@@ -71,7 +71,7 @@ export function Hero() {
           <figure className={s.shot}>
             <figcaption>
               <span className={cx(ui.kicker, s.kicker)}>The prototype · Board</span>
-              <b>Every task the project is running. Three need a person. The rest move on their own.</b>
+              <b>Every task the project is running. Four need a person. The rest move on their own.</b>
             </figcaption>
             <div className={ui.frame}>
               <picture>
@@ -82,7 +82,7 @@ export function Hero() {
                   width={1440}
                   height={780}
                   fetchPriority="high"
-                  alt="The Charrette board: tasks grouped as Needs you, Running, Held and Settled, each showing its agent, model and progress."
+                  alt="The Charrette board: tasks grouped as Up next, Running, Needs you and Settled, each showing its step, model and progress, with the decisions laid out as choices."
                 />
               </picture>
             </div>

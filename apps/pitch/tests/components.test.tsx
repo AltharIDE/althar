@@ -207,23 +207,24 @@ describe('Standup', () => {
     const h = renderToString(<Standup />)
     expect(h).toContain('If token rotation fails, should the request fail, or retry once?')
     expect(count(h, /PR #\d+/g)).toBe(1)
-    expect(h).toContain('Found by the security audit.')
+    expect(h).toContain('Found by the security review.')
+    expect(h).toContain('You were away 14 hours')
   })
 })
 
 describe('Board', () => {
-  it('lays the same morning out as columns, with the decision first', () => {
+  it('lays the same morning out as columns, with the decision beside the running work', () => {
     const h = text(renderToString(<Board />))
-    for (const k of ['Needs you', 'Running', 'Held', 'Settled']) expect(h).toContain(`${k} <span`)
-    expect(h.indexOf('Needs you')).toBeLessThan(h.indexOf('Running'))
-    expect(h).toContain('Currency rounding in refund totals')
-    expect(h).toContain('Waiting on 419')
+    for (const k of ['Up next', 'Running', 'Needs you', 'Settled']) expect(h).toContain(`<i></i>${k}`)
+    expect(h.indexOf('Running')).toBeLessThan(h.indexOf('Needs you'))
+    expect(h).toContain('Drop legacy_sessions table')
+    expect(h).toContain('Starts when 419 merges')
   })
   it('pins two views, the stand-up then the board', () => {
     const h = renderToString(<Team />)
     expect(count(h, /<i class="[^"]*snap[^"]*"/g)).toBe(2)
-    expect(h).toContain('Since you left yesterday')
-    expect(h).toContain('Waiting on 419')
+    expect(h).toContain('You were away 14 hours')
+    expect(h).toContain('Starts when 419 merges')
   })
 })
 
