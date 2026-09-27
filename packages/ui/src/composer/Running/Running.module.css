@@ -1,0 +1,78 @@
+/* The same pill and list as Listening, which it sits beside; cobalt only for what is still running. */
+.pill {
+  composes: pill from '../Listening/Listening.module.css';
+}
+.text {
+  composes: text from '../Listening/Listening.module.css';
+}
+.k {
+  composes: k from '../Listening/Listening.module.css';
+}
+.name {
+  composes: name from '../Listening/Listening.module.css';
+}
+.mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font: 500 11px var(--mono);
+}
+.what {
+  composes: what from '../Listening/Listening.module.css';
+}
+.chev {
+  composes: chev from '../Listening/Listening.module.css';
+}
+.still {
+  flex: none;
+  color: var(--t-3);
+}
+.bad {
+  color: var(--danger);
+}
+
+.pop {
+  composes: pop from '../Listening/Listening.module.css';
+}
+.head {
+  composes: head from '../Listening/Listening.module.css';
+}
+.list {
+  composes: list from '../Listening/Listening.module.css';
+}
+.row {
+  composes: row from '../Listening/Listening.module.css';
+}
+.rowGlyph {
+  composes: rowGlyph from '../Listening/Listening.module.css';
+  color: var(--t-2);
+}
+.rowMain {
+  composes: rowMain from '../Listening/Listening.module.css';
+}
+.rowTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.command {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 550 12px var(--mono);
+  color: var(--t-1);
+}
+.url {
+  flex: none;
+  font-size: 11.5px;
+}
+span.url {
+  color: var(--t-3);
+}
+.rowMeta {
+  composes: rowMeta from '../Listening/Listening.module.css';
+}
+.act {
+  composes: stop from '../Listening/Listening.module.css';
+}

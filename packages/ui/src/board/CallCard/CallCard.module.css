@@ -1,0 +1,60 @@
+/* Paper like every card; the kind, the keys and the way in carry the violet. */
+.call {
+  background: var(--paper);
+  padding-top: 14px;
+}
+.kind {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--signal);
+}
+.title {
+  margin-top: 2px;
+  font-size: 14px;
+}
+.because {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 5px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 9px 6px 7px;
+  border-radius: 8px;
+  background: var(--signal-paper);
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--t-1);
+}
+.key {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--signal-line);
+  font: 600 10px/1 var(--mono);
+  color: var(--signal);
+}
+.holds {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.go {
+  color: var(--signal);
+}

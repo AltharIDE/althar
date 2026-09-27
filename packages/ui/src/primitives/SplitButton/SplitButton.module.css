@@ -1,0 +1,30 @@
+.split {
+  display: inline-flex;
+  flex: none;
+}
+.split .main {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+.split .more {
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+  margin-inline-start: -1px;
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  color: var(--t-3);
+}
+.split .more[aria-expanded='true'] {
+  background: var(--n-3);
+  color: var(--t-1);
+}
+/* the two halves share an edge: the one with focus draws its ring over the other */
+.split .main:focus-visible,
+.split .more:focus-visible {
+  position: relative;
+  z-index: 1;
+}
+.small .more {
+  width: 24px;
+}

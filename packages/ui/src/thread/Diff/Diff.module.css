@@ -1,0 +1,75 @@
+.diff {
+  display: grid;
+  padding: 4px 0;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font: 11.5px/1.75 var(--mono);
+  overflow-x: auto;
+}
+/* rows of a grid, so each line is as wide as the widest and a scrolled line keeps its colour */
+.line {
+  display: grid;
+  grid-template-columns: 42px 18px 1fr;
+  white-space: pre;
+  color: var(--t-2);
+}
+.n {
+  padding-right: 10px;
+  text-align: right;
+  color: var(--t-3);
+  user-select: none;
+}
+.sign {
+  font-weight: 700;
+  color: var(--t-3);
+  user-select: none;
+}
+.add {
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+  color: var(--add-ink);
+}
+.add .n {
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+  color: var(--add-ink-2);
+}
+.add .sign {
+  color: var(--ok);
+}
+.del {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--del-ink);
+}
+.del .n {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--del-ink-2);
+}
+.del .sign {
+  color: var(--danger);
+}
+.line mark {
+  border-radius: 3px;
+  padding: 1px 0;
+  color: inherit;
+}
+.add mark {
+  background: color-mix(in srgb, var(--ok) 30%, transparent);
+}
+.del mark {
+  background: color-mix(in srgb, var(--danger) 26%, transparent);
+}
+.hunk {
+  color: var(--t-3);
+  background: var(--n-1);
+  box-shadow:
+    inset 0 1px 0 var(--line),
+    inset 0 -1px 0 var(--line);
+}
+/* a hunk that opens the diff is its header: flush with the top edge, ruled below */
+.diff:has(> .hunk:first-child) {
+  padding-top: 0;
+}
+.hunk:first-child {
+  border-radius: 8px 8px 0 0;
+  box-shadow: inset 0 -1px 0 var(--line);
+}

@@ -1,0 +1,223 @@
+.card {
+  position: relative;
+  padding: 14px 16px 0;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  overflow: hidden;
+}
+/* something in it waits on you: violet, like every ask */
+.you.card {
+  background: var(--signal-paper);
+  box-shadow: inset 0 0 0 1px var(--signal-line);
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.running .status {
+  color: var(--live);
+}
+.you .status {
+  color: var(--signal);
+}
+:is(.paused, .stopped) .status {
+  color: var(--t-2);
+}
+:is(.paused, .stopped) .status svg {
+  color: var(--t-3);
+}
+.nowText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-3);
+}
+.at {
+  margin-left: auto;
+  flex: none;
+  color: var(--t-3);
+}
+.title {
+  margin: 8px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  color: var(--t-1);
+}
+.stopped .title {
+  color: var(--t-2);
+}
+
+.track {
+  margin: 14px 0 0;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px -16px 0;
+  padding: 9px 10px 9px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--n-1);
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.you .foot {
+  background: rgba(255, 255, 255, 0.5);
+  border-top-color: var(--signal-line);
+}
+.lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.leadModel {
+  color: var(--t-1);
+  font-weight: 550;
+}
+.sep {
+  width: 1px;
+  height: 12px;
+  background: var(--line-2);
+}
+.branch,
+.pr {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--t-2);
+}
+.branch {
+  font-family: var(--mono);
+}
+.pr {
+  font-size: 11.5px;
+}
+.open {
+  margin-left: auto;
+  gap: 6px;
+}
+
+/* arriving from the plan: the card lands, then the track fills in step by step */
+.fresh {
+  animation: land 460ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+@keyframes land {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-1px) scale(1.004);
+  }
+  100% {
+    transform: none;
+  }
+}
+.found {
+  animation: found 1.4s var(--ease);
+}
+@keyframes found {
+  0%,
+  30% {
+    box-shadow:
+      inset 0 0 0 1.5px var(--t-1),
+      var(--lift-card);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .card *,
+  .card *::after {
+    animation: none !important;
+  }
+}
+
+/* a task card, folded to the moment it changed */
+.mark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: 12px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.pips {
+  display: inline-flex;
+  gap: 3px;
+  flex: none;
+  margin-right: 2px;
+}
+.pips i {
+  width: 9px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--n-5);
+}
+.pips i.done {
+  background: var(--t-3);
+}
+.pips i.now {
+  background: var(--t-2);
+}
+.pips i.seen {
+  background: var(--n-5);
+  box-shadow: inset 0 0 0 1px var(--t-3);
+}
+.markLabel {
+  flex: none;
+  color: var(--t-2);
+}
+.markLabel b {
+  font-weight: 600;
+  color: var(--t-1);
+}
+.detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--t-3);
+}
+.rule {
+  flex: 1 1 16px;
+  min-width: 16px;
+  height: 1px;
+  background: var(--line-2);
+}
+.markAt {
+  flex: none;
+  color: var(--t-3);
+}
+.go {
+  flex: none;
+}
+.mark:not(.last) .go {
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.mark:hover .go,
+.mark .go:focus-visible {
+  opacity: 1;
+}

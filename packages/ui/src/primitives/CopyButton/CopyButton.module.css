@@ -1,0 +1,9 @@
+.copy {
+  flex: none;
+}
+.done {
+  color: var(--t-1);
+}
+.failed {
+  color: var(--danger);
+}

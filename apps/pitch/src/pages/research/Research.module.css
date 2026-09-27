@@ -17,7 +17,7 @@
 
 /* ---- masthead: the deck's, without the moving parts ---- */
 .mast { max-width: var(--max); margin: 0 auto; padding: 22px var(--gut) 0; display: flex; justify-content: space-between; align-items: center; }
-.brand { font-weight: 800; font-size: 17px; letter-spacing: -.03em; text-decoration: none; }
+.brand { display: inline-flex; align-items: center; gap: 7px; font-weight: 800; font-size: 17px; letter-spacing: -.03em; text-decoration: none; }
 .pages { display: flex; gap: 22px; font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
 .pages a { color: var(--ink-4); text-decoration: none; }
 .pages a:hover, .pages a[aria-current] { color: var(--ink); }

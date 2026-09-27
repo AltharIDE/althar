@@ -1,0 +1,227 @@
+/* The board: lanes side by side, each on the page, each scrolling on its own. */
+.board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(260px, 460px));
+  justify-content: center;
+  height: 100%;
+  min-height: 0;
+  overflow-x: auto;
+  background: var(--n-2);
+}
+.column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  box-shadow: inset 1px 0 0 var(--line);
+}
+.column:last-child {
+  box-shadow:
+    inset 1px 0 0 var(--line),
+    inset -1px 0 0 var(--line);
+}
+/* the lane of calls only you can make, washed faintly in their colour */
+.you.column {
+  background: color-mix(in srgb, var(--signal) 3.5%, var(--n-2));
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 20px 20px 0;
+}
+.title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+.count {
+  margin-left: auto;
+  font: 500 11.5px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.you .count {
+  color: var(--signal);
+}
+.ring {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  box-shadow: inset 0 0 0 1.5px var(--t-3);
+}
+span.you {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--signal);
+}
+.settledGlyph {
+  flex: none;
+  color: var(--t-3);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 28px;
+}
+.empty {
+  margin: 0;
+  padding: 22px 12px;
+  border: 1.5px dashed var(--line-2);
+  border-radius: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.list {
+  margin: -4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.list > li + li {
+  border-top: 1px solid var(--line-2);
+}
+
+/* ---- What the cards and rows share -------------------------------------
+   Each card and row is one button, its title, stretched over the whole of
+   it; what else it holds is read as its description. The one open beside
+   the board is ringed in ink. */
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 13px 14px 12px;
+  border-radius: 12px;
+  background: var(--n-1);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  transition:
+    background var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+.card:hover {
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift-card);
+}
+.card[aria-current='true'] {
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1.5px var(--t-1),
+    var(--lift-card);
+}
+.card:has(.open:focus-visible) {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 2px;
+}
+
+.row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 10px;
+  border-radius: 10px;
+  transition: background var(--fast) var(--ease);
+}
+.row:hover {
+  background: var(--n-1);
+}
+.row[aria-current='true'] {
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--t-1);
+}
+.row:has(.open:focus-visible) {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 0;
+}
+
+.open {
+  display: block;
+  outline: 0;
+  font-size: 13.5px;
+  line-height: 1.36;
+  font-weight: 550;
+  letter-spacing: -0.012em;
+  color: var(--t-1);
+  text-wrap: pretty;
+}
+.open::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  min-height: 20px;
+  font-size: 11px;
+  color: var(--t-3);
+}
+/* in a narrow lane the line wraps between its parts, never inside one */
+.top > * {
+  white-space: nowrap;
+}
+.ref {
+  font: 500 11px/1 var(--mono);
+  letter-spacing: -0.02em;
+  color: var(--t-3);
+}
+.at {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-height: 22px;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+/* where the card leads, said at its end; the card itself is the button */
+.go {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.go svg {
+  transition: transform var(--fast) var(--ease);
+}
+.card:hover .go svg {
+  transform: translateX(2px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .row,
+  .go svg {
+    transition: none;
+  }
+}

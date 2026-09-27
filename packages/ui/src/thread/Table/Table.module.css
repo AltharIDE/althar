@@ -1,0 +1,50 @@
+.wrap {
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  overflow-x: auto;
+}
+.wrap:focus-visible {
+  outline-offset: 2px;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+/* cells keep to one line; a table wider than the column scrolls sideways instead of wrapping its values */
+.table :is(th, td) {
+  white-space: nowrap;
+}
+.caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.table thead th {
+  height: 34px;
+  padding: 0 12px;
+  text-align: left;
+  font-weight: 500;
+  font-size: 11.5px;
+  color: var(--t-3);
+  background: var(--n-1);
+  border-bottom: 1px solid var(--line);
+}
+.table td,
+.first {
+  height: 36px;
+  padding: 0 12px;
+  color: var(--t-1);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-weight: 400;
+}
+.table tr:last-child :is(td, th) {
+  border-bottom: 0;
+}
+.first {
+  font: 11.5px var(--mono);
+}

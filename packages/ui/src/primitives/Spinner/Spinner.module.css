@@ -1,0 +1,33 @@
+.spin {
+  flex: none;
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 99px;
+  border: 1.5px solid var(--live-dim);
+  border-top-color: var(--live);
+  animation: spin 0.8s linear infinite;
+}
+.small {
+  width: 9px;
+  height: 9px;
+}
+.large {
+  width: 13px;
+  height: 13px;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Still, it must still read as busy: the ring stays three-quarters dim. */
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
+.onFill {
+  border-color: rgba(255, 255, 255, 0.3);
+  border-top-color: var(--on-ink);
+}

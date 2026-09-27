@@ -2,7 +2,7 @@
 
 .mast { position: fixed; top: 0; left: 0; right: 0; z-index: 20; display: flex; justify-content: space-between; align-items: center; padding: 18px var(--edge); font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; pointer-events: none; transition: color 200ms; color: var(--ink); }
 .mast a { pointer-events: auto; text-decoration: none; color: inherit; }
-.brand { font: 900 17px var(--sans); letter-spacing: -.04em; text-transform: none; }
+.brand { display: inline-flex; align-items: center; gap: 7px; font: 900 17px var(--sans); letter-spacing: -.04em; text-transform: none; }
 .pages { display: flex; gap: 20px; }
 .pages a { opacity: .72; }
 .pages a[aria-current], .pages a:hover { opacity: 1; }
@@ -13,6 +13,7 @@
 .count b { font-weight: 500; opacity: .72; margin-left: 10px; }
 .count.last { opacity: 0; }
 [data-tone='dark'].mast, [data-tone='dark'].count { color: #fff; }
+[data-tone='dark'].mast { --logo-point: var(--lime); }
 
 @media (max-width: 760px) {
   .mast { padding: 14px var(--gut); }

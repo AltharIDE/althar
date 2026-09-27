@@ -1,0 +1,51 @@
+.ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 21px;
+  padding: 0 6px 0 5px;
+  margin: 0 1px;
+  vertical-align: baseline;
+  border-radius: 5px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font: 11.5px/21px var(--mono);
+  color: var(--t-2);
+  white-space: nowrap;
+  transition:
+    box-shadow var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.ref svg {
+  color: var(--t-3);
+}
+.ref:hover {
+  color: var(--t-1);
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.ref:active {
+  background: var(--n-3);
+}
+.line {
+  color: var(--t-3);
+}
+
+.cite {
+  display: inline-block;
+  min-width: 15px;
+  height: 15px;
+  margin-left: 2px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: var(--n-4);
+  font: 600 9.5px/15px var(--mono);
+  text-align: center;
+  color: var(--t-2);
+  cursor: default;
+  vertical-align: 4px;
+}
+.cite:hover,
+.cite:focus-visible {
+  background: var(--t-1);
+  color: var(--on-ink);
+}

@@ -1,0 +1,38 @@
+.steer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.corner {
+  flex: none;
+  color: var(--t-3);
+  transform: scaleY(-1);
+}
+.to {
+  flex: none;
+}
+.step {
+  font-weight: 550;
+  color: var(--t-1);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 2px;
+}
+.step:hover {
+  text-decoration-color: currentColor;
+}
+.said {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-2);
+}
+.at {
+  margin-left: auto;
+  flex: none;
+  color: var(--t-3);
+}

@@ -1,0 +1,93 @@
+/* Two finishes: paper keeps the thread one material; dark reads as a machine at a glance. The host sets data-term.
+   On its own it is a whole block; in a Tool's sheet, the sheet squares its top and drops its edge. */
+.term {
+  border-radius: 10px;
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.out {
+  margin: 0;
+  padding: 11px 14px 12px;
+  font: 11.5px/1.65 var(--mono);
+  white-space: pre-wrap;
+  color: var(--t-2);
+}
+.command {
+  color: var(--t-1);
+}
+.prompt {
+  color: var(--t-3);
+  user-select: none;
+}
+/* the way back to what scrolled past, in the output's own flow */
+.earlier {
+  display: block;
+  margin: 1px 0 3px;
+}
+.earlier button {
+  font: 11px var(--font);
+}
+.err {
+  color: var(--danger);
+}
+.live {
+  color: var(--live);
+}
+.cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: currentColor;
+  opacity: 0.7;
+  animation: blink 1s steps(1) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cursor {
+    animation: none;
+  }
+}
+.foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -8px;
+  padding: 0 14px 10px;
+}
+.exit {
+  font: 500 10.5px var(--mono);
+  color: var(--t-3);
+}
+.bad {
+  color: var(--danger);
+}
+
+:global([data-term='dark']) .term {
+  background: var(--term);
+  box-shadow: none;
+}
+:global([data-term='dark']) .out {
+  color: var(--on-ink-2);
+}
+:global([data-term='dark']) .command {
+  color: var(--term-t1);
+}
+:global([data-term='dark']) .prompt,
+:global([data-term='dark']) .exit {
+  color: var(--term-t4);
+}
+:global([data-term='dark']) .err,
+:global([data-term='dark']) .bad {
+  color: var(--term-danger);
+}
+:global([data-term='dark']) .live {
+  color: var(--term-live);
+}
+:global([data-term='dark']) .earlier button {
+  color: var(--on-ink-2);
+}

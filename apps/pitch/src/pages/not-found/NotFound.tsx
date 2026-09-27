@@ -1,3 +1,4 @@
+import { Logo } from '../../components/Logo'
 import { Wordmark } from '../../components/Wordmark'
 import { useMeta } from '../../lib/useMeta'
 import { NOT_FOUND } from '../../meta'
@@ -10,6 +11,7 @@ export function NotFound() {
     <div className={s.page}>
       <header className={s.mast}>
         <a className={s.brand} href={homeHref}>
+          <Logo />
           Charrette
         </a>
         <nav className={s.pages} aria-label="Pages">

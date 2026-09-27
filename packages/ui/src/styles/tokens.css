@@ -1,0 +1,150 @@
+:root {
+  /* Paper — warm paper and ink. Cobalt is Charrette and the work it runs,
+     violet is a person's call. Everything else is ink on paper. */
+  color-scheme: light;
+
+  /* stacking, lowest first: what floats over the page, a modal, what a modal opens, what that opens */
+  --z-float: 30;
+  --z-dialog: 40;
+  --z-popover: 50;
+  --z-tip: 60;
+
+  /* ---- Surfaces ----------------------------------------------------------
+     On paper, raised means lighter: the page is a shade of cream and the
+     things on it (cards, sheets, the dock) are near-white.                  */
+  --n-0: #dcd8cd; /* the desk, behind the window */
+  --n-1: #fcfbf8; /* raised: cards, the dock, sheets */
+  --n-2: #f4f2ec; /* the page: the primary work surface */
+  --n-3: #fbfaf7; /* hover, inputs */
+  --n-4: #e7e3da; /* pressed / selected */
+  --n-5: #d6d1c6; /* strong fill, borders that must read */
+  --chrome: #ebe8e0; /* the window's own bars */
+  --paper: #ffffff; /* the lightest: fields, cards and chosen options that sit on a raised sheet */
+
+  /* ---- Ink ---------------------------------------------------------------*/
+  --t-1: #141417; /* primary */
+  --t-2: #45454c; /* secondary */
+  --t-3: #6f6f77; /* tertiary — metadata */
+  --t-4: #9a99a0; /* quaternary — disabled, faint scaffolding */
+
+  /* ---- Lines -------------------------------------------------------------
+     Almost everything is separated by the faintest possible line. A visible
+     border must earn itself.                                                */
+  --line: rgba(20, 20, 28, 0.07);
+  --line-2: rgba(20, 20, 28, 0.11);
+  --line-3: rgba(20, 20, 28, 0.18);
+
+  /* ---- Signal ------------------------------------------------------------
+     Violet means exactly one thing: this requires a person.                 */
+  --signal: #7a3ff0;
+  --signal-bright: #6a2fd6;
+  --signal-dim: rgba(122, 63, 240, 0.1);
+  --signal-line: rgba(122, 63, 240, 0.32);
+  --signal-hover: rgba(122, 63, 240, 0.16);
+  --signal-paper: #f6f1ff; /* a sheet that is asking you something */
+  --signal-pressed: #5b26bd;
+  --on-signal: #ffffff;
+
+  /* ---- Cobalt ------------------------------------------------------------
+     Charrette's own colour: the work it is running right now.               */
+  --live: #2b3bff;
+  --live-dim: rgba(43, 59, 255, 0.1);
+  --danger: #c4402f;
+  --danger-dim: rgba(196, 64, 47, 0.07);
+  --danger-hover: rgba(196, 64, 47, 0.12);
+  --ok: #2e8c46;
+
+  /* ---- Derived materials ------------------------------------------------*/
+  --n-1-clear: rgba(252, 251, 248, 0); /* --n-1 at zero alpha, for fades */
+  --n-2-clear: rgba(244, 242, 236, 0);
+  --n-5-hover: #cbc5b8;
+  --track: rgba(20, 20, 28, 0.08); /* progress, empty */
+  --track-done: rgba(20, 20, 28, 0.32);
+  --sunk: rgba(20, 20, 28, 0.04); /* a chosen option, pressed in */
+  --wire: #d2cdc1; /* graph edges */
+  --wire-live: #a8a295;
+  --add: rgba(46, 140, 70, 0.1); /* diff lines */
+  --del: rgba(196, 64, 47, 0.06);
+  --shadow: rgba(60, 50, 30, 0.14);
+  --lift: 0 1px 2px rgba(60, 50, 30, 0.05);
+  --lift-card: 0 1px 2px rgba(20, 20, 28, 0.04); /* a card resting on the page */
+  --lift-dialog: 0 1px 2px rgba(60, 50, 30, 0.08), 0 24px 48px -24px rgba(60, 50, 30, 0.35);
+  --scrim: rgba(28, 26, 22, 0.18); /* behind a modal */
+  --scrim-dark: rgba(20, 20, 24, 0.74); /* behind an image, which reads best on dark */
+  --lift-2: 0 1px 2px rgba(60, 50, 30, 0.06), 0 4px 10px -6px rgba(60, 50, 30, 0.12);
+  --lift-pop: 0 1px 2px rgba(60, 50, 30, 0.06), 0 10px 24px -12px var(--shadow); /* popovers and menus */
+  /* shadows are neutral and short: paper lifting off paper, never a glow */
+  --traffic: #d0cbc0;
+
+  /* ---- On ink -------------------------------------------------------------
+     What sits on an ink fill (--t-1) or a dark terminal. Washes on ink are
+     white at low alpha, written where they are used.                         */
+  --on-ink: #ffffff;
+  --on-ink-2: #c9c7c0;
+  --on-ink-focus: #b99bff;
+  --ink-hover: #2a2a30;
+  --ink-pressed: #000000;
+
+  /* ---- Terminal, dark -----------------------------------------------------
+     Command output on its own dark sheet. The near-greys are kept apart
+     until a design pass merges them.                                         */
+  --term: #1c1c20;
+  --term-raised: #242429;
+  --term-t1: #f2f0ea;
+  --term-t2: #e8e6df;
+  --term-t3: #a9a7a0;
+  --term-t4: #a09ea6;
+  --term-t5: #9a99a0;
+  --term-live: #9aa6ff;
+  --term-danger: #f08a78;
+  --term-paper-ink: #2a2a30; /* command text on the paper terminal */
+
+  /* ---- Syntax and diff inks ----------------------------------------------
+     Muted, and none of them the product's signal colours.                    */
+  --syn-keyword: #8b3d6b;
+  --syn-string: #82540f;
+  --syn-fn: #2c5f7c;
+  --add-ink: #14391f;
+  --add-ink-2: #2f6a40;
+  --del-ink: #5b1d15;
+  --del-ink-2: #94463b;
+  --signal-peek: #efe7ff; /* the edge of the next ask, under the one showing */
+
+  /* ---- Radius ------------------------------------------------------------*/
+  --r-sm: 4px;
+  --r: 6px;
+  --r-lg: 10px;
+
+  /* ---- Type --------------------------------------------------------------*/
+  --font: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-display: var(--font); /* titles: the task, the dock, the thread */
+  --font-prose: var(--font); /* what the coordinator and you write */
+  --font-label: var(--mono); /* eyebrows */
+
+  /* ---- Scale and air -----------------------------------------------------*/
+  --sp: 1.15; /* air inside the working surfaces */
+  --measure: 700px; /* how wide the conversation and the task read */
+
+  /* ---- Motion ------------------------------------------------------------*/
+  --ease: cubic-bezier(0.22, 0.61, 0.24, 1);
+  --fast: 110ms;
+  --base: 180ms;
+  --slow: 260ms;
+  --fold: 320ms; /* anything that opens */
+  --ease-fold: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* ---- The thread ----------------------------------------------------------
+     Four levels, so a thread never reads as one grey block: who is speaking,
+     what they said, what they carry, and metadata (only metadata is dim). */
+  --you-bubble: rgba(20, 20, 28, 0.065);
+  --bot: var(--live);
+  --prose-size: 14px;
+  --prose-lh: 1.62;
+  --lede-size: 15px;
+
+  /* ---- Sources ---------------------------------------------------------------
+     A source's own colour, for its mark and nothing else. */
+  --linear: #5e6ad2;
+  --linear-ink: #4b55b8;
+}

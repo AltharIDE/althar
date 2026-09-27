@@ -1,0 +1,141 @@
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.divider svg {
+  color: var(--t-3);
+}
+.rule {
+  flex: 1;
+  min-width: 16px;
+  height: 1px;
+  background: var(--line-2);
+}
+.action {
+  flex: none;
+  white-space: nowrap;
+}
+
+.stopped {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.stopped svg {
+  fill: currentColor;
+}
+
+.gc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: 12px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.gc > svg {
+  flex: none;
+  color: var(--t-2);
+}
+.gcTitle {
+  flex: none;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.gcNote {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 0 8px;
+}
+.kicker {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.emptyTitle {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--t-1);
+}
+.emptyText {
+  margin: 2px 0 0;
+  max-width: 520px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t-3);
+}
+
+/* who leads, and a change of lead: a short rule, then the line, then a long one */
+.swap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.swap::before,
+.swap::after {
+  content: '';
+  flex: none;
+  height: 1px;
+  background: var(--line-2);
+}
+.swap::before {
+  width: 24px;
+}
+.swap::after {
+  flex: 1 1 16px;
+  min-width: 16px;
+}
+.swapModel {
+  font-weight: 550;
+  color: var(--t-1);
+}
+.swapNote {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--t-3);
+}
+
+.jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px 0 11px;
+  border-radius: 99px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-2);
+  font-size: 12px;
+  color: var(--t-1);
+}
+.jump > svg {
+  color: var(--t-3);
+}
+.jump:hover {
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift-2);
+}
+.jump:active {
+  background: var(--n-2);
+}

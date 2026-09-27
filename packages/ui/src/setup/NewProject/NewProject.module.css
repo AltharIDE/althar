@@ -1,0 +1,7 @@
+.name {
+  width: 100%;
+  max-width: 420px;
+}
+.promise {
+  flex: 1 1 260px;
+}

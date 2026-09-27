@@ -1,0 +1,13 @@
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  border-radius: 99px;
+  background: var(--signal);
+  vertical-align: 1px;
+}
+.n {
+  margin-left: 7px;
+  font: 500 11px/1 var(--mono);
+}

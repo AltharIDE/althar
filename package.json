@@ -1,29 +1,34 @@
 {
   "name": "charrette",
   "private": true,
-  "type": "module",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
+  "type": "module",
   "scripts": {
     "dev": "bun --filter @charrette/pitch dev",
     "build": "bun --filter '*' build",
     "check": "bun --filter '*' check",
     "test": "bun --filter '*' test",
     "test:e2e": "bun --filter '*' test:e2e",
-    "verify": "bun --filter '*' verify"
+    "verify": "bun --filter '*' verify",
+    "prepare": "vp config --no-agent",
+    "fix": "bun --filter '*' fix"
+  },
+  "devDependencies": {
+    "vite-plus": "1.0.0-rc.0"
   },
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
     "vitest": "5.0.1"
   },
-  "trustedDependencies": [
-    "sharp"
-  ],
   "engines": {
     "bun": ">=1.3.5",
     "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
   },
-  "packageManager": "bun@1.3.5"
+  "packageManager": "bun@1.3.5",
+  "trustedDependencies": [
+    "sharp"
+  ]
 }

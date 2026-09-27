@@ -1,0 +1,56 @@
+.group {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--n-2);
+}
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+  text-align: center;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.option:hover:not(:disabled) {
+  color: var(--t-1);
+}
+.option:active:not(:disabled) {
+  background: var(--n-4);
+}
+.option[aria-checked='true'] {
+  background: var(--paper);
+  color: var(--t-1);
+  font-weight: 550;
+  box-shadow: var(--lift);
+}
+.option:disabled {
+  color: var(--t-4);
+  opacity: 0.6;
+  cursor: default;
+}
+/* something new there, or something there waits on you */
+.dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 99px;
+  background: var(--t-3);
+}
+.yours {
+  background: var(--signal);
+}
+.kbd {
+  margin-right: -3px;
+}

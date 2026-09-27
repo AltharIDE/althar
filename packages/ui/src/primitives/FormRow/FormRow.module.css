@@ -1,0 +1,34 @@
+.row {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 24px;
+  padding: 18px 22px;
+  border-top: 1px solid var(--line);
+}
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 7px;
+}
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.note {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.control {
+  min-width: 0;
+}
+
+/* Needs a container above it; the panels that hold rows are one. */
+@container (max-width: 560px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+}

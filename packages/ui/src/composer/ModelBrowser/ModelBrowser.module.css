@@ -1,0 +1,250 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  background: var(--scrim);
+  animation: fade var(--fast) var(--ease);
+}
+.dialog {
+  position: fixed;
+  z-index: var(--z-dialog);
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  width: min(860px, calc(100vw - 32px));
+  height: min(560px, 76vh);
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--lift-dialog);
+  color: var(--t-1);
+  animation: in var(--fast) var(--ease);
+}
+.dialog:focus {
+  outline: none;
+}
+@keyframes in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  .dialog {
+    animation: none;
+  }
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--t-3);
+}
+.search input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 14.5px;
+  color: var(--t-1);
+}
+.search input::placeholder {
+  color: var(--t-3);
+}
+.search input::-webkit-search-cancel-button {
+  display: none;
+}
+.search:focus-within {
+  box-shadow: inset 0 -1.5px 0 var(--signal);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.rail {
+  flex: none;
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px;
+  border-right: 1px solid var(--line);
+  background: var(--n-3);
+  overflow-y: auto;
+}
+.railKey {
+  margin: 12px 8px 4px;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.railButton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.railButton:hover {
+  background: var(--n-4);
+  color: var(--t-1);
+}
+.railButton:active {
+  background: var(--n-5);
+}
+.railButton[aria-pressed='true'] {
+  background: var(--n-4);
+  color: var(--t-1);
+  font-weight: 550;
+}
+.railButton > span:nth-child(2) {
+  flex: 1;
+}
+.railN {
+  font: 500 10.5px/1 var(--mono);
+  color: var(--t-3);
+}
+.add {
+  margin-top: auto;
+  color: var(--t-3);
+}
+
+.results {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 4px 8px 8px;
+}
+.cols,
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.3fr) 56px 104px 32px;
+  align-items: center;
+  gap: 10px;
+}
+.cols {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 10px 6px;
+  background: var(--paper);
+  font-size: 11px;
+  color: var(--t-3);
+  border-bottom: 1px solid var(--line);
+}
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.row {
+  height: 40px;
+  padding: 0 4px 0 0;
+  border-radius: 7px;
+  font-size: 12.5px;
+}
+.row:hover,
+.row:focus-within {
+  background: var(--n-2);
+}
+.use {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 0 0 10px;
+  border-radius: 7px;
+  color: var(--t-1);
+  font-weight: 500;
+}
+.use:focus-visible {
+  outline-offset: -1.5px;
+}
+.inUse {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--t-3);
+}
+.via {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-2);
+}
+.via span {
+  color: var(--t-3);
+}
+.ctx,
+.none {
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pin {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--t-4);
+  opacity: 0;
+}
+.row:hover .pin,
+.row:focus-within .pin,
+.pin[aria-pressed='true'] {
+  opacity: 1;
+}
+.pin:hover {
+  background: var(--n-4);
+  color: var(--t-1);
+}
+.pin[aria-pressed='true'] {
+  color: var(--t-1);
+}
+.pin[aria-pressed='true'] svg {
+  fill: currentColor;
+}
+.empty {
+  margin: 0;
+  padding: 24px 10px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 9px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--n-3);
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.foot > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.footRight {
+  margin-left: auto;
+}

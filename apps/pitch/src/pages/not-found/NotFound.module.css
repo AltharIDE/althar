@@ -4,7 +4,7 @@
 :global(html):has(.page), :global(body):has(.page) { background: var(--lime); }
 .mast { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 18px var(--edge); font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
 .mast a { text-decoration: none; color: inherit; }
-.brand { font: 900 17px var(--sans); letter-spacing: -.04em; text-transform: none; }
+.brand { display: inline-flex; align-items: center; gap: 7px; font: 900 17px var(--sans); letter-spacing: -.04em; text-transform: none; }
 .pages { display: flex; gap: 20px; }
 .pages a { opacity: .72; }
 .pages a:hover { opacity: 1; }

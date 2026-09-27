@@ -1,0 +1,186 @@
+import { DropdownMenu as M } from 'radix-ui'
+import type { ReactElement, ReactNode } from 'react'
+
+import { Icon, type IconName } from '../../foundations/Icon/Icon'
+import { cx } from '../../lib/cx'
+import { Kbd } from '../Kbd/Kbd'
+import { side, type Align, type Placement } from '../Popover/Popover'
+import s from './Menu.module.css'
+
+/*
+ * A menu a button opens: a short list of commands or of choices, one of
+ * which may be current. Built on Radix's dropdown menu, which gives the menu
+ * button pattern (arrows, Home and End, typeahead, Escape back to the button)
+ * and keeps the menu on screen.
+ */
+
+export interface MenuProps {
+  /** The button that opens it. It must accept a ref and spread its props onto a button. */
+  trigger: ReactElement
+  /** What the menu is for; read when it opens. */
+  label: string
+  children: ReactNode
+  placement?: Placement
+  align?: Align
+  width?: number
+  open?: boolean
+  defaultOpen?: boolean
+  onOpenChange?: (open: boolean) => void
+  className?: string
+}
+
+export function Menu({
+  trigger,
+  label,
+  children,
+  placement = 'below',
+  align = 'start',
+  width,
+  open,
+  defaultOpen,
+  onOpenChange,
+  className,
+}: MenuProps) {
+  return (
+    <M.Root open={open} defaultOpen={defaultOpen} onOpenChange={onOpenChange} modal={false}>
+      <M.Trigger asChild>{trigger}</M.Trigger>
+      <M.Portal>
+        <M.Content
+          /* Radix names the menu after its trigger, which would override the label: Effort, not Effort: High */
+          aria-labelledby={undefined}
+          aria-label={label}
+          side={side(placement)}
+          align={align}
+          sideOffset={6}
+          collisionPadding={8}
+          loop
+          className={cx('ch-root', s.menu, className)}
+          style={width ? { width } : undefined}
+        >
+          {children}
+        </M.Content>
+      </M.Portal>
+    </M.Root>
+  )
+}
+
+interface ItemBase {
+  children: ReactNode
+  /** Quieter text after the label: a count, a short note. */
+  hint?: ReactNode
+  /** A second line under the label, for why you would pick it. */
+  description?: ReactNode
+  kbd?: string
+  disabled?: boolean
+  /** Picking it leaves the menu open, for choices you may change twice. */
+  keepOpen?: boolean
+}
+
+const parts = (children: ReactNode, hint?: ReactNode, kbd?: string, description?: ReactNode) => (
+  <>
+    {description ? (
+      <span className={s.text}>
+        <span className={s.label}>{children}</span>
+        <span className={s.description}>{description}</span>
+      </span>
+    ) : (
+      <span className={s.label}>{children}</span>
+    )}
+    {hint && <span className={s.hint}>{hint}</span>}
+    {kbd && <Kbd>{kbd}</Kbd>}
+  </>
+)
+
+export interface MenuItemProps extends ItemBase {
+  icon?: IconName
+  onSelect: () => void
+}
+
+export function MenuItem({ icon, children, hint, description, kbd, disabled, keepOpen, onSelect }: MenuItemProps) {
+  return (
+    <M.Item
+      className={cx(s.item, description != null && s.tall)}
+      disabled={disabled}
+      onSelect={(e) => {
+        if (keepOpen) e.preventDefault()
+        onSelect()
+      }}
+    >
+      {icon && (
+        <span className={s.lead}>
+          <Icon name={icon} size={13} />
+        </span>
+      )}
+      {parts(children, hint, kbd, description)}
+    </M.Item>
+  )
+}
+
+export interface MenuRadioGroupProps {
+  /** A small heading over the choices; also the group's name. */
+  label: string
+  value: string
+  onChange: (value: string) => void
+  children: ReactNode
+}
+
+/** A set of choices where one is current. */
+export function MenuRadioGroup({ label, value, onChange, children }: MenuRadioGroupProps) {
+  return (
+    <M.RadioGroup value={value} onValueChange={onChange} aria-label={label} className={s.group}>
+      <M.Label className={s.heading} aria-hidden="true">
+        {label}
+      </M.Label>
+      {children}
+    </M.RadioGroup>
+  )
+}
+
+export interface MenuRadioItemProps extends ItemBase {
+  value: string
+  /** Something before the label, like a lab mark. */
+  lead?: ReactNode
+}
+
+/** One choice in a MenuRadioGroup. The current one carries a check. */
+export function MenuRadioItem({ value, lead, children, hint, description, kbd, disabled, keepOpen }: MenuRadioItemProps) {
+  return (
+    <M.RadioItem
+      value={value}
+      className={cx(s.item, description != null && s.tall)}
+      disabled={disabled}
+      onSelect={(e) => {
+        if (keepOpen) e.preventDefault()
+      }}
+    >
+      {lead && <span className={s.lead}>{lead}</span>}
+      {parts(children, hint, kbd, description)}
+      <span className={s.check}>
+        <M.ItemIndicator>
+          <Icon name="check" size={12} />
+        </M.ItemIndicator>
+      </span>
+    </M.RadioItem>
+  )
+}
+
+/** Items that belong together, under a small heading. */
+export function MenuGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <M.Group aria-label={label} className={s.group}>
+      <M.Label className={s.heading} aria-hidden="true">
+        {label}
+      </M.Label>
+      {children}
+    </M.Group>
+  )
+}
+
+export function MenuSeparator() {
+  return <M.Separator className={s.separator} />
+}
+
+/** A quiet line of explanation at the foot of a menu. Not an item. */
+export function MenuNote({ children }: { children: ReactNode }) {
+  return <div className={s.note}>{children}</div>
+}

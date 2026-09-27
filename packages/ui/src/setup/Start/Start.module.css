@@ -1,0 +1,96 @@
+.start {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+}
+.title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--t-1);
+}
+.section {
+  display: flex;
+  flex-direction: column;
+}
+.label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.note {
+  margin: 3px 0 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.none {
+  margin: 6px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.way {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 3px;
+  margin-top: 8px;
+  padding: 14px 14px 15px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  text-align: left;
+  transition:
+    box-shadow var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+.way:hover {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.way:active {
+  background: var(--n-2);
+}
+.wayIcon {
+  grid-row: 1;
+  margin-top: 1px;
+  color: var(--t-2);
+}
+.wayTitle {
+  grid-row: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.wayKbd {
+  grid-row: 1;
+}
+.drop {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.wayNote {
+  grid-column: 2 / -1;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .way {
+    transition: none;
+  }
+}

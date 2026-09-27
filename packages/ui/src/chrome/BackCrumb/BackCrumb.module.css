@@ -1,0 +1,56 @@
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+.back {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 8px;
+  margin-left: -4px;
+  border-radius: var(--r);
+  font-weight: 550;
+  color: var(--t-1);
+  transition: background var(--fast) var(--ease);
+}
+.back:hover {
+  background: var(--n-3);
+}
+.back:active {
+  background: var(--n-4);
+}
+.arrow {
+  transform: scaleX(-1);
+  color: var(--t-2);
+}
+.sep {
+  color: var(--t-3);
+}
+.here {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.task {
+  flex: none;
+  font: 500 11.5px/1 var(--mono);
+  color: var(--t-3);
+}
+.title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .back {
+    transition: none;
+  }
+}

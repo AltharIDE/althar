@@ -1,0 +1,33 @@
+.outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.merged .outcome {
+  color: var(--ok);
+}
+.abandoned .outcome {
+  color: var(--t-3);
+}
+.title {
+  font-size: 13px;
+  font-weight: 500;
+}
+.abandoned .title {
+  color: var(--t-2);
+}
+.meta {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.kind {
+  margin-right: 7px;
+  padding-right: 7px;
+  box-shadow: inset -1px 0 0 var(--line-2);
+  color: var(--t-2);
+}
