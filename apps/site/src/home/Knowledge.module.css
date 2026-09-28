@@ -1,0 +1,80 @@
+/* The knowledge graph, drafted like the task graph: ruled cells, square
+   corners, orthogonal leaders with filled heads. Ink at rest; cobalt for
+   what the next task touches and the notes it takes; violet for your
+   calls; a proposed note dashed. */
+
+.knowledge { position: relative; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.svg { display: block; width: 100%; height: auto; }
+
+.colHead text { fill: var(--t-1); font: 700 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.colHead line { stroke: var(--t-1); stroke-width: 1.5; }
+.mark { color: var(--t-1); fill: currentColor; }
+.headInk { fill: var(--t-3); }
+.headLive { fill: var(--live); }
+
+.from rect { fill: var(--n-1); stroke: var(--t-1); stroke-width: 1.1; }
+.fromTask { fill: var(--t-1); font: 650 13.5px var(--font); }
+.fromWho { fill: var(--t-3); font: 500 9.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+
+.edge { fill: none; stroke: var(--t-3); stroke-width: 1; transition: stroke 200ms var(--ease); }
+.scope.on { stroke: var(--live); stroke-width: 1.6; transition-delay: 500ms; }
+
+.note line { stroke: var(--t-1); stroke-width: 0.7; }
+.box { fill: var(--n-1); stroke: var(--t-1); stroke-width: 1.3; transition: stroke 200ms var(--ease), fill 200ms var(--ease); }
+.num { fill: var(--n-4); transition: fill 200ms var(--ease); }
+.no { fill: var(--t-1); font: 700 14px var(--mono); }
+.name { fill: var(--t-1); font: 650 15px var(--font); letter-spacing: -0.012em; }
+.tag { fill: var(--t-3); font: 600 9.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.yours .tag { fill: var(--signal-pressed); }
+.proposed .box { stroke-dasharray: 6 4; }
+.proposed .name { fill: var(--t-2); }
+.note.on .box { stroke: var(--live); stroke-width: 2; fill: rgba(43, 59, 255, 0.05); transition-delay: 700ms; }
+.note.on .num { fill: rgba(43, 59, 255, 0.14); transition-delay: 700ms; }
+.note.on .no,
+.note.on .tag { fill: var(--live); }
+
+.area rect { fill: var(--n-1); stroke: var(--t-1); stroke-width: 1.1; transition: stroke 200ms var(--ease), fill 200ms var(--ease); }
+.area text { fill: var(--t-1); font: 500 12.5px var(--mono); }
+.area.on rect { stroke: var(--live); stroke-width: 1.8; fill: rgba(43, 59, 255, 0.05); transition-delay: 300ms; }
+.area.on text { fill: var(--live); }
+
+.touch { fill: none; stroke: var(--live); stroke-width: 1.6; stroke-dasharray: 1; stroke-dashoffset: 1; opacity: 0; }
+.touch.on { opacity: 1; animation: draw 500ms var(--ease) forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+
+.next { animation: arrive 360ms var(--ease) both; }
+.next line { stroke: var(--t-1); stroke-width: 0.7; }
+.nextBox { fill: var(--n-1); stroke: var(--live); stroke-width: 1.8; }
+.nextHead { fill: var(--live); font: 700 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.nextTask { fill: var(--t-1); font: 650 15px var(--font); }
+.nextTitle { fill: var(--t-2); font: 500 13px var(--font); }
+.nextCount { fill: var(--live); font: 700 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+@keyframes arrive { from { opacity: 0; transform: translateX(10px); } }
+
+.foot { margin-top: 18px; font: 500 11px/1.5 var(--mono); letter-spacing: 0.04em; color: var(--t-3); }
+
+/* Narrow: the next task, and the notes it starts with picked out. */
+.narrow { display: none; }
+.nextCard { display: grid; gap: 6px; padding: 14px 16px; background: var(--n-1); box-shadow: inset 0 0 0 1.8px var(--live); font-size: 15px; line-height: 1.4; color: var(--t-2); animation: arrive 360ms var(--ease) both; }
+.nextCardHead { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 650; color: var(--t-1); }
+.nextCardHead svg { fill: var(--t-1); }
+.nextCard b { font: 700 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--live); }
+.rows { list-style: none; margin: 16px 0 0; padding: 0; }
+.rows li { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 11px 0; box-shadow: inset 0 -1px 0 var(--line-3); transition: color 200ms var(--ease); }
+.rowNo { font: 700 12px var(--mono); color: var(--t-3); }
+.rowName { font-size: 15.5px; font-weight: 620; color: var(--t-3); }
+.rowFrom { display: inline-flex; align-items: center; gap: 6px; font: 500 11px var(--mono); color: var(--t-3); }
+.rowFrom svg { fill: currentColor; }
+.rowOn .rowNo,
+.rowOn .rowFrom { color: var(--live); }
+.rowOn .rowName { color: var(--t-1); }
+
+@media (max-width: 860px) {
+  .svg { display: none; }
+  .narrow { display: block; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .next, .nextCard, .touch.on { animation: none; }
+  .touch.on { stroke-dashoffset: 0; }
+}

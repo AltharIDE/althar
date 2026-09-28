@@ -1,0 +1,36 @@
+/* The plates are the crane's: cobalt, square, the agent's mark and name in
+   paper. The verbs stay put while the plates change hands. */
+
+.crew { position: relative; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.lines { list-style: none; margin: 0; padding: 0; display: grid; gap: clamp(10px, 1.6vw, 20px); }
+.lines li { display: flex; align-items: center; gap: 0.32em; font-size: clamp(30px, 4.2vw, 64px); line-height: 1; letter-spacing: -0.045em; font-weight: 700; }
+.slot { display: grid; justify-items: end; }
+.slot > * { grid-area: 1 / 1; }
+.sizer { visibility: hidden; }
+.now { display: flex; animation: plate 460ms var(--ease) both; }
+.plate {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42em;
+  padding: 0.22em 0.5em 0.24em;
+  background: var(--live);
+  color: var(--n-2);
+  font-size: 0.5em;
+  font-weight: 720;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.icon { width: 1.05em; height: 1.05em; }
+.verb { white-space: nowrap; }
+@keyframes plate {
+  from { opacity: 0; transform: translateY(0.3em); clip-path: inset(0 0 100% 0); }
+  to { opacity: 1; transform: none; clip-path: inset(0 0 0 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .now { animation: none; }
+}
+
+.roster { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px 22px; }
+.roster li { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: var(--t-1); }
