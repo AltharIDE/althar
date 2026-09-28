@@ -9,6 +9,7 @@
     "dev": "vp dev",
     "build": "vp build",
     "preview": "vp preview",
+    "deploy": "vp build && wrangler deploy",
     "check": "vp check",
     "fix": "vp check --fix"
   },
@@ -27,7 +28,8 @@
     "@vitejs/plugin-react": "^6.1.1",
     "typescript": "^7.0.2",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
-    "vite-plus": "1.0.0-rc.0"
+    "vite-plus": "1.0.0-rc.0",
+    "wrangler": "^4.143.0"
   },
   "engines": {
     "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
