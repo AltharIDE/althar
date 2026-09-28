@@ -130,13 +130,16 @@ stateDiagram-v2
     [*] --> ready
     ready --> admitted
     admitted --> running
+    admitted --> cancelled
+    running --> succeeded
     running --> waiting_attention
     waiting_attention --> running
     running --> verifying
     verifying --> succeeded
-    admitted --> cancelled
     running --> cancelling
+    waiting_attention --> cancelling
     cancelling --> cancelled
+    cancelling --> uncertain: stop not confirmed
     running --> failed
     verifying --> failed
     running --> uncertain
@@ -145,10 +148,17 @@ stateDiagram-v2
     reconciling --> succeeded
     reconciling --> failed
     reconciling --> waiting_attention
+    running --> superseded: another agent takes over
+    waiting_attention --> superseded
     failed --> [*]
     cancelled --> [*]
     succeeded --> [*]
+    superseded --> [*]
 ```
+
+The same lifecycle is data in `@charrette/domain` (`lifecycles.ts`). An
+attempt ends as `superseded` when a switch hands the node to another agent;
+a new attempt of the same node takes over.
 
 A retry creates a new `NodeAttempt`. It never erases the failed attempt.
 

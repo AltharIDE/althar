@@ -325,15 +325,21 @@ stateDiagram-v2
     [*] --> probing
     probing --> auth_required
     probing --> ready
+    probing --> failed
     auth_required --> ready
+    auth_required --> failed
     ready --> starting
     starting --> active
+    starting --> failed
     active --> waiting_approval
     waiting_approval --> active
     active --> completed
     active --> cancelling
+    waiting_approval --> cancelling
     cancelling --> cancelled
+    cancelling --> uncertain: stop not confirmed
     active --> superseded: switched to another agent
+    waiting_approval --> superseded
     active --> lost
     lost --> reconciling
     reconciling --> active: resumable and safe
@@ -345,6 +351,9 @@ stateDiagram-v2
     uncertain --> [*]
     failed --> [*]
 ```
+
+The same lifecycle is data in `@charrette/domain` (`lifecycles.ts`), whose tests
+keep it whole: every state reachable, and none left after a terminal one.
 
 A provider session state does not directly set the run outcome. The workflow
 node interprets normalized observations under its retry, verification, and
