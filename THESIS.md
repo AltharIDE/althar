@@ -6,7 +6,11 @@
 
 Charrette begins with a hypothesis:
 
-> **Software engineering is entering a new phase in which the primary unit of work shifts from code, and then from individual agent conversations, toward persistent software projects capable of coordinating transient intelligent workers.**
+> **Software engineering may be entering a new phase in which the primary locus of context and coordination shifts from code artifacts and individual agent conversations toward persistent engineering contexts capable of coordinating transient intelligent workers.**
+
+The software project is Charrette's initial candidate for that persistent context.
+
+It is not yet clear that the project is the highest, or even always the correct, primitive. Useful knowledge may belong to a task, repository, project, product, team, programme, portfolio, organisation, or some federation spanning several of them. Determining those boundaries is part of the research rather than a decision made in advance.
 
 As implementation becomes increasingly delegable, the scarce functions of software engineering begin to move elsewhere.
 
@@ -15,7 +19,7 @@ The engineer spends proportionally less effort translating intent directly into 
 * defining intent
 * refining requirements
 * making trade-offs
-* preserving and sharing project knowledge
+* preserving and sharing engineering knowledge at the appropriate scope
 * coordinating parallel work
 * evaluating outcomes
 * resolving ambiguity
@@ -23,7 +27,7 @@ The engineer spends proportionally less effort translating intent directly into 
 * verifying correctness
 * deciding when human judgement is required
 
-If this transition continues, the software project itself may need to become a more active computational object.
+If this transition continues, the durable context surrounding software work may need to become a more active computational object.
 
 Not merely a repository.
 
@@ -33,7 +37,7 @@ Not merely an issue tracker.
 
 Not merely a collection of agent conversations.
 
-A persistent, potentially collaborative system capable of retaining context, coordinating work, and surviving the replacement of the individual agents, models, interfaces, and developers operating within it.
+A persistent, potentially collaborative system capable of retaining appropriately scoped context, coordinating work, and surviving the replacement of the individual agents, models, interfaces, and developers operating within it.
 
 Charrette is an attempt to explore that hypothesis.
 
@@ -44,18 +48,19 @@ Charrette is an attempt to explore that hypothesis.
 1. [The emerging transition](#1-the-emerging-transition)
 2. [The core claim](#2-the-core-claim)
 3. [Project persistence and shared project intelligence](#3-project-persistence-and-shared-project-intelligence)
-4. [The coordinator hypothesis](#4-the-coordinator-hypothesis)
-5. [Tasks as bounded execution contexts](#5-tasks-as-bounded-execution-contexts)
-6. [The human-attention boundary](#6-the-human-attention-boundary)
-7. [Execution as a graph](#7-execution-as-a-graph)
-8. [Provider independence and open infrastructure](#8-provider-independence-and-open-infrastructure)
-9. [What Charrette is](#9-what-charrette-is)
-10. [What this thesis does not assume](#10-what-this-thesis-does-not-assume)
-11. [Questions this project must answer](#11-questions-this-project-must-answer)
-12. [Evidence to collect during prototyping](#12-evidence-to-collect-during-prototyping)
-13. [What would make this thesis wrong?](#13-what-would-make-this-thesis-wrong)
-14. [Toward a whitepaper](#14-toward-a-whitepaper)
-15. [Current working proposition](#15-current-working-proposition)
+4. [Is the project the highest persistent primitive?](#4-is-the-project-the-highest-persistent-primitive)
+5. [The coordinator hypothesis](#5-the-coordinator-hypothesis)
+6. [Tasks as bounded execution contexts](#6-tasks-as-bounded-execution-contexts)
+7. [The human-attention boundary](#7-the-human-attention-boundary)
+8. [Execution as a graph](#8-execution-as-a-graph)
+9. [Provider independence and open infrastructure](#9-provider-independence-and-open-infrastructure)
+10. [What Charrette is](#10-what-charrette-is)
+11. [What this thesis does not assume](#11-what-this-thesis-does-not-assume)
+12. [Questions this project must answer](#12-questions-this-project-must-answer)
+13. [Evidence to collect during prototyping](#13-evidence-to-collect-during-prototyping)
+14. [What would make this thesis wrong?](#14-what-would-make-this-thesis-wrong)
+15. [Toward a whitepaper](#15-toward-a-whitepaper)
+16. [Current working proposition](#16-current-working-proposition)
 
 ---
 
@@ -108,7 +113,7 @@ The agent can inspect a codebase, make changes, run tools, and reason over multi
 ```text
 Human / Team
      ↓
-Persistent Project
+Persistent Engineering Context(s)
      ↓
 Coordinator
      ↓
@@ -119,7 +124,9 @@ Transient Agents
 Outcomes
 ```
 
-The engineer increasingly manages intent, constraints, judgement, and priorities while a persistent project-level system coordinates execution.
+The engineer increasingly manages intent, constraints, judgement, and priorities while a persistent engineering context coordinates execution.
+
+Charrette begins by implementing that context at project level. The research must determine whether this is the durable root of the system or merely one useful scope within a larger structure.
 
 Individual agents become workers rather than the place where project state lives.
 
@@ -199,9 +206,11 @@ Source control solved collaborative ownership of source code remarkably well.
 
 It has not yet solved collaborative ownership of the accumulated intelligence used by agents to understand that source code.
 
-Charrette therefore starts from a stronger assumption:
+Charrette therefore starts from a stronger working hypothesis at project scope:
 
 > **Durable project intelligence should belong to the project rather than to an individual worker, conversation, developer, or model provider.**
+
+This claim is about lifetime and ownership. It does not imply that every useful piece of engineering knowledge belongs inside one project, or that the project is the outermost durable context.
 
 A worker may exist for minutes.
 
@@ -315,7 +324,84 @@ The collaborative project is therefore a direction to explore, not a solved assu
 
 ---
 
-# 4. The coordinator hypothesis
+# 4. Is the project the highest persistent primitive?
+
+The project is a natural starting point.
+
+It is recognisable to developers, has a relatively coherent purpose, and already gathers repositories, tasks, decisions, artifacts, and collaborators. It is a plausible boundary within which to test persistence and coordination.
+
+But it is not a stable or universal boundary.
+
+A product may span many repositories and services.
+
+A monorepo may contain many products.
+
+A shared library or platform may serve dozens of projects.
+
+An incident, migration, security policy, customer commitment, or architectural decision may cut across all of them.
+
+Some durable knowledge is inherently broader than one project:
+
+* organisation-wide engineering and security policy
+* shared platform and infrastructure constraints
+* domain terminology and product strategy
+* relationships between services and repositories
+* reusable execution and review workflows
+* incident findings that affect several systems
+* ownership, expertise, and dependency information
+* coordinated migrations or programmes of work
+
+Other knowledge is narrower or differently bounded:
+
+* task-specific findings
+* branch-specific facts
+* personal working context
+* team conventions
+* confidential or role-restricted information
+* temporary knowledge valid only during an incident or migration
+
+This suggests that durable engineering intelligence may not fit inside a single container. It may need to exist across linked scopes:
+
+```text
+Organisation / ecosystem
+          ↕
+Product / programme / platform
+          ↕
+        Project ↔ Project
+          ↕
+         Task
+```
+
+The arrows are deliberately not a strict hierarchy. Knowledge may be inherited downward, promoted upward, shared laterally, overridden locally, or withheld entirely. A team may span projects; a project may span teams; an external standard may govern an organisation without belonging to it.
+
+Simply replacing project memory with organisation-wide memory would not solve the problem. It could create a larger context dump, propagate incorrect assumptions further, leak sensitive information, erase local exceptions, and turn shared knowledge into bureaucracy.
+
+A useful system may therefore need every durable claim to carry more than content. It may also need:
+
+* provenance
+* intended scope
+* authority
+* visibility
+* confidence
+* temporal validity
+* inheritance and override rules
+* a path for correction or revocation
+
+The relevant context for a task could then be assembled from several scopes rather than retrieved from one global memory.
+
+The answer may also differ by concern. A project could remain the useful unit of execution while knowledge spans products, policy belongs to an organisation, identity belongs to people and teams, and a programme coordinates work across all of them. Searching for one universal highest primitive may itself be a category error.
+
+Several structural models are plausible: a hierarchy, a federated graph of contexts, linked but autonomous projects, or no new abstraction beyond existing repositories and organisational systems. Charrette should not select among them before evidence exists.
+
+The working proposition is therefore narrower than “the project is the root”:
+
+> **A project may be a useful persistent coordination boundary without being the highest primitive for knowledge, policy, identity, or work.**
+
+Whether a more general primitive such as **scope**, **context**, or **domain** is needed remains an open question.
+
+---
+
+# 5. The coordinator hypothesis
 
 If multiple agents can operate simultaneously, asking the developer to independently manage every agent may not scale.
 
@@ -350,9 +436,11 @@ In a collaborative project, the coordinator may eventually also need to reason a
 
 Whether one coordinator, multiple personal coordinators, or some hybrid architecture works best is itself an open question.
 
+The coordinator's own scope is also unresolved. A project coordinator may need to consult wider organisational policy, coordinate with peer projects, or contribute a finding to a broader knowledge scope. Alternatively, project coordinators may remain autonomous and exchange only explicit artifacts. A single organisation-wide coordinator should not be assumed to be either necessary or desirable.
+
 ---
 
-# 5. Tasks as bounded execution contexts
+# 6. Tasks as bounded execution contexts
 
 Work delegated to an agent should be isolated into a task.
 
@@ -372,7 +460,7 @@ A task may contain:
 
 Tasks are bounded.
 
-Projects are persistent.
+Their containing context persists. In Charrette's initial model, that context is the project.
 
 This boundary may make agent workers replaceable.
 
@@ -397,7 +485,7 @@ A significant amount of useful engineering work consists of understanding rather
 
 ---
 
-# 6. The human-attention boundary
+# 7. The human-attention boundary
 
 Greater agent autonomy is only valuable if it reduces useful human effort rather than moving problems elsewhere.
 
@@ -433,7 +521,7 @@ A project-level coordinator may be useful partly because it can mediate this bou
 
 ---
 
-# 7. Execution as a graph
+# 8. Execution as a graph
 
 Agent execution is often presented as a conversation or a linear loop:
 
@@ -518,7 +606,7 @@ A visual frontend task may replace several of those stages with:
 
 This suggests a broader hypothesis:
 
-> **Execution workflows may themselves become durable, programmable project assets.**
+> **Execution workflows may themselves become durable, programmable engineering assets at project, team, or broader scope.**
 
 Review is therefore only one node in a larger system.
 
@@ -550,7 +638,7 @@ The prototype should determine whether this generality is genuinely useful or un
 
 ---
 
-# 8. Provider independence and open infrastructure
+# 9. Provider independence and open infrastructure
 
 Current coding agents are improving rapidly.
 
@@ -570,7 +658,7 @@ Another may simply become better.
 
 The developer therefore has a strong incentive to preserve optionality.
 
-> **Developers should be able to use whichever agent is best for a particular task without abandoning the accumulated intelligence and workflows of their project.**
+> **Developers should be able to use whichever agent is best for a particular task without abandoning the accumulated intelligence and workflows of their project or organisation.**
 
 Yet some of the earliest attempts at project-level orchestration are naturally being built inside model-provider and proprietary development harnesses.
 
@@ -587,20 +675,20 @@ But they are not identical to the developer's incentives.
 A provider may prefer:
 
 ```text
-Project
-   ↓
-Its harness
-   ↓
-Its models
+Persistent scopes
+       ↓
+  Its harness
+       ↓
+   Its models
 ```
 
 The developer may prefer:
 
 ```text
-                     ┌→ Model A
-Project → Open layer ├→ Model B
-                     ├→ Local agent
-                     └→ Future model
+                                 ┌→ Model A
+Persistent scopes → Open layer ──┼→ Model B
+                                 ├→ Local agent
+                                 └→ Future model
 ```
 
 If the persistent layer begins to contain:
@@ -613,21 +701,22 @@ If the persistent layer begins to contain:
 * review policies
 * learned conventions
 * team knowledge
+* cross-project policy and relationships
 * historical artifacts
 
 then leaving a platform may become much more expensive than merely changing an API call.
 
 The lock-in would no longer primarily concern the model.
 
-It would concern the accumulated **operating system of the project**.
+It would concern the accumulated **operating system of the engineering organisation**, whether represented as one project or many linked contexts.
 
 Charrette therefore tests the idea that:
 
-> **The persistent project layer should remain independent from the transient execution providers beneath it.**
+> **The persistent context layer should remain independent from the transient execution providers beneath it.**
 
 And that leads to a second principle:
 
-> **The infrastructure defining that layer should be open enough that no single corporation exclusively owns the developer's accumulated project intelligence or engineering workflows.**
+> **The infrastructure defining that layer should be open enough that no single corporation exclusively owns the developer's accumulated engineering intelligence or workflows.**
 
 Open source matters here for practical reasons rather than ideology alone.
 
@@ -640,7 +729,7 @@ It enables developers and teams to:
 * preserve workflows even when providers disappear
 * self-host where appropriate
 * contribute interoperable project formats
-* experiment with new models without migrating the project itself
+* experiment with new models without migrating the durable context itself
 
 Provider independence does not mean pretending all agents are identical.
 
@@ -652,7 +741,7 @@ Whether an open provider-independent layer delivers enough additional value to j
 
 ---
 
-# 9. What Charrette is
+# 10. What Charrette is
 
 Charrette is an experimental open-source implementation of these ideas.
 
@@ -660,7 +749,9 @@ Its current conceptual model contains four core primitives:
 
 ## Project
 
-The persistent owner of knowledge, history, tasks, artifacts, execution state, and potentially shared team context.
+The current persistent owner of knowledge, history, tasks, artifacts, execution state, and potentially shared team context.
+
+Project is an experimental operational boundary, not a claim about the highest possible scope.
 
 ## Coordinator
 
@@ -676,19 +767,29 @@ A useful output of work that does not necessarily belong in the repository's dur
 
 Execution graphs may eventually become another first-class primitive, or they may remain an implementation detail beneath tasks.
 
+Likewise, a higher-order scope may eventually become a first-class primitive. Candidate forms include organisation, workspace, product, programme, portfolio, domain, or a generic context that can link and contain projects. Charrette should earn that abstraction through cross-project use rather than introduce it only for conceptual symmetry.
+
 This model is provisional.
 
 The prototype exists partly to discover whether these are the right abstractions.
 
 ---
 
-# 10. What this thesis does not assume
+# 11. What this thesis does not assume
 
 This project should not begin by assuming that more autonomy is always better.
 
 It should not assume that multi-agent systems outperform a strong single agent.
 
 It should not assume that every project needs a knowledge graph.
+
+It should not assume that the project is a natural, fixed, or highest-level boundary.
+
+It should not assume that all cross-project knowledge should be centralised.
+
+It should not assume that organisation-wide memory is automatically useful, safe, or coherent.
+
+It should not assume that knowledge scopes map neatly onto repositories or the organisational chart.
 
 It should not assume that shared agent memory is automatically beneficial.
 
@@ -714,7 +815,7 @@ Not conclusions.
 
 ---
 
-# 11. Questions this project must answer
+# 12. Questions this project must answer
 
 The purpose of Charrette is not only to build software.
 
@@ -722,7 +823,7 @@ It is to investigate the operating model emerging around agentic software develo
 
 The following questions should guide both product development and the eventual whitepaper.
 
-## 11.1 Is there genuinely a new engineering abstraction?
+## 12.1 Is there genuinely a new engineering abstraction?
 
 * What fundamentally changes when implementation capacity becomes abundant?
 * What remains scarce when agents can independently complete well-scoped tasks?
@@ -733,21 +834,21 @@ The following questions should guide both product development and the eventual w
 * Which forms of engineering work stubbornly remain human?
 * Does the project itself become a useful computational abstraction?
 
-## 11.2 What should persist?
+## 12.2 What should persist?
 
 * What information must survive an individual agent session?
-* What belongs to the project rather than the worker?
+* What belongs to the task, project, team, product, organisation, or worker?
 * How much conversation history is genuinely useful?
 * What information should be canonical?
 * What information should remain episodic?
 * When should episodic knowledge be promoted into canonical knowledge?
-* How should provenance be stored?
+* How should provenance and scope be stored?
 * How quickly does stored project knowledge become stale?
 * Can stale information be detected automatically?
 * Can a new agent reconstruct sufficient context without inheriting full historical conversations?
 * Is repository content plus retrieval sufficient, or is another persistence layer necessary?
 
-## 11.3 Can project intelligence become collaborative?
+## 12.3 Can project intelligence become collaborative?
 
 * Which project knowledge should be shared between developers?
 * Which knowledge should remain private or personal?
@@ -761,7 +862,24 @@ The following questions should guide both product development and the eventual w
 * Should developers have personal coordinators operating against a common project state?
 * Can collaborative project intelligence scale to large organisations?
 
-## 11.4 What is the correct human-agent boundary?
+## 12.4 Is the project the right boundary, and is it the highest primitive?
+
+* What operationally defines a project: repository, product, service, goal, team, or something else?
+* How should a monorepo containing many products differ from a product spanning many repositories?
+* Which knowledge belongs at task, project, team, product, programme, portfolio, organisation, or ecosystem scope?
+* Is a generic scope or context primitive useful, or does it merely rename existing organisational structures?
+* Do knowledge, execution, policy, identity, and coordination need different scope models rather than one shared hierarchy?
+* Should broader contexts contain projects, link them, index them, or only publish policy to them?
+* How should knowledge be promoted from one project for use elsewhere?
+* How should wider policy be inherited, locally overridden, corrected, or revoked?
+* What happens when project evidence conflicts with organisation-wide knowledge?
+* Can one project discover a relevant finding from another without receiving its irrelevant or confidential context?
+* Should coordinators operate across several projects, or should autonomous project coordinators exchange explicit artifacts?
+* Does cross-project memory measurably reduce repeated work, incidents, or inconsistent decisions?
+* At what scale does shared intelligence become context pollution, bureaucracy, or a security boundary violation?
+* Can projects remain portable if some of their operating context belongs to an organisation?
+
+## 12.5 What is the correct human-agent boundary?
 
 * What kinds of ambiguity should stop execution?
 * What decisions can agents make safely without asking?
@@ -773,7 +891,7 @@ The following questions should guide both product development and the eventual w
 * Is one coordinator easier to manage than several direct agent conversations?
 * When does delegation cost more than direct implementation?
 
-## 11.5 Does orchestration improve engineering work?
+## 12.6 Does orchestration improve engineering work?
 
 * Does parallel execution reduce elapsed completion time?
 * Where does parallelism introduce conflicts or duplicated effort?
@@ -784,7 +902,7 @@ The following questions should guide both product development and the eventual w
 * How large is orchestration overhead relative to execution?
 * What becomes the bottleneck when implementation ceases to be the bottleneck?
 
-## 11.6 What is the right execution model?
+## 12.7 What is the right execution model?
 
 * Are configurable execution graphs useful?
 * Are DAGs the correct abstraction?
@@ -797,7 +915,7 @@ The following questions should guide both product development and the eventual w
 * How much control should remain implicit versus explicitly configured?
 * When should execution graphs escalate to a human?
 
-## 11.7 Does independent verification improve outcomes?
+## 12.8 Does independent verification improve outcomes?
 
 * Does an independent reviewer reliably identify meaningful defects?
 * Should implementer and reviewer use different models?
@@ -809,17 +927,18 @@ The following questions should guide both product development and the eventual w
 * How often can an agent repair review findings without introducing regressions?
 * What categories of finding should always require human review?
 
-## 11.8 How should project knowledge behave?
+## 12.9 How should persistent engineering knowledge behave?
 
 * Can project memory improve agent performance over time?
 * Which stored information produces the most value?
 * How should contradictory knowledge be handled?
 * How should the system represent uncertainty?
 * Should knowledge have confidence, source, date, and scope?
+* How should authority, inheritance, local override, and revocation work across scopes?
 * Can agents maintain project documentation automatically without degrading its quality?
 * How do we prevent memory accumulation from becoming another form of context pollution?
 
-## 11.9 Does provider independence matter?
+## 12.10 Does provider independence matter?
 
 * How frequently do developers benefit from switching agent or model?
 * Do different models remain meaningfully specialised?
@@ -831,7 +950,7 @@ The following questions should guide both product development and the eventual w
 * Which parts of execution can realistically be provider-independent?
 * Where should provider-specific capabilities remain exposed rather than abstracted away?
 
-## 11.10 What happens to existing software-development tools?
+## 12.11 What happens to existing software-development tools?
 
 * Does the IDE remain the primary surface?
 * Does the issue tracker become primarily an intake system?
@@ -841,20 +960,21 @@ The following questions should guide both product development and the eventual w
 * Do repositories need a portable machine-readable project-memory format?
 * Should that format be standardised?
 * What does vendor lock-in mean when accumulated project intelligence becomes valuable?
-* Is a new project-level control-plane layer required between developers and execution agents?
+* Is a new project-level or multi-scope control-plane layer required between developers and execution agents?
 
-## 11.11 What should Charrette not own?
+## 12.12 What should Charrette not own?
 
 * Which state should remain in Git?
 * Which state should remain in Linear, Jira, or GitHub?
 * Which information should Charrette reference rather than duplicate?
+* Which cross-project and organisation-wide state should remain in existing knowledge, policy, identity, and portfolio systems?
 * When should external systems be mutated?
 * How should bidirectional sync be handled?
 * What is the minimum persistent state Charrette needs in order to remain useful?
 
 ---
 
-# 12. Evidence to collect during prototyping
+# 13. Evidence to collect during prototyping
 
 The prototype should be instrumented.
 
@@ -884,8 +1004,14 @@ Useful measurements may include:
 * coordinator interventions
 * project-memory retrievals
 * shared-memory retrievals
+* cross-project and broader-scope retrievals
+* knowledge promotions between scopes
+* inherited-policy applications and local overrides
+* scope-conflict resolutions
+* irrelevant-context retrievals
 * stale-memory incidents
 * contradictory-memory incidents
+* permission or information-boundary incidents
 * human overrides
 * final outcome type
 
@@ -899,6 +1025,11 @@ Particularly useful events include:
 * cases where shared memory materially helped
 * cases where memory misled an agent
 * cases where another developer already possessed knowledge an agent had to rediscover
+* cases where another project already possessed knowledge an agent had to rediscover
+* cases where broader organisational knowledge prevented a defect or repeated investigation
+* cases where broader context was irrelevant, misleading, or impermissibly exposed
+* cases where local project evidence correctly overrode a broader rule
+* cases where a project finding should have been promoted but was not
 * points where the developer became confused
 * unnecessary interruptions
 * missed escalations
@@ -917,7 +1048,7 @@ The goal is to understand the system.
 
 ---
 
-# 13. What would make this thesis wrong?
+# 14. What would make this thesis wrong?
 
 This thesis should remain falsifiable.
 
@@ -927,6 +1058,9 @@ Evidence against it would include findings such as:
 * repository files plus ordinary retrieval provide all useful project memory
 * developer-specific agent context is sufficient and shared project intelligence adds little value
 * shared project memory produces more confusion than coordination
+* project boundaries prove sufficient in practice and broader knowledge scopes add little value
+* cross-project knowledge is handled better by existing documentation, search, policy, and portfolio systems
+* wider shared context causes enough contamination, permission risk, or governance overhead to outweigh reuse
 * developers strongly prefer direct interaction with individual workers
 * orchestration overhead outweighs the gains from parallel execution
 * project-level persistence provides little measurable improvement
@@ -945,7 +1079,7 @@ The thesis is a hypothesis to test, not a doctrine to protect.
 
 ---
 
-# 14. Toward a whitepaper
+# 15. Toward a whitepaper
 
 The eventual whitepaper should not primarily be a whitepaper about Charrette.
 
@@ -957,7 +1091,7 @@ A working title is:
 
 Possible subtitle:
 
-> **From Coding Agents to Persistent Project Intelligence**
+> **From Coding Agents to Persistent Engineering Intelligence**
 
 Charrette should appear as the experimental system through which the ideas were explored.
 
@@ -987,23 +1121,26 @@ The whitepaper should answer, with evidence where possible:
 2. What changed as coding agents became capable of autonomous multi-step work?
 3. What became scarce as implementation became cheaper?
 4. What state must survive individual agent sessions?
-5. What project intelligence should be shared between developers?
-6. Can software projects themselves become persistent collaborative intelligence systems?
-7. What is the appropriate persistent abstraction?
-8. What is the role of a coordinator?
-9. When does parallel agent execution help or hurt?
-10. What decisions still require human judgement?
-11. Are programmable execution graphs useful?
-12. When should implementation be followed by review, repair, re-review, or specialised testing?
-13. Can verification itself be delegated?
-14. Does persistent project knowledge improve future execution?
-15. What should remain canonical and what should remain episodic?
-16. What happens to IDEs, issue trackers, PRs, and repositories?
-17. What forms of vendor lock-in emerge around project intelligence and engineering workflows?
-18. Does provider independence produce meaningful practical value?
-19. What role should open-source infrastructure play in the persistent project layer?
-20. What did building and using Charrette reveal that was not obvious beforehand?
-21. Which parts of the original thesis were wrong?
+5. At what scope should different kinds of engineering knowledge persist?
+6. Is the project the highest useful primitive, one node in a federation, or the wrong boundary altogether?
+7. Can knowledge move across projects and organisations without becoming noise, bureaucracy, or an access-control hazard?
+8. What project intelligence should be shared between developers?
+9. Can software projects themselves become persistent collaborative intelligence systems?
+10. What is the appropriate persistent abstraction?
+11. What is the role and appropriate scope of a coordinator?
+12. When does parallel agent execution help or hurt?
+13. What decisions still require human judgement?
+14. Are programmable execution graphs useful?
+15. When should implementation be followed by review, repair, re-review, or specialised testing?
+16. Can verification itself be delegated?
+17. Does persistent engineering knowledge improve future execution?
+18. What should remain canonical and what should remain episodic?
+19. What happens to IDEs, issue trackers, PRs, and repositories?
+20. What forms of vendor lock-in emerge around engineering intelligence and workflows?
+21. Does provider independence produce meaningful practical value?
+22. What role should open-source infrastructure play in the persistent context layer?
+23. What did building and using Charrette reveal that was not obvious beforehand?
+24. Which parts of the original thesis were wrong?
 
 A good final paper should contain findings that changed the system.
 
@@ -1011,14 +1148,20 @@ If the whitepaper merely confirms everything written in this file, the research 
 
 ---
 
-# 15. Current working proposition
+# 16. Current working proposition
 
 The current proposition behind Charrette is:
 
 > **The project persists. The coordinator understands. Agents come and go.**
 
+This is Charrette's starting architecture, not a claim that the project is the final or highest boundary.
+
 A second, increasingly important proposition is:
 
-> **Project intelligence should belong to the project and its team, not to the transient agent, developer session, or corporation through which the work happened.**
+> **Durable engineering intelligence should belong to the people and scope it serves, not to the transient agent, developer session, or corporation through which the work happened.**
+
+That scope may be a project. It may also be a team, product, programme, portfolio, organisation, or federation of otherwise autonomous contexts.
+
+The next question is therefore not only whether the project can persist, but whether it is the highest useful primitive at all.
 
 Everything else remains open to evidence.

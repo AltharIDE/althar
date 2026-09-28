@@ -1,73 +1,77 @@
-# Charrette
+<img src="docs/assets/readme-header.png" width="100%" alt="Charrette. The project should persist. The agents should not have to." />
 
-Charrette is an open-source project orchestration environment for software engineering with AI agents.
+Charrette is an open-source environment for running software projects with AI coding agents. It keeps the project in one place: its rules, knowledge, decisions, tasks and history. That place outlasts any single agent session. The work goes to whichever agents suit it, such as Claude Code, Codex or Gemini CLI, as installed on your machine.
 
-It is built around a simple idea:
+> [!NOTE]
+> **Very early.** There is no runnable Charrette yet. This repository holds the thesis, the architecture, the interface primitives and the brief. The model, and the words for it, will change as we prototype.
 
-> **The project should persist. The agents should not have to.**
+## Why
 
-Today, much of the useful context created during AI-assisted development accumulates inside individual agent sessions, developer chats, proprietary tools, and model-specific environments.
+Today, the useful context from AI-assisted work collects inside individual agent sessions, one developer's chat history, and whichever tool or model was in use at the time. Change the model, the tool or the person, and much of it is lost.
 
-Charrette explores a different model: the **project** becomes the persistent object.
+Charrette makes the **project** the thing that persists. Agents come and go. They start from what the project knows and leave behind what they learned.
 
-A project can retain its knowledge, decisions, tasks, artifacts, execution history, and shared context independently of whichever agent happens to be working on it.
+## How it works
 
-Agents become transient workers.
+| | |
+| --- | --- |
+| **Project** | A body of work with its own rules, knowledge and history. It owns everything below, and it may span several repositories or none. |
+| **Coordinator** | The project's agent that you talk to. It plans and orders tasks, hands them out, answers questions and follows the work. It never writes code itself. |
+| **Task** | One piece of work with an outcome, usually one change. |
+| **Lead** | The agent that owns a task. It implements, runs the task's steps, such as review and verify, and settles what they find. Each step can use a different model. |
+| **Knowledge** | What the project holds: notes that every task starts with (decisions, conventions, architecture), and what individual tasks noticed along the way. |
+| **Artifacts** | What a task produced that is worth keeping but doesn't belong in a repository. |
 
-The project remains.
-
-## The basic model
-
-Charrette currently explores four core primitives:
-
-**Project** — the persistent owner of context, knowledge, history, tasks, artifacts, and execution state.
-
-**Coordinator** — the developer's continuous interface to the project. It understands intent, delegates work, follows execution, synthesises outcomes, and remains available while other agents work asynchronously.
-
-**Task** — a bounded execution context that may be handled by any suitable coding agent and may produce code, research, documentation, decisions, or other outcomes.
-
-**Artifact** — useful output produced during work that should remain accessible without necessarily becoming permanent repository documentation.
-
-The model is deliberately provisional.
-
-Charrette is a prototype for discovering what the right abstractions actually are.
+Agents work under the project's rules. You're pulled in only when something needs a person to decide.
 
 ## Open by design
 
-Charrette is intended to exist as open-source infrastructure.
+Model providers will build good orchestration around their own agents. Developers have a different incentive: to use whichever agent is best for the work. If a project's knowledge, workflows and history become some of the most valuable parts of how a team builds software, that layer shouldn't belong to one provider.
 
-This is not incidental to the project.
+Charrette aims to let you:
 
-If project context, engineering workflows, accumulated knowledge, orchestration rules, and execution history become increasingly valuable parts of software development, they should not be controlled exclusively by a single model provider or development platform.
-
-Developers should be able to:
-
-* choose and change models
-* combine agents from different providers
-* move between interfaces
-* retain their project state
-* inspect how orchestration works
-* own the workflows their teams develop
-* avoid rebuilding accumulated project intelligence when a better model or tool appears
-
-Model providers will naturally build excellent orchestration experiences around their own agents.
-
-Developers have a different incentive: **to use whichever agent is best for the work.**
-
-Charrette explores whether the persistent layer between the developer and those agents should therefore be open, portable, and provider-independent.
+- mix agents from different providers in one project, and switch between them mid-task
+- keep project data portable and inspectable
+- see and change how orchestration works
+- keep what the project has learned when a better model or tool appears
 
 ## The thesis
 
-Charrette is an implementation of a broader research hypothesis about how software engineering changes when autonomous coding agents become abundant.
+Charrette tests a broader hypothesis about how software engineering changes once coding agents are abundant. The argument, the questions it raises and the evidence we hope to collect are in **[THESIS.md](./THESIS.md)**. Treat Charrette as an experiment that comes out of that thesis, not as proof of it.
 
-That argument, the questions we intend to test, and the evidence we hope to collect are maintained in:
+## In this repository
 
-**[`THESIS.md`](./THESIS.md)**
+| Path | What's there |
+| --- | --- |
+| [`THESIS.md`](./THESIS.md) | The research hypothesis |
+| [`docs/architecture/`](./docs/architecture) | The working architecture: a local-first desktop app, with seams for a later cloud. Listed below |
+| [`docs/glossary.md`](./docs/glossary.md) | The words the interface uses, beside the words the architecture uses |
+| [`docs/open-questions.md`](./docs/open-questions.md) | What is not decided yet |
+| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | The engineering standards every app and package follows |
+| [`apps/pitch`](./apps/pitch) | The brief and research note, as a static site |
 
-Charrette should be understood as an experiment emerging from that thesis rather than proof that the thesis is correct.
+The architecture, starting from [the overview](./docs/architecture/README.md):
 
-## Status
+1. [Concepts and the project model](./docs/architecture/01-concepts-and-project-model.md)
+2. [Desktop runtime](./docs/architecture/02-desktop-runtime.md)
+3. [Agent runtime and auth](./docs/architecture/03-agent-runtime-and-auth.md)
+4. [Workflow engine](./docs/architecture/04-workflow-engine.md)
+5. [Integrations and skills](./docs/architecture/05-integrations-and-skills.md)
+6. [Persistence, security and cloud](./docs/architecture/06-persistence-security-and-cloud.md)
+7. [Precedents and validation](./docs/architecture/07-precedents-and-validation.md)
 
-Very early.
+## Develop
 
-The architecture, terminology, interaction model, and even the underlying thesis are expected to change substantially through prototyping and use.
+You need Bun 1.3.5 and Node 24. The pinned versions are in `.bun-version` and `.node-version`.
+
+```bash
+bun install --frozen-lockfile
+bun run dev                            # the pitch site, at localhost:5290
+bun run verify                         # checks, tests and builds for every package
+```
+
+Each app and package has its own README or `ARCHITECTURE.md` with more detail.
+
+## Licence
+
+Charrette is meant to be open source, but no licence has been chosen yet. Until one is added, all rights are reserved.
