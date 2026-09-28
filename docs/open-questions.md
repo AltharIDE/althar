@@ -34,9 +34,14 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
   should the new agent get a fresh take without the old agent's reasoning,
   start from base rather than the current code, or get a generated handoff
   in Amp's style? How does the switch menu offer that?
-- [ ] **Changing model in OpenCode.** Its ACP couldn't change model per session
-  as of June 2026. Restart it with a new configuration, treat the change as an
-  agent switch, or use OpenCode's own server API?
+- [x] **Changing model in OpenCode.** Settled by OpenCode itself: 1.18.31
+  changes model and mode per session over ACP. Checked with the adapter's probe
+  and the contract suite.
+- [ ] **Claude Code starts in the user's own default mode.** On a machine where
+  that is `bypassPermissions`, the Agent SDK approves every tool call itself.
+  Charrette sets the mode on every session, so this is handled, but should
+  Charrette also warn when the user's Claude Code defaults to bypass, since
+  their own use of it skips every check?
 - [ ] **Usage limits in ACP itself.** Propose a rate-limit extension to ACP,
   rather than keep a side channel per agent?
 - [ ] **Agent settings that approve before Charrette sees.** A user's own allow

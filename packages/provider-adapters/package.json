@@ -1,0 +1,41 @@
+{
+  "name": "@charrette/provider-adapters",
+  "version": "0.0.0",
+  "private": true,
+  "description": "How Charrette talks to agents: one ACP adapter, the agent registry, and native side channels.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "check": "vp check",
+    "fix": "vp check --fix",
+    "test": "vp test run",
+    "test:coverage": "vp test run --coverage",
+    "test:agents": "vp test run --config vite.agents.config.ts",
+    "probe": "node --experimental-strip-types scripts/probe.ts",
+    "verify": "bun run check && bun run test:coverage"
+  },
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.84.0",
+    "@agentclientprotocol/codex-acp": "2.0.0",
+    "@agentclientprotocol/sdk": "1.5.1",
+    "@charrette/domain": "workspace:*",
+    "effect": "4.0.0-rc.118",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.118",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "5.0.1",
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
+    "vite-plus": "1.0.0-rc.0",
+    "vitest": "5.0.1"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
+  }
+}

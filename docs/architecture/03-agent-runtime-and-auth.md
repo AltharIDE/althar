@@ -35,9 +35,22 @@ can move between them.
 
 | Agent | How Charrette runs it | Sign-in, held by the agent | Notes |
 |---|---|---|---|
-| Claude Code | `claude-agent-acp`, the ACP project's adapter on the Claude Agent SDK. Claude Code has no native ACP | Claude plan or Anthropic API key | The Agent SDK reports usage limits, but the adapter doesn't forward them |
-| Codex | `codex-acp`, the ACP project's adapter | ChatGPT plan or OpenAI API key | Usage limits reach the adapter but are only rendered as `/status` text |
-| OpenCode | `opencode acp`, native | API keys for any provider; local model servers | The bring-your-own-key route. It cannot use a Claude plan. As of June 2026 its ACP could not change model per session |
+| Claude Code | `claude-agent-acp`, the ACP project's adapter on the Claude Agent SDK. Claude Code has no native ACP | Claude plan or Anthropic API key; status from `claude auth status` | Starts in the user's own default mode, which can be `bypassPermissions`. The Agent SDK reports usage limits, but the adapter doesn't forward them |
+| Codex | `codex-acp`, the ACP project's adapter, driving its own bundled Codex | ChatGPT plan or OpenAI API key; status from `codex login status` | Usage limits reach the adapter but are only rendered as `/status` text |
+| OpenCode | `opencode acp`, native | API keys for any provider; local model servers; status from `opencode auth list` | The bring-your-own-key route. It cannot use a Claude plan. It allows most actions without asking unless configured, so Charrette starts it with inline config that makes it ask |
+
+What each agent reports was read from the agents themselves on 28 September
+2026, with `scripts/probe.ts` in `@charrette/provider-adapters`: claude-agent-acp
+0.84.0, codex-acp 2.0.0 and OpenCode 1.18.31. All three expose their mode and
+model as session config options and can change both within a session; all
+three can load and resume sessions. Claude Code and Codex also advertise
+steering a turn in progress, as an extension in `_meta`. Probe again after
+upgrading any of them.
+
+Charrette checks sign-in with each agent's documented status command, never by
+reading a credential store, and tells the user the agent's own login command
+when it is signed out. The Claude Code desktop app and the `claude` command
+line sign in separately; the adapter uses the command line's sign-in.
 
 Another ACP agent, such as Gemini CLI, is added by a registry entry and the
 contract suite, not new code.
@@ -262,9 +275,9 @@ These are two different operations.
 Codex models, keeps the session. The adapter sets the model config option
 through ACP and the context carries over. The prompt cache is per model, so the
 first turn after a switch costs more. An agent whose ACP can't change model per
-session (OpenCode as of June 2026) restarts with a different configuration and
-loads its session again where it can, or the change is handled as an agent
-switch.
+session restarts with a different configuration and loads its session again
+where it can, or the change is handled as an agent switch. None of the MVP's
+agents needs this today.
 
 **Agent.** A session can't move between agents. A switch starts a new session
 on the new agent, in the same workspace, from a brief. The new session belongs
