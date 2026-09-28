@@ -12,8 +12,7 @@
   },
   "scripts": {
     "storybook": "storybook dev --port 6006 --no-open",
-    "workbench": "vp dev",
-    "build": "vp build && storybook build --output-dir dist/storybook --quiet",
+    "build": "storybook build --output-dir dist/storybook --quiet",
     "check": "vp check",
     "fix": "vp check --fix",
     "test": "vp test run",

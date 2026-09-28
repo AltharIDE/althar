@@ -212,7 +212,7 @@ The workbench (`workbench/`, `bun run workbench`) is where components are seen i
 
 These are known departures from the principles above, with the way back:
 
-- **The workbench** is not yet in the package. The prototype's specimen, once migrated to these components, is the catalogue it should hold.
+- **The workbench** is not yet in the package, so neither is `bun run workbench`. The prototype's specimen, once migrated to these components, is the catalogue it should hold.
 - **Plays that need a browser.** Testing Library in jsdom does not know `inert`, and cannot click a label that forwards a pointer event. Five plays run in Storybook only; they are listed in `tests/stories.test.tsx`.
 - **The marks generator is not in the repository.** `brands.ts` says to regenerate rather than edit by hand, but the script that writes it lives outside the repo. It should move to `packages/ui/scripts/marks` as a Bun script that reads `simple-icons` and `@lobehub/icons-static-svg`.
 - **Dictation recording is red.** The Composer's recording state uses `--danger`, which is kept for deletions and failures. It needs its own treatment.
