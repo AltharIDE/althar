@@ -1,0 +1,74 @@
+# Developing Charrette
+
+How to work in this repository. For what Charrette is, see the [README](README.md).
+
+## Set up
+
+You need Bun 1.3.5 and Node 24. The pinned versions are in `.bun-version` and `.node-version`.
+
+```bash
+bun install --frozen-lockfile
+```
+
+Installing also sets up the pre-commit hook (`.vite-hooks/pre-commit`), which formats and lints the files you stage and fixes what it can.
+
+## Commands
+
+From the repository root:
+
+| Command | What it does |
+| --- | --- |
+| `bun run dev` | The pitch site, at `http://localhost:5290` |
+| `bun --filter @charrette/ui storybook` | The UI package's Storybook, at `http://localhost:6006` |
+| `bun run check` | Format, type-aware lint and type checks, in every package |
+| `bun run fix` | The same, fixing what can be fixed |
+| `bun run test` | Unit and component tests, in every package |
+| `bun run verify` | Everything CI runs, in every package: checks, tests with coverage, builds, and end-to-end tests where a package has them |
+
+Each app and package has its own README with its own commands.
+
+## The repository
+
+| Path | What's there |
+| --- | --- |
+| [`apps/pitch`](apps/pitch) | The brief and research note, as a static site |
+| [`packages/ui`](packages/ui) | `@charrette/ui`, the interface components, with a Storybook |
+| [`docs/architecture`](docs/architecture) | The working architecture: a local-first desktop app, with seams for a later cloud |
+| [`docs/decisions`](docs/decisions) | Architecture decisions, one per file |
+| [`docs/glossary.md`](docs/glossary.md) | The words the interface uses, beside the words the architecture uses |
+| [`docs/open-questions.md`](docs/open-questions.md) | What is not decided yet |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | The engineering standards every app and package follows |
+| [`THESIS.md`](THESIS.md) | The research hypothesis Charrette comes out of |
+
+## Standards
+
+[ARCHITECTURE.md](ARCHITECTURE.md) is the target every app and package moves toward. In short:
+
+- TypeScript everywhere, strict, with runtime validation of anything untrusted.
+- Tests first for new behaviour, and at least 90% line and branch coverage in each app and package.
+- Accessibility to WCAG 2.2 AA from the first implementation.
+- A consequential decision gets an ADR in [`docs/decisions`](docs/decisions); an exception gets an owner and an expiry.
+
+Each app and package has its own `ARCHITECTURE.md` for what is specific to it. Before naming anything on screen, check [the glossary](docs/glossary.md).
+
+## The architecture
+
+Start from [the overview](docs/architecture/README.md), then:
+
+1. [Concepts and the project model](docs/architecture/01-concepts-and-project-model.md)
+2. [Desktop runtime](docs/architecture/02-desktop-runtime.md)
+3. [Agent runtime and auth](docs/architecture/03-agent-runtime-and-auth.md)
+4. [Coordinator](docs/architecture/04-coordinator.md)
+5. [Workflow engine](docs/architecture/05-workflow-engine.md)
+6. [Integrations and skills](docs/architecture/06-integrations-and-skills.md)
+7. [Persistence, security and cloud](docs/architecture/07-persistence-security-and-cloud.md)
+8. [Precedents and validation](docs/architecture/08-precedents-and-validation.md)
+
+## Changes and CI
+
+Work on a branch and open a pull request to `main`. On a pull request:
+
+- **GitHub Actions** runs a package's workflow when its files change: `pitch` for `apps/pitch`, `ui` for `packages/ui`. Both also run when the root `package.json`, `bun.lock` or `vite.config.ts` changes.
+- **Cloudflare Workers Builds** builds the pitch site. A branch gets a preview deployment (`wrangler preview`), and `main` deploys to production. The preview build fails without the `previews` block in `apps/pitch/wrangler.jsonc`, so keep it.
+
+Merge only when every check is green, the Cloudflare one included.
