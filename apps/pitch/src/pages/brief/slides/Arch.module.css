@@ -1,40 +1,40 @@
 /* 08 · where Charrette sits: inside the line around what's yours, next to your
    repository, your plans and your machines. Agents are outside, and plug in. */
 
-.arch { background: var(--ink); color: #fff; }
-.kicker { color: var(--lime); }
+.arch { background: var(--ink); color: var(--on-ink); }
 .arch h2 { max-width: 20ch; font-size: clamp(36px, 4.2vw, 60px); margin-bottom: 32px; }
-.l-k { margin: 0; font-size: 22px; font-weight: 900; letter-spacing: -.03em; }
-.l-k small { display: block; margin-top: 4px; font-size: 13px; font-weight: 500; letter-spacing: 0; color: #9a9aa0; line-height: 1.35; }
+.l-k { margin: 0; font-size: 22px; font-weight: var(--title); letter-spacing: -.025em; }
+.l-k small { display: block; margin-top: 4px; font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--on-ink-3); line-height: 1.35; }
 
-.agents { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; align-items: center; padding: 20px 24px; border-radius: 14px; background: var(--night); }
+.agents { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; align-items: center; padding: 20px 24px; border-radius: 12px; background: var(--night); }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.chips span { padding: 9px 14px; border-radius: 999px; border: 1px solid var(--night-rule); font-size: 15px; font-weight: 600; color: #c4c4c8; transition: background 300ms, color 300ms, border-color 300ms; }
-.chips span.on { background: var(--lime); border-color: var(--lime); color: var(--ink); }
-.chips .next { border-style: dashed; color: #8e8e94; font-weight: 500; }
+/* the agent running now is lit in Charrette's colour: the work it is running */
+.chips span { padding: 9px 14px; border-radius: 999px; border: 1px solid var(--night-rule); font-size: 15px; font-weight: 500; color: var(--on-ink-2); transition: background 300ms, color 300ms, border-color 300ms; }
+.chips span.on { background: var(--cobalt); border-color: var(--cobalt); color: #fff; }
+.chips .next { border-style: dashed; color: var(--on-ink-4); }
 
 /* the socket between the agents and what's yours */
-.plug { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 14px; height: 44px; font: 500 12px var(--mono); color: #9a9aa0; }
-.plug i { height: 0; border-top: 1.5px dashed rgba(255, 255, 255, .28); }
-.plug b { color: var(--lime); font-weight: 500; }
+.plug { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 14px; height: 44px; font: 500 12px var(--mono); color: var(--on-ink-3); }
+.plug i { height: 0; border-top: 1.5px dashed rgba(255, 255, 255, .24); }
+.plug b { color: var(--cobalt-soft); font-weight: 500; }
 
 /* one line around everything the team owns: Charrette on top, on the things it runs on */
-.yours { position: relative; border: 2px solid var(--cobalt-soft); border-radius: 18px; padding: 30px 14px 14px; }
-.yours-k { position: absolute; top: -11px; left: 20px; margin: 0; padding: 0 10px; background: var(--ink); font: 700 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--cobalt-soft); line-height: 20px; }
+.yours { position: relative; border: 1.5px solid var(--cobalt-soft); border-radius: 18px; padding: 30px 14px 14px; }
+.yours-k { position: absolute; top: -11px; left: 20px; margin: 0; padding: 0 10px; background: var(--ink); font: 500 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--cobalt-soft); line-height: 20px; }
 .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .tile { display: flex; flex-direction: column; gap: 4px; padding: 18px 18px 20px; border-radius: 10px; background: var(--night-2); }
 .tile small { font: 500 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--cobalt-soft); }
-.tile b { font-size: 19px; font-weight: 800; letter-spacing: -.025em; line-height: 1.15; }
-.tile span { font-size: 14px; line-height: 1.4; color: #c4c4c8; }
+.tile b { font-size: 19px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+.tile span { font-size: 14px; line-height: 1.4; color: var(--on-ink-2); }
 .core { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 32px; align-items: end; padding: 22px 24px; position: relative; margin-bottom: 14px; background: var(--cobalt); }
 .core > div { display: grid; gap: 4px; }
 /* it rests on the three below: a short leg down to each */
 .core::after { content: ''; position: absolute; left: calc(100% / 6); right: calc(100% / 6); bottom: -24px; height: 24px; background: linear-gradient(var(--cobalt-soft), var(--cobalt-soft)) left / 2px 100% no-repeat, linear-gradient(var(--cobalt-soft), var(--cobalt-soft)) center / 2px 100% no-repeat, linear-gradient(var(--cobalt-soft), var(--cobalt-soft)) right / 2px 100% no-repeat; }
-.core small { color: #dfe2ff; }
-.core b { font-size: 30px; font-weight: 900; letter-spacing: -.04em; }
+.core small { color: var(--on-cobalt); }
+.core b { font-size: 30px; font-weight: var(--title); letter-spacing: -.03em; }
 .core span { color: #fff; font-size: 16px; max-width: 58ch; }
 
-.cap { margin: 22px 0 0; font-size: 16px; line-height: 1.45; color: #9a9aa0; max-width: 70ch; }
+.cap { margin: 22px 0 0; font-size: 16px; line-height: 1.45; color: var(--on-ink-3); max-width: 70ch; }
 
 @media (max-width: 900px) {
   .agents { grid-template-columns: minmax(0, 1fr); gap: 14px; }

@@ -4,7 +4,7 @@ import { fillShell, headTags, joinBase, parseOrigin, robotsTxt, sitemapXml } fro
 import { BRIEF, NOT_FOUND, PAGES, RESEARCH } from '../src/meta'
 
 const SHELL =
-  '<html><head><title>Charrette</title><meta name="description" content="" /><meta name="theme-color" content="#f2efe6" /><!--head--></head><body><div id="app"><!--app--></div></body></html>'
+  '<html><head><title>Charrette</title><meta name="description" content="" /><meta name="theme-color" content="#f4f2ec" /><!--head--></head><body><div id="app"><!--app--></div></body></html>'
 
 describe('parseOrigin', () => {
   it('accepts an origin, with or without a trailing slash', () => {

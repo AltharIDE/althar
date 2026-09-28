@@ -1,3 +1,4 @@
+import { Logo } from '../../../components/Logo'
 import { homeHref } from '../../../paths'
 import s from '../Research.module.css'
 
@@ -11,7 +12,10 @@ export function Close() {
         </p>
         <a href={homeHref} className={s.next}>
           {' '}
-          <span className={s.nextK}>Brief</span>{' '}
+          <span className={s.nextK}>
+            <Logo size={18} />
+            Brief
+          </span>{' '}
           <span className={s.nextT}>
             Agents come and go. The project stays.<span>The short version, with the product in motion.</span>
           </span>{' '}

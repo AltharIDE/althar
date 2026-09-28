@@ -2,15 +2,14 @@
    from evidence, then the camera pans off its Record step into the knowledge
    graph it writes to, which fills in, then gains the people who share it. */
 
-.flow { background: var(--ink); color: #fff; }
-.kicker { color: var(--lime); margin-bottom: 18px; }
+.flow { background: var(--ink); color: var(--on-ink); }
+.kicker { margin-bottom: 18px; }
 .heads { display: grid; margin-bottom: 36px; }
 .head { grid-area: 1 / 1; transition: opacity 450ms, transform 450ms cubic-bezier(.4, 0, .2, 1); }
-.flow h2, .h2 { font-weight: 900; font-size: clamp(34px, 3.6vw, 52px); line-height: .93; letter-spacing: -.055em; margin: 0; max-width: 24ch; }
-.task { display: flex; gap: 14px; align-items: baseline; margin: 18px 0 0; font-size: 16px; line-height: 1.4; color: #9a9aa0; }
-.task span { flex: none; font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink); background: #fff; padding: 3px 7px; border-radius: 3px; }
+.flow h2, .h2 { font-weight: var(--title); font-size: clamp(34px, 3.6vw, 52px); line-height: 1; letter-spacing: -.04em; margin: 0; max-width: 24ch; }
+.task { display: flex; gap: 14px; align-items: baseline; margin: 18px 0 0; font-size: 16px; line-height: 1.4; color: var(--on-ink-3); }
+.task span { flex: none; font: 500 12px var(--mono); color: var(--on-ink); padding: 2px 7px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--night-rule); }
 .head-mem { opacity: 0; transform: translateY(14px); pointer-events: none; }
-.head-mem .task span { background: var(--lime); }
 .stage[data-phase='memory'] .head:first-child { opacity: 0; transform: translateY(-14px); }
 .stage[data-phase='memory'] .head-mem { opacity: 1; transform: none; }
 
@@ -18,24 +17,28 @@
 .cam { display: block; width: 100%; height: auto; aspect-ratio: 1650 / 500; max-height: calc(100vh - 480px); font-family: var(--sans); overflow: hidden; }
 .stage[data-phase='memory'] .cam { mask-image: linear-gradient(90deg, transparent, #000 14%); }
 
-.e { fill: none; stroke: rgba(255, 255, 255, .26); stroke-width: 2; transition: opacity 600ms; }
-.e.app { stroke: var(--lime); }
+.e { fill: none; stroke: rgba(255, 255, 255, .24); stroke-width: 2; transition: opacity 600ms; }
+.e.app { stroke: var(--cobalt-soft); stroke-dasharray: 6 5; }
 .e.human { stroke: var(--you); }
 .new { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 450ms cubic-bezier(.5, 0, .2, 1) forwards; }
 @keyframes draw { to { stroke-dashoffset: 0; } }
 .n { transition: opacity 600ms; }
-.n rect { fill: var(--night-2); }
-.nk { font-size: 20px; font-weight: 800; fill: #fff; letter-spacing: -.025em; }
-.nw { font: 500 12px var(--mono); fill: #8c8c92; }
-.n.coord rect { fill: transparent; stroke: rgba(255, 255, 255, .3); stroke-width: 1.5; }
-.n.app rect { stroke: var(--lime); stroke-width: 1.5; }
+/* a step, as the product's graph draws it: a raised card. Running is cobalt, a person's call is violet,
+   and a step a result added carries a dashed cobalt edge */
+.n rect { fill: var(--night-2); stroke: rgba(255, 255, 255, .08); stroke-width: 1; }
+.nk { font-size: 20px; font-weight: 600; fill: var(--on-ink); letter-spacing: -.02em; }
+.nw { font: 500 12px var(--mono); fill: var(--on-ink-4); }
+.n.coord rect { fill: transparent; stroke: rgba(255, 255, 255, .26); stroke-width: 1.5; }
+.n.app rect { stroke: var(--cobalt-soft); stroke-width: 1.5; stroke-dasharray: 6 5; }
 .n.human rect { fill: var(--you); stroke: none; }
-.n.human text { fill: var(--ink); }
-.n.cur rect { fill: var(--lime); stroke: none; filter: drop-shadow(0 0 22px rgba(214, 255, 69, .4)); }
-.n.human.cur rect { fill: var(--you); filter: drop-shadow(0 0 22px rgba(154, 92, 255, .55)); }
-.n.cur text { fill: var(--ink); }
-.n svg { color: #c4c4c8; }
-.n.cur svg { color: var(--ink); }
+.n.human text { fill: #fff; }
+.n.human .nw { fill: #e4d8ff; }
+.n.cur rect { fill: var(--cobalt); stroke: none; }
+.n.human.cur rect { fill: var(--you); }
+.n.cur text { fill: #fff; }
+.n.cur .nw { fill: var(--on-cobalt); }
+.n svg { color: var(--on-ink-2); }
+.n.cur svg, .n.human svg { color: #fff; }
 .n.cur { animation: pop 380ms cubic-bezier(.16, 1, .3, 1); transform-box: fill-box; transform-origin: center; }
 @keyframes pop { from { opacity: 0; transform: scale(.92); } }
 .n.past { opacity: .82; }
@@ -44,28 +47,29 @@
 .stage[data-phase='memory'] .n.past, .stage[data-phase='memory'] .e { opacity: .35; }
 
 /* project memory */
-.link { fill: none; stroke: var(--lime); stroke-width: 2.5; }
-.spoke { fill: none; stroke: rgba(255, 255, 255, .2); stroke-width: 1.5; }
-.fresh-spoke { stroke: var(--lime); stroke-width: 2; }
+.link { fill: none; stroke: var(--cobalt-soft); stroke-width: 2.5; }
+.spoke { fill: none; stroke: rgba(255, 255, 255, .18); stroke-width: 1.5; }
+.fresh-spoke { stroke: var(--cobalt-soft); stroke-width: 2; }
 .dispute { fill: none; stroke: var(--you); stroke-width: 2; stroke-dasharray: 5 5; animation: fade 600ms both; }
 .fact { animation: fade 500ms 150ms both; }
 @keyframes fade { from { opacity: 0; } }
-.fact circle { fill: #fff; }
-.fk { font-size: 21px; font-weight: 700; letter-spacing: -.02em; fill: #fff; }
-.fs { font: 500 14px var(--mono); fill: #8e8e94; }
-.seen circle { fill: var(--ink); stroke: #fff; stroke-width: 2; }
-.proposed circle { fill: var(--ink); stroke: #fff; stroke-width: 2; stroke-dasharray: 3 3; }
+.fact circle { fill: var(--on-ink); }
+.fk { font-size: 21px; font-weight: 600; letter-spacing: -.015em; fill: var(--on-ink); }
+.fs { font: 500 14px var(--mono); fill: var(--on-ink-4); }
+.seen circle { fill: var(--ink); stroke: var(--on-ink); stroke-width: 2; }
+.proposed circle { fill: var(--ink); stroke: var(--on-ink); stroke-width: 2; stroke-dasharray: 3 3; }
 .retired circle { fill: #4a4a50; }
 .retired .fk { fill: #77777d; text-decoration: line-through; }
-.fresh circle { fill: var(--lime); stroke: none; }
-.fresh .fk { fill: var(--lime); }
-.fresh.proposed circle { fill: var(--ink); stroke: var(--lime); }
-.hub circle { fill: var(--lime); filter: drop-shadow(0 0 18px rgba(214, 255, 69, .55)); }
-.hub text { font: 500 15px var(--mono); fill: #c4c4c8; }
+.fresh circle { fill: var(--cobalt-soft); stroke: none; }
+.fresh .fk { fill: var(--cobalt-soft); }
+.fresh.proposed circle { fill: var(--ink); stroke: var(--cobalt-soft); }
+/* the project itself: Charrette's colour, ringed so it holds on the dark */
+.hub circle { fill: var(--cobalt); stroke: var(--cobalt-soft); stroke-width: 2; }
+.hub text { font: 500 15px var(--mono); fill: var(--on-ink-2); }
 .person { animation: fade 500ms both, float 7s ease-in-out var(--d, 0s) infinite; }
 .person line { stroke: var(--you-soft); stroke-width: 1.5; opacity: .55; }
 .person circle { fill: var(--you); stroke: var(--ink); stroke-width: 3; }
-.person text { font-size: 13px; font-weight: 800; fill: var(--ink); letter-spacing: -.01em; }
+.person text { font-size: 13px; font-weight: 600; fill: #fff; letter-spacing: -.01em; }
 @keyframes float { 50% { transform: translate(5px, -7px); } }
 
 /* the step being told: one line of type under the figure, like a subtitle */
@@ -74,33 +78,33 @@
 .card-mem { grid-template-columns: 150px minmax(0, 300px) minmax(0, 1fr); opacity: 0; }
 .stage[data-phase='memory'] .card-task { opacity: 0; }
 .stage[data-phase='memory'] .card-mem { opacity: 1; }
-.fc-n { margin: 0; font: 500 13px var(--mono); color: #8e8e94; }
-.fc-n b { font: 900 34px var(--sans); letter-spacing: -.05em; color: #fff; margin-right: 4px; }
-.card-mem .fc-n b { display: block; color: var(--lime); font-size: 44px; line-height: 1; }
+.fc-n { margin: 0; font: 500 13px var(--mono); color: var(--on-ink-4); }
+.fc-n b { font: var(--title) 34px var(--sans); letter-spacing: -.04em; color: var(--on-ink); margin-right: 4px; font-variant-numeric: tabular-nums; }
+.card-mem .fc-n b { display: block; color: var(--cobalt-soft); font-size: 44px; line-height: 1; }
 .card-mem .fc-n span { display: block; margin-top: 6px; font-size: 11.5px; line-height: 1.35; }
-.fc-h { margin: 0; font-size: 28px; font-weight: 900; letter-spacing: -.04em; line-height: 1.05; }
-.fc-w { margin: 6px 0 0; font: 500 12px/1.45 var(--mono); color: #9a9aa0; }
+.fc-h { margin: 0; font-size: 28px; font-weight: var(--title); letter-spacing: -.03em; line-height: 1.05; }
+.fc-w { margin: 6px 0 0; font: 500 12px/1.45 var(--mono); color: var(--on-ink-3); }
 .fc-w.human { color: var(--you-soft); }
-.mem-w { color: var(--lime); }
-.fc-p { margin: 0; font-size: 17px; line-height: 1.5; color: #d2d2d6; max-width: 62ch; }
-.why { display: block; margin-top: 8px; font-size: 15px; color: #9a9aa0; }
-.why b { color: var(--lime); font-weight: 700; }
+.mem-w { color: var(--cobalt-soft); }
+.fc-p { margin: 0; font-size: 17px; line-height: 1.5; color: var(--on-ink-2); max-width: 62ch; }
+.why { display: block; margin-top: 8px; font-size: 15px; color: var(--on-ink-3); }
+.why b { color: var(--cobalt-soft); font-weight: 600; }
 .why.human b { color: var(--you-soft); }
 
 /* the same story as text: visually hidden where the figure plays, the figure itself where it can't */
 .after { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .list { list-style: none; }
 .mem-list { max-width: var(--max); }
-.mem-list h3 { font-size: clamp(30px, 3.4vw, 46px); font-weight: 900; line-height: .95; letter-spacing: -.05em; margin: 0 0 20px; max-width: 20ch; }
-.mem-lead { font-size: 17px; line-height: 1.5; color: #c4c4c8; max-width: 62ch; margin: 0 0 20px; }
-.mem-lead b { color: #fff; }
+.mem-list h3 { font-size: clamp(30px, 3.4vw, 46px); font-weight: var(--title); line-height: 1; letter-spacing: -.04em; margin: 0 0 20px; max-width: 20ch; }
+.mem-lead { font-size: 17px; line-height: 1.5; color: var(--on-ink-2); max-width: 62ch; margin: 0 0 20px; }
+.mem-lead b { color: var(--on-ink); }
 .mem-list ul { list-style: none; margin: 0 0 24px; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; }
 .mem-list li { display: grid; gap: 2px; padding: 12px 0; border-top: 1px solid var(--night-rule); }
-.mem-list li b { font-size: 17px; font-weight: 700; letter-spacing: -.015em; }
-.ml-s { font: 500 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: #9a9aa0; }
-.ml-src { font: 500 12px var(--mono); color: #8e8e94; }
-.mem-list li.fresh .ml-s, .mem-list li.fresh b { color: var(--lime); }
-.mem-list li.retired b { color: #8e8e94; text-decoration: line-through; }
+.mem-list li b { font-size: 17px; font-weight: 600; letter-spacing: -.015em; }
+.ml-s { font: 500 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--on-ink-3); }
+.ml-src { font: 500 12px var(--mono); color: var(--on-ink-4); }
+.mem-list li.fresh .ml-s, .mem-list li.fresh b { color: var(--cobalt-soft); }
+.mem-list li.retired b { color: var(--on-ink-4); text-decoration: line-through; }
 
 @media (min-width: 901px) and (min-height: 620px) and (prefers-reduced-motion: no-preference) and (scripting: enabled) {
   .stick { padding: 80px 0 44px; }
@@ -122,13 +126,14 @@
   .list { position: static; width: auto; height: auto; overflow: visible; clip-path: none; white-space: normal; display: block; margin: 0 0 56px; padding: 0; }
   .list li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 2px 12px; padding: 16px 0; border-top: 1px solid var(--night-rule); }
   .list li > :not(.ln) { grid-column: 2; }
-  .ln { grid-row: 1 / span 4; font: 500 12px var(--mono); color: #8e8e94; padding-top: 4px; }
-  .list b { font-size: 19px; font-weight: 800; letter-spacing: -.02em; }
-  .lw { font: 500 11.5px var(--mono); color: var(--lime); }
+  .ln { grid-row: 1 / span 4; font: 500 12px var(--mono); color: var(--on-ink-4); padding-top: 4px; }
+  .list b { font-size: 19px; font-weight: 600; letter-spacing: -.015em; }
+  .lw { font: 500 11.5px var(--mono); color: var(--on-ink-3); }
   .lw.human { color: var(--you-soft); }
-  .list p { margin: 4px 0 0; font-size: 15px; line-height: 1.45; color: #c4c4c8; }
-  .la { display: inline-block; margin-bottom: 4px; font: 500 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink); background: var(--lime); padding: 2px 7px; border-radius: 3px; justify-self: start; }
-  .la.human { background: var(--you); }
+  .list p { margin: 4px 0 0; font-size: 15px; line-height: 1.45; color: var(--on-ink-2); }
+  /* added steps say so in a word, in the colour of what added them */
+  .la { display: inline-block; margin-bottom: 4px; font: 500 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--cobalt-soft); justify-self: start; }
+  .la.human { color: var(--you-soft); }
   .mem-list ul { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) {

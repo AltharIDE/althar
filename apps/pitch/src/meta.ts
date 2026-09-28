@@ -19,7 +19,7 @@ export const BRIEF: PageMeta = {
   title: 'Charrette · Brief',
   description:
     'Charrette is the open project layer for software engineering with AI agents: a memory the project owns, and a coordinator that moves work between any agents.',
-  theme: '#f2efe6',
+  theme: '#f4f2ec',
 }
 
 export const RESEARCH: PageMeta = {
@@ -28,7 +28,7 @@ export const RESEARCH: PageMeta = {
   title: 'Charrette · Research note',
   description:
     'The missing project layer: why software engineering with AI agents needs open, provider-independent project memory and coordination.',
-  theme: '#fbfaf6',
+  theme: '#fcfbf8',
 }
 
 export const NOT_FOUND: PageMeta = {
@@ -36,7 +36,7 @@ export const NOT_FOUND: PageMeta = {
   file: '404.html',
   title: 'Not found · Charrette',
   description: 'This page isn’t part of the Charrette brief.',
-  theme: '#d6ff45',
+  theme: '#2b3bff',
   noindex: true,
 }
 

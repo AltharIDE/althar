@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 
+import { Logo } from '../../components/Logo'
 import { cx } from '../../lib/cx'
 import { homeHref, researchHref } from '../../paths'
 import s from './Chrome.module.css'
@@ -42,6 +43,7 @@ export function Chrome({ deck, total, first }: { deck: RefObject<HTMLElement | n
     <>
       <header className={s.mast} data-tone={at.tone}>
         <a className={s.brand} href={homeHref}>
+          <Logo />
           Charrette
         </a>
         <nav className={s.pages} aria-label="Pages">

@@ -7,7 +7,7 @@ import s from './Closer.module.css'
 
 export function Closer() {
   return (
-    <Slide id="close" tone="light" name="Close" className={s.closer}>
+    <Slide id="close" tone="dark" name="Close" className={s.closer}>
       <div className={cx(ui.wrap, s.wrap)}>
         <p className={s.q}>
           <span>The project persists.</span> <span>The coordinator understands.</span> <span>Agents come and go.</span>

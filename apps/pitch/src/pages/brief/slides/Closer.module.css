@@ -1,14 +1,17 @@
-/* 14 · close: the name sits on the floor of the page */
+/* 14 · close: Charrette's own ground, as on its icon, with the mark and the name standing on the floor of the page */
 
-.closer { background: var(--lime); overflow: hidden; align-items: flex-start; padding-bottom: 0; }
-.wrap { padding-bottom: calc((100vw - 32px) / 4.36 * .73 + 40px); }
-.q { font-weight: 900; font-size: clamp(40px, 5.2vw, 84px); line-height: .9; letter-spacing: -.06em; margin: 0 0 40px; }
+.closer { background: var(--cobalt); color: var(--cream); overflow: hidden; align-items: flex-start; padding-bottom: 0; --logo-point: var(--cobalt); }
+.closer :focus-visible { outline-color: #fff; }
+.wrap { padding-bottom: calc((100vw - 32px) / 5.12 * .78 + 40px); }
+.q { font-weight: var(--title); font-size: clamp(40px, 5.2vw, 84px); line-height: .98; letter-spacing: -.045em; margin: 0 0 40px; }
 .q span { display: block; }
-.next { display: inline-flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline; padding: 22px 30px; background: var(--ink); color: #fff; font-size: 22px; font-weight: 800; letter-spacing: -.03em; text-decoration: none; border-radius: 4px; transition: background 150ms; }
-.next:hover { background: var(--cobalt); }
-.next span { font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--lime); }
+.q span:last-child { color: var(--on-cobalt); }
+.next { display: inline-flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline; padding: 22px 28px; background: var(--cream); color: var(--ink); font-size: 22px; font-weight: 600; letter-spacing: -.02em; text-decoration: none; border-radius: 10px; transition: background 150ms; }
+.next:hover { background: #fff; }
+.next span { font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--cobalt); }
 .next i { font-style: normal; }
-.foot { display: flex; justify-content: space-between; gap: 16px; margin: 40px 0 0; font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+.foot { display: flex; justify-content: space-between; gap: 16px; margin: 40px 0 0; font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--on-cobalt); }
+.closer > p { color: var(--cream); }
 
 @media (max-width: 760px) {
   .next { font-size: 18px; padding: 18px 20px; }

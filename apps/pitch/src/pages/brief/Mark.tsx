@@ -77,7 +77,7 @@ export function Mark({ lab, className }: { lab: Lab | undefined; className?: str
     )
   }
   return (
-    <svg className={cx(s.mark, s[lab], className)} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <svg className={cx(s.mark, className)} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path d={PATHS[lab]} />
     </svg>
   )
@@ -87,7 +87,7 @@ export function Mark({ lab, className }: { lab: Lab | undefined; className?: str
 export function MarkAt({ lab, x, y, size }: { lab: Lab | undefined; x: number; y: number; size: number }) {
   if (!lab || isLetter(lab)) return null
   return (
-    <svg className={cx(s.mark, s[lab])} x={x} y={y} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+    <svg className={s.mark} x={x} y={y} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
       <path d={PATHS[lab]} />
     </svg>
   )

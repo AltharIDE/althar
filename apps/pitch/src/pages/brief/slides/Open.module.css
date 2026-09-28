@@ -2,14 +2,13 @@
    that grows and what a lead checks. One scene per beat where the panel pins; all four where it doesn't. */
 
 .open { background: var(--white); }
-.kicker { color: var(--cobalt); }
 .grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 64px; align-items: center; }
 .grid h2 { font-size: clamp(32px, 3.4vw, 50px); max-width: 17ch; margin-bottom: 26px; }
 
 .beats { list-style: none; margin: 0; padding: 0; display: grid; }
-.beats li { display: grid; gap: 6px; padding: 15px 0; border-top: 1px solid rgba(16, 16, 18, .14); }
-.beats span { font: 500 11.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--cobalt); }
-.beats b { font-size: 21px; font-weight: 800; letter-spacing: -.025em; line-height: 1.15; }
+.beats li { display: grid; gap: 6px; padding: 15px 0; border-top: 1px solid var(--line-2); }
+.beats span { font: 500 11.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.beats b { font-size: 21px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
 .beats p { margin: 0; font-size: 16px; line-height: 1.5; color: var(--ink-2); max-width: 50ch; }
 
 .fig { margin: 0; display: grid; gap: 40px; }
@@ -17,34 +16,34 @@
 .sk { margin: 0 0 12px; font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
 
 /* 1 · the desktop app, with memory as files */
-.win { border-radius: 12px; overflow: hidden; background: var(--ink); color: #d2d2d6; box-shadow: 0 30px 60px -30px rgba(16, 16, 18, .45); }
+.win { border-radius: 12px; overflow: hidden; background: var(--night); color: var(--on-ink-2); box-shadow: var(--lift-dialog); }
 .bar { display: flex; align-items: center; gap: 7px; padding: 11px 14px; background: var(--night-2); font: 500 12px var(--mono); }
 .bar i { width: 10px; height: 10px; border-radius: 50%; background: #3a3a40; }
-.bar span { margin-left: 10px; color: #fff; }
-.bar em { margin-left: auto; font-style: normal; color: var(--lime); }
+.bar span { margin-left: 10px; color: var(--on-ink); }
+.bar em { margin-left: auto; font-style: normal; color: var(--on-ink-3); }
 .pane { display: grid; grid-template-columns: 215px minmax(0, 1fr); min-height: 250px; }
-.tree { list-style: none; margin: 0; padding: 14px 0; border-right: 1px solid var(--night-rule); font: 500 12.5px/1.9 var(--mono); color: #8e8e94; }
+.tree { list-style: none; margin: 0; padding: 14px 0; border-right: 1px solid var(--night-rule); font: 500 12.5px/1.9 var(--mono); color: var(--on-ink-4); }
 .tree li { padding: 0 12px 0 calc(14px + var(--d, 0) * 14px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tree li[data-d='1'] { --d: 1; }
 .tree li[data-d='2'] { --d: 2; }
 .tree li[data-d='3'] { --d: 3; }
 .tree li.ours { color: var(--cobalt-soft); }
-.tree li.sel { color: var(--ink); background: var(--lime); }
-.file { margin: 0; padding: 18px 20px; font: 500 13.5px/1.7 var(--mono); white-space: pre-wrap; color: #fff; }
+.tree li.sel { color: var(--on-ink); background: rgba(154, 166, 255, .16); }
+.file { margin: 0; padding: 18px 20px; font: 500 13.5px/1.7 var(--mono); white-space: pre-wrap; color: var(--on-ink); }
 .fm { color: #6a6a70; }
 .fk { color: var(--cobalt-soft); }
 .chips { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 0; padding: 0; }
-.chips li { padding: 6px 11px; border-radius: 999px; background: var(--cream); font-size: 13.5px; font-weight: 600; }
+.chips li { padding: 6px 11px; border-radius: 999px; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line-2); font-size: 13.5px; font-weight: 500; }
 
 /* 2 · the stack, built on the same core */
 .stack { display: grid; gap: 10px; position: relative; padding-left: 34px; }
-.layer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: end; padding: 18px 20px; border-radius: 12px; background: var(--cream); border: 1.5px solid rgba(16, 16, 18, .1); }
+.layer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: end; padding: 18px 20px; border-radius: 12px; background: var(--cream); box-shadow: inset 0 0 0 1px var(--line-2); }
 .layer small { display: block; font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
-.layer b { display: block; margin-top: 3px; font-size: 21px; font-weight: 900; letter-spacing: -.035em; line-height: 1.1; }
+.layer b { display: block; margin-top: 3px; font-size: 21px; font-weight: var(--title); letter-spacing: -.025em; line-height: 1.1; }
 .layer span { display: block; margin-top: 4px; font-size: 14.5px; line-height: 1.4; color: var(--ink-2); }
 .who { margin: 0; font: 500 11.5px var(--mono); color: var(--ink-2); white-space: nowrap; }
-.base { background: var(--cobalt); border-color: var(--cobalt); color: #fff; padding: 24px 22px; }
-.base small { color: #dfe2ff; }
+.base { background: var(--cobalt); box-shadow: none; color: #fff; padding: 24px 22px; }
+.base small { color: var(--on-cobalt); }
 .base b { font-size: 30px; }
 .base span, .base .who { color: #fff; }
 /* the core runs up through every layer */
@@ -54,23 +53,24 @@
 /* 3 · the loop */
 .loop { padding: 24px 26px; border-radius: 12px; background: var(--cream); }
 .loop ol { list-style: none; margin: 0; padding: 0; display: grid; }
-.loop li { position: relative; display: flex; gap: 14px; align-items: center; padding: 11px 0; font-size: 19px; font-weight: 700; letter-spacing: -.02em; }
+.loop li { position: relative; display: flex; gap: 14px; align-items: center; padding: 11px 0; font-size: 19px; font-weight: 600; letter-spacing: -.015em; }
 .loop li span { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--cobalt); color: #fff; font: 600 12.5px var(--mono); }
 .loop li + li::before { content: ''; position: absolute; left: 14px; top: -11px; width: 2px; height: 22px; background: var(--cobalt); }
 .back { margin: 12px 0 0; padding-top: 14px; border-top: 1.5px dashed var(--cobalt); font: 500 13px/1.45 var(--mono); color: var(--cobalt); }
 .back::before { content: '↺ '; font-size: 15px; }
 
 /* 4 · the lead's review */
-.review { padding: 18px 22px 22px; border-radius: 12px; background: var(--ink); color: #fff; }
-.rv-h { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; padding-bottom: 12px; border-bottom: 1px solid var(--night-rule); font: 500 12px var(--mono); color: #9a9aa0; }
-.rv-h b { margin-right: 6px; color: #fff; }
+.review { padding: 18px 22px 22px; border-radius: 12px; background: var(--night); color: var(--on-ink); box-shadow: var(--lift-dialog); }
+.rv-h { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; padding-bottom: 12px; border-bottom: 1px solid var(--night-rule); font: 500 12px var(--mono); color: var(--on-ink-3); }
+.rv-h b { margin-right: 6px; color: var(--on-ink); }
 .rv { list-style: none; margin: 0; padding: 0; }
 .rv li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 11px 0; border-bottom: 1px solid var(--night-rule); }
-.rv b { display: block; font-size: 15.5px; font-weight: 800; letter-spacing: -.015em; }
-.rv p { margin: 2px 0 0; font-size: 14px; line-height: 1.4; color: #b4b4ba; }
-.rv code { margin-top: 1px; padding: 3px 8px; border-radius: 4px; background: var(--night-2); font: 500 11.5px/1.4 var(--mono); color: var(--cobalt-soft); white-space: nowrap; }
-.ok { color: var(--lime); font-weight: 900; line-height: 22px; }
-.stamp { display: inline-block; margin: 16px 0 0; padding: 6px 12px; border-radius: 4px; background: var(--lime); color: var(--ink); font: 700 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.rv b { display: block; font-size: 15.5px; font-weight: 600; letter-spacing: -.01em; }
+.rv p { margin: 2px 0 0; font-size: 14px; line-height: 1.4; color: var(--on-ink-3); }
+.rv code { margin-top: 1px; padding: 3px 8px; border-radius: 4px; background: var(--night-2); font: 500 11.5px/1.4 var(--mono); color: var(--on-ink-2); white-space: nowrap; }
+.ok { color: var(--ok-soft); font-weight: 600; line-height: 22px; }
+/* the verdict, said in a word like the product's review result */
+.stamp { display: block; margin: 16px 0 0; font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ok-soft); }
 
 /* one scene at a time, where panels pin */
 @media (min-width: 901px) and (min-height: 620px) and (prefers-reduced-motion: no-preference) and (scripting: enabled) {

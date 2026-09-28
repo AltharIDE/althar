@@ -2,16 +2,30 @@
    Everything else lives in a CSS module next to the component it styles. */
 
 :root {
-  --ink: #101012; --ink-2: #3c3c42; --ink-3: #64646b; --ink-4: #8c8c92;
-  --cream: #f2efe6; --white: #fbfaf6; --stone: #e2ded3;
-  /* Cobalt is Charrette and what's yours, lime is what just happened, violet is a person's call.
-     Orange is kept for one thing only: the cost of working without Charrette. */
-  --cobalt: #2b3bff; --cobalt-soft: #9aa3ff; --lime: #d6ff45;
-  --you: #9a5cff; --you-ink: #6a2fd6; --you-soft: #c9adff;
-  --hot: #ff5a1f;
-  --night: #16161a; --night-2: #1f1f24; --night-rule: rgba(255, 255, 255, .14);
+  /* The product's paper and ink (@charrette/ui tokens.css), set at poster scale.
+     Colour is a signal: cobalt is Charrette and the work it runs, violet is a
+     person's call, red is what breaks without it. Everything else is ink on paper. */
+  --ink: #141417; --ink-2: #45454c; --ink-3: #64646b; --ink-4: #8c8c92;
+  --cream: #f4f2ec; /* the page */
+  --white: #fcfbf8; /* raised: sheets, cards, the lighter panels */
+  --paper: #fff; /* the lightest: what sits on a raised sheet */
+  --stone: #e7e3da; /* pressed, selected */
+  --desk: #dcd8cd; /* behind the window: work done without Charrette */
+  --line: rgba(20, 20, 28, .07); --line-2: rgba(20, 20, 28, .11); --line-3: rgba(20, 20, 28, .2);
+  --cobalt: #2b3bff; --cobalt-soft: #9aa6ff; --cobalt-wash: rgba(43, 59, 255, .07); --on-cobalt: #dfe2ff;
+  --you: #7a3ff0; --you-ink: #6a2fd6; --you-soft: #b99bff; --you-paper: #f6f1ff;
+  --ok: #2e8c46; --ok-soft: #7cc491; --danger: #c4402f; --danger-ink: #a8321f; --danger-soft: #f08a78;
+  /* dark panels: the product's terminal sheet */
+  --night: #1c1c20; --night-2: #242429; --night-rule: rgba(255, 255, 255, .1);
+  --on-ink: #f2f0ea; --on-ink-2: #c9c7c0; --on-ink-3: #a9a7a0; --on-ink-4: #8a8983;
+  /* shadows are neutral and short: paper lifting off paper, never a glow */
+  --lift: 0 1px 2px rgba(60, 50, 30, .06), 0 4px 10px -6px rgba(60, 50, 30, .12);
+  --lift-dialog: 0 1px 2px rgba(60, 50, 30, .08), 0 24px 48px -24px rgba(60, 50, 30, .35);
+  --ease: cubic-bezier(.22, .61, .24, 1);
   --sans: 'Inter Variable', 'Inter', system-ui, sans-serif;
   --mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
+  /* titles: the product's weight; optical sizing picks Inter Display at poster sizes */
+  --title: 650;
   --gut: 56px; --max: 1240px;
   --edge: max(var(--gut), calc((100vw - var(--max)) / 2 + var(--gut)));
 }
@@ -20,17 +34,22 @@
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
-body { margin: 0; background: var(--cream); color: var(--ink); font: 400 18px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+body {
+  margin: 0; background: var(--cream); color: var(--ink); font: 400 18px/1.55 var(--sans); letter-spacing: -.011em;
+  font-optical-sizing: auto; font-feature-settings: 'cv05' 1, 'cv11' 1, 'ss03' 1;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
 img { display: block; max-width: 100%; height: auto; }
 picture { display: block; }
-b, strong { font-weight: 700; }
+b, strong { font-weight: 600; }
+::selection { background: rgba(122, 63, 240, .16); }
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.skip { position: fixed; left: var(--gut); top: 12px; z-index: 30; padding: 10px 14px; background: var(--ink); color: #fff; font: 500 13px var(--mono); text-decoration: none; border-radius: 4px; transform: translateY(-160%); transition: transform 150ms; }
+.skip { position: fixed; left: var(--gut); top: 12px; z-index: 30; padding: 10px 14px; background: var(--ink); color: var(--on-ink); font: 500 13px var(--mono); text-decoration: none; border-radius: 6px; transform: translateY(-160%); transition: transform 150ms; }
 .skip:focus { transform: none; }
 main:focus { outline: none; }
-:focus-visible { outline: 3px solid var(--cobalt); outline-offset: 3px; border-radius: 2px; }
-[data-tone='dark'] :focus-visible { outline-color: var(--lime); }
+:focus-visible { outline: 2px solid var(--you); outline-offset: 3px; border-radius: 2px; }
+[data-tone='dark'] :focus-visible { outline-color: var(--you-soft); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }

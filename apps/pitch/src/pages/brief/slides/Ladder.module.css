@@ -1,47 +1,47 @@
 /* 07 · the ladder, as a staircase */
 
 .ladder { background: var(--white); }
-.kicker { color: var(--cobalt); }
 .ladder h2 { max-width: 20ch; }
 .stairs { counter-reset: step; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1.7fr); grid-template-rows: auto auto auto auto; gap: 0 10px; }
 /* each step shares the same four rows, so titles and text line up whatever the tread height */
 .stairs li { display: grid; grid-row: span 4; grid-template-rows: subgrid; min-width: 0; }
-.tread { align-self: end; position: relative; height: min(calc(var(--h) * 1px), calc(var(--h) * .078vh)); border-radius: 10px 10px 0 0; background: var(--stone); padding: 16px 16px 0; margin-bottom: 18px; border-bottom: 2px solid var(--ink); }
-.stairs li:nth-child(1) .tread { background: #ebe7dc; }
-.stairs li:nth-child(2) .tread { background: #e2ded3; }
-.stairs li:nth-child(3) .tread { background: #d6d1c4; }
+.tread { align-self: end; position: relative; height: min(calc(var(--h) * 1px), calc(var(--h) * .078vh)); border-radius: 10px 10px 0 0; background: var(--stone); padding: 16px 16px 0; margin-bottom: 18px; border-bottom: 1.5px solid var(--ink); }
+.stairs li:nth-child(1) .tread { background: var(--cream); }
+.stairs li:nth-child(2) .tread { background: var(--stone); }
+.stairs li:nth-child(3) .tread { background: var(--desk); }
 .tread svg { display: block; width: 100%; max-width: 200px; height: auto; }
-.gb { fill: var(--white); stroke: var(--ink); stroke-width: 1.5; }
+.gb { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
 .gl { fill: none; stroke: var(--ink); stroke-width: 1.5; }
 .gd { fill: none; stroke: var(--ink-3); stroke-width: 1.5; stroke-dasharray: 3 3; }
 .gy { fill: var(--you); }
 .gi { fill: var(--ink); }
-.ga { fill: var(--white); stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.ga { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .gad { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .gh { fill: none; stroke: var(--ink); stroke-width: 1.5; }
 .gm { fill: var(--ink); }
-/* Charrette's step: the same drawing language, in Charrette's colour */
+/* Charrette's step: the same drawing language, in Charrette's colour, on project memory's paper */
 .stairs li.us .tread { background: var(--cobalt); border-bottom-color: var(--cobalt); }
 .stairs li.us .tread svg { max-width: none; }
-.gt { font: 600 11px var(--mono); letter-spacing: .06em; fill: var(--ink); }
+.gt { font: 500 11px var(--mono); letter-spacing: .06em; fill: var(--ink); }
 .stairs li.us .gb { fill: var(--cobalt); stroke: #fff; }
 .stairs li.us .gl, .stairs li.us .gh { stroke: #fff; }
-.stairs li.us .ga { fill: var(--cobalt); stroke: var(--lime); }
-.stairs li.us .gad { stroke: var(--lime); }
-.stairs li.us .gm { fill: var(--lime); }
+.stairs li.us .ga { fill: var(--cobalt); stroke: var(--on-cobalt); }
+.stairs li.us .gad { stroke: var(--on-cobalt); }
+.stairs li.us .gm { fill: var(--cream); }
+.stairs li.us .gy { stroke: #fff; stroke-width: 1.5; }
 .stairs b::before { counter-increment: step; content: '0' counter(step); display: block; margin-bottom: 6px; font: 500 12px var(--mono); letter-spacing: .06em; color: var(--ink-3); }
 .stairs li.us b::before { color: var(--cobalt); }
-.stairs b { align-self: start; font-size: 20px; font-weight: 800; letter-spacing: -.03em; line-height: 1.1; }
+.stairs b { align-self: start; font-size: 20px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
 .stairs p { margin: 6px 0 8px; font-size: 15px; line-height: 1.45; color: var(--ink-2); }
 .r-w { font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
 .stairs li.us b { font-size: 24px; }
 .stairs li.us p { max-width: 46ch; }
-.stairs li.us .r-w { color: var(--cobalt); font-weight: 700; }
-.cap { margin: 28px 0 0; font-size: 19px; line-height: 1.4; font-weight: 600; letter-spacing: -.015em; max-width: 52ch; }
+.stairs li.us .r-w { color: var(--cobalt); }
+.cap { margin: 28px 0 0; font-size: 19px; line-height: 1.4; font-weight: 500; letter-spacing: -.015em; max-width: 52ch; }
 
 @media (max-width: 1000px) {
   .stairs { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; gap: 0; }
-  .stairs li { grid-row: auto; grid-template-rows: none; grid-template-columns: 150px minmax(0, 1fr); gap: 2px 20px; padding: 14px 0; border-top: 1px solid rgba(16, 16, 18, .12); }
+  .stairs li { grid-row: auto; grid-template-rows: none; grid-template-columns: 150px minmax(0, 1fr); gap: 2px 20px; padding: 14px 0; border-top: 1px solid var(--line-2); }
   .tread { grid-row: 1 / span 3; align-self: start; height: auto; border-radius: 8px; border-bottom: 0; margin: 0; padding: 12px; }
   .stairs p { margin: 4px 0 6px; }
 }

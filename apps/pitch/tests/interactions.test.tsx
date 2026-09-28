@@ -74,7 +74,7 @@ describe('client behavior', () => {
 
     render(<App pathname="/research/" />)
     expect(document.title).toBe('Charrette · Research note')
-    expect(document.querySelector('meta[name="theme-color"]')?.getAttribute('content')).toBe('#fbfaf6')
+    expect(document.querySelector('meta[name="theme-color"]')?.getAttribute('content')).toBe('#fcfbf8')
     expect(document.querySelector('a[href="#s1"]')?.getAttribute('aria-current')).toBe('location')
 
     active = 's2'

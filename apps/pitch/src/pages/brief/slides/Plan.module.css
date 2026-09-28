@@ -1,29 +1,29 @@
 /* 13 · where we are, as a timeline */
 
-.path { background: var(--ink); color: #fff; }
-.kicker { color: var(--lime); }
+.path { background: var(--ink); color: var(--on-ink); }
 .path h2 { max-width: 20ch; }
 .tl { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: .8fr 1fr 1fr 1fr; gap: 0 28px; position: relative; }
 .tl::before { content: ''; position: absolute; left: 0; right: 0; top: 7px; height: 2px; background: rgba(255, 255, 255, .2); }
-.tl::after { content: ''; position: absolute; left: 0; top: 7px; height: 2px; width: calc((.8 / 3.8) * (100% - 84px) + 28px + 8px); background: var(--lime); }
+.tl::after { content: ''; position: absolute; left: 0; top: 7px; height: 2px; width: calc((.8 / 3.8) * (100% - 84px) + 28px + 8px); background: var(--cobalt-soft); }
 .tl > li { position: relative; padding-top: 34px; }
 .tl > li::before { content: ''; position: absolute; left: 0; top: 0; width: 16px; height: 16px; border-radius: 50%; background: var(--ink); border: 2px solid rgba(255, 255, 255, .45); box-sizing: border-box; z-index: 1; }
-.tl > li.done::before { background: var(--lime); border-color: var(--lime); }
-.tl > li.now::before { background: #fff; border-color: #fff; box-shadow: 0 0 0 6px rgba(214, 255, 69, .28); animation: beat 2.4s ease-in-out infinite; }
-@keyframes beat { 50% { box-shadow: 0 0 0 10px rgba(214, 255, 69, .08); } }
-.ph-w { margin: 0 0 8px; font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: #9a9aa0; }
-.done .ph-w { color: var(--lime); }
-.now .ph-w { color: #fff; }
-.funded .ph-w { color: #fff; }
-.tl li > b { display: block; font-size: 22px; font-weight: 900; letter-spacing: -.035em; line-height: 1.1; margin-bottom: 12px; }
-.tl ul { list-style: none; margin: 0; padding: 0; font-size: 15px; line-height: 1.4; color: #c4c4c8; }
+/* live work pulses, as it does in the product: only what is moving now */
+.tl > li.done::before { background: var(--cobalt-soft); border-color: var(--cobalt-soft); }
+.tl > li.now::before { background: var(--cobalt); border-color: var(--cobalt-soft); box-shadow: 0 0 0 5px rgba(154, 166, 255, .22); animation: beat 2.4s ease-in-out infinite; }
+@keyframes beat { 50% { box-shadow: 0 0 0 9px rgba(154, 166, 255, .06); } }
+.ph-w { margin: 0 0 8px; font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--on-ink-3); }
+.done .ph-w { color: var(--cobalt-soft); }
+.now .ph-w { color: var(--on-ink); }
+.funded .ph-w { color: var(--on-ink); }
+.tl li > b { display: block; font-size: 22px; font-weight: var(--title); letter-spacing: -.025em; line-height: 1.1; margin-bottom: 12px; }
+.tl ul { list-style: none; margin: 0; padding: 0; font-size: 15px; line-height: 1.4; color: var(--on-ink-2); }
 .tl ul li { padding: 6px 0; border-top: 1px solid var(--night-rule); }
 .done > b, .done ul { opacity: .7; }
-.fund { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px; align-items: baseline; margin: 28px 0 0 calc((1.8 / 3.8) * (100% - 84px) + 56px); padding-top: 14px; border-top: 2px solid var(--lime); font-size: 16px; line-height: 1.4; color: #c4c4c8; position: relative; }
-.fund::before, .fund::after { content: ''; position: absolute; top: -8px; width: 2px; height: 8px; background: var(--lime); }
+.fund { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px; align-items: baseline; margin: 28px 0 0 calc((1.8 / 3.8) * (100% - 84px) + 56px); padding-top: 14px; border-top: 2px solid var(--cobalt-soft); font-size: 16px; line-height: 1.4; color: var(--on-ink-2); position: relative; }
+.fund::before, .fund::after { content: ''; position: absolute; top: -8px; width: 2px; height: 8px; background: var(--cobalt-soft); }
 .fund::before { left: 0; }
 .fund::after { right: 0; }
-.fund span { font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--lime); }
+.fund span { font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--cobalt-soft); }
 
 @media (max-width: 900px) {
   .tl { grid-template-columns: minmax(0, 1fr); gap: 28px; padding-left: 30px; }

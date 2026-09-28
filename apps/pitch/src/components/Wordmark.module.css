@@ -1,3 +1,6 @@
-/* The name across the bottom of the page: sized to span it, baseline on the bottom edge. */
+/* The mark and the name across the bottom of the page: sized to span it, standing on the bottom edge.
+   The ruler's section is drawn cap-high, its flat base on the baseline. */
 
-.mark { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; text-align: center; font-weight: 900; font-size: calc((100vw - 32px) / 4.36); line-height: 1; letter-spacing: -.05em; transform: translateY(.136em); white-space: nowrap; color: var(--ink); pointer-events: none; user-select: none; }
+.mark { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; display: flex; justify-content: center; align-items: baseline; font-weight: var(--title); font-size: var(--wm, calc((100vw - 32px) / 5.12)); line-height: 1; letter-spacing: -.045em; transform: translateY(.13em); white-space: nowrap; color: var(--ink); pointer-events: none; user-select: none; }
+/* 24 grid: the section spans 4.8 to 19.2, so a 1.2em box makes it .72em tall, with .24em below its base */
+.logo { width: 1.2em; height: 1.2em; margin: 0 -.04em 0 -.2em; transform: translateY(.24em); }

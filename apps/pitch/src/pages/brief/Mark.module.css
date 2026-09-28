@@ -1,5 +1,3 @@
-/* Lab marks, sized to the text around them. Claude's keeps its colour; the rest follow the text. */
+/* Lab marks, sized to the text around them and drawn in its ink, as the product draws them: never in brand colour. */
 .mark { display: inline-block; flex: none; width: 1em; height: 1em; vertical-align: -.12em; fill: currentColor; }
-.anthropic { fill: #d97757; }
-.google { fill: #4a8cff; }
-.letter { font: 800 .8em/1.25 var(--sans); text-align: center; border: 1.5px solid currentColor; border-radius: 3px; width: 1.25em; height: 1.25em; }
+.letter { font: 650 .8em/1.25 var(--sans); text-align: center; border: 1.5px solid currentColor; border-radius: 3px; width: 1.25em; height: 1.25em; }

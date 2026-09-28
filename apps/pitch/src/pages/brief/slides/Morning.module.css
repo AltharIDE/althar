@@ -1,55 +1,56 @@
 /* 04 · problem two: the fix's seven steps, run by hand. Each result waits for
-   you to notice it, and a step you forget simply doesn't happen. Orange stays
-   here: it is the cost of working without Charrette, and nowhere else. */
+   you to notice it, and a step you forget simply doesn't happen. The panel is
+   the desk behind the window: work done without Charrette. Red is only what
+   broke on the way. */
 
-.p2 { background: var(--hot); }
-.kicker { color: var(--ink); }
+.p2 { background: var(--desk); }
+.kicker { color: var(--ink-2); }
 .grid { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 56px; align-items: center; }
 .grid h2 { font-size: clamp(36px, 4vw, 60px); margin-bottom: 22px; }
-.body { font-size: 19px; margin: 0 0 28px; max-width: 34ch; }
+.body { font-size: 19px; margin: 0 0 28px; max-width: 34ch; color: var(--ink); }
 
 .nums { display: grid; gap: 0; margin: 0; }
-.nums div { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 16px; align-items: center; padding: 12px 0; border-top: 2px solid var(--ink); }
-.nums dt { grid-column: 2; grid-row: 1; font-size: 15px; line-height: 1.3; font-weight: 600; }
-.nums dd { grid-column: 1; grid-row: 1; margin: 0; font-size: 52px; font-weight: 900; line-height: .9; letter-spacing: -.06em; font-variant-numeric: tabular-nums; }
+.nums div { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 16px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line-3); }
+.nums dt { grid-column: 2; grid-row: 1; font-size: 15px; line-height: 1.3; font-weight: 500; }
+.nums dd { grid-column: 1; grid-row: 1; margin: 0; font-size: 52px; font-weight: var(--title); line-height: .9; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
 .nums small { font-size: 22px; letter-spacing: -.02em; margin-left: 4px; }
-.nums .bad dd { color: #fff; }
+.nums .bad dd, .nums .bad dt { color: var(--danger-ink); }
 
 /* the checklist, on the dark card */
-.card { margin: 0; background: var(--ink); color: #fff; border-radius: 14px; padding: 18px 22px 20px; }
-.card-h { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding-bottom: 12px; margin-bottom: 6px; border-bottom: 1px solid var(--night-rule); font-size: 15px; color: #c4c4c8; }
-.card-h b { color: #fff; font-weight: 800; margin-right: 6px; }
-.clock { flex: none; font: 500 13px var(--mono); color: #fff; font-variant-numeric: tabular-nums; }
+.card { margin: 0; background: var(--night); color: var(--on-ink); border-radius: 12px; padding: 18px 22px 20px; box-shadow: var(--lift-dialog); }
+.card-h { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding-bottom: 12px; margin-bottom: 6px; border-bottom: 1px solid var(--night-rule); font-size: 15px; color: var(--on-ink-2); }
+.card-h b { color: var(--on-ink); font-weight: 600; margin-right: 6px; }
+.clock { flex: none; font: 500 13px var(--mono); color: var(--on-ink); font-variant-numeric: tabular-nums; }
 
 .rows { list-style: none; margin: 0; padding: 0; display: grid; }
 .row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 14px; align-items: start; padding: 10px 10px; margin: 0 -10px; border-radius: 8px; transition: background 300ms, opacity 300ms; }
 .row + .row { box-shadow: 0 -1px 0 var(--night-rule); }
-.no { font: 500 12px/22px var(--mono); color: #8e8e94; }
+.no { font: 500 12px/22px var(--mono); color: var(--on-ink-4); }
 .what { display: grid; gap: 2px; min-width: 0; }
-.what b { font-size: 17px; font-weight: 800; letter-spacing: -.02em; line-height: 22px; }
-.who { display: flex; align-items: center; gap: 6px; font: 500 12px var(--mono); color: #9a9aa0; }
-.you { margin-top: 4px; font-size: 14.5px; line-height: 1.4; color: #d2d2d6; }
+.what b { font-size: 17px; font-weight: 600; letter-spacing: -.015em; line-height: 22px; }
+.who { display: flex; align-items: center; gap: 6px; font: 500 12px var(--mono); color: var(--on-ink-3); }
+.you { margin-top: 4px; font-size: 14.5px; line-height: 1.4; color: var(--on-ink-2); }
 .out { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; padding-top: 1px; max-width: 250px; }
-.chip { padding: 3px 8px; border-radius: 4px; background: var(--night-2); font: 500 12px/1.4 var(--mono); color: #c4c4c8; white-space: nowrap; }
-.chip em { font-style: normal; color: var(--hot); }
-.lost { background: transparent; box-shadow: inset 0 0 0 1.5px var(--hot); color: var(--hot); }
-.never { background: var(--hot); color: var(--ink); font-weight: 700; }
-.dash { color: #5c5c62; }
+/* status as words, the way the product's terminal says exit 1: no fills, red only for what broke */
+.chip { padding: 1px 0; font: 500 12px/1.4 var(--mono); color: var(--on-ink-3); white-space: nowrap; }
+.chip em { font-style: normal; color: var(--on-ink); }
+.lost, .never { color: var(--danger-soft); }
+.never { font-weight: 600; }
+.dash { color: #55555b; }
 
 .next { opacity: .45; }
 .now { background: var(--night-2); }
-.now .chip { background: var(--ink); }
 .past .you { display: none; }
-.forgot b { text-decoration: line-through; text-decoration-color: var(--hot); text-decoration-thickness: 2px; }
-.forgot .you { color: var(--hot); }
+.forgot b { text-decoration: line-through; text-decoration-color: var(--danger-soft); text-decoration-thickness: 2px; }
+.forgot .you { color: var(--danger-soft); }
 .now.forgot .you, .done .forgot .you { display: block; }
 
 .sum { display: none; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--night-rule); }
 .done .sum { display: block; }
-.sum p { margin: 0; font-size: 17px; line-height: 1.45; color: #d2d2d6; }
-.sum b { color: #fff; font-weight: 800; }
-.sum .then { margin-top: 10px; font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--lime); }
-.then span { color: #fff; margin: 0 6px; }
+.sum p { margin: 0; font-size: 17px; line-height: 1.45; color: var(--on-ink-2); }
+.sum b { color: var(--on-ink); font-weight: 600; }
+.sum .then { margin-top: 10px; font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--cobalt-soft); }
+.then span { color: var(--on-ink); margin: 0 6px; }
 
 @media (max-width: 1000px) {
   .grid { grid-template-columns: minmax(0, 1fr); gap: 32px; }

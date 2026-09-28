@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { Logo } from '../../components/Logo'
 import { useMeta } from '../../lib/useMeta'
 import { RESEARCH } from '../../meta'
 import { homeHref, researchHref } from '../../paths'
@@ -77,6 +78,7 @@ export function Research() {
     <div className={s.page}>
       <header className={s.mast}>
         <a className={s.brand} href={homeHref}>
+          <Logo />
           Charrette
         </a>
         <nav className={s.pages} aria-label="Pages">

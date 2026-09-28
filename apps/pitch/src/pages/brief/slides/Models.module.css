@@ -3,7 +3,6 @@
    last step adds the open-weights models close behind, one dot per release. */
 
 .models { background: var(--white); }
-.kicker { color: var(--cobalt); }
 .kick-b { display: none; }
 .heads { display: grid; margin-bottom: 26px; }
 .head { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 48px; align-items: end; }
@@ -17,33 +16,34 @@
 .year { transition: opacity 400ms; }
 .next { opacity: .12; }
 
-.y { font-size: 30px; line-height: 54px; font-weight: 900; letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
+.y { font-size: 30px; line-height: 54px; font-weight: var(--title); letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
 .lanes { display: grid; gap: 6px; }
 .track { position: relative; height: 54px; border-radius: 8px; background: var(--cream); }
 
 /* a reign: the face clips the name, the tip floats above (out of layout until hovered, so it never widens the page) */
-.reign { position: absolute; top: 0; bottom: 0; left: calc(var(--from) * 100%); width: calc((var(--to) - var(--from)) * 100%); container-type: inline-size; background: var(--ink); color: #fff; box-shadow: inset -2px 0 0 var(--white); }
+.reign { position: absolute; top: 0; bottom: 0; left: calc(var(--from) * 100%); width: calc((var(--to) - var(--from)) * 100%); container-type: inline-size; background: var(--ink); color: var(--on-ink); box-shadow: inset -2px 0 0 var(--white); }
 .track > :first-child { border-radius: 8px 0 0 8px; }
 .track > :last-child { border-radius: 0 8px 8px 0; }
-.face { display: flex; align-items: center; gap: 7px; height: 100%; padding: 0 9px; overflow: hidden; font-size: 13px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
+.face { display: flex; align-items: center; gap: 7px; height: 100%; padding: 0 9px; overflow: hidden; font-size: 13px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
 .face svg, .face > span:first-child { flex: none; fill: currentColor; font-size: 15px; }
 .carried { background: var(--stone); color: var(--ink); }
-.top { background: var(--lime); color: var(--ink); }
+/* the model on top today: the one Charrette would route to */
+.top { background: var(--cobalt); color: #fff; }
 .nm { overflow: hidden; text-overflow: ellipsis; }
 @container (max-width: 84px) { .nm { display: none; } }
 @container (max-width: 22px) { .face svg, .face > span:first-child { display: none; } .face { padding: 0; } }
-.rest { position: absolute; top: 0; bottom: 0; left: calc(var(--from) * 100%); right: 0; background: repeating-linear-gradient(135deg, transparent 0 5px, rgba(16, 16, 18, .1) 5px 6px); }
+.rest { position: absolute; top: 0; bottom: 0; left: calc(var(--from) * 100%); right: 0; background: repeating-linear-gradient(135deg, transparent 0 5px, var(--line-2) 5px 6px); }
 
 /* the open models, a dot per release */
-.oss { position: relative; height: calc(6px + var(--rows, 1) * 20px); border-top: 1px dashed rgba(16, 16, 18, .18); }
-.dot { position: absolute; top: calc(4px + var(--lane) * 20px); left: calc(var(--at) * 100%); transform: translateX(-50%); display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--white); box-shadow: inset 0 0 0 1.5px var(--ink); color: var(--ink); font-size: 12px; }
+.oss { position: relative; height: calc(6px + var(--rows, 1) * 20px); border-top: 1px dashed var(--line-3); }
+.dot { position: absolute; top: calc(4px + var(--lane) * 20px); left: calc(var(--at) * 100%); transform: translateX(-50%); display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--paper); box-shadow: inset 0 0 0 1.5px var(--ink); color: var(--ink); font-size: 12px; }
 .dot > svg, .dot > span:first-child { font-size: 11px; fill: currentColor; }
 .dot > span:first-child:not(.tip) { border: 0; width: auto; height: auto; line-height: 1; }
 
 /* hover captions */
-.tip { position: absolute; z-index: 3; bottom: calc(100% + 8px); left: 50%; transform: translate(-50%, 4px); padding: 6px 10px; border-radius: 6px; background: var(--ink); color: #c4c4c8; box-shadow: 0 10px 24px -8px rgba(16, 16, 18, .5); font: 500 12px/1.3 var(--mono); white-space: nowrap; display: none; pointer-events: none; transition: opacity 150ms, transform 150ms; }
-.tip b { color: #fff; font: 700 13px var(--sans); margin-right: 4px; }
-.tip em { font-style: normal; color: var(--lime); }
+.tip { position: absolute; z-index: 3; bottom: calc(100% + 8px); left: 50%; transform: translate(-50%, 4px); padding: 6px 10px; border-radius: 6px; background: var(--night); color: var(--on-ink-2); box-shadow: var(--lift-dialog); font: 500 12px/1.3 var(--mono); white-space: nowrap; display: none; pointer-events: none; transition: opacity 150ms, transform 150ms; }
+.tip b { color: var(--on-ink); font: 600 13px var(--sans); margin-right: 4px; }
+.tip em { font-style: normal; color: var(--cobalt-soft); }
 .tip-l { left: 0; transform: translate(0, 4px); }
 .tip-r { left: auto; right: 0; transform: translate(0, 4px); }
 .reign:hover, .dot:hover { z-index: 2; }
@@ -51,15 +51,15 @@
 @starting-style { .reign:hover > .tip, .dot:hover > .tip { opacity: 0; } }
 .reign:hover > .tip-l, .reign:hover > .tip-r, .dot:hover > .tip-l, .dot:hover > .tip-r { transform: none; }
 .reign:hover .face { background: rgba(255, 255, 255, .12); }
-.dot:hover { background: var(--lime); }
+.dot:hover { background: var(--cobalt); color: #fff; box-shadow: none; }
 
 .stat { display: grid; gap: 4px; padding-top: 2px; }
-.stat p { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 7px; font-size: 15px; font-weight: 600; line-height: 1.25; }
-.stat b { font-size: 32px; font-weight: 900; letter-spacing: -.05em; line-height: 1; }
+.stat p { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 7px; font-size: 15px; font-weight: 500; line-height: 1.25; }
+.stat b { font-size: 32px; font-weight: var(--title); letter-spacing: -.04em; line-height: 1; font-variant-numeric: tabular-nums; }
 .stat span { flex-basis: 100%; font: 500 12px var(--mono); color: var(--ink-3); }
 .now .stat b { color: var(--cobalt); }
 .stat .oss-stat { display: block; font: 500 12px var(--mono); color: var(--ink-2); }
-.oss-stat b { font: 800 14px var(--sans); letter-spacing: -.02em; color: var(--ink); margin: 0 3px 0 0; }
+.oss-stat b { font: 600 14px var(--sans); letter-spacing: -.015em; color: var(--ink); margin: 0 3px 0 0; }
 
 .axis { margin-top: 6px; font: 500 11px var(--mono); color: var(--ink-3); }
 .axis span { grid-column: 2; grid-row: 1; }
@@ -68,7 +68,7 @@
 .axis span:nth-child(4) { margin-left: 74.8%; }
 
 .pull { margin: 22px 0 0; font-size: clamp(18px, 1.6vw, 22px); line-height: 1.3; letter-spacing: -.025em; color: var(--ink-2); max-width: 82ch; }
-.pull b { color: var(--ink); font-weight: 900; }
+.pull b { color: var(--ink); font-weight: 600; }
 .src { margin: 10px 0 0; font: 400 11.5px/1.5 var(--mono); color: var(--ink-3); max-width: 140ch; }
 
 /* where the panel pins: one headline at a time, and the open models arrive last */

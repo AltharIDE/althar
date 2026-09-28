@@ -1,4 +1,4 @@
-import '@fontsource-variable/inter'
+import '@fontsource-variable/inter/opsz.css'
 import '@fontsource-variable/jetbrains-mono'
 import './styles/base.css'
 

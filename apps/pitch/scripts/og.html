@@ -3,21 +3,22 @@
 <meta charset="utf-8" />
 <title>og</title>
 <style>
-  @font-face { font-family: Inter; src: url(../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2) format('woff2'); font-weight: 100 900; }
+  /* The brief's closer as a card: Charrette's own ground, as on its icon, with the mark and the name standing on the floor. */
+  @font-face { font-family: Inter; src: url(../node_modules/@fontsource-variable/inter/files/inter-latin-opsz-normal.woff2) format('woff2'); font-weight: 100 900; }
   @font-face { font-family: Mono; src: url(../node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2) format('woff2'); font-weight: 100 800; }
   * { box-sizing: border-box; margin: 0; }
   html, body { width: 1200px; height: 630px; overflow: hidden; }
-  body { background: #d6ff45; color: #101012; font-family: Inter; position: relative; padding: 64px 72px; }
-  .top { display: flex; justify-content: space-between; font: 500 20px Mono; letter-spacing: .02em; text-transform: uppercase; }
-  .top i { display: inline-block; width: 26px; height: 26px; border-radius: 5px; background: #101012; vertical-align: -6px; margin-right: 12px; }
-  h1 { margin-top: 64px; font-size: 66px; line-height: .98; letter-spacing: -.045em; font-weight: 700; }
+  body { background: #2b3bff; color: #f4f2ec; font-family: Inter; font-optical-sizing: auto; font-feature-settings: 'cv05' 1, 'cv11' 1, 'ss03' 1; position: relative; padding: 60px 72px; -webkit-font-smoothing: antialiased; }
+  .top { display: flex; justify-content: space-between; align-items: center; font: 500 18px Mono; letter-spacing: .06em; text-transform: uppercase; color: #dfe2ff; }
+  h1 { margin-top: 56px; font-size: 64px; line-height: 1; letter-spacing: -.04em; font-weight: 650; }
   h1 span { display: block; }
-  h1 .dim { color: rgba(16, 16, 18, .42); }
-  .mark { position: absolute; left: 60px; right: 60px; bottom: 0; font-size: 252px; font-weight: 800; letter-spacing: -.05em; line-height: 1; transform: translateY(.19em); white-space: nowrap; }
+  h1 .dim { color: #dfe2ff; }
+  .mark { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; align-items: baseline; font-size: 224px; font-weight: 650; letter-spacing: -.045em; line-height: 1; transform: translateY(.13em); white-space: nowrap; }
+  .mark svg { width: 1.2em; height: 1.2em; margin: 0 -.04em 0 -.2em; transform: translateY(.24em); fill: currentColor; }
 </style>
 <body>
-  <p class="top"><span><i></i>Charrette</span><span>The open project layer for agents</span></p>
+  <p class="top"><span>Brief · Research note</span><span>The open project layer for agents</span></p>
   <h1><span>The project should persist.</span><span class="dim">The agents should not have to.</span></h1>
-  <p class="mark">Charrette</p>
+  <p class="mark"><svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="M12.42 5.53A15.36 15.36 0 0 0 19.89 18.47L19.47 19.2A15.36 15.36 0 0 0 4.53 19.2L4.11 18.47A15.36 15.36 0 0 0 11.58 5.53ZM10.2 14.4a1.8 1.8 0 1 0 3.6 0a1.8 1.8 0 1 0-3.6 0Z"/></svg>Charrette</p>
 </body>
 </html>

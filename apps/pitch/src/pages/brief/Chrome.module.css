@@ -1,21 +1,25 @@
 /* The brief's chrome: follows the tone of the panel underneath it. */
 
-.mast { position: fixed; top: 0; left: 0; right: 0; z-index: 20; display: flex; justify-content: space-between; align-items: center; padding: 18px var(--edge); font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; pointer-events: none; transition: color 200ms; color: var(--ink); }
+.mast { position: fixed; top: 0; left: 0; right: 0; z-index: 20; display: flex; justify-content: space-between; align-items: center; padding: 18px var(--edge); pointer-events: none; transition: color 200ms; color: var(--ink); }
 .mast a { pointer-events: auto; text-decoration: none; color: inherit; }
-.brand { font: 900 17px var(--sans); letter-spacing: -.04em; text-transform: none; }
-.pages { display: flex; gap: 20px; }
-.pages a { opacity: .72; }
+/* the product's lockup: the mark, then the name */
+.brand { display: inline-flex; align-items: center; gap: 8px; font: 600 16px/1 var(--sans); letter-spacing: -.015em; }
+.pages { display: flex; gap: 22px; font: 500 14px var(--sans); letter-spacing: -.005em; }
+/* the other page is dimmed only as far as text stays readable on every panel, cobalt included */
+.pages a { opacity: .85; transition: opacity 150ms; }
+.pages a[aria-current] { font-weight: 600; }
 .pages a[aria-current], .pages a:hover { opacity: 1; }
-.prog { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 21; }
+.prog { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 21; }
 .prog i { display: block; height: 100%; width: 100%; transform-origin: left; transform: scaleX(0); background: var(--cobalt); transition: background 200ms; }
-[data-tone='dark'].prog i { background: var(--lime); }
-.count { position: fixed; right: var(--edge); bottom: 18px; z-index: 20; margin: 0; font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; transition: color 200ms, opacity 200ms; pointer-events: none; color: var(--ink); }
-.count b { font-weight: 500; opacity: .72; margin-left: 10px; }
+[data-tone='dark'].prog i { background: var(--cobalt-soft); }
+.count { position: fixed; right: var(--edge); bottom: 18px; z-index: 20; margin: 0; font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; font-variant-numeric: tabular-nums; transition: color 200ms, opacity 200ms; pointer-events: none; color: var(--ink); }
+.count b { font-weight: 500; opacity: .6; margin-left: 10px; }
 .count.last { opacity: 0; }
-[data-tone='dark'].mast, [data-tone='dark'].count { color: #fff; }
+[data-tone='dark'].mast, [data-tone='dark'].count { color: var(--on-ink); }
+[data-tone='dark'].mast { --logo-point: var(--cobalt-soft); }
 
 @media (max-width: 760px) {
   .mast { padding: 14px var(--gut); }
-  .pages { gap: 14px; }
+  .pages { gap: 16px; font-size: 13.5px; }
   .count { display: none; }
 }

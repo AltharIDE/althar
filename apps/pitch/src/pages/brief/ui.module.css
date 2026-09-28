@@ -1,23 +1,26 @@
-/* The brief's shared type and layout. Type is sized to be read across a table. */
+/* The brief's shared type and layout. Type is sized to be read across a room, in the product's weights. */
 
 .deck { position: relative; }
 
-:where(.deck) h1 { font-weight: 900; font-size: clamp(58px, 10vw, 156px); line-height: .86; letter-spacing: -.065em; margin: 0 0 52px; max-width: 10ch; }
+:where(.deck) h1 { font-weight: var(--title); font-size: clamp(58px, 10vw, 156px); line-height: .9; letter-spacing: -.05em; margin: 0 0 52px; max-width: 10ch; }
 /* no one-word last lines: headings balance, running text avoids orphans */
 :where(.deck) :is(h1, h2, h3) { text-wrap: balance; }
 :where(.deck) :is(p, li, dt, dd, td, figcaption) { text-wrap: pretty; }
-:where(.deck) h2 { font-weight: 900; font-size: clamp(36px, 4.6vw, 68px); line-height: .93; letter-spacing: -.055em; margin: 0 0 36px; max-width: 16ch; }
+:where(.deck) h2 { font-weight: var(--title); font-size: clamp(36px, 4.6vw, 68px); line-height: .98; letter-spacing: -.04em; margin: 0 0 36px; max-width: 16ch; }
 
 .wrap { max-width: var(--max); margin: 0 auto; padding: 0 var(--gut); width: 100%; }
-.kicker { font: 500 12.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; margin: 0 0 24px; }
-.body { font-size: 21px; line-height: 1.45; margin: 0 0 32px; max-width: 46ch; }
+/* an eyebrow, as the product sets them: mono, spaced, quiet */
+.kicker { font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; margin: 0 0 24px; color: var(--ink-3); }
+/* no more specific than a slide's own .kicker, so a slide on another ground can set its own */
+:where([data-tone='dark']) .kicker { color: var(--on-ink-3); }
+.body { font-size: 21px; line-height: 1.45; margin: 0 0 32px; max-width: 46ch; color: var(--ink-2); }
 .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 72px; align-items: center; }
 .split h2 { font-size: clamp(36px, 4.3vw, 64px); }
 .pts { list-style: none; margin: 0; padding: 0; max-width: 44ch; }
-.pts li { padding: 14px 0; border-top: 1px solid rgba(127, 127, 127, .3); font-size: 17px; line-height: 1.45; }
-.pts b { font-weight: 800; }
-.frame { border-radius: 10px; overflow: hidden; background: #111215; box-shadow: 0 1px 0 rgba(255, 255, 255, .06) inset, 0 40px 80px -30px rgba(0, 0, 0, .45), 0 0 0 1px rgba(0, 0, 0, .2); }
-.answer { margin: 0; font: 500 13px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.pts li { padding: 14px 0; border-top: 1px solid var(--line-2); font-size: 17px; line-height: 1.45; }
+.pts b { font-weight: 600; }
+.frame { border-radius: 12px; overflow: hidden; background: var(--cream); box-shadow: 0 0 0 1px var(--line-2), var(--lift-dialog); }
+.answer { margin: 0; font: 500 12.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
 .answer span { color: var(--cobalt); margin: 0 6px; }
 
 @media (max-width: 900px) {

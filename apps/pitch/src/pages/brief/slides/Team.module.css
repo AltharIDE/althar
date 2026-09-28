@@ -1,14 +1,13 @@
 /* 07 · the experience: a mockup of the coordinator's stand-up and the board, pinned to the four points beside it */
 
 .team { background: var(--cream); }
-.kicker { color: var(--cobalt); }
 .split { grid-template-columns: minmax(0, .72fr) minmax(0, 1.28fr); gap: 56px; }
 .split h2 { font-size: clamp(32px, 3.3vw, 48px); margin-bottom: 24px; }
 
 .pts { list-style: none; margin: 0; padding: 0; }
-.pts li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 12px; padding: 12px 0; border-top: 1px solid rgba(16, 16, 18, .14); }
+.pts li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 12px; padding: 12px 0; border-top: 1px solid var(--line-2); }
 .pts p { margin: 0; font-size: 16px; line-height: 1.45; color: var(--ink-2); }
-.pts b { color: var(--ink); font-weight: 800; }
+.pts b { color: var(--ink); font-weight: 600; }
 .n, .pin { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--cobalt); color: #fff; font: 600 11.5px var(--mono); }
 .n { margin-top: 1px; }
 
@@ -23,7 +22,7 @@
   --live: #2b3bff; --ok: #23733a;
   container-type: inline-size;
   border-radius: 12px; overflow: hidden; background: var(--page); color: var(--t2); font-size: 12.5px;
-  box-shadow: 0 30px 70px -34px rgba(16, 16, 18, .4), 0 0 0 1px rgba(16, 16, 18, .12);
+  box-shadow: 0 0 0 1px var(--line-2), var(--lift-dialog);
 }
 .app kbd { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 4px; font: 600 10px var(--mono); }
 

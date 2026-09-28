@@ -1,21 +1,23 @@
-/* 404: the closer's lime, and the way back. */
+/* 404: the closer's cobalt, and the way back. */
 
-.page { position: relative; min-height: 100vh; min-height: 100svh; overflow: hidden; background: var(--lime); color: var(--ink); }
-:global(html):has(.page), :global(body):has(.page) { background: var(--lime); }
-.mast { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 18px var(--edge); font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.page { position: relative; min-height: 100vh; min-height: 100svh; overflow: hidden; background: var(--cobalt); color: var(--cream); --logo-point: var(--cobalt); }
+:global(html):has(.page), :global(body):has(.page) { background: var(--cobalt); }
+.page :focus-visible { outline-color: #fff; }
+.page > p { color: var(--cream); }
+.mast { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 18px var(--edge); }
 .mast a { text-decoration: none; color: inherit; }
-.brand { font: 900 17px var(--sans); letter-spacing: -.04em; text-transform: none; }
-.pages { display: flex; gap: 20px; }
-.pages a { opacity: .72; }
-.pages a:hover { opacity: 1; }
-.main { max-width: var(--max); margin: 0 auto; padding: 22vh var(--gut) calc((100vw - 32px) / 4.36 * .73 + 40px); }
-.kicker { font: 500 12.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; margin: 0; }
-.main h1 { font-weight: 900; font-size: clamp(48px, 7vw, 112px); letter-spacing: -.045em; line-height: .95; margin: 14px 0 20px; }
-.lead { max-width: 36ch; font-size: clamp(18px, 1.6vw, 22px); line-height: 1.45; margin: 0; }
-.home { display: inline-block; margin-top: 28px; padding: 14px 20px; background: var(--ink); color: var(--lime); border-radius: 6px; font: 500 14px var(--mono); text-decoration: none; }
-.home:hover { background: #000; }
+.brand { display: inline-flex; align-items: center; gap: 8px; font: 600 16px/1 var(--sans); letter-spacing: -.015em; }
+.pages { display: flex; gap: 22px; font: 500 14px var(--sans); }
+.pages a { color: var(--on-cobalt); }
+.pages a:hover { color: #fff; }
+.main { max-width: var(--max); margin: 0 auto; padding: 22vh var(--gut) calc((100vw - 32px) / 5.12 * .78 + 40px); }
+.kicker { font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; margin: 0; color: var(--on-cobalt); }
+.main h1 { font-weight: var(--title); font-size: clamp(48px, 7vw, 112px); letter-spacing: -.045em; line-height: .98; margin: 14px 0 20px; }
+.lead { max-width: 36ch; font-size: clamp(18px, 1.6vw, 22px); line-height: 1.45; margin: 0; color: var(--on-cobalt); }
+.home { display: inline-block; margin-top: 28px; padding: 14px 20px; background: var(--cream); color: var(--ink); border-radius: 8px; font: 500 15px var(--sans); text-decoration: none; transition: background 150ms; }
+.home:hover { background: #fff; }
 
 @media (max-width: 760px) {
   .mast { padding: 14px var(--gut); }
-  .pages { gap: 14px; }
+  .pages { gap: 16px; font-size: 13.5px; }
 }
