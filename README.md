@@ -39,42 +39,12 @@ Charrette aims to let you:
 
 Charrette tests a broader hypothesis about how software engineering changes once coding agents are abundant. The argument, the questions it raises and the evidence we hope to collect are in **[THESIS.md](./THESIS.md)**. Treat Charrette as an experiment that comes out of that thesis, not as proof of it.
 
-## In this repository
+## Read more
 
-| Path | What's there |
-| --- | --- |
-| [`THESIS.md`](./THESIS.md) | The research hypothesis |
-| [`docs/architecture/`](./docs/architecture) | The working architecture: a local-first desktop app, with seams for a later cloud. Listed below |
-| [`docs/decisions/`](./docs/decisions) | Architecture decisions, one per file |
-| [`docs/glossary.md`](./docs/glossary.md) | The words the interface uses, beside the words the architecture uses |
-| [`docs/open-questions.md`](./docs/open-questions.md) | What is not decided yet |
-| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | The engineering standards every app and package follows |
-| [`packages/ui`](./packages/ui) | `@charrette/ui`, the interface primitives, with a Storybook |
-| [`apps/pitch`](./apps/pitch) | The brief and research note, as a static site |
-
-The architecture, starting from [the overview](./docs/architecture/README.md):
-
-1. [Concepts and the project model](./docs/architecture/01-concepts-and-project-model.md)
-2. [Desktop runtime](./docs/architecture/02-desktop-runtime.md)
-3. [Agent runtime and auth](./docs/architecture/03-agent-runtime-and-auth.md)
-4. [Coordinator](./docs/architecture/04-coordinator.md)
-5. [Workflow engine](./docs/architecture/05-workflow-engine.md)
-6. [Integrations and skills](./docs/architecture/06-integrations-and-skills.md)
-7. [Persistence, security and cloud](./docs/architecture/07-persistence-security-and-cloud.md)
-8. [Precedents and validation](./docs/architecture/08-precedents-and-validation.md)
-
-## Develop
-
-You need Bun 1.3.5 and Node 24. The pinned versions are in `.bun-version` and `.node-version`.
-
-```bash
-bun install --frozen-lockfile
-bun run dev                            # the pitch site, at localhost:5290
-bun --filter @charrette/ui storybook   # the UI package's Storybook, at localhost:6006
-bun run verify                         # checks, tests and builds for every package
-```
-
-Each app and package has its own README or `ARCHITECTURE.md` with more detail.
+- **[The architecture](./docs/architecture/README.md):** how Charrette is built. It's a local-first desktop app that runs Claude Code, Codex and OpenCode through one protocol, with room for a cloud later.
+- **[Decisions](./docs/decisions):** what has been decided, and why.
+- **[Open questions](./docs/open-questions.md):** what hasn't been decided yet.
+- **[Development](./DEVELOPMENT.md):** how to set up, run and change the code.
 
 ## Licence
 
