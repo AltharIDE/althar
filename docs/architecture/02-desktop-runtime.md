@@ -25,6 +25,33 @@ The renderer should feel like a normal frontend talking to a typed backend API.
 The main difference is deployment: both client and backend ship inside the
 desktop product and communicate locally rather than over the public internet.
 
+## The renderer
+
+The renderer is MVVM, organised by feature
+([ADR-010](../decisions/010-desktop-app-mvvm.md)):
+
+```mermaid
+flowchart TB
+    Views["Views<br/>React, composing @charrette/ui"]
+    VM["View models<br/>hooks: state out, intents in"]
+    Data["Data layer<br/>Effect: RPC client, change feed, caches"]
+    Runtime["Runtime<br/>over MessagePort"]
+
+    Views --> VM
+    VM --> Data
+    Data <--> Runtime
+```
+
+- **Views** render what their view model returns and call its intents. They
+  hold no app logic.
+- **View models are hooks.** They turn data into what a view shows, and user
+  intent into commands.
+- **The data layer** is the only code that talks to the runtime. It is written
+  with Effect ([ADR-009](../decisions/009-effect-on-the-runtime-side.md)), but
+  view models see plain values, promises and subscriptions.
+- **Features are folders.** `apps/desktop/src/features/<feature>/` holds a
+  feature's routes (TanStack Router), views, view models and tests together.
+
 ## What a process is
 
 A **process** is a running program with its own memory and operating-system
@@ -377,6 +404,10 @@ together:
 ```text
 apps/
   desktop/
+    src/
+      features/<feature>/ # routes, views, view models, tests
+      shared/             # what several features use
+      data/               # the Effect data layer: RPC client, change feed
   cli/                    # optional diagnostic/control client
 packages/
   contracts/              # versioned client/runtime schemas
@@ -392,6 +423,9 @@ packages/
   ui/
   testkit/
 ```
+
+Runtime-side packages are written with Effect; `ui` never uses it
+([ADR-009](../decisions/009-effect-on-the-runtime-side.md)).
 
 These are package boundaries, not network services:
 

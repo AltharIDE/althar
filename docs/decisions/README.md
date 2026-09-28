@@ -16,3 +16,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [006](006-worktree-per-task.md) | A git worktree per task |
 | [007](007-permission-requests-reach-charrette.md) | Every permission request reaches Charrette |
 | [008](008-shortcuts-in-behaviour-not-in-records.md) | Shortcuts in behaviour, never in recorded facts |
+| [009](009-effect-on-the-runtime-side.md) | Effect on the runtime side |
+| [010](010-desktop-app-mvvm.md) | The desktop app is MVVM, in feature folders |
