@@ -1,0 +1,66 @@
+.section {
+  margin-top: 12px;
+}
+.label {
+  margin: 0 0 6px;
+  font: 500 10.5px/1 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+
+/* each thing tried, in order, with how it went; a failure is the one red here */
+.tried {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.attempt {
+  display: grid;
+  grid-template-columns: 12px minmax(0, auto) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.failed {
+  align-self: center;
+  color: var(--danger);
+}
+.what {
+  color: var(--t-1);
+}
+.result {
+  color: var(--t-3);
+}
+
+.read {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+/* the lead's mark and name lead the sentence, in its flow */
+.read > :first-child {
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+.output {
+  margin-top: 12px;
+}
+.tell {
+  display: flex;
+  margin-top: 12px;
+}
+
+@media (max-width: 480px) {
+  .attempt {
+    grid-template-columns: 12px minmax(0, 1fr);
+  }
+  .result {
+    grid-column: 2;
+  }
+}

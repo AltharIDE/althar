@@ -1,0 +1,51 @@
+/* hung out by its own padding, like the rows below, so its words line up with theirs */
+.action {
+  margin: 0 0 14px -8px;
+}
+.list {
+  margin: 0 -8px;
+  padding: 0;
+  list-style: none;
+}
+.entry {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--r);
+}
+.opens {
+  transition: background var(--fast) var(--ease);
+}
+.opens:hover {
+  background: var(--n-2);
+}
+.opens:active {
+  background: var(--n-4);
+}
+.title {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--t-1);
+}
+.flag {
+  flex: none;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--signal);
+}
+.meta {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .opens {
+    transition: none;
+  }
+}

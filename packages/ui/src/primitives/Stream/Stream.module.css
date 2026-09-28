@@ -1,0 +1,22 @@
+/* Each word fades in from a slight blur; the blur clears before the fade ends. */
+.word {
+  animation: word 460ms cubic-bezier(0.2, 0.6, 0.2, 1) both;
+}
+@keyframes word {
+  from {
+    opacity: 0;
+    filter: blur(2.5px);
+  }
+  60% {
+    filter: none;
+  }
+  to {
+    opacity: 1;
+    filter: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .word {
+    animation: none;
+  }
+}

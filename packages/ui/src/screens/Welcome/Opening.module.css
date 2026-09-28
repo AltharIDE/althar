@@ -1,0 +1,301 @@
+/*
+ * The opening. The camera starts close on the crossing of two construction
+ * lines, the mark is drawn big around it and filled, and its point is set;
+ * then the camera pulls back hard, and the name and its line come into focus.
+ * About four seconds; `.still` arrives at the end.
+ *
+ * The zoom is --zoom, and it resizes things rather than scaling them: the
+ * mark is an SVG laid out at the zoomed size and the grid's cells grow, so
+ * everything is drawn fresh at every size and nothing is ever an enlarged
+ * picture of itself.
+ */
+
+@property --zoom {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 1;
+}
+
+/* drawn on the table: the opening's own origin is the crossing, and everything is placed about it */
+.opening {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
+
+/*
+ * The camera: close and drifting while the mark is drawn, then a strong pull
+ * back. The frame keeps its place in the layout; what is in it grows past it,
+ * about the crossing at (75, 90), the mark's bore.
+ */
+.pull {
+  position: absolute;
+  left: -75px;
+  top: -90px;
+  width: 150px;
+  height: 150px;
+  animation: zoom 3500ms both;
+}
+@keyframes zoom {
+  0% {
+    --zoom: 5.4;
+    animation-timing-function: cubic-bezier(0.3, 0, 0.7, 1);
+  }
+  67% {
+    --zoom: 4.6;
+    animation-timing-function: cubic-bezier(0.7, 0, 0.12, 1);
+  }
+  100% {
+    --zoom: 1;
+  }
+}
+
+.grid {
+  position: absolute;
+  left: 75px;
+  top: 90px;
+  width: 200vw;
+  height: 200vh;
+  transform: translate(-50%, -50%);
+  background-image:
+    linear-gradient(rgba(20, 20, 28, 0.055) 1px, transparent 1px), linear-gradient(90deg, rgba(20, 20, 28, 0.055) 1px, transparent 1px),
+    linear-gradient(rgba(20, 20, 28, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(20, 20, 28, 0.03) 1px, transparent 1px);
+  background-size:
+    calc(160px * var(--zoom)) calc(160px * var(--zoom)),
+    calc(160px * var(--zoom)) calc(160px * var(--zoom)),
+    calc(32px * var(--zoom)) calc(32px * var(--zoom)),
+    calc(32px * var(--zoom)) calc(32px * var(--zoom));
+  /* its lines run through the crossing at every size, so it zooms about it, and meets the table's grid once pulled back */
+  background-position: 100vw 100vh;
+  mask-image: radial-gradient(closest-side, #000 20%, transparent 70%);
+  animation: fade 1400ms var(--ease) both;
+}
+/* the camera has moved on: the table's own grid takes over */
+.away .grid {
+  animation: gone 900ms var(--ease) 300ms both;
+}
+@keyframes gone {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.hline,
+.vline {
+  position: absolute;
+  background: var(--t-3);
+}
+.hline {
+  top: 90px;
+  left: 75px;
+  width: 200vw;
+  height: 1px;
+  transform: translateX(-50%) scaleX(0);
+  animation: hline 1200ms cubic-bezier(0.16, 1, 0.3, 1) 100ms forwards;
+}
+.vline {
+  left: 75px;
+  top: 90px;
+  width: 1px;
+  height: 200vh;
+  transform: translateY(-50%) scaleY(0);
+  animation: vline 1200ms cubic-bezier(0.16, 1, 0.3, 1) 250ms forwards;
+  /* it stops just under the mark, clear of the name */
+  mask-image: linear-gradient(to bottom, #000 calc(50% + 40px * var(--zoom)), transparent calc(50% + 72px * var(--zoom)));
+}
+@keyframes hline {
+  to {
+    transform: translateX(-50%) scaleX(1);
+    opacity: 0.5;
+  }
+}
+@keyframes vline {
+  to {
+    transform: translateY(-50%) scaleY(1);
+    opacity: 0.5;
+  }
+}
+
+/* the mark, laid out at the zoomed size with its bore on the crossing */
+.mark {
+  position: absolute;
+  display: block;
+  overflow: visible;
+  left: calc(75px - 75px * var(--zoom));
+  top: calc(90px - 90px * var(--zoom));
+  width: calc(150px * var(--zoom));
+  height: calc(150px * var(--zoom));
+}
+/* the pen is a little heavier close up, as it would be, and a hairline once pulled back */
+.markLine {
+  fill: none;
+  stroke: var(--t-1);
+  stroke-width: calc(0.16px * (0.7 + 0.3 * var(--zoom)) / var(--zoom));
+  stroke-linejoin: round;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  animation: draw 1250ms cubic-bezier(0.65, 0, 0.35, 1) 350ms forwards;
+}
+.markFill {
+  fill: var(--t-1);
+  opacity: 0;
+  animation: show 420ms var(--ease) 1550ms forwards;
+}
+
+/* the point: a plain dot, set while the camera is still close, before it pulls back */
+.point {
+  fill: var(--live);
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: set 360ms cubic-bezier(0.2, 0.8, 0.2, 1) 1950ms forwards;
+}
+@keyframes set {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* or a plain circle drawn first, where the lines will cross, filled at the same moment */
+.ring {
+  fill: var(--live);
+  fill-opacity: 0;
+  stroke: var(--t-1);
+  stroke-width: calc(0.12px * (0.7 + 0.3 * var(--zoom)) / var(--zoom));
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  animation:
+    draw 600ms cubic-bezier(0.65, 0, 0.35, 1) 60ms forwards,
+    fill 360ms var(--ease) 1950ms forwards;
+}
+@keyframes fill {
+  to {
+    fill-opacity: 1;
+    stroke: var(--live);
+  }
+}
+
+/* the words: once the camera has pulled back, the name, then its line, come into focus as a lens pulls them */
+.name {
+  position: absolute;
+  left: 0;
+  top: 96px;
+  translate: -50% 0;
+  margin: 0;
+  white-space: nowrap;
+  font-size: 48px;
+  font-weight: 680;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+  color: var(--t-1);
+  animation: focus 1400ms cubic-bezier(0.16, 1, 0.3, 1) 3350ms both;
+}
+.line {
+  position: absolute;
+  left: 0;
+  top: 161px;
+  translate: -50% 0;
+  margin: 0;
+  white-space: nowrap;
+  font-size: 16px;
+  color: var(--t-2);
+  animation: focus-line 1200ms cubic-bezier(0.16, 1, 0.3, 1) 3800ms both;
+}
+@keyframes focus {
+  from {
+    opacity: 0;
+    transform: scale(1.08);
+    filter: blur(20px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+@keyframes focus-line {
+  from {
+    opacity: 0;
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes show {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* ---- still, and reduced motion: the end, at once ---- */
+
+.still *,
+.still {
+  animation: none !important;
+}
+.still .markLine,
+.still .ring {
+  stroke-dashoffset: 0;
+}
+.still :is(.markFill, .point) {
+  opacity: 1;
+}
+.still .ring {
+  fill-opacity: 1;
+  stroke: var(--live);
+}
+.still .hline {
+  transform: translateX(-50%);
+  opacity: 0.5;
+}
+.still .vline {
+  transform: translateY(-50%);
+  opacity: 0.5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .opening *,
+  .opening {
+    animation: none !important;
+  }
+  .markLine,
+  .ring {
+    stroke-dashoffset: 0;
+  }
+  .markFill,
+  .point {
+    opacity: 1;
+  }
+  .ring {
+    fill-opacity: 1;
+    stroke: var(--live);
+  }
+  .hline {
+    transform: translateX(-50%);
+    opacity: 0.5;
+  }
+  .vline {
+    transform: translateY(-50%);
+    opacity: 0.5;
+  }
+}

@@ -1,0 +1,47 @@
+.fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--fold) var(--ease-fold);
+}
+.fold[data-state='open'] {
+  grid-template-rows: 1fr;
+}
+.inner {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-6px);
+  visibility: hidden;
+  transition:
+    opacity 160ms var(--ease),
+    transform var(--fold) var(--ease-fold),
+    visibility 0s linear var(--fold);
+}
+.bleed {
+  margin: 0 -8px;
+  padding: 0 8px;
+}
+.fold[data-state='open'] > .inner {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  transition:
+    opacity 240ms var(--ease) 60ms,
+    transform var(--fold) var(--ease-fold),
+    visibility 0s;
+}
+.caret {
+  color: var(--t-4);
+  transition: transform var(--fold) var(--ease-fold);
+}
+.caretOpen {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fold,
+  .inner,
+  .fold[data-state='open'] > .inner,
+  .caret {
+    transition: none;
+  }
+}

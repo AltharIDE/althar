@@ -1,0 +1,256 @@
+/* the card is an Ask; these are what a permission adds to it */
+.pos {
+  font-weight: 450;
+  color: var(--t-3);
+}
+.cmd {
+  display: flex;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 7px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font: 11.5px/1.5 var(--mono);
+  color: var(--t-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cmd code {
+  font: inherit;
+}
+.prompt {
+  flex: none;
+  color: var(--t-3);
+}
+.why {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 12px 0 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.option {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-height: 36px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font-size: 13px;
+  color: var(--t-1);
+  transition: box-shadow var(--fast) var(--ease);
+}
+.option:hover {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.option:has(.radio:focus-visible) {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 1px;
+}
+.on,
+.on:hover {
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.optionLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+/* the radio is real, for the keyboard and assistive technology; the numbered key is what shows */
+.radio {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+}
+.key {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--n-4);
+  font: 600 10.5px var(--mono);
+  color: var(--t-2);
+}
+.on .key {
+  background: var(--signal);
+  color: var(--on-signal);
+}
+.scopeLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.note {
+  flex-basis: 100%;
+  margin: 2px 0 2px 28px;
+}
+.keys {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--t-3);
+}
+
+.stack {
+  position: relative;
+  transition: padding-bottom 220ms var(--ease-fold);
+}
+.stack > .card {
+  position: relative;
+  z-index: 3;
+  animation: in 300ms var(--ease-fold);
+}
+@keyframes in {
+  from {
+    opacity: 0.3;
+    transform: translateY(10px) scale(0.975);
+  }
+}
+.peek {
+  position: absolute;
+  height: 40px;
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+  background: var(--signal-peek);
+  box-shadow: inset 0 0 0 1px var(--signal-line);
+  transition:
+    bottom 300ms var(--ease-fold),
+    opacity 220ms var(--ease);
+}
+.peek + .peek {
+  opacity: 0.7;
+}
+.gone {
+  opacity: 0 !important;
+}
+
+/* a yes: one beat, ringed in violet; then it lifts away. A no steps aside.
+   Written on .card so they win over the stack's entrance, which is as specific and comes first. */
+.card.beat {
+  animation: beat 420ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+@keyframes beat {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  38% {
+    transform: scale(1.012);
+    box-shadow:
+      inset 0 0 0 1px var(--signal),
+      0 0 0 1px color-mix(in srgb, var(--signal) 22%, transparent),
+      0 0 0 10px color-mix(in srgb, var(--signal) 10%, transparent);
+  }
+}
+.card.out {
+  animation: out 220ms var(--ease) forwards;
+}
+@keyframes out {
+  to {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.985);
+  }
+}
+.card.outNo {
+  animation: outNo 220ms var(--ease) forwards;
+}
+@keyframes outNo {
+  to {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .stack,
+  .peek {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.said {
+  flex: none;
+  color: var(--t-1);
+  font-weight: 550;
+}
+.saidNote {
+  min-width: 0;
+  color: var(--t-3);
+}
+.allowedRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  font-size: 12px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.allowedRow > svg:first-child {
+  flex: none;
+  color: var(--t-2);
+}
+.allowedRow:hover .said {
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 2px;
+}
+.rule {
+  flex: 1;
+  min-width: 16px;
+  height: 1px;
+  background: var(--line-2);
+}
+.allowedList {
+  margin: 6px 0 2px 19px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.allowedList li {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 1px 12px;
+  padding: 6px 0;
+}
+.allowedList li + li {
+  border-top: 1px solid var(--line);
+}
+.allowedStep {
+  grid-row: span 2;
+  color: var(--t-3);
+}
+.allowedCmd {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 11.5px var(--mono);
+  color: var(--t-1);
+}
+.allowedBy {
+  color: var(--t-3);
+}

@@ -3,9 +3,9 @@ name: pitch
 on:
   push:
     branches: [main]
-    paths: ['apps/pitch/**', 'package.json', 'bun.lock', '.github/workflows/pitch.yml']
+    paths: ['apps/pitch/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/pitch.yml']
   pull_request:
-    paths: ['apps/pitch/**', 'package.json', 'bun.lock', '.github/workflows/pitch.yml']
+    paths: ['apps/pitch/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/pitch.yml']
 
 permissions:
   contents: read

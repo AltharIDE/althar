@@ -1,0 +1,71 @@
+.groups {
+  display: grid;
+  gap: 24px;
+}
+.title {
+  margin: 0 0 10px;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.swatch {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 2px 10px;
+  align-items: center;
+  padding: 10px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.chip {
+  grid-row: span 2;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.name {
+  font: 12px var(--mono);
+  color: var(--t-1);
+}
+.note {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.type {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.type p {
+  margin: 0;
+}
+.materials {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.material {
+  display: grid;
+  place-items: center;
+  width: 120px;
+  height: 72px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  font-size: 11px;
+  color: var(--t-3);
+}

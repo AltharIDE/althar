@@ -1,0 +1,7 @@
+.logo {
+  flex: none;
+  fill: currentColor;
+}
+.point {
+  fill: var(--live);
+}

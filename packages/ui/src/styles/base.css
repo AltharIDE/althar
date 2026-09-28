@@ -1,0 +1,73 @@
+/* Base: box model, form resets, focus, scrollbars, reduced motion. An app
+   that mounts these components sets its own page background and overflow;
+   .ch-root sets the type the components expect to inherit. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+.ch-root {
+  color: var(--t-1);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.45;
+  letter-spacing: -0.005em;
+  font-feature-settings:
+    'cv05' 1,
+    'cv11' 1,
+    'ss03' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+:where(.ch-root) :where(button, input, textarea, select) {
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+:where(.ch-root) :where(button) {
+  cursor: pointer;
+  text-align: left;
+}
+:where(.ch-root) :where(button:disabled) {
+  cursor: default;
+}
+
+:where(.ch-root) ::selection {
+  background: var(--signal-dim);
+  color: var(--t-1);
+}
+
+/* One focus ring everywhere, shown only for the keyboard. Every rule here
+   has no specificity, so a component's own styles always win. */
+:where(.ch-root) :where(:focus) {
+  outline: none;
+}
+:where(.ch-root) :where(:focus-visible) {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 1px;
+}
+
+/* Scrollbars: present, but not furniture. */
+.ch-root,
+.ch-root * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--n-5) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ch-root *,
+  .ch-root *::before,
+  .ch-root *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

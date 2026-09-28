@@ -1,0 +1,31 @@
+.sizes {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--t-1);
+}
+.onInk {
+  color: var(--n-1);
+}
+.lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font: 600 14px/1 var(--font);
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+.lockupLarge {
+  gap: 14px;
+  font-size: 32px;
+  letter-spacing: -0.025em;
+}
+.tile {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  background: var(--live);
+  color: var(--n-1);
+}

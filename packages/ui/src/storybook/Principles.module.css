@@ -1,0 +1,305 @@
+/* The principles page: the same paper and ink as the introduction, one principle per band. */
+.hero {
+  display: grid;
+  justify-items: start;
+  gap: 14px;
+  padding: 24px 0 8px;
+}
+.title {
+  margin: 0;
+  font: 650 46px/1 var(--font-display);
+  letter-spacing: -0.035em;
+  color: var(--t-1);
+}
+.lede {
+  max-width: 60ch;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+
+.index {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 28px;
+  margin-top: 18px;
+}
+.indexItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  font: 550 17px/1.3 var(--font-display);
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+  text-decoration: none;
+  transition: color var(--fast) var(--ease);
+}
+.indexItem:hover {
+  color: var(--t-2);
+}
+.indexItem:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.number {
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.list {
+  display: grid;
+  margin: 36px 0 24px;
+}
+.principle {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 20px 48px;
+  padding: 40px 0 44px;
+  border-top: 1px solid var(--line);
+  scroll-margin-top: 16px;
+}
+.head {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+.name {
+  margin: 0;
+  font: 650 28px/1.15 var(--font-display);
+  letter-spacing: -0.025em;
+  color: var(--t-1);
+  text-wrap: balance;
+}
+.belief {
+  max-width: 42ch;
+  margin: 4px 0 0;
+  font: 450 16px/1.55 var(--font-display);
+  letter-spacing: -0.005em;
+  color: var(--t-1);
+  text-wrap: pretty;
+}
+
+.notice {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.point {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.point b {
+  font-weight: 600;
+  color: var(--t-1);
+}
+
+.specimen {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 12px 0 0;
+  border-radius: 14px;
+  background: var(--n-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  overflow: clip;
+}
+.stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  padding: 32px 28px;
+}
+.caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 20px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  font: 11px/1.5 var(--mono);
+  color: var(--t-3);
+}
+.see {
+  flex: none;
+  color: var(--t-2);
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 3px;
+}
+.see:hover {
+  color: var(--t-1);
+  text-decoration-color: currentColor;
+}
+.see:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.close {
+  margin: 0;
+  padding-top: 28px;
+  border-top: 1px solid var(--line);
+  font-size: 13.5px;
+  color: var(--t-2);
+}
+
+/* calm: the colour key */
+.colours {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 22px;
+  width: min(100%, 560px);
+}
+.key {
+  display: grid;
+  width: 100%;
+  margin: 0;
+}
+.keyRow {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.keyRow:last-child {
+  border-bottom: 0;
+}
+.keyName {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 99px;
+}
+.keyMeans {
+  margin: 0;
+  font-size: 13px;
+  color: var(--t-2);
+}
+.keyShown {
+  margin: 0;
+  justify-self: end;
+}
+.live,
+.you,
+.ink {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+.live {
+  color: var(--live);
+}
+.you {
+  color: var(--signal);
+}
+.ink {
+  color: var(--t-2);
+}
+.statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 32px;
+  padding-top: 4px;
+}
+
+/* clean: two cards at a lane's width */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 320px));
+  justify-content: center;
+  align-items: start;
+  gap: 16px;
+  width: 100%;
+}
+
+/* intuitive: the composer in four moments */
+.moments {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 22px 24px;
+  width: 100%;
+}
+.moment {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  align-content: start;
+}
+.momentLabel {
+  font: 500 10.5px/1 var(--font-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+
+/* the small stuff: other trackers, looking like themselves */
+.trackers {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 14px;
+  width: min(100%, 540px);
+}
+.trackers > a {
+  width: 100%;
+}
+.glyphs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  padding-top: 10px;
+  color: var(--t-2);
+}
+.glyphRule {
+  width: 1px;
+  height: 14px;
+  background: var(--line-2);
+}
+
+@media (max-width: 720px) {
+  .principle {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 32px 0 36px;
+  }
+  .stage {
+    padding: 24px 16px;
+  }
+  .keyRow {
+    grid-template-columns: 80px minmax(0, 1fr);
+  }
+  .keyShown {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .indexItem {
+    transition: none;
+  }
+}

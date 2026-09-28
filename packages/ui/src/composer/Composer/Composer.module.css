@@ -1,0 +1,196 @@
+.composer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 10px 8px 14px;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  box-shadow: var(--lift);
+  transition:
+    border-color var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+
+.composer:focus-within {
+  border-color: var(--line-3);
+  box-shadow: var(--lift-2);
+}
+
+.composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 22px;
+  max-height: 200px;
+  resize: none;
+  padding: 1px 4px 0 1px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--t-1);
+}
+
+.composer textarea::placeholder {
+  color: var(--t-3);
+}
+
+.recording textarea::placeholder {
+  color: var(--t-2);
+}
+
+/* the field, and over it the words still arriving: the same box, so they line up letter for letter */
+.field {
+  display: grid;
+}
+
+.field > * {
+  grid-area: 1 / 1;
+}
+
+.interim {
+  padding: 1px 4px 0 1px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: var(--t-3);
+  pointer-events: none;
+}
+
+.written {
+  color: transparent;
+}
+
+/* what you sent while it worked, above the field, in order */
+.queue {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: -3px -2px 6px -6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.queueHead {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 2px;
+  font-size: 11px;
+  color: var(--t-3);
+}
+
+.queueList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.queued {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 2px 0 6px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+
+.queued:hover {
+  background: var(--n-3);
+}
+
+.queuedText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queuedEdit {
+  flex: none;
+}
+
+/* floats on the top edge, over the end of the thread */
+.above {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: var(--z-float);
+  display: flex;
+  /* when they don't fit side by side, the first stays nearest the field and the rest stack above it */
+  flex-wrap: wrap-reverse;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: -6px;
+}
+
+.space {
+  flex: 1;
+}
+
+.note {
+  margin-right: 6px;
+  font-size: 11px;
+  color: var(--t-3);
+}
+
+.kbd {
+  margin: 0 6px 0 2px;
+}
+
+/* the other way to send while the agent works: quieter than the button, beside the note that explains it */
+.sendNow {
+  margin-right: 6px;
+}
+
+/* dictating is you talking, not a warning: ink, with your voice drawn as bars */
+.recButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  background: var(--n-2);
+  color: var(--t-1);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.recButton:hover {
+  background: var(--n-4);
+}
+
+.wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+}
+
+.wave i {
+  width: 2px;
+  height: calc(3px + var(--l, 0) * 13px);
+  border-radius: 1px;
+  background: currentColor;
+  opacity: calc(0.35 + var(--l, 0) * 0.65);
+  transition: height 90ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wave i {
+    transition: none;
+  }
+}

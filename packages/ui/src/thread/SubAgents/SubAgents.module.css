@@ -1,0 +1,57 @@
+.subs {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  overflow: hidden;
+}
+.sub + .sub {
+  border-top: 1px solid var(--line);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.row:hover {
+  background: var(--n-1);
+}
+.row:active {
+  background: var(--n-2);
+}
+.row:focus-visible {
+  outline-offset: -1.5px;
+}
+.label {
+  flex: 1;
+  min-width: 0;
+  color: var(--t-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta {
+  min-width: 74px;
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.running .meta {
+  color: var(--live);
+}
+.body {
+  padding: 2px 14px 8px 36px;
+}
+.failed .meta {
+  color: var(--danger);
+}

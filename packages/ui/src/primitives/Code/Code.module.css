@@ -1,0 +1,7 @@
+.code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--n-4);
+  font: 0.88em var(--mono);
+  color: var(--t-1);
+}

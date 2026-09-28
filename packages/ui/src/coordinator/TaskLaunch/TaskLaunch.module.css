@@ -1,0 +1,175 @@
+.launch {
+  position: relative;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.head {
+  padding: 14px 16px 10px;
+}
+.kicker {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.title {
+  margin: 3px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.steps {
+  margin: 0;
+  padding: 2px 8px 6px;
+  list-style: none;
+}
+.step {
+  display: grid;
+  grid-template-columns: 22px auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 13px;
+}
+.step:hover {
+  background: var(--n-2);
+}
+.n {
+  font: 11px var(--mono);
+  color: var(--t-3);
+  text-align: right;
+}
+.label {
+  font-weight: 550;
+  color: var(--t-1);
+  white-space: nowrap;
+}
+.who {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.plus {
+  margin: 0 6px;
+  color: var(--t-3);
+}
+.why {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.act {
+  justify-self: end;
+  font-size: 12px;
+}
+.fixed {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.skip {
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.step:hover .skip,
+.skipped .skip,
+.skip:focus-visible {
+  opacity: 1;
+}
+.skipped :is(.label, .who) {
+  color: var(--t-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--t-3);
+}
+.out .why {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--t-2);
+}
+.out .why svg {
+  flex: none;
+  color: var(--t-3);
+}
+.end {
+  grid-template-columns: 22px auto minmax(0, 1fr);
+}
+.pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 7px;
+  margin: 0 -1px 0 -6px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--t-2);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.pick:hover,
+.pick[aria-expanded='true'] {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+  color: var(--t-1);
+}
+.pick > svg {
+  color: var(--t-3);
+}
+
+.foot {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 10px 16px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+}
+.estimate {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.ring {
+  flex: none;
+  transform: rotate(-90deg);
+}
+.ring circle {
+  fill: none;
+  stroke-width: 2;
+}
+.ringBg {
+  stroke: var(--n-4);
+}
+.ringFg {
+  stroke: var(--t-2);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear;
+}
+.when {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-2);
+}
+/* the time left, running down along the foot */
+.bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: calc(var(--left) * 100%);
+  background: var(--t-3);
+  transition: width 1s linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ringFg,
+  .bar {
+    transition: none;
+  }
+}

@@ -1,0 +1,41 @@
+name: ui
+
+on:
+  push:
+    branches: [main]
+    paths: ['packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/ui.yml']
+  pull_request:
+    paths: ['packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/ui.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: packages/ui
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run check
+      - run: bun run test:coverage
+      - run: bun run build
+      - uses: actions/upload-artifact@v6
+        with:
+          name: storybook
+          path: packages/ui/dist/storybook
+          retention-days: 7

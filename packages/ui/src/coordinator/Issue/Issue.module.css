@@ -1,0 +1,137 @@
+.issue {
+  position: relative;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 12px;
+  width: 100%;
+  padding: 12px 14px 12px 12px;
+  border-radius: 12px;
+  background: var(--paper);
+  overflow: hidden;
+  text-decoration: none;
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+a.issue:hover {
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift-card);
+}
+.issue > :not(.pixels) {
+  position: relative;
+}
+.pixels {
+  color: var(--linear);
+}
+a.issue:hover .pixels {
+  opacity: 1;
+}
+.logo {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: var(--t-1);
+  color: var(--on-ink);
+}
+.linear .logo {
+  background: var(--linear);
+}
+.main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+.top {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.top b {
+  font-weight: 600;
+  color: var(--t-1);
+}
+.linear .top b {
+  color: var(--linear-ink);
+}
+.id {
+  font: 11px var(--mono);
+}
+.title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+/* in a narrow card the items wrap whole, never inside themselves */
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.meta > * {
+  white-space: nowrap;
+}
+.glyphed {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--t-2);
+}
+.glyphed svg {
+  color: var(--t-3);
+}
+.go {
+  align-self: start;
+  margin-top: 3px;
+  color: var(--t-3);
+}
+
+/* the mark sits level with the first line in every card, however many lines follow */
+.unread {
+  background: var(--n-1);
+}
+.unread .logo {
+  background: var(--n-4);
+  color: var(--t-3);
+}
+.unread .top b {
+  color: var(--t-2);
+}
+.unread .title {
+  color: var(--t-2);
+  font-weight: 550;
+}
+.fix {
+  align-self: center;
+}
+
+.from {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: -1px;
+}
+.fromLinear {
+  color: var(--linear);
+}
+.fromId {
+  font: 11px var(--mono);
+}
+/* an issue with no address to open: no pointer states */
+.still {
+  cursor: auto;
+}

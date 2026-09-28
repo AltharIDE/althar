@@ -1,0 +1,12 @@
+.name {
+  width: 100%;
+  max-width: 420px;
+}
+.promise {
+  flex: 1 1 260px;
+}
+.error {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--danger);
+}

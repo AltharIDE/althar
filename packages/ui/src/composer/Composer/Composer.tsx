@@ -1,0 +1,270 @@
+import { useId, useLayoutEffect, useRef, type FormEvent, type ReactNode, type RefObject } from 'react'
+
+import { Icon } from '../../foundations/Icon/Icon'
+import { cx } from '../../lib/cx'
+import { ActionButton } from '../../primitives/ActionButton/ActionButton'
+import { Tooltip } from '../../primitives/HoverCard/HoverCard'
+import { IconButton } from '../../primitives/IconButton/IconButton'
+import { Kbd } from '../../primitives/Kbd/Kbd'
+import { cssVars } from '../../lib/cssVars'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import s from './Composer.module.css'
+
+/* Bars at rest, for a transcriber that does not report levels. */
+const QUIET: readonly number[] = Array.from({ length: 12 }, () => 0)
+
+export interface Dictation {
+  /** Time so far while dictating, formatted (0:04); null when not dictating. */
+  elapsed: string | null
+  /** How loud you are, recent first-to-last, each from 0 to 1: drawn as bars while dictating. */
+  levels?: readonly number[]
+  /** Words heard and not yet settled, shown faint after what is written. For a transcriber that streams. */
+  interim?: string
+  onStart: () => void
+  onStop: () => void
+}
+
+/** Something you sent while the agent worked, waiting for it to finish what it is doing. */
+export interface QueuedMessage {
+  id: string
+  text: string
+}
+
+export interface ComposerText {
+  send: string
+  /** The key that sends or queues, shown in the button's tooltip. */
+  sendKey: string
+  /** Sending while the agent works: it waits until the agent is done with what it is doing. */
+  queue: string
+  /** Stops the agent's turn; the task keeps going, and the agent waits for you. */
+  stop: string
+  /** The host's shortcut for stopping, shown in the button's tooltip. */
+  stopKey: string
+  queueNote: string
+  /** Sends while the agent works, instead of queueing: it stops at a safe point and carries on with both. */
+  sendNow: string
+  /** What Send now does, in its tooltip. */
+  sendNowNote: string
+  sendNowKey: string
+  newlineNote: string
+  dictate: string
+  stopDictating: (elapsed: string) => string
+  /** The field's placeholder while dictating. */
+  listening: string
+  queued: (n: number) => string
+  /** Takes a queued message back into the field. */
+  editQueued: string
+  unqueue: (text: string) => string
+}
+
+export const composerText: ComposerText = {
+  send: 'Send',
+  sendKey: '↵',
+  queue: 'Queue',
+  stop: 'Interrupt the lead',
+  stopKey: '⌘.',
+  queueNote: 'Enter queues it; the lead reads it next',
+  sendNow: 'Send now',
+  sendNowNote: 'Interrupt the lead with this; it carries on with both',
+  sendNowKey: '⌘↵',
+  newlineNote: 'Shift+Enter for a new line',
+  dictate: 'Dictate',
+  stopDictating: (elapsed) => `Stop dictating, ${elapsed}`,
+  listening: 'Listening…',
+  queued: (n) => (n === 1 ? 'Queued; the lead reads it next' : `${n} queued; the lead reads them in order`),
+  editQueued: 'Edit',
+  unqueue: (text) => `Take “${text}” out of the queue`,
+}
+
+export interface ComposerProps {
+  value: string
+  onChange: (value: string) => void
+  onSubmit: (text: string) => void
+  /** While the agent works: send now instead of queueing, with ⌘Enter or the Send now beside the note. Without it, text only queues. */
+  onSendNow?: (text: string) => void
+  /** Also the field's accessible name. */
+  placeholder: string
+  /** The start of the lower row: which model, how hard. A ModelPick. */
+  picker?: ReactNode
+  /** Before the send button: how full the context is. A ContextRing. */
+  meter?: ReactNode
+  /** The agent is working: text you send is queued, and an empty composer offers to interrupt it when it can. */
+  busy?: boolean
+  /** Interrupt the agent's turn. Without it, a busy composer with nothing written offers nothing. */
+  onStopAgent?: () => void
+  dictation?: Dictation
+  /** What you sent while it worked, in order; the agent reads them once it is done with what it is doing. */
+  queued?: readonly QueuedMessage[]
+  /** Take a queued message back into the field. Without it, a queued message has no Edit. */
+  onEditQueued?: (id: string) => void
+  /** Take a queued message out of the queue. */
+  onUnqueue?: (id: string) => void
+  /** The shortcut that focuses the composer, shown when there is nothing to send. */
+  hint?: string
+  /** What floats on the composer's top edge: what the agent listens to, what it left running. */
+  above?: ReactNode
+  inputRef?: RefObject<HTMLTextAreaElement | null>
+  className?: string
+  text?: Partial<ComposerText>
+}
+
+/**
+ * The one composer, for the project conversation and for a task. Two rows:
+ * what you are writing, then where it goes. Enter sends, Shift+Enter breaks
+ * the line. The lower row holds what the consumer puts there, the model
+ * picker and the context meter, quiet until you look.
+ */
+export function Composer({
+  value,
+  onChange,
+  onSubmit,
+  onSendNow,
+  placeholder,
+  picker,
+  meter,
+  busy = false,
+  onStopAgent,
+  dictation,
+  queued = [],
+  onEditQueued,
+  onUnqueue,
+  hint,
+  above,
+  inputRef,
+  className,
+  text,
+}: ComposerProps) {
+  const t = { ...composerText, ...text }
+  const own = useRef<HTMLTextAreaElement>(null)
+  const ref = inputRef ?? own
+  const hintId = useId()
+  const elapsed = dictation?.elapsed ?? null
+  const interim = elapsed !== null ? (dictation?.interim ?? '') : ''
+  const drafted = value.trim() !== ''
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+  }, [value, ref])
+
+  const submit = (e?: FormEvent) => {
+    e?.preventDefault()
+    const out = value.trim()
+    if (out) onSubmit(out)
+  }
+  const canSendNow = busy && drafted && onSendNow !== undefined
+  const sendNow = () => {
+    const out = value.trim()
+    if (out) onSendNow?.(out)
+  }
+
+  const shownPlaceholder = (() => {
+    if (interim) return ''
+    if (elapsed !== null) return t.listening
+    return placeholder
+  })()
+
+  const note = (() => {
+    if (busy && drafted) return t.queueNote
+    if (value.includes('\n')) return t.newlineNote
+    return null
+  })()
+
+  /* What the last button is. While the agent works, an empty composer offers
+     to stop it; text you send waits until it is done with what it is doing, rather than cutting in. */
+  const action = (() => {
+    if (drafted) return <IconButton icon="up" label={busy ? t.queue : t.send} tone="fill" type="submit" kbd={t.sendKey} />
+    if (busy && onStopAgent) return <IconButton icon="square" label={t.stop} tone="fill" onClick={onStopAgent} kbd={t.stopKey} />
+    if (hint) return <Kbd className={s.kbd}>{hint}</Kbd>
+    return null
+  })()
+
+  return (
+    <form className={cx(s.composer, elapsed !== null && s.recording, className)} onSubmit={submit}>
+      {above && <div className={s.above}>{above}</div>}
+      {queued.length > 0 && (
+        <section className={s.queue} aria-label={t.queued(queued.length)}>
+          <span className={s.queueHead}>
+            <Icon name="clock" size={11} />
+            {t.queued(queued.length)}
+          </span>
+          <ol className={s.queueList}>
+            {queued.map((q) => (
+              <li key={q.id} className={s.queued}>
+                <span className={s.queuedText}>{q.text}</span>
+                {onEditQueued && (
+                  <LinkButton className={s.queuedEdit} onClick={() => onEditQueued(q.id)}>
+                    {t.editQueued}
+                  </LinkButton>
+                )}
+                {onUnqueue && <IconButton icon="close" size="small" label={t.unqueue(q.text)} onClick={() => onUnqueue(q.id)} />}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+      <div className={s.field}>
+        {/* the words still arriving, faint after what is written; the field's own text shows through clear */}
+        {interim && (
+          <div className={s.interim} aria-hidden="true">
+            <span className={s.written}>{value}</span>
+            {value && !/\s$/.test(value) ? ' ' : ''}
+            {interim}
+          </div>
+        )}
+        <textarea
+          ref={ref}
+          rows={1}
+          value={value}
+          placeholder={shownPlaceholder}
+          aria-label={placeholder}
+          aria-describedby={note ? hintId : undefined}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+            if ((e.metaKey || e.ctrlKey) && canSendNow) {
+              e.preventDefault()
+              sendNow()
+              return
+            }
+            submit(e)
+          }}
+        />
+      </div>
+      <div className={s.bar}>
+        {picker}
+        <span className={s.space} />
+        {note && (
+          <span id={hintId} className={s.note}>
+            {note}
+          </span>
+        )}
+        {canSendNow && (
+          <Tooltip label={t.sendNowNote}>
+            <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey}>
+              {t.sendNow}
+            </ActionButton>
+          </Tooltip>
+        )}
+        {meter}
+        {dictation &&
+          (elapsed !== null ? (
+            <button type="button" className={s.recButton} onClick={dictation.onStop} aria-label={t.stopDictating(elapsed)}>
+              <span className={s.wave} aria-hidden="true">
+                {(dictation.levels ?? QUIET).map((l, i) => (
+                  <i key={i} style={cssVars({ '--l': Math.max(0, Math.min(1, l)) })} />
+                ))}
+              </span>
+              {elapsed}
+              <Icon name="square" size={11} />
+            </button>
+          ) : (
+            <IconButton icon="mic" label={t.dictate} onClick={dictation.onStart} />
+          ))}
+        {action}
+      </div>
+    </form>
+  )
+}

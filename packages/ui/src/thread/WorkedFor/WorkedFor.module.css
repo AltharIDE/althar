@@ -1,0 +1,39 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 30px;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.took {
+  flex: none;
+  font-weight: 550;
+}
+.summary {
+  flex: none;
+  color: var(--t-3);
+}
+.rule {
+  flex: 1;
+  height: 1px;
+  background: var(--line-2);
+}
+.row:hover .took {
+  color: var(--t-1);
+}
+.row:hover .rule {
+  background: var(--line-3);
+}
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0 4px 12px;
+  margin-left: 5px;
+  box-shadow: -1px 0 0 var(--line-2);
+}
+.body > * + * {
+  margin-top: 4px;
+}

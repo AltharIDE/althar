@@ -1,0 +1,329 @@
+/*
+ * The welcome: a drafting table under a camera, the opening, the words and
+ * the title block. Motion runs once on arrival; `.cut` and reduced motion
+ * skip to where it ends.
+ */
+
+.welcome {
+  position: relative;
+  height: 100%;
+  min-height: 520px;
+  overflow: hidden;
+  background: var(--n-1);
+  isolation: isolate;
+}
+
+/* ---- the table ------------------------------------------------------------- */
+
+/* how far out the camera is: set with each placing, and carried through a flight by its keyframes */
+@property --far {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 1;
+}
+
+.view {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--n-0);
+}
+/* the table's grid: away while the opening draws its own, which it meets exactly once the camera has pulled back */
+@property --grid {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+.lens {
+  position: absolute;
+  inset: 0;
+  perspective: 2400px;
+  perspective-origin: 62% 40%;
+}
+.tilt {
+  position: absolute;
+  inset: 0;
+  transform-origin: 62% 55%;
+}
+.world {
+  /* no will-change: a layer kept for the camera is painted once at the scale it started at, and blurs when the camera closes in */
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  background-color: var(--n-1);
+  background-image:
+    linear-gradient(rgba(20, 20, 28, calc(0.055 * var(--grid))) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 20, 28, calc(0.055 * var(--grid))) 1px, transparent 1px),
+    linear-gradient(rgba(20, 20, 28, calc(0.03 * var(--grid))) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 20, 28, calc(0.03 * var(--grid))) 1px, transparent 1px);
+  background-size:
+    160px 160px,
+    160px 160px,
+    32px 32px,
+    32px 32px;
+  transition: --grid 700ms var(--ease);
+}
+.open {
+  --grid: 1;
+}
+/* the paper runs on past the table, so no edge ever shows */
+.world::before {
+  content: '';
+  position: absolute;
+  /* a whole number of cells, so its grid runs on from the table's without a step */
+  inset: -6400px;
+  z-index: -1;
+  background: inherit;
+}
+/* the opening, drawn on the table: its crossing is this point */
+.openingSpot {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+.route {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.plan {
+  fill: none;
+  stroke: var(--line-3);
+  stroke-width: calc(1.5px * var(--far));
+  stroke-dasharray: calc(2px * var(--far)) calc(10px * var(--far));
+  stroke-linecap: round;
+  opacity: 0;
+}
+.open .plan {
+  opacity: 1;
+  animation: fade 1400ms var(--ease) 700ms both;
+}
+.leg {
+  fill: none;
+  stroke: var(--t-3);
+  stroke-width: calc(1.25px * var(--far));
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 1600ms cubic-bezier(0.42, 0, 0.2, 1);
+}
+.legDrawn {
+  stroke-dashoffset: 0;
+}
+/* where the route meets a plot */
+.node {
+  r: calc(3.5px * var(--far));
+  fill: var(--n-1);
+  stroke: var(--t-3);
+  stroke-width: calc(1.25px * var(--far));
+  opacity: 0;
+  transition: fill 400ms var(--ease) 1200ms;
+}
+.open .node {
+  opacity: 1;
+  animation: fade 900ms var(--ease) 900ms both;
+}
+.nodeDrawn {
+  fill: var(--t-3);
+}
+
+/* the words sit on paper, over the table's left edge */
+.scrim {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 2;
+  width: calc(56px + min(360px, 30vw) + 60px);
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--n-1) 0 calc(100% - 60px), color-mix(in srgb, var(--n-1) 0%, transparent));
+  animation: fade 600ms var(--ease) both;
+}
+
+/* ---- the words --------------------------------------------------------------- */
+
+.words {
+  position: absolute;
+  left: 56px;
+  top: 50%;
+  z-index: 3;
+  width: min(360px, 30vw);
+  transform: translateY(-46%);
+}
+.heading {
+  position: relative;
+  margin: 16px 0 0;
+  font-size: clamp(30px, 3.3vw, 46px);
+  font-weight: 680;
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+  color: var(--t-1);
+}
+.mask {
+  display: inline-block;
+  overflow: hidden;
+  padding-bottom: 0.1em;
+  margin-bottom: -0.1em;
+  vertical-align: top;
+}
+.rise {
+  display: inline-block;
+  animation: word 900ms cubic-bezier(0.2, 0.75, 0.1, 1) calc(var(--i) * 60ms + 160ms) both;
+}
+.body {
+  position: relative;
+  margin: 22px 0 0;
+  font-size: 15px;
+  line-height: 1.62;
+  text-wrap: pretty;
+  color: var(--t-2);
+  animation: up 800ms var(--ease) 560ms both;
+}
+.endWords {
+  left: 50%;
+  top: auto;
+  bottom: 108px;
+  width: min(560px, 88vw);
+  text-align: center;
+  transform: translateX(-50%);
+}
+.endWords .heading {
+  font-size: clamp(30px, 3vw, 42px);
+}
+.narrowWords {
+  left: 24px;
+  right: 24px;
+  top: auto;
+  bottom: 96px;
+  width: auto;
+  transform: none;
+}
+.narrowWords .heading {
+  font-size: 28px;
+}
+.narrowWords .body {
+  font-size: 14px;
+}
+
+/* the opening is its own component (Opening); Begin comes once it has played */
+.begin {
+  animation: up 700ms var(--ease) 4300ms both;
+}
+
+/* ---- the title block ---------------------------------------------------------- */
+
+.skip {
+  position: absolute;
+  top: 18px;
+  right: 22px;
+  z-index: 4;
+}
+.block {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 36px 28px 22px;
+  background: linear-gradient(to top, var(--n-1) 55%, transparent);
+}
+.scale {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  height: 16px;
+  padding: 0 3px;
+  margin-right: auto;
+  box-shadow: inset 0 -1px 0 var(--t-3);
+}
+.tick {
+  width: 1px;
+  height: 6px;
+  background: var(--t-3);
+  transition:
+    height var(--slow) var(--ease),
+    background var(--slow) var(--ease);
+}
+.past {
+  height: 9px;
+  background: var(--t-2);
+}
+.here {
+  width: 2px;
+  height: 16px;
+  background: var(--t-1);
+}
+.cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-left: auto;
+  padding: 6px 12px;
+  border-left: 1px solid var(--line-3);
+  font: 500 10px/1.2 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.cellName {
+  color: var(--t-1);
+}
+.cellSheet {
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- motion ------------------------------------------------------------------- */
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+@keyframes word {
+  from {
+    transform: translateY(108%);
+  }
+}
+
+.cut :is(.scrim, .rise, .body, .begin) {
+  animation: none;
+}
+.cut .leg {
+  transition: none;
+}
+.cut :is(.plan, .node) {
+  animation: none;
+  transition: none;
+}
+.cut .world {
+  transition: none;
+}
+.cut .view {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tick,
+  .node {
+    transition: none;
+  }
+  .plan,
+  .node {
+    animation: none;
+  }
+}
