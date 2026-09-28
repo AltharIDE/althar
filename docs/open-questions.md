@@ -46,8 +46,24 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
 - [ ] **The coordinator's defaults.** Its default model; whether task events
   prompt it; whether it can skip the countdown when you asked for exactly that
   task. See [architecture 04](architecture/04-coordinator.md).
-- [ ] **Setup per worktree.** Where the setup command and the files to copy
-  are declared: in the project rules, or in a file in the repository?
+- [x] **Where worktrees live.** Settled: `~/Charrette/<project>/<task>/<repository>`,
+  with a root that can be changed per project.
+  [ADR-006](decisions/006-worktree-per-task.md).
+- [x] **How the lead, Verify and Review work together.** Settled: the lead's
+  session spans its nodes, Verify runs the project's checks, review and
+  settling loop for at most 3 rounds, reviewers are read-only, and the default
+  reviewer is another provider's strongest model.
+  [Architecture 05](architecture/05-workflow-engine.md). The demo runs them as
+  one fixed graph ([MVP plan](plans/mvp.md)).
+- [ ] **Setup per worktree.** Where the setup command, the check command that
+  Verify runs, and the files to copy are declared: in the project rules, or
+  in a file in the repository?
+- [ ] **An acceptance-criteria checker.** A step type that checks the change
+  against the task's acceptance criteria, beside Review. When, and what does
+  it return?
+- [ ] **"Strongest available model."** How Charrette ranks models per provider
+  for the default reviewer: a list it ships and updates, or something the
+  agent reports?
 
 ## From the design review, 27 September
 
@@ -156,7 +172,9 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
     that asks, and Charrette answers `session/request_permission` from the
     rules. In the MVP the lead doesn't answer yet.
     [ADR-007](decisions/007-permission-requests-reach-charrette.md).
-  - What goes on the default always-ask list?
+  - ~~What goes on the default always-ask list?~~ Settled for now: pushes to
+    the default branch, force pushes, merges, deploy commands, and writes
+    outside the task's worktree.
   *Prototype:* Project → "Project rules", and "Allowed without you".
 - [ ] **Project rules: when and where they are set.** Leaning, as mocked in
   the kit's NewProject: creating a project asks one thing, who answers when
@@ -189,11 +207,11 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
 
 ## Starting and finishing a task
 
-- [ ] **When is a PR opened?** Leaning: when the graph finishes, open a
-  **draft** PR automatically. It's cheap and reversible, CI runs on it, and
-  marking it ready and merging stay with you. This is a project rule ("When a
-  task is done"), shown as the last step of the plan so it can be changed per
-  task. Open:
+- [ ] **When is a PR opened?** Settled for the MVP: when the graph finishes,
+  a draft PR opens automatically. It's cheap and reversible, CI runs on it,
+  and marking it ready and merging stay with you
+  ([MVP plan](plans/mvp.md)). Later it becomes a project rule
+  ("When a task is done"), shown as the last step of the plan. Still open:
   - Should a task that only answers a question, or makes no code change, skip
     it?
   - Does the lead mark the PR ready once review and checks pass?

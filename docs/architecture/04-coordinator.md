@@ -19,7 +19,9 @@ See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
   ([06](06-integrations-and-skills.md));
 - recommends a lead per task, with its reasons ([05](05-workflow-engine.md));
 - shows a task's plan before it starts: steps, an agent per step, optional
-  steps, and a short countdown after which the plan starts on its own;
+  steps, and a short countdown after which the plan starts on its own. In the
+  MVP the plan is always one fixed graph with its choices filled in
+  ([MVP plan](../plans/mvp.md)); composing a graph per task comes next;
 - follows the work, and passes messages to a task's lead.
 
 It never edits a repository, runs builds or tests, or merges, even for a

@@ -425,6 +425,35 @@ weighs the kind of work, past outcomes on similar tasks, runtime availability
 and usage limits, and cost. The user can override it. The recommendation and
 its reasons are recorded on the task.
 
+## Implementing, verifying, and reviewing
+
+**The lead keeps its session across its nodes.** Implementing and settling
+findings are turns in one provider session, so the lead remembers why it made
+a change. A new session starts only on a switch, after a crash when the
+session can't be loaded, or when its context is full. One provider session can
+therefore span several node attempts.
+
+**Verification runs the project's own checks, with no agent.** A verification
+node runs the project's check command in the task's workspace after the lead
+changes code. Later steps, such as review, receive its result.
+
+**Review and settling loop, within a bound.** After a review, the lead settles
+the findings. If settling changed code, verification and review run again, up
+to a bound (3 rounds by default). Past the bound, the task is Stuck, with the
+findings still open.
+
+**Reviewers are read-only.** A reviewer works in the task's workspace but may
+run only read-only commands (diff, search, log). Running tests belongs to
+verification: tests write caches and snapshots into the workspace, and would
+duplicate it.
+
+**The default reviewer** runs on a different provider from the lead when one is
+available, on that provider's strongest available model. The plan shows the
+choice, and it can be changed. If the lead and reviewer end up the same model,
+the thread says so quietly.
+
+The MVP runs these as one fixed graph ([MVP plan](../plans/mvp.md)).
+
 ## Concurrency and joins
 
 Fan-out declares:
