@@ -1,0 +1,14 @@
+import { defineConfig } from 'vite-plus'
+
+export default defineConfig({
+  test: {
+    include: ['tests/**/*.test.ts'],
+    environment: 'node',
+    coverage: {
+      include: ['src/**/*.ts'],
+      exclude: ['src/index.ts'],
+      reporter: ['text', 'html'],
+      thresholds: { lines: 90, branches: 90 },
+    },
+  },
+})

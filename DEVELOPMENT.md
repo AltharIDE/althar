@@ -33,6 +33,8 @@ Each app and package has its own README with its own commands.
 | --- | --- |
 | [`apps/pitch`](apps/pitch) | The brief and research note, as a static site |
 | [`packages/ui`](packages/ui) | `@charrette/ui`, the interface components, with a Storybook |
+| [`packages/domain`](packages/domain) | `@charrette/domain`: identifiers, vocabularies, lifecycles and commands, as Effect schemas |
+| [`packages/persistence-sqlite`](packages/persistence-sqlite) | `@charrette/persistence-sqlite`: the local store, its schema ([schema.sql](packages/persistence-sqlite/schema.sql)) and migrations |
 | [`docs/architecture`](docs/architecture) | The working architecture: a local-first desktop app, with seams for a later cloud |
 | [`docs/decisions`](docs/decisions) | Architecture decisions, one per file |
 | [`docs/glossary.md`](docs/glossary.md) | The words the interface uses, beside the words the architecture uses |
@@ -74,7 +76,7 @@ Start from [the overview](docs/architecture/README.md), then:
 
 Work on a branch and open a pull request to `main`. On a pull request:
 
-- **GitHub Actions** runs a package's workflow when its files change: `pitch` for `apps/pitch`, `ui` for `packages/ui`. Both also run when the root `package.json`, `bun.lock` or `vite.config.ts` changes.
+- **GitHub Actions** runs a package's workflow when its files change: `pitch` for `apps/pitch`, `ui` for `packages/ui`, and `harness` for `packages/domain` and `packages/persistence-sqlite`. Both also run when the root `package.json`, `bun.lock` or `vite.config.ts` changes.
 - **Cloudflare Workers Builds** builds the pitch site. A branch gets a preview deployment (`wrangler preview`), and `main` deploys to production. The preview build fails without the `previews` block in `apps/pitch/wrangler.jsonc`, so keep it.
 
 Merge only when every check is green, the Cloudflare one included.

@@ -36,7 +36,7 @@ identity and scope
 source and workspaces
   repository_bindings, repository_locations
   task_repository_requirements
-  workspace_sets, workspaces
+  workspaces, workspace_snapshots
   change_sets, repository_changes
 
 work and workflow
@@ -48,10 +48,10 @@ work and workflow
 agent interaction
   interaction_threads, user_inputs, turn_deliveries
   provider_installations, provider_principals
-  provider_sessions, provider_events
+  provider_sessions, runtime_instances, processes
 
 attention and knowledge
-  attention_requests, decisions
+  permission_requests, attention_requests, findings, decisions
   knowledge_claims, claim_relations
 
 integrations and capabilities
@@ -78,6 +78,30 @@ lifetimes when those capabilities exist.
 Use globally unique sortable IDs, integer aggregate revisions, UTC timestamps,
 and explicit terminal/tombstone facts. Store external provider IDs as data,
 never as Charrette primary keys.
+
+### Schema rules
+
+The local schema follows these rules; `@charrette/persistence-sqlite` tests the
+ones that can be tested.
+
+- **Vocabularies are lookup tables** (`vocab_<name>`), so a new word is an
+  insert. SQLite cannot alter a `CHECK`, and rebuilding a referenced table is
+  the expensive way to add a state.
+- **Every row that changes state has a revision,** and a change records the new
+  revision in the record and the feed.
+- **Every project-scoped row carries its project,** and references between
+  them are composite, `(id, project_id)`, so no row can point into another
+  project. The record, the feed and artifacts carry it too; in the cloud it is
+  the partition, the filter for each member's feed, and the export boundary.
+- **Device-only data stays in device-keyed tables,** such as where a device
+  keeps its worktrees, so linking a project to the cloud never carries it.
+- **Every reference to an artifact,** including one inside a JSON column, also
+  has an `artifact_links` row, so cleanup marks what is used without parsing
+  JSON.
+- **"One active" rules are partial unique indexes:** one active attempt per
+  run, one unfinished attempt per node, one active turn per thread.
+- **Migrations run with foreign keys off,** then `PRAGMA foreign_key_check`,
+  then on: SQLite's procedure for rebuilding a table others reference.
 
 ## Transaction and effect pattern
 
@@ -128,6 +152,9 @@ A compact resumable invalidation stream:
 ### Raw/diagnostic protocol capture
 
 Optional, bounded, encrypted where appropriate, and more aggressively redacted.
+It lives in its own file, not the canonical database, and keeps raw bytes: it
+neither bloats the canonical database's backups and WAL, nor refuses a
+malformed line, which is exactly what a protocol violation needs to show.
 It records enough to debug adapter/version failures but is not canonical state
 or an automatic cloud-sync format.
 

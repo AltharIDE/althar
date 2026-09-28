@@ -227,6 +227,9 @@ A brief contains, as the role needs:
 - the conversation record: the user's messages verbatim, earlier agents'
   turns, decisions, what was tried and failed, and open items;
 - step results and artifacts the role needs;
+- for a later review round, the earlier rounds' findings and how each was
+  settled, with the lead's response and any person's decision
+  ([05](05-workflow-engine.md));
 - per-project instructions for a step type, such as `.charrette/review.md`.
 
 The same brief starts:
@@ -325,15 +328,21 @@ stateDiagram-v2
     [*] --> probing
     probing --> auth_required
     probing --> ready
+    probing --> failed
     auth_required --> ready
+    auth_required --> failed
     ready --> starting
     starting --> active
+    starting --> failed
     active --> waiting_approval
     waiting_approval --> active
     active --> completed
     active --> cancelling
+    waiting_approval --> cancelling
     cancelling --> cancelled
+    cancelling --> uncertain: stop not confirmed
     active --> superseded: switched to another agent
+    waiting_approval --> superseded
     active --> lost
     lost --> reconciling
     reconciling --> active: resumable and safe
@@ -345,6 +354,9 @@ stateDiagram-v2
     uncertain --> [*]
     failed --> [*]
 ```
+
+The same lifecycle is data in `@charrette/domain` (`lifecycles.ts`), whose tests
+keep it whole: every state reachable, and none left after a terminal one.
 
 A provider session state does not directly set the run outcome. The workflow
 node interprets normalized observations under its retry, verification, and
@@ -514,7 +526,12 @@ including the always-ask list
 
 - Every session starts in a mode where the agent asks rather than acts. No
   session starts in a bypass mode. Requests arrive as ACP
-  `session/request_permission`.
+  `session/request_permission`. The session records how it was started: the
+  mode, and the MCP servers and tools its role was given.
+- Charrette answers with a one-time option only. If it offered an agent
+  "allow always", the agent could remember the rule itself, and later requests
+  would stop reaching Charrette. A standing allow is Charrette's own rule,
+  recorded with the decision, and applied by Charrette.
 - Charrette answers from the project rules. Nearly everything is allowed
   without the user; only what the rules keep for the user becomes an attention
   request. Every answer is recorded on the task, and the thread shows allowed

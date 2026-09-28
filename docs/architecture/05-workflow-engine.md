@@ -130,13 +130,16 @@ stateDiagram-v2
     [*] --> ready
     ready --> admitted
     admitted --> running
+    admitted --> cancelled
+    running --> succeeded
     running --> waiting_attention
     waiting_attention --> running
     running --> verifying
     verifying --> succeeded
-    admitted --> cancelled
     running --> cancelling
+    waiting_attention --> cancelling
     cancelling --> cancelled
+    cancelling --> uncertain: stop not confirmed
     running --> failed
     verifying --> failed
     running --> uncertain
@@ -145,10 +148,23 @@ stateDiagram-v2
     reconciling --> succeeded
     reconciling --> failed
     reconciling --> waiting_attention
+    running --> held: waiting without a person
+    held --> running
+    held --> cancelling
+    held --> superseded
+    running --> superseded: another agent takes over
+    waiting_attention --> superseded
     failed --> [*]
     cancelled --> [*]
     succeeded --> [*]
+    superseded --> [*]
 ```
+
+The same lifecycle is data in `@charrette/domain` (`lifecycles.ts`). An
+attempt ends as `superseded` when a switch hands the node to another agent;
+a new attempt of the same node takes over. An attempt is `held`, with a reason,
+when it waits without needing a person, such as for a usage limit to reset;
+`waiting_attention` is only for a person.
 
 A retry creates a new `NodeAttempt`. It never erases the failed attempt.
 
@@ -333,7 +349,9 @@ The step's full session remains readable from its own thread.
 
 **Anyone can be talked to.** The main composer always addresses the lead.
 Opening a step's thread lets the user steer that step directly, if its contract
-accepts steering. The task thread records the steer as one line. Talking to an
+accepts steering. A step has one thread per step name within an execution, not
+one per loop iteration, so a reviewer keeps its thread, and can keep its
+session, across review rounds and check its own earlier findings. The task thread records the steer as one line. Talking to an
 agent's own sub-agents goes through that agent.
 
 **Redirecting.** Input to the lead during its own node is ordinary
@@ -441,6 +459,15 @@ changes code. Later steps, such as review, receive its result.
 the findings. If settling changed code, verification and review run again, up
 to a bound (3 rounds by default). Past the bound, the task is Stuck, with the
 findings still open.
+
+**A later review round builds on the earlier ones.** The reviewer in round 2
+or later is briefed on every earlier round: its findings, and how each was
+settled, with the lead's response (what it changed, or why it set the finding
+aside) and any person's decision. The reviewer checks that fixes hold, and does
+not raise a finding the lead set aside or a person dismissed again unless it
+has new evidence; then it says which earlier finding it repeats, and why the
+evidence is new. Because the reviewer's thread spans rounds, it may also keep
+its session, but the brief carries the lead's responses either way.
 
 **Reviewers are read-only.** A reviewer works in the task's workspace but may
 run only read-only commands (diff, search, log). Running tests belongs to

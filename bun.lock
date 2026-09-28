@@ -35,6 +35,40 @@
         "vitest": "5.0.1",
       },
     },
+    "packages/domain": {
+      "name": "@charrette/domain",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "4.0.0-rc.118",
+      },
+      "devDependencies": {
+        "@effect/vitest": "4.0.0-rc.118",
+        "@types/node": "^24.0.0",
+        "@vitest/coverage-v8": "5.0.1",
+        "typescript": "^7.0.2",
+        "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
+        "vite-plus": "1.0.0-rc.0",
+        "vitest": "5.0.1",
+      },
+    },
+    "packages/persistence-sqlite": {
+      "name": "@charrette/persistence-sqlite",
+      "version": "0.0.0",
+      "dependencies": {
+        "@charrette/domain": "workspace:*",
+        "@effect/sql-sqlite-node": "4.0.0-rc.118",
+        "effect": "4.0.0-rc.118",
+      },
+      "devDependencies": {
+        "@effect/vitest": "4.0.0-rc.118",
+        "@types/node": "^24.0.0",
+        "@vitest/coverage-v8": "5.0.1",
+        "typescript": "^7.0.2",
+        "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
+        "vite-plus": "1.0.0-rc.0",
+        "vitest": "5.0.1",
+      },
+    },
     "packages/ui": {
       "name": "@charrette/ui",
       "version": "0.0.0",
@@ -128,6 +162,10 @@
 
     "@bramus/specificity": ["@bramus/specificity@2.4.2", "", { "dependencies": { "css-tree": "^3.0.0" }, "bin": { "specificity": "bin/cli.js" } }, "sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw=="],
 
+    "@charrette/domain": ["@charrette/domain@workspace:packages/domain"],
+
+    "@charrette/persistence-sqlite": ["@charrette/persistence-sqlite@workspace:packages/persistence-sqlite"],
+
     "@charrette/pitch": ["@charrette/pitch@workspace:apps/pitch"],
 
     "@charrette/ui": ["@charrette/ui@workspace:packages/ui"],
@@ -143,6 +181,10 @@
     "@csstools/css-syntax-patches-for-csstree": ["@csstools/css-syntax-patches-for-csstree@1.1.14", "", { "peerDependencies": { "css-tree": "^3.2.1" }, "optionalPeers": ["css-tree"] }, "sha512-HpbVXyrofRXpHpgkNIjU/3EWR4WJvOkO3emNK/L6X/mTJU7bGUI3AkkpoTNXznQLp0KRjLHELTGeKI5dIkI9JQ=="],
 
     "@csstools/css-tokenizer": ["@csstools/css-tokenizer@4.0.1", "", {}, "sha512-bPlN9S9O1A0euCpEWE4qnvB5YDuyYVsUTrxSgmAM1Is0j4tICHoVyOVAXfWMP/kS9ZrjvyIXWV2PmomiAXXqOw=="],
+
+    "@effect/sql-sqlite-node": ["@effect/sql-sqlite-node@4.0.0-rc.118", "", { "peerDependencies": { "effect": "^4.0.0-rc.118" } }, "sha512-O+TswiXTeP1/9I7GaCalMWWGXrbalzZkFdkXoO/x/3uDdfnYSi3/lkcOvmfFJnmaQPvOR4wG2CkZSdf9n88A4w=="],
+
+    "@effect/vitest": ["@effect/vitest@4.0.0-rc.118", "", { "peerDependencies": { "effect": "^4.0.0-rc.118", "vitest": ">=5.0.0 <6.0.0" } }, "sha512-O0CPgtFVhkB+pyFtjP4up2XF4uVWsPgUmlv4hMjq8ARLOPKYix+uu3AUFIUKRHjzzQpx+JPce6KPhD6Flkrfag=="],
 
     "@emnapi/core": ["@emnapi/core@1.9.2", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.1", "tslib": "^2.4.0" } }, "sha512-UC+ZhH3XtczQYfOlu3lNEkdW/p4dsJ1r/bP7H8+rhao3TTTMO1ATq/4DdIi23XuGoFY+Cz0JmCbdVl0hz9jZcA=="],
 
@@ -845,6 +887,8 @@
     "doctrine": ["doctrine@3.0.0", "", { "dependencies": { "esutils": "^2.0.2" } }, "sha512-yS+Q5i3hBf7GBkd4KG8a7eBNNWNGLTaEwwYWUijIYM7zrlYDM0BFXHjjPWlWZ1Rg7UaddZeIDmi9jF3HmqiQ2w=="],
 
     "dom-accessibility-api": ["dom-accessibility-api@0.6.3", "", {}, "sha512-7ZgogeTnjuHbo+ct10G9Ffp0mif17idi0IyWNVA/wcwcm7NPOD/WEHVP3n7n3MhXqxoIYm8d6MuZohYWIZ4T3w=="],
+
+    "effect": ["effect@4.0.0-rc.118", "", {}, "sha512-hxhpCd+swzrtu9lnyPpEFre2ODQzJ9qxgyL1oHIEY8NKnW4PxTbM1XzplMZXiAsLD62HO+KJc41Nqxr9T791ZQ=="],
 
     "electron-to-chromium": ["electron-to-chromium@1.5.439", "", {}, "sha512-qu6QIPXhsb+CRcAiTMNjR4A1y/7tCYKkKjr5CZXRVih6qkDf79peZ2BpEU3qoDBNCRrcy3Mra3X9nG5oruuA7Q=="],
 

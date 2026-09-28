@@ -400,7 +400,7 @@ The provider adapter chooses among:
 
 - native user/project skill configuration;
 - a generated run-level instruction bundle;
-- a read-only managed overlay within the workspace set;
+- a read-only managed overlay within the task's workspaces;
 - explicit prompt attachments.
 
 The run records what the provider actually received and excludes managed skill
