@@ -21,7 +21,17 @@ From the repository root, run `bun install`. Then run these from `apps/site`:
 
 ## Deploying
 
-`dist/` is static: `index.html` for the landing page, `thesis/index.html` for the thesis, and `assets/`. Build with `bun run build` from `apps/site` and serve `dist/` from any static host. On Cloudflare Pages, set the root directory to `apps/site`, the build command to `bun run build` and the output directory to `dist`.
+`dist/` is static: `index.html` for the landing page, `thesis/index.html` for the thesis, and `assets/`. `wrangler.jsonc` deploys it to Cloudflare as static assets, with no Worker code; any other path gets the landing page.
+
+On Cloudflare (Workers Builds), connected to this repository:
+
+| Setting | Value |
+| --- | --- |
+| Root directory | `apps/site` |
+| Build command | `bun install --frozen-lockfile && bun run build` |
+| Deploy command | `npx wrangler deploy` (the default) |
+
+From a machine logged in with `bunx wrangler login`, `bun run deploy` builds and deploys the same way.
 
 ## Where things live
 
