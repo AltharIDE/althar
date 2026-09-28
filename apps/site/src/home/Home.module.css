@@ -1,0 +1,76 @@
+/* Perspective. A two-point drawing on warm paper: the building in ink with
+   two tones of face, the crane and scaffold in cobalt, your decisions in
+   violet. The words sit in the sky, over the drawing. */
+
+.page {
+  --sh-paper: var(--n-2);
+  --sh-ink: var(--t-1);
+  --sh-ink-2: var(--t-2);
+  --sh-blue: var(--live);
+  --sh-grid: rgba(43, 59, 255, 0.05);
+  --sh-grid-2: rgba(43, 59, 255, 0.1);
+  --sh-violet: var(--signal);
+  --sh-violet-ink: var(--signal-pressed);
+  --sh-violet-paper: var(--signal-paper);
+  background: var(--n-2);
+  color: var(--t-1);
+  overflow-x: clip;
+}
+.page :focus-visible { outline: 2px solid var(--live); outline-offset: 3px; }
+.blue { color: var(--live); }
+
+.hero {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'text' '.' 'cap';
+  min-height: calc(100svh - 76px);
+}
+.stage { position: absolute; inset: 0 0 44px; }
+.canvas { display: block; width: 100%; height: 100%; }
+.notes { position: absolute; inset: 0; pointer-events: none; }
+.chip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  gap: 3px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  background: var(--n-2);
+  box-shadow: 0 0 0 3px var(--n-2);
+  white-space: nowrap;
+  visibility: hidden;
+  will-change: transform;
+}
+.chip b { font-size: 14px; line-height: 1.2; font-weight: 650; letter-spacing: -0.01em; }
+.chip span { display: flex; align-items: center; gap: 5px; font: 500 10px/1.2 var(--mono); letter-spacing: 0.07em; text-transform: uppercase; color: var(--t-3); }
+.chip svg { fill: var(--t-1); flex: none; }
+.chip.you span { color: var(--signal-pressed); }
+
+.text { grid-area: text; position: relative; justify-self: start; padding: clamp(20px, 4.5vh, 56px) var(--gut) 0; pointer-events: none; }
+.text > * { pointer-events: auto; width: fit-content; }
+.kicker { display: flex; align-items: center; gap: 10px; margin-bottom: clamp(14px, 2vh, 22px); font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-2); }
+.h1 { font-size: clamp(46px, 6.2vw, 116px); line-height: 0.94; letter-spacing: -0.058em; font-weight: 720; }
+.h1 span { display: block; white-space: nowrap; }
+.sub { max-width: 33ch; margin-top: clamp(22px, 3vh, 32px); font-size: clamp(16.5px, 1.25vw, 19px); line-height: 1.5; color: var(--t-2); }
+.ctas { margin-top: clamp(20px, 3vh, 30px); }
+.ctasNarrow { display: none !important; }
+
+.cap { grid-area: cap; position: relative; display: flex; justify-content: space-between; align-items: center; gap: 16px; min-height: 44px; padding: 10px var(--gut); font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
+.onCrane { color: var(--live); }
+.replay { flex: none; white-space: nowrap; padding: 6px 0; border: 0; background: none; font: 600 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--live); cursor: pointer; }
+.replay:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+.list { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+@media (max-width: 860px) {
+  .hero { grid-template-rows: auto auto auto auto; grid-template-areas: 'text' 'stage' 'ctas' 'cap'; min-height: 0; }
+  .kicker, .sub, .text .ctas { display: none; }
+  .ctasNarrow { display: flex !important; grid-area: ctas; margin: 20px 0 0; padding: 0 var(--gut); }
+  .cap span:first-child { display: none; }
+  .cap { min-height: 0; padding-top: 4px; justify-content: flex-end; }
+  .stage { grid-area: stage; position: relative; inset: auto; height: calc(60vw + 92px); margin-top: 16px; }
+  .text { padding-bottom: 8px; }
+  .h1 span { white-space: normal; }
+}

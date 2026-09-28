@@ -1,0 +1,95 @@
+/* Task 418's graph, drafted: ruled cells with square corners and hairline
+   divisions, filled arrowheads, the loop as a dash-dot zone. Ink for the
+   work, cobalt for the lead and the loop, violet for your call. */
+
+.scroll { position: relative; overflow-x: auto; margin: 0 -8px; padding: 8px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.svg { display: block; width: 100%; min-width: 960px; height: auto; }
+
+.cell line { stroke: var(--t-1); stroke-width: 0.7; }
+.box { fill: var(--n-1); stroke: var(--t-1); stroke-width: 1.4; }
+.numCell { fill: var(--n-4); stroke: none; }
+.no { fill: var(--t-1); font: 700 15px var(--mono); letter-spacing: -0.02em; }
+.kind { fill: var(--t-1); font: 700 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.status { fill: var(--t-3); font: 500 9.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.name { fill: var(--t-1); font: 650 14px var(--font); letter-spacing: -0.012em; }
+.sub { fill: var(--t-3); font: 500 9.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.mark { color: var(--t-1); fill: currentColor; }
+.added .box { stroke: var(--live); stroke-dasharray: 6 3; }
+.added .numCell { fill: rgba(43, 59, 255, 0.08); }
+.added .no,
+.added .status { fill: var(--live); }
+.kept .box { stroke-width: 2.4; }
+.kept .status { fill: var(--t-1); font-weight: 700; }
+.kept .name { font-size: 14px; }
+.keptText { fill: var(--live); font: 500 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+
+.edges line { stroke: var(--t-1); stroke-width: 1.1; }
+.edgeText { fill: var(--t-2); font: 600 9.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.headInk { fill: var(--t-1); }
+.headLive { fill: var(--live); }
+.headYou { fill: var(--signal); }
+
+.lead path { fill: none; stroke: var(--live); stroke-width: 1; }
+.lead text { fill: var(--live); font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+
+.zone rect { fill: rgba(43, 59, 255, 0.035); stroke: var(--live); stroke-width: 1.1; stroke-dasharray: 16 4 2 4; }
+.zone text { fill: var(--live); font: 600 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.loop line { stroke: var(--live); stroke-width: 1.6; }
+.loop circle { fill: var(--live); }
+.loopText { fill: var(--live); font: 600 9.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+
+.toCall line { stroke: var(--signal); stroke-width: 1.2; }
+.callText { fill: var(--signal-pressed); font: 500 9.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.call path { fill: var(--signal-paper); stroke: var(--signal); stroke-width: 1.3; }
+.call path:first-child { fill: none; stroke-width: 0.7; }
+.callNo { fill: var(--signal-pressed); font: 700 11px var(--mono); }
+.callName { fill: var(--signal-pressed); font: 650 14px var(--font); }
+.callWho { fill: var(--signal-pressed); font: 500 9.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85; }
+
+.manual line,
+.manual circle { stroke: var(--t-1); stroke-width: 0.8; fill: none; }
+.manual .pin { stroke: var(--t-3); stroke-dasharray: 2 3; }
+.window { fill: var(--n-1); stroke: var(--t-1); stroke-width: 1.2; }
+.bar { fill: var(--line-3); }
+.tick { fill: none; stroke: var(--live) !important; stroke-width: 1.8 !important; stroke-linecap: square; }
+.cursor { fill: var(--t-1); stroke: var(--n-1); stroke-width: 1; }
+.manualText { fill: var(--t-1); font: 700 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.manualSub { fill: var(--t-3); font: 500 9.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+.dim line { stroke: var(--live); stroke-width: 0.8; }
+.dim .tick2 { stroke-width: 1.4; }
+.dim text { fill: var(--live); font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* Narrow: the same steps top to bottom, each a ruled cell, the loop a zone. */
+.list { display: none; list-style: none; margin: 0; padding: 0; }
+.list ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 22px; }
+.row { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); grid-template-rows: auto auto auto; background: var(--n-1); border: 1.4px solid var(--t-1); }
+.row + .row::before,
+.aside + .zoneList::before,
+.zoneList + .row::before,
+.list ol .row + .row::before { content: ''; position: absolute; left: 50%; top: -24px; height: 22px; border-left: 1.2px solid var(--t-1); }
+.rowNo { grid-row: 1 / -1; display: grid; place-items: center; background: var(--n-4); font: 700 14px var(--mono); box-shadow: inset -0.7px 0 0 var(--t-1); }
+.rowHead { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; box-shadow: inset 0 -0.7px 0 var(--t-1); font: 700 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.rowHead i { font-style: normal; font-weight: 500; font-size: 9.5px; color: var(--t-3); }
+.rowName { display: flex; align-items: center; gap: 8px; padding: 9px 10px 2px; font-size: 15px; font-weight: 650; }
+.rowName svg { fill: var(--t-1); flex: none; }
+.row small { padding: 0 10px 9px; font: 500 9.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--t-3); }
+.rowAdded { border-style: dashed; border-color: var(--live); }
+.rowAdded .rowNo,
+.rowAdded .rowHead i { color: var(--live); }
+.rowAdded .rowNo { background: rgba(43, 59, 255, 0.08); }
+.rowKept { border-width: 2.4px; }
+.rowKept .rowHead i { color: var(--t-1); font-weight: 700; }
+.list > * + * { margin-top: 22px; }
+.aside { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 10px; align-items: center; margin-left: 20px; padding: 10px 12px 10px 0; font-size: 14px; line-height: 1.45; color: var(--signal-pressed); }
+.aside b { font-weight: 650; }
+.callMark { display: grid; place-items: center; width: 30px; height: 30px; margin-left: 5px; transform: rotate(45deg); background: var(--signal-paper); box-shadow: inset 0 0 0 1.3px var(--signal); }
+.zoneList { position: relative; padding: 36px 14px 16px; background: rgba(43, 59, 255, 0.035); outline: 1.1px dashed var(--live); outline-offset: 0; }
+.zoneHead { position: absolute; top: 11px; left: 14px; font: 600 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--live); }
+.zoneList .row + .row::before { border-left-color: var(--live); border-left-width: 1.6px; }
+
+@media (max-width: 760px) {
+  .list { display: block; }
+  .scroll { display: none; }
+}

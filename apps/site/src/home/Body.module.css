@@ -1,0 +1,115 @@
+/* The page under the site: warm paper, big type, and a sheet's strip at the
+   head of each part. The drawings from Set sit on their own drafting grid. */
+
+.section { max-width: var(--max); margin: 0 auto; padding: clamp(96px, 14vh, 152px) var(--gut) 0; box-sizing: content-box; }
+.strip { display: flex; align-items: baseline; gap: 14px; margin-bottom: clamp(36px, 5vh, 56px); padding-bottom: 12px; box-shadow: inset 0 -1px 0 var(--t-1); font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-1); }
+.stripNo { font-weight: 700; color: var(--live); }
+.stripNote { margin-left: auto; color: var(--t-3); }
+
+.h2 { max-width: 18ch; font-size: clamp(36px, 4.4vw, 68px); line-height: 1; letter-spacing: -0.05em; font-weight: 700; text-wrap: balance; }
+.head { margin-bottom: clamp(40px, 6vh, 64px); }
+.lede { max-width: 56ch; margin-top: 20px; font-size: clamp(17px, 1.35vw, 19.5px); line-height: 1.55; color: var(--t-2); }
+
+/* What it is. */
+.what { max-width: 24ch; font-size: clamp(30px, 3.5vw, 54px); line-height: 1.12; letter-spacing: -0.035em; font-weight: 620; text-wrap: pretty; }
+.keeps { color: var(--live); }
+.soft { color: var(--t-3); }
+.ctas { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; margin-top: clamp(32px, 4vh, 44px); }
+.primary { display: inline-flex; align-items: center; gap: 10px; padding: 14px 20px; border-radius: 2px; background: var(--t-1); color: var(--n-2); font-size: 15.5px; font-weight: 620; text-decoration: none; transition: background var(--fast) var(--ease); }
+.primary:hover { background: var(--live); }
+.secondary { font-size: 15.5px; font-weight: 600; text-decoration: none; }
+.secondary:hover { color: var(--live); }
+.whatGrid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 0.75fr); gap: 48px clamp(40px, 6vw, 104px); align-items: end; }
+.facts { display: grid; gap: 28px; margin: 0; }
+.facts div { padding-top: 14px; box-shadow: inset 0 1px 0 var(--line-3); }
+.facts dt { font: 600 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.facts dd { margin: 8px 0 0; max-width: 34ch; font-size: 16px; line-height: 1.5; color: var(--t-2); }
+
+/* The agents, on the crane's plates. */
+.agentsGrid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr); gap: 48px clamp(40px, 6vw, 96px); align-items: center; margin-top: clamp(44px, 6vh, 72px); }
+.agentsCopy { display: grid; gap: 18px; }
+.agentsCopy .lede { margin: 0; }
+.agentsCopy ul { margin-top: 10px; padding-top: 18px; box-shadow: inset 0 1px 0 var(--line-3); }
+.fine { margin: 0; font: 500 11.5px/1.5 var(--mono); letter-spacing: 0.04em; color: var(--t-3); }
+
+/* Task 418, as its graph, on a drafting grid. */
+.sheet {
+  margin: 0;
+  padding: clamp(20px, 3vw, 40px);
+  background:
+    linear-gradient(var(--sh-grid-2) 1px, transparent 1px) 0 0 / 96px 96px,
+    linear-gradient(90deg, var(--sh-grid-2) 1px, transparent 1px) 0 0 / 96px 96px,
+    linear-gradient(var(--sh-grid) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, var(--sh-grid) 1px, transparent 1px) 0 0 / 24px 24px;
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+
+/* Where it stands, on its own sheet: Set's revisions and stamp, and the ways in as buttons. */
+.band {
+  margin-top: clamp(96px, 14vh, 152px);
+  padding-bottom: clamp(72px, 10vh, 112px);
+  background:
+    linear-gradient(var(--sh-grid-2) 1px, transparent 1px) 0 0 / 96px 96px,
+    linear-gradient(90deg, var(--sh-grid-2) 1px, transparent 1px) 0 0 / 96px 96px,
+    linear-gradient(var(--sh-grid) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, var(--sh-grid) 1px, transparent 1px) 0 0 / 24px 24px,
+    var(--n-1);
+  box-shadow: inset 0 1px 0 var(--t-1), inset 0 -1px 0 var(--t-1);
+}
+.band .section { padding-top: clamp(56px, 8vh, 88px); }
+.ways { list-style: none; margin: 0 0 clamp(56px, 8vh, 88px); padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px clamp(16px, 2vw, 28px); }
+.ways li { display: grid; align-content: start; gap: 12px; }
+.ways p { max-width: 30ch; font-size: 14.5px; line-height: 1.5; color: var(--t-2); }
+.way,
+.wayMain {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 2px;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.way span,
+.wayMain span { transition: transform var(--fast) var(--ease); }
+.way:hover span,
+.wayMain:hover span { transform: translateX(3px); }
+.wayMain { background: var(--t-1); color: var(--n-2); }
+.wayMain:hover { background: var(--live); }
+.way { background: var(--n-2); color: var(--t-1); box-shadow: inset 0 0 0 1.5px var(--t-1); }
+.way:hover { background: var(--t-1); color: var(--n-2); }
+.issue { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr); gap: 40px clamp(32px, 5vw, 72px); align-items: start; }
+.side { display: grid; gap: 44px; justify-items: center; padding-top: 16px; }
+.band .fine { margin-top: 32px; }
+
+.foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 32px; max-width: var(--max); margin: 0 auto; padding: 28px var(--gut) 104px; box-sizing: content-box;
+  font: 500 11.5px var(--mono); color: var(--t-3);
+}
+.footBrand { display: flex; align-items: center; gap: 9px; font: 700 16px var(--font); letter-spacing: -0.02em; color: var(--t-1); }
+.footLinks { display: flex; gap: 20px; margin-left: auto; }
+.footLinks a { color: var(--t-1); text-decoration: none; }
+.footLinks a:hover { color: var(--live); }
+
+@media (max-width: 1100px) {
+  .ways { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 860px) {
+  .agentsGrid, .issue, .whatGrid { grid-template-columns: minmax(0, 1fr); }
+  .side { justify-items: start; }
+}
+@media (max-width: 760px) {
+  .wideOnly { display: none !important; }
+  .section { padding-top: 88px; }
+  .what { font-size: 26px; }
+  .ways li { gap: 0; }
+  .ways { gap: 10px; }
+}
+@media (max-width: 560px) {
+  .ways { grid-template-columns: minmax(0, 1fr); }
+  .footLinks { margin-left: 0; }
+}

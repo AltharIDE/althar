@@ -1,0 +1,126 @@
+/* The thesis, set for reading: one measured column on warm paper, the
+   contents pinned beside it like a drawing list, propositions set as
+   claims, diagrams on grid paper. */
+
+.page {
+  --sh-paper: var(--n-2);
+  --sh-ink: var(--t-1);
+  --sh-ink-2: var(--t-2);
+  --sh-blue: var(--live);
+  background: var(--n-2);
+  color: var(--t-1);
+  overflow-x: clip;
+}
+.page :focus-visible { outline: 2px solid var(--live); outline-offset: 3px; }
+
+.strip { display: flex; align-items: baseline; gap: 14px; padding-bottom: 12px; box-shadow: inset 0 -1px 0 var(--t-1); font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.stripNo { font-weight: 700; color: var(--live); }
+.stripNote { margin-left: auto; color: var(--t-3); }
+
+.head { max-width: var(--max); margin: 0 auto; padding: clamp(40px, 7vh, 80px) var(--gut) 0; box-sizing: content-box; }
+.headGrid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 40px clamp(40px, 6vw, 96px); align-items: end; margin-top: clamp(36px, 5vh, 56px); }
+.h1 { max-width: 14ch; font-size: clamp(44px, 6.4vw, 108px); line-height: 0.95; letter-spacing: -0.056em; font-weight: 720; text-wrap: balance; }
+.lede { max-width: 38ch; margin-top: clamp(28px, 4vh, 40px); font-weight: 500; font-size: clamp(20px, 1.9vw, 27px); line-height: 1.4; letter-spacing: -0.018em; color: var(--t-2); }
+.hypothesis { max-width: 760px; margin: 18px 0 0; padding-top: 18px; background: linear-gradient(var(--live), var(--live)) 0 0 / 44px 2px no-repeat; }
+.hypLead { max-width: 42ch; font-size: clamp(18px, 1.5vw, 21px); line-height: 1.45; letter-spacing: -0.01em; color: var(--t-1); }
+.shift { display: grid; grid-template-columns: minmax(0, 0.8fr) 64px minmax(0, 1fr); gap: 20px; align-items: center; margin-top: 18px; padding-top: 16px; box-shadow: inset 0 1px 0 var(--line-3); }
+.from,
+.to { font-size: 16.5px; line-height: 1.45; }
+.from span,
+.to span { display: block; margin-bottom: 6px; font: 600 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.from { color: var(--t-3); }
+.from span { color: var(--t-4); }
+.to { color: var(--t-1); font-weight: 600; }
+.to span { color: var(--live); }
+.arrow { width: 64px; height: 12px; margin-top: 16px; }
+.arrow line { stroke: var(--live); stroke-width: 1.4; }
+.arrow path { fill: var(--live); }
+.stampSide { display: grid; justify-items: center; gap: 28px; padding-bottom: 12px; }
+.status { max-width: 30ch; text-align: center; font: 500 11px/1.6 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--t-3); }
+
+.body { display: grid; grid-template-columns: 260px minmax(0, 700px); justify-content: center; gap: clamp(40px, 6vw, 112px); max-width: var(--max); margin: clamp(64px, 10vh, 112px) auto 0; padding: 0 var(--gut); box-sizing: content-box; }
+
+.contents { position: sticky; top: 96px; align-self: start; max-height: calc(100svh - 120px); overflow-y: auto; }
+.contentsHead { padding-bottom: 10px; box-shadow: inset 0 -1.5px 0 var(--t-1); font: 700 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.contents ol { list-style: none; margin: 0; padding: 0; }
+.contents a { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 4px; padding: 7px 0; box-shadow: inset 0 -1px 0 var(--line-2); font-size: 13.5px; line-height: 1.35; color: var(--t-2); text-decoration: none; }
+.contents a span { font: 600 10.5px/1.9 var(--mono); color: var(--t-4); }
+.contents a:hover { color: var(--t-1); }
+.contents a[aria-current] { color: var(--t-1); font-weight: 600; }
+.contents a[aria-current] span { color: var(--live); }
+
+/* The reading column. */
+.article { min-width: 0; font-size: 18.5px; line-height: 1.66; color: var(--t-1); }
+.article p { margin: 0 0 1em; text-wrap: pretty; }
+.article strong { font-weight: 650; }
+.article a { color: var(--t-1); text-decoration: underline; text-decoration-color: var(--live); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+.article a:hover { color: var(--live); }
+.article code { padding: 1px 5px; border-radius: 3px; background: var(--n-4); font: 500 0.84em var(--mono); }
+
+.intro { padding-bottom: 8px; }
+.part { padding-top: clamp(72px, 10vh, 112px); scroll-margin-top: 40px; }
+.partStrip { display: flex; gap: 12px; margin-bottom: 24px !important; padding-bottom: 10px; box-shadow: inset 0 -1px 0 var(--t-1); font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.h2 { margin-bottom: 28px; font-size: clamp(32px, 3.4vw, 50px); line-height: 1.02; letter-spacing: -0.045em; font-weight: 700; text-wrap: balance; }
+.h3 { margin: 44px 0 14px; font-size: 24px; line-height: 1.2; letter-spacing: -0.025em; font-weight: 680; scroll-margin-top: 96px; }
+.h4 { margin: 32px 0 10px; font-size: 19px; line-height: 1.3; letter-spacing: -0.015em; font-weight: 680; scroll-margin-top: 96px; }
+
+.ul, .ol { margin: 0 0 1.1em; padding: 0; list-style: none; }
+.ul li, .ol li { position: relative; padding-left: 28px; margin: 0.28em 0; }
+.ul li::before { content: '–'; position: absolute; left: 4px; color: var(--t-4); }
+.ol { counter-reset: n; }
+.ol li { counter-increment: n; padding-left: 36px; }
+.ol li::before { content: counter(n, decimal-leading-zero); position: absolute; left: 0; top: 0.3em; font: 600 11.5px var(--mono); color: var(--live); }
+.ul li p, .ol li p { margin: 0; }
+
+/* A proposition, set as a claim; a plain quote, set quietly. */
+.claim { max-width: 36ch; margin: 36px 0; padding-top: 16px; background: linear-gradient(var(--live), var(--live)) 0 0 / 32px 2px no-repeat; font-size: clamp(19px, 1.6vw, 22px); line-height: 1.42; letter-spacing: -0.012em; }
+.claim p { margin: 0; }
+.claim strong { font-weight: 560; }
+.quote { margin: 18px 0; padding-left: 28px; font-size: 20px; color: var(--t-2); font-style: italic; }
+.quote p { margin: 0; }
+
+/* The diagrams, on grid paper. */
+.diagram {
+  margin: 28px 0;
+  padding: 22px 26px;
+  overflow-x: auto;
+  background:
+    linear-gradient(rgba(43, 59, 255, 0.1) 1px, transparent 1px) 0 0 / 96px 96px,
+    linear-gradient(90deg, rgba(43, 59, 255, 0.1) 1px, transparent 1px) 0 0 / 96px 96px,
+    linear-gradient(rgba(43, 59, 255, 0.05) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, rgba(43, 59, 255, 0.05) 1px, transparent 1px) 0 0 / 24px 24px,
+    var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.diagram pre { margin: 0; font: 500 14px/1.7 var(--mono); color: var(--t-1); }
+
+.tableWrap { overflow-x: auto; margin: 24px 0; }
+.table { width: 100%; border-collapse: collapse; font-size: 15px; }
+.table th, .table td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line-3); }
+.table th { font: 600 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); border-bottom: 1.5px solid var(--t-1); }
+
+.end { margin-top: 72px !important; padding-top: 16px; box-shadow: inset 0 1px 0 var(--t-1); font: 500 12px var(--mono); letter-spacing: 0.04em; color: var(--t-3); }
+
+.foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 32px; max-width: var(--max); margin: clamp(96px, 14vh, 144px) auto 0; padding: 28px var(--gut) 104px; box-sizing: content-box; box-shadow: inset 0 1px 0 var(--t-1); font: 500 11.5px var(--mono); color: var(--t-3); }
+.foot a { margin-left: auto; color: var(--t-1); text-decoration: none; }
+.foot a:hover { color: var(--live); }
+.footBrand { display: flex; align-items: center; gap: 9px; font: 700 16px var(--font); letter-spacing: -0.02em; color: var(--t-1); }
+
+@media (max-width: 1000px) {
+  .body { grid-template-columns: minmax(0, 1fr); }
+  .contents { position: static; max-height: none; }
+  .contents ol { columns: 2; column-gap: 24px; }
+  .contents li { break-inside: avoid; }
+}
+@media (max-width: 760px) {
+  .headGrid { grid-template-columns: minmax(0, 1fr); }
+  .shift { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .arrow { display: none; }
+  .stampSide { justify-items: start; }
+  .status { text-align: left; }
+  .contents ol { columns: 1; }
+  .article { font-size: 17px; }
+  .quote { padding-left: 18px; }
+  .diagram { padding: 16px; }
+  .diagram pre { font-size: 12.5px; }
+}

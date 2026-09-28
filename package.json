@@ -8,6 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun --filter @charrette/pitch dev",
+    "site": "bun --filter @charrette/site dev",
     "build": "bun --filter '*' build",
     "check": "bun --filter '*' check",
     "test": "bun --filter '*' test",

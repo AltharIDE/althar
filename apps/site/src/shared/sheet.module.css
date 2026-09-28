@@ -1,0 +1,48 @@
+/* The drawing set's pieces. Colours come from the page's --sh-* variables;
+   layout comes from the width each piece is given, through container
+   queries. */
+
+.fit { container-type: inline-size; }
+
+/* Keyed steps. */
+.keys { list-style: none; margin: 40px 0 0; padding: 28px 0 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px 32px; box-shadow: inset 0 1px 0 var(--sh-ink); }
+.keys li { display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: start; }
+.keyNo { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--sh-blue); font: 600 11px var(--mono); color: var(--sh-blue); background: var(--sh-paper); }
+.keys b { font-size: 14.5px; font-weight: 650; letter-spacing: -0.01em; }
+.keys b span { font-weight: 450; color: var(--sh-ink-2); }
+.keys p { margin-top: 4px; font-size: 14px; line-height: 1.5; color: var(--sh-ink-2); }
+.keyYou .keyNo { box-shadow: inset 0 0 0 1px var(--sh-violet); color: var(--sh-violet-ink); }
+
+/* The revision block. */
+.revs { width: 100%; border-collapse: collapse; background: var(--sh-paper); box-shadow: inset 0 0 0 1.5px var(--sh-ink); font-size: 15px; }
+.revs th, .revs td { text-align: left; vertical-align: top; padding: 14px 18px; border-bottom: 1px solid var(--sh-ink); }
+.revs thead th { font: 600 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--sh-ink-2); padding-top: 12px; padding-bottom: 10px; }
+.revs td + td, .revs th + th { border-left: 1px solid var(--sh-ink); }
+.revs caption { text-align: left; font: 600 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; padding-bottom: 10px; }
+.revs td { font-size: 14.5px; line-height: 1.45; }
+.mark { font: 600 12px var(--mono); color: var(--sh-blue); width: 84px; white-space: nowrap; }
+.stage { font: 600 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.revs .done { color: var(--sh-ink); }
+.revs .now td { color: var(--sh-blue); background: var(--sh-now, rgba(43, 59, 255, 0.05)); }
+.revs .next td, .revs .later td { color: var(--sh-ink-2); }
+
+/* The stamp and the definition. */
+.stamp { display: grid; justify-items: center; gap: 6px; padding: 18px 26px; border: 2px solid var(--sh-blue); outline: 1px solid var(--sh-blue); outline-offset: 3px; color: var(--sh-blue); transform: rotate(-6deg); text-transform: uppercase; text-align: center; }
+.stamp span { font: 600 11px var(--mono); letter-spacing: 0.18em; }
+.stamp b { font-size: 26px; font-weight: 750; letter-spacing: 0.02em; line-height: 1; }
+.define { margin: 0; padding: 18px 20px; background: var(--sh-paper); box-shadow: inset 0 0 0 1px var(--sh-ink); max-width: 340px; }
+.define dt { font-size: 19px; font-weight: 650; letter-spacing: -0.015em; }
+.define dt i { font-style: normal; font-weight: 400; color: var(--sh-ink-2); font-size: 15px; }
+.define dt em { font: italic 400 14px var(--font); color: var(--sh-ink-2); }
+.define dd { margin: 8px 0 0; font-size: 15px; line-height: 1.5; color: var(--sh-ink-2); }
+
+@container (max-width: 900px) {
+  .keys { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container (max-width: 560px) {
+  .keys { grid-template-columns: minmax(0, 1fr); }
+  .revs thead { display: none; }
+  .revs tr { display: grid; grid-template-columns: 40px 1fr auto; border-bottom: 1px solid var(--sh-ink); }
+  .revs td { border: none !important; padding: 10px 12px; }
+  .revs td:nth-child(2) { display: none; }
+}
