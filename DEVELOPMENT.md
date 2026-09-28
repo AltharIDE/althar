@@ -52,6 +52,11 @@ Each app and package has its own README with its own commands.
 - Accessibility to WCAG 2.2 AA from the first implementation.
 - A consequential decision gets an ADR in [`docs/decisions`](docs/decisions); an exception gets an owner and an expiry.
 
+Runtime-side code is written with Effect 4, with the conventions in
+[ADR-009](docs/decisions/009-effect-on-the-runtime-side.md); the UI kit never
+uses it. The desktop app is MVVM in feature folders
+([ADR-010](docs/decisions/010-desktop-app-mvvm.md)).
+
 Each app and package has its own `ARCHITECTURE.md` for what is specific to it. Before naming anything on screen, check [the glossary](docs/glossary.md).
 
 ## The architecture
