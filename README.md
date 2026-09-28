@@ -1,6 +1,6 @@
 <img src="docs/assets/readme-header.png" width="100%" alt="Charrette. The project should persist. The agents should not have to." />
 
-Charrette is an open-source environment for running software projects with AI coding agents. It keeps the project in one place: its rules, knowledge, decisions, tasks and history. That place outlasts any single agent session. The work goes to whichever agents suit it, such as Claude Code, Codex or Gemini CLI, as installed on your machine.
+Charrette is an open-source environment for running software projects with AI coding agents. It keeps the project in one place: its rules, knowledge, decisions, tasks and history. That place outlasts any single agent session. The work goes to whichever agents suit it, such as Claude Code, Codex or OpenCode, as installed on your machine.
 
 > [!NOTE]
 > **Very early.** There is no runnable Charrette yet. This repository holds the thesis, the architecture, the interface primitives and the brief. The model, and the words for it, will change as we prototype.
@@ -45,6 +45,7 @@ Charrette tests a broader hypothesis about how software engineering changes once
 | --- | --- |
 | [`THESIS.md`](./THESIS.md) | The research hypothesis |
 | [`docs/architecture/`](./docs/architecture) | The working architecture: a local-first desktop app, with seams for a later cloud. Listed below |
+| [`docs/decisions/`](./docs/decisions) | Architecture decisions, one per file |
 | [`docs/glossary.md`](./docs/glossary.md) | The words the interface uses, beside the words the architecture uses |
 | [`docs/open-questions.md`](./docs/open-questions.md) | What is not decided yet |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | The engineering standards every app and package follows |
@@ -55,10 +56,11 @@ The architecture, starting from [the overview](./docs/architecture/README.md):
 1. [Concepts and the project model](./docs/architecture/01-concepts-and-project-model.md)
 2. [Desktop runtime](./docs/architecture/02-desktop-runtime.md)
 3. [Agent runtime and auth](./docs/architecture/03-agent-runtime-and-auth.md)
-4. [Workflow engine](./docs/architecture/04-workflow-engine.md)
-5. [Integrations and skills](./docs/architecture/05-integrations-and-skills.md)
-6. [Persistence, security and cloud](./docs/architecture/06-persistence-security-and-cloud.md)
-7. [Precedents and validation](./docs/architecture/07-precedents-and-validation.md)
+4. [Coordinator](./docs/architecture/04-coordinator.md)
+5. [Workflow engine](./docs/architecture/05-workflow-engine.md)
+6. [Integrations and skills](./docs/architecture/06-integrations-and-skills.md)
+7. [Persistence, security and cloud](./docs/architecture/07-persistence-security-and-cloud.md)
+8. [Precedents and validation](./docs/architecture/08-precedents-and-validation.md)
 
 ## Develop
 

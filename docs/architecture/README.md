@@ -1,7 +1,7 @@
-# Charrette Architecture Plan
+# Charrette Architecture
 
 > **Status:** Working architecture baseline
-> **Date:** 2026-09-20
+> **Date:** 2026-09-20, harness decisions added 2026-09-28
 > **Scope:** Local-first MVP with explicit seams for later cloud authority
 > **Audience:** Product engineers familiar with web or mobile development
 
@@ -18,8 +18,10 @@ Charrette is therefore an **agent harness**, but not a new agent runtime:
 
 - Charrette owns projects, tasks, workflow state, policy, approvals,
   integrations, skills, evidence, and recovery.
-- Codex, Claude Code, or another provider owns its model calls, context window,
-  native tool loop, provider conversation, and provider authentication.
+- Claude Code, Codex, OpenCode, or another agent owns its model calls, context
+  window, native tool loop, provider conversation, and provider
+  authentication. Charrette reaches every agent through the Agent Client
+  Protocol (ACP).
 - Charrette supervises and interprets provider work without trying to reproduce
   the provider internally.
 
@@ -111,18 +113,22 @@ The MVP is one installed product with a UI and a local backend:
 flowchart TB
     UI["Electron renderer<br/>web UI"]
     Main["Electron main<br/>native application shell"]
-    Runtime["Charrette runtime<br/>local control plane"]
+    Runtime["Charrette runtime<br/>utility process, local control plane"]
     Store[("SQLite + artifact store")]
-    Provider["Codex / Claude Code / other agent runtime"]
+    Provider["Agents over ACP<br/>Claude Code · Codex · OpenCode"]
+    Tools["Charrette tools<br/>MCP"]
     Connector["Git host / Linear / Jira connector"]
     MCP["MCP tools and resources"]
     Skills["Resolved skill snapshot"]
 
     UI <-->|"narrow typed bridge"| Main
-    Main <-->|"versioned local protocol"| Runtime
+    UI <-->|"MessagePort"| Runtime
+    Main -->|"starts and supervises"| Runtime
     Runtime <--> Store
-    Runtime <--> Provider
+    Runtime <-->|"ACP over stdio"| Provider
     Runtime <--> Connector
+    Provider <--> Tools
+    Tools <--> Runtime
     Provider <--> MCP
     Skills --> Runtime
 ```
@@ -131,7 +137,7 @@ For a web/mobile developer, the renderer is the frontend and the Charrette
 runtime is a backend service that happens to run on the same computer. Electron
 main is the thin native shell between them.
 
-The separate runtime:
+The separate runtime, which runs in an Electron utility process:
 
 - remains the only writer to the local database;
 - owns long-running providers and tools;
@@ -148,7 +154,7 @@ Four concepts that may all look like “plugins” are intentionally separate:
 
 | Boundary | Purpose | Example |
 |---|---|---|
-| Provider runtime adapter | Run an agent session | Codex app-server |
+| Provider runtime adapter | Run an agent session | Claude Code, Codex, or OpenCode over ACP |
 | Domain connector | Reconcile durable external state | Linear, Jira, GitHub |
 | MCP connection | Expose callable tools/resources | Search or database tool |
 | Skill package | Supply procedural knowledge/resources | Review or migration skill |
@@ -175,24 +181,34 @@ the concepts:
    child processes, shutdown, crashes, and code/package boundaries.
 
 3. [Agent runtime and authentication](03-agent-runtime-and-auth.md)
-   explains what Charrette delegates to Codex or another provider, adapter
-   tiers, process ownership, approvals, and hostile CLI-only authentication.
+   explains what Charrette delegates to agents, ACP and its gaps, the agent
+   registry, briefing agents, switching model or agent, usage limits,
+   permission routing, process ownership, and authentication.
 
-4. [Workflow engine](04-workflow-engine.md)
+4. [Coordinator](04-coordinator.md)
+   explains the project's coordinator: an agent session with Charrette's tools
+   and read-only access, whose conversation Charrette keeps.
+
+5. [Workflow engine](05-workflow-engine.md)
    explains durable graphs, node attempts, retries, dynamic changes,
-   self-repair, compensation, interruption, and workflow authoring.
+   self-repair, compensation, interruption, task leads and steps, and workflow
+   authoring.
 
-5. [Integrations and skills](05-integrations-and-skills.md)
+6. [Integrations and skills](06-integrations-and-skills.md)
    explains Linear/Jira/Git hosting connectors, MCP, synchronization,
    credentials, skill resolution, and skill trust.
 
-6. [Persistence, security, scale, and cloud](06-persistence-security-and-cloud.md)
+7. [Persistence, security, scale, and cloud](07-persistence-security-and-cloud.md)
    explains SQLite, artifacts, trust boundaries, performance constraints,
    local authority, and future collaboration/cloud ownership.
 
-7. [Precedents and architecture validation](07-precedents-and-validation.md)
+8. [Precedents and architecture validation](08-precedents-and-validation.md)
    compares relevant systems, records required architecture decisions, and
    states the evidence that would validate or invalidate the design.
+
+Decisions are recorded one per file in [`docs/decisions/`](../decisions/). The
+words the interface uses are in [the glossary](../glossary.md), and what is
+still open is in [the open questions](../open-questions.md).
 
 ## System-wide invariants
 
@@ -222,6 +238,11 @@ These rules matter more than the eventual class or folder names:
 15. Every retry, loop, fan-out, repair, and background poll has a bound.
 16. Interrupting a chat turn acknowledges and stops that turn, then continues
     the unfinished objective with the new input. It is not task cancellation.
+17. Every session starts from a brief Charrette assembled and recorded. No
+    agent's own memory is the only record of a task.
+18. Every permission request reaches Charrette. No session starts in a bypass
+    mode.
+19. Switching model or agent never loses the task's workspace or record.
 
 ## MVP architecture boundary
 
@@ -230,9 +251,12 @@ The local MVP includes:
 - one local profile and no mandatory account;
 - projects with zero or more repository bindings;
 - several explicitly selected local clones or Git URLs;
-- managed workspaces that do not mutate selected working copies;
+- a git worktree per task that does not mutate selected working copies;
 - one host satisfying each run's full repository and credential set;
-- one structured provider adapter;
+- one ACP adapter serving Claude Code, Codex, and OpenCode, with native side
+  channels where ACP falls short;
+- switching model or agent mid-task;
+- a coordinator per project: a read-only agent session with Charrette's tools;
 - one immutable, code-owned workflow with attention and verification;
 - durable chat input with interrupt-and-continue behavior;
 - persisted attempts, observations, approvals, artifacts, changes, and claims;
@@ -242,6 +266,7 @@ The local MVP includes:
 It does not require:
 
 - a home-grown model/tool loop;
+- converting one agent's session files into another's format;
 - a provider marketplace;
 - a visual workflow builder;
 - arbitrary agent-authored executable nodes;
@@ -257,15 +282,34 @@ It does not require:
 The architecture retains seams for these capabilities without making them
 present-tense product promises.
 
-## Product choices still requiring sign-off
+## Building to standard
 
-The architecture uses the recommended defaults below. They remain explicit
-product choices:
+The proof of concept is built to product standard, so it can become the
+product without a rewrite. Shortcuts are allowed in behaviour, never in
+recorded facts or data shapes
+([ADR-008](../decisions/008-shortcuts-in-behaviour-not-in-records.md)). If the
+facts are recorded, smarter behaviour is a later change. If they are missing,
+the history cannot be recovered.
+
+## Product choices
+
+Decided:
+
+| Choice | Decision | Record |
+|---|---|---|
+| Agent protocol | ACP for every agent, behind Charrette's adapter port, with native side channels and replacement adapters where ACP falls short | [ADR-002](../decisions/002-acp-for-every-agent.md) |
+| Agents in the MVP | Claude Code, Codex, and OpenCode, interchangeable | [ADR-002](../decisions/002-acp-for-every-agent.md) |
+| Shell | Electron, with the runtime in a utility process | [ADR-003](../decisions/003-electron-shell.md) |
+| Coordinator | An ordinary agent session with Charrette's tools and read-only access | [ADR-004](../decisions/004-coordinator-is-an-agent-session.md) |
+| Starting context | Charrette briefs every agent; switching agent hands over everything in the MVP | [ADR-005](../decisions/005-charrette-briefs-every-agent.md) |
+| Workspaces | A git worktree per task; plain branches maybe later | [ADR-006](../decisions/006-worktree-per-task.md) |
+| Permissions | Every request reaches Charrette and is answered from the project rules | [ADR-007](../decisions/007-permission-requests-reach-charrette.md) |
+| Build standard | Shortcuts in behaviour, never in recorded facts or data shapes | [ADR-008](../decisions/008-shortcuts-in-behaviour-not-in-records.md) |
+
+Still requiring sign-off. The architecture uses these recommended defaults:
 
 | Choice | Recommended default | Why it matters |
 |---|---|---|
-| First provider mechanism | Prefer Codex app-server over stdio, subject to compatibility/lifecycle validation; keep the Codex SDK as the simpler fallback | Determines event, approval, resume, and packaging behavior |
-| Generic provider protocol | Keep a Charrette port; add stable ACP adapters where useful | Avoids coupling the domain to a draft or provider-specific protocol |
 | Subscription-backed CLI auth | Local execution through the official CLI only | Cloud must not extract or relay consumer subscription credentials |
 | First issue tracker | Choose Linear or Jira from the first serious cohort | Building both obscures field ownership and reconciliation lessons |
 | MCP posture | Charrette broker with explicit grants and audit | Provider-native pass-through is less consistently observable |
@@ -279,11 +323,11 @@ product choices:
 
 ## Primary references
 
+- [Agent Client Protocol](https://agentclientprotocol.com/)
 - [Codex app-server](https://learn.chatgpt.com/docs/app-server)
-- [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)
 - [Codex authentication](https://learn.chatgpt.com/docs/auth)
 - [Building Codex skills](https://learn.chatgpt.com/docs/build-skills)
-- [Agent Client Protocol](https://github.com/agentclientprotocol/agent-client-protocol)
+- [OpenCode ACP support](https://opencode.ai/docs/acp/)
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 - [Agent Skills specification](https://agentskills.io/specification)
 - [LangGraph durable execution](https://docs.langchain.com/oss/javascript/langgraph/thinking-in-langgraph)

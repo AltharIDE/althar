@@ -23,6 +23,25 @@ If Charrette implements both columns, it inherits the hardest and fastest-moving
 parts of Codex, Claude Code, and every future provider while weakening the
 durable project layer that differentiates it.
 
+Charrette reaches every agent through one protocol, the Agent Client Protocol
+(ACP), and adds native channels per agent only where ACP falls short
+([ADR-002](../decisions/002-acp-for-every-agent.md)).
+
+## Agents in the MVP
+
+Claude Code, Codex and OpenCode are interchangeable from the first version. A
+task's lead, any step and the coordinator can run on any of them, and a task
+can move between them.
+
+| Agent | How Charrette runs it | Sign-in, held by the agent | Notes |
+|---|---|---|---|
+| Claude Code | `claude-agent-acp`, the ACP project's adapter on the Claude Agent SDK. Claude Code has no native ACP | Claude plan or Anthropic API key | The Agent SDK reports usage limits, but the adapter doesn't forward them |
+| Codex | `codex-acp`, the ACP project's adapter | ChatGPT plan or OpenAI API key | Usage limits reach the adapter but are only rendered as `/status` text |
+| OpenCode | `opencode acp`, native | API keys for any provider; local model servers | The bring-your-own-key route. It cannot use a Claude plan. As of June 2026 its ACP could not change model per session |
+
+Another ACP agent, such as Gemini CLI, is added by a registry entry and the
+contract suite, not new code.
+
 ## Adapter contract
 
 The domain depends on an internal `ProviderRuntimeAdapter`, not directly on a
@@ -36,10 +55,16 @@ interface ProviderRuntimeAdapter {
   start(request: StartSessionRequest): AsyncIterable<ProviderEvent>
   resume(request: ResumeSessionRequest): AsyncIterable<ProviderEvent>
   respond(request: RespondRequest): Promise<void>
+  configure(request: ConfigureSessionRequest): Promise<SessionConfiguration>
   cancel(request: CancelSessionRequest): Promise<CancelResult>
   inspect(request: InspectSessionRequest): Promise<ProviderSessionObservation>
+  accountStatus(request: AccountStatusRequest): AsyncIterable<AccountStatus>
 }
 ```
+
+`configure` changes session settings such as the model and reasoning effort.
+`accountStatus` reports usage limits for the signed-in account (see Usage
+limits).
 
 The adapter reports, rather than fakes, capabilities:
 
@@ -48,13 +73,15 @@ The adapter reports, rather than fakes, capabilities:
 - streaming;
 - tool-approval hooks;
 - file and image attachments;
-- model and reasoning selection;
+- model and reasoning selection, and whether it can change within a session;
 - usage/cost reporting;
+- account usage limits and reset times;
 - cancellation and hard termination;
 - live steering, queued input, and interruption acknowledgement;
 - native subagents or handoffs;
 - MCP configuration;
 - skill/instruction injection;
+- read-only and ask-first session modes;
 - sandbox or execution-location claims;
 - supported authentication modes.
 
@@ -62,99 +89,110 @@ Unsupported capabilities are explicit. Provider independence means capability
 negotiation plus isolated translation, not erasing differences into an
 unreliable lowest common denominator.
 
-## Integration tiers
+## Transports
 
-Prefer the highest supported tier for each provider:
+ACP is the default transport. An adapter is one ACP session transport plus
+zero or more native side channels for what ACP doesn't carry. The domain sees
+the adapter's capability report, never which channel supplied a fact, so a
+native adapter can replace ACP for one agent without the domain changing.
 
 | Tier | Mechanism | Policy |
 |---|---|---|
-| A | Native supported SDK or structured service protocol | Preferred; pin versions and translate at the adapter boundary |
-| B | Stable Agent Client Protocol implementation | Useful generic transport; negotiate capabilities and protocol version |
+| A | ACP, spoken natively or through a maintained adapter | The default for every agent. Pin agent and adapter versions |
+| B | A native structured protocol or SDK, such as Codex app-server or OpenCode's server | A side channel for what ACP lacks, or a full adapter for one agent when ACP falls short |
 | C | Documented headless CLI with structured JSON/events | Supported with stricter lifecycle and compatibility tests |
-| D | PTY/TUI scraping or undocumented local protocol | Experimental only; never the default correctness path |
+| D | PTY/TUI scraping, undocumented local protocols, or another agent's private session files | Experimental only; never the default correctness path |
 
 Charrette must never parse ANSI terminal presentation as its canonical event
 stream. A terminal may be exposed as a user surface, but execution truth comes
 from a documented structured channel or remains explicitly uncertain.
 
-## Codex recommendation
+## ACP
 
-### App-server integration
+ACP is the default because one implementation reaches every agent in the MVP,
+and each later agent costs a registry entry rather than an integration. As of
+September 2026 it covers:
 
-Codex app-server is the best initial candidate for a rich integration because
-OpenAI documents it for clients that need authentication, conversation
-history, approvals, and streamed agent events. It uses JSON-RPC over stdio by
-default, while WebSocket support is currently an alternative transport. Its
-schemas are generated per Codex CLI version.
+- initialisation, protocol version and capability negotiation;
+- authentication methods;
+- creating and cancelling sessions, and loading them where the agent supports
+  it;
+- prompts and streamed updates: messages, tool calls, plans;
+- permission requests, which Charrette answers (see Permission routing);
+- session modes and config options, including the model selector
+  (`session/set_config_option`);
+- the MCP servers a session may use, given at `session/new`;
+- context-window use and cost (`usage_update`).
 
-Use stdio for this integration:
+It does not cover:
 
-- the process is child-owned and naturally scoped to one local runtime;
-- no local port discovery or firewall behavior is needed;
-- input/output lifetime follows the owned process;
-- protocol messages can be recorded after redaction;
-- app-server version and generated schema can be part of the adapter support
-  matrix.
+- usage limits and quotas, which the protocol leaves to a future proposal;
+- steering a turn in progress, so interrupt-and-continue is a cancel followed
+  by a new prompt ([01](01-concepts-and-project-model.md));
+- moving history between agents: a session can only be loaded by the agent
+  that created it.
 
-The adapter contract must demonstrate:
-
-1. initialization and capability/version negotiation;
-2. login-required and account-switch behavior;
-3. starting and resuming a conversation;
-4. streaming item/event ordering;
-5. approval request/response round trips;
-6. cancellation versus process termination;
-7. input queued during output and interrupt-and-continue behavior;
-8. crash behavior during a tool action;
-9. unknown or added protocol fields;
-10. bounded log retention and redaction;
-11. behavior across the oldest and newest supported CLI versions.
-
-Do not promote app-server identifiers into `Task` or `Run` IDs. They are stored
-as a provider-owned `ProviderSession` identity.
-
-### SDK fallback
-
-The Codex SDK is a simpler fit for programmatic local automation: start or
-resume threads and receive structured results without implementing the full
-client protocol. It is the fallback if app-server packaging or lifecycle proves
-too volatile for the MVP.
-
-The trade-off is less control over the complete client interaction surface.
-Compatibility and lifecycle evidence, not architectural taste, chooses between
-app-server and SDK.
-
-### Codex CLI fallback
-
-A documented non-interactive structured-output mode can satisfy Tier C, but it
-must still expose enough information to:
-
-- distinguish provider failure from task failure;
-- bind approval to an exact action where available;
-- cancel the complete child process tree;
-- record a resumable identifier or explicitly report no resume;
-- prevent human-formatted output from becoming domain state.
-
-## ACP and generic interoperability
-
-The Agent Client Protocol is promising because its protocol covers
-initialization and capability negotiation, authentication, session creation and
-resumption, prompts, cancellation, updates, and permission requests over
-JSON-RPC.
-
-Charrette should use an official ACP SDK for providers that implement a stable
-ACP version, but should not make ACP objects its domain model:
+ACP is still not Charrette's domain model:
 
 - ACP is a client-agent transport, not a project, workflow, integration, or
   persistence model.
 - Protocol drafts and capability growth must be quarantined inside an adapter.
-- Codex app-server is not assumed to be ACP.
+  The protocol moves quickly; the model selector, for example, moved from an
+  unstable method to session config options during 2026.
 - Charrette needs durable graph and authority semantics even if every provider
   eventually speaks ACP.
 
 The adapter converts ACP sessions and notifications into Charrette
 `ProviderSession` and `Observation` records while retaining the raw protocol
-version for diagnostics.
+version for diagnostics. ACP session identifiers are never promoted into
+`Task` or `Run` IDs.
+
+## The contract suite
+
+Every agent adapter passes the same suite, against the oldest and newest
+supported versions of the agent and its adapter:
+
+1. initialisation and capability/version negotiation;
+2. login-required and account-switch behaviour;
+3. starting and, where supported, loading a session;
+4. streaming update ordering;
+5. permission request/response round trips;
+6. changing the model within a session, or reporting that it can't;
+7. cancellation versus process termination;
+8. input queued during output and interrupt-and-continue behaviour;
+9. crash behaviour during a tool action;
+10. usage-limit recognition from errors, and account status where the agent
+    has it;
+11. unknown or added protocol fields;
+12. bounded log retention and redaction.
+
+## Agent registry
+
+Each agent is a registry entry, not a code path:
+
+```ts
+type AgentRegistryEntry = {
+  id: string // "claude-code", "codex", "opencode"
+  launch: {
+    source: "bundled" | "user_installed"
+    command: string
+    args: string[]
+    pinnedVersion?: string
+  }
+  probe: ProbeSpec // installed, version, signed in
+  sessionModes: { ask: string; readOnly?: string }
+  sideChannels: SideChannelSpec[] // for example account status
+  knownGaps: string[]
+}
+```
+
+- Adapters Charrette ships, `claude-agent-acp` and `codex-acp`, are bundled at
+  pinned versions. Nothing is fetched with `npx` or a similar tool at run
+  time. Adapters written for Node run on Electron's own Node
+  ([02](02-desktop-runtime.md)).
+- Agents the user installs, such as OpenCode, are found by probe, and their
+  version is checked against the support matrix.
+- Adding an ACP agent means adding an entry and passing the contract suite.
 
 ## Where agent frameworks fit
 
@@ -174,6 +212,112 @@ Use specialists or handoffs only when prompts, tools, or policies genuinely
 differ. Spawning agents is not a substitute for decomposing a graph into
 durable, observable nodes.
 
+## Briefing agents
+
+Charrette assembles every session's starting context. A new session learns
+about the task only from its brief. No session depends on what another agent
+remembered ([ADR-005](../decisions/005-charrette-briefs-every-agent.md)).
+
+A brief contains, as the role needs:
+
+- project rules and Charrette's instructions for the role: lead, step, or
+  coordinator;
+- the task, its plan, and where the graph stands;
+- the workspace: base, branch, and the diff so far;
+- the conversation record: the user's messages verbatim, earlier agents'
+  turns, decisions, what was tried and failed, and open items;
+- step results and artifacts the role needs;
+- per-project instructions for a step type, such as `.charrette/review.md`.
+
+The same brief starts:
+
+- a lead on a new task;
+- every step;
+- the coordinator's session when it is rebuilt ([04](04-coordinator.md));
+- a new attempt after a crash or retry;
+- the new agent after a switch.
+
+Rules:
+
+- Charrette does not edit a repository's own instruction files (`CLAUDE.md`,
+  `AGENTS.md`). Each agent still reads its own. The brief makes sure every
+  agent also starts with the same project context. Since September 2026 Claude
+  Code falls back to `AGENTS.md` only when no `CLAUDE.md` exists, so a
+  repository with both still gives different agents different instructions.
+- What fits goes in the first prompt. The rest stays readable through
+  Charrette's tools (an MCP server given to every session at `session/new`), so
+  the agent reads it when it needs it.
+- The brief sent is recorded as an artifact on the attempt, so what an agent
+  was told is always inspectable.
+- Project knowledge, when memory is built, enters sessions through the brief.
+
+## Switching model or agent
+
+These are two different operations.
+
+**Model, within one agent.** Changing Sonnet to Opus in Claude Code, or between
+Codex models, keeps the session. The adapter sets the model config option
+through ACP and the context carries over. The prompt cache is per model, so the
+first turn after a switch costs more. An agent whose ACP can't change model per
+session (OpenCode as of June 2026) restarts with a different configuration and
+loads its session again where it can, or the change is handled as an agent
+switch.
+
+**Agent.** A session can't move between agents. A switch starts a new session
+on the new agent, in the same workspace, from a brief. The new session belongs
+to a new attempt of the same node; the old session ends as `superseded`, and
+its controller is fenced.
+
+In the MVP the new agent takes over everything: the whole conversation record,
+the plan, the open items, and the code as it stands. The record goes into the
+first prompt as far as it fits, most recent first, and the rest is readable
+through Charrette's tools. No model is needed to switch, so a switch is
+immediate and works when the outgoing agent is out of usage.
+
+This will be tuned. Candidates include a fresh take that leaves out the
+previous agent's reasoning (research in 2026 suggests a stronger model does
+better without a weaker model's trajectory), starting again from base rather
+than the current code, and a generated handoff in the style of Amp's. Each is a
+brief policy; the mechanism stays the same.
+
+Rejected: converting one agent's session files into another agent's format so
+its own resume picks them up. Those formats are private and change with each
+release (Tier D), and provider-signed reasoning is lost either way.
+
+## Usage limits
+
+A usage limit belongs to an account (`ProviderPrincipal`), so it pauses every
+session on that account at once ([05](05-workflow-engine.md)). ACP does not
+report limits. Charrette detects them in two layers:
+
+1. **From errors, on every agent.** Each adapter classifies a failed turn as
+   `usage_limit`, with the reset time when the error carries one.
+2. **From account status, where the agent exposes it.** A native side channel
+   reports use per window and reset times before the limit is reached:
+   - Claude Code: the Agent SDK's `rate_limit_event` gives status, use per
+     window (five-hour, seven-day, per model) and reset times.
+     `claude-agent-acp` doesn't forward it, so Charrette ships the adapter
+     with a patch that forwards it as an ACP extension notification, and
+     offers the patch upstream.
+   - Codex: app-server's `account/rateLimits/read` and
+     `account/rateLimits/updated`, through a small app-server connection used
+     only for this.
+   - OpenCode: the provider's rate-limit errors and retry hints. API keys have
+     no plan windows.
+
+```ts
+type AccountStatus = {
+  principalId: string
+  state: "ok" | "warning" | "limited"
+  windows: Array<{ kind: string; usedFraction?: number; resetsAt?: string }>
+  source: "error" | "side_channel"
+  observedAt: string
+}
+```
+
+With account status, the scheduler can hold or move work before the limit is
+reached rather than after.
+
 ## Provider session lifecycle
 
 ```mermaid
@@ -189,6 +333,7 @@ stateDiagram-v2
     active --> completed
     active --> cancelling
     cancelling --> cancelled
+    active --> superseded: switched to another agent
     active --> lost
     lost --> reconciling
     reconciling --> active: resumable and safe
@@ -196,6 +341,7 @@ stateDiagram-v2
     reconciling --> failed: not resumable
     completed --> [*]
     cancelled --> [*]
+    superseded --> [*]
     uncertain --> [*]
     failed --> [*]
 ```
@@ -300,6 +446,20 @@ Rules:
 This is both safer and more durable than coupling Charrette to the current shape
 of a vendor's private auth cache.
 
+### Claude plans in third-party apps
+
+Anthropic's rules for using a Claude plan through other apps changed three
+times in 2026. Third-party use was blocked on 4 April. A separate, smaller
+credit was then announced for 15 June, and paused on 15 June. As of 28
+September 2026, Agent SDK and third-party app usage draws on the plan's normal
+limits, and Anthropic says it will give notice before changing that.
+
+Charrette running Claude Code through `claude-agent-acp` counts as third-party
+use. Check the policy again before relying on a Claude plan beyond the proof of
+concept; an Anthropic API key, through Claude Code or OpenCode, is the fallback.
+Plan sign-in works only in Claude Code and claude.ai, so OpenCode cannot use a
+Claude plan.
+
 ### API keys and OAuth
 
 When a provider supports programmatic credentials:
@@ -312,6 +472,10 @@ When a provider supports programmatic credentials:
 - support revocation and key rotation;
 - require cloud-side secret storage for cloud runners;
 - show which principal, billing context, and host will be used before execution.
+
+Keys the user gives Charrette for OpenCode follow these rules: they are kept in
+the Keychain and injected only into that OpenCode child's environment. Keys
+OpenCode already holds stay with OpenCode.
 
 Device authorization and OAuth callbacks must use the provider's documented
 native-app flow. A local loopback callback or claimed HTTPS scheme requires
@@ -341,6 +505,27 @@ At launch:
 Automatic provider upgrades must not silently change an in-flight run's
 adapter semantics. An app update can add support, but active sessions stay tied
 to the adapter/protocol version with which they began.
+
+## Permission routing
+
+Charrette must see every permission request to apply the project's rules,
+including the always-ask list
+([ADR-007](../decisions/007-permission-requests-reach-charrette.md)).
+
+- Every session starts in a mode where the agent asks rather than acts. No
+  session starts in a bypass mode. Requests arrive as ACP
+  `session/request_permission`.
+- Charrette answers from the project rules. Nearly everything is allowed
+  without the user; only what the rules keep for the user becomes an attention
+  request. Every answer is recorded on the task, and the thread shows allowed
+  requests as one quiet line.
+- A session with a read-only role, such as the coordinator or a review step,
+  starts in the agent's read-only mode where it has one (for example Claude
+  Code's plan mode, Codex's read-only sandbox, or OpenCode's plan agent), and
+  the rules deny it writes as well.
+- Known gap: an agent's own user-level settings, such as allow rules in the
+  user's Claude Code settings, can approve an action before Charrette sees it.
+  The always-ask list cannot be enforced against those.
 
 ## Approval boundary
 
@@ -383,7 +568,7 @@ Controls:
 - constrain Charrette-owned filesystem operations to registered roots;
 - allowlist child environment variables;
 - require explicit grants for MCP tools and external mutations;
-- record the exact skill and instruction snapshot sent to the provider;
+- record the exact brief, skills, and instructions sent to the agent;
 - treat provider claims about completed actions as observations until verified.
 
 Host-native execution uses the current user's OS authority and must be labeled
@@ -398,7 +583,8 @@ The adapter classifies failures without collapsing them:
 |---|---|---|
 | `auth_required` | Logged out or expired grant | Pause and request authentication |
 | `unsupported_version` | CLI schema outside support matrix | Block or degraded mode; never guess |
-| `transient_provider` | Rate limit or temporary network failure | Bounded retry with jitter and provider hint |
+| `transient_provider` | Short rate limit or temporary network failure | Bounded retry with jitter and provider hint |
+| `usage_limit` | The account's allowance is used up until a reset | Pause every session on that account; move or hold work under the project rule |
 | `invalid_request` | Unsupported model/tool option | Fail node with actionable detail |
 | `provider_refusal` | Policy refusal | Record terminal provider outcome |
 | `process_lost` | Child vanished | Reconcile session and external effects |
@@ -423,13 +609,27 @@ single generic “agent failed” label.
 - An account switch invalidates the prior execution grant.
 - A provider without resume support cannot be presented as resumed.
 - Host-native execution is never labeled sandboxed.
+- Claude Code, Codex, and OpenCode pass the same contract suite.
+- No session starts in a bypass mode; every permission request reaches
+  Charrette.
+- Switching to another agent keeps the workspace and hands over the whole
+  record, and the superseded session cannot write afterwards.
+- A usage limit is recognised on every agent from its error, and before it is
+  reached on agents with account status.
+- Every session's brief is recorded.
 
 ## References
 
+- [Agent Client Protocol](https://agentclientprotocol.com/)
+- [ACP session config options](https://agentclientprotocol.com/protocol/session-config-options)
+- [ACP session usage RFD](https://agentclientprotocol.com/rfds/session-usage)
+- [claude-agent-acp](https://github.com/agentclientprotocol/claude-agent-acp)
+- [codex-acp](https://github.com/agentclientprotocol/codex-acp)
+- [OpenCode ACP support](https://opencode.ai/docs/acp/)
 - [Codex app-server](https://learn.chatgpt.com/docs/app-server)
-- [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)
 - [Codex authentication](https://learn.chatgpt.com/docs/auth)
+- [Use the Claude Agent SDK with your Claude plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)
+- [Amp: Handoff](https://ampcode.com/news/handoff)
+- [The Handoff Tax (arXiv 2608.24358)](https://arxiv.org/abs/2608.24358)
 - [OpenAI Agents SDK orchestration](https://developers.openai.com/api/docs/guides/agents/orchestration)
-- [Agent Client Protocol repository](https://github.com/agentclientprotocol/agent-client-protocol)
-- [ACP protocol overview](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/protocol/v2/overview.mdx)
 - [OAuth 2.0 for native apps, RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html)

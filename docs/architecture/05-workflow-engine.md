@@ -367,8 +367,9 @@ receives. With a reason, it is also a candidate `KnowledgeClaim`, so later
 reviewers get the context.
 
 **Permissions are answered below the user where possible.** Charrette is the
-ACP client that answers `session/request_permission`, so it can answer from
-policy before anything reaches a person. The leaning:
+ACP client that answers `session/request_permission`, and every session starts
+in a mode that asks, so it can answer from policy before anything reaches a
+person ([03](03-agent-runtime-and-auth.md), Permission routing). The leaning:
 
 - project rules answer first;
 - the lead answers requests from its steps that the rules don't cover;
@@ -378,12 +379,16 @@ policy before anything reaches a person. The leaning:
 - everything allowed without the user is recorded on the task and shown as one
   quiet line.
 
-Open: whether the lead or a separate cheap judge model answers.
+Open: whether the lead or a separate cheap judge model answers. In the MVP,
+the rules and the always-ask list answer, and the lead does not yet.
 
 **Usage limits pause a runtime, not an agent.** A limit belongs to a runtime's
 account, so it pauses every node on that runtime at once: the lead, any steps,
-and their sub-agents. Under the default project rule, the paused work moves to
-the next free runtime, and the thread shows one line per move. Otherwise a
+and their sub-agents. How Charrette detects a limit is in
+[03](03-agent-runtime-and-auth.md), Usage limits. Under the default project
+rule, the paused work moves to the next free agent, which takes it over from a
+brief in the same workspace (03, Switching model or agent), and the thread
+shows one line per move. Otherwise a
 single attention request names everything paused and moves it together.
 
 **Typed step results.** Each step type declares its output schema, for example:
@@ -414,7 +419,8 @@ default all-required policy. Disagreement a rule cannot settle becomes an
 attention request. Parallel writers wait for per-branch workspaces and an
 explicit merge or select step.
 
-**Lead recommendation.** The coordinator recommends a lead model per task. It
+**Lead recommendation.** The coordinator ([04](04-coordinator.md)) recommends
+a lead model per task. It
 weighs the kind of work, past outcomes on similar tasks, runtime availability
 and usage limits, and cost. The user can override it. The recommendation and
 its reasons are recorded on the task.
@@ -485,7 +491,8 @@ Interrupting a chat turn is not any of these cancellation scopes.
 | User redirects the lead while a later step is pending | Interrupt and continue; lead proposes a patch for pending nodes; obsolete attempts are cancelled, not deleted |
 | User messages the lead while another agent's step runs | Lead answers without disturbing the step; forwards a steer or cancels the attempt only if the message concerns it |
 | Review finding rests on missing business context | User dismisses the finding with a reason; the decision reaches the lead and is a knowledge candidate |
-| Lead's runtime hits a usage limit mid-node | Attempt interrupted; a new attempt on another runtime starts from the task record |
+| Lead's runtime hits a usage limit mid-node | Attempt interrupted; a new attempt on another agent takes over from a brief, in the same workspace |
+| User switches the lead to another agent mid-task | The current session is superseded; a new attempt on the new agent takes over everything from a brief |
 | Parallel reviewers disagree | Aggregation reports the disagreement; a rule settles it or it becomes an attention request |
 
 ## Authoring model

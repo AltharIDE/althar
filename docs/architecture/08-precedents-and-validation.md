@@ -63,27 +63,41 @@ a better precedent than pretending host-native execution is sandboxed.
 Charrette should keep an `ExecutionHostAdapter` seam, while avoiding the trap of
 using an agent event stream as the complete project data model.
 
-### Codex app-server and SDK
-
-Codex provides two credible integration levels:
-
-- app-server for a client needing authentication, history, approvals, and
-  streamed agent events;
-- SDK for simpler programmatic thread start/resume behavior.
-
-This materially reduces the case for building a model/tool harness. Charrette
-still needs its own adapter and domain because Codex sessions do not define
-Charrette projects, workflow authority, connectors, or cross-run knowledge.
-
 ### Agent Client Protocol
 
-ACP provides a promising generic JSON-RPC client-agent boundary with capability
-negotiation, auth, sessions, prompts, cancellation, updates, and permission
-requests.
+ACP is a generic JSON-RPC client-agent boundary with capability negotiation,
+auth, sessions, prompts, cancellation, updates, permission requests, session
+config options, and per-session MCP servers. Zed and JetBrains clients use it,
+Claude Code and Codex reach it through adapters the ACP project maintains, and
+OpenCode and Gemini CLI speak it natively.
 
-Use it where providers implement a stable version. Do not freeze Charrette's
-domain to it: protocol drafts can evolve, not every provider uses it, and it
-does not solve the control-plane product model.
+Charrette uses it for every agent in the MVP
+([ADR-002](../decisions/002-acp-for-every-agent.md)). The domain is still not
+frozen to it: protocol drafts evolve, it has no usage limits or cross-agent
+history, and it does not solve the control-plane product model.
+
+### Codex app-server and SDK
+
+Codex app-server serves clients that need authentication, history, approvals,
+streamed events, and account usage limits. Charrette uses it as a side channel
+for Codex's usage limits, and could make it Codex's full adapter if ACP falls
+short.
+
+### OpenCode, pi, and Amp
+
+These show three answers to changing model or agent mid-work:
+
+- OpenCode and pi hold their own message history, so they can switch
+  provider mid-session; pi converts one provider's reasoning into text for the
+  next.
+- Amp replaced compaction with Handoff: a model drafts the first message of a
+  new thread from the old one, for a stated goal, and the user can edit it.
+- Conductor and Superset run several agents on shared worktrees, and hand
+  context over through the files, not the conversation.
+
+Charrette can't hold the loop for Claude Code or Codex, so switching agent is
+a new session with a brief ([03](03-agent-runtime-and-auth.md)). Amp's handoff
+is a candidate for tuning it.
 
 ### MCP
 
@@ -159,13 +173,19 @@ important choice, its alternatives, and the evidence behind it. These ADRs keep
 implementation-specific decisions from becoming undocumented assumptions:
 
 1. **Runtime lifetime and packaging**
-   Desktop supervision, quit semantics, reconciliation, daemon extraction.
+   Electron with the runtime in a utility process is decided
+   ([ADR-003](../decisions/003-electron-shell.md)). Quit semantics,
+   reconciliation, and daemon extraction are still open.
 
 2. **Local control-plane transport**
-   MessagePort/socket choice, authentication, versioning, CLI coexistence.
+   `MessagePort` for the desktop, a socket for a later CLI
+   ([02](02-desktop-runtime.md)). Versioning and authentication are still
+   open.
 
 3. **First provider integration**
-   App-server versus SDK/CLI evidence, support matrix, degraded behavior.
+   Decided: ACP for every agent, with native side channels
+   ([ADR-002](../decisions/002-acp-for-every-agent.md)). Still needs the
+   support matrix and degraded behaviour per agent.
 
 4. **Provider and external authentication**
    Principals, opaque credential references, local subscription CLI policy,
@@ -206,6 +226,14 @@ implementation-specific decisions from becoming undocumented assumptions:
     Link/unlink, aggregate authority, fencing, artifact/secret movement.
 
 ADRs record decisions and evidence; they do not duplicate these documents.
+They live in [`docs/decisions/`](../decisions/). Beyond this list, the
+coordinator ([ADR-004](../decisions/004-coordinator-is-an-agent-session.md)),
+briefing agents ([ADR-005](../decisions/005-charrette-briefs-every-agent.md)),
+workspaces ([ADR-006](../decisions/006-worktree-per-task.md)), permission
+routing ([ADR-007](../decisions/007-permission-requests-reach-charrette.md)),
+and the build standard
+([ADR-008](../decisions/008-shortcuts-in-behaviour-not-in-records.md)) are
+decided.
 
 ## Architecture validation criteria
 

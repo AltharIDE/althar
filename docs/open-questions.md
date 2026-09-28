@@ -9,6 +9,46 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@charrette/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `charrette-designs` repository (`prototypes/shell`).
 
+## The harness, 28 September
+
+- [x] **How Charrette reaches agents.** Settled: ACP for every agent, with
+  Claude Code, Codex and OpenCode interchangeable in the MVP, and native side
+  channels where ACP falls short.
+  [ADR-002](decisions/002-acp-for-every-agent.md).
+- [x] **The shell.** Settled: Electron, with the runtime in a utility process.
+  [ADR-003](decisions/003-electron-shell.md).
+- [x] **What the coordinator is.** Settled: an agent session with Charrette's
+  tools and read-only access; Charrette keeps its conversation.
+  [ADR-004](decisions/004-coordinator-is-an-agent-session.md),
+  [architecture 04](architecture/04-coordinator.md).
+- [x] **Switching agent mid-task.** Settled for the MVP: the new agent takes
+  over everything, from a brief, in the same workspace. Changing model within
+  an agent keeps the session.
+  [ADR-005](decisions/005-charrette-briefs-every-agent.md).
+- [x] **Workspaces.** Settled: a git worktree per task, shared by its steps.
+  [ADR-006](decisions/006-worktree-per-task.md).
+- [x] **How much rigour the proof of concept gets.** Settled: shortcuts in
+  behaviour, never in recorded facts or data shapes.
+  [ADR-008](decisions/008-shortcuts-in-behaviour-not-in-records.md).
+- [ ] **Tuning a switch.** When you switch because you don't like the work,
+  should the new agent get a fresh take without the old agent's reasoning,
+  start from base rather than the current code, or get a generated handoff
+  in Amp's style? How does the switch menu offer that?
+- [ ] **Changing model in OpenCode.** Its ACP couldn't change model per session
+  as of June 2026. Restart it with a new configuration, treat the change as an
+  agent switch, or use OpenCode's own server API?
+- [ ] **Usage limits in ACP itself.** Propose a rate-limit extension to ACP,
+  rather than keep a side channel per agent?
+- [ ] **Agent settings that approve before Charrette sees.** A user's own allow
+  rules, in Claude Code's settings for example, can approve an action before
+  it reaches Charrette, so the always-ask list never sees it. Warn, read those
+  settings, or accept it?
+- [ ] **The coordinator's defaults.** Its default model; whether task events
+  prompt it; whether it can skip the countdown when you asked for exactly that
+  task. See [architecture 04](architecture/04-coordinator.md).
+- [ ] **Setup per worktree.** Where the setup command and the files to copy
+  are declared: in the project rules, or in a file in the repository?
+
 ## From the design review, 27 September
 
 - [x] **Stop, interrupt and cancel are one square today.** Settled as the
@@ -84,7 +124,9 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
 - [ ] **API keys and local models.** "Connect another" now opens a panel
   (kit `setup/ConnectAgent`): apps Charrette can run but didn't find, APIs that
   take a key (typed once, hidden, into the Keychain), model servers on this
-  Mac, and any agent that speaks ACP by its command. Open: which apps and APIs
+  Mac, and any agent that speaks ACP by its command. Leaning: keys and local
+  models run through OpenCode, so Charrette still calls no model API itself
+  ([ADR-002](decisions/002-acp-for-every-agent.md)). Open: which apps and APIs
   are listed at launch, and how a connected key shows in the agent list.
 - [ ] **Choosing subpaths in a workspace.** The map offers "only these
   folders" as one suggested choice. Choosing folders freely needs a tree
@@ -110,8 +152,10 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
   for you arrives as a card. Open:
   - Does the lead answer, or a separate cheap judge model? The lead is busy and
     expensive; a judge has no task context.
-  - How does this map onto ACP, where Charrette is the client that answers
-    `session/request_permission`?
+  - ~~How does this map onto ACP?~~ Settled: every session starts in a mode
+    that asks, and Charrette answers `session/request_permission` from the
+    rules. In the MVP the lead doesn't answer yet.
+    [ADR-007](decisions/007-permission-requests-reach-charrette.md).
   - What goes on the default always-ask list?
   *Prototype:* Project → "Project rules", and "Allowed without you".
 - [ ] **Project rules: when and where they are set.** Leaning, as mocked in
@@ -213,7 +257,9 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
   account, so it pauses every agent on that runtime at once: the lead, its
   steps, and their sub-agents. Leaning: a project rule moves the work to the
   next free agent, which shows as a quiet line, and the card appears only when
-  the rule says to ask. Open:
+  the rule says to ask. How a limit is detected is settled
+  ([architecture 03](architecture/03-agent-runtime-and-auth.md), Usage limits).
+  Open:
   - Does paused work move back after the reset?
   - What if no other runtime is connected?
   - What about a step that must stay on one model, such as a review that

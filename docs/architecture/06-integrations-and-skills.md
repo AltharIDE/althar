@@ -7,7 +7,7 @@ Charrette must model them separately:
 
 | Plane | Purpose | Examples | Authority |
 |---|---|---|---|
-| `ProviderRuntimeAdapter` | Execute agent work | Codex, Claude Code | Provider owns its session; Charrette owns the run |
+| `ProviderRuntimeAdapter` | Execute agent work | Claude Code, Codex, OpenCode over ACP | Provider owns its session; Charrette owns the run |
 | `DomainConnector` | Synchronize durable business/domain state | GitHub/GitLab, Linear, Jira | External system owns its resources; Charrette owns mappings and workflow state |
 | `MCPConnection` | Expose callable tools and resources to an agent | Search, databases, SaaS actions | Tool server owns operation; Charrette owns grant and audit |
 | `SkillPackage` | Supply procedural knowledge and supporting resources | Review workflow, migration playbook | Package author owns content; Charrette owns resolution and permission policy |
@@ -242,6 +242,11 @@ The broker:
 - redacts and records call metadata and result artifacts;
 - enforces timeout, output-size, concurrency, and network policy;
 - translates provider-specific MCP configuration where necessary.
+
+ACP gives each session its MCP servers at `session/new`, so Charrette decides
+per session what an agent can reach, whatever the agent's own configuration
+says. Every session gets Charrette's own tools server
+([04](04-coordinator.md)) and the broker's allowed servers.
 
 When direct provider MCP configuration is allowed, record its exact
 configuration digest and treat pass-through as an explicit adapter capability.

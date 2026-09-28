@@ -12,7 +12,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Repository | `RepositoryBinding` | A repository that the project's tasks may change, with its role. It is shared by everyone on the project. |
 | On this Mac, Map it later | `RepositoryLocation`, or none | Where this device keeps that repository. "Map it later" is a binding with no location here. On the Sources view that state is "needs mapping". |
 | Reading it | read-only inspection | What Charrette does to a folder before a project exists. It changes nothing. |
-| Agent | runtime, adapter | Claude Code, Codex, Gemini CLI and the like, as installed on this machine. |
+| Agent | runtime, adapter | Claude Code, Codex, OpenCode and the like, as installed on this machine. |
 | Signed in as | `ProviderPrincipal` | Who the agent says you are. The agent keeps its own sign-in; Charrette never holds the credential. |
 | Sign in | vendor login, `auth_required` | Opens the agent's own sign-in. |
 | Out of usage | usage limit, `transient_provider` | The account has used its allowance until a reset. The task is Paused, or moves to another agent, depending on the project rules. |

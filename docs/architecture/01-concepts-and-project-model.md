@@ -38,7 +38,7 @@ flowchart LR
 - A **run** is one submission of that task under a workflow and policy.
 - A **workflow execution** is the durable graph of steps Charrette coordinates.
 - A **node attempt** is one try at a step.
-- A **provider session** is the temporary Codex, Claude Code, or other agent
+- A **provider session** is the temporary Claude Code, Codex, OpenCode, or other agent
   conversation used by a node.
 - An **observation** is something Charrette saw; an **artifact** is retained
   evidence such as a patch, log, or report.
@@ -172,7 +172,8 @@ Tasks, evidence, and decisions remain readable when a source is unavailable.
 ### Existing working copies
 
 An existing clone is an input source, not the default execution workspace.
-Charrette prepares a managed Git worktree or clone elsewhere. It never:
+Charrette prepares a Git worktree per task in a folder it owns
+([ADR-006](../decisions/006-worktree-per-task.md)). It never:
 
 - changes the user's current branch;
 - hides or stashes their changes;
@@ -180,6 +181,13 @@ Charrette prepares a managed Git worktree or clone elsewhere. It never:
 - removes their worktree;
 - rewrites remotes;
 - initializes Git without a separate explicit action.
+
+A project can declare a setup command, run in each new worktree, and untracked
+files to copy into it, such as `.env`.
+
+Working on a plain branch in the user's own checkout may come later, as an
+explicit per-project choice. It relaxes the rules above and must say so where
+the choice is made.
 
 For the MVP, writable source bindings are Git repositories. A plain directory
 can be attached read-only as an artifact/source reference later, but making it
@@ -215,7 +223,9 @@ If a required binding is unresolved, the run does not partially start. The user
 can map, clone, remove the requirement, or choose another capable host.
 
 One attempt receives one `WorkspaceSet` with a workspace per participating
-binding. Cross-repository publication is not atomic. A resulting `ChangeSet`
+binding. Everything in the attempt shares it: the lead, its steps, and any
+agent that takes the task over after a switch. Parallel steps in v1 only read,
+so one workspace per repository is enough. Cross-repository publication is not atomic. A resulting `ChangeSet`
 groups independent `RepositoryChange` records:
 
 - binding ID;
@@ -467,4 +477,5 @@ live beneath a project while keeping the MVP product coherent.
 - Multi-host execution within one run.
 - Treating a shared folder path as collaboration.
 - Treating Git remote access as project membership.
-- Mutating a user-selected working tree as a normal execution strategy.
+- Mutating a user-selected working tree as a normal execution strategy (a
+  plain-branch opt-in may come later; see Existing working copies).

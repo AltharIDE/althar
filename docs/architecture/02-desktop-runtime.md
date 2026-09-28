@@ -19,7 +19,7 @@ The desktop application has a UI and a local backend:
 | Charrette runtime process | A backend service running only on the user's computer | Own domain rules, workflows, persistence, integrations, and long-running work |
 | SQLite | The runtime's local relational database | Store canonical structured state |
 | Artifact store | Local object storage | Store patches, logs, reports, and other large immutable files |
-| Provider child process | A locally launched worker | Run Codex, Claude Code, Git, tests, or another tool |
+| Provider child process | A locally launched worker | Run Claude Code, Codex, OpenCode, Git, tests, or another tool |
 
 The renderer should feel like a normal frontend talking to a typed backend API.
 The main difference is deployment: both client and backend ship inside the
@@ -92,18 +92,41 @@ A separate runtime gives Charrette:
 5. **More than one client later.** The desktop UI and a diagnostic CLI can use
    the same typed contract.
 
-The runtime is packaged as a separate executable, but Electron supervises it.
-The MVP does not install a background daemon or operating-system service.
+The runtime runs in an Electron utility process (`utilityProcess`), which main
+starts and supervises ([ADR-003](../decisions/003-electron-shell.md)). The
+runtime package imports nothing from Electron, so the same code runs under
+plain Node for tests, a diagnostic CLI, or a later daemon. The MVP does not
+install a background daemon or operating-system service.
+
+## Why Electron
+
+- **Node is needed either way.** All code is TypeScript
+  ([ARCHITECTURE.md](../../ARCHITECTURE.md)), the ACP reference SDK is
+  TypeScript, and `claude-agent-acp` runs on Node. Electron ships Node. Tauri
+  would need a Rust core plus a bundled Node or Bun, so two runtimes, and most
+  of its size advantage would be gone.
+- **One browser engine.** Electron renders with Chromium on every platform,
+  the engine Storybook already runs in. Tauri uses each system's web view:
+  WebKit on macOS, WebView2 on Windows, WebKitGTK on Linux. The UI kit and its
+  overlays would be tested against three engines.
+- **The process model fits.** A utility process gives the runtime its own
+  process, supervised by main, with direct `MessagePort` channels to the
+  renderer.
+
+The costs are a larger download and more memory than Tauri, and the hardening
+this document already requires. Flutter would slow UI work and couldn't reuse
+the UI kit; a native Swift app couldn't either, and would be macOS-only.
+Electrobun is too young to build a product on today.
 
 ## Lifecycle walkthrough
 
 ### Application startup
 
 1. Electron main starts.
-2. It resolves the bundled runtime binary from the application installation,
-   not from the current repository or arbitrary `PATH`.
-3. It launches the runtime with a fresh local authentication secret and a
-   profile directory.
+2. It starts the runtime's utility process from the application bundle, not
+   from the current repository or arbitrary `PATH`.
+3. It gives the runtime a profile directory and one end of a `MessagePort`
+   channel; the other end goes to the renderer through the preload bridge.
 4. Main and runtime exchange protocol and application versions.
 5. The runtime opens/migrates SQLite, checks artifact storage, and reconciles
    work that was active before the previous shutdown.
@@ -227,15 +250,16 @@ They have different compatibility and retention requirements.
 
 ## Local transport
 
-The transport may initially be an Electron/Node local channel such as a
-`MessagePort` or authenticated local socket. The domain API must not depend on
-which one is chosen.
+The desktop uses `MessagePort` channels: main creates each channel and hands
+one end to the runtime and the other to a renderer. A diagnostic CLI, when it
+exists, connects through an authenticated local socket that speaks the same
+contract. The domain API must not depend on either transport.
 
 Required properties:
 
 - request/response correlation;
 - schema and protocol version negotiation;
-- a per-launch authentication secret;
+- a per-launch authentication secret for any socket;
 - bounded message and stream sizes;
 - cancellation;
 - resumable change cursors;
@@ -251,8 +275,13 @@ Electron-owned channel is simpler when only the desktop client exists.
 ### Child process
 
 A **child process** is another program launched by the runtime—for example
-Codex, Git, or a test runner. Standard input/output (`stdio`) are byte streams
-through which the runtime may send requests and receive structured events.
+an agent, Git, or a test runner. Standard input/output (`stdio`) are byte
+streams through which the runtime may send requests and receive structured
+events. Agents speak ACP over `stdio`.
+
+Bundled ACP adapters written for Node run on Electron's own Node (the Electron
+binary started with `ELECTRON_RUN_AS_NODE`), so Charrette doesn't depend on a
+Node installed on the machine.
 
 Starting a process is easy. Owning its complete lifecycle is the hard part.
 
@@ -355,7 +384,8 @@ packages/
   runtime/                # composition root and process supervision
   persistence-sqlite/
   workflow/
-  provider-adapters/
+  provider-adapters/      # the ACP adapter, agent registry, native side channels
+  charrette-tools/        # the MCP server agents use to reach Charrette
   integration-connectors/
   mcp-broker/
   skills/
@@ -396,6 +426,12 @@ A daemon can survive application quit and serve several clients, but adds
 installation permissions, service management, upgrades, discovery, and support
 burden before the product needs them.
 
+### A separate runtime executable
+
+Packaging the runtime as its own binary would let it outlive the app or serve
+several clients, but a utility process already gives a separate, supervised
+process. Keeping the runtime package free of Electron preserves the option.
+
 ### Split into local microservices
 
 Independent processes for workflow, integrations, providers, and persistence
@@ -422,3 +458,4 @@ complexity without independent scale or team ownership.
 - [Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model)
 - [Electron security checklist](https://www.electronjs.org/docs/latest/tutorial/security)
 - [Electron utility process API](https://www.electronjs.org/docs/latest/api/utility-process)
+- [Electron MessagePorts](https://www.electronjs.org/docs/latest/tutorial/message-ports)

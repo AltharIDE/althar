@@ -76,7 +76,15 @@ Record consequential decisions in an ADR with context, alternatives considered, 
 
 ## ADR log
 
-Add new decisions here in sequence. Preserve earlier decisions and mark them superseded when the target changes.
+ADR-001 is recorded here. Later decisions are one file each in [`docs/decisions/`](docs/decisions/), numbered in sequence. Preserve earlier decisions and mark them superseded when the target changes.
+
+- [ADR-002](docs/decisions/002-acp-for-every-agent.md) — 2026-09-28: ACP for every agent
+- [ADR-003](docs/decisions/003-electron-shell.md) — 2026-09-28: Electron shell, with the runtime in a utility process
+- [ADR-004](docs/decisions/004-coordinator-is-an-agent-session.md) — 2026-09-28: The coordinator is an agent session with Charrette's tools
+- [ADR-005](docs/decisions/005-charrette-briefs-every-agent.md) — 2026-09-28: Charrette briefs every agent, and a switch hands over everything
+- [ADR-006](docs/decisions/006-worktree-per-task.md) — 2026-09-28: A git worktree per task
+- [ADR-007](docs/decisions/007-permission-requests-reach-charrette.md) — 2026-09-28: Every permission request reaches Charrette
+- [ADR-008](docs/decisions/008-shortcuts-in-behaviour-not-in-records.md) — 2026-09-28: Shortcuts in behaviour, never in recorded facts
 
 ### ADR-001 — 2026-09-22: Repository-wide engineering target
 
