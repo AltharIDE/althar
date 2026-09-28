@@ -310,6 +310,8 @@ Decided:
 | Workspaces | A git worktree per task, in `~/Charrette/<project>/<task>/<repository>`; plain branches maybe later | [ADR-006](../decisions/006-worktree-per-task.md) |
 | Permissions | Every request reaches Charrette and is answered from the project rules | [ADR-007](../decisions/007-permission-requests-reach-charrette.md) |
 | Build standard | Shortcuts in behaviour, never in recorded facts or data shapes | [ADR-008](../decisions/008-shortcuts-in-behaviour-not-in-records.md) |
+| Runtime-side code | Effect 4, pinned; never in the UI kit | [ADR-009](../decisions/009-effect-on-the-runtime-side.md) |
+| Desktop app | MVVM: views, hooks as view models, an Effect data layer; feature folders; TanStack Router | [ADR-010](../decisions/010-desktop-app-mvvm.md) |
 
 Still requiring sign-off. The architecture uses these recommended defaults:
 

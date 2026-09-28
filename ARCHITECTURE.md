@@ -85,6 +85,8 @@ ADR-001 is recorded here. Later decisions are one file each in [`docs/decisions/
 - [ADR-006](docs/decisions/006-worktree-per-task.md) — 2026-09-28: A git worktree per task
 - [ADR-007](docs/decisions/007-permission-requests-reach-charrette.md) — 2026-09-28: Every permission request reaches Charrette
 - [ADR-008](docs/decisions/008-shortcuts-in-behaviour-not-in-records.md) — 2026-09-28: Shortcuts in behaviour, never in recorded facts
+- [ADR-009](docs/decisions/009-effect-on-the-runtime-side.md) — 2026-09-28: Effect on the runtime side
+- [ADR-010](docs/decisions/010-desktop-app-mvvm.md) — 2026-09-28: The desktop app is MVVM, in feature folders
 
 ### ADR-001 — 2026-09-22: Repository-wide engineering target
 
