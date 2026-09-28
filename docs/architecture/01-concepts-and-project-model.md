@@ -3,8 +3,8 @@
 ## Purpose
 
 This document introduces the durable concepts that the rest of the architecture
-builds on: projects, repositories, devices, workspaces, tasks, runs,
-conversations, and collaboration.
+builds on: projects, the coordinator, repositories, devices, workspaces, tasks,
+leads and steps, runs, conversations, and collaboration.
 
 The key decision is:
 
@@ -21,9 +21,10 @@ The product can be understood as one chain:
 
 ```mermaid
 flowchart LR
-    Project --> Task
+    Project --> Coordinator
+    Coordinator -->|"plans and hands out"| Task
     Task --> Run
-    Run --> Workflow["Workflow execution"]
+    Run --> Workflow["Workflow execution<br/>lead and steps"]
     Workflow --> Attempt["Node attempts"]
     Attempt --> Session["Provider sessions / tools"]
     Attempt --> Evidence["Artifacts and observations"]
@@ -32,11 +33,18 @@ flowchart LR
 ```
 
 - A **project** is the durable place where related work and knowledge remain.
+- The **coordinator** is the project's agent that you talk to. It answers
+  questions, plans and orders work, drafts tasks and hands them out, and never
+  writes code. Its conversation belongs to the project; the agent session
+  behind it is disposable ([04](04-coordinator.md)).
 - A **repository binding** says which source repository the project means.
   Each computer maps that shared identity to its own local clone.
 - A **task** describes desired work and which repositories it may use.
 - A **run** is one submission of that task under a workflow and policy.
 - A **workflow execution** is the durable graph of steps Charrette coordinates.
+- Each task has one **lead**: the agent that implements it and that you talk
+  to about it. Its **steps**, such as review, run other agents as nodes of the
+  graph and report back to the lead ([05](05-workflow-engine.md)).
 - A **node attempt** is one try at a step.
 - A **provider session** is the temporary Claude Code, Codex, OpenCode, or other agent
   conversation used by a node.
@@ -56,6 +64,7 @@ A `Project` groups work that shares intent, durable context, decisions, policy,
 history, and collaborators. It may own:
 
 - purpose and operating constraints;
+- its coordinator thread: the whole conversation with the coordinator;
 - tasks, runs, workflow executions, and attention requests;
 - artifacts, evidence, decisions, and knowledge claims;
 - memberships and execution policy;
@@ -252,6 +261,10 @@ On another device:
 4. Read-only and write capabilities are verified separately.
 5. The device advertises which task requirements it can satisfy.
 
+In the MVP a project has one coordinator, on this device. Later each member
+has their own coordinator thread and session, reading the shared project state
+([04](04-coordinator.md)).
+
 A collaborator may be allowed to read project history without source access.
 Source availability is neither project membership nor permission to view every
 artifact.
@@ -323,6 +336,7 @@ same source location, while each run still receives its own managed workspace.
 | Entity | Created when | Terminal or replaced when |
 |---|---|---|
 | `Project` | User establishes a coordination space | Archived or explicitly deleted |
+| `CoordinatorThread` | The project is created (later, one per member) | Archived with the project; never truncated |
 | `RepositoryBinding` | Source identity joins a project | Detached/tombstoned |
 | `RepositoryLocation` | A host maps or clones a binding | Remapped, unavailable, or removed |
 | `Task` | Desired work is recorded | Completed, cancelled, or archived |
@@ -341,8 +355,9 @@ Identifiers must never be reused across these lifetimes.
 
 ## Chat input queue and interruption
 
-A Charrette conversation is a durable interaction stream around a task or run;
-it is not merely the provider's current stdin. User input can arrive while the
+A Charrette conversation is a durable interaction stream around a task, a run,
+or the project's coordinator; it is not merely the provider's current stdin.
+The coordinator's thread uses the same queue and dispositions as a task's. User input can arrive while the
 runtime is sampling, waiting for a tool, executing a tool, awaiting approval, or
 recovering.
 
@@ -468,6 +483,11 @@ live beneath a project while keeping the MVP product coherent.
    the interrupt, the current turn stops, and the next turn continues the
    original task under the new constraint rather than treating it as a new
    unrelated task.
+7. A user asks the coordinator for a small change. It drafts a task and a plan
+   and hands the task to a lead; it does not edit the repository itself.
+8. The user switches a task's lead to another agent mid-task. The new agent
+   continues in the same workspace, from a brief, and the task's history keeps
+   both sessions.
 
 ## Explicit non-goals
 

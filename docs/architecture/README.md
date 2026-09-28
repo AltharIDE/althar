@@ -35,9 +35,10 @@ The main concepts form one chain:
 
 ```mermaid
 flowchart LR
-    Project --> Task
+    Project --> Coordinator
+    Coordinator -->|"plans and hands out"| Task
     Task --> Run
-    Run --> Workflow["Workflow execution"]
+    Run --> Workflow["Workflow execution<br/>lead and steps"]
     Workflow --> Attempt["Node attempts"]
     Attempt --> Agent["Agent / tool / person"]
     Attempt --> Evidence["Artifacts and observations"]
@@ -49,13 +50,16 @@ In plain terms:
 
 1. A **project** is the durable coordination space.
 2. A project may refer to zero, one, or many repositories.
-3. A **task** describes desired work and the repositories or systems it may use.
-4. Starting the task creates a **run**.
-5. The run materializes a durable **workflow**.
-6. Workflow nodes ask an agent, tool, integration, or person to do something.
-7. Charrette records attempts, approvals, outputs, verification, and
+3. The project's **coordinator** is the agent you talk to. It plans work and
+   hands it out as tasks, and never writes code itself.
+4. A **task** describes desired work and the repositories or systems it may use.
+5. Starting the task creates a **run**.
+6. The run materializes a durable **workflow**: the task's **lead**, the agent
+   that implements it, and **steps** such as review, run by other agents.
+7. Workflow nodes ask an agent, tool, integration, or person to do something.
+8. Charrette records attempts, approvals, outputs, verification, and
    uncertainty.
-8. Useful results become project evidence, decisions, or scoped knowledge.
+9. Useful results become project evidence, decisions, or scoped knowledge.
 
 These objects remain distinct because they have different lifetimes. A provider
 conversation may disappear while the project, task, workflow history, and
