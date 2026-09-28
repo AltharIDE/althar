@@ -212,6 +212,19 @@ describe('constraints', () => {
       assert.isFalse(yield* decision({ findingId, outcome: 'allow' }))
       assert.isFalse(yield* decision({ findingId, outcome: 'dismiss', scope: 'once' }))
       assert.isFalse(yield* decision({ findingId, outcome: 'fix', agentOptionId: 'allow-once' }))
+      yield* sql`UPDATE findings SET state = 'set_aside', settled_at = ${createdAt}, response = 'Bounded by the queue' WHERE id = ${findingId}`
+      assert.isTrue(
+        yield* succeeds(
+          sql`INSERT INTO findings ${sql.insert({ id: yield* Domain.newId(Domain.Ids.finding), projectId, reviewAttemptId, severity: 'major', claim: 'Retries are unbounded under load', state: 'open', repeatsFindingId: findingId, createdAt })}`,
+        ),
+        'a finding raised again says which one it repeats',
+      )
+      assert.isFalse(
+        yield* succeeds(
+          sql`INSERT INTO findings ${sql.insert({ id: yield* Domain.newId(Domain.Ids.finding), projectId, reviewAttemptId, severity: 'major', claim: 'x', state: 'open', repeatsFindingId: yield* Domain.newId(Domain.Ids.finding), createdAt })}`,
+        ),
+        'and the one it repeats exists',
+      )
       assert.isFalse(
         yield* succeeds(
           sql`INSERT INTO findings ${sql.insert({ id: yield* Domain.newId(Domain.Ids.finding), projectId, reviewAttemptId, severity: 'nit', claim: 'x', state: 'fixed', createdAt })}`,

@@ -460,6 +460,15 @@ the findings. If settling changed code, verification and review run again, up
 to a bound (3 rounds by default). Past the bound, the task is Stuck, with the
 findings still open.
 
+**A later review round builds on the earlier ones.** The reviewer in round 2
+or later is briefed on every earlier round: its findings, and how each was
+settled, with the lead's response (what it changed, or why it set the finding
+aside) and any person's decision. The reviewer checks that fixes hold, and does
+not raise a finding the lead set aside or a person dismissed again unless it
+has new evidence; then it says which earlier finding it repeats, and why the
+evidence is new. Because the reviewer's thread spans rounds, it may also keep
+its session, but the brief carries the lead's responses either way.
+
 **Reviewers are read-only.** A reviewer works in the task's workspace but may
 run only read-only commands (diff, search, log). Running tests belongs to
 verification: tests write caches and snapshots into the workspace, and would

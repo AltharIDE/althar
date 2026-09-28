@@ -227,6 +227,9 @@ A brief contains, as the role needs:
 - the conversation record: the user's messages verbatim, earlier agents'
   turns, decisions, what was tried and failed, and open items;
 - step results and artifacts the role needs;
+- for a later review round, the earlier rounds' findings and how each was
+  settled, with the lead's response and any person's decision
+  ([05](05-workflow-engine.md));
 - per-project instructions for a step type, such as `.charrette/review.md`.
 
 The same brief starts:

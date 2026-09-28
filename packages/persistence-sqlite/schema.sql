@@ -676,13 +676,15 @@ CREATE TABLE findings (
   state TEXT NOT NULL REFERENCES vocab_finding_state (word),
   settled_by_actor_id TEXT REFERENCES actors (id),
   settled_in_attempt_id TEXT,
-  reason TEXT,
+  response TEXT,
+  repeats_finding_id TEXT,
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   settled_at TEXT CHECK (settled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
   CHECK ((state = 'open') = (settled_at IS NULL)),
   FOREIGN KEY (review_attempt_id, project_id) REFERENCES node_attempts (id, project_id),
   FOREIGN KEY (settled_in_attempt_id, project_id) REFERENCES node_attempts (id, project_id),
+  FOREIGN KEY (repeats_finding_id, project_id) REFERENCES findings (id, project_id),
   UNIQUE (id, project_id)
 ) STRICT;
 
@@ -725,6 +727,8 @@ CREATE INDEX attention_requests_by_task ON attention_requests (task_id);
 CREATE INDEX findings_by_review ON findings (review_attempt_id);
 
 CREATE INDEX findings_open ON findings (project_id) WHERE state = 'open';
+
+CREATE INDEX findings_by_repeated ON findings (repeats_finding_id);
 
 CREATE INDEX decisions_by_permission_request ON decisions (permission_request_id);
 

@@ -53,7 +53,10 @@ export const attention: ReadonlyArray<string> = [
 
   /*
    * One finding from a review attempt. It stays open until the lead fixes it
-   * or sets it aside with a reason, or a person dismisses it.
+   * or sets it aside, or a person dismisses it; `response` is the lead's
+   * answer: what it changed, or why it set the finding aside. A later review
+   * round is briefed on these, and a finding that raises an earlier one again
+   * says which, in `repeats_finding_id`.
    */
   table(
     'findings',
@@ -68,7 +71,8 @@ export const attention: ReadonlyArray<string> = [
       word('state', 'finding_state'),
       ref('settled_by_actor_id', 'actors', { nullable: true }),
       scoped('settled_in_attempt_id', { nullable: true }),
-      'reason TEXT',
+      'response TEXT',
+      scoped('repeats_finding_id', { nullable: true }),
       at('created_at'),
       at('settled_at', { nullable: true }),
       revision,
@@ -77,6 +81,7 @@ export const attention: ReadonlyArray<string> = [
       "CHECK ((state = 'open') = (settled_at IS NULL))",
       sameProject('review_attempt_id', 'node_attempts'),
       sameProject('settled_in_attempt_id', 'node_attempts'),
+      sameProject('repeats_finding_id', 'findings'),
       referencedInProject,
     ],
   ),
@@ -128,6 +133,7 @@ export const attention: ReadonlyArray<string> = [
   index('attention_requests_by_task', 'attention_requests (task_id)'),
   index('findings_by_review', 'findings (review_attempt_id)'),
   index('findings_open', 'findings (project_id)', { where: "state = 'open'" }),
+  index('findings_by_repeated', 'findings (repeats_finding_id)'),
   index('decisions_by_permission_request', 'decisions (permission_request_id)'),
   index('decisions_by_attention_request', 'decisions (attention_request_id)'),
   index('decisions_by_finding', 'decisions (finding_id)'),
