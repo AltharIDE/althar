@@ -181,8 +181,11 @@ Tasks, evidence, and decisions remain readable when a source is unavailable.
 ### Existing working copies
 
 An existing clone is an input source, not the default execution workspace.
-Charrette prepares a Git worktree per task in a folder it owns
-([ADR-006](../decisions/006-worktree-per-task.md)). It never:
+Charrette prepares a Git worktree per task in a folder it owns,
+`~/Charrette/<project>/<task>/<repository>` by default, with a root that can
+be changed per project ([ADR-006](../decisions/006-worktree-per-task.md)).
+Opening the task's folder in an editor shows all its repositories together.
+It never:
 
 - changes the user's current branch;
 - hides or stashes their changes;

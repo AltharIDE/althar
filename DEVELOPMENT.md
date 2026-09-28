@@ -37,6 +37,7 @@ Each app and package has its own README with its own commands.
 | [`docs/decisions`](docs/decisions) | Architecture decisions, one per file |
 | [`docs/glossary.md`](docs/glossary.md) | The words the interface uses, beside the words the architecture uses |
 | [`docs/open-questions.md`](docs/open-questions.md) | What is not decided yet |
+| [`docs/plans`](docs/plans) | Temporary plans, such as the current demo's. Not architecture |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | The engineering standards every app and package follows |
 | [`THESIS.md`](THESIS.md) | The research hypothesis Charrette comes out of |
 

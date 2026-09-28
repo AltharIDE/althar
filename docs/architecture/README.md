@@ -284,7 +284,8 @@ It does not require:
 - claims that host-native execution is sandboxed.
 
 The architecture retains seams for these capabilities without making them
-present-tense product promises.
+present-tense product promises. The current plan for the first demo, which is
+temporary, is in [docs/plans/mvp.md](../plans/mvp.md).
 
 ## Building to standard
 
@@ -306,7 +307,7 @@ Decided:
 | Shell | Electron, with the runtime in a utility process | [ADR-003](../decisions/003-electron-shell.md) |
 | Coordinator | An ordinary agent session with Charrette's tools and read-only access | [ADR-004](../decisions/004-coordinator-is-an-agent-session.md) |
 | Starting context | Charrette briefs every agent; switching agent hands over everything in the MVP | [ADR-005](../decisions/005-charrette-briefs-every-agent.md) |
-| Workspaces | A git worktree per task; plain branches maybe later | [ADR-006](../decisions/006-worktree-per-task.md) |
+| Workspaces | A git worktree per task, in `~/Charrette/<project>/<task>/<repository>`; plain branches maybe later | [ADR-006](../decisions/006-worktree-per-task.md) |
 | Permissions | Every request reaches Charrette and is answered from the project rules | [ADR-007](../decisions/007-permission-requests-reach-charrette.md) |
 | Build standard | Shortcuts in behaviour, never in recorded facts or data shapes | [ADR-008](../decisions/008-shortcuts-in-behaviour-not-in-records.md) |
 
