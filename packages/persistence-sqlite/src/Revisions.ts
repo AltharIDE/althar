@@ -3,20 +3,39 @@ import { SqlClient } from 'effect/sql'
 
 import { RevisionConflict, RowNotFound } from './errors'
 
-/** The tables whose rows carry a revision for optimistic concurrency. */
-export type RevisionedTable =
-  | 'projects'
-  | 'project_settings'
-  | 'tasks'
-  | 'task_plans'
-  | 'runs'
-  | 'workflow_executions'
-  | 'nodes'
-  | 'node_attempts'
-  | 'threads'
-  | 'provider_sessions'
-  | 'attention_requests'
-  | 'change_sets'
+/**
+ * The tables whose rows carry a revision. The rule: every row that changes
+ * state has one, and a change records its new revision with the change. A test
+ * checks this list against the schema.
+ */
+export const revisionedTables = [
+  'projects',
+  'project_settings',
+  'tasks',
+  'task_repository_requirements',
+  'task_plans',
+  'runs',
+  'run_attempts',
+  'workspaces',
+  'workflow_executions',
+  'nodes',
+  'node_attempts',
+  'threads',
+  'user_inputs',
+  'turn_deliveries',
+  'thread_items',
+  'agent_installations',
+  'provider_sessions',
+  'processes',
+  'permission_requests',
+  'attention_requests',
+  'findings',
+  'change_sets',
+  'repository_changes',
+  'work_items',
+  'mutation_receipts',
+] as const
+export type RevisionedTable = (typeof revisionedTables)[number]
 
 /**
  * Moves a row from the revision the caller read to the next one, or fails if

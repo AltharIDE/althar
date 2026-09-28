@@ -109,4 +109,57 @@ describe('Commands', () => {
       assert.strictEqual(receipt?.result, 'null')
     }).pipe(Effect.provide(Env)),
   )
+
+  it.effect("keeps receipts per actor, so one actor's id reveals nothing of another's", () =>
+    Effect.gen(function* () {
+      const commands = yield* Commands
+      const sql = yield* SqlClient.SqlClient
+      const commandId = yield* newId(Ids.command)
+      const { fields } = yield* renameFields(commandId, { name: 'Mine' })
+      yield* commands.execute({
+        envelope: new CommandEnvelope(fields),
+        result: Renamed,
+        handle: Effect.succeed({ name: 'Mine', revision: 2 }),
+      })
+      const otherActor = yield* newId(Ids.actor)
+      yield* sql`INSERT INTO actors ${sql.insert({ id: otherActor, kind: 'person', displayName: 'Lin', createdAt: fields.issuedAt })}`
+      const theirs = yield* commands.execute({
+        envelope: new CommandEnvelope({ ...fields, actorId: otherActor }),
+        result: Renamed,
+        handle: Effect.succeed({ name: 'Theirs', revision: 2 }),
+      })
+      assert.strictEqual(theirs.name, 'Theirs')
+      assert.lengthOf(yield* sql`SELECT 1 FROM command_receipts WHERE command_id = ${commandId}`, 2)
+    }).pipe(Effect.provide(Env)),
+  )
+
+  it.effect('records who a command acts for, as part of the command', () =>
+    Effect.gen(function* () {
+      const commands = yield* Commands
+      const sql = yield* SqlClient.SqlClient
+      const { fields, projectId } = yield* renameFields(yield* newId(Ids.command), { name: 'For Ada' })
+      const coordinator = yield* newId(Ids.actor)
+      yield* sql`INSERT INTO actors ${sql.insert({ id: coordinator, kind: 'agent', displayName: 'Coordinator', agentId: 'claude-code', createdAt: fields.issuedAt })}`
+      const forAda = { ...fields, actorId: coordinator, onBehalfOfActorId: fields.actorId }
+      yield* commands.execute({
+        envelope: new CommandEnvelope(forAda),
+        projectId,
+        result: Renamed,
+        handle: Effect.succeed({ name: 'For Ada', revision: 2 }),
+      })
+      const [receipt] = yield* sql<{
+        onBehalfOfActorId: string
+        projectId: string
+      }>`SELECT on_behalf_of_actor_id, project_id FROM command_receipts`
+      assert.deepStrictEqual(receipt, { onBehalfOfActorId: fields.actorId, projectId })
+      const forNobody = yield* Effect.flip(
+        commands.execute({
+          envelope: new CommandEnvelope({ ...forAda, onBehalfOfActorId: undefined }),
+          result: Renamed,
+          handle: Effect.succeed({ name: 'x', revision: 2 }),
+        }),
+      )
+      assert.instanceOf(forNobody, CommandIdReused)
+    }).pipe(Effect.provide(Env)),
+  )
 })

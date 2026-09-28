@@ -61,9 +61,6 @@ export type NodeType = typeof NodeType.Type
 export const NodeState = Schema.Literals(['pending', 'ready', 'running', 'succeeded', 'failed', 'skipped', 'cancelled', 'uncertain'])
 export type NodeState = typeof NodeState.Type
 
-export const GraphPatchState = Schema.Literals(['proposed', 'held', 'accepted', 'rejected', 'undone'])
-export type GraphPatchState = typeof GraphPatchState.Type
-
 export const ThreadKind = Schema.Literals(['coordinator', 'task', 'step'])
 export type ThreadKind = typeof ThreadKind.Type
 
@@ -104,7 +101,8 @@ export type AccountStatusSource = typeof AccountStatusSource.Type
 export const ProcessPurpose = Schema.Literals(['agent', 'verify', 'setup', 'git', 'other'])
 export type ProcessPurpose = typeof ProcessPurpose.Type
 
-export const ProcessState = Schema.Literals(['running', 'exited', 'killed', 'unknown'])
+/** `launching` is written before the process is spawned, so a crash in between still leaves a trace to reconcile. */
+export const ProcessState = Schema.Literals(['launching', 'running', 'exited', 'killed', 'unknown'])
 export type ProcessState = typeof ProcessState.Type
 
 /** ACP's tool kinds. */
@@ -114,9 +112,32 @@ export type ToolKind = typeof ToolKind.Type
 export const PermissionRequestState = Schema.Literals(['open', 'decided', 'cancelled'])
 export type PermissionRequestState = typeof PermissionRequestState.Type
 
-/** ACP's permission option kinds, plus the answers to other attention requests. */
-export const DecisionOutcome = Schema.Literals(['allow_once', 'allow_always', 'reject_once', 'reject_always', 'answer', 'dismiss'])
+/**
+ * What was decided. `allow` and `reject` answer a permission request; `fix`,
+ * `answer` and `dismiss` answer a finding or a question. The option sent to the
+ * agent is recorded apart, and is always a one-time option (ADR-007).
+ */
+export const DecisionOutcome = Schema.Literals(['allow', 'reject', 'answer', 'fix', 'dismiss'])
 export type DecisionOutcome = typeof DecisionOutcome.Type
+
+/** How far a permission decision reaches: this request only, or a rule for later ones. */
+export const DecisionScope = Schema.Literals(['once', 'rule'])
+export type DecisionScope = typeof DecisionScope.Type
+
+export const FindingSeverity = Schema.Literals(['blocking', 'major', 'minor', 'nit'])
+export type FindingSeverity = typeof FindingSeverity.Type
+
+/** A review finding: open until the lead fixes it or sets it aside, or a person dismisses it. */
+export const FindingState = Schema.Literals(['open', 'fixed', 'set_aside', 'dismissed'])
+export type FindingState = typeof FindingState.Type
+
+/** Why Charrette recorded what code a workspace held. */
+export const SnapshotReason = Schema.Literals(['node_started', 'node_ended', 'switch', 'interrupt'])
+export type SnapshotReason = typeof SnapshotReason.Type
+
+/** Why a node attempt is held without needing a person. */
+export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable'])
+export type HoldReason = typeof HoldReason.Type
 
 export const AttentionKind = Schema.Literals([
   'permission',
@@ -156,14 +177,21 @@ export const AggregateType = Schema.Literals([
   'task',
   'task_plan',
   'run',
+  'run_attempt',
+  'workspace',
   'workflow_execution',
   'node',
   'node_attempt',
   'thread',
+  'user_input',
+  'turn_delivery',
   'provider_session',
   'permission_request',
   'attention_request',
+  'decision',
+  'finding',
   'change_set',
+  'mutation_receipt',
   'agent_installation',
   'account_status',
 ])

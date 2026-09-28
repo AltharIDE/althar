@@ -61,6 +61,13 @@ describe('lifecycles', () => {
     assert.isTrue(canTransition(providerSessionLifecycle, 'active', 'superseded'))
   })
 
+  it('holds an attempt without a person, and lets it run again or pass to another agent', () => {
+    assert.isTrue(canTransition(nodeAttemptLifecycle, 'running', 'held'))
+    assert.isTrue(canTransition(nodeAttemptLifecycle, 'held', 'running'))
+    assert.isTrue(canTransition(nodeAttemptLifecycle, 'held', 'superseded'))
+    assert.isFalse(canTransition(nodeAttemptLifecycle, 'held', 'succeeded'))
+  })
+
   it('reconciles an uncertain attempt before deciding its outcome', () => {
     assert.isFalse(canTransition(nodeAttemptLifecycle, 'uncertain', 'succeeded'))
     assert.isTrue(canTransition(nodeAttemptLifecycle, 'uncertain', 'reconciling'))

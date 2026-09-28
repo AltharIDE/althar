@@ -1,99 +1,82 @@
 import * as Domain from '@charrette/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Exit, Layer } from 'effect'
+import { Effect, Exit, Layer, Predicate, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { snakeToPascal } from 'effect/String'
 
-import { seed } from './fixtures'
+import { seed, seedRun } from './fixtures'
 import { InMemory, WebCrypto } from './support'
 
 const Env = Layer.mergeAll(InMemory, WebCrypto)
 
-/** Each column that holds a vocabulary, and the domain's list for it. */
-const vocabularies: Record<string, { readonly literals: ReadonlyArray<string> }> = {
-  'actors.kind': Domain.ActorKind,
-  'repository_locations.kind': Domain.LocationKind,
-  'repository_locations.state': Domain.LocationState,
-  'artifacts.kind': Domain.ArtifactKind,
-  'artifacts.sensitivity': Domain.Sensitivity,
-  'tasks.state': Domain.TaskState,
-  'task_repository_requirements.access': Domain.RepositoryAccess,
-  'task_plans.state': Domain.PlanState,
-  'runs.state': Domain.RunState,
-  'run_attempts.state': Domain.RunAttemptState,
-  'workspace_sets.state': Domain.WorkspaceState,
-  'workspaces.state': Domain.WorkspaceState,
-  'workflow_executions.state': Domain.ExecutionState,
-  'graph_patches.state': Domain.GraphPatchState,
-  'execution_graph_revisions.cause': Domain.GraphRevisionCause,
-  'nodes.type': Domain.NodeType,
-  'nodes.state': Domain.NodeState,
-  'threads.kind': Domain.ThreadKind,
-  'user_inputs.disposition': Domain.InputDisposition,
-  'user_inputs.state': Domain.UserInputState,
-  'turn_deliveries.state': Domain.TurnDeliveryState,
-  'thread_items.kind': Domain.ThreadItemKind,
-  'agent_installations.status': Domain.InstallationStatus,
-  'principals.auth_mode': Domain.AuthMode,
-  'account_statuses.state': Domain.AccountState,
-  'account_statuses.source': Domain.AccountStatusSource,
-  'provider_sessions.state': Domain.ProviderSessionState,
-  'processes.purpose': Domain.ProcessPurpose,
-  'processes.state': Domain.ProcessState,
-  'node_attempts.state': Domain.NodeAttemptState,
-  'permission_requests.tool_kind': Domain.ToolKind,
-  'permission_requests.state': Domain.PermissionRequestState,
-  'attention_requests.kind': Domain.AttentionKind,
-  'attention_requests.state': Domain.AttentionState,
-  'decisions.outcome': Domain.DecisionOutcome,
-  'change_sets.state': Domain.ChangeSetState,
-  'repository_changes.pull_request_state': Domain.PullRequestState,
-  'work_items.state': Domain.WorkItemState,
-  'mutation_receipts.state': Domain.MutationState,
-  'record_events.aggregate_type': Domain.AggregateType,
-  'change_log.aggregate_type': Domain.AggregateType,
-}
+/** The domain's vocabularies by name: every exported schema with a list of literals. */
+const domainVocabularies = new Map(
+  Object.entries(Domain).flatMap(([name, value]) =>
+    Schema.isSchema(value) && 'literals' in value && Array.isArray(value.literals)
+      ? [[name, value.literals.filter(Predicate.isString)]]
+      : [],
+  ),
+)
 
-/** Columns with a fixed list that belongs to the store alone. */
-const storeOnly = new Set(['provider_events.direction'])
-
-const inserts = (statement: Effect.Effect<unknown, unknown, SqlClient.SqlClient>) => Effect.map(Effect.exit(statement), Exit.isSuccess)
+const succeeds = (statement: Effect.Effect<unknown, unknown, SqlClient.SqlClient>) => Effect.map(Effect.exit(statement), Exit.isSuccess)
 
 describe('constraints', () => {
-  it.effect('check every vocabulary column against the domain list', () =>
+  it.effect('hold every domain vocabulary in a lookup table with the same words', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const tables = yield* sql<{ name: string; sql: string }>`SELECT name, sql FROM sqlite_schema WHERE type = 'table'`
-      const found = new Map<string, Array<string>>()
-      for (const table of tables) {
-        for (const match of table.sql.matchAll(/\n\s+(\w+) TEXT[^,\n]* CHECK \(\1 IN \(([^)]*)\)\)/g)) {
-          const [, column = '', list = ''] = match
-          found.set(
-            `${table.name}.${column}`,
-            [...list.matchAll(/'([^']*)'/g)].map(([, value = '']) => value),
-          )
-        }
+      const tables = yield* sql<{ name: string }>`SELECT name FROM sqlite_schema WHERE type = 'table' AND name LIKE 'vocab_%'`
+      const stored = new Map<string, ReadonlyArray<string>>()
+      for (const { name } of tables) {
+        const words = yield* sql<{ word: string }>`SELECT word FROM ${sql(name)}`
+        stored.set(
+          snakeToPascal(name.replace('vocab_', '')),
+          words.map((row) => row.word),
+        )
       }
-      for (const [column, values] of found) {
-        if (storeOnly.has(column)) continue
-        const vocabulary = vocabularies[column]
-        assert.isDefined(vocabulary, `${column} holds a vocabulary with no domain list`)
-        assert.deepStrictEqual(values.toSorted(), [...(vocabulary?.literals ?? [])].toSorted(), column)
-      }
-      for (const column of Object.keys(vocabularies)) assert.isTrue(found.has(column), `${column} has no CHECK list`)
+      assert.deepStrictEqual([...stored.keys()].toSorted(), [...domainVocabularies.keys()].toSorted())
+      for (const [name, words] of stored)
+        assert.deepStrictEqual([...words].toSorted(), [...(domainVocabularies.get(name) ?? [])].toSorted(), name)
     }).pipe(Effect.provide(InMemory)),
+  )
+
+  it.effect('refuse a word that is not in its vocabulary', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const createdAt = yield* Domain.now
+      const actor = (kind: string) =>
+        Effect.flatMap(Domain.newId(Domain.Ids.actor), (id) =>
+          succeeds(sql`INSERT INTO actors ${sql.insert({ id, kind, displayName: 'X', createdAt })}`),
+        )
+      assert.isTrue(yield* actor('person'))
+      assert.isFalse(yield* actor('robot'))
+    }).pipe(Effect.provide(Env)),
   )
 
   it.effect('enforce foreign keys', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { createdAt } = yield* seed
-      const projectId = yield* Domain.newId(Domain.Ids.project)
+      const id = yield* Domain.newId(Domain.Ids.project)
       const orphan = yield* Domain.newId(Domain.Ids.actor)
       assert.isFalse(
-        yield* inserts(
-          sql`INSERT INTO projects ${sql.insert({ id: projectId, name: 'X', slug: 'x', createdByActorId: orphan, createdAt })}`,
-        ),
+        yield* succeeds(sql`INSERT INTO projects ${sql.insert({ id, name: 'X', slug: 'x', createdByActorId: orphan, createdAt })}`),
       )
+    }).pipe(Effect.provide(Env)),
+  )
+
+  it.effect('keep references inside their project', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const mine = yield* seedRun
+      const other = yield* seed
+      const thread = (projectId: string) =>
+        Effect.flatMap(Domain.newId(Domain.Ids.thread), (id) =>
+          succeeds(
+            sql`INSERT INTO threads ${sql.insert({ id, projectId, kind: 'step', taskId: mine.taskId, executionId: mine.executionId, nodeKey: 'verify', createdAt: mine.createdAt })}`,
+          ),
+        )
+      assert.isTrue(yield* thread(mine.projectId))
+      assert.isFalse(yield* thread(other.projectId))
     }).pipe(Effect.provide(Env)),
   )
 
@@ -101,7 +84,7 @@ describe('constraints', () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const createdAt = yield* Domain.now
-      const device = (id: string) => inserts(sql`INSERT INTO devices ${sql.insert({ id, name: 'Mac', createdAt })}`)
+      const device = (id: string) => succeeds(sql`INSERT INTO devices ${sql.insert({ id, name: 'Mac', createdAt })}`)
       assert.isTrue(yield* device(yield* Domain.newId(Domain.Ids.device)))
       assert.isFalse(yield* device(yield* Domain.newId(Domain.Ids.actor)))
       assert.isFalse(yield* device('dev_0192f0b3c4d57e8f9a0b1c2d3e4f5a6'))
@@ -113,9 +96,12 @@ describe('constraints', () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { projectId, actorId, createdAt } = yield* seed
+      let revision = 0
       const policy = (rules: string, at: string) =>
         Effect.flatMap(Domain.newId(Domain.Ids.policy), (id) =>
-          inserts(sql`INSERT INTO policies ${sql.insert({ id, projectId, revision: 1, rules, createdByActorId: actorId, createdAt: at })}`),
+          succeeds(
+            sql`INSERT INTO policies ${sql.insert({ id, projectId, revision: ++revision, rules, createdByActorId: actorId, createdAt: at })}`,
+          ),
         )
       assert.isTrue(yield* policy('{"ask":[]}', createdAt))
       assert.isFalse(yield* policy('{"ask":', createdAt))
@@ -124,40 +110,142 @@ describe('constraints', () => {
     }).pipe(Effect.provide(Env)),
   )
 
-  it.effect('shape threads by kind, with one coordinator thread per person and one thread per task', () =>
+  it.effect('shape threads by kind: one coordinator thread per person, one per task, one per step', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { projectId, actorId, createdAt } = yield* seed
-      const taskId = yield* Domain.newId(Domain.Ids.task)
-      yield* sql`INSERT INTO tasks ${sql.insert({ id: taskId, projectId, title: 'Retry checkout', slug: 'retry-checkout', state: 'open', createdByActorId: actorId, createdAt })}`
+      const { projectId, actorId, taskId, executionId, createdAt } = yield* seedRun
       const thread = (fields: Record<string, unknown>) =>
         Effect.flatMap(Domain.newId(Domain.Ids.thread), (id) =>
-          inserts(
-            sql`INSERT INTO threads ${sql.insert({ id, projectId, ownerActorId: null, taskId: null, nodeId: null, createdAt, ...fields })}`,
-          ),
+          succeeds(sql`INSERT INTO threads ${sql.insert({ id, projectId, createdAt, ...fields })}`),
         )
       assert.isTrue(yield* thread({ kind: 'coordinator', ownerActorId: actorId }))
       assert.isFalse(yield* thread({ kind: 'coordinator', ownerActorId: actorId }))
       assert.isFalse(yield* thread({ kind: 'coordinator' }))
-      assert.isTrue(yield* thread({ kind: 'task', taskId }))
-      assert.isFalse(yield* thread({ kind: 'task', taskId }))
-      assert.isFalse(yield* thread({ kind: 'step', taskId }))
+      assert.isFalse(yield* thread({ kind: 'task', taskId }), 'seedRun already made the task thread')
+      assert.isTrue(yield* thread({ kind: 'step', taskId, executionId, nodeKey: 'review' }))
+      assert.isFalse(yield* thread({ kind: 'step', taskId, executionId, nodeKey: 'review' }))
+      assert.isFalse(yield* thread({ kind: 'step', taskId, executionId }))
     }).pipe(Effect.provide(Env)),
   )
 
-  it.effect('record who superseded a provider session', () =>
+  it.effect('record who superseded a session or an input', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { projectId, actorId, createdAt } = yield* seed
-      const threadId = yield* Domain.newId(Domain.Ids.thread)
-      yield* sql`INSERT INTO threads ${sql.insert({ id: threadId, projectId, kind: 'coordinator', ownerActorId: actorId, createdAt })}`
-      const session = (id: string, fields: Record<string, unknown>) =>
-        inserts(sql`INSERT INTO provider_sessions ${sql.insert({ id, threadId, agentId: 'claude-code', startedAt: createdAt, ...fields })}`)
+      const { projectId, threadId, actorId, createdAt } = yield* seedRun
+      const session = (fields: Record<string, unknown>) =>
+        Effect.flatMap(Domain.newId(Domain.Ids.providerSession), (id) =>
+          succeeds(
+            sql`INSERT INTO provider_sessions ${sql.insert({ id, projectId, threadId, agentId: 'claude-code', startedAt: createdAt, ...fields })}`,
+          ),
+        )
       const next = yield* Domain.newId(Domain.Ids.providerSession)
-      assert.isTrue(yield* session(next, { state: 'active' }))
-      assert.isFalse(yield* session(yield* Domain.newId(Domain.Ids.providerSession), { state: 'superseded' }))
-      assert.isTrue(yield* session(yield* Domain.newId(Domain.Ids.providerSession), { state: 'superseded', supersededBySessionId: next }))
-      assert.isFalse(yield* session(yield* Domain.newId(Domain.Ids.providerSession), { state: 'active', supersededBySessionId: next }))
+      yield* sql`INSERT INTO provider_sessions ${sql.insert({ id: next, projectId, threadId, agentId: 'codex', state: 'active', startedAt: createdAt })}`
+      assert.isFalse(yield* session({ state: 'superseded' }))
+      assert.isTrue(yield* session({ state: 'superseded', supersededBySessionId: next }))
+      assert.isFalse(yield* session({ state: 'active', supersededBySessionId: next }))
+
+      const input = (sequence: number, fields: Record<string, unknown>) =>
+        Effect.gen(function* () {
+          const id = yield* Domain.newId(Domain.Ids.userInput)
+          const commandId = yield* Domain.newId(Domain.Ids.command)
+          const ok = yield* succeeds(
+            sql`INSERT INTO user_inputs ${sql.insert({ id, projectId, threadId, sequence, commandId, disposition: 'after_current', body: 'x', authorActorId: actorId, acceptedAt: createdAt, ...fields })}`,
+          )
+          return { id, ok }
+        })
+      const replacement = yield* input(1, { state: 'queued' })
+      assert.isFalse((yield* input(2, { state: 'superseded' })).ok)
+      assert.isTrue((yield* input(3, { state: 'superseded', supersededByInputId: replacement.id })).ok)
+    }).pipe(Effect.provide(Env)),
+  )
+
+  it.effect('allow one unfinished attempt per node, and say why an attempt is held', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, nodeId, runAttemptId, createdAt } = yield* seedRun
+      const attempt = (attemptNumber: number, fields: Record<string, unknown>) =>
+        Effect.flatMap(Domain.newId(Domain.Ids.nodeAttempt), (id) =>
+          succeeds(
+            sql`INSERT INTO node_attempts ${sql.insert({ id, projectId, nodeId, attemptNumber, runAttemptId, controllerGeneration: 1, admittedAt: createdAt, ...fields })}`,
+          ),
+        )
+      assert.isTrue(yield* attempt(1, { state: 'superseded' }))
+      assert.isTrue(yield* attempt(2, { state: 'running' }))
+      assert.isFalse(yield* attempt(3, { state: 'held', holdReason: 'usage_limit' }), 'attempt 2 is still unfinished')
+      yield* sql`UPDATE node_attempts SET state = 'failed' WHERE attempt_number = 2`
+      assert.isFalse(yield* attempt(3, { state: 'held' }))
+      assert.isTrue(yield* attempt(3, { state: 'held', holdReason: 'usage_limit' }))
+      assert.isFalse(yield* attempt(4, { state: 'failed', holdReason: 'usage_limit' }))
+    }).pipe(Effect.provide(Env)),
+  )
+
+  it.effect('record a process before it has a pid, and not after', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { deviceId, instanceId, createdAt } = yield* seed
+      const process = (fields: Record<string, unknown>) =>
+        Effect.flatMap(Domain.newId(Domain.Ids.process), (id) =>
+          succeeds(
+            sql`INSERT INTO processes ${sql.insert({ id, deviceId, runtimeInstanceId: instanceId, purpose: 'agent', executable: 'claude-agent-acp', launchedAt: createdAt, ...fields })}`,
+          ),
+        )
+      assert.isTrue(yield* process({ state: 'launching' }))
+      assert.isFalse(yield* process({ state: 'running' }))
+      assert.isTrue(yield* process({ state: 'running', pid: 4321 }))
+    }).pipe(Effect.provide(Env)),
+  )
+
+  it.effect('let a decision answer exactly one thing, and scope only permissions', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, nodeId, runAttemptId, actorId, createdAt } = yield* seedRun
+      const reviewAttemptId = yield* Domain.newId(Domain.Ids.nodeAttempt)
+      yield* sql`INSERT INTO node_attempts ${sql.insert({ id: reviewAttemptId, projectId, nodeId, attemptNumber: 1, runAttemptId, controllerGeneration: 1, state: 'succeeded', admittedAt: createdAt })}`
+      const findingId = yield* Domain.newId(Domain.Ids.finding)
+      yield* sql`INSERT INTO findings ${sql.insert({ id: findingId, projectId, reviewAttemptId, severity: 'major', claim: 'Retries are unbounded', state: 'open', createdAt })}`
+      const decision = (fields: Record<string, unknown>) =>
+        Effect.flatMap(Domain.newId(Domain.Ids.decision), (id) =>
+          succeeds(sql`INSERT INTO decisions ${sql.insert({ id, projectId, decidedByActorId: actorId, decidedAt: createdAt, ...fields })}`),
+        )
+      assert.isTrue(yield* decision({ findingId, outcome: 'dismiss', reason: 'Bounded by the queue' }))
+      assert.isFalse(yield* decision({ outcome: 'dismiss' }))
+      assert.isFalse(yield* decision({ findingId, outcome: 'allow' }))
+      assert.isFalse(yield* decision({ findingId, outcome: 'dismiss', scope: 'once' }))
+      assert.isFalse(yield* decision({ findingId, outcome: 'fix', agentOptionId: 'allow-once' }))
+      assert.isFalse(
+        yield* succeeds(
+          sql`INSERT INTO findings ${sql.insert({ id: yield* Domain.newId(Domain.Ids.finding), projectId, reviewAttemptId, severity: 'nit', claim: 'x', state: 'fixed', createdAt })}`,
+        ),
+        'a settled finding says when',
+      )
+    }).pipe(Effect.provide(Env)),
+  )
+
+  it.effect('allow one active turn per thread, and a claim only with a holder and a lease', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, threadId, instanceId, createdAt } = yield* seedRun
+      const sessionId = yield* Domain.newId(Domain.Ids.providerSession)
+      yield* sql`INSERT INTO provider_sessions ${sql.insert({ id: sessionId, projectId, threadId, agentId: 'claude-code', state: 'active', startedAt: createdAt })}`
+      const turn = (state: string) =>
+        Effect.flatMap(Domain.newId(Domain.Ids.turnDelivery), (id) =>
+          succeeds(
+            sql`INSERT INTO turn_deliveries ${sql.insert({ id, projectId, threadId, providerSessionId: sessionId, controllerGeneration: 1, state, requestedAt: createdAt })}`,
+          ),
+        )
+      assert.isTrue(yield* turn('completed'))
+      assert.isTrue(yield* turn('delivered'))
+      assert.isFalse(yield* turn('pending'))
+
+      const workItem = (fields: Record<string, unknown>) =>
+        Effect.flatMap(Domain.newId(Domain.Ids.workItem), (id) =>
+          succeeds(
+            sql`INSERT INTO work_items ${sql.insert({ id, kind: 'open_pull_request', subjectType: 'change_set', subjectId: 'chg', availableAt: createdAt, createdAt, updatedAt: createdAt, ...fields })}`,
+          ),
+        )
+      assert.isTrue(yield* workItem({ state: 'pending' }))
+      assert.isFalse(yield* workItem({ state: 'claimed' }))
+      assert.isTrue(yield* workItem({ state: 'claimed', claimedByInstanceId: instanceId, leaseExpiresAt: createdAt }))
     }).pipe(Effect.provide(Env)),
   )
 })

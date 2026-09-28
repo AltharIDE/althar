@@ -8,22 +8,28 @@ The profile's SQLite store, as described in [docs/architecture/07](../../docs/ar
 
 ## The schema
 
-- **[schema.sql](schema.sql)** is the readable copy of the whole schema, generated from the migrations by `tests/schema.test.ts`. Review schema changes there.
+- **[schema.sql](schema.sql)** is the readable copy of the whole schema, generated from the migrations by `tests/schema.test.ts`, with each vocabulary's words at the top. Review schema changes there.
 - **Migrations are append-only.** Each one is a list of SQL statements. `src/migrations/checksums.ts` records every released migration's SHA-256, and a test fails if one changes. A change to the schema is a new migration.
+- **Migrations run with foreign keys off,** then `PRAGMA foreign_key_check`, and only then are foreign keys turned on; the database refuses to open with rows pointing at nothing. This is SQLite's procedure for rebuilding a table others reference, which a test performs.
 - **Every table is `STRICT`,** so SQLite enforces column types.
+- **Vocabularies are lookup tables,** `vocab_<name> (word)`, and columns reference them. A new word is an `INSERT` in a later migration. A test compares every lookup table with `@charrette/domain`'s lists, both ways.
+- **Every project-scoped row carries `project_id`,** and references between project rows are composite, `(id, project_id)`, so no row can point into another project. The record, the feed and artifacts carry it too, for the cloud.
+- **Device-only data stays in device-keyed tables,** such as `device_project_settings`, never in shared ones.
 - **Ids are checked:** a primary key must be its kind's prefix, an underscore and 32 lowercase hex digits.
 - **Timestamps** are text in UTC with milliseconds, checked by pattern, so they sort in time order.
-- **JSON columns** are checked with `json_valid`.
-- **Vocabularies are checked** against the same lists as `@charrette/domain`. A test compares every `CHECK (… IN (…))` list with the domain's, and fails if a vocabulary column has no domain list.
-- **Aggregates carry a revision** for optimistic concurrency; `bumpRevision` moves one on or fails with `RevisionConflict`.
-- **Distinct identities stay distinct:** task, run, run attempt, workflow execution, node, node attempt, provider session, workspace and thread are separate tables, as docs/architecture/01 requires.
+- **JSON columns** are checked with `json_valid`. Every artifact a JSON column refers to also gets an `artifact_links` row.
+- **Every row that changes state has a revision.** `revisionedTables` lists them, a test checks the list against the schema, and `bumpRevision` moves one on or fails with `RevisionConflict`.
+- **"One active" rules are partial unique indexes:** one active attempt per run, one unfinished attempt per node, one active turn per thread, one thread per task and per step.
+- **Distinct identities stay distinct,** as docs/architecture/01 requires. A task's workspace is shared by its runs and attempts on a device; `workspace_snapshots` records which code each attempt saw. A step's thread spans its review rounds.
+- **Restarts can be reconciled:** each app launch is a `runtime_instances` row; run attempts name the instance holding their controller generation; processes are recorded as `launching` before they are spawned, with the OS start time; work-item claims name their holder and a lease.
+- **Permission decisions** record Charrette's outcome and scope apart from the option sent to the agent, which is always one-time.
 - **Columns are snake_case** in SQL and camelCase in TypeScript; the client translates.
 
 ## Writes
 
 - **One connection.** The client serialises every statement through it, and transactions begin `IMMEDIATE`.
 - **No I/O inside a transaction.** Effects outside the database go through `work_items` as intent first, and a worker performs them after commit (docs/architecture/07, the intent and receipt pattern).
-- **`Commands.execute`** runs a command and stores its receipt in one transaction. A retry with the same id and the same command gets the first result back without running again; the same id with a different command fails with `CommandIdReused`. A failed command leaves nothing behind.
+- **`Commands.execute`** runs a command and stores its receipt in one transaction. Receipts are kept per actor. A retry of the same command by the same actor gets the first result back without running again; the same id with a different command fails with `CommandIdReused`; another actor's id reveals nothing. A command an agent issues for a person records both. A failed command leaves nothing behind.
 - **`Ledger.record`** adds a fact to the operational record and a change to the client feed, inside the caller's transaction. `Ledger.changesSince` pages through the feed from a cursor.
 
 ## Checks
@@ -36,4 +42,4 @@ The profile's SQLite store, as described in [docs/architecture/07](../../docs/ar
 - **Fencing by controller generation** is in the schema (the columns exist) but not yet enforced on writes.
 - **The artifact store** for bytes, content-addressed on disk, is not built; only artifact metadata is.
 - **WAL checkpoints, integrity checks, backup and restore,** which 07 requires, are not built.
-- **Retention for `provider_events`,** the raw protocol capture, is not built.
+- **Raw protocol capture** is not in this database. It arrives with the agent adapter, as a separate bounded file of raw bytes (docs/architecture/07).

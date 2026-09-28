@@ -1,4 +1,4 @@
-import { CommandEnvelope, now } from '@charrette/domain'
+import { CommandEnvelope, now, type ProjectId } from '@charrette/domain'
 import { Context, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -13,16 +13,19 @@ interface Receipt {
 
 /**
  * Runs commands exactly once (docs/architecture/02). A command runs in one
- * transaction with its receipt. A retry with the same id and the same command
- * returns the first result without running again; the same id with a
- * different command fails. A command that fails leaves no receipt and no
- * writes, so a retry evaluates it afresh.
+ * transaction with its receipt. Receipts are kept per actor: a retry of the
+ * same command by the same actor returns the first result without running
+ * again; the same id with a different command fails; another actor's id
+ * reveals nothing. A command that fails leaves no receipt and no writes, so a
+ * retry evaluates it afresh.
  */
 export class Commands extends Context.Service<
   Commands,
   {
     execute<A, I, E, R>(options: {
       readonly envelope: CommandEnvelope
+      /** The project the command acts in, if any. */
+      readonly projectId?: ProjectId
       /** How the result is stored in the receipt and read back on a retry. */
       readonly result: Schema.Codec<A, I>
       readonly handle: Effect.Effect<A, E, R>
@@ -36,14 +39,18 @@ export class Commands extends Context.Service<
 
       const execute = <A, I, E, R>(options: {
         readonly envelope: CommandEnvelope
+        readonly projectId?: ProjectId
         readonly result: Schema.Codec<A, I>
         readonly handle: Effect.Effect<A, E, R>
       }) =>
         Effect.gen(function* () {
           const { envelope } = options
-          const payloadDigest = sha256Hex(canonicalJson({ commandType: envelope.commandType, payload: envelope.payload }))
+          const payloadDigest = sha256Hex(
+            canonicalJson({ commandType: envelope.commandType, onBehalfOf: envelope.onBehalfOfActorId ?? null, payload: envelope.payload }),
+          )
           const [previous] = yield* sql<Receipt>`
-            SELECT command_type, payload_digest, result FROM command_receipts WHERE command_id = ${envelope.commandId}`
+            SELECT command_type, payload_digest, result FROM command_receipts
+            WHERE actor_id = ${envelope.actorId} AND command_id = ${envelope.commandId}`
           if (previous !== undefined) {
             if (previous.commandType !== envelope.commandType || previous.payloadDigest !== payloadDigest) {
               return yield* new CommandIdReused({ commandId: envelope.commandId })
@@ -55,12 +62,14 @@ export class Commands extends Context.Service<
           const encoded = yield* Schema.encodeEffect(options.result)(value)
           const completedAt = yield* now
           yield* sql`INSERT INTO command_receipts ${sql.insert({
+            actorId: envelope.actorId,
             commandId: envelope.commandId,
+            onBehalfOfActorId: envelope.onBehalfOfActorId ?? null,
             commandType: envelope.commandType,
             schemaVersion: envelope.schemaVersion,
             payloadDigest,
-            actorId: envelope.actorId,
             deviceId: envelope.deviceId,
+            projectId: options.projectId ?? null,
             aggregateId: envelope.aggregateId ?? null,
             result: JSON.stringify(encoded ?? null),
             receivedAt,

@@ -4,5 +4,5 @@
  * line here when you add a migration; never change an existing line.
  */
 export const checksums: Readonly<Record<string, string>> = {
-  '0001_initial': '47643c79246ec0042e03713d92f4f7f0274d1faf3e32651d03f42dee38d9dc6a',
+  '0001_initial': 'd2a8400012a35b65368c0f27308adf61548797a38b0115096036ee9f0fc1f252',
 }

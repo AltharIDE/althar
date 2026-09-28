@@ -523,7 +523,12 @@ including the always-ask list
 
 - Every session starts in a mode where the agent asks rather than acts. No
   session starts in a bypass mode. Requests arrive as ACP
-  `session/request_permission`.
+  `session/request_permission`. The session records how it was started: the
+  mode, and the MCP servers and tools its role was given.
+- Charrette answers with a one-time option only. If it offered an agent
+  "allow always", the agent could remember the rule itself, and later requests
+  would stop reaching Charrette. A standing allow is Charrette's own rule,
+  recorded with the decision, and applied by Charrette.
 - Charrette answers from the project rules. Nearly everything is allowed
   without the user; only what the rules keep for the user becomes an attention
   request. Every answer is recorded on the task, and the thread shows allowed

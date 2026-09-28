@@ -4,7 +4,7 @@ import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RevisionConflict, RowNotFound } from '../src/errors'
-import { bumpRevision } from '../src/Revisions'
+import { bumpRevision, revisionedTables } from '../src/Revisions'
 import { seed } from './fixtures'
 import { InMemory, WebCrypto } from './support'
 
@@ -42,6 +42,18 @@ describe('bumpRevision', () => {
       const { projectId } = yield* seed
       yield* sql`INSERT INTO project_settings ${sql.insert({ projectId, updatedAt: yield* now })}`
       assert.strictEqual(yield* bumpRevision('project_settings', projectId, 1), 2)
+    }).pipe(Effect.provide(Env)),
+  )
+
+  // Policies and graph revisions are immutable rows; their `revision` numbers a version, not a concurrency check.
+  it.effect('covers exactly the tables with a revision column', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const tables = yield* sql<{ name: string }>`
+        SELECT DISTINCT m.name FROM sqlite_schema m, pragma_table_info(m.name) c
+        WHERE m.type = 'table' AND c.name = 'revision'
+          AND m.name NOT IN ('policies', 'execution_graph_revisions')`
+      assert.deepStrictEqual(tables.map((table) => table.name).toSorted(), [...revisionedTables].toSorted())
     }).pipe(Effect.provide(Env)),
   )
 })

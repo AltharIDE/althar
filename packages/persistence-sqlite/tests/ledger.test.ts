@@ -17,6 +17,7 @@ describe('Ledger', () => {
       const { actorId, projectId } = yield* seed
       yield* TestClock.adjust(5)
       const event = yield* ledger.record({
+        projectId,
         aggregateType: 'project',
         aggregateId: projectId,
         aggregateRevision: 1,
@@ -31,8 +32,8 @@ describe('Ledger', () => {
       assert.isNull(stored?.commandId)
       const changes = yield* ledger.changesSince(0, 10)
       assert.deepStrictEqual(
-        changes.map((change) => [change.aggregateType, change.aggregateId, change.revision]),
-        [['project', projectId, 1]],
+        changes.map((change) => [change.projectId, change.aggregateType, change.aggregateId, change.aggregateRevision]),
+        [[projectId, 'project', projectId, 1]],
       )
     }).pipe(Effect.provide(Env)),
   )
@@ -53,12 +54,12 @@ describe('Ledger', () => {
       }
       const firstPage = yield* ledger.changesSince(0, 2)
       assert.deepStrictEqual(
-        firstPage.map((change) => change.revision),
+        firstPage.map((change) => change.aggregateRevision),
         [1, 2],
       )
       const rest = yield* ledger.changesSince(firstPage.at(-1)?.cursor ?? 0, 10)
       assert.deepStrictEqual(
-        rest.map((change) => change.revision),
+        rest.map((change) => change.aggregateRevision),
         [3, 4, 5],
       )
       assert.isTrue(rest.every((change, index) => index === 0 || change.cursor > (rest[index - 1]?.cursor ?? 0)))

@@ -18,6 +18,7 @@ export const NodeAttemptState = Schema.Literals([
   'cancelled',
   'uncertain',
   'reconciling',
+  'held',
   'superseded',
 ])
 export type NodeAttemptState = typeof NodeAttemptState.Type
@@ -45,16 +46,21 @@ export interface Lifecycle<S extends string> {
   readonly edges: { readonly [From in S]: ReadonlyArray<S> }
 }
 
-/** A switch to another agent ends the current attempt as `superseded`; a new attempt of the same node takes over. */
+/**
+ * A switch to another agent ends the current attempt as `superseded`; a new
+ * attempt of the same node takes over. `held` waits without a person, for
+ * example for a usage limit to reset, and goes back to running.
+ */
 export const nodeAttemptLifecycle: Lifecycle<NodeAttemptState> = {
   name: 'node attempt',
   edges: {
     ready: ['admitted'],
     admitted: ['running', 'cancelled'],
-    running: ['waiting_attention', 'verifying', 'succeeded', 'failed', 'cancelling', 'uncertain', 'superseded'],
+    running: ['waiting_attention', 'held', 'verifying', 'succeeded', 'failed', 'cancelling', 'uncertain', 'superseded'],
     waiting_attention: ['running', 'cancelling', 'superseded'],
     verifying: ['succeeded', 'failed', 'uncertain'],
     cancelling: ['cancelled', 'uncertain'],
+    held: ['running', 'cancelling', 'superseded'],
     uncertain: ['reconciling'],
     reconciling: ['succeeded', 'failed', 'waiting_attention'],
     succeeded: [],

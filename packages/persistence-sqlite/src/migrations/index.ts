@@ -23,6 +23,5 @@ const run = (statements: ReadonlyArray<string>) =>
     for (const statement of statements) yield* sql.unsafe(statement)
   })
 
-export const loader = SqliteMigrator.fromRecord(
-  Object.fromEntries(migrations.map((migration) => [migration.key, run(migration.statements)])),
-)
+export const loaderFor = (list: ReadonlyArray<Migration>) =>
+  SqliteMigrator.fromRecord(Object.fromEntries(list.map((migration) => [migration.key, run(migration.statements)])))

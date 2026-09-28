@@ -13,6 +13,8 @@ export class CommandEnvelope extends Schema.Class<CommandEnvelope>('@charrette/d
   commandType: Schema.String.check(Schema.isPattern(/^[a-z]+(\.[a-z_]+)+$/)),
   schemaVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   actorId: ActorId,
+  /** The person a command acts for, when an agent issues it: the coordinator acts for its owner. */
+  onBehalfOfActorId: Schema.optional(ActorId),
   deviceId: DeviceId,
   aggregateId: Schema.optional(Schema.String),
   expectedRevision: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),

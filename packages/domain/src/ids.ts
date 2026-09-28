@@ -23,17 +23,16 @@ export const Ids = {
   taskPlan: kind('plan', 'TaskPlanId'),
   run: kind('run', 'RunId'),
   runAttempt: kind('ratt', 'RunAttemptId'),
-  workspaceSet: kind('wset', 'WorkspaceSetId'),
+  runtimeInstance: kind('rt', 'RuntimeInstanceId'),
   workspace: kind('ws', 'WorkspaceId'),
+  workspaceSnapshot: kind('snap', 'WorkspaceSnapshotId'),
   workflowDefinition: kind('wdef', 'WorkflowDefinitionId'),
   workflowVersion: kind('wver', 'WorkflowVersionId'),
   workflowExecution: kind('wexe', 'WorkflowExecutionId'),
   node: kind('node', 'NodeId'),
   nodeAttempt: kind('natt', 'NodeAttemptId'),
-  graphPatch: kind('patch', 'GraphPatchId'),
   thread: kind('thr', 'ThreadId'),
   threadItem: kind('item', 'ThreadItemId'),
-  threadSummary: kind('sum', 'ThreadSummaryId'),
   userInput: kind('input', 'UserInputId'),
   turnDelivery: kind('turn', 'TurnDeliveryId'),
   agentInstallation: kind('inst', 'AgentInstallationId'),
@@ -44,6 +43,7 @@ export const Ids = {
   permissionRequest: kind('perm', 'PermissionRequestId'),
   attentionRequest: kind('attn', 'AttentionRequestId'),
   decision: kind('dec', 'DecisionId'),
+  finding: kind('find', 'FindingId'),
   changeSet: kind('chg', 'ChangeSetId'),
   repositoryChange: kind('rchg', 'RepositoryChangeId'),
   workItem: kind('work', 'WorkItemId'),
@@ -78,10 +78,12 @@ export const RunId = Ids.run.schema
 export type RunId = typeof RunId.Type
 export const RunAttemptId = Ids.runAttempt.schema
 export type RunAttemptId = typeof RunAttemptId.Type
-export const WorkspaceSetId = Ids.workspaceSet.schema
-export type WorkspaceSetId = typeof WorkspaceSetId.Type
+export const RuntimeInstanceId = Ids.runtimeInstance.schema
+export type RuntimeInstanceId = typeof RuntimeInstanceId.Type
 export const WorkspaceId = Ids.workspace.schema
 export type WorkspaceId = typeof WorkspaceId.Type
+export const WorkspaceSnapshotId = Ids.workspaceSnapshot.schema
+export type WorkspaceSnapshotId = typeof WorkspaceSnapshotId.Type
 export const WorkflowDefinitionId = Ids.workflowDefinition.schema
 export type WorkflowDefinitionId = typeof WorkflowDefinitionId.Type
 export const WorkflowVersionId = Ids.workflowVersion.schema
@@ -92,14 +94,10 @@ export const NodeId = Ids.node.schema
 export type NodeId = typeof NodeId.Type
 export const NodeAttemptId = Ids.nodeAttempt.schema
 export type NodeAttemptId = typeof NodeAttemptId.Type
-export const GraphPatchId = Ids.graphPatch.schema
-export type GraphPatchId = typeof GraphPatchId.Type
 export const ThreadId = Ids.thread.schema
 export type ThreadId = typeof ThreadId.Type
 export const ThreadItemId = Ids.threadItem.schema
 export type ThreadItemId = typeof ThreadItemId.Type
-export const ThreadSummaryId = Ids.threadSummary.schema
-export type ThreadSummaryId = typeof ThreadSummaryId.Type
 export const UserInputId = Ids.userInput.schema
 export type UserInputId = typeof UserInputId.Type
 export const TurnDeliveryId = Ids.turnDelivery.schema
@@ -120,6 +118,8 @@ export const AttentionRequestId = Ids.attentionRequest.schema
 export type AttentionRequestId = typeof AttentionRequestId.Type
 export const DecisionId = Ids.decision.schema
 export type DecisionId = typeof DecisionId.Type
+export const FindingId = Ids.finding.schema
+export type FindingId = typeof FindingId.Type
 export const ChangeSetId = Ids.changeSet.schema
 export type ChangeSetId = typeof ChangeSetId.Type
 export const RepositoryChangeId = Ids.repositoryChange.schema

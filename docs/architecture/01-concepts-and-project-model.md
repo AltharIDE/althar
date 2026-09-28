@@ -95,8 +95,8 @@ Shared identity and device-local location are distinct:
 |---|---|---|---|
 | `RepositoryBinding` | Project authority | Binding ID, role, normalized remote fingerprints, provider repository ID where available, allowed subpaths, default base-ref policy | Local paths and credentials |
 | `RepositoryLocation` | One device or runner | Binding ID, host ID, existing or managed path, observed remotes, access capabilities, last verification | Shared authority |
-| `WorkspaceSet` | One run attempt | Exact workspaces, base revisions, roles, and preparation record used together | Cross-repository atomicity claim |
-| `Workspace` | One binding within an attempt | Concrete worktree/clone, base commit, branch/ref, dirty-state observation, ownership, cleanup policy | Project identity |
+| `Workspace` | One task, one binding, one device | Concrete worktree, access mode, base commit, branch/ref, ownership, cleanup policy | Project identity |
+| `WorkspaceSnapshot` | One moment in a workspace | The commit or tree the workspace held, and why it was taken (a node starting or ending, a switch, an interrupt) | Cross-repository atomicity claim |
 
 ```mermaid
 flowchart LR
@@ -104,11 +104,11 @@ flowchart LR
     Binding --> LocationA["RepositoryLocation · device A"]
     Binding --> LocationB["RepositoryLocation · device B"]
     Task -->|"requires 0..n"| Binding
-    Attempt --> Set["WorkspaceSet"]
-    Set --> Workspace1["Workspace · repo A"]
-    Set --> Workspace2["Workspace · repo B"]
+    Task --> Workspace1["Workspace · repo A · this device"]
+    Task --> Workspace2["Workspace · repo B · this device"]
     Workspace1 --> Binding
     Workspace2 --> Binding
+    Attempt["Node attempt"] -.->|"snapshots"| Workspace1
 ```
 
 A URL is useful evidence but is not a universal repository identity. Forks,
@@ -234,10 +234,18 @@ The preflight resolves all required bindings on one host:
 If a required binding is unresolved, the run does not partially start. The user
 can map, clone, remove the requirement, or choose another capable host.
 
-One attempt receives one `WorkspaceSet` with a workspace per participating
-binding. Everything in the attempt shares it: the lead, its steps, and any
-agent that takes the task over after a switch. Parallel steps in v1 only read,
-so one workspace per repository is enough. Cross-repository publication is not atomic. A resulting `ChangeSet`
+A task has one workspace per participating repository on each device,
+created when its first run is admitted there. Every run, attempt and agent of
+the task on that device shares it: the lead, its steps, and any agent that
+takes the task over after a switch. Parallel steps in v1 only read, so one
+workspace per repository is enough. A workspace snapshot records which commit
+or tree the workspace held when each node attempt started and ended, at a
+switch and at an interrupt, so what each step saw can always be found again.
+
+Run admission copies the task's repository requirements onto the run, so
+editing the task later never changes what a past run was allowed.
+
+Cross-repository publication is not atomic. A resulting `ChangeSet`
 groups independent `RepositoryChange` records:
 
 - binding ID;
@@ -345,8 +353,8 @@ same source location, while each run still receives its own managed workspace.
 | `Task` | Desired work is recorded | Completed, cancelled, or archived |
 | `Run` | A task is submitted under a workflow and policy | Logical outcome chosen |
 | `RunAttempt` | Execution or retry is admitted | Succeeded, failed, cancelled, interrupted |
-| `WorkspaceSet` | Attempt source preflight succeeds | Retained or cleaned after terminal outcome |
-| `Workspace` | One repository workspace is prepared | Retained, published, or cleaned |
+| `Workspace` | A task's first run is admitted on a device | Retained, published, or cleaned with the task |
+| `WorkspaceSnapshot` | A node attempt starts or ends, a switch, an interrupt | Immutable |
 | `WorkflowExecution` | A workflow version is materialized for a run | Completed, cancelled, failed |
 | `NodeAttempt` | A node is scheduled or retried | Succeeded, failed, cancelled, uncertain |
 | `ProviderSession` | An adapter starts or resumes provider work | Provider terminal, lost, or superseded |
@@ -471,8 +479,8 @@ live beneath a project while keeping the MVP product coherent.
 ## Acceptance examples
 
 1. A user opens repository A, adds repository B, and creates one task that may
-   write A but only read B. The preflight and workspace set preserve that
-   distinction.
+   write A but only read B. The preflight, the run's copy of the requirements,
+   and each workspace's access mode preserve that distinction.
 2. A collaborator opens the project without access to B. They can read allowed
    decisions and evidence, but cannot start the task or infer another user's
    path.
