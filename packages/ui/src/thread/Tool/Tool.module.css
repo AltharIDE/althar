@@ -1,0 +1,278 @@
+.tool {
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0);
+  box-shadow: inset 0 0 0 1px transparent;
+  transition:
+    background var(--fold) var(--ease-fold),
+    box-shadow var(--fold) var(--ease-fold),
+    margin var(--fold) var(--ease-fold);
+}
+.tool + .tool {
+  margin-top: 2px;
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 16px);
+  height: 30px;
+  margin: 0 -8px;
+  padding-right: 8px;
+  border-radius: 7px;
+  box-shadow: inset 0 -1px 0 transparent;
+  transition:
+    background var(--fast) var(--ease),
+    width var(--fold) var(--ease-fold),
+    margin var(--fold) var(--ease-fold),
+    height var(--fold) var(--ease-fold),
+    border-radius var(--fold) var(--ease-fold),
+    box-shadow var(--fold) var(--ease-fold);
+}
+.toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding-left: 8px;
+  border-radius: inherit;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.toggle:not(button) {
+  padding-right: 0;
+}
+/* the button's area is the whole row; the row shows its hover and press */
+button.toggle {
+  position: static;
+  outline: 0;
+}
+button.toggle::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.row {
+  border-radius: 7px;
+}
+.row:has(> button.toggle:hover),
+.row:has(> button.toggle:focus-visible) {
+  background: var(--n-4);
+}
+.row:has(> button.toggle:active) {
+  background: var(--n-5);
+}
+.row:has(> button.toggle:focus-visible) {
+  outline: 1.5px solid var(--signal);
+  outline-offset: -1.5px;
+}
+.glyph {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  flex: none;
+  color: var(--t-3);
+}
+.verb {
+  flex: none;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  font: 11.5px var(--mono);
+  color: var(--t-2);
+}
+.meta {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.took {
+  font-size: 11px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.exit {
+  font: 600 11px var(--mono);
+  color: var(--danger);
+}
+.caret {
+  flex: none;
+  pointer-events: none;
+}
+/* a target that opens: the toggle keeps to the glyph and verb, and the link sits over the row's hit area */
+.linked .toggle {
+  flex: none;
+}
+.linked > .meta {
+  flex: 1;
+  justify-content: flex-end;
+}
+.link {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  font: 11.5px var(--mono);
+  color: var(--t-2);
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 2px;
+}
+.link:hover {
+  color: var(--t-1);
+  text-decoration-color: currentColor;
+}
+.running .verb,
+.running .meta {
+  color: var(--live);
+}
+/* set back: it did not happen, and that is not a failure */
+.declined .verb,
+.cancelled .verb {
+  color: var(--t-2);
+}
+.declined .target,
+.cancelled .target {
+  color: var(--t-3);
+}
+.said {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.out {
+  margin: 4px 0 8px 24px;
+}
+.sheetable .out {
+  margin: 0;
+}
+/* what a sheet holds sits flush in it */
+.sheetable .out > * {
+  border-radius: 0 0 10px 10px;
+  box-shadow: none;
+}
+.sheetable .out > [data-diff] {
+  padding: 0;
+}
+.sheetable .out > [data-diff] > :first-child {
+  border-radius: 0;
+}
+
+/* the copy button unfolds into the header when the sheet opens */
+.copy {
+  position: relative;
+  flex: none;
+  max-width: 0;
+  margin-left: -8px;
+  overflow: hidden;
+  opacity: 0;
+  transition:
+    max-width var(--fold) var(--ease-fold),
+    opacity var(--base) var(--ease);
+}
+.sheet .copy {
+  max-width: 150px;
+  margin: 0 -2px 0 2px;
+  opacity: 1;
+}
+
+.sheet {
+  margin: 8px 0;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.sheet > .row {
+  width: 100%;
+  height: 38px;
+  margin: 0;
+  padding-right: 10px;
+  border-radius: 10px 10px 0 0;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.sheet > .row .toggle {
+  padding-left: 12px;
+}
+.sheet > .row:has(> button.toggle:hover) {
+  background: var(--n-1);
+}
+
+/* a dark finish for commands, when the host asks for it */
+:global([data-term='dark']) .sheet.run {
+  background: var(--term);
+  box-shadow: inset 0 0 0 1px var(--term);
+}
+:global([data-term='dark']) .sheet.run > .row {
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.07);
+}
+:global([data-term='dark']) .sheet.run > .row button.toggle {
+  color: var(--term-t3);
+}
+:global([data-term='dark']) .sheet.run > .row:has(> button.toggle:hover) {
+  background: var(--term-raised);
+}
+:global([data-term='dark']) .sheet.run :is(.verb, .target) {
+  color: var(--term-t1);
+}
+:global([data-term='dark']) .sheet.run :is(.glyph, .meta, .took, .caret) {
+  color: var(--term-t4);
+}
+:global([data-term='dark']) .sheet.run.running :is(.verb, .meta) {
+  color: var(--term-live);
+}
+:global([data-term='dark']) .sheet.run .exit {
+  color: var(--term-danger);
+}
+
+.groupRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  width: calc(100% + 16px);
+  margin: 0 -8px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.groupRow:hover {
+  background: var(--n-4);
+  color: var(--t-1);
+}
+.groupRow:active {
+  background: var(--n-5);
+}
+.groupSummary {
+  font-weight: 500;
+}
+.push {
+  margin-left: auto;
+}
+.groupBody {
+  margin: 2px 0 4px 5px;
+  padding-left: 11px;
+  box-shadow: -1px 0 0 var(--line-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool,
+  .row,
+  .copy {
+    transition: none;
+  }
+}

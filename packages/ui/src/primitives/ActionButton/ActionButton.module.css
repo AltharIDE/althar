@@ -1,0 +1,77 @@
+.action {
+  --action-h: 26px;
+  --action-pad: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: var(--action-h);
+  padding: 0 var(--action-pad);
+  border-radius: 6px;
+  font-size: 11.5px;
+  white-space: nowrap;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.small {
+  --action-h: 22px;
+  --action-pad: 6px;
+  gap: 4px;
+  border-radius: 5px;
+}
+.iconOnly {
+  --action-pad: calc((var(--action-h) - 12px) / 2);
+  justify-content: center;
+  width: var(--action-h);
+  padding: 0;
+}
+/* the label, or the glyph of an icon-only button, lines up with the text beside it */
+.flushStart {
+  margin-inline-start: calc(-1 * var(--action-pad));
+}
+.flushEnd {
+  margin-inline-end: calc(-1 * var(--action-pad));
+}
+.action:disabled {
+  opacity: 0.45;
+}
+
+.default {
+  color: var(--t-3);
+}
+.default:hover:not(:disabled) {
+  background: var(--n-4);
+  color: var(--t-1);
+}
+.default:active:not(:disabled),
+.default[aria-pressed='true'],
+.default[aria-expanded='true'] {
+  background: var(--n-5);
+  color: var(--t-1);
+}
+
+.strong {
+  color: var(--signal);
+  font-weight: 600;
+}
+.strong:hover:not(:disabled) {
+  background: var(--signal-dim);
+}
+.strong:active:not(:disabled) {
+  background: var(--signal-hover);
+}
+
+.onDark {
+  color: var(--on-ink-2);
+}
+.onDark:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--on-ink);
+}
+.onDark:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--on-ink);
+}
+.onDark:focus-visible {
+  outline-color: var(--on-ink-focus);
+}

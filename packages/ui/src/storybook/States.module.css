@@ -1,0 +1,53 @@
+.compact,
+.wide,
+.thread {
+  display: grid;
+  gap: 10px;
+}
+.compact {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+.wide {
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+/* a part of the thread gets the thread's width, and the grid adds columns to the right when there is room */
+.thread {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 660px), 1fr));
+  align-items: start;
+}
+.cell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--r-lg);
+  background: var(--n-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.label {
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.stage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+}
+/* a line as wide as its cell shrinks to it, as it would in a thread */
+.stage > * {
+  min-width: 0;
+}
+/* and reads at the thread's width, not the cell's */
+.thread .stage {
+  display: block;
+  max-width: calc(var(--measure) - 56px);
+}
+.dark {
+  margin: -4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #1d1c21;
+}

@@ -1,0 +1,37 @@
+.thread {
+  display: block;
+}
+/* :not(:first-child) rather than * + *, so a part's own margin reset does not win on load order */
+.thread > :not(:first-child) {
+  margin-top: 30px;
+}
+/* parts that belong together sit closer: steps stack, a steer sits by its step, changes read as one list */
+.thread > [data-rhythm='you'] + [data-rhythm='you'] {
+  margin-top: 6px;
+}
+.thread > [data-rhythm='step'] + [data-rhythm='step'] {
+  margin-top: 12px;
+}
+.thread > [data-rhythm='steer'] + :is([data-rhythm='step'], [data-rhythm='steer']),
+.thread > [data-rhythm='step'] + :is([data-rhythm='steer'], [data-rhythm='change'], [data-rhythm='allowed']) {
+  margin-top: 8px;
+}
+.thread > [data-rhythm='change'] + [data-rhythm='change'] {
+  margin-top: 2px;
+}
+.thread > * + [data-rhythm='mark'] {
+  margin-top: 22px;
+}
+.thread > [data-rhythm='mark'] + [data-rhythm='mark'] {
+  margin-top: 2px;
+}
+
+.measure {
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 0 calc(28px * var(--sp));
+}
+.wide {
+  max-width: calc(var(--measure) + 140px);
+}

@@ -1,0 +1,18 @@
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--n-4);
+  font: 500 10px/15px var(--font);
+  color: var(--t-3);
+}
+.onFill {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.18);
+  color: var(--on-ink);
+}

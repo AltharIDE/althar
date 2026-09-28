@@ -1,0 +1,34 @@
+.panel {
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100vw - 16px);
+  max-height: var(--radix-popover-content-available-height);
+  overflow-y: auto;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  box-shadow: var(--lift-pop);
+  text-align: left;
+  animation: pop var(--fast) var(--ease);
+}
+.panel:focus-visible {
+  outline: none;
+}
+.padded {
+  padding: 11px 12px;
+}
+
+/* it comes in from the side it opens toward */
+.panel[data-side='top'] {
+  --from: 3px;
+}
+.panel[data-side='bottom'] {
+  --from: -3px;
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(var(--from, 0));
+  }
+}

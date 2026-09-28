@@ -1,0 +1,222 @@
+.change {
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  overflow: hidden;
+}
+.body {
+  padding: 18px 20px 16px;
+}
+.statusLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.ready .status {
+  color: var(--signal);
+}
+.merged .status {
+  color: var(--ok);
+}
+span.you {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--signal);
+}
+.note {
+  font-size: 12px;
+  color: var(--t-3);
+}
+.title {
+  margin: 8px 0 0;
+  font: 600 19px/1.3 var(--font-display);
+  letter-spacing: -0.015em;
+  color: var(--t-1);
+  text-wrap: pretty;
+}
+.branch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 11px;
+  color: var(--t-3);
+}
+.ref {
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: var(--n-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font: 500 11.5px/1.2 var(--mono);
+  color: var(--t-1);
+}
+.commits {
+  margin-left: 5px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.by {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  margin-top: 14px;
+  font-size: 12.5px;
+}
+.who {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+.k {
+  color: var(--t-3);
+}
+.model {
+  font-weight: 550;
+  color: var(--t-1);
+}
+.same {
+  font-size: 11.5px;
+  color: var(--t-2);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  border-top: 1px solid var(--line);
+}
+/* a line on the left and the top of each, so they stay divided side by side or stacked */
+.section {
+  min-width: 0;
+  padding: 14px 20px 16px;
+  box-shadow:
+    -1px 0 0 var(--line),
+    0 -1px 0 var(--line);
+}
+.sub {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.count {
+  font: 500 11px/1 var(--mono);
+  color: var(--t-3);
+}
+.sum {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--t-3);
+}
+
+.pr + .pr {
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.prHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.order {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px var(--line-3);
+  font: 600 10px/1 var(--mono);
+  color: var(--t-2);
+}
+.repo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.owner {
+  font-weight: 400;
+  color: var(--t-3);
+}
+.number {
+  font: 500 12px/1 var(--mono);
+  color: var(--t-3);
+}
+.github {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-decoration: none;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.github:hover {
+  background: var(--n-2);
+  color: var(--t-1);
+}
+.after {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 4px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--n-1);
+}
+.deciding {
+  background: var(--signal-paper);
+  box-shadow: inset 0 1px 0 var(--signal-line);
+  border-top-color: transparent;
+}
+.meta {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.push {
+  margin-left: auto;
+}
+.error {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--danger);
+}

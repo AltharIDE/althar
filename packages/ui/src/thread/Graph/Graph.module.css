@@ -1,0 +1,156 @@
+/* the graph, small */
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.item {
+  display: inline-flex;
+  align-items: center;
+}
+.edge {
+  width: 12px;
+  height: 1px;
+  background: var(--line-3);
+}
+.node {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  background: var(--paper);
+  font-size: 11.5px;
+  color: var(--t-2);
+  white-space: nowrap;
+}
+.done {
+  color: var(--t-3);
+}
+.done svg {
+  color: var(--t-3);
+}
+.now {
+  border-color: var(--live);
+  color: var(--t-1);
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--live);
+}
+.next {
+  background: transparent;
+  color: var(--t-3);
+}
+.added {
+  border-style: dashed;
+  border-color: var(--t-3);
+  color: var(--t-1);
+  font-weight: 500;
+}
+.stopped {
+  background: transparent;
+  color: var(--t-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--t-3);
+}
+.stopped svg {
+  color: var(--t-3);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.row > svg {
+  flex: none;
+  color: var(--t-3);
+}
+.title {
+  flex: none;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-2);
+}
+.rev {
+  flex: none;
+  color: var(--t-3);
+}
+.undone .title,
+.undone .summary {
+  color: var(--t-3);
+}
+.line {
+  flex: 1 1 16px;
+  min-width: 16px;
+  height: 1px;
+  background: var(--line-2);
+}
+.undo {
+  position: relative;
+  overflow: hidden;
+}
+/* the time left, running down under the button */
+.undo::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: calc(var(--left) * 100%);
+  background: var(--t-3);
+  transition: width 1s linear;
+}
+.left {
+  margin-left: 6px;
+  font: 11px var(--mono);
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.body {
+  padding: 8px 0 4px 19px;
+}
+.ops {
+  margin: 12px 0 6px;
+  padding-left: 16px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--t-2);
+}
+.why {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--t-3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .undo::after {
+    transition: none;
+  }
+}
+
+.proposed {
+  margin: 2px 0 12px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}

@@ -1,0 +1,45 @@
+/* sized to sit beside 12px words */
+.live {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--live);
+}
+.live::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 99px;
+  background: var(--live);
+  opacity: 0.25;
+  animation: ping 1.6s var(--ease) infinite;
+}
+@keyframes ping {
+  from {
+    transform: scale(0.4);
+    opacity: 0.35;
+  }
+  to {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+span.you {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin: 0 2px;
+  border-radius: 99px;
+  background: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-dim);
+}
+.icon {
+  flex: none;
+  color: var(--t-3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .live::after {
+    animation: none;
+  }
+}

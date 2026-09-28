@@ -1,0 +1,58 @@
+{
+  "name": "@charrette/ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Charrette's interface primitives (the thread, the coordinator's cards, the composer), with a Storybook and a workbench.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./screens": "./src/screens/index.ts",
+    "./styles.css": "./src/styles/global.css"
+  },
+  "scripts": {
+    "storybook": "storybook dev --port 6006 --no-open",
+    "workbench": "vp dev",
+    "build": "vp build && storybook build --output-dir dist/storybook --quiet",
+    "check": "vp check",
+    "fix": "vp check --fix",
+    "test": "vp test run",
+    "test:coverage": "vp test run --coverage",
+    "verify": "bun run check && bun run test:coverage && bun run build"
+  },
+  "dependencies": {
+    "iconoir-react": "^7.12.1",
+    "marked": "^18.0.14",
+    "radix-ui": "^1.6.7"
+  },
+  "devDependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@storybook/addon-a11y": "10.6.0",
+    "@storybook/addon-docs": "10.6.0",
+    "@storybook/react-vite": "10.6.0",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "@vitest/coverage-v8": "5.0.1",
+    "jsdom": "^30.1.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "storybook": "10.6.0",
+    "storybook-addon-pseudo-states": "10.6.0",
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
+    "vite-plus": "1.0.0-rc.0",
+    "vitest": "5.0.1"
+  },
+  "peerDependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
+  }
+}

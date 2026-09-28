@@ -49,6 +49,7 @@ Charrette tests a broader hypothesis about how software engineering changes once
 | [`docs/glossary.md`](./docs/glossary.md) | The words the interface uses, beside the words the architecture uses |
 | [`docs/open-questions.md`](./docs/open-questions.md) | What is not decided yet |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | The engineering standards every app and package follows |
+| [`packages/ui`](./packages/ui) | `@charrette/ui`, the interface primitives, with a Storybook |
 | [`apps/pitch`](./apps/pitch) | The brief and research note, as a static site |
 
 The architecture, starting from [the overview](./docs/architecture/README.md):
@@ -69,6 +70,7 @@ You need Bun 1.3.5 and Node 24. The pinned versions are in `.bun-version` and `.
 ```bash
 bun install --frozen-lockfile
 bun run dev                            # the pitch site, at localhost:5290
+bun --filter @charrette/ui storybook   # the UI package's Storybook, at localhost:6006
 bun run verify                         # checks, tests and builds for every package
 ```
 

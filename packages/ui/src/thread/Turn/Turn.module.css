@@ -1,0 +1,102 @@
+/* block, not flex, so a sheet's margin meets the next part's and collapses */
+.turn {
+  display: block;
+}
+/* :not(:first-child) rather than * + *, so a part's own margin reset does not win on load order */
+.turn > :not(:first-child) {
+  margin-top: 14px;
+}
+.turn > .head + * {
+  margin-top: 0;
+}
+.turn > [data-rhythm='fold'][data-state='closed'] + * {
+  margin-top: 8px;
+}
+/* a record or a card keeps its own distance, even from the head */
+.turn > * + :is([data-rhythm='change'], [data-rhythm='allowed']) {
+  margin-top: 16px;
+}
+.turn > * + [data-rhythm='card'] {
+  margin-top: 12px;
+}
+.turn > * + .actions {
+  margin-top: 4px;
+}
+.turn > :is([data-rhythm='tool'], [data-rhythm='sheet']) + [data-rhythm='tool'] {
+  margin-top: 2px;
+}
+.turn > [data-rhythm='sheet'] {
+  margin-bottom: 0;
+}
+.turn > [data-rhythm='snippet'] + [data-rhythm='snippet'],
+.turn > [data-rhythm='external'] + [data-rhythm='external'] {
+  margin-top: 6px;
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.who {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.who::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--bot);
+}
+.agent {
+  gap: 6px;
+}
+.at {
+  font-size: 11px;
+  color: var(--t-3);
+}
+
+.prose {
+  margin: 0;
+  font-family: var(--font-prose);
+  font-size: var(--prose-size);
+  line-height: var(--prose-lh);
+  color: var(--t-1);
+}
+.prose + .prose {
+  margin-top: 10px;
+}
+.dim {
+  color: var(--t-3);
+}
+
+/* the actions wait for the turn to be hovered or reached by keyboard */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: -8px;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.turn:hover > .actions,
+.actions:focus-within {
+  opacity: 1;
+}
+/* with nothing to hover, they stay */
+@media (hover: none) {
+  .actions {
+    opacity: 1;
+  }
+}
+.meta {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}

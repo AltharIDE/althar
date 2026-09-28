@@ -1,0 +1,24 @@
+.frame {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  min-height: 120px;
+}
+.withPanel {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 44%);
+  min-height: 520px;
+}
+.column {
+  width: 100%;
+  max-width: var(--measure);
+  padding: 8px 0 24px;
+}
+/* a grid of states lays its cells out across the canvas; each cell keeps the thread's width */
+.column:has(> [data-states]) {
+  max-width: none;
+}
+.note {
+  margin: 16px 0 0;
+  font-size: 12px;
+  color: var(--t-3);
+}

@@ -1,0 +1,10 @@
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 3px;
+}
+.add {
+  align-self: flex-start;
+  margin-left: 4px;
+}

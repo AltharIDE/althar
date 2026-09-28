@@ -1,0 +1,55 @@
+/* Accepting is your call, so the kind and the way in are violet; the change itself is ink. */
+.accept {
+  background: var(--paper);
+  padding-top: 14px;
+}
+.kind {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--signal);
+}
+.title {
+  margin-top: 2px;
+  font-size: 14px;
+}
+.prs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.pr {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--n-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 12px;
+  color: var(--t-1);
+}
+.repo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+}
+.number {
+  font: 500 11.5px/1 var(--mono);
+  color: var(--t-3);
+}
+.delta {
+  margin-left: auto;
+}
+.checks {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.go {
+  color: var(--signal);
+}

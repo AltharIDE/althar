@@ -1,0 +1,215 @@
+/* The landing page. Charrette's own colour only where the logo puts it. */
+.hero {
+  display: grid;
+  justify-items: start;
+  gap: 14px;
+  padding: 24px 0 8px;
+}
+.logo {
+  flex: none;
+  align-self: center;
+  margin-right: -2px;
+  color: var(--t-1);
+}
+.name {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.title {
+  margin: 0;
+  font: 650 46px/1 var(--font-display);
+  letter-spacing: -0.035em;
+  color: var(--t-1);
+}
+.kit {
+  font: 500 13px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.lede {
+  max-width: 60ch;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+
+.specimen {
+  display: grid;
+  gap: 0;
+  margin: 28px 0 0;
+  border-radius: 14px;
+  background: var(--n-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  overflow: clip;
+}
+.rooms {
+  display: contents;
+}
+.bar {
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+.thread {
+  display: grid;
+  gap: 18px;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 28px 28px 8px;
+}
+.tools {
+  margin-top: 6px;
+}
+/* room above the composer for the pills that float on its edge */
+.composer {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 52px 28px 28px;
+}
+@media (max-width: 560px) {
+  /* a window is never this narrow: the specimen's bar keeps the project and what needs you */
+  .bar > :first-child,
+  .rooms {
+    display: none;
+  }
+  .thread {
+    padding-inline: 16px;
+  }
+  .composer {
+    padding: 86px 16px 20px;
+  }
+}
+.caption {
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  font: 11px var(--mono);
+  color: var(--t-3);
+}
+
+.sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 10px;
+  margin: 28px 0 8px;
+}
+.section {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px 15px;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: inherit;
+  text-decoration: none;
+  transition:
+    box-shadow var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+.section:hover {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.section:active {
+  background: var(--n-2);
+}
+.section:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 2px;
+}
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sectionIcon {
+  flex: none;
+  color: var(--t-2);
+}
+.sectionTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.count {
+  font: 11px var(--mono);
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.go {
+  margin-left: auto;
+  color: var(--t-3);
+  transition:
+    transform var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.section:hover .go {
+  transform: translateX(2px);
+  color: var(--t-1);
+}
+.about {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .go {
+    transition: none;
+  }
+}
+
+.notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 28px 40px;
+  margin: 44px 0 24px;
+  padding-top: 28px;
+  border-top: 1px solid var(--line);
+}
+.note {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+.noteTitle {
+  margin: 0;
+  font: 500 10.5px/1 var(--font-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.noteList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0 0 0 16px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+.noteList b {
+  font-weight: 600;
+  color: var(--t-1);
+}
+.noteText {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+.noteText code {
+  font: 12px var(--mono);
+  color: var(--t-1);
+}
+.code {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--n-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font: 12px/1.6 var(--mono);
+  color: var(--t-1);
+  overflow-x: auto;
+}

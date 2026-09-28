@@ -1,0 +1,349 @@
+/* A stop on the table: its plot, its sketch, the real thing over it, and what is pinned to it. */
+
+.station {
+  position: absolute;
+}
+
+/*
+ * The plot, pegged out when the table comes into view, before anything is
+ * built. --far is how far out the camera is (table pixels to a screen pixel),
+ * so its lines and its name keep their weight when the table is seen whole.
+ */
+.plot {
+  position: absolute;
+  inset: -28px;
+  border-radius: 18px;
+  opacity: 0;
+  box-shadow: inset 0 0 0 calc(1px * var(--far, 1)) var(--line-3);
+  transition: opacity 900ms var(--ease);
+}
+.plot::before,
+.plot::after {
+  content: '';
+  position: absolute;
+  width: calc(18px * var(--far, 1));
+  height: calc(18px * var(--far, 1));
+  border: 0 solid var(--t-3);
+}
+/* crop marks at two corners, as on a drawing */
+.plot::before {
+  left: calc(-10px * var(--far, 1));
+  top: calc(-10px * var(--far, 1));
+  border-left-width: calc(1px * var(--far, 1));
+  border-top-width: calc(1px * var(--far, 1));
+}
+.plot::after {
+  right: calc(-10px * var(--far, 1));
+  bottom: calc(-10px * var(--far, 1));
+  border-right-width: calc(1px * var(--far, 1));
+  border-bottom-width: calc(1px * var(--far, 1));
+}
+.shown .plot {
+  opacity: 0.9;
+  animation: peg 760ms var(--ease-fold) calc(var(--n) * 140ms + 150ms) both;
+}
+/* built, the plot stays as a faint sheet edge, so the route still lands on something */
+.built .plot {
+  box-shadow: inset 0 0 0 calc(1px * var(--far, 1)) var(--line);
+}
+.built .plot::before,
+.built .plot::after {
+  opacity: 0.7;
+}
+@keyframes peg {
+  from {
+    opacity: 0;
+    clip-path: inset(0 100% 100% 0 round 18px);
+  }
+  to {
+    opacity: 0.9;
+    clip-path: inset(-200px);
+  }
+}
+
+.tag {
+  position: absolute;
+  left: -28px;
+  bottom: calc(100% + 38px);
+  display: flex;
+  align-items: baseline;
+  gap: calc(14px * var(--far, 1));
+  white-space: nowrap;
+  opacity: 0;
+}
+.shown .tag {
+  opacity: 1;
+  animation: rise 700ms var(--ease) calc(var(--n) * 140ms + 380ms) both;
+}
+.numeral {
+  font: 700 108px/0.8 var(--font);
+  letter-spacing: -0.06em;
+  color: transparent;
+  -webkit-text-stroke: calc(1.25px * var(--far, 1)) var(--t-3);
+}
+.label {
+  font: 500 calc(13px * var(--far, 1))/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--t-2);
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(calc(24px * var(--far, 1)));
+  }
+}
+.instant .plot,
+.instant .tag {
+  animation: none;
+}
+
+/* the real thing: hidden until built, then uncovered top to bottom over its sketch */
+.content {
+  position: relative;
+  width: max-content;
+  opacity: 0;
+}
+.built .content {
+  opacity: 1;
+  animation: uncover 900ms var(--ease-fold) 620ms both;
+}
+.instant .content {
+  animation: none;
+  opacity: 1;
+}
+@keyframes uncover {
+  from {
+    clip-path: inset(0 0 100% 0 round 12px);
+    filter: saturate(0.2);
+  }
+  60% {
+    filter: saturate(0.6);
+  }
+  99% {
+    clip-path: inset(0 0 0 0 round 12px);
+    filter: none;
+  }
+  /* then nothing: notes and shadows reach past the edge */
+  to {
+    clip-path: inset(-800px);
+    filter: none;
+  }
+}
+
+/* the pencil: wiped away by the same sweep that uncovers the real thing, so the two never overlap */
+.sketch {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+  animation: wipe 900ms var(--ease-fold) 620ms both;
+}
+.box,
+.text {
+  fill: none;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  animation: pencil 520ms var(--ease) var(--d, 0ms) forwards;
+}
+.box {
+  stroke: var(--t-2);
+  stroke-width: 1;
+}
+.text {
+  stroke: var(--t-3);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+@keyframes pencil {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes wipe {
+  from {
+    clip-path: inset(-40px -40px -40px -40px);
+  }
+  99% {
+    clip-path: inset(100% -40px -40px -40px);
+  }
+  to {
+    clip-path: inset(100% -40px -40px -40px);
+    visibility: hidden;
+  }
+}
+
+/* notes: each leader is cased in paper, so it reads over whatever it passes */
+.note {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.leader {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+}
+.dot {
+  fill: var(--t-1);
+  stroke: var(--n-1);
+  stroke-width: 2;
+  paint-order: stroke;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: dot 380ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.casing,
+.line {
+  fill: none;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  animation: pencil 520ms var(--ease) 120ms forwards;
+}
+.casing {
+  stroke: var(--n-1);
+  stroke-width: 5;
+}
+.line {
+  stroke: var(--t-2);
+  stroke-width: 1;
+}
+.noteLabel {
+  position: absolute;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--n-1);
+  box-shadow: 0 0 0 3px var(--n-1);
+  font: 500 11px/1.2 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t-1);
+  animation: label 420ms var(--ease) 480ms both;
+}
+.noteLeft {
+  transform: translate(-100%, -50%);
+}
+@keyframes dot {
+  from {
+    transform: scale(0);
+  }
+}
+@keyframes label {
+  from {
+    opacity: 0;
+    clip-path: inset(-4px 100% -4px -4px);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(-4px -4px -4px -4px);
+  }
+}
+
+/* what the pointer is over, washed as a hover would wash it, darker while pressed */
+.wash {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 4;
+  opacity: 0;
+  pointer-events: none;
+  background: rgba(20, 20, 28, 0.05);
+  mix-blend-mode: multiply;
+  transition:
+    opacity 200ms var(--ease),
+    background 120ms var(--ease);
+}
+.washOn {
+  opacity: 1;
+}
+.washDown {
+  background: rgba(20, 20, 28, 0.1);
+}
+
+/* the pointer: a hand on the table showing what a person would do */
+.pointer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  margin: -2px 0 0 -2px;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 700ms cubic-bezier(0.65, 0, 0.35, 1),
+    opacity 240ms var(--ease);
+}
+.pointer svg {
+  display: block;
+  fill: var(--t-1);
+  stroke: var(--paper);
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 2px 3px rgba(20, 20, 28, 0.25));
+  transition: transform 120ms var(--ease);
+  transform-origin: 2px 2px;
+}
+.pointerShown {
+  opacity: 1;
+}
+.pointerDown svg {
+  transform: scale(0.84);
+}
+.pressRing {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border-radius: 99px;
+  box-shadow: 0 0 0 1.5px var(--t-2);
+  opacity: 0;
+  transform: scale(0.3);
+}
+.pointerDown .pressRing {
+  animation: press 520ms var(--ease) forwards;
+}
+@keyframes press {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.3);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plot,
+  .tag,
+  .built .content,
+  .sketch,
+  .box,
+  .text,
+  .dot,
+  .casing,
+  .line,
+  .noteLabel {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .sketch {
+    display: none;
+  }
+  .pointer,
+  .wash {
+    display: none;
+  }
+}

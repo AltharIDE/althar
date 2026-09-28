@@ -1,0 +1,69 @@
+.bar {
+  position: relative;
+  z-index: var(--z-float);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  height: 46px;
+  padding: 0 14px 0 12px;
+  background: var(--n-1);
+  border-bottom: 1px solid var(--line);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+/* what can be pressed is not a drag handle */
+.bar :is(button, a, input, [role='radio']) {
+  -webkit-app-region: no-drag;
+}
+.lights {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  width: 49px;
+  margin-right: 6px;
+}
+.lights i {
+  width: 11px;
+  height: 11px;
+  border-radius: 99px;
+  visibility: hidden;
+}
+.drawn i {
+  visibility: visible;
+  background: var(--traffic);
+  transition: background var(--base) var(--ease);
+}
+.bar:hover .drawn i:nth-child(1) {
+  background: #e0685c;
+}
+.bar:hover .drawn i:nth-child(2) {
+  background: #dfa53f;
+}
+.bar:hover .drawn i:nth-child(3) {
+  background: #62b04f;
+}
+.start {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.rule {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawn i {
+    transition: none;
+  }
+}

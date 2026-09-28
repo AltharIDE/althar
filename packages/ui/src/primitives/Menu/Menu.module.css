@@ -1,0 +1,146 @@
+.menu {
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  max-width: calc(100vw - 16px);
+  max-height: var(--radix-dropdown-menu-content-available-height);
+  overflow-y: auto;
+  padding: 5px;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  box-shadow: var(--lift-pop);
+  animation: pop var(--fast) var(--ease);
+}
+.menu:focus-visible {
+  outline: none;
+}
+.menu[data-side='top'] {
+  --from: 3px;
+}
+.menu[data-side='bottom'] {
+  --from: -3px;
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(var(--from, 0));
+  }
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+.heading {
+  padding: 7px 9px 6px;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.separator {
+  height: 1px;
+  margin: 4px -5px;
+  background: var(--line);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--t-1);
+  cursor: default;
+  outline: none;
+  user-select: none;
+}
+/* Radix moves focus with the pointer and marks the item it is on */
+.item[data-highlighted],
+.item:hover {
+  background: var(--n-2);
+}
+.item:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.item:active:not([data-disabled]) {
+  background: var(--n-4);
+}
+.item[data-disabled] {
+  color: var(--t-4);
+}
+.item[data-state='checked'] {
+  font-weight: 550;
+}
+
+.lead {
+  display: inline-flex;
+  flex: none;
+  color: var(--t-3);
+}
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hint {
+  flex: none;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.check {
+  display: inline-flex;
+  flex: none;
+  width: 12px;
+  color: var(--t-1);
+}
+/* an item with a second line grows to hold it; its mark and check stay level with the first */
+.tall {
+  height: auto;
+  min-height: 30px;
+  padding-block: 7px;
+  align-items: flex-start;
+}
+.tall > .lead,
+.tall > .check {
+  margin-top: 2px;
+}
+.text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.text > .label {
+  flex: none;
+}
+.description {
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--t-3);
+}
+.note {
+  margin: 4px -5px 0;
+  padding: 8px 13px 4px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+/* an item that ends or throws something away */
+.danger {
+  color: var(--danger);
+}
+.danger > .lead {
+  color: inherit;
+}

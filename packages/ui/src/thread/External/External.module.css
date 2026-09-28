@@ -1,0 +1,152 @@
+.ext {
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.ext + .ext {
+  margin-top: 6px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px 0 9px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  color: var(--t-2);
+  transition: background var(--fast) var(--ease);
+}
+.row:hover {
+  background: rgba(255, 255, 255, 0.6);
+}
+.row:active {
+  background: var(--paper);
+}
+.fav {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font: 650 9.5px var(--font);
+  color: var(--t-2);
+}
+.small {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 9px;
+}
+.icon {
+  color: var(--t-3);
+}
+.stack {
+  display: inline-flex;
+  flex: none;
+}
+.stack .fav {
+  position: relative;
+}
+.stack .fav + .fav {
+  margin-left: -5px;
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    0 0 0 1.5px var(--n-2);
+}
+.stack .fav:nth-child(1) {
+  z-index: 3;
+}
+.stack .fav:nth-child(2) {
+  z-index: 2;
+}
+.kind {
+  flex: none;
+  color: var(--t-3);
+}
+.title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--t-1);
+}
+.mono {
+  font: 400 11.5px var(--mono);
+}
+.args {
+  color: var(--t-3);
+}
+.aside {
+  margin-left: auto;
+  flex: none;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+
+.body {
+  padding: 2px 14px 12px 36px;
+}
+.quote {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+.quote::before {
+  content: '“';
+}
+.quote::after {
+  content: '”';
+}
+.link {
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 2px;
+}
+.link:hover {
+  color: var(--t-1);
+  text-decoration-color: currentColor;
+}
+
+.list {
+  margin: 0;
+  padding: 0 4px 5px;
+  list-style: none;
+}
+.result {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--t-2);
+  text-decoration: none;
+}
+.result:hover {
+  background: var(--n-4);
+  color: var(--t-1);
+}
+.result:focus-visible {
+  outline-offset: -1.5px;
+}
+.resultTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* a result with nowhere to go: no pointer states */
+.still.result:hover {
+  background: none;
+  color: var(--t-2);
+}

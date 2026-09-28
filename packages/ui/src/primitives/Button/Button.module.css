@@ -1,0 +1,79 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease),
+    color var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+.small {
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.button:active:not(:disabled, .busy) {
+  transform: translateY(0.5px);
+}
+.button:disabled {
+  opacity: 0.45;
+}
+
+.default {
+  background: var(--paper);
+  color: var(--t-1);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift);
+}
+.default:hover:not(:disabled, .busy) {
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift);
+}
+.default:active:not(:disabled, .busy) {
+  background: var(--n-3);
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+
+.signal {
+  background: var(--signal);
+  color: var(--on-signal);
+}
+.signal:hover:not(:disabled, .busy) {
+  background: var(--signal-bright);
+}
+.signal:active:not(:disabled, .busy) {
+  background: var(--signal-pressed);
+}
+.signal:focus-visible {
+  outline-offset: 2px;
+}
+
+.quiet {
+  background: transparent;
+  color: var(--t-3);
+}
+.quiet:hover:not(:disabled, .busy) {
+  color: var(--t-1);
+  background: var(--sunk);
+}
+.quiet:active:not(:disabled, .busy) {
+  background: var(--n-4);
+}
+
+.busy {
+  cursor: progress;
+}
+.signal.busy {
+  background: var(--signal-bright);
+}

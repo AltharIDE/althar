@@ -1,0 +1,265 @@
+/* The scenes: real components, laid out on the table at their real size. */
+
+.eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  font: 500 10.5px/1.4 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.block {
+  padding: 0 22px 20px;
+}
+.enter {
+  animation: rise 620ms var(--ease) both;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+/* 01 */
+.project {
+  position: relative;
+  width: 660px;
+  min-height: 564px;
+  padding-bottom: 40px;
+}
+.projectPanel {
+  width: 450px;
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-2);
+}
+/* the visiting task rests over the panel's corner, like a card put down on a drawing */
+.visitor {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 300px;
+}
+.visitor > * {
+  box-shadow: var(--lift-dialog);
+  border-radius: 12px;
+}
+.enterRight {
+  animation: enter-right 820ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes enter-right {
+  from {
+    opacity: 0;
+    transform: translate(80px, 20px) rotate(2deg);
+  }
+}
+
+/* 02 */
+.task {
+  position: relative;
+  width: 600px;
+  min-height: 386px;
+}
+.threadHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px 4px;
+  font: 500 11px/1 var(--font-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t-2);
+}
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px;
+  border-radius: 14px;
+  background: var(--n-2);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-2);
+}
+.reply {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--t-1);
+}
+.word {
+  opacity: 0;
+  animation: word 360ms var(--ease) both;
+}
+@keyframes word {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+  }
+}
+
+/* 03 */
+.calls {
+  position: relative;
+  display: grid;
+  grid-template-rows: 46px 600px;
+  width: 900px;
+  border-radius: 12px;
+  background: var(--n-2);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-dialog);
+}
+.bar {
+  border-radius: 12px 12px 0 0;
+  background: var(--chrome);
+}
+.barName {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.boardWrap {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0 0 12px 12px;
+}
+.calls .board {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.dock {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  background: var(--n-1);
+  box-shadow:
+    -1px 0 0 var(--line-2),
+    -24px 0 48px -24px rgba(60, 50, 30, 0.3);
+  animation: dock 460ms var(--ease-fold) both;
+}
+@keyframes dock {
+  from {
+    transform: translateX(100%);
+  }
+}
+.dockLeaving {
+  animation: dock-out 360ms var(--ease-fold) forwards;
+}
+@keyframes dock-out {
+  to {
+    transform: translateX(100%);
+  }
+}
+/* leaving: the row for Running, the answered call back toward the task it held */
+.leaveRight {
+  animation: leave-right 360ms var(--ease) forwards;
+}
+.leaveLeft {
+  animation: leave-left 360ms var(--ease) forwards;
+}
+@keyframes leave-right {
+  to {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+@keyframes leave-left {
+  to {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+}
+.dockHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 16px 20px 4px;
+}
+.dockKind {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--signal-bright);
+}
+.dockFrom {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.dockBody {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 20px;
+}
+
+/* 04 */
+.change {
+  position: relative;
+  width: 660px;
+}
+
+/* 05 */
+.agents {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 90px;
+  width: 850px;
+}
+.agentsPanel {
+  flex: none;
+  width: 460px;
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-2);
+}
+.agentsTask {
+  flex: none;
+  width: 300px;
+}
+.wires {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+}
+.wires path {
+  fill: none;
+  stroke: var(--t-3);
+  stroke-width: 1.25;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  animation: wire 900ms var(--ease) both;
+}
+@keyframes wire {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enter,
+  .word,
+  .enterRight,
+  .dock,
+  .dockLeaving,
+  .leaveRight,
+  .leaveLeft,
+  .wires path {
+    animation: none;
+    opacity: 1;
+    filter: none;
+    stroke-dashoffset: 0;
+  }
+}

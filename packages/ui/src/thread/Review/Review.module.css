@@ -1,0 +1,273 @@
+.label {
+  font-weight: 600;
+  color: var(--t-1);
+}
+.who {
+  display: inline-flex;
+  align-items: center;
+  color: var(--t-2);
+}
+.plus {
+  margin: 0 5px;
+  color: var(--t-4);
+}
+.said {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--t-2);
+}
+.note {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--t-3);
+}
+.forYou {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--signal);
+  font-weight: 550;
+}
+/* something waits on you: the same violet as any ask */
+.you {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin: 0 2px;
+  border-radius: 99px;
+  background: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-dim);
+}
+
+/* while it runs: each reviewer, then the combining */
+.live {
+  display: flex;
+  flex-direction: column;
+  margin: 6px 0 0 79px;
+}
+.reviewer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.reviewer > svg {
+  color: var(--t-2);
+}
+.reviewer > :global(.model),
+.reviewer > span:nth-child(2) {
+  font-weight: 500;
+}
+.meta {
+  color: var(--t-3);
+  font-weight: 400;
+}
+.running .meta {
+  color: var(--live);
+}
+.queued {
+  color: var(--t-3);
+}
+.queued > svg {
+  color: var(--t-4);
+}
+
+.body {
+  margin-top: 8px;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.findings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.finding {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  gap: 0 12px;
+  align-items: start;
+  padding: 12px 12px 12px 14px;
+}
+.finding + .finding {
+  border-top: 1px solid var(--line);
+}
+.severity {
+  padding-top: 1px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t-3);
+}
+.high .severity {
+  color: var(--t-1);
+}
+.medium .severity {
+  color: var(--t-2);
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 18px;
+}
+.at {
+  font: 11.5px var(--mono);
+  color: var(--t-3);
+}
+.by {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.claim {
+  margin: 3px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-1);
+}
+.against {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.line > svg {
+  align-self: center;
+  color: var(--t-2);
+}
+.k {
+  color: var(--t-3);
+}
+.in {
+  color: var(--t-1);
+  font-weight: 500;
+}
+.in .k {
+  font-weight: 400;
+}
+.reason {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+:is(.dismissed, .fixed, .aside) .claim {
+  color: var(--t-3);
+}
+:is(.dismissed, .fixed, .aside) .severity {
+  color: var(--t-3);
+}
+
+/* a finding's actions show on hover and focus, and always when you are passing over the list */
+.acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.finding:hover .acts,
+.acts:focus-within {
+  opacity: 1;
+}
+.actsPass {
+  display: flex;
+  margin: 6px 0 0 -8px;
+  opacity: 1;
+}
+.pass .severity {
+  color: var(--signal);
+}
+.rest {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+/* a finding that waits on you */
+li.yours {
+  position: relative;
+  z-index: 1;
+  margin: -1px 0;
+  background: var(--signal-paper);
+  box-shadow: inset 0 0 0 1px var(--signal-line);
+}
+li.yours + .finding {
+  border-top-color: transparent;
+}
+li.yours .severity {
+  color: var(--signal);
+}
+.yoursCard {
+  margin-top: 10px;
+  padding: 10px 12px 12px;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--signal-line);
+}
+.call {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--signal);
+}
+.ask {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-1);
+}
+.yoursActs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.form {
+  margin-top: 10px;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 10px 10px;
+  background: var(--n-1);
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.reach {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
