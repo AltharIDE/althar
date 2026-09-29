@@ -1,0 +1,38 @@
+/* The site's only global CSS, on top of @charrette/ui's tokens and base:
+   page measures, the body, and the skip link. Each concept sets its own
+   ground and type in its module. */
+
+:root {
+  --gut: 48px;
+  --max: 1280px;
+  --edge: max(var(--gut), calc((100vw - var(--max)) / 2 + var(--gut)));
+  --display: 'Inter Variable', 'Inter', system-ui, sans-serif;
+}
+@media (max-width: 900px) { :root { --gut: 28px; } }
+@media (max-width: 640px) { :root { --gut: 16px; } }
+
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--n-2);
+  color: var(--t-1);
+  font: 400 17px/1.55 var(--font);
+  font-feature-settings: 'cv05' 1, 'cv11' 1, 'ss03' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: clip;
+}
+img, svg { display: block; }
+h1, h2, h3, h4, p { margin: 0; }
+a { color: inherit; }
+
+.skip {
+  position: fixed; left: 16px; top: 12px; z-index: 100;
+  padding: 10px 14px; background: var(--t-1); color: var(--on-ink);
+  font: 500 13px var(--mono); text-decoration: none; border-radius: var(--r);
+  transform: translateY(-160%); transition: transform 150ms var(--ease);
+}
+.skip:focus { transform: none; }
+main:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--live); outline-offset: 3px; border-radius: 2px; }
