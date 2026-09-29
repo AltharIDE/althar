@@ -52,22 +52,48 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
   auto-review `agent` mode, and OpenCode gets inline config. Checked on 29
   September 2026 against a repository whose settings allow everything.
   [Architecture 03](architecture/03-agent-runtime-and-auth.md#permission-routing).
-- [ ] **What Claude's ask rules don't reach.** Tools not on the ask list, such
-  as MCP tools, can still be allowed by the user's or repository's settings,
-  and Claude Code hooks can decide a tool call. Put MCP tools on the list,
-  leave out the project and local setting sources, or accept it?
-- [ ] **Shell commands that write outside the worktree.** The rules see a
-  command's text and an edit's paths. `cp x ~/.zshrc` in a shell command
-  isn't caught unless it matches the always-ask list. Codex's sandbox stops it
-  (it asks to leave the workspace); Claude Code and OpenCode have no sandbox by
-  default. Lean on each agent's sandbox where it has one, parse commands for
-  paths, or run agents in a sandbox of Charrette's own?
-- [ ] **Codex commits in a worktree.** A worktree's git directory lies outside
-  it, so Codex asks before every `git add` and `git commit` in a task's
-  worktree. Leaning: the runtime adds the repository's git directory to the
-  session's directories, which Codex treats as writable, since writing in the
-  task's own worktree is allowed anyway. Or should the project rules allow git
-  writes there instead, so each still reaches Charrette?
+- [x] **What Claude's ask rules don't reach.** Settled on 29 September 2026:
+  Claude sessions load only the MCP servers Charrette gives them
+  (`strictMcpConfig`), so the user's and the repository's own servers, whose
+  tools the ask list doesn't cover, never load. A hook that approves can't
+  get past an ask rule; checked with a repository whose hook approves every
+  tool call. What stays open is below, under trusting a repository's agent
+  settings.
+- [ ] **Trusting a repository's agent settings.** A repository's hooks
+  (`.claude/settings.json`, `.codex/hooks.json`) and Codex project config run
+  as code on the Mac whenever the agent uses a tool. Claude's SDK loads them
+  without the trust prompt its app shows, and codex-acp marks every session
+  folder trusted. Agent Orchestrator is criticised for exactly this
+  ([AO#3280](https://github.com/Untrivial-ai/agent-orchestrator/issues/3280)).
+  Leaning: opening a project is the trust step, and it says what the
+  repository's agent settings will run; untrusted, Claude sessions get
+  `disableAllHooks`. Codex can't be told not to trust a folder through
+  codex-acp yet.
+- [x] **Shell commands that write outside the worktree.** Settled on 29
+  September 2026: each agent's own sandbox is the boundary where it has one.
+  Codex's is on in `workspace-write`; Claude Code's is now switched on for
+  every session, so a command that stays inside runs without asking and one
+  that has to leave (the network, a write elsewhere) reaches Charrette. The
+  rules read commands as a shell would, for pushes and for the places they
+  write, as a second line. Still to do: wrap OpenCode, which has no sandbox,
+  in the same sandbox-runtime Claude uses. Dev containers stay a later,
+  per-project option: isolation, setup and services per task, but Docker,
+  sign-in inside the container and no macOS toolchains.
+- [x] **Codex commits in a worktree.** Settled on 29 September 2026: the
+  sandbox stays as it is, and the rules allow git's own writes for the task
+  (`git add`, `git commit`), so Codex's requests are answered without the
+  person, and each is recorded. Making the repository's `.git` writable was
+  rejected: it would expose its hooks, config and every other branch. Codex's
+  own users rejected it for the same reason
+  ([openai/codex#48717](https://github.com/openai/codex/issues/48717)).
+  Claude's sandbox already lets a worktree write the main `.git`, hooks and
+  config excepted.
+- [ ] **Reads and fetches outside the worktree.** The rules allow them, as
+  the MVP plan says: agents read widely, and fetch docs. But reading a secret
+  and then fetching is how data would leave. Claude's sandbox asks per host
+  for the network; Codex's has the network off. Ask for reads of known secret
+  places (`~/.ssh`, `.env` outside the worktree), limit hosts per project, or
+  accept it for now?
 - [ ] **The coordinator's defaults.** Its default model; whether task events
   prompt it; whether it can skip the countdown when you asked for exactly that
   task. See [architecture 04](architecture/04-coordinator.md).

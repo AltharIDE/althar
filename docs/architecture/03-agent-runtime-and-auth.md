@@ -628,25 +628,53 @@ What keeps each agent asking, whatever its own settings say:
 
 | Agent | How | Checked against |
 |---|---|---|
-| Claude Code | Every session gets ask rules for Bash, Edit, Write, MultiEdit, NotebookEdit and WebFetch, and has bypass mode turned off for its whole life, through the adapter's `_meta.claudeCode.options`. Ask rules win over allow rules from any settings file | A repository whose `.claude/settings.json` allows those tools and defaults to `bypassPermissions` |
+| Claude Code | Every session gets ask rules for Bash, Edit, Write, MultiEdit, NotebookEdit and WebFetch, has bypass mode turned off for its whole life, loads only the MCP servers Charrette gives it (`strictMcpConfig`), and runs its shell in Claude's sandbox, all through the adapter's `_meta.claudeCode.options`. Ask rules win over allow rules from any settings file, and over a hook that approves | A repository whose `.claude/settings.json` allows those tools, defaults to `bypassPermissions`, and has a hook that approves every tool call |
 | Codex | Mode `workspace-write`, whose reviewer is the person. The default `agent` mode sends requests to an automatic reviewer instead, and was seen to write outside the workspace without asking | Writing outside the workspace, which it asks for |
 | OpenCode | Inline config (`OPENCODE_CONFIG_CONTENT`) that sets edits, commands and fetches to ask, for its built-in agents too, and lets it carry on after a rejection (`experimental.continue_loop_on_deny`) | A repository whose `opencode.json` allows everything |
 
-Inside its sandbox, Codex edits the workspace and runs commands without
-asking; it asks only to go beyond it. A worktree's git directory lies outside
-the worktree, so Codex asks before each `git add` and `git commit` there. The
-runtime can add the repository's git directory to the session's directories,
-which Codex treats as writable, or the project rules can allow git writes in
-the task's own worktree.
+**Sandboxes are the boundary for commands.** A permission request for a shell
+command carries only its text, and no rule can tell what a script will write.
+So where an agent has a sandbox, it keeps commands inside the worktree:
+
+- Codex's, in `workspace-write`, with the network off.
+- Claude Code's, switched on for every session. A command that stays inside
+  runs without asking. One that needs the network asks per host. A write
+  outside is blocked, and Claude reports it instead of retrying outside the
+  sandbox unless asked to.
+- OpenCode has none yet. Wrapping it in the same sandbox-runtime Claude uses
+  is next.
+
+A command that has to leave its sandbox reaches Charrette as a request, and
+the rules read it as a shell would, into commands and words. They ask about:
+
+- pushes to the default branch, force pushes, pushes of every branch or of
+  tags, and deleting a branch other than the task's;
+- merges, and deploy and publish commands;
+- git pointed at another repository;
+- a write whose words name a place outside the worktree, following symlinks.
+
+Where they can't tell where a push goes or where an edit writes, they ask.
+
+**Git in a worktree.** A worktree's git data lives in the main repository,
+outside the worktree. Inside Codex's sandbox, each `git add` and `git commit`
+therefore asks, and the rules allow git's own writes for the task, so the
+person isn't involved. Claude's sandbox already lets a worktree write the main
+`.git`, except its hooks and config. Making the whole `.git` writable for
+Codex was rejected: it would expose hooks, config and every other branch.
 
 Known gaps:
 
-- Tools not on Claude's ask list, such as MCP tools, can still be allowed by
-  the user's or the repository's settings.
-- Hooks in Claude Code settings can decide a tool call; that path is not yet
-  checked.
+- A repository's hooks (`.claude/settings.json`, `.codex/hooks.json`) and
+  Codex project config run as code on the Mac. Claude's SDK loads them without
+  the trust prompt its app shows, and codex-acp marks every session folder
+  trusted. Opening a project should be the trust step (see the open questions).
+- Claude's sandbox denies writes to a repository's tracked `.claude/` files, so
+  git can fail to check those out inside it
+  ([claude-code#93173](https://github.com/anthropics/claude-code/issues/93173)).
+- Reads and fetches outside the worktree are allowed; see the open questions.
 - If ask rules ever stop winning, the fallback is to leave the project and
-  local setting sources out of Claude sessions.
+  local setting sources out of Claude sessions. In the Agent SDK that also
+  stops the repository's `CLAUDE.md` loading.
 
 ## Approval boundary
 
