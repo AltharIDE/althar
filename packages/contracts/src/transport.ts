@@ -81,19 +81,24 @@ export const serverProtocol = (port: PortLike): Layer.Layer<RpcServer.Protocol> 
                 run: <A, E, R>(handler: (portId: number, message: I) => Effect.Effect<A, E, R> | void) =>
                   Effect.flatMap(Effect.context<R>(), (context) =>
                     Effect.callback<void>((resume) => {
+                      const release = () => {
+                        stop()
+                        unclose?.()
+                      }
+                      // The client closing, or the other end going, ends the server for it.
+                      const end = () => {
+                        release()
+                        resume(Effect.void)
+                      }
                       const stop = port.listen((data) => {
                         const message = data as WorkerRunner.PlatformMessage<I>
-                        if (message[0] === 1) return resume(Effect.void)
+                        if (message[0] === 1) return end()
                         const handled = handler(0, message[1])
                         if (Effect.isEffect(handled)) Effect.runForkWith(context)(handled)
                       })
-                      // The other end gone ends the server for it.
-                      const unclose = port.closed?.(() => resume(Effect.void))
+                      const unclose = port.closed?.(end)
                       port.post([0])
-                      return Effect.sync(() => {
-                        stop()
-                        unclose?.()
-                      })
+                      return Effect.sync(release)
                     }),
                   ),
                 send: (portId, message) => Effect.sync(() => sendUnsafe(portId, message)),
@@ -115,7 +120,15 @@ export const clientProtocol = (port: PortLike): Layer.Layer<RpcClient.Protocol> 
         Layer.succeed(
           Worker.WorkerPlatform,
           Worker.makePlatform<PortLike>()({
-            setup: ({ worker }) => Effect.succeed({ postMessage: (message: unknown) => worker.post(message), worker }),
+            // Closing the client says so, and the server stops serving it.
+            setup: ({ worker, scope }) =>
+              Effect.as(
+                Scope.addFinalizer(
+                  scope,
+                  Effect.sync(() => worker.post([1])),
+                ),
+                { postMessage: (message: unknown) => worker.post(message), worker },
+              ),
             listen: ({ port: wrapped, emit, scope }) =>
               Effect.flatMap(
                 Effect.sync(() => wrapped.worker.listen(emit)),
