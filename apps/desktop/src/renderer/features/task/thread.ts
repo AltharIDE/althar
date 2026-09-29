@@ -37,14 +37,6 @@ export type Block =
     }
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
 
-const field = (value: unknown, key: string): unknown =>
-  typeof value === 'object' && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined
-
-const text = (value: unknown, key: string): string => {
-  const found = field(value, key)
-  return typeof found === 'string' ? found : ''
-}
-
 /** ACP's tool kinds, as the kit's. */
 export const toolKindOf = (kind: string): ToolKind => {
   switch (kind) {
@@ -69,28 +61,39 @@ export const toolKindOf = (kind: string): ToolKind => {
   }
 }
 
-/** What a tool call did, in a word, before what it did it to. */
-export const verbText: Readonly<Record<ToolKind, string>> = {
-  [ToolKind.Read]: 'Read',
-  [ToolKind.List]: 'Listed',
-  [ToolKind.Search]: 'Searched',
-  [ToolKind.Edit]: 'Edited',
-  [ToolKind.Create]: 'Created',
-  [ToolKind.Delete]: 'Deleted',
-  [ToolKind.Move]: 'Moved',
-  [ToolKind.Run]: 'Ran',
-  [ToolKind.Think]: 'Thought',
-  [ToolKind.Fetch]: 'Fetched',
-  [ToolKind.Mcp]: 'Used',
-  [ToolKind.Agent]: 'Did',
-  [ToolKind.PullRequest]: 'Opened',
-  [ToolKind.Comment]: 'Commented',
-  [ToolKind.Push]: 'Pushed',
-  [ToolKind.Other]: 'Did',
+/**
+ * What a tool call does, in a word, before what it does it to: as it runs
+ * ("Running"), once done ("Ran"), and otherwise, when it was declined, failed
+ * or stopped, the plain verb ("Run"), which the kit marks as such.
+ */
+export const verbs: Readonly<Record<ToolKind, { readonly plain: string; readonly running: string; readonly done: string }>> = {
+  [ToolKind.Read]: { plain: 'Read', running: 'Reading', done: 'Read' },
+  [ToolKind.List]: { plain: 'List', running: 'Listing', done: 'Listed' },
+  [ToolKind.Search]: { plain: 'Search', running: 'Searching', done: 'Searched' },
+  [ToolKind.Edit]: { plain: 'Edit', running: 'Editing', done: 'Edited' },
+  [ToolKind.Create]: { plain: 'Create', running: 'Creating', done: 'Created' },
+  [ToolKind.Delete]: { plain: 'Delete', running: 'Deleting', done: 'Deleted' },
+  [ToolKind.Move]: { plain: 'Move', running: 'Moving', done: 'Moved' },
+  [ToolKind.Run]: { plain: 'Run', running: 'Running', done: 'Ran' },
+  [ToolKind.Think]: { plain: 'Plan', running: 'Planning', done: 'Planned' },
+  [ToolKind.Fetch]: { plain: 'Fetch', running: 'Fetching', done: 'Fetched' },
+  [ToolKind.Mcp]: { plain: 'Call', running: 'Calling', done: 'Called' },
+  [ToolKind.Agent]: { plain: 'Start', running: 'Starting', done: 'Started' },
+  [ToolKind.PullRequest]: { plain: 'Open', running: 'Opening', done: 'Opened' },
+  [ToolKind.Comment]: { plain: 'Reply on', running: 'Replying on', done: 'Replied on' },
+  [ToolKind.Push]: { plain: 'Push', running: 'Pushing', done: 'Pushed' },
+  [ToolKind.Other]: { plain: 'Use', running: 'Using', done: 'Used' },
 }
 
-/** A tool call's status, as the kit's. One left running when its turn has ended was stopped with it. */
-export const toolStateOf = (status: string, turnRunning: boolean): ToolState => {
+/** The verb for a tool call as it stands. */
+export const verbFor = (toolKind: ToolKind, state: ToolState): string => {
+  const verb = verbs[toolKind]
+  return state === ToolState.Running ? verb.running : state === ToolState.Done ? verb.done : verb.plain
+}
+
+/** A tool call's status, as the kit's. One declined says so; one left running when its turn has ended was stopped with it. */
+export const toolStateOf = (status: string, turnRunning: boolean, declined = false): ToolState => {
+  if (declined) return ToolState.Declined
   switch (status) {
     case 'completed':
       return ToolState.Done
@@ -101,83 +104,63 @@ export const toolStateOf = (status: string, turnRunning: boolean): ToolState => 
   }
 }
 
+/** A plan step's status, as the kit's. A step still in progress when its turn has ended waits for the next. */
+export const planStateOf = (status: string, turnRunning: boolean): PlanState =>
+  status === 'completed' ? PlanState.Done : status === 'in_progress' && turnRunning ? PlanState.Running : PlanState.Queued
+
+type ToolContent = Extract<ThreadItem, { kind: 'tool_call' }>['content']
+type NoticeContent = Extract<ThreadItem, { kind: 'notice' }>['content']
+
 /** A path inside the worktree, from the worktree; any other, whole. */
 const within = (path: string, worktree: string | null) =>
   worktree !== null && path.startsWith(`${worktree}/`) ? path.slice(worktree.length + 1) : path
 
 /**
- * What a tool call did, and to what: the file it touched or the command it
- * ran when it says, and otherwise its title, whose first word is its verb.
+ * What a tool call acts on: the file it touches or the command it runs when
+ * it says, and otherwise its title. A title that starts with a verb of its own
+ * ("Write hello.txt") gives the rest; the verb comes from the call's kind.
  */
-export const describeTool = (
-  content: unknown,
-  toolKind: ToolKind,
-  worktree: string | null,
-): { readonly verb: string; readonly target: string } => {
-  const locations = field(content, 'locations')
-  const path = Array.isArray(locations) ? text(locations[0], 'path') : ''
-  if (path !== '') return { verb: verbText[toolKind], target: within(path, worktree) }
-  const command = field(field(content, 'rawInput'), 'command')
-  if (typeof command === 'string' && command !== '') return { verb: verbText[toolKind], target: command }
-  if (Array.isArray(command) && command.length > 0) return { verb: verbText[toolKind], target: command.join(' ') }
-  const title = text(content, 'title')
-  const space = title.indexOf(' ')
-  return space > 0 ? { verb: title.slice(0, space), target: title.slice(space + 1) } : { verb: verbText[toolKind], target: title }
+export const targetOf = (content: ToolContent, worktree: string | null): string => {
+  const path = content.locations[0]?.path
+  if (path !== undefined) return within(path, worktree)
+  if (content.command !== null) return content.command
+  const space = content.title.indexOf(' ')
+  return space > 0 && content.toolKind !== 'other' ? content.title.slice(space + 1) : content.title
 }
 
-/** A plan step's status, as the kit's. A step still in progress when its turn has ended waits for the next. */
-export const planStateOf = (status: string, turnRunning: boolean): PlanState =>
-  status === 'completed' ? PlanState.Done : status === 'in_progress' && turnRunning ? PlanState.Running : PlanState.Queued
+const noticeText = (content: NoticeContent) => (content.description === null ? content.title : `${content.title} ${content.description}`)
 
 const partOf = (
-  item: ThreadItem,
+  item: Exclude<ThreadItem, { kind: 'user_message' }>,
   streaming: ReadonlyMap<string, string>,
   turnRunning: boolean,
   worktree: string | null,
-): Part | undefined => {
-  const live = streaming.get(item.id)
-  const stored = text(item.content, 'text')
-  // Streaming text is whole each time; the store catches up behind it.
-  const shown = live !== undefined && live.length >= stored.length ? live : stored
+): Part => {
   switch (item.kind) {
     case 'agent_message':
-      return { kind: 'message', id: item.id, text: shown }
-    case 'agent_thought':
-      return { kind: 'thought', id: item.id, text: shown }
-    case 'tool_call': {
-      const toolKind = toolKindOf(text(item.content, 'kind'))
-      return {
-        kind: 'tool',
-        id: item.id,
-        toolKind,
-        ...describeTool(item.content, toolKind, worktree),
-        state: toolStateOf(text(item.content, 'status'), turnRunning),
-      }
+    case 'agent_thought': {
+      const live = streaming.get(item.id)
+      // Streaming text is whole each time; the store catches up behind it.
+      const text = live !== undefined && live.length >= item.content.text.length ? live : item.content.text
+      return { kind: item.kind === 'agent_thought' ? 'thought' : 'message', id: item.id, text }
     }
-    case 'plan': {
-      const entries = field(item.content, 'entries')
+    case 'tool_call': {
+      const toolKind = toolKindOf(item.content.toolKind)
+      const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
+      return { kind: 'tool', id: item.id, toolKind, verb: verbFor(toolKind, state), target: targetOf(item.content, worktree), state }
+    }
+    case 'plan':
       return {
         kind: 'plan',
         id: item.id,
-        steps: (Array.isArray(entries) ? entries : []).map((entry, index) => ({
+        steps: item.content.entries.map((entry, index) => ({
           id: `${item.id}-${index}`,
-          label: text(entry, 'content'),
-          state: planStateOf(text(entry, 'status'), turnRunning),
+          label: entry.content,
+          state: planStateOf(entry.status, turnRunning),
         })),
       }
-    }
-    case 'notice': {
-      const severity = text(item.content, 'severity')
-      const description = text(item.content, 'description')
-      return {
-        kind: 'notice',
-        id: item.id,
-        text: description === '' ? text(item.content, 'title') : `${text(item.content, 'title')} ${description}`,
-        tone: severity === 'error' ? 'error' : severity === 'warning' ? 'warning' : 'info',
-      }
-    }
-    default:
-      return undefined
+    case 'notice':
+      return { kind: 'notice', id: item.id, text: noticeText(item.content), tone: item.content.severity }
   }
 }
 
@@ -193,16 +176,15 @@ export const blocksOf = (
     if (item.kind === 'user_message') {
       const delivery =
         item.input?.state === 'queued' ? (item.input.interrupting ? Delivery.Interrupting : Delivery.Queued) : Delivery.Delivered
-      blocks.push({ kind: 'you', id: item.id, text: text(item.content, 'text'), at: ago(item.createdAt), delivery })
+      blocks.push({ kind: 'you', id: item.id, text: item.content.text, at: ago(item.createdAt), delivery })
       continue
     }
-    // What Charrette itself says, such as a change of agent, is a line across the thread.
-    if (item.kind === 'notice' && text(item.content, 'source') === 'runtime') {
-      blocks.push({ kind: 'divider', id: item.id, text: text(item.content, 'title') })
+    // What Charrette itself says, such as a change of agent or a restart, is a line across the thread.
+    if (item.kind === 'notice' && item.content.source === 'runtime') {
+      blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
       continue
     }
     const part = partOf(item, streaming, turnRunning, snapshot.task.worktree)
-    if (part === undefined) continue
     const last = blocks.at(-1)
     if (last?.kind === 'turn' && last.agentId === item.agentId) {
       blocks[blocks.length - 1] = { ...last, parts: [...last.parts, part] }

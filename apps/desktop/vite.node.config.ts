@@ -8,7 +8,9 @@ import { defineConfig } from 'vite-plus'
  * Node's own modules, since Node can't run the workspace's TypeScript as it
  * is. The agent adapters stay packages: they run as processes of their own.
  */
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  // A packaged build leaves out the end-to-end tests' hooks, such as the fake agents.
+  define: { __CHARRETTE_TEST_HOOKS__: JSON.stringify(mode !== 'package') },
   build: {
     ssr: true,
     outDir: 'dist',
@@ -22,4 +24,4 @@ export default defineConfig({
     },
   },
   ssr: { noExternal: true, target: 'node' },
-})
+}))

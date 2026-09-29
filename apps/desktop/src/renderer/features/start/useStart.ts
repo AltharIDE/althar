@@ -21,37 +21,44 @@ export interface StartModel {
   readonly openDropped: (file: File) => Promise<ProjectSummary | null>
 }
 
+/** Changes that move what the start screen shows: a project's name, its tasks, who is working, what waits on you. */
+const SHOWN = new Set(['project', 'task', 'provider_session', 'attention_request'])
+
 export const useStart = (): StartModel => {
   const { client, host } = useServices()
   const [status, setStatus] = useState<Status | null>(null)
   const [projects, setProjects] = useState<ReadonlyArray<ProjectSummary> | null>(null)
+  const [since, setSince] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [opening, setOpening] = useState(false)
 
   const loadProjects = useCallback(() => {
-    client.listProjects().then(setProjects, (failure: unknown) => setError(messageOf(failure)))
+    client.listProjects().then(
+      (list) => {
+        setProjects(list.projects)
+        setSince((first) => first ?? list.cursor)
+      },
+      (failure: unknown) => setError(messageOf(failure)),
+    )
   }, [client])
 
   useEffect(() => {
     loadProjects()
-    // Sign-in checks ask each agent, which takes a moment; the projects don't wait for them.
-    client.status().then(setStatus, (failure: unknown) => setError(messageOf(failure)))
+    // This is where sign-in shows, so each agent is asked again. That takes a moment; the projects don't wait for it.
+    client.status({ recheck: true }).then(setStatus, (failure: unknown) => setError(messageOf(failure)))
   }, [client, loadProjects])
 
   useWatch((event) => {
-    if (
-      event._tag === 'Changed' &&
-      (event.aggregateType === 'project' || event.aggregateType === 'task' || event.aggregateType === 'provider_session')
-    )
-      loadProjects()
-  })
+    if (event._tag === 'Changed' && SHOWN.has(event.aggregateType)) loadProjects()
+  }, since)
 
-  const openPath = useCallback(
-    async (path: string) => {
+  const open = useCallback(
+    async (grant: string | null) => {
+      if (grant === null) return null
       setError(null)
       setOpening(true)
       try {
-        return await client.openProject(path)
+        return await client.openProject(grant)
       } catch (failure) {
         setError(messageOf(failure))
         return null
@@ -62,18 +69,8 @@ export const useStart = (): StartModel => {
     [client],
   )
 
-  const openFolder = useCallback(async () => {
-    const path = await host.pickFolder()
-    return path === null ? null : openPath(path)
-  }, [host, openPath])
-
-  const openDropped = useCallback(
-    (file: File) => {
-      const path = host.pathOf(file)
-      return path === '' ? Promise.resolve(null) : openPath(path)
-    },
-    [host, openPath],
-  )
+  const openFolder = useCallback(async () => open(await host.pickFolder()), [host, open])
+  const openDropped = useCallback(async (file: File) => open(await host.grantDropped(file)), [host, open])
 
   return { status, projects, error, opening, openFolder, openDropped }
 }

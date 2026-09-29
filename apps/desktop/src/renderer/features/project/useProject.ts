@@ -27,18 +27,28 @@ export interface ProjectModel {
   readonly startTask: (input: NewTask) => Promise<TaskSummary | null>
 }
 
+/** Changes that move what a project's screen shows: its name, its tasks, their branches, who is working, what waits on you. */
+const SHOWN = new Set(['project', 'task', 'workspace', 'provider_session', 'attention_request'])
+
 export const useProject = (projectId: string): ProjectModel => {
   const { client } = useServices()
   const [project, setProject] = useState<ProjectSummary | null>(null)
   const [tasks, setTasks] = useState<ReadonlyArray<TaskSummary> | null>(null)
+  const [since, setSince] = useState<number | null>(null)
   const [agents, setAgents] = useState<ReadonlyArray<AgentStatus>>([])
   const [error, setError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
 
   const load = useCallback(() => {
-    const fail = (failure: unknown) => setError(messageOf(failure))
-    client.listProjects().then((all) => setProject(all.find((candidate) => candidate.id === projectId) ?? null), fail)
-    client.listTasks(projectId).then(setTasks, fail)
+    Promise.all([client.listProjects(), client.listTasks(projectId)]).then(
+      ([projects, list]) => {
+        setProject(projects.projects.find((candidate) => candidate.id === projectId) ?? null)
+        setTasks(list.tasks)
+        // Watching from the earlier of the two reads misses nothing either saw.
+        setSince((first) => first ?? Math.min(projects.cursor, list.cursor))
+      },
+      (failure: unknown) => setError(messageOf(failure)),
+    )
   }, [client, projectId])
 
   useEffect(() => {
@@ -50,8 +60,8 @@ export const useProject = (projectId: string): ProjectModel => {
   }, [client, load])
 
   useWatch((event) => {
-    if (event._tag === 'Changed' && event.projectId === projectId) load()
-  })
+    if (event._tag === 'Changed' && event.projectId === projectId && SHOWN.has(event.aggregateType)) load()
+  }, since)
 
   const startTask = useCallback(
     async (input: NewTask) => {

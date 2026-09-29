@@ -57,6 +57,9 @@ export const text = {
   stopped: 'Stopped',
   thought: 'Thought',
   dismiss: 'Dismiss',
+  earlier: 'Earlier in this task',
+  showEarlier: 'Show',
+  loadingEarlier: 'Showing…',
 }
 
 /** Where a task stands, for its header. */
@@ -244,6 +247,15 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
       </div>
       <TaskFace className={s.face} composer={composer}>
         <Thread label={text.thread} busy={busy}>
+          {snapshot.earlier && (
+            <ThreadDivider
+              icon="up"
+              action={model.loadingEarlier ? text.loadingEarlier : text.showEarlier}
+              onAction={() => void model.loadEarlier()}
+            >
+              {text.earlier}
+            </ThreadDivider>
+          )}
           {blocksOf(snapshot, model.streaming, (iso) => ago(iso)).map((block) => (
             <BlockView key={block.id} block={block} agentName={agentName} />
           ))}

@@ -8,6 +8,7 @@
   "main": "dist/main/main.js",
   "scripts": {
     "build": "vp build --config vite.node.config.ts && vp build --config vite.preload.config.ts && vp build",
+    "build:package": "vp build --config vite.node.config.ts --mode package && vp build --config vite.preload.config.ts && vp build",
     "start": "electron .",
     "dev": "bun run build && electron .",
     "check": "vp check",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { AgentStatus, ThreadSnapshot } from '@charrette/contracts'
+import { type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@charrette/contracts'
 
 import { messageOf } from '../../data/client'
 import { useServices, useWatch } from '../../data/services'
@@ -9,14 +9,17 @@ import { useServices, useWatch } from '../../data/services'
  * A task's view model: its thread as the store has it, the text an agent is
  * streaming, and what the person can do: talk to the lead, interrupt it,
  * answer its calls, change its model, hand the task to another agent, stop
- * it. The thread is read again whenever the store says the project changed,
- * a few changes at a time.
+ * it. It reads the thread's newest page once, then only what changes: an item
+ * that changed is read alone, and anything else about the thread (the agent
+ * working, the calls waiting) reads the thread's head again, without its
+ * items. Earlier items are read a page at a time, when asked for.
  */
 
-/** How long changes are gathered before the thread is read again. */
-const REFETCH_AFTER = 60
+/** How long changes are gathered before they are read. */
+const GATHER = 60
 
 export interface TaskModel {
+  /** The thread's head and the items read so far, oldest first. */
   readonly snapshot: ThreadSnapshot | null
   /** Text still streaming, by thread item. */
   readonly streaming: ReadonlyMap<string, string>
@@ -25,6 +28,9 @@ export interface TaskModel {
   readonly error: string | null
   /** An action is on its way to the runtime. */
   readonly pending: boolean
+  /** Earlier items are on their way. */
+  readonly loadingEarlier: boolean
+  readonly loadEarlier: () => Promise<void>
   readonly send: (body: string) => Promise<void>
   readonly sendNow: (body: string) => Promise<void>
   readonly interrupt: () => Promise<void>
@@ -36,60 +42,100 @@ export interface TaskModel {
   readonly dismissError: () => void
 }
 
+/** Items by id, oldest first: what arrives replaces what was there. */
+export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: ReadonlyArray<ThreadItem>): ReadonlyArray<ThreadItem> => {
+  const byId = new Map(current.map((item) => [item.id, item]))
+  for (const item of incoming) byId.set(item.id, item)
+  return [...byId.values()].toSorted((a, b) => a.sequence - b.sequence)
+}
+
+/** Streamed text the store now holds in full needs no streamed copy. */
+const caughtUp = (streaming: ReadonlyMap<string, string>, items: ReadonlyArray<ThreadItem>): ReadonlyMap<string, string> => {
+  const kept = new Map(streaming)
+  for (const item of items) {
+    const live = kept.get(item.id)
+    if (live !== undefined && 'text' in item.content && item.content.text.length >= live.length) kept.delete(item.id)
+  }
+  return kept.size === streaming.size ? streaming : kept
+}
+
 export const useTask = (threadId: string): TaskModel => {
   const { client } = useServices()
   const [snapshot, setSnapshot] = useState<ThreadSnapshot | null>(null)
   const [streaming, setStreaming] = useState<ReadonlyMap<string, string>>(new Map())
+  const [since, setSince] = useState<number | null>(null)
   const [agents, setAgents] = useState<ReadonlyArray<AgentStatus>>([])
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
-  const projectId = useRef<string | null>(null)
+  const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const changed = useRef({ head: false, items: new Set<string>() })
 
-  const load = useCallback(
+  const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
+
+  const arrived = useCallback((items: ReadonlyArray<ThreadItem>) => {
+    setSnapshot((current) => (current === null ? current : { ...current, items: mergeItems(current.items, items) }))
+    setStreaming((current) => caughtUp(current, items))
+  }, [])
+
+  /** The thread's head again: its task, the agent working, the calls waiting. Its items stay as they are. */
+  const readHead = useCallback(
     () =>
-      client.getThread(threadId).then(
-        (next) => {
-          projectId.current = next.project.id
-          setSnapshot(next)
-          // What the store now holds in full no longer needs its streamed copy.
-          setStreaming((current) => {
-            const kept = new Map(current)
-            for (const item of next.items) {
-              const stored = (item.content as { text?: unknown } | null)?.text
-              const live = kept.get(item.id)
-              if (live !== undefined && typeof stored === 'string' && stored.length >= live.length) kept.delete(item.id)
-            }
-            return kept.size === current.size ? current : kept
-          })
-        },
-        (failure: unknown) => setError(messageOf(failure)),
-      ),
-    [client, threadId],
+      client
+        .getThread(threadId, { limit: 0 })
+        .then(
+          (head) => setSnapshot((current) => (current === null ? head : { ...head, items: current.items, earlier: current.earlier })),
+          fail,
+        ),
+    [client, threadId, fail],
   )
 
   useEffect(() => {
-    void load()
-    client.status().then(
-      (status) => setAgents(status.agents.filter((agent) => agent.signIn !== 'signed_out')),
-      (failure: unknown) => setError(messageOf(failure)),
-    )
+    client.getThread(threadId).then((first) => {
+      setSnapshot(first)
+      setSince(first.cursor)
+    }, fail)
+    client.status().then((status) => setAgents(status.agents.filter((agent) => agent.signIn !== 'signed_out')), fail)
     return () => clearTimeout(timer.current)
-  }, [client, load])
+  }, [client, threadId, fail])
+
+  /** Reads what the gathered changes touched. */
+  const readChanged = useCallback(() => {
+    timer.current = undefined
+    const { head, items } = changed.current
+    changed.current = { head: false, items: new Set() }
+    if (head) void readHead()
+    for (const itemId of items) void client.getThreadItem(threadId, itemId).then((item) => arrived([item]), fail)
+  }, [client, threadId, readHead, arrived, fail])
 
   useWatch((event) => {
     if (event._tag === 'Streaming') {
       if (event.threadId === threadId) setStreaming((current) => new Map(current).set(event.itemId, event.text))
       return
     }
-    if (event.projectId !== projectId.current || timer.current !== undefined) return
-    timer.current = setTimeout(() => {
-      timer.current = undefined
-      void load()
-    }, REFETCH_AFTER)
-  })
+    if (event.threadId !== threadId) return
+    if (event.aggregateType === 'thread_item') changed.current.items.add(event.aggregateId)
+    else changed.current.head = true
+    timer.current ??= setTimeout(readChanged, GATHER)
+  }, since)
 
-  /** Runs an action, says what went wrong if it did, and reads the thread again. */
+  const loadEarlier = useCallback(async () => {
+    const first = snapshot?.items[0]
+    if (first === undefined) return
+    setLoadingEarlier(true)
+    try {
+      const page = await client.getThread(threadId, { before: first.sequence, limit: PAGE })
+      setSnapshot((current) =>
+        current === null ? current : { ...current, items: mergeItems(current.items, page.items), earlier: page.earlier },
+      )
+    } catch (failure) {
+      fail(failure)
+    } finally {
+      setLoadingEarlier(false)
+    }
+  }, [client, threadId, snapshot, fail])
+
+  /** Runs an action, says what went wrong if it did, and reads the thread's head again. */
   const act = useCallback(
     async (action: () => Promise<unknown>) => {
       setError(null)
@@ -97,13 +143,13 @@ export const useTask = (threadId: string): TaskModel => {
       try {
         await action()
       } catch (failure) {
-        setError(messageOf(failure))
+        fail(failure)
       } finally {
         setPending(false)
-        await load()
+        await readHead()
       }
     },
-    [load],
+    [readHead, fail],
   )
 
   return {
@@ -112,6 +158,8 @@ export const useTask = (threadId: string): TaskModel => {
     agents,
     error,
     pending,
+    loadingEarlier,
+    loadEarlier,
     send: (body) => act(() => client.send({ threadId, body, disposition: 'after_current' })),
     sendNow: (body) => act(() => client.send({ threadId, body, disposition: 'interrupt_and_continue' })),
     interrupt: () => act(() => client.interrupt(threadId)),

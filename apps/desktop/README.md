@@ -18,7 +18,7 @@ The app shares its profile and worktrees with the command-line client (`apps/cli
 | --- | --- |
 | `CHARRETTE_PROFILE` | `~/Library/Application Support/Charrette` on macOS |
 | `CHARRETTE_WORKTREES` | `~/Charrette` |
-| `CHARRETTE_FAKE_AGENTS=1` | Off. Runs the scripted fake agent under Claude Code's and Codex's names, for the end-to-end tests |
+| `CHARRETTE_FAKE_AGENTS=1` | Off. Runs the scripted fake agent under Claude Code's and Codex's names, for the end-to-end tests. Packaged builds leave it out |
 
 ## Work on it
 
@@ -27,11 +27,12 @@ From `apps/desktop`:
 | Command | What it does |
 | --- | --- |
 | `bun run build` | Builds the main process, the runtime, the preload and the window into `dist/` |
+| `bun run build:package` | The same, without the end-to-end tests' hooks, as a packaged app will be built |
 | `bun run start` | Opens what was last built |
 | `bun run check` | Format, type-aware lint and type checks |
 | `bun run test` | The window's view models and views against a fake client, and its client against the real runtime |
 | `bun run test:coverage` | The same, with the coverage gate: 90% of lines and branches |
-| `bun run test:e2e` | Builds the app and drives it with Playwright: a project, a task, a thread, a call answered, all with the fake agent |
+| `bun run test:e2e` | Builds the app and drives it with Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back |
 | `bun run verify` | Check, coverage and the end-to-end tests, as CI runs them |
 
 To run the end-to-end test against a real agent, signed in on this machine (it uses a little of its usage):

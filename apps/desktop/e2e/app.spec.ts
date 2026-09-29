@@ -81,6 +81,17 @@ test('opens a project, starts a task, and talks to its lead', async () => {
     await say(page, 'updates')
     await expect(page.getByText('Write the test')).toBeVisible()
     await page.screenshot({ path: 'test-results/thread.png' })
+
+    // The runtime crashes: the app starts it again, the window reconnects, and the thread says what happened.
+    const killed = await electronApp.evaluate(({ app }) => {
+      const runtime = app.getAppMetrics().find((metric) => metric.type === 'Utility' && metric.name === 'Charrette runtime')
+      if (runtime !== undefined) process.kill(runtime.pid, 'SIGKILL')
+      return runtime !== undefined
+    })
+    expect(killed).toBe(true)
+    await expect(page.getByText(/Charrette restarted\. The lead stopped with it/)).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByText('Stopped', { exact: true })).toBeVisible()
+    await page.screenshot({ path: 'test-results/restarted.png' })
   } finally {
     await electronApp.close()
   }

@@ -4,32 +4,45 @@ import {
   clientProtocol,
   type DomMessagePort,
   domPort,
+  type ProjectList,
   type ProjectSummary,
   type Status,
+  type TaskList,
   type TaskSummary,
+  type ThreadItem,
   type ThreadSnapshot,
   type WatchEvent,
 } from '@charrette/contracts'
-import { Cause, Effect, Exit, Fiber, Layer, Scope, Stream } from 'effect'
+import { Cause, Duration, Effect, Exit, Fiber, Layer, Option, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
 /*
  * The data layer (ADR-010): the only code that talks to the runtime. It is
  * Effect inside; what it hands the view models is plain promises and a
  * subscription, so they stay ordinary React hooks.
+ *
+ * Every command gets an id here. When a command's answer doesn't come back
+ * (the runtime didn't answer, rather than said no), it is tried once more
+ * with the same id, and the runtime answers the retry from the first one's
+ * receipt instead of doing it twice. `watch` picks up from the last change it
+ * heard when its stream breaks.
  */
 
 export interface Client {
-  readonly status: () => Promise<Status>
-  readonly listProjects: () => Promise<ReadonlyArray<ProjectSummary>>
-  readonly openProject: (path: string) => Promise<ProjectSummary>
-  readonly listTasks: (projectId: string) => Promise<ReadonlyArray<TaskSummary>>
+  /** The runtime's version and the agents on this Mac; `recheck` asks each agent again rather than trust the last minute's answer. */
+  readonly status: (options?: { readonly recheck?: boolean }) => Promise<Status>
+  readonly listProjects: () => Promise<ProjectList>
+  /** Opens the folder a grant names: one the person chose in the picker or dropped on the window. */
+  readonly openProject: (grant: string) => Promise<ProjectSummary>
+  readonly listTasks: (projectId: string) => Promise<TaskList>
   readonly createTask: (input: {
     readonly projectId: string
     readonly title: string
     readonly description?: string
   }) => Promise<TaskSummary>
-  readonly getThread: (threadId: string) => Promise<ThreadSnapshot>
+  /** The thread, with the newest `limit` items before `before`. */
+  readonly getThread: (threadId: string, page?: { readonly before?: number; readonly limit?: number }) => Promise<ThreadSnapshot>
+  readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem>
   readonly startSession: (input: { readonly threadId: string; readonly agentId: string; readonly model?: string }) => Promise<string>
   readonly switchAgent: (input: { readonly threadId: string; readonly agentId: string; readonly model?: string }) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
@@ -45,17 +58,17 @@ export interface Client {
     readonly decision: 'allow' | 'reject'
     readonly reason?: string
   }) => Promise<void>
-  /** Calls `listener` with each change until the returned function is called. */
-  readonly watch: (listener: (event: WatchEvent) => void) => () => void
+  /** Calls `listener` with each change after `since` (or from now) until the returned function is called. */
+  readonly watch: (listener: (event: WatchEvent) => void, since?: number) => () => void
   readonly close: () => Promise<void>
 }
 
 /** What went wrong with a call, in words a view can show. */
-export const messageOf = (error: unknown): string => {
-  if (error instanceof ApiError) return error.message
-  if (error instanceof Error) return error.message
-  return String(error)
-}
+export const messageOf = (error: unknown): string =>
+  error instanceof ApiError ? error.message : "Charrette's runtime didn't answer. If it keeps happening, restart Charrette."
+
+/** A new command id, as the contract has them. */
+export const newCommandId = (): string => `cmd_${globalThis.crypto.randomUUID().replaceAll('-', '')}`
 
 /** Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it. */
 const settle = <A>(effect: Effect.Effect<A, unknown>): Promise<A> =>
@@ -63,6 +76,23 @@ const settle = <A>(effect: Effect.Effect<A, unknown>): Promise<A> =>
     if (Exit.isSuccess(exit)) return exit.value
     throw Cause.squash(exit.cause)
   })
+
+/** How long before a command with no answer is tried again, once. */
+const RETRY_AFTER = Duration.millis(300)
+
+/** How long before a broken watch picks up again. */
+const REWATCH_AFTER = Duration.seconds(1)
+
+/** A command, under one id however often it is tried: once more when the runtime didn't answer, never when it said no. */
+const command = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Promise<A> => {
+  const commandId = newCommandId()
+  return settle(
+    Effect.catchCause(run(commandId), (cause) => {
+      const refused = Option.exists(Cause.findErrorOption(cause), (error) => error instanceof ApiError)
+      return refused || Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.andThen(Effect.sleep(RETRY_AFTER), run(commandId))
+    }),
+  )
+}
 
 /** Connects to the runtime over a port, and keeps the connection until `close`. */
 export const connect = async (port: DomMessagePort): Promise<Client> => {
@@ -74,21 +104,32 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     }).pipe(Scope.provide(scope)),
   )
   return {
-    status: () => settle(api.Status()),
+    status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
-    openProject: (path) => settle(api.OpenProject({ path })),
+    openProject: (grant) => command((commandId) => api.OpenProject({ commandId, grant })),
     listTasks: (projectId) => settle(api.ListTasks({ projectId })),
-    createTask: (input) => settle(api.CreateTask(input)),
-    getThread: (threadId) => settle(api.GetThread({ threadId })),
-    startSession: (input) => settle(api.StartSession(input)),
-    switchAgent: (input) => settle(api.SwitchAgent(input)),
-    setModel: (input) => settle(api.SetModel(input)),
-    interrupt: (threadId) => settle(api.Interrupt({ threadId })),
-    stopSession: (threadId) => settle(api.StopSession({ threadId })),
-    send: (input) => settle(api.Send(input)),
-    answer: (input) => settle(api.Answer(input)),
-    watch: (listener) => {
-      const fiber = Effect.runFork(Stream.runForEach(api.Watch(), (event) => Effect.sync(() => listener(event))))
+    createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
+    getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
+    getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
+    startSession: (input) => command((commandId) => api.StartSession({ commandId, ...input })),
+    switchAgent: (input) => command((commandId) => api.SwitchAgent({ commandId, ...input })),
+    setModel: (input) => command((commandId) => api.SetModel({ commandId, ...input })),
+    interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
+    stopSession: (threadId) => command((commandId) => api.StopSession({ commandId, threadId })),
+    send: (input) => command((commandId) => api.Send({ commandId, ...input })),
+    answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),
+    watch: (listener, since) => {
+      let cursor = since
+      // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.
+      const heard = Effect.suspend(() =>
+        Stream.runForEach(api.Watch(cursor === undefined ? {} : { since: cursor }), (event) =>
+          Effect.sync(() => {
+            if (event._tag === 'Changed') cursor = event.cursor
+            listener(event)
+          }),
+        ),
+      )
+      const fiber = Effect.runFork(Effect.forever(Effect.andThen(Effect.ignore(heard), Effect.sleep(REWATCH_AFTER))))
       return () => void Effect.runFork(Fiber.interrupt(fiber))
     },
     close: () => Effect.runPromise(Scope.close(scope, Exit.void)),

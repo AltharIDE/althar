@@ -40,23 +40,60 @@ export const task: TaskSummary = {
 }
 
 let sequence = 0
-export const item = (kind: ThreadItem['kind'], content: unknown, extra: Partial<ThreadItem> = {}): ThreadItem => {
+const next = () => {
   sequence += 1
-  return {
-    id: `i${sequence}`,
-    sequence,
-    kind,
-    content,
-    agentId: kind === 'user_message' ? null : 'claude-code',
-    toolCallId: null,
-    input: kind === 'user_message' ? { state: 'delivered', interrupting: false } : null,
-    createdAt: NOW,
-    ...extra,
-  }
+  return { id: `i${sequence}`, sequence, createdAt: NOW }
+}
+
+/** Thread items of each kind, as the runtime gives them. */
+export const items = {
+  you: (
+    text: string,
+    input: Extract<ThreadItem, { kind: 'user_message' }>['input'] = { state: 'delivered', interrupting: false },
+  ): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'user_message',
+    content: { text },
+    input,
+  }),
+  says: (text: string, agentId = 'claude-code', id?: string): ThreadItem => ({
+    ...next(),
+    ...(id === undefined ? {} : { id }),
+    agentId,
+    kind: 'agent_message',
+    content: { text },
+  }),
+  thinks: (text: string, agentId = 'claude-code'): ThreadItem => ({ ...next(), agentId, kind: 'agent_thought', content: { text } }),
+  tool: (content: Partial<Extract<ThreadItem, { kind: 'tool_call' }>['content']> = {}, agentId = 'claude-code'): ThreadItem => ({
+    ...next(),
+    agentId,
+    kind: 'tool_call',
+    content: {
+      title: 'Read checkout.ts',
+      toolKind: 'read',
+      status: 'completed',
+      command: null,
+      locations: [],
+      declined: false,
+      ...content,
+    },
+  }),
+  plan: (entries: ReadonlyArray<{ content: string; status: string }>, agentId = 'claude-code'): ThreadItem => ({
+    ...next(),
+    agentId,
+    kind: 'plan',
+    content: { entries },
+  }),
+  notice: (
+    content: Partial<Extract<ThreadItem, { kind: 'notice' }>['content']> & { title: string },
+    agentId: string | null = 'claude-code',
+  ): ThreadItem => ({ ...next(), agentId, kind: 'notice', content: { source: 'agent', severity: 'info', description: null, ...content } }),
 }
 
 export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapshot => ({
   threadId: 'th1',
+  cursor: 10,
   project: { id: 'p1', name: 'meridian' },
   task: {
     id: 't1',
@@ -77,22 +114,24 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     models: ['opus', 'sonnet'],
     turnRunning: false,
   },
-  items: [],
   attention: [],
-  turns: [],
+  items: [],
+  earlier: false,
   ...overrides,
 })
 
 /** A client whose every call resolves with the fixtures, and whose watch the test drives with `emit`. */
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
+  const watching: Array<number | undefined> = []
   const client: Client = {
     status: vi.fn(async () => status),
-    listProjects: vi.fn(async () => [project]),
+    listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
     openProject: vi.fn(async () => project),
-    listTasks: vi.fn(async () => [task]),
+    listTasks: vi.fn(async () => ({ cursor: 4, tasks: [task] })),
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),
+    getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
     startSession: vi.fn(async () => 's1'),
     switchAgent: vi.fn(async () => 's2'),
     setModel: vi.fn(async () => {}),
@@ -100,18 +139,34 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     stopSession: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
     answer: vi.fn(async () => {}),
-    watch: (listener) => {
+    watch: (listener, since) => {
+      watching.push(since)
       listeners.add(listener)
       return () => void listeners.delete(listener)
     },
     close: vi.fn(async () => {}),
     ...overrides,
   }
-  return { client, emit: (event: WatchEvent) => listeners.forEach((listener) => listener(event)), listeners }
+  return { client, emit: (event: WatchEvent) => listeners.forEach((listener) => listener(event)), listeners, watching }
 }
 
 export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
-  pickFolder: vi.fn(async () => '/code/meridian'),
-  pathOf: vi.fn(() => '/code/dropped'),
+  pickFolder: vi.fn(async () => 'grant_picked'),
+  grantDropped: vi.fn(async () => 'grant_dropped'),
   ...overrides,
+})
+
+/** A change the runtime's feed reports. */
+export const changed = (
+  aggregateType: string,
+  aggregateId: string,
+  threadId: string | null = 'th1',
+  projectId: string | null = 'p1',
+): WatchEvent => ({
+  _tag: 'Changed',
+  cursor: 20,
+  aggregateType,
+  aggregateId,
+  projectId,
+  threadId,
 })
