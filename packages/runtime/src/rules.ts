@@ -48,11 +48,14 @@ const field = (value: unknown, key: string): unknown =>
   typeof value === 'object' && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined
 
 /** The command an execute request runs: from its raw input where the agent gives one, else its title. */
-export const commandOf = (request: PermissionRequest): string => {
-  const command = field(request.rawInput, 'command') ?? field(request.rawInput, 'cmd')
+export const commandOf = (request: PermissionRequest): string => commandIn(request.rawInput) ?? request.title
+
+/** The command line in a tool call's raw input, as a shell would read it, when it names one. */
+export const commandIn = (rawInput: unknown): string | undefined => {
+  const command = field(rawInput, 'command') ?? field(rawInput, 'cmd')
   if (typeof command === 'string') return command
   if (Array.isArray(command) && command.every((part) => typeof part === 'string')) return command.map(quoteWord).join(' ')
-  return request.title
+  return undefined
 }
 
 const quoteWord = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`)

@@ -291,10 +291,17 @@ export class Permissions extends Context.Service<
               const commands = yield* Commands
               const waiter = waiting.get(attentionId)
               if (waiter === undefined) {
-                const [row] = yield* sql<{ id: string }>`SELECT id FROM attention_requests WHERE id = ${attentionId}`
-                return yield* row === undefined
-                  ? new NotFound({ kind: 'attention_request', id: attentionId })
-                  : new AttentionClosed({ attentionId })
+                // A retry of an answer already given is answered from its receipt; anything else is too late.
+                return yield* commands.execute({
+                  envelope,
+                  result: Schema.Void,
+                  handle: Effect.gen(function* () {
+                    const [row] = yield* sql<{ id: string }>`SELECT id FROM attention_requests WHERE id = ${attentionId}`
+                    return yield* row === undefined
+                      ? Effect.fail<NotFound | AttentionClosed>(new NotFound({ kind: 'attention_request', id: attentionId }))
+                      : Effect.fail<NotFound | AttentionClosed>(new AttentionClosed({ attentionId }))
+                  }),
+                })
               }
               const answered: PermissionDecision = { decision, ...(reason === undefined ? {} : { reason }) }
               yield* commands.execute({

@@ -21,6 +21,8 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `Live.ts` | What is happening now, for clients that watch, with each message's text as far as it has come |
 | `Queries.ts` | What a client's screens show, read from the store: projects, tasks, and a task's thread with its live session and the calls waiting |
 | `Api.ts` | The API of `@charrette/contracts`, served over a port: handlers, and the change feed and streaming text as one `Watch` stream |
+| `Folders.ts` | Folders the person chose, by grant: the app's main process allows them, and the window opens them by grant |
+| `words.ts` | What went wrong, in the words the window shows |
 | `git.ts` | The git commands the runtime runs itself |
 
 ## Principles
@@ -34,7 +36,11 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 - **Permission decisions are recorded before they are sent,** with the option the adapter will send. A failed decision is a rejection. A question to the person is withdrawn when the turn is cancelled or the agent goes.
 - **Processes are owned.** A process is recorded as launching before it is spawned, then with its pid, OS start time and environment digest. Stopping a session ends its turn first, then its process group, and records both. Reconciliation stops an earlier launch's process group when its leader is the process recorded (pid and OS start time both match), or when the leader has gone but the group lives on, since a pid isn't reused while its group exists; what an agent left running, such as a dev server, stops with it. A worktree a crash interrupted is marked ready or failed.
 - **One runtime per profile.** The store holds the database in exclusive locking mode, so a second runtime on the same profile fails to open it (`DatabaseInUse`) instead of reconciling live sessions away.
-- **Clients read, then watch.** A query returns a projection shaped for a screen. `Watch` says which record changed (from the change feed, read every 150 ms) and what an agent is still saying; a client reads again what shows it. Errors reach a client as `ApiError`, with the runtime's error tag as its reason.
+- **Clients read, then watch.** A query returns a projection shaped for a screen, with the change-feed cursor it read at, taken before its rows. `Watch` says which record changed after a cursor (from the change feed, read every 150 ms), with the thread it belongs to, and what an agent is still saying, at most every 80 ms; a client reads again what shows it.
+- **A client's command ids are the commands' ids.** Commands with receipts in the store (opening a project, creating a task, sending, answering) answer a retry from the receipt, even after the thing they did has moved on. Session commands, which start and stop processes outside any transaction, are answered from memory for the launch.
+- **Errors reach a client in words.** A failure goes out as `ApiError`, with the runtime's error tag as its reason and a sentence from `words.ts`; anything the person can't put right also goes to the log with its whole cause.
+- **Sign-in is checked at most once a minute,** unless a client asks again: each check starts the agent's own status command.
+- **The thread says when an agent goes.** One that exits on its own, one that can't start, and one a restart stopped each leave a line in the thread saying so.
 - **Services capture what they need.** Each service's methods return effects with no requirements, so the adapter can call `Permissions.decide` from its own fibers.
 
 ## Checks
@@ -45,7 +51,7 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 ## Gaps
 
 - **No workflow graph yet.** Sessions run on a task's thread directly, not as node attempts of a run; controller generations are always 1 and not yet fenced.
-- **Starting a session is not a command** with a receipt; it is an operation the client calls.
+- **Session commands have no receipts in the store.** A retry within a launch gets the first one's result; across a restart, the session is gone anyway.
 - **Rules read commands, not what they do.** A script that writes outside the worktree isn't caught by the rules; the agents' sandboxes are the boundary (Codex's and Claude's). OpenCode has no sandbox yet.
 - **Briefs are text in the first prompt,** not artifacts, and there are no Charrette MCP tools yet for the part that doesn't fit.
 - **Sessions are not loaded after a restart;** a lost session stays lost, and the person starts a new one.

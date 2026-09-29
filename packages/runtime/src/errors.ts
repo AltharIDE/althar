@@ -36,7 +36,17 @@ export class NoSession extends Schema.TaggedError<NoSession>()('NoSession', {
 /** The agent could not be started, or its session could not be set up. */
 export class SessionFailed extends Schema.TaggedError<SessionFailed>()('SessionFailed', {
   agentId: Schema.String,
+  /** Everything that went wrong, for the log. */
   reason: Schema.String,
+  /** What went wrong, in a sentence a person reads. */
+  summary: Schema.String,
+}) {}
+
+/** The agent didn't take the model it was asked for; it carries on with the one it had. */
+export class ModelUnchanged extends Schema.TaggedError<ModelUnchanged>()('ModelUnchanged', {
+  agentId: Schema.String,
+  model: Schema.String,
+  summary: Schema.String,
 }) {}
 
 /** The attention request has already been answered, or was withdrawn. */

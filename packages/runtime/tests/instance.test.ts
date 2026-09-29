@@ -143,6 +143,15 @@ describe('the runtime instance', () => {
         }
       }).pipe(Effect.provide(runtime(file)))
 
+      // Each task whose lead the restart stopped says so in its thread.
+      const said = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return yield* sql<{ content: string }>`SELECT content FROM thread_items WHERE kind = 'notice' ORDER BY sequence`
+      }).pipe(Effect.provide(runtime(file)))
+      assert.deepStrictEqual(
+        said.map((row) => (JSON.parse(row.content) as { title: string }).title),
+        ['Charrette restarted.', 'Charrette restarted.', 'Charrette restarted.', 'Charrette restarted.'],
+      )
       assert.deepStrictEqual(after, {
         crashedEnded: true,
         sessions: ['lost', 'lost', 'failed', 'uncertain'],

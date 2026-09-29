@@ -10,7 +10,7 @@ import { SqlClient } from 'effect/sql'
 import { SessionFailed } from '../src/errors'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { runtime, task, turns, until } from './support'
+import { notices, runtime, task, turns, until } from './support'
 
 const alive = (pid: number) => {
   try {
@@ -79,6 +79,9 @@ describe('agents as processes', () => {
         after.map((row) => [row.session, row.processes[0]?.state, row.processes[0]?.exitCode]),
         [['lost', 'exited', 3]],
       )
+      // The thread says why nothing is happening.
+      const [said] = yield* until(notices(created.threadId), (rows) => rows.length > 0)
+      assert.strictEqual(said?.title, 'Fake process stopped on its own.')
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -92,6 +95,10 @@ describe('agents as processes', () => {
       const [row] = yield* sql<{ session: string; process: string; pid: number | null }>`
         SELECT s.state AS session, p.state AS process, p.pid FROM provider_sessions s JOIN processes p ON p.provider_session_id = s.id`
       assert.deepStrictEqual(row, { session: 'failed', process: 'unknown', pid: null })
+      assert.strictEqual(error.summary, "charrette-no-such-agent isn't installed, or isn't on this Mac's PATH.")
+      assert.deepStrictEqual(yield* notices(created.threadId), [
+        { source: 'runtime', severity: 'error', title: "Fake missing couldn't start.", description: error.summary },
+      ])
     }).pipe(Effect.provide(runtime())),
   )
 

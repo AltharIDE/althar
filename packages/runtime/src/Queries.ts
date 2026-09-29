@@ -1,16 +1,21 @@
-import type { ProjectSummary, TaskSummary, ThreadSnapshot } from '@charrette/contracts'
-import { Context, Effect, Layer, Option, type Schema } from 'effect'
+import { PAGE, type ProjectList, type TaskList, type TaskSummary, type ThreadItem, type ThreadSnapshot } from '@charrette/contracts'
+import { Context, Effect, Layer, Option } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Agents } from './Config'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
+import { commandIn } from './rules'
 import { Sessions } from './Sessions'
 
 /*
  * What screens show, read from the store (docs/architecture/02: queries
  * return projections shaped for screens, not tables). Read-only: nothing here
  * writes or starts anything.
+ *
+ * Each read says the change-feed cursor it read at, taken before the rows: a
+ * client that watches from there sees every change after, and at worst one
+ * it already has.
  */
 
 /** Session states in which a session is working on its thread. */
@@ -28,15 +33,122 @@ const parse = (json: string | null): unknown => {
 const field = (value: unknown, key: string): unknown =>
   typeof value === 'object' && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined
 
+const text = (value: unknown, key: string): string => {
+  const found = field(value, key)
+  return typeof found === 'string' ? found : ''
+}
+
+interface ItemRow {
+  readonly id: string
+  readonly sequence: number
+  readonly kind: string
+  readonly content: string
+  readonly agentId: string | null
+  readonly inputState: 'queued' | 'delivered' | 'superseded' | null
+  readonly disposition: string | null
+  /** For a tool call that asked: what was decided, last. */
+  readonly decision: string | null
+  readonly createdAt: string
+}
+
+/**
+ * A stored item as the contract has it: each kind with its own content. A
+ * tool call keeps what a screen shows (the command it runs and the files it
+ * touches), not its raw input and output. Kinds the contract doesn't have yet,
+ * such as a step's result, are left out.
+ */
+export const itemOf = (row: ItemRow): ThreadItem | undefined => {
+  const content = parse(row.content)
+  const base = { id: row.id, sequence: row.sequence, agentId: row.agentId, createdAt: row.createdAt }
+  switch (row.kind) {
+    case 'user_message':
+      return {
+        ...base,
+        kind: 'user_message',
+        content: { text: text(content, 'text') },
+        input: row.inputState === null ? null : { state: row.inputState, interrupting: row.disposition === 'interrupt_and_continue' },
+      }
+    case 'agent_message':
+    case 'agent_thought':
+      return { ...base, kind: row.kind, content: { text: text(content, 'text') } }
+    case 'tool_call': {
+      const locations = field(content, 'locations')
+      return {
+        ...base,
+        kind: 'tool_call',
+        content: {
+          title: text(content, 'title'),
+          toolKind: text(content, 'kind') || 'other',
+          status: text(content, 'status') || 'pending',
+          command: commandIn(field(content, 'rawInput')) ?? null,
+          locations: (Array.isArray(locations) ? locations : []).flatMap((location) => {
+            const path = text(location, 'path')
+            const line = field(location, 'line')
+            return path === '' ? [] : [{ path, ...(typeof line === 'number' ? { line } : {}) }]
+          }),
+          declined: row.decision === 'reject',
+        },
+      }
+    }
+    case 'plan': {
+      const entries = field(content, 'entries')
+      return {
+        ...base,
+        kind: 'plan',
+        content: {
+          entries: (Array.isArray(entries) ? entries : []).map((entry) => ({
+            content: text(entry, 'content'),
+            status: text(entry, 'status'),
+          })),
+        },
+      }
+    }
+    case 'notice': {
+      const severity = text(content, 'severity')
+      const description = text(content, 'description')
+      return {
+        ...base,
+        kind: 'notice',
+        content: {
+          source: text(content, 'source') === 'runtime' ? 'runtime' : 'agent',
+          severity: severity === 'error' || severity === 'warning' ? severity : 'info',
+          title: text(content, 'title'),
+          description: description === '' ? null : description,
+        },
+      }
+    }
+    default:
+      return undefined
+  }
+}
+
+/** A change from the store's feed, with the thread it belongs to, when it belongs to one. */
+export interface ThreadChange {
+  readonly cursor: number
+  readonly aggregateType: string
+  readonly aggregateId: string
+  readonly projectId: string | null
+  readonly threadId: string | null
+}
+
 type Store = SqlClient.SqlClient | Instance | Agents | Sessions
 
 export class Queries extends Context.Service<
   Queries,
   {
-    projects: Effect.Effect<ReadonlyArray<ProjectSummary>, SqlError.SqlError>
-    tasks(projectId: string): Effect.Effect<ReadonlyArray<TaskSummary>, SqlError.SqlError>
+    projects: Effect.Effect<ProjectList, SqlError.SqlError>
+    tasks(projectId: string): Effect.Effect<TaskList, SqlError.SqlError>
     task(taskId: string): Effect.Effect<TaskSummary, SqlError.SqlError | NotFound>
-    thread(threadId: string): Effect.Effect<ThreadSnapshot, SqlError.SqlError | NotFound | Schema.SchemaError>
+    /** The thread, with the newest `limit` items before `before`. */
+    thread(
+      threadId: string,
+      page?: { readonly before?: number; readonly limit?: number },
+    ): Effect.Effect<ThreadSnapshot, SqlError.SqlError | NotFound>
+    item(threadId: string, itemId: string): Effect.Effect<ThreadItem, SqlError.SqlError | NotFound>
+    /** Changes after `cursor`, oldest first, each with its thread. */
+    changesSince(cursor: number, limit: number): Effect.Effect<ReadonlyArray<ThreadChange>, SqlError.SqlError>
+    /** The newest cursor in the feed. */
+    readonly cursor: Effect.Effect<number, SqlError.SqlError>
   }
 >()('@charrette/runtime/Queries') {
   static readonly layer: Layer.Layer<Queries, never, Store> = Layer.effect(
@@ -47,9 +159,16 @@ export class Queries extends Context.Service<
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const live = LIVE.map((state) => `'${state}'`).join(', ')
 
+      const cursor = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const [latest] = yield* sql<{ cursor: number }>`SELECT coalesce(max(cursor), 0) AS cursor FROM change_log`
+        return latest?.cursor ?? 0
+      })
+
       const projects = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        return yield* sql<ProjectSummary>`
+        const at = yield* cursor
+        const rows = yield* sql<ProjectList['projects'][number]>`
           SELECT p.id, p.name, p.slug,
             (SELECT l.path FROM repository_bindings b JOIN repository_locations l ON l.binding_id = b.id
               WHERE b.project_id = p.id AND l.device_id = ${instance.deviceId} ORDER BY b.created_at LIMIT 1) AS repository,
@@ -57,6 +176,7 @@ export class Queries extends Context.Service<
             (SELECT count(*) FROM provider_sessions s WHERE s.project_id = p.id AND s.state IN (${sql.unsafe(live)})) AS running,
             (SELECT count(*) FROM attention_requests a WHERE a.project_id = p.id AND a.state = 'open') AS waiting
           FROM projects p WHERE p.archived_at IS NULL ORDER BY p.created_at DESC, p.id DESC`
+        return { cursor: at, projects: rows }
       })
 
       const taskRows = (where: { readonly projectId?: string; readonly taskId?: string }) =>
@@ -75,11 +195,31 @@ export class Queries extends Context.Service<
             ORDER BY k.created_at DESC, k.id DESC`
         })
 
-      const thread = (threadId: string) =>
+      const itemRows = (threadId: string, where: { readonly before?: number; readonly itemId?: string; readonly limit: number }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<ItemRow>`
+            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, u.state AS input_state, u.disposition, i.created_at,
+              (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
+                WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
+                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision
+            FROM thread_items i
+            LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
+            LEFT JOIN user_inputs u ON u.id = i.user_input_id
+            WHERE i.thread_id = ${threadId}
+              AND ${where.itemId === undefined ? sql`1 = 1` : sql`i.id = ${where.itemId}`}
+              AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}
+            ORDER BY i.sequence DESC LIMIT ${where.limit + 1}`
+          // One more than asked for says whether there are earlier ones.
+          return { items: rows.slice(0, where.limit).toReversed(), earlier: rows.length > where.limit }
+        })
+
+      const thread = (threadId: string, page: { readonly before?: number; readonly limit?: number } = {}) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
           const agents = yield* Agents
+          const at = yield* cursor
           const [head] = yield* sql<{
             threadId: string
             projectId: string
@@ -111,29 +251,16 @@ export class Queries extends Context.Service<
             : undefined
           const values = field(modelOption, 'values')
 
-          const items = yield* sql<{
-            id: string
-            sequence: number
-            kind: string
-            content: string
-            agentId: string | null
-            toolCallId: string | null
-            inputState: 'queued' | 'delivered' | 'superseded' | null
-            disposition: string | null
-            createdAt: string
-          }>`
-            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, i.tool_call_id, u.state AS input_state, u.disposition, i.created_at
-            FROM thread_items i
-            LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
-            LEFT JOIN user_inputs u ON u.id = i.user_input_id
-            WHERE i.thread_id = ${threadId} ORDER BY i.sequence`
+          const { items, earlier } = yield* itemRows(threadId, {
+            ...(page.before === undefined ? {} : { before: page.before }),
+            limit: page.limit ?? PAGE,
+          })
           const attention = yield* sql<{ id: string; payload: string; createdAt: string }>`
             SELECT id, payload, created_at FROM attention_requests WHERE task_id = ${head.taskId} AND state = 'open' ORDER BY created_at`
-          const turns = yield* sql<{ id: string; state: string; errorClass: string | null; requestedAt: string; endedAt: string | null }>`
-            SELECT id, state, error_class, requested_at, ended_at FROM turn_deliveries WHERE thread_id = ${threadId} ORDER BY requested_at, id`
 
           return {
             threadId,
+            cursor: at,
             project: { id: head.projectId, name: head.projectName },
             task: {
               id: head.taskId,
@@ -157,40 +284,68 @@ export class Queries extends Context.Service<
                     models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
                     turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
                   },
-            items: items.map(({ inputState, disposition, ...item }) => ({
-              ...item,
-              kind: item.kind as ThreadSnapshot['items'][number]['kind'],
-              content: parse(item.content),
-              input: inputState === null ? null : { state: inputState, interrupting: disposition === 'interrupt_and_continue' },
-            })),
             attention: attention.map((request) => {
               const payload = parse(request.payload)
-              const text = (key: string) => {
-                const value = field(payload, key)
-                return typeof value === 'string' ? value : null
-              }
               return {
                 id: request.id,
-                title: text('title') ?? '',
-                reason: text('reason') ?? '',
-                command: text('command'),
+                title: text(payload, 'title'),
+                reason: text(payload, 'reason'),
+                command: text(payload, 'command') || null,
                 createdAt: request.createdAt,
               }
             }),
-            turns,
+            items: items.flatMap((row) => itemOf(row) ?? []),
+            earlier,
           } satisfies ThreadSnapshot
+        })
+
+      const item = (threadId: string, itemId: string) =>
+        Effect.gen(function* () {
+          const { items } = yield* itemRows(threadId, { itemId, limit: 1 })
+          const found = items[0] === undefined ? undefined : itemOf(items[0])
+          return found === undefined ? yield* new NotFound({ kind: 'thread item', id: itemId }) : found
+        })
+
+      const changesSince = (after: number, limit: number) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql<ThreadChange>`
+            SELECT c.cursor, c.aggregate_type, c.aggregate_id, c.project_id,
+              CASE c.aggregate_type
+                WHEN 'thread_item' THEN (SELECT thread_id FROM thread_items WHERE id = c.aggregate_id)
+                WHEN 'turn_delivery' THEN (SELECT thread_id FROM turn_deliveries WHERE id = c.aggregate_id)
+                WHEN 'provider_session' THEN (SELECT thread_id FROM provider_sessions WHERE id = c.aggregate_id)
+                WHEN 'user_input' THEN (SELECT thread_id FROM user_inputs WHERE id = c.aggregate_id)
+                WHEN 'permission_request' THEN (SELECT s.thread_id FROM permission_requests r
+                  JOIN provider_sessions s ON s.id = r.provider_session_id WHERE r.id = c.aggregate_id)
+                WHEN 'attention_request' THEN (SELECT t.id FROM attention_requests a
+                  JOIN threads t ON t.task_id = a.task_id AND t.kind = 'task' WHERE a.id = c.aggregate_id)
+                WHEN 'workspace' THEN (SELECT t.id FROM workspaces w
+                  JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task' WHERE w.id = c.aggregate_id)
+                WHEN 'task' THEN (SELECT id FROM threads WHERE task_id = c.aggregate_id AND kind = 'task')
+              END AS thread_id
+            FROM change_log c WHERE c.cursor > ${after} ORDER BY c.cursor LIMIT ${limit}`
         })
 
       return Queries.of({
         projects: run(projects),
-        tasks: (projectId) => run(taskRows({ projectId })),
+        tasks: (projectId) =>
+          run(
+            Effect.gen(function* () {
+              const at = yield* cursor
+              return { cursor: at, tasks: yield* taskRows({ projectId }) }
+            }),
+          ),
         task: (taskId) =>
           run(
             Effect.flatMap(taskRows({ taskId }), ([row]) =>
               row === undefined ? Effect.fail(new NotFound({ kind: 'task', id: taskId })) : Effect.succeed(row),
             ),
           ),
-        thread: (threadId) => run(thread(threadId)),
+        thread: (threadId, page) => run(thread(threadId, page)),
+        item: (threadId, itemId) => run(item(threadId, itemId)),
+        changesSince: (after, limit) => run(changesSince(after, limit)),
+        cursor: run(cursor),
       })
     }),
   )

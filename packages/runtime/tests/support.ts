@@ -137,3 +137,13 @@ export const turns = (threadId: string) =>
         (SELECT count(*) FROM turn_delivery_inputs i WHERE i.delivery_id = t.id) AS inputs
       FROM turn_deliveries t WHERE t.thread_id = ${threadId} ORDER BY t.requested_at, t.id`
   })
+
+/** The notices on a thread, as their titles and descriptions, oldest first. */
+export const notices = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{
+      content: string
+    }>`SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice' ORDER BY sequence`
+    return rows.map((row) => JSON.parse(row.content) as Readonly<Record<string, string>>)
+  })

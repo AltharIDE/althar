@@ -26,7 +26,8 @@ Effect.runPromise(Effect.scoped(program).pipe(Effect.provide(Runtime.layer({ dat
 - **`Permissions`** answers every permission request from the rules. What the always-ask list keeps for the person becomes an attention request, answered with `answer`.
 - **`Live`** streams what is happening now: agent events, turns, sessions, and questions for the person.
 
-- **`Queries`** reads what a client's screens show: projects, tasks, and a task's thread.
+- **`Queries`** reads what a client's screens show: projects, tasks, and a task's thread a page at a time, each with the change-feed cursor it read at.
+- **`Folders`** holds the folders the person chose, by grant, so a client opens a project without naming a path.
 
 To serve the API of `@charrette/contracts` over a port, as the desktop app does, build `services` once and launch a `connection` per port:
 

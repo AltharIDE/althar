@@ -12,13 +12,14 @@ import { Cause, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Option
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Agents, type AgentEntry } from './Config'
-import { NoSession, NotFound, SessionFailed, SessionRunning, type UnknownAgent } from './errors'
+import { ModelUnchanged, NoSession, NotFound, SessionFailed, SessionRunning, type UnknownAgent } from './errors'
 import { Instance } from './Instance'
 import { Live } from './Live'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { change, fact, timestamp } from './records'
 import { git } from './git'
 import { addItem, recorder, transcript } from './threads'
+import { agentSaid, summarize } from './words'
 
 /*
  * Agent sessions on a task's thread (docs/architecture/03). The runtime
@@ -113,6 +114,9 @@ export const errorClassOf = (
   return failed ? 'unknown' : undefined
 }
 
+/** How often a message's text, as far as it has come, goes to watching clients. */
+const STREAM_EVERY = 80
+
 export class Sessions extends Context.Service<
   Sessions,
   {
@@ -130,7 +134,7 @@ export class Sessions extends Context.Service<
       readonly disposition?: Disposition
     }): Effect.Effect<AcceptedInput, NotFound | Failure>
     /** Changes the session's model; the session and its context carry on. */
-    setModel(input: { readonly threadId: string; readonly model: string }): Effect.Effect<void, NoSession | SessionFailed | Failure>
+    setModel(input: { readonly threadId: string; readonly model: string }): Effect.Effect<void, NoSession | ModelUnchanged | Failure>
     /** Hands the thread to another agent: a new session, briefed with the thread so far (ADR-005). */
     switchAgent(input: {
       readonly threadId: string
@@ -291,14 +295,44 @@ export class Sessions extends Context.Service<
           // A failure to record one event doesn't stop the runtime reading the rest of the turn.
           const record = (event: SessionEvent) =>
             items.record(event).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause)))
+          /*
+           * The text being written goes to watching clients whole, at most every
+           * STREAM_EVERY, and once more after the last piece, so a long message
+           * doesn't cost the square of its length on the way.
+           */
+          const streaming = { sentAt: 0, trailing: false }
+          const sendOpen = Effect.suspend(() => {
+            streaming.sentAt = Date.now()
+            const open = items.current()
+            return open === undefined
+              ? Effect.void
+              : live.publish({ _tag: 'Streaming', threadId: thread.threadId, itemId: open.id, kind: open.kind, text: open.text })
+          })
+          const stream = Effect.suspend(() => {
+            const wait = STREAM_EVERY - (Date.now() - streaming.sentAt)
+            if (wait <= 0) return sendOpen
+            if (streaming.trailing) return Effect.void
+            streaming.trailing = true
+            return Effect.asVoid(
+              Effect.forkChild(
+                Effect.andThen(
+                  Effect.sleep(Duration.millis(wait)),
+                  Effect.andThen(
+                    Effect.sync(() => {
+                      streaming.trailing = false
+                    }),
+                    sendOpen,
+                  ),
+                ),
+              ),
+            )
+          })
           const streamed = yield* Stream.runForEach(running.agent.prompt(prompt), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
               yield* record(event)
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
-              const open = event._tag === 'AgentMessage' || event._tag === 'AgentThought' ? items.current() : undefined
-              if (open !== undefined)
-                yield* live.publish({ _tag: 'Streaming', threadId: thread.threadId, itemId: open.id, kind: open.kind, text: open.text })
+              if (event._tag === 'AgentMessage' || event._tag === 'AgentThought') yield* stream
             }),
           ).pipe(Effect.exit)
           yield* items.flush.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the end of a message', cause)))
@@ -470,6 +504,18 @@ export class Sessions extends Context.Service<
               )
             }),
           )
+          // An agent that goes on its own leaves a line in the thread, so the person knows why nothing is happening.
+          if (state === 'lost')
+            yield* addItem(
+              { projectId: running.thread.projectId, threadId: running.thread.threadId, sessionId: running.sessionId },
+              'notice',
+              {
+                source: 'runtime',
+                severity: 'warning',
+                title: `${running.entry.definition.name} stopped on its own.`,
+                description: 'Start the lead again to carry on; it picks up from the thread.',
+              },
+            )
           yield* live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state })
           yield* Deferred.succeed(running.ended, undefined)
         })
@@ -530,6 +576,7 @@ export class Sessions extends Context.Service<
           if (Exit.isFailure(started)) {
             yield* Scope.close(scope, Exit.void)
             const reason = Cause.pretty(started.cause)
+            const summary = summarize(started.cause)
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 if (processId !== undefined) yield* change('processes', processId, { state: 'unknown', endedAt: yield* timestamp })
@@ -537,7 +584,14 @@ export class Sessions extends Context.Service<
                 yield* sessionFact(thread, sessionId, revision, 'provider_session.failed', { reason })
               }),
             )
-            return yield* new SessionFailed({ agentId: definition.id, reason })
+            // The thread says why nothing happened, as well as the call that asked.
+            yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+              source: 'runtime',
+              severity: 'error',
+              title: `${definition.name} couldn't start.`,
+              ...(summary === '' ? {} : { description: summary }),
+            })
+            return yield* new SessionFailed({ agentId: definition.id, reason, summary })
           }
           const { connection, agent } = started.value
           if (processId !== undefined && connection.process !== undefined) {
@@ -723,7 +777,11 @@ export class Sessions extends Context.Service<
           const { definition } = running.entry
           const options = yield* running.agent
             .setOption(definition.options.model, input.model)
-            .pipe(Effect.mapError((error) => new SessionFailed({ agentId: definition.id, reason: error.message })))
+            .pipe(
+              Effect.mapError(
+                (error) => new ModelUnchanged({ agentId: definition.id, model: input.model, summary: agentSaid(error) ?? error.message }),
+              ),
+            )
           const sql = yield* SqlClient.SqlClient
           yield* sql.withTransaction(
             Effect.gen(function* () {
