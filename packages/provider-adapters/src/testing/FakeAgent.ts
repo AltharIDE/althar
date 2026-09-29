@@ -350,7 +350,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         case scenarios.toolAlwaysOnly: {
           const toolCall =
             text === scenarios.tool
-              ? { toolCallId: 'call-1', title: 'Write hello.txt', kind: 'edit' as const, rawInput: { path: 'hello.txt' } }
+              ? {
+                  toolCallId: 'call-1',
+                  title: 'Write hello.txt',
+                  kind: 'edit' as const,
+                  rawInput: { path: 'hello.txt' },
+                  locations: [{ path: 'hello.txt' }],
+                }
               : { toolCallId: 'call-1', title: 'Write hello.txt' }
           await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
           const chosen = await ask(toolCall, permissionOptions(text === scenarios.toolAlwaysOnly))
