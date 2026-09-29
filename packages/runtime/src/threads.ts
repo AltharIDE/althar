@@ -1,7 +1,7 @@
 import { Ids, newId, type ProjectId } from '@charrette/domain'
 import { Ledger } from '@charrette/persistence-sqlite'
 import type { SessionEvent } from '@charrette/provider-adapters'
-import { Effect } from 'effect'
+import { Clock, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { change, timestamp } from './records'
@@ -70,6 +70,10 @@ const toolItem = (sessionId: string, toolCallId: string) =>
     return row === undefined ? undefined : { id: row.id, content: JSON.parse(row.content) as Record<string, unknown> }
   })
 
+/** How often a message being streamed is written: every so many characters, or so many milliseconds. */
+const WRITE_EVERY_CHARACTERS = 2_000
+const WRITE_EVERY_MILLIS = 2_000
+
 const defined = (entries: Record<string, unknown>) => Object.fromEntries(Object.entries(entries).filter(([, value]) => value !== undefined))
 
 /**
@@ -78,7 +82,9 @@ const defined = (entries: Record<string, unknown>) => Object.fromEntries(Object.
  * turn ends.
  */
 export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
-  let gathering: { readonly kind: 'agent_message' | 'agent_thought'; readonly id: string; text: string } | undefined
+  let gathering:
+    | { readonly kind: 'agent_message' | 'agent_thought'; readonly id: string; text: string; written: number; writtenAt: number }
+    | undefined
   let plan: string | undefined
 
   /** Writes the message being gathered; its item was placed when its first chunk arrived. */
@@ -91,12 +97,19 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const gather = (kind: 'agent_message' | 'agent_thought', text: string) =>
     Effect.gen(function* () {
       if (gathering !== undefined && gathering.kind !== kind) yield* flush
+      const now = yield* Clock.currentTimeMillis
       if (gathering === undefined) {
         // The item is placed when its first chunk arrives, so the thread keeps the order things happened in.
-        gathering = { kind, id: yield* addItem(place, kind, { text }), text }
+        gathering = { kind, id: yield* addItem(place, kind, { text }), text, written: text.length, writtenAt: now }
         return
       }
       gathering.text += text
+      // A long message is written as it grows, so a crash loses only its last few seconds.
+      if (gathering.text.length - gathering.written >= WRITE_EVERY_CHARACTERS || now - gathering.writtenAt >= WRITE_EVERY_MILLIS) {
+        yield* updateItem(place.projectId, gathering.id, { text: gathering.text })
+        gathering.written = gathering.text.length
+        gathering.writtenAt = now
+      }
     })
 
   const notice = (content: Record<string, unknown>) => Effect.andThen(flush, addItem(place, 'notice', defined(content)))

@@ -4,22 +4,26 @@ import type { ProjectId } from '@charrette/domain'
 import type { SessionEvent } from '@charrette/provider-adapters'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Exit } from 'effect'
+import { Effect, Exit, Stream } from 'effect'
 
 import { Agents, WebCrypto } from '../src/Config'
 import { UnknownAgent } from '../src/errors'
 import { currentBranch, defaultBranch, remoteUrls } from '../src/git'
 import { change } from '../src/records'
+import { Live } from '../src/Live'
 import { Sessions } from '../src/Sessions'
 import { recorder, transcript } from '../src/threads'
-import { items, repository, runtime, task } from './support'
+import { items, repository, runtime, task, turns, until } from './support'
 
 /** A thread with a session on it, for the recorder to write into. */
 const place = Effect.gen(function* () {
   const sessions = yield* Sessions
   const { project, task: created } = yield* task()
   const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
-  return { projectId: project.projectId as ProjectId, threadId: created.threadId, sessionId }
+  // The session's first turn delivers its brief; the tests write after it.
+  yield* until(turns(created.threadId), (rows) => rows[0]?.state === 'completed')
+  const before = (yield* items(created.threadId)).length
+  return { projectId: project.projectId as ProjectId, threadId: created.threadId, sessionId, before }
 })
 
 describe('the thread recorder', () => {
@@ -43,10 +47,9 @@ describe('the thread recorder', () => {
       ]
       for (const event of events) yield* record.record(event)
       yield* record.flush
-      const kinds = (yield* items(where.threadId)).map((item) => [
-        item.kind,
-        item.content.title ?? item.content.text ?? item.content.entries,
-      ])
+      const kinds = (yield* items(where.threadId))
+        .slice(where.before)
+        .map((item) => [item.kind, item.content.title ?? item.content.text ?? item.content.entries])
       assert.deepStrictEqual(kinds, [
         ['tool_call', 'Run tests'],
         ['agent_message', 'Looking'],
@@ -69,9 +72,28 @@ describe('the thread recorder', () => {
       yield* writer.record({ _tag: 'AgentThought', text: 'thinking is left out' })
       yield* writer.flush
       const whole = yield* transcript(where.threadId, 10_000)
-      assert.deepStrictEqual(whole, { text: '[codex] first\n[tool] Read README (completed)\n[note] Plain: with detail', omitted: 0 })
+      assert.strictEqual(whole.omitted, 0)
+      assert.isTrue(whole.text.startsWith('[codex] echo: You are working on a task'))
+      assert.isTrue(whole.text.endsWith('\n[codex] first\n[tool] Read README (completed)\n[note] Plain: with detail'))
       const tail = yield* transcript(where.threadId, 30)
-      assert.deepStrictEqual(tail, { text: '[note] Plain: with detail', omitted: 2 })
+      assert.deepStrictEqual(tail, { text: '[note] Plain: with detail', omitted: 3 })
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('long messages', () => {
+  it.live('are written as they grow, not only when they end', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const writer = recorder(where)
+      yield* writer.record({ _tag: 'AgentMessage', text: 'Start. ' })
+      yield* writer.record({ _tag: 'AgentMessage', text: 'x'.repeat(2_500) })
+      const [written] = (yield* items(where.threadId)).slice(where.before)
+      assert.strictEqual(String(written?.content.text).length, 2_507)
+      yield* writer.record({ _tag: 'AgentMessage', text: ' end' })
+      yield* writer.flush
+      const [done] = (yield* items(where.threadId)).slice(where.before)
+      assert.isTrue(String(done?.content.text).endsWith('x end'))
     }).pipe(Effect.provide(runtime())),
   )
 })
@@ -108,6 +130,18 @@ describe('the runtime helpers', () => {
       assert.strictEqual(codex.transport('/tmp')._tag, 'Process')
       assert.instanceOf(yield* Effect.flip(agents.get('gemini')), UnknownAgent)
     }).pipe(Effect.provide(Agents.registry)),
+  )
+
+  it.live('lets a client subscribe before anything happens, and miss nothing', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const live = yield* Live
+        const events = yield* live.subscribe
+        yield* live.publish({ _tag: 'TurnStarted', threadId: 't', turnId: 'u' })
+        const [first] = yield* Stream.runCollect(Stream.take(events, 1))
+        assert.deepStrictEqual(first, { _tag: 'TurnStarted', threadId: 't', turnId: 'u' })
+      }),
+    ).pipe(Effect.provide(Live.layer)),
   )
 
   it.effect('digests with the platform crypto', () =>

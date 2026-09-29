@@ -1,5 +1,5 @@
 import type { SessionEvent } from '@charrette/provider-adapters'
-import { Context, Effect, Layer, PubSub, Stream } from 'effect'
+import { Context, Effect, Layer, PubSub, type Scope, Stream } from 'effect'
 
 /*
  * What is happening now, for clients that watch: every event an agent
@@ -40,13 +40,19 @@ export class Live extends Context.Service<
     publish(event: LiveEvent): Effect.Effect<void>
     /** Events from the moment the stream is run. */
     readonly events: Stream.Stream<LiveEvent>
+    /** Events from the moment this returns, for as long as the scope lasts: nothing published after it is missed. */
+    readonly subscribe: Effect.Effect<Stream.Stream<LiveEvent>, never, Scope.Scope>
   }
 >()('@charrette/runtime/Live') {
   static readonly layer: Layer.Layer<Live> = Layer.effect(
     Live,
     Effect.gen(function* () {
       const pubsub = yield* PubSub.unbounded<LiveEvent>()
-      return Live.of({ publish: (event) => Effect.asVoid(PubSub.publish(pubsub, event)), events: Stream.fromPubSub(pubsub) })
+      return Live.of({
+        publish: (event) => Effect.asVoid(PubSub.publish(pubsub, event)),
+        events: Stream.fromPubSub(pubsub),
+        subscribe: Effect.map(PubSub.subscribe(pubsub), Stream.fromSubscription),
+      })
     }),
   )
 }

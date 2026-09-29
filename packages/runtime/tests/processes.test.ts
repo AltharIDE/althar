@@ -66,8 +66,10 @@ describe('agents as processes', () => {
       const sessions = yield* Sessions
       const { task: created } = yield* task()
       const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'process' })
+      // The brief goes first; then the turn in which the agent exits.
+      yield* until(turns(created.threadId), (rows) => rows[0]?.state === 'completed')
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: created.threadId, body: scenarios.exit })
-      const [turn] = yield* until(turns(created.threadId), (rows) => rows[0]?.state === 'failed')
+      const [, turn] = yield* until(turns(created.threadId), (rows) => rows[1]?.state === 'failed')
       assert.strictEqual(turn?.errorClass, 'agent_exited')
       const after = yield* until(
         Effect.map(records(sessionId), (row) => [row]),

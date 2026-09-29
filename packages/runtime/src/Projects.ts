@@ -1,13 +1,14 @@
+import { existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import { type CommandEnvelope, Ids, newId, type ProjectId, type TaskId, type ThreadId } from '@charrette/domain'
 import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@charrette/persistence-sqlite'
-import { Context, Crypto, Effect, Layer, Schema } from 'effect'
+import { Context, Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
 import { type GitFailed, NotARepository, NotFound } from './errors'
-import { addWorktree, commitOf, defaultBranch, remoteUrls, topLevel } from './git'
+import { addWorktree, branchExists, commitOf, defaultBranch, fetchBranch, remoteUrls, topLevel } from './git'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
 
@@ -58,6 +59,33 @@ const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
   if (!taken.includes(slug)) return slug
   for (let n = 2; ; n += 1) if (!taken.includes(`${slug}-${n}`)) return `${slug}-${n}`
 }
+
+/**
+ * Adds a task's worktree. The base is the default branch as origin has it now:
+ * fetched first, so the task doesn't start from a stale commit (and its pull
+ * request doesn't conflict for that reason), falling back to the local branch
+ * when origin can't be reached. A branch or folder that already exists, from
+ * another project on the same repository or an earlier profile, gets the next
+ * free name instead of failing.
+ */
+const prepareWorktree = (repository: string, base: string, planned: { readonly worktree: string; readonly branch: string }) =>
+  Effect.gen(function* () {
+    const fetched = yield* fetchBranch(repository, base)
+    const remote = `origin/${base}`
+    const fromRemote = fetched ? yield* commitOf(repository, remote).pipe(Effect.option) : Option.none()
+    const baseRef = Option.isSome(fromRemote) ? remote : base
+    const baseCommit = Option.isSome(fromRemote)
+      ? fromRemote.value
+      : yield* commitOf(repository, base).pipe(Effect.catch(() => commitOf(repository, remote)))
+    let branch = planned.branch
+    let worktree = planned.worktree
+    for (let n = 2; (yield* branchExists(repository, branch)) || existsSync(worktree); n += 1) {
+      branch = `${planned.branch}-${n}`
+      worktree = `${planned.worktree}-${n}`
+    }
+    yield* addWorktree(repository, worktree, branch, baseCommit)
+    return { worktree, branch, baseRef, baseCommit, fetched }
+  })
 
 type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | RuntimeConfig
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
@@ -235,25 +263,26 @@ export class Projects extends Context.Service<
             }),
           })
 
-          // The worktree, after the task is committed. The base is the branch's commit, locally or on origin.
-          const [workspace] = yield* sql<{ state: string }>`SELECT state FROM workspaces WHERE id = ${created.workspaceId}`
-          if (workspace?.state === 'ready') return created
-          const prepared = yield* Effect.exit(
-            Effect.gen(function* () {
-              const commit = yield* commitOf(project.repository, base).pipe(
-                Effect.catch(() => commitOf(project.repository, `origin/${base}`)),
-              )
-              yield* addWorktree(project.repository, created.worktree, created.branch, commit)
-              return commit
-            }),
-          )
+          // The worktree, after the task is committed.
+          const [workspace] = yield* sql<{ state: string; path: string; branch: string }>`
+            SELECT state, path, branch FROM workspaces WHERE id = ${created.workspaceId}`
+          if (workspace?.state === 'ready') return { ...created, worktree: workspace.path, branch: workspace.branch }
+          const prepared = yield* Effect.exit(prepareWorktree(project.repository, base, created))
           yield* sql.withTransaction(
             Effect.gen(function* () {
               const ready = prepared._tag === 'Success'
               const revision = yield* change(
                 'workspaces',
                 created.workspaceId,
-                ready ? { state: 'ready', baseCommit: prepared.value } : { state: 'failed' },
+                ready
+                  ? {
+                      state: 'ready',
+                      baseRef: prepared.value.baseRef,
+                      baseCommit: prepared.value.baseCommit,
+                      path: prepared.value.worktree,
+                      branch: prepared.value.branch,
+                    }
+                  : { state: 'failed' },
               )
               yield* fact({
                 projectId: project.id,
@@ -261,15 +290,13 @@ export class Projects extends Context.Service<
                 aggregateId: created.workspaceId,
                 revision,
                 type: ready ? 'workspace.ready' : 'workspace.failed',
-                payload: ready
-                  ? { path: created.worktree, branch: created.branch, baseCommit: prepared.value }
-                  : { path: created.worktree },
+                payload: ready ? prepared.value : { path: created.worktree },
                 actorId: instance.systemId,
               })
             }),
           )
           if (prepared._tag === 'Failure') return yield* Effect.failCause(prepared.cause)
-          return created
+          return { ...created, worktree: prepared.value.worktree, branch: prepared.value.branch }
         })
 
       return Projects.of({ open: (input) => run(open(input)), createTask: (input) => run(createTask(input)) })

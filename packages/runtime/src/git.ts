@@ -6,15 +6,21 @@ import { GitFailed } from './errors'
 
 /*
  * The git commands the runtime runs itself, outside any agent. They never
- * prompt: a command that would ask for a password fails instead.
+ * prompt: a command that would ask for a password fails instead. They run
+ * with the repository's hooks off (docs/architecture/07): adding a worktree
+ * would otherwise run its `post-checkout` hook, code from the repository, on
+ * the person's machine.
  */
 
-export const git = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
+export const git = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> => gitWithin(60_000, cwd, ...args)
+
+/** A git command that gives up after `timeout` milliseconds, for those that reach the network. */
+export const gitWithin = (timeout: number, cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   Effect.callback<string, GitFailed>((resume) => {
     execFile(
       'git',
-      args,
-      { cwd, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' } },
+      ['-c', 'core.hooksPath=/dev/null', ...args],
+      { cwd, timeout, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' } },
       (error, stdout, stderr) =>
         resume(
           error === null
@@ -28,7 +34,14 @@ export const git = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<
 export const topLevel = (path: string) => git(path, 'rev-parse', '--show-toplevel')
 
 /** The commit a ref points at. */
-export const commitOf = (cwd: string, ref: string) => git(cwd, 'rev-parse', '--verify', `${ref}^{commit}`)
+export const commitOf = (cwd: string, ref: string) => git(cwd, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`)
+
+/** Whether a local branch exists. */
+export const branchExists = (cwd: string, branch: string) =>
+  git(cwd, 'show-ref', '--verify', '--quiet', `refs/heads/${branch}`).pipe(
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+  )
 
 /** The branch checked out, or undefined when HEAD is detached. */
 export const currentBranch = (cwd: string) =>
@@ -37,21 +50,54 @@ export const currentBranch = (cwd: string) =>
     Effect.orElseSucceed(() => undefined),
   )
 
-/** The remote's default branch where git knows it, else the branch checked out, else `main`. */
+const COMMON_DEFAULTS = ['main', 'master', 'trunk', 'develop']
+
+/**
+ * The repository's default branch: what origin says (as git last saw it, or
+ * by asking it), else the first of the usual names that exists here, else
+ * `main`. Never the branch the person happens to have checked out, which may
+ * be a feature branch the push rules would then protect instead.
+ */
 export const defaultBranch = (cwd: string) =>
   git(cwd, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD').pipe(
     Effect.map((ref) => ref.replace(/^origin\//, '')),
-    Effect.catch(() => Effect.map(currentBranch(cwd), (branch) => branch ?? 'main')),
+    Effect.catch(() =>
+      gitWithin(15_000, cwd, 'ls-remote', '--symref', 'origin', 'HEAD').pipe(
+        Effect.flatMap((output) => {
+          const branch = /^ref: refs\/heads\/(\S+)\s+HEAD$/m.exec(output)?.[1]
+          return branch === undefined ? Effect.fail(new GitFailed({ args: ['ls-remote'], cwd, stderr: 'no HEAD' })) : Effect.succeed(branch)
+        }),
+      ),
+    ),
+    Effect.catch(() =>
+      Effect.gen(function* () {
+        for (const branch of COMMON_DEFAULTS) if (yield* branchExists(cwd, branch)) return branch
+        return 'main'
+      }),
+    ),
   )
 
-/** Every remote's fetch URL. */
+/** Brings a remote branch up to date locally; false when that can't be done, as offline. */
+export const fetchBranch = (cwd: string, branch: string) =>
+  gitWithin(60_000, cwd, 'fetch', '--quiet', '--no-tags', 'origin', branch).pipe(
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+  )
+
+/**
+ * A remote URL without the credentials it may carry: `https://user:token@host/…`
+ * becomes `https://host/…`. The record never holds a secret (docs/architecture/07).
+ */
+export const redactUrl = (url: string) => url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1')
+
+/** Every remote's fetch URL, without credentials. */
 export const remoteUrls = (cwd: string) =>
   Effect.map(git(cwd, 'remote', '-v'), (output) => [
     ...new Set(
       output
         .split('\n')
         .filter((line) => line.endsWith('(fetch)'))
-        .map((line) => line.split(/\s+/)[1] ?? '')
+        .map((line) => redactUrl(line.split(/\s+/)[1] ?? ''))
         .filter((url) => url !== ''),
     ),
   ])

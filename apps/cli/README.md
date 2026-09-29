@@ -1,6 +1,6 @@
 # @charrette/cli
 
-A command-line client for the Charrette runtime, the first step of the MVP's build order: the agent harness without a UI. It opens a folder as a project, starts a task in a worktree of its own, starts the task's agent, and lets you talk to it. The runtime runs inside the CLI's own process, over the same profile the app will use.
+A command-line client for the Charrette runtime, the first step of the MVP's build order: the agent harness without a UI. It opens a folder as a project, starts a task in a worktree of its own, and starts the task's agent, which begins on the task from its brief. Then you talk to it. The runtime runs inside the CLI's own process, over the same profile the app will use.
 
 ## Use it
 

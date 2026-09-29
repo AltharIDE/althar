@@ -16,6 +16,7 @@ import { Context, Crypto, Deferred, Effect, Layer, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { AttentionClosed, NotFound } from './errors'
+import { currentBranch } from './git'
 import { Instance } from './Instance'
 import { Live } from './Live'
 import { change, fact, timestamp } from './records'
@@ -211,7 +212,10 @@ export class Permissions extends Context.Service<
               })
             }),
           )
-          const verdict = decide(request, requestContext.rules)
+          // Where a push without a destination goes depends on the branch checked out now.
+          const current =
+            request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(requestContext.rules.worktree) : undefined
+          const verdict = decide(request, { ...requestContext.rules, ...(current === undefined ? {} : { currentBranch: current }) })
           if (verdict.verdict === 'allow') {
             const decision: PermissionDecision = { decision: 'allow', reason: 'Allowed by the project rules.' }
             yield* sql.withTransaction(

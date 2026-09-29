@@ -1,8 +1,9 @@
-import type { ActorId, ProjectId, RuntimeInstanceId } from '@charrette/domain'
-import { osStartTime, stopProcessGroup } from '@charrette/provider-adapters'
-import { Duration, Effect } from 'effect'
+import type { ActorId, DeviceId, ProjectId, RuntimeInstanceId } from '@charrette/domain'
+import { osStartTime, stopProcessGroup, type StopReport } from '@charrette/provider-adapters'
+import { Duration, Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { currentBranch, git } from './git'
 import { change, fact, timestamp } from './records'
 
 /*
@@ -31,7 +32,11 @@ export interface Reconciled {
   readonly requestsCancelled: number
 }
 
-export const reconcile = Effect.fn('reconcile')(function* (instance: { readonly id: RuntimeInstanceId; readonly systemId: ActorId }) {
+export const reconcile = Effect.fn('reconcile')(function* (instance: {
+  readonly id: RuntimeInstanceId
+  readonly deviceId: DeviceId
+  readonly systemId: ActorId
+}) {
   const sql = yield* SqlClient.SqlClient
   const actorId = instance.systemId
 
@@ -40,13 +45,42 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: { readonly 
     WHERE state IN ('launching', 'running') AND runtime_instance_id <> ${instance.id}`
   let processesStopped = 0
   for (const stale of processes) {
-    const ours = stale.pid !== null && stale.osStartedAt !== null && (yield* osStartTime(stale.pid)) === stale.osStartedAt
-    const stop = ours && stale.pid !== null ? yield* stopProcessGroup(stale.pid, Duration.seconds(2)) : undefined
-    if (ours) processesStopped += 1
+    let stop: StopReport | undefined
+    if (stale.pid !== null) {
+      const leaderStarted = yield* osStartTime(stale.pid)
+      // Ours when the leader is the process recorded; or when the leader has gone but its group lives on, since a
+      // pid isn't reused while a group with that id exists. Then what the agent left running, such as a dev server, is stopped too.
+      const ours = leaderStarted === undefined || leaderStarted === stale.osStartedAt
+      if (ours) stop = yield* stopProcessGroup(stale.pid, Duration.seconds(2))
+    }
+    const stopped = stop !== undefined && stop.signal !== 'none'
+    if (stopped) processesStopped += 1
     yield* change('processes', stale.id, {
-      state: ours ? 'killed' : 'unknown',
-      signal: stop === undefined || stop.signal === 'none' ? null : stop.signal,
+      state: stopped ? 'killed' : 'unknown',
+      signal: stopped ? stop?.signal : null,
       endedAt: yield* timestamp,
+    })
+  }
+
+  // A worktree a crash interrupted: ready if git finished adding it, failed otherwise.
+  const preparing = yield* sql<{ id: string; projectId: ProjectId; path: string; branch: string }>`
+    SELECT id, project_id, path, branch FROM workspaces WHERE state = 'preparing' AND device_id = ${instance.deviceId}`
+  for (const workspace of preparing) {
+    const branch = yield* currentBranch(workspace.path)
+    const head = branch === workspace.branch ? yield* git(workspace.path, 'rev-parse', 'HEAD').pipe(Effect.option) : Option.none()
+    const revision = yield* change(
+      'workspaces',
+      workspace.id,
+      Option.isSome(head) ? { state: 'ready', baseCommit: head.value } : { state: 'failed' },
+    )
+    yield* fact({
+      projectId: workspace.projectId,
+      aggregateType: 'workspace',
+      aggregateId: workspace.id,
+      revision,
+      type: Option.isSome(head) ? 'workspace.ready' : 'workspace.failed',
+      payload: { reason: 'runtime_restarted' },
+      actorId,
     })
   }
 

@@ -131,6 +131,10 @@ export const turns = (threadId: string) =>
       errorClass: string | null
       usage: string | null
       providerSessionId: string
+      prompt: string | null
+      inputs: number
     }>`
-      SELECT id, state, stop_reason, error_class, usage, provider_session_id FROM turn_deliveries WHERE thread_id = ${threadId} ORDER BY requested_at, id`
+      SELECT t.id, t.state, t.stop_reason, t.error_class, t.usage, t.provider_session_id, t.prompt,
+        (SELECT count(*) FROM turn_delivery_inputs i WHERE i.delivery_id = t.id) AS inputs
+      FROM turn_deliveries t WHERE t.thread_id = ${threadId} ORDER BY t.requested_at, t.id`
   })

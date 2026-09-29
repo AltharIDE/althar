@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -113,5 +113,100 @@ describe('projects', () => {
     assert.strictEqual(slugify('  Café Déjà Vu  ', 'x'), 'cafe-deja-vu')
     assert.strictEqual(slugify('!!!', 'task'), 'task')
     assert.strictEqual(slugify('a'.repeat(60), 'x').length, 48)
+  })
+
+  describe('worktrees', () => {
+    const git = (cwd: string, ...args: Array<string>) =>
+      execFileSync('git', args, {
+        cwd,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 'T',
+          GIT_AUTHOR_EMAIL: 't@t.test',
+          GIT_COMMITTER_NAME: 'T',
+          GIT_COMMITTER_EMAIL: 't@t.test',
+        },
+      })
+        .toString()
+        .trim()
+    const create = (projectId: string, title: string) =>
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        return yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', { title }), projectId, title })
+      })
+
+    it.live('fetches first, and starts the task from the default branch as origin has it', () =>
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const sql = yield* SqlClient.SqlClient
+        const upstream = repository()
+        const clone = mkdtempSync(join(tmpdir(), 'charrette-clone-'))
+        execFileSync('git', ['clone', '-q', upstream, clone])
+        // Someone else moves main on after the clone.
+        writeFileSync(join(upstream, 'later.md'), 'later\n')
+        git(upstream, 'add', '.')
+        git(upstream, 'commit', '-q', '-m', 'Later')
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: clone })
+        const created = yield* create(project.projectId, 'Use the latest')
+        const [workspace] = yield* sql<{ baseRef: string; baseCommit: string }>`SELECT base_ref, base_commit FROM workspaces`
+        assert.deepStrictEqual(workspace, { baseRef: 'origin/main', baseCommit: git(upstream, 'rev-parse', 'main') })
+        assert.isTrue(existsSync(join(created.worktree, 'later.md')))
+      }).pipe(Effect.provide(runtime())),
+    )
+
+    it.live('picks a free branch and folder when the planned ones exist', () =>
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const path = repository()
+        git(path, 'branch', 'charrette/tidy-up')
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+        const created = yield* create(project.projectId, 'Tidy up')
+        assert.strictEqual(created.branch, 'charrette/tidy-up-2')
+        assert.isTrue(created.worktree.endsWith('-2'))
+        assert.strictEqual(git(created.worktree, 'branch', '--show-current'), 'charrette/tidy-up-2')
+      }).pipe(Effect.provide(runtime())),
+    )
+
+    it.live("never runs the repository's own hooks", () =>
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const path = repository()
+        const marker = join(mkdtempSync(join(tmpdir(), 'charrette-hook-')), 'ran')
+        writeFileSync(join(path, '.git', 'hooks', 'post-checkout'), `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 })
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+        yield* create(project.projectId, 'No hooks')
+        assert.isFalse(existsSync(marker))
+      }).pipe(Effect.provide(runtime())),
+    )
+
+    it.live('keeps credentials in remote URLs out of the record', () =>
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const sql = yield* SqlClient.SqlClient
+        const path = repository()
+        git(path, 'remote', 'add', 'origin', 'https://ada:ghp_secret@github.com/meridian/app.git')
+        git(path, 'remote', 'add', 'mirror', 'git@github.com:meridian/app.git')
+        yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+        const rows = yield* sql<{ text: string }>`
+          SELECT remote_fingerprints AS text FROM repository_bindings
+          UNION ALL SELECT observed_remotes FROM repository_locations
+          UNION ALL SELECT payload FROM record_events`
+        assert.isFalse(rows.some((row) => row.text.includes('ghp_secret') || row.text.includes('ada:')))
+        assert.include(rows[0]?.text ?? '', 'https://github.com/meridian/app.git')
+        assert.include(rows[0]?.text ?? '', 'git@github.com:meridian/app.git')
+      }).pipe(Effect.provide(runtime())),
+    )
+
+    it.live('takes the usual default branch, not whatever the person has checked out', () =>
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const sql = yield* SqlClient.SqlClient
+        const path = repository()
+        git(path, 'checkout', '-q', '-b', 'feature/wip')
+        yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+        const [binding] = yield* sql<{ defaultBaseRef: string }>`SELECT default_base_ref FROM repository_bindings`
+        assert.strictEqual(binding?.defaultBaseRef, 'main')
+      }).pipe(Effect.provide(runtime())),
+    )
   })
 })

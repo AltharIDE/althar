@@ -5,7 +5,7 @@ import { createInterface } from 'node:readline'
 
 import { agents, signInStatus } from '@charrette/provider-adapters'
 import { type Instance, Live, Permissions, Projects, Runtime, Sessions } from '@charrette/runtime'
-import { Cause, type Crypto, Effect, Exit, Queue, Stream } from 'effect'
+import { Cause, type Crypto, Effect, Exit, Option, Queue, Stream } from 'effect'
 
 import { type Action, HELP, parseLine } from './input'
 import { defaultProfile, defaultWorktrees, parseOptions, USAGE } from './options'
@@ -61,9 +61,9 @@ const program = Effect.gen(function* () {
   write(`Task "${options.task}" in ${task.worktree}, on ${task.branch}\n`)
 
   const out = printer(task.threadId)
-  yield* Effect.forkScoped(Stream.runForEach(live.events, (event) => Effect.sync(() => write(out.print(event)))))
-  // The printer is watching before the session starts.
-  yield* Effect.sleep('20 millis')
+  // Subscribed before the session starts, so the printer misses nothing.
+  const events = yield* live.subscribe
+  yield* Effect.forkScoped(Stream.runForEach(events, (event) => Effect.sync(() => write(out.print(event)))))
   yield* sessions.start({
     threadId: task.threadId,
     agentId: options.agent,
@@ -82,12 +82,19 @@ const program = Effect.gen(function* () {
       sessions.send({ envelope, threadId: task.threadId, body, disposition }),
     )
 
+  /** A message sent with no agent running waits in the queue; say so, rather than leave it silent. */
+  const idleWarning = Effect.flatMap(sessions.running(task.threadId), (running) =>
+    Effect.sync(() => {
+      if (Option.isNone(running)) write('No agent is running; your message waits for one. Start one with /agent <id>.\n')
+    }),
+  )
+
   const handle = (action: Action): Effect.Effect<'quit' | undefined, unknown, Instance | Crypto.Crypto> => {
     switch (action._tag) {
       case 'Say':
-        return Effect.as(send(action.text, 'after_current'), undefined)
+        return Effect.as(Effect.andThen(send(action.text, 'after_current'), idleWarning), undefined)
       case 'Interrupt':
-        return Effect.as(send(action.text, 'interrupt_and_continue'), undefined)
+        return Effect.as(Effect.andThen(send(action.text, 'interrupt_and_continue'), idleWarning), undefined)
       case 'Model':
         return Effect.as(sessions.setModel({ threadId: task.threadId, model: action.model }), undefined)
       case 'Agent':
