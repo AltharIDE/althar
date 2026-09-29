@@ -22,15 +22,15 @@ The profile's SQLite store, as described in [docs/architecture/07](../../docs/ar
 - **"One active" rules are partial unique indexes:** one active attempt per run, one unfinished attempt per node, one active turn per thread, one thread per task and per step.
 - **Distinct identities stay distinct,** as docs/architecture/01 requires. A task's workspace is shared by its runs and attempts on a device; `workspace_snapshots` records which code each attempt saw. A step's thread spans its review rounds.
 - **Restarts can be reconciled:** each app launch is a `runtime_instances` row; run attempts name the instance holding their controller generation; processes are recorded as `launching` before they are spawned, with the OS start time; work-item claims name their holder and a lease.
-- **Permission decisions** record Charrette's outcome and scope apart from the option sent to the agent, which is always one-time.
+- **Permission decisions** record Charrette's outcome and scope apart from the option sent to the agent, which is never an "always" option.
 - **Columns are snake_case** in SQL and camelCase in TypeScript; the client translates.
 
 ## Writes
 
-- **One connection.** The client serialises every statement through it, and transactions begin `IMMEDIATE`.
+- **One connection, one runtime.** The client serialises every statement through it, and transactions begin `IMMEDIATE`. A file is held in exclusive locking mode for the connection's life, so a second runtime on the same profile fails to open it with `DatabaseInUse`.
 - **No I/O inside a transaction.** Effects outside the database go through `work_items` as intent first, and a worker performs them after commit (docs/architecture/07, the intent and receipt pattern).
 - **`Commands.execute`** runs a command and stores its receipt in one transaction. Receipts are kept per actor. A retry of the same command by the same actor gets the first result back without running again; the same id with a different command fails with `CommandIdReused`; another actor's id reveals nothing. A command an agent issues for a person records both. A failed command leaves nothing behind.
-- **`Ledger.record`** adds a fact to the operational record and a change to the client feed, inside the caller's transaction. `Ledger.changesSince` pages through the feed from a cursor.
+- **`Ledger.record`** adds a fact to the operational record and a change to the client feed, inside the caller's transaction. `Ledger.notify` adds only the change, for what isn't a fact a person would look up, such as a thread item growing as an agent streams. `Ledger.changesSince` pages through the feed from a cursor.
 
 ## Checks
 
@@ -38,8 +38,7 @@ The profile's SQLite store, as described in [docs/architecture/07](../../docs/ar
 
 ## Gaps
 
-- **Repositories per aggregate** (tasks, runs, sessions…) arrive with the runtime code that uses them.
 - **Fencing by controller generation** is in the schema (the columns exist) but not yet enforced on writes.
 - **The artifact store** for bytes, content-addressed on disk, is not built; only artifact metadata is.
 - **WAL checkpoints, integrity checks, backup and restore,** which 07 requires, are not built.
-- **Raw protocol capture** is not in this database. It arrives with the agent adapter, as a separate bounded file of raw bytes (docs/architecture/07).
+- **Raw protocol capture** is not in this database. The agent adapter hands it over frame by frame; writing it to a separate bounded file (docs/architecture/07) is not built yet.

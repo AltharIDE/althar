@@ -79,7 +79,7 @@ export const providerSessionLifecycle: Lifecycle<ProviderSessionState> = {
     ready: ['starting'],
     starting: ['active', 'failed'],
     active: ['waiting_approval', 'completed', 'cancelling', 'lost', 'superseded'],
-    waiting_approval: ['active', 'cancelling', 'superseded'],
+    waiting_approval: ['active', 'cancelling', 'lost', 'superseded'],
     cancelling: ['cancelled', 'uncertain'],
     lost: ['reconciling'],
     reconciling: ['active', 'uncertain', 'failed'],
