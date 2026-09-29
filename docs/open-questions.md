@@ -11,6 +11,12 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
 
 ## The desktop app, 29 September
 
+- [ ] **Running the bundled adapters once the app is signed.** They run on
+  Electron's own binary as Node (`ELECTRON_RUN_AS_NODE`), so the RunAsNode
+  fuse has to stay on, and then anything can run Charrette's signed binary as
+  Node with the app's entitlements. Leaning: ship a separate Node for the
+  adapters and turn the fuse off. Decide before the first signed build.
+
 - [ ] **Task numbers.** The kit's header and crumb show a task's number
   (#418); tasks have slugs, not numbers, so the app shows the title alone.
   Leaning: a number per project, given by the store when the task is made.

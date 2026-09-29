@@ -20,10 +20,11 @@ import { Api, clientProtocol, domPort } from '@charrette/contracts'
 import { RpcClient } from 'effect/rpc'
 
 const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(yield* Layer.build(clientProtocol(domPort(port)))))
-const status = yield* client.Status()
+const status = yield* client.Status({})
 ```
 
-- **`Api`** holds every call: status and sign-in, projects, tasks, a task's thread (`GetThread`), sessions (start, switch, model, interrupt, stop), sending to a thread, answering a call, and `Watch`, the stream of what changes.
+- **`Api`** holds every call: status and sign-in, projects, tasks, a task's thread a page at a time (`GetThread`) and one of its items (`GetThreadItem`), sessions (start, switch, model, interrupt, stop), sending to a thread, answering a call, and `Watch`, the stream of what changes after a cursor.
+- **Commands** each take a `commandId` the client makes (`cmd_` and 32 hex digits); sending the same one again is a safe retry.
 - **`ApiError`** is the one error a call fails with: the runtime's own error tag as `reason`, and a message a person can read.
 - **`serverProtocol` and `clientProtocol`** run Effect's RPC over any port, as a worker would: the server says it is ready, and ends when the client closes or its port does.
 
@@ -34,7 +35,7 @@ From `packages/contracts`:
 | Command | What it does |
 | --- | --- |
 | `bun run check` | Format, type-aware lint and type checks |
-| `bun run test` | A server and a client over a `MessageChannel`: calls, errors and a stream |
+| `bun run test` | The schemas, and a server and a client over a `MessageChannel`: calls, errors, a stream, and ending when either side goes |
 | `bun run test:coverage` | The same, with the coverage gate |
 | `bun run verify` | Check and coverage, as CI runs them |
 

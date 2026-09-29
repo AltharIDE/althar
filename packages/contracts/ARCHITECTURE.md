@@ -15,18 +15,21 @@ The versioned client and runtime schemas of [docs/architecture/02](../../docs/ar
 
 ## Principles
 
-- **Projections, not tables.** A query returns what a screen shows (`ThreadSnapshot`, `ProjectSummary`), shaped by the runtime, never rows for the client to join.
-- **Checked on both sides.** Every payload, result and event is a schema; a client and a runtime that disagree fail at the boundary, not deep inside.
+- **Projections, not tables.** A query returns what a screen shows (`ThreadSnapshot`, `ProjectSummary`), shaped by the runtime, never rows for the client to join. A tool call carries the command it runs and the files it touches, not its raw input and output.
+- **Checked on both sides.** Every payload, result and event is a schema, a thread item's content too (a union by kind); a client and a runtime that disagree fail at the boundary, not deep inside.
 - **Versioned.** `API_VERSION` goes up when a change would break a client built against an older API; `Status` says which the runtime speaks.
+- **Commands carry the client's id.** Every command takes a `commandId` the client makes; the same id again is a retry, answered with the first one's result.
+- **Reads say where the feed stood, and `Watch` starts there.** Lists and threads return the cursor they read at; `Watch({ since })` sends every change after it, each with its cursor and its thread, so a client resumes where it left off.
+- **Unbounded results are paged.** A thread comes with its newest items and says whether there are earlier ones; `GetThreadItem` reads one item.
 - **One stream.** `Watch` says what changed and what is streaming; clients read again what they show. There are no per-screen subscriptions.
-- **One error.** A call fails with `ApiError`, whose `reason` is the runtime's error tag, so a client can tell failures apart without the runtime's types.
+- **One error.** A call fails with `ApiError`: `reason` is the runtime's error tag, so a client can tell failures apart without the runtime's types, and `message` says it in words a window can show.
+- **No paths from a client.** A folder is opened by a grant the app's main process got from the runtime (07).
 
 ## Checks
 
 - `bun run check`: format, type-aware lint and type checks.
-- `bun run test:coverage`: a server and a client over a real `MessageChannel`.
+- `bun run test:coverage`: the schemas, and a server and a client over a real `MessageChannel`, closing and all.
 
 ## Gaps
 
-- **Commands carry no receipts yet.** The runtime makes each command's envelope itself, so a client that retries a call can't be told it already ran.
-- **Thread items' content is untyped** (`Unknown`) until the item kinds settle.
+- **Lists are not paged yet.** Projects and tasks come whole; a person has tens of them, not thousands.
