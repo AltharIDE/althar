@@ -1,0 +1,13 @@
+/* The page itself: the kit's type comes from .ch-root on the body; the
+   window never scrolls, its screens do. */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: var(--n-2);
+}
