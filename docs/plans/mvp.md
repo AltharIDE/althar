@@ -76,7 +76,8 @@ compensation are in the schema but not executed.
 
    It starts with the schema and the event log.
 2. **The desktop shell.** Electron, with the runtime in a utility process, and
-   the UI kit showing a real thread.
+   the UI kit showing a real thread. Built (`apps/desktop`): projects, tasks,
+   a task's thread with its calls, and the lead's controls.
 3. **The coordinator,** and the demo above.
 
 ## Done when

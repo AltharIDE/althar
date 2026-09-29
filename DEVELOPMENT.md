@@ -19,6 +19,7 @@ From the repository root:
 | Command | What it does |
 | --- | --- |
 | `bun run dev` | The pitch site, at `http://localhost:5290` |
+| `bun --filter @charrette/desktop dev` | Builds the desktop app and opens it |
 | `bun --filter @charrette/ui storybook` | The UI package's Storybook, at `http://localhost:6006` |
 | `bun run check` | Format, type-aware lint and type checks, in every package |
 | `bun run fix` | The same, fixing what can be fixed |
@@ -37,7 +38,9 @@ Each app and package has its own README with its own commands.
 | [`packages/persistence-sqlite`](packages/persistence-sqlite) | `@charrette/persistence-sqlite`: the local store, its schema ([schema.sql](packages/persistence-sqlite/schema.sql)) and migrations |
 | [`packages/provider-adapters`](packages/provider-adapters) | `@charrette/provider-adapters`: how Charrette talks to agents over ACP, and the agent registry |
 | [`packages/runtime`](packages/runtime) | `@charrette/runtime`: the store's one writer, which owns projects, tasks, agent sessions, turns and permissions |
-| [`apps/cli`](apps/cli) | `@charrette/cli`: a command-line client for the runtime, to run a task with a real agent before the app exists |
+| [`packages/contracts`](packages/contracts) | `@charrette/contracts`: the API between the runtime and its clients, and the transport it runs over |
+| [`apps/desktop`](apps/desktop) | `@charrette/desktop`: the desktop app, Electron with the runtime in a utility process |
+| [`apps/cli`](apps/cli) | `@charrette/cli`: a command-line client for the runtime, which runs a task with a real agent in a terminal |
 | [`docs/architecture`](docs/architecture) | The working architecture: a local-first desktop app, with seams for a later cloud |
 | [`docs/decisions`](docs/decisions) | Architecture decisions, one per file |
 | [`docs/glossary.md`](docs/glossary.md) | The words the interface uses, beside the words the architecture uses |
@@ -79,7 +82,7 @@ Start from [the overview](docs/architecture/README.md), then:
 
 Work on a branch and open a pull request to `main`. On a pull request:
 
-- **GitHub Actions** runs a package's workflow when its files change: `pitch` for `apps/pitch`, `ui` for `packages/ui`, and `harness` for `packages/domain`, `packages/persistence-sqlite`, `packages/provider-adapters`, `packages/runtime` and `apps/cli`. The agent adapter's contract runs in CI against a scripted fake agent; the real agents run only on demand (`bun run test:agents` in `packages/provider-adapters`), since they need sign-in and cost usage. Every workflow also runs when the root `package.json`, `bun.lock` or `vite.config.ts` changes.
+- **GitHub Actions** runs a package's workflow when its files change: `pitch` for `apps/pitch`, `ui` for `packages/ui`, `harness` for `packages/contracts`, `packages/domain`, `packages/persistence-sqlite`, `packages/provider-adapters`, `packages/runtime` and `apps/cli`, and `desktop` for `apps/desktop` and everything it builds on. The desktop app's end-to-end tests run in CI with the fake agent, under a virtual display. The agent adapter's contract runs in CI against a scripted fake agent; the real agents run only on demand (`bun run test:agents` in `packages/provider-adapters`, and `e2e/real.spec.ts` in `apps/desktop`), since they need sign-in and cost usage. Every workflow also runs when the root `package.json`, `bun.lock` or `vite.config.ts` changes.
 - **Cloudflare Workers Builds** builds the pitch site. A branch gets a preview deployment (`wrangler preview`), and `main` deploys to production. The preview build fails without the `previews` block in `apps/pitch/wrangler.jsonc`, so keep it.
 
 Merge only when every check is green, the Cloudflare one included.
