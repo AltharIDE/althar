@@ -112,8 +112,8 @@ const groupGone = (pid: number, limit: Duration.Input) =>
     return !groupAlive(pid)
   })
 
-/** When the OS says a process started, as ISO 8601, or undefined if it can't say. */
-const osStartTime = (pid: number): Effect.Effect<string | undefined> =>
+/** When the OS says a process started, as ISO 8601, or undefined if it can't say. With the pid, it tells a process from a later one given the same pid. */
+export const osStartTime = (pid: number): Effect.Effect<string | undefined> =>
   Effect.callback<string | undefined>((resume) => {
     execFile(
       'ps',
@@ -184,24 +184,24 @@ export const spawnOwned = (
     }),
     (owned) =>
       Effect.gen(function* () {
+        const stop = yield* stopProcessGroup(owned.pid, options.grace ?? Duration.seconds(2))
         // The report waits until the OS has reaped the agent itself, so its pid is free when the report says so.
-        const report = (stop: StopReport) =>
-          Effect.andThen(
-            Deferred.await(owned.exited).pipe(Effect.timeoutOption(Duration.seconds(2))),
-            Deferred.succeed(owned.stopped, stop),
-          )
-        // The agent may have exited and left its children running, so the group is always signalled.
-        if (!groupAlive(owned.pid)) {
-          yield* report({ signal: 'none', survivors: false })
-          return
-        }
-        signalGroup(owned.pid, 'SIGTERM')
-        if (yield* groupGone(owned.pid, options.grace ?? Duration.seconds(2))) {
-          yield* report({ signal: 'SIGTERM', survivors: false })
-          return
-        }
-        signalGroup(owned.pid, 'SIGKILL')
-        const gone = yield* groupGone(owned.pid, Duration.seconds(2))
-        yield* report({ signal: 'SIGKILL', survivors: !gone })
+        yield* Deferred.await(owned.exited).pipe(Effect.timeoutOption(Duration.seconds(2)))
+        yield* Deferred.succeed(owned.stopped, stop)
       }),
   )
+
+/**
+ * Stops a process group Charrette owns: TERM, a grace period, then KILL, and
+ * says whether anything outlived it. A group that has already gone is left
+ * alone. The runtime also uses it for a group an earlier launch left behind,
+ * once it has checked the group's leader is the process it recorded.
+ */
+export const stopProcessGroup = (pid: number, grace: Duration.Input): Effect.Effect<StopReport> =>
+  Effect.gen(function* () {
+    if (!groupAlive(pid)) return { signal: 'none', survivors: false }
+    signalGroup(pid, 'SIGTERM')
+    if (yield* groupGone(pid, grace)) return { signal: 'SIGTERM', survivors: false }
+    signalGroup(pid, 'SIGKILL')
+    return { signal: 'SIGKILL', survivors: !(yield* groupGone(pid, Duration.seconds(2))) }
+  })

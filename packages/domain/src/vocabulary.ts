@@ -186,6 +186,7 @@ export const AggregateType = Schema.Literals([
   'node',
   'node_attempt',
   'thread',
+  'thread_item',
   'user_input',
   'turn_delivery',
   'provider_session',

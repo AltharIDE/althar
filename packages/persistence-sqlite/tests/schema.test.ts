@@ -88,6 +88,30 @@ describe('schema', () => {
     ),
   )
 
+  it.effect(
+    'lets one runtime at a time open a file',
+    () =>
+      withFile((filename) =>
+        Effect.gen(function* () {
+          const open = Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            yield* sql`SELECT 1`
+          })
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* Layer.build(Layer.fresh(Database.layer({ filename })))
+              const second = yield* Effect.flip(Effect.provide(open, Layer.fresh(Database.layer({ filename }))))
+              assert.instanceOf(second, Database.DatabaseInUse)
+            }),
+          )
+          // Once the first has closed, the next can open it.
+          yield* Effect.provide(open, Layer.fresh(Database.layer({ filename })))
+        }),
+      ),
+    // The second opener waits out SQLite's busy timeout, five seconds, before it gives up.
+    15_000,
+  )
+
   it.effect('lets a later migration rebuild a table that others reference', () =>
     withFile((filename) =>
       Effect.gen(function* () {

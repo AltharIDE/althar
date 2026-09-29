@@ -12,7 +12,7 @@ import { Commands, Database, Ledger } from '@charrette/persistence-sqlite'
 const Store = Layer.mergeAll(Ledger.layer, Commands.layer).pipe(Layer.provideMerge(Database.layer({ filename })))
 ```
 
-`Database.layer` opens the file with foreign keys on and WAL, and runs every migration before anything else can use it. `Ledger.layer` needs Effect's `Crypto` service for event ids.
+`Database.layer` opens the file with foreign keys on and WAL, holds it so no second runtime can open it, and runs every migration before anything else can use it. `Ledger.layer` needs Effect's `Crypto` service for event ids.
 
 ## Work on it
 

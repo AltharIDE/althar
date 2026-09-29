@@ -9,7 +9,7 @@ export const RecordEventInput = Schema.Struct({
   aggregateType: AggregateType,
   aggregateId: Schema.String,
   aggregateRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-  type: Schema.String.check(Schema.isPattern(/^[a-z]+(\.[a-z_]+)+$/)),
+  type: Schema.String.check(Schema.isPattern(/^[a-z][a-z_]*(\.[a-z_]+)+$/)),
   /** The version of the payload's shape. Events are kept for good, so a reader can tell old shapes from new. */
   schemaVersion: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
   payload: Schema.Unknown,
@@ -24,6 +24,15 @@ export const RecordedEvent = Schema.Struct({
   occurredAt: Timestamp,
 })
 export type RecordedEvent = typeof RecordedEvent.Type
+
+/** A change to put on the client feed. */
+export const ChangeInput = Schema.Struct({
+  projectId: Schema.optional(ProjectId),
+  aggregateType: AggregateType,
+  aggregateId: Schema.String,
+  aggregateRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+})
+export type ChangeInput = typeof ChangeInput.Type
 
 /** One entry of the client change feed: which aggregate changed, and its revision since. */
 export const Change = Schema.Struct({
@@ -45,6 +54,12 @@ export class Ledger extends Context.Service<
   Ledger,
   {
     record(input: RecordEventInput): Effect.Effect<RecordedEvent, SqlError.SqlError | Schema.SchemaError>
+    /**
+     * Tells clients an aggregate changed without adding a fact to the record,
+     * for changes that are not facts a person would look up, such as a thread
+     * item growing as an agent streams its message (docs/architecture/02).
+     */
+    notify(change: ChangeInput): Effect.Effect<void, SqlError.SqlError | Schema.SchemaError>
     /** Changes after `cursor`, oldest first, at most `limit` of them. A client resumes from the last cursor it saw. */
     changesSince(cursor: number, limit: number): Effect.Effect<ReadonlyArray<Change>, SqlError.SqlError | Schema.SchemaError>
   }
@@ -84,6 +99,17 @@ export class Ledger extends Context.Service<
         return yield* Schema.decodeUnknownEffect(RecordedEvent)({ sequence: row?.sequence, id, occurredAt })
       }, sql.withTransaction)
 
+      const notify = Effect.fn('Ledger.notify')(function* (input: ChangeInput) {
+        const change = yield* Schema.decodeUnknownEffect(ChangeInput)(input)
+        yield* sql`INSERT INTO change_log ${sql.insert({
+          projectId: change.projectId ?? null,
+          aggregateType: change.aggregateType,
+          aggregateId: change.aggregateId,
+          aggregateRevision: change.aggregateRevision,
+          changedAt: yield* now,
+        })}`
+      })
+
       const findChanges = SqlSchema.findAll({
         Request: Schema.Struct({ cursor: Schema.Int, limit: Schema.Int }),
         Result: Change,
@@ -94,7 +120,7 @@ export class Ledger extends Context.Service<
         return yield* findChanges({ cursor, limit: Math.max(1, Math.min(limit, 1000)) })
       })
 
-      return Ledger.of({ record, changesSince })
+      return Ledger.of({ record, notify, changesSince })
     }),
   )
 }

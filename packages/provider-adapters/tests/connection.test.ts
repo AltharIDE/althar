@@ -245,6 +245,7 @@ describe('AgentConnection', () => {
             title: 'Write hello.txt',
             kind: 'edit',
             rawInput: { path: 'hello.txt' },
+            paths: ['hello.txt'],
             options: undefined,
           },
         )

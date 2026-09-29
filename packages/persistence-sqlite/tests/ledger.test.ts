@@ -10,6 +10,22 @@ import { InMemory, WebCrypto } from './support'
 const Env = Ledger.layer.pipe(Layer.provideMerge(Layer.mergeAll(InMemory, WebCrypto)))
 
 describe('Ledger', () => {
+  it.effect('tells clients about a change without recording a fact', () =>
+    Effect.gen(function* () {
+      const ledger = yield* Ledger
+      const sql = yield* SqlClient.SqlClient
+      const { projectId } = yield* seed
+      yield* ledger.notify({ projectId, aggregateType: 'thread_item', aggregateId: 'item_1', aggregateRevision: 2 })
+      const [change] = yield* ledger.changesSince(0, 10)
+      assert.deepStrictEqual(
+        { type: change?.aggregateType, id: change?.aggregateId, revision: change?.aggregateRevision },
+        { type: 'thread_item', id: 'item_1', revision: 2 },
+      )
+      const [events] = yield* sql<{ count: number }>`SELECT count(*) AS count FROM record_events`
+      assert.strictEqual(events?.count, 0)
+    }).pipe(Effect.provide(Env)),
+  )
+
   it.effect('records a fact and tells clients the aggregate changed', () =>
     Effect.gen(function* () {
       const ledger = yield* Ledger

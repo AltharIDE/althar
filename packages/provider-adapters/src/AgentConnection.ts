@@ -42,6 +42,8 @@ export interface PermissionRequest {
   readonly title: string
   readonly kind: ToolKind
   readonly rawInput?: unknown
+  /** The files the action touches, as the agent reported them. */
+  readonly paths: ReadonlyArray<string>
   readonly options: ReadonlyArray<PermissionOption>
 }
 
@@ -214,6 +216,7 @@ const permissionRequest = (params: acp.RequestPermissionRequest): PermissionRequ
       ? (params.toolCall.kind as ToolKind)
       : 'other',
   ...(params.toolCall.rawInput === undefined ? {} : { rawInput: params.toolCall.rawInput }),
+  paths: (params.toolCall.locations ?? []).map((location) => location.path),
   options: params.options.map((option) => ({ optionId: option.optionId, name: option.name, kind: option.kind })),
 })
 

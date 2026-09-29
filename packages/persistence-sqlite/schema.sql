@@ -43,7 +43,7 @@
 -- pull_request_state: none, draft, ready, merged, closed
 -- work_item_state: pending, claimed, done, failed, uncertain
 -- mutation_state: intended, confirmed, failed, uncertain
--- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status
+-- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -416,7 +416,7 @@ CREATE TABLE turn_deliveries (
   requested_at TEXT NOT NULL CHECK (requested_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   delivered_at TEXT CHECK (delivered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), prompt TEXT,
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   FOREIGN KEY (provider_session_id, project_id) REFERENCES provider_sessions (id, project_id),
   FOREIGN KEY (node_attempt_id, project_id) REFERENCES node_attempts (id, project_id),
@@ -469,8 +469,6 @@ CREATE INDEX user_inputs_queued ON user_inputs (thread_id, sequence) WHERE state
 CREATE UNIQUE INDEX one_active_turn_per_thread ON turn_deliveries (thread_id) WHERE state IN ('pending', 'delivered');
 
 CREATE INDEX turn_deliveries_by_session ON turn_deliveries (provider_session_id);
-
-CREATE UNIQUE INDEX one_item_per_tool_call ON thread_items (thread_id, tool_call_id) WHERE tool_call_id IS NOT NULL;
 
 CREATE TABLE agent_installations (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'inst_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
@@ -531,36 +529,6 @@ CREATE TABLE provider_sessions (
   UNIQUE (id, project_id)
 ) STRICT;
 
-CREATE TABLE processes (
-  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'proc_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
-  project_id TEXT REFERENCES projects (id),
-  device_id TEXT NOT NULL REFERENCES devices (id),
-  runtime_instance_id TEXT NOT NULL REFERENCES runtime_instances (id),
-  provider_session_id TEXT,
-  run_attempt_id TEXT,
-  node_attempt_id TEXT,
-  purpose TEXT NOT NULL REFERENCES vocab_process_purpose (word),
-  executable TEXT NOT NULL,
-  executable_version TEXT,
-  pid INTEGER CHECK (pid > 0),
-  process_group_id INTEGER CHECK (process_group_id > 0),
-  os_started_at TEXT CHECK (os_started_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  args_redacted TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(args_redacted)),
-  environment_digest TEXT,
-  controller_generation INTEGER CHECK (controller_generation >= 1),
-  state TEXT NOT NULL REFERENCES vocab_process_state (word),
-  launched_at TEXT NOT NULL CHECK (launched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  exit_code INTEGER,
-  signal TEXT,
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
-  CHECK (state = 'launching' OR pid IS NOT NULL),
-  CHECK ((provider_session_id IS NULL AND run_attempt_id IS NULL AND node_attempt_id IS NULL) OR project_id IS NOT NULL),
-  FOREIGN KEY (provider_session_id, project_id) REFERENCES provider_sessions (id, project_id),
-  FOREIGN KEY (run_attempt_id, project_id) REFERENCES run_attempts (id, project_id),
-  FOREIGN KEY (node_attempt_id, project_id) REFERENCES node_attempts (id, project_id)
-) STRICT;
-
 CREATE TABLE node_attempts (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'natt_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
   project_id TEXT NOT NULL REFERENCES projects (id),
@@ -607,10 +575,6 @@ CREATE INDEX account_statuses_by_principal ON account_statuses (principal_id, ob
 CREATE INDEX provider_sessions_by_thread ON provider_sessions (thread_id);
 
 CREATE INDEX provider_sessions_by_run_attempt ON provider_sessions (run_attempt_id);
-
-CREATE INDEX processes_by_session ON processes (provider_session_id);
-
-CREATE INDEX processes_live ON processes (runtime_instance_id) WHERE state IN ('launching', 'running');
 
 CREATE UNIQUE INDEX one_unfinished_attempt_per_node ON node_attempts (node_id) WHERE state NOT IN ('succeeded', 'failed', 'cancelled', 'superseded');
 
@@ -875,3 +839,41 @@ CREATE INDEX record_events_by_aggregate ON record_events (aggregate_type, aggreg
 CREATE INDEX record_events_by_project ON record_events (project_id, sequence);
 
 CREATE INDEX change_log_by_project ON change_log (project_id, cursor);
+
+CREATE UNIQUE INDEX one_item_per_tool_call ON thread_items (provider_session_id, tool_call_id) WHERE tool_call_id IS NOT NULL;
+
+CREATE TABLE "processes" (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'proc_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT REFERENCES projects (id),
+  device_id TEXT NOT NULL REFERENCES devices (id),
+  runtime_instance_id TEXT NOT NULL REFERENCES runtime_instances (id),
+  provider_session_id TEXT,
+  run_attempt_id TEXT,
+  node_attempt_id TEXT,
+  purpose TEXT NOT NULL REFERENCES vocab_process_purpose (word),
+  executable TEXT NOT NULL,
+  executable_version TEXT,
+  pid INTEGER CHECK (pid > 0),
+  process_group_id INTEGER CHECK (process_group_id > 0),
+  os_started_at TEXT CHECK (os_started_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  args_redacted TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(args_redacted)),
+  environment_digest TEXT,
+  controller_generation INTEGER CHECK (controller_generation >= 1),
+  state TEXT NOT NULL REFERENCES vocab_process_state (word),
+  launched_at TEXT NOT NULL CHECK (launched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  exit_code INTEGER,
+  signal TEXT,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  CHECK (state IN ('launching', 'unknown') OR pid IS NOT NULL),
+  CHECK ((provider_session_id IS NULL AND run_attempt_id IS NULL AND node_attempt_id IS NULL) OR project_id IS NOT NULL),
+  FOREIGN KEY (provider_session_id, project_id) REFERENCES provider_sessions (id, project_id),
+  FOREIGN KEY (run_attempt_id, project_id) REFERENCES run_attempts (id, project_id),
+  FOREIGN KEY (node_attempt_id, project_id) REFERENCES node_attempts (id, project_id)
+) STRICT;
+
+CREATE INDEX processes_by_session ON processes (provider_session_id);
+
+CREATE INDEX processes_live ON processes (runtime_instance_id) WHERE state IN ('launching', 'running');
+
+CREATE UNIQUE INDEX one_live_session_per_thread ON provider_sessions (thread_id) WHERE state IN ('active', 'waiting_approval', 'cancelling');

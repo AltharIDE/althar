@@ -297,6 +297,12 @@ Required properties:
 A local socket is useful when a separate CLI must connect. A direct
 Electron-owned channel is simpler when only the desktop client exists.
 
+Until the desktop app exists, the command-line client (`apps/cli`) runs the
+runtime inside its own process. One runtime at a time may use a profile: the
+store holds its database in SQLite's exclusive locking mode, so a second
+runtime fails to open it rather than taking the first one's live sessions for
+a crashed launch's and reconciling them.
+
 ## Child processes and supervision
 
 ### Child process

@@ -1,0 +1,40 @@
+{
+  "name": "@charrette/cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A command-line client for the Charrette runtime: open a project, start a task, and talk to its agent.",
+  "license": "UNLICENSED",
+  "bin": {
+    "charrette": "./dist/charrette.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "vp build",
+    "start": "node dist/charrette.js",
+    "check": "vp check",
+    "fix": "vp check --fix",
+    "test": "vp test run",
+    "test:coverage": "vp test run --coverage",
+    "verify": "bun run check && bun run test:coverage"
+  },
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.84.0",
+    "@agentclientprotocol/codex-acp": "2.0.0",
+    "@charrette/domain": "workspace:*",
+    "@charrette/provider-adapters": "workspace:*",
+    "@charrette/runtime": "workspace:*",
+    "effect": "4.0.0-rc.118"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.118",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "5.0.1",
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
+    "vite-plus": "1.0.0-rc.0",
+    "vitest": "5.0.1"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
+  }
+}
