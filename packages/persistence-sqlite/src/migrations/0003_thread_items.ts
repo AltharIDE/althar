@@ -11,6 +11,12 @@
  * processes table now allows without a pid. SQLite can't change a CHECK in
  * place, so the table is rebuilt (its documented procedure; foreign keys are
  * off while migrations run, and checked after).
+ *
+ * A turn records the prompt it sent, so what an agent was told can always be
+ * read back (docs/architecture/03), until briefs become artifacts.
+ *
+ * A thread has at most one session delivering turns. A session being started
+ * to take over is `starting` until the one it replaces has stopped.
  */
 export const statements: ReadonlyArray<string> = [
   "INSERT INTO vocab_aggregate_type (word) VALUES ('thread_item')",
@@ -50,4 +56,6 @@ export const statements: ReadonlyArray<string> = [
   'ALTER TABLE processes_new RENAME TO processes',
   'CREATE INDEX processes_by_session ON processes (provider_session_id)',
   "CREATE INDEX processes_live ON processes (runtime_instance_id) WHERE state IN ('launching', 'running')",
+  'ALTER TABLE turn_deliveries ADD COLUMN prompt TEXT',
+  "CREATE UNIQUE INDEX one_live_session_per_thread ON provider_sessions (thread_id) WHERE state IN ('active', 'waiting_approval', 'cancelling')",
 ]

@@ -416,7 +416,7 @@ CREATE TABLE turn_deliveries (
   requested_at TEXT NOT NULL CHECK (requested_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   delivered_at TEXT CHECK (delivered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), prompt TEXT,
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   FOREIGN KEY (provider_session_id, project_id) REFERENCES provider_sessions (id, project_id),
   FOREIGN KEY (node_attempt_id, project_id) REFERENCES node_attempts (id, project_id),
@@ -875,3 +875,5 @@ CREATE TABLE "processes" (
 CREATE INDEX processes_by_session ON processes (provider_session_id);
 
 CREATE INDEX processes_live ON processes (runtime_instance_id) WHERE state IN ('launching', 'running');
+
+CREATE UNIQUE INDEX one_live_session_per_thread ON provider_sessions (thread_id) WHERE state IN ('active', 'waiting_approval', 'cancelling');

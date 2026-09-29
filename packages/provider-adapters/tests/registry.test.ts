@@ -38,6 +38,8 @@ describe('the agent registry', () => {
       claudeCode: { options: { allowDangerouslySkipPermissions: boolean; settings: { permissions: { ask: Array<string> } } } }
     }
     assert.isFalse(meta.claudeCode.options.allowDangerouslySkipPermissions)
+    assert.isTrue((meta.claudeCode.options as unknown as { strictMcpConfig: boolean }).strictMcpConfig)
+    assert.isTrue((meta.claudeCode.options.settings as unknown as { sandbox: { enabled: boolean } }).sandbox.enabled)
     assert.includeMembers(meta.claudeCode.options.settings.permissions.ask, ['Bash', 'Edit', 'Write'])
   })
 

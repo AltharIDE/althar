@@ -111,15 +111,30 @@ const openCodeConfig = JSON.stringify({
 /**
  * Claude Code reads the user's settings and the repository's committed
  * `.claude/settings.json`, and an allow rule in either approves an action
- * before Charrette sees it. Ask rules win over allow rules, so every session
- * gets these, and bypass mode is made unreachable for its whole life.
+ * before Charrette sees it. Ask rules win over allow rules, and over a hook
+ * that approves, so every session gets these, and bypass mode is made
+ * unreachable for its whole life.
+ *
+ * Its sandbox keeps shell commands inside the worktree (docs/architecture/03):
+ * a command that stays inside runs without asking, and one that has to leave
+ * (the network, a write elsewhere) asks, and reaches Charrette. In a git
+ * worktree the sandbox lets git write to the main repository's `.git`, except
+ * its hooks and config. Where the sandbox can't start, commands run without
+ * it and every one asks.
+ *
+ * Only the MCP servers Charrette gives a session are loaded, not the user's
+ * or the repository's own, whose tools the ask list doesn't cover.
  */
 const claudeAsks = {
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
+      strictMcpConfig: true,
       // An object: the adapter reads a string as a path to a settings file.
-      settings: { permissions: { ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] } },
+      settings: {
+        permissions: { ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
+        sandbox: { enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: true, failIfUnavailable: false },
+      },
     },
   },
 }
@@ -146,7 +161,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     sessionMeta: () => claudeAsks,
     knownGaps: [
       'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Charrette always sets the mode.',
-      "Allow rules in the user's own Claude Code settings approve actions before Charrette sees them.",
+      "Hooks in the repository's or the user's settings run as code on the Mac whenever Claude uses a tool; they cannot approve past the ask rules.",
+      "Its sandbox denies writes to a repository's tracked `.claude/` files, so git can fail to check those out inside it.",
       'Usage limits reach the Agent SDK but are not forwarded over ACP; only errors show them.',
     ],
   },
@@ -179,6 +195,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     },
     knownGaps: [
       'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network.',
+      "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply.",
       'Usage limits are held by the adapter but only shown as /status text; only errors show them over ACP.',
     ],
   },
