@@ -3,9 +3,9 @@ name: harness
 on:
   push:
     branches: [main]
-    paths: ['packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/harness.yml']
+    paths: ['packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'apps/cli/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/harness.yml']
   pull_request:
-    paths: ['packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/harness.yml']
+    paths: ['packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'apps/cli/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/harness.yml']
 
 permissions:
   contents: read
@@ -21,10 +21,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [domain, persistence-sqlite, provider-adapters]
+        package: [packages/domain, packages/persistence-sqlite, packages/provider-adapters, packages/runtime, apps/cli]
     defaults:
       run:
-        working-directory: packages/${{ matrix.package }}
+        working-directory: ${{ matrix.package }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2

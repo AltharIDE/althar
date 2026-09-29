@@ -56,6 +56,12 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
   as MCP tools, can still be allowed by the user's or repository's settings,
   and Claude Code hooks can decide a tool call. Put MCP tools on the list,
   leave out the project and local setting sources, or accept it?
+- [ ] **Shell commands that write outside the worktree.** The rules see a
+  command's text and an edit's paths. `cp x ~/.zshrc` in a shell command
+  isn't caught unless it matches the always-ask list. Codex's sandbox stops it
+  (it asks to leave the workspace); Claude Code and OpenCode have no sandbox by
+  default. Lean on each agent's sandbox where it has one, parse commands for
+  paths, or run agents in a sandbox of Charrette's own?
 - [ ] **Codex commits in a worktree.** A worktree's git directory lies outside
   it, so Codex asks before every `git add` and `git commit` in a task's
   worktree. Leaning: the runtime adds the repository's git directory to the
