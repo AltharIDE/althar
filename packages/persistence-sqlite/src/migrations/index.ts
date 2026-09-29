@@ -3,6 +3,7 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { statements as initial } from './0001_initial'
+import { statements as permissionScopeTurn } from './0002_permission_scope_turn'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -15,7 +16,10 @@ export interface Migration {
  * migration never changes. `checksums.ts` records each one, and a test fails
  * if a released migration is edited.
  */
-export const migrations: ReadonlyArray<Migration> = [{ key: '0001_initial', statements: initial }]
+export const migrations: ReadonlyArray<Migration> = [
+  { key: '0001_initial', statements: initial },
+  { key: '0002_permission_scope_turn', statements: permissionScopeTurn },
+]
 
 const run = (statements: ReadonlyArray<string>) =>
   Effect.gen(function* () {

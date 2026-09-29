@@ -8,7 +8,8 @@
   preferred Codex app-server first, with ACP as a secondary tier.
 - **Decision:**
   - Charrette connects to every agent through the Agent Client Protocol,
-    behind its own `ProviderRuntimeAdapter` port.
+    behind its own adapter interface (`AgentConnection`, in
+    `@charrette/provider-adapters`).
   - Claude Code runs through `claude-agent-acp` and Codex through `codex-acp`,
     both bundled at pinned versions. OpenCode runs through `opencode acp`.
   - Where ACP falls short, an agent gets a native side channel, or if needed a

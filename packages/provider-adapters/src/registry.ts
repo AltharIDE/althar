@@ -1,0 +1,214 @@
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
+
+/*
+ * Each agent is an entry here, not a code path (docs/architecture/03). The
+ * modes and option ids were read from the agents themselves (scripts/probe.ts)
+ * on 28 September 2026: claude-agent-acp 0.84.0, codex-acp 2.0.0 and OpenCode
+ * 1.18.31. Probe again after upgrading any of them.
+ */
+
+export type AgentId = 'claude-code' | 'codex' | 'opencode'
+
+/**
+ * How to start a process: a command, its arguments, extra environment, and
+ * which of Charrette's own environment variables it may inherit beyond the
+ * common allowlist (see `process.ts`).
+ */
+export interface LaunchSpec {
+  readonly command: string
+  readonly args: ReadonlyArray<string>
+  readonly env?: Readonly<Record<string, string>>
+  readonly inheritEnv?: ReadonlyArray<string>
+}
+
+/**
+ * What an agent's permission options mean, by id. Agents give the same ACP
+ * kind to options that do different things: Codex has two `reject_once`
+ * options, one that skips the action and carries on, and one that stops the
+ * turn to wait for a person. Ids not listed here fall back to their kind:
+ * `allow_once` allows this action, `reject_once` rejects it and carries on.
+ */
+export interface PermissionMeanings {
+  readonly rejectAndContinue: ReadonlyArray<string>
+  readonly rejectAndStop: ReadonlyArray<string>
+  /** How far each allow option reaches, when it is not just this action. */
+  readonly allowScopes: Readonly<Record<string, 'once' | 'turn' | 'session'>>
+}
+
+export interface AgentDefinition {
+  readonly id: AgentId
+  readonly name: string
+  /** Bundled adapters ship with Charrette at pinned versions; user-installed agents are found on the machine. */
+  readonly source: 'bundled' | 'user_installed'
+  /** The command that starts it. `node` is the Node binary bundled adapters run on: Electron's own, in the app. */
+  readonly launch: (node: string) => LaunchSpec
+  /**
+   * The modes Charrette starts sessions in (ADR-007): one where the agent asks
+   * before acting, never a bypass mode, and one that only reads.
+   */
+  readonly modes: { readonly ask: string; readonly readOnly: string }
+  /** The ids of its session config options. */
+  readonly options: { readonly mode: string; readonly model: string; readonly effort?: string }
+  /**
+   * The agent's own sign-in (docs/architecture/03: the official tool owns it).
+   * Charrette runs the documented status command and reads its output; it
+   * never reads a credential store. `login` is what the user runs.
+   */
+  readonly signIn: {
+    readonly status: (node: string) => LaunchSpec
+    /** True when signed in, false when not, undefined when the output can't tell. */
+    readonly read: (output: string, exitCode: number | null) => boolean | undefined
+    readonly login: string
+  }
+  readonly permissions: PermissionMeanings
+  /**
+   * What goes in `_meta` on `session/new`, to keep the agent asking whatever
+   * its settings say (ADR-007).
+   */
+  readonly sessionMeta?: () => Readonly<Record<string, unknown>>
+  /** What it does differently, for the support matrix. */
+  readonly knownGaps: ReadonlyArray<string>
+}
+
+const require = createRequire(import.meta.url)
+const bundled = (packageName: string, entry: string) => join(dirname(require.resolve(`${packageName}/package.json`)), entry)
+
+/** The Codex binary codex-acp drives, so its sign-in status is the one that counts. */
+const bundledCodex = () => {
+  const fromAdapter = createRequire(require.resolve('@agentclientprotocol/codex-acp/package.json'))
+  return join(dirname(fromAdapter.resolve('@openai/codex/package.json')), 'bin/codex.js')
+}
+
+const loggedInField = (output: string): boolean | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(output)
+    return typeof parsed === 'object' && parsed !== null && 'loggedIn' in parsed && typeof parsed.loggedIn === 'boolean'
+      ? parsed.loggedIn
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * OpenCode allows most actions without asking unless its config says
+ * otherwise. Inline config overrides the project's own, so every OpenCode
+ * process Charrette starts asks, and its requests reach Charrette. Agent-level
+ * permissions take precedence over global ones, so the built-in agents are
+ * set too, in case a repository's config allows more for them.
+ *
+ * OpenCode also stops its loop when a request is rejected, unless told to
+ * carry on, so a rejection works as it does for the other agents.
+ */
+const asks = { edit: 'ask', bash: 'ask', webfetch: 'ask' }
+const openCodeConfig = JSON.stringify({
+  permission: asks,
+  agent: { build: { permission: asks }, plan: { permission: asks } },
+  experimental: { continue_loop_on_deny: true },
+})
+
+/**
+ * Claude Code reads the user's settings and the repository's committed
+ * `.claude/settings.json`, and an allow rule in either approves an action
+ * before Charrette sees it. Ask rules win over allow rules, so every session
+ * gets these, and bypass mode is made unreachable for its whole life.
+ */
+const claudeAsks = {
+  claudeCode: {
+    options: {
+      allowDangerouslySkipPermissions: false,
+      // An object: the adapter reads a string as a path to a settings file.
+      settings: { permissions: { ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] } },
+    },
+  },
+}
+
+export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
+  'claude-code': {
+    id: 'claude-code',
+    name: 'Claude Code',
+    source: 'bundled',
+    launch: (node) => ({
+      command: node,
+      args: [bundled('@agentclientprotocol/claude-agent-acp', 'dist/index.js')],
+      inheritEnv: ['CLAUDE_CONFIG_DIR'],
+    }),
+    modes: { ask: 'default', readOnly: 'plan' },
+    options: { mode: 'mode', model: 'model', effort: 'effort' },
+    signIn: {
+      status: () => ({ command: 'claude', args: ['auth', 'status'] }),
+      read: loggedInField,
+      login: 'claude auth login',
+    },
+    /* From claude-agent-acp's permissions/options/shared.js. Rejecting skips the action and Claude carries on. */
+    permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
+    sessionMeta: () => claudeAsks,
+    knownGaps: [
+      'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Charrette always sets the mode.',
+      "Allow rules in the user's own Claude Code settings approve actions before Charrette sees them.",
+      'Usage limits reach the Agent SDK but are not forwarded over ACP; only errors show them.',
+    ],
+  },
+  codex: {
+    id: 'codex',
+    name: 'Codex',
+    source: 'bundled',
+    launch: (node) => ({ command: node, args: [bundled('@agentclientprotocol/codex-acp', 'dist/index.js')], inheritEnv: ['CODEX_HOME'] }),
+    /*
+     * Not `agent`, codex-acp's default: that mode sends every request to go
+     * beyond the sandbox to an automatic reviewer, so none reach Charrette.
+     * In `workspace-write` the person, through Charrette, is the reviewer.
+     */
+    modes: { ask: 'workspace-write', readOnly: 'read-only' },
+    options: { mode: 'mode', model: 'model', effort: 'reasoning_effort' },
+    signIn: {
+      status: (node) => ({ command: node, args: [bundledCodex(), 'login', 'status'] }),
+      read: (output, exitCode) => (/not logged in/i.test(output) ? false : /logged in/i.test(output) && exitCode === 0 ? true : undefined),
+      login: 'codex login',
+    },
+    /*
+     * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
+     * on; `cancel` stops the turn and is the only rejection offered for a file
+     * edit. Allowing a permission profile reaches the rest of the turn.
+     */
+    permissions: {
+      rejectAndContinue: ['decline'],
+      rejectAndStop: ['cancel'],
+      allowScopes: { allow_once: 'once', allow_permissions_turn: 'turn', allow_permissions_turn_strict_auto_review: 'turn' },
+    },
+    knownGaps: [
+      'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network.',
+      'Usage limits are held by the adapter but only shown as /status text; only errors show them over ACP.',
+    ],
+  },
+  opencode: {
+    id: 'opencode',
+    name: 'OpenCode',
+    source: 'user_installed',
+    launch: () => ({
+      command: 'opencode',
+      args: ['acp'],
+      env: { OPENCODE_CONFIG_CONTENT: openCodeConfig },
+      inheritEnv: ['OPENCODE_CONFIG_DIR'],
+    }),
+    modes: { ask: 'build', readOnly: 'plan' },
+    options: { mode: 'mode', model: 'model' },
+    signIn: {
+      status: () => ({ command: 'opencode', args: ['auth', 'list'] }),
+      /* OpenCode runs its free models without signing in, so no credentials means "can't tell", not "signed out". */
+      read: (output) => {
+        const count = /(\d+)\s+credentials?/i.exec(output)?.[1]
+        return count !== undefined && Number(count) > 0 ? true : undefined
+      },
+      login: 'opencode auth login',
+    },
+    /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
+    permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { once: 'once' } },
+    knownGaps: [
+      'No effort option.',
+      'Provider rate limits come back as errors; API keys have no plan windows.',
+      'Carrying on after a rejection relies on an experimental setting, continue_loop_on_deny.',
+    ],
+  },
+}

@@ -35,36 +35,88 @@ can move between them.
 
 | Agent | How Charrette runs it | Sign-in, held by the agent | Notes |
 |---|---|---|---|
-| Claude Code | `claude-agent-acp`, the ACP project's adapter on the Claude Agent SDK. Claude Code has no native ACP | Claude plan or Anthropic API key | The Agent SDK reports usage limits, but the adapter doesn't forward them |
-| Codex | `codex-acp`, the ACP project's adapter | ChatGPT plan or OpenAI API key | Usage limits reach the adapter but are only rendered as `/status` text |
-| OpenCode | `opencode acp`, native | API keys for any provider; local model servers | The bring-your-own-key route. It cannot use a Claude plan. As of June 2026 its ACP could not change model per session |
+| Claude Code | `claude-agent-acp`, the ACP project's adapter on the Claude Agent SDK. Claude Code has no native ACP | Claude plan or Anthropic API key; status from `claude auth status` | Starts in the user's own default mode, which can be `bypassPermissions`, so Charrette turns bypass off and adds ask rules for every session. The Agent SDK reports usage limits, but the adapter doesn't forward them |
+| Codex | `codex-acp`, the ACP project's adapter, driving its own bundled Codex | ChatGPT plan or OpenAI API key; status from `codex login status` | Charrette uses its `workspace-write` mode, not the default `agent` mode, whose automatic reviewer answers requests itself. Usage limits reach the adapter but are only rendered as `/status` text |
+| OpenCode | `opencode acp`, native | API keys for any provider; local model servers; status from `opencode auth list` | The bring-your-own-key route. It cannot use a Claude plan. It allows most actions without asking unless configured, so Charrette starts it with inline config that makes it ask |
+
+What each agent reports was read from the agents themselves on 28 September
+2026, with `scripts/probe.ts` in `@charrette/provider-adapters`: claude-agent-acp
+0.84.0, codex-acp 2.0.0 and OpenCode 1.18.31. All three expose their mode and
+model as session config options and can change both within a session; all
+three can load and resume sessions. Claude Code and Codex also advertise
+steering a turn in progress, as an extension in `_meta`. Probe again after
+upgrading any of them.
+
+Charrette checks sign-in with each agent's documented status command, never by
+reading a credential store, and tells the user the agent's own login command
+when it is signed out. The Claude Code desktop app and the `claude` command
+line sign in separately; the adapter uses the command line's sign-in.
 
 Another ACP agent, such as Gemini CLI, is added by a registry entry and the
 contract suite, not new code.
 
 ## Adapter contract
 
-The domain depends on an internal `ProviderRuntimeAdapter`, not directly on a
-vendor SDK, CLI schema, or ACP revision.
+The domain depends on the adapter's own interface, in
+`@charrette/provider-adapters`, not directly on a vendor SDK, CLI schema, or
+ACP revision. No ACP type appears in it, so a native adapter for one agent
+(Tier B below) can stand in without callers changing. It is written with Effect
+([ADR-009](../decisions/009-effect-on-the-runtime-side.md)).
 
 ```ts
-interface ProviderRuntimeAdapter {
-  probe(request: ProbeRequest): Promise<ProviderInstallation>
-  authenticate(request: AuthRequest): Promise<AuthResult>
-  capabilities(request: CapabilityRequest): Promise<CapabilityReport>
-  start(request: StartSessionRequest): AsyncIterable<ProviderEvent>
-  resume(request: ResumeSessionRequest): AsyncIterable<ProviderEvent>
-  respond(request: RespondRequest): Promise<void>
-  configure(request: ConfigureSessionRequest): Promise<SessionConfiguration>
-  cancel(request: CancelSessionRequest): Promise<CancelResult>
-  inspect(request: InspectSessionRequest): Promise<ProviderSessionObservation>
-  accountStatus(request: AccountStatusRequest): AsyncIterable<AccountStatus>
+connect(options: {
+  transport: Transport // a process Charrette owns, or an in-process agent in tests
+  onPermission: (request: PermissionRequest) => Effect<PermissionDecision> // from the project's rules
+  permissions?: PermissionMeanings // what the agent's option ids mean: the registry's
+  onQuestion?: (question: Question) => Effect<QuestionAnswer> // for the person
+}): Effect<AgentConnection, AgentStartFailed | AgentExited | AgentRequestFailed, Scope>
+
+interface AgentConnection {
+  info: AgentInfo // name, version, protocol, loadSession, closeSession, steering, MCP transports, auth methods
+  process?: ProcessInfo // pid, OS start time, environment digest, how stopping went
+  closed: Effect<ProcessExit>
+  newSession(options: NewSessionOptions): Effect<AgentSession, Failure | OptionUnavailable, Scope>
+}
+
+interface AgentSession {
+  sessionId: string
+  options: Effect<ConfigOption[]> // as last reported: mode, model, effort
+  mode: Effect<string>
+  prompt(text: string): Stream<SessionEvent, Failure | TurnInProgress> // one turn, ending with TurnEnded
+  events: Stream<SessionEvent> // what the agent says between turns
+  cancel: Effect<void, Failure>
+  interrupt: Effect<void, Failure> // cancel, and wait for the turn to end
+  setOption(configId: string, value: string): Effect<ConfigOption[], Failure | OptionUnavailable>
 }
 ```
 
-`configure` changes session settings such as the model and reasoning effort.
-`accountStatus` reports usage limits for the signed-in account (see Usage
-limits).
+A scope owns each connection and session: closing it closes the session with
+the agent (`session/close`, where offered) and stops the process group.
+
+What it guarantees:
+
+- **The mode is set, and checked.** `newSession` requires a mode, sets it
+  before anything else, and refuses the session if the agent doesn't end up in
+  it. An agent with no modes can't be made to ask, so it gets no session.
+- **One turn at a time.** A prompt while a turn runs fails with
+  `TurnInProgress`. A turn reads to its own end even when its stream is
+  stopped early, so nothing it says reaches the next turn.
+- **Order.** Updates, permission answers and the end of each prompt pass
+  through one inbox per session in the order they arrived, so an answer never
+  overtakes the tool call it answers, and a turn's last update never follows
+  its end.
+- **Permissions** are answered as in Permission routing below, and every
+  answer is an event: `PermissionAnswered` with the option sent and how far it
+  reaches, or `PermissionWithdrawn` when the turn was cancelled first.
+- **Failures** are classified (see Usage limits). An agent's structured
+  failure report is an `AgentFailure` event, and a turn it ended carries it on
+  `TurnEnded`.
+- **Questions** the agent asks the person (ACP elicitation, such as Claude's
+  AskUserQuestion) go to `onQuestion`, or are cancelled.
+- **Nothing is dropped.** An update this version doesn't know is an `Other`
+  event with its raw payload.
+
+Not built yet: loading a session, account status side channels, and steering.
 
 The adapter reports, rather than fakes, capabilities:
 
@@ -164,24 +216,34 @@ supported versions of the agent and its adapter:
 10. usage-limit recognition from errors, and account status where the agent
     has it;
 11. unknown or added protocol fields;
-12. bounded log retention and redaction.
+12. bounded log retention and redaction;
+13. a rejected action lets the turn carry on;
+14. a permission request still waiting when the turn is interrupted is
+    withdrawn;
+15. a repository's own agent settings, allowing everything, don't stop the
+    agent asking.
+
+The suite runs against a scripted fake agent in CI and against the real agents
+on demand (`bun run test:agents`), in a repository whose own settings allow
+everything and start in bypass mode. As of 29 September 2026 all three agents
+pass 1, 3 to 7, 11 and 13 to 15; 2, 9 and 10 are covered against the fake
+agent only; account switching, loading a session, queued input and 12 are not
+built yet.
 
 ## Agent registry
 
 Each agent is a registry entry, not a code path:
 
 ```ts
-type AgentRegistryEntry = {
-  id: string // "claude-code", "codex", "opencode"
-  launch: {
-    source: "bundled" | "user_installed"
-    command: string
-    args: string[]
-    pinnedVersion?: string
-  }
-  probe: ProbeSpec // installed, version, signed in
-  sessionModes: { ask: string; readOnly?: string }
-  sideChannels: SideChannelSpec[] // for example account status
+type AgentDefinition = {
+  id: "claude-code" | "codex" | "opencode"
+  source: "bundled" | "user_installed"
+  launch: (node: string) => LaunchSpec // command, args, env, which parent variables it inherits
+  modes: { ask: string; readOnly: string }
+  options: { mode: string; model: string; effort?: string } // config option ids
+  signIn: { status: (node: string) => LaunchSpec; read: (output, exitCode) => boolean | undefined; login: string }
+  permissions: PermissionMeanings // what its option ids mean
+  sessionMeta?: () => Record<string, unknown> // `_meta` for session/new that keeps it asking
   knownGaps: string[]
 }
 ```
@@ -262,9 +324,9 @@ These are two different operations.
 Codex models, keeps the session. The adapter sets the model config option
 through ACP and the context carries over. The prompt cache is per model, so the
 first turn after a switch costs more. An agent whose ACP can't change model per
-session (OpenCode as of June 2026) restarts with a different configuration and
-loads its session again where it can, or the change is handled as an agent
-switch.
+session restarts with a different configuration and loads its session again
+where it can, or the change is handled as an agent switch. None of the MVP's
+agents needs this today.
 
 **Agent.** A session can't move between agents. A switch starts a new session
 on the new agent, in the same workspace, from a brief. The new session belongs
@@ -294,7 +356,14 @@ session on that account at once ([05](05-workflow-engine.md)). ACP does not
 report limits. Charrette detects them in two layers:
 
 1. **From errors, on every agent.** Each adapter classifies a failed turn as
-   `usage_limit`, with the reset time when the error carries one.
+   `usage_limit`, with the reset time when the error carries one. Claude's
+   adapter also reports failures in structured form when the client asks (the
+   JetBrains AIR `sessionFailure` extension, in `_meta`): its category and the
+   actions it suggests tell an exhausted quota from a short rate limit and a
+   full context, where the text alone can't. Every failure is one of
+   `usage_limit`, `context_full` (start a new session from a brief),
+   `transient` (a short rate limit or an overloaded service: retry after a
+   pause), `auth_required`, `invalid_request` or `unknown`.
 2. **From account status, where the agent exposes it.** A native side channel
    reports use per window and reset times before the limit is reached:
    - Claude Code: the Agent SDK's `rate_limit_event` gives status, use per
@@ -528,10 +597,24 @@ including the always-ask list
   session starts in a bypass mode. Requests arrive as ACP
   `session/request_permission`. The session records how it was started: the
   mode, and the MCP servers and tools its role was given.
-- Charrette answers with a one-time option only. If it offered an agent
-  "allow always", the agent could remember the rule itself, and later requests
-  would stop reaching Charrette. A standing allow is Charrette's own rule,
-  recorded with the decision, and applied by Charrette.
+- Charrette decides allow or reject, and the adapter sends the narrowest
+  option that carries the decision out. It never sends an "always" option: the
+  agent could remember the rule itself, and later requests would stop reaching
+  Charrette. A standing allow is Charrette's own rule, recorded with the
+  decision, and applied by Charrette.
+  - Allow: the option for this action; where the agent offers nothing
+    narrower, the one for the rest of the turn (Codex's permission profiles),
+    recorded with scope `turn`.
+  - Reject: the option that skips the action and lets the agent carry on.
+    Where the only rejection stops the turn (Codex's file edits), the adapter
+    resumes the turn itself, telling the agent what was not allowed and why,
+    up to three times.
+  - Agents give the same ACP kind to options that do different things (Codex
+    has two `reject_once` options, one of which stops the turn), so the
+    registry names what each agent's option ids mean.
+  - A decision that fails to be made is a rejection.
+- Cancelling a turn answers the requests still waiting with `cancelled`, as
+  ACP asks of the client, whether or not the agent withdraws them.
 - Charrette answers from the project rules. Nearly everything is allowed
   without the user; only what the rules keep for the user becomes an attention
   request. Every answer is recorded on the task, and the thread shows allowed
@@ -540,9 +623,30 @@ including the always-ask list
   starts in the agent's read-only mode where it has one (for example Claude
   Code's plan mode, Codex's read-only sandbox, or OpenCode's plan agent), and
   the rules deny it writes as well.
-- Known gap: an agent's own user-level settings, such as allow rules in the
-  user's Claude Code settings, can approve an action before Charrette sees it.
-  The always-ask list cannot be enforced against those.
+
+What keeps each agent asking, whatever its own settings say:
+
+| Agent | How | Checked against |
+|---|---|---|
+| Claude Code | Every session gets ask rules for Bash, Edit, Write, MultiEdit, NotebookEdit and WebFetch, and has bypass mode turned off for its whole life, through the adapter's `_meta.claudeCode.options`. Ask rules win over allow rules from any settings file | A repository whose `.claude/settings.json` allows those tools and defaults to `bypassPermissions` |
+| Codex | Mode `workspace-write`, whose reviewer is the person. The default `agent` mode sends requests to an automatic reviewer instead, and was seen to write outside the workspace without asking | Writing outside the workspace, which it asks for |
+| OpenCode | Inline config (`OPENCODE_CONFIG_CONTENT`) that sets edits, commands and fetches to ask, for its built-in agents too, and lets it carry on after a rejection (`experimental.continue_loop_on_deny`) | A repository whose `opencode.json` allows everything |
+
+Inside its sandbox, Codex edits the workspace and runs commands without
+asking; it asks only to go beyond it. A worktree's git directory lies outside
+the worktree, so Codex asks before each `git add` and `git commit` there. The
+runtime can add the repository's git directory to the session's directories,
+which Codex treats as writable, or the project rules can allow git writes in
+the task's own worktree.
+
+Known gaps:
+
+- Tools not on Claude's ask list, such as MCP tools, can still be allowed by
+  the user's or the repository's settings.
+- Hooks in Claude Code settings can decide a tool call; that path is not yet
+  checked.
+- If ask rules ever stop winning, the fallback is to leave the project and
+  local setting sources out of Claude sessions.
 
 ## Approval boundary
 

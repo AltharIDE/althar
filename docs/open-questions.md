@@ -34,15 +34,34 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
   should the new agent get a fresh take without the old agent's reasoning,
   start from base rather than the current code, or get a generated handoff
   in Amp's style? How does the switch menu offer that?
-- [ ] **Changing model in OpenCode.** Its ACP couldn't change model per session
-  as of June 2026. Restart it with a new configuration, treat the change as an
-  agent switch, or use OpenCode's own server API?
+- [x] **Changing model in OpenCode.** Settled by OpenCode itself: 1.18.31
+  changes model and mode per session over ACP. Checked with the adapter's probe
+  and the contract suite.
+- [ ] **Claude Code starts in the user's own default mode.** On a machine where
+  that is `bypassPermissions`, the Agent SDK approves every tool call itself.
+  Charrette sets the mode on every session and turns bypass off for the
+  session's life, so this is handled, but should Charrette also warn when the
+  user's Claude Code defaults to bypass, since their own use of it skips every
+  check?
 - [ ] **Usage limits in ACP itself.** Propose a rate-limit extension to ACP,
   rather than keep a side channel per agent?
-- [ ] **Agent settings that approve before Charrette sees.** A user's own allow
-  rules, in Claude Code's settings for example, can approve an action before
-  it reaches Charrette, so the always-ask list never sees it. Warn, read those
-  settings, or accept it?
+- [x] **Agent settings that approve before Charrette sees.** Settled: every
+  session gets settings that make the agent ask, and they win over the user's
+  and the repository's own. Claude gets ask rules per session (ask beats allow
+  in every settings file), Codex runs in `workspace-write` rather than its
+  auto-review `agent` mode, and OpenCode gets inline config. Checked on 29
+  September 2026 against a repository whose settings allow everything.
+  [Architecture 03](architecture/03-agent-runtime-and-auth.md#permission-routing).
+- [ ] **What Claude's ask rules don't reach.** Tools not on the ask list, such
+  as MCP tools, can still be allowed by the user's or repository's settings,
+  and Claude Code hooks can decide a tool call. Put MCP tools on the list,
+  leave out the project and local setting sources, or accept it?
+- [ ] **Codex commits in a worktree.** A worktree's git directory lies outside
+  it, so Codex asks before every `git add` and `git commit` in a task's
+  worktree. Leaning: the runtime adds the repository's git directory to the
+  session's directories, which Codex treats as writable, since writing in the
+  task's own worktree is allowed anyway. Or should the project rules allow git
+  writes there instead, so each still reaches Charrette?
 - [ ] **The coordinator's defaults.** Its default model; whether task events
   prompt it; whether it can skip the countdown when you asked for exactly that
   task. See [architecture 04](architecture/04-coordinator.md).

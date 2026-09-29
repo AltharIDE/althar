@@ -9,6 +9,12 @@
 - **Decision:**
   - No session starts in a bypass mode. Sessions start in a mode where the
     agent asks, and requests arrive as ACP `session/request_permission`.
+  - Each session is also given settings that keep the agent asking whatever
+    its own or the repository's settings allow, through the agent's launch
+    options, never by writing its settings files.
+  - Charrette answers with the narrowest option that carries out its
+    decision, never an "always" option, so the agent keeps no rule of its
+    own.
   - Charrette answers from the project rules. Allowed requests are recorded
     and shown as one quiet line. Only what the rules keep for the user becomes
     an attention request.
@@ -22,7 +28,8 @@
     nothing, and the always-ask list couldn't be enforced.
   - Charrette writing each agent's settings files: changes the user's
     configuration, and drifts.
-- **Trade-off:** every request is a round trip through Charrette. An agent's
-  own user-level allow rules can still approve actions Charrette never sees.
+- **Trade-off:** every request is a round trip through Charrette. What the
+  per-session settings don't reach, such as Claude Code hooks, can still
+  approve actions Charrette never sees.
 - **Revisit when:** the lead or a judge model answers; Charrette enforces
   write and network reach; organisation-level rules arrive.
