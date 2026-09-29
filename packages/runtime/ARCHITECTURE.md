@@ -3,8 +3,8 @@
 The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime.md): the composition root that owns the store, agent sessions and their processes. The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target.
 
 - **Owner:** Repository maintainers
-- **Consumers:** the command-line client (`apps/cli`) now; the desktop app's utility process next.
-- **Dependency direction:** depends on `@charrette/domain`, `@charrette/persistence-sqlite`, `@charrette/provider-adapters` and `effect`. It imports nothing from Electron.
+- **Consumers:** the desktop app's utility process (`apps/desktop`), over the API; the command-line client (`apps/cli`), in its own process.
+- **Dependency direction:** depends on `@charrette/contracts`, `@charrette/domain`, `@charrette/persistence-sqlite`, `@charrette/provider-adapters` and `effect`. It imports nothing from Electron.
 
 ## What it holds
 
@@ -18,7 +18,9 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `Permissions.ts` | Records permission requests and decisions; asks the person what the rules keep for them |
 | `rules.ts` | The MVP's rules: everything allowed except the always-ask list. Commands are read as a shell would split them |
 | `threads.ts` | Turns agent events into thread items; writes the thread as text for a brief |
-| `Live.ts` | What is happening now, for clients that watch |
+| `Live.ts` | What is happening now, for clients that watch, with each message's text as far as it has come |
+| `Queries.ts` | What a client's screens show, read from the store: projects, tasks, and a task's thread with its live session and the calls waiting |
+| `Api.ts` | The API of `@charrette/contracts`, served over a port: handlers, and the change feed and streaming text as one `Watch` stream |
 | `git.ts` | The git commands the runtime runs itself |
 
 ## Principles
@@ -32,6 +34,7 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 - **Permission decisions are recorded before they are sent,** with the option the adapter will send. A failed decision is a rejection. A question to the person is withdrawn when the turn is cancelled or the agent goes.
 - **Processes are owned.** A process is recorded as launching before it is spawned, then with its pid, OS start time and environment digest. Stopping a session ends its turn first, then its process group, and records both. Reconciliation stops an earlier launch's process group when its leader is the process recorded (pid and OS start time both match), or when the leader has gone but the group lives on, since a pid isn't reused while its group exists; what an agent left running, such as a dev server, stops with it. A worktree a crash interrupted is marked ready or failed.
 - **One runtime per profile.** The store holds the database in exclusive locking mode, so a second runtime on the same profile fails to open it (`DatabaseInUse`) instead of reconciling live sessions away.
+- **Clients read, then watch.** A query returns a projection shaped for a screen. `Watch` says which record changed (from the change feed, read every 150 ms) and what an agent is still saying; a client reads again what shows it. Errors reach a client as `ApiError`, with the runtime's error tag as its reason.
 - **Services capture what they need.** Each service's methods return effects with no requirements, so the adapter can call `Permissions.decide` from its own fibers.
 
 ## Checks

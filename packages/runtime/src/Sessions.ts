@@ -137,6 +137,8 @@ export class Sessions extends Context.Service<
       readonly agentId: string
       readonly model?: string
     }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | Failure>
+    /** Stops the turn running, if there is one; the session waits for what comes next. */
+    interrupt(threadId: string): Effect.Effect<void, NoSession>
     /** Stops the thread's session, after ending its turn. */
     stop(threadId: string): Effect.Effect<void, NoSession>
     /** The session running on a thread, if there is one. */
@@ -294,6 +296,9 @@ export class Sessions extends Context.Service<
               if (event._tag === 'TurnEnded') ended = event
               yield* record(event)
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
+              const open = event._tag === 'AgentMessage' || event._tag === 'AgentThought' ? items.current() : undefined
+              if (open !== undefined)
+                yield* live.publish({ _tag: 'Streaming', threadId: thread.threadId, itemId: open.id, kind: open.kind, text: open.text })
             }),
           ).pipe(Effect.exit)
           yield* items.flush.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the end of a message', cause)))
@@ -821,6 +826,11 @@ export class Sessions extends Context.Service<
         send: (input) => run(send(input)),
         setModel: (input) => run(setModel(input)),
         switchAgent: (input) => run(switchAgent(input)),
+        interrupt: (threadId) =>
+          Effect.suspend(() => {
+            const running = threads.get(threadId)
+            return running === undefined ? Effect.fail(new NoSession({ threadId })) : Effect.ignore(running.agent.interrupt)
+          }),
         stop: (threadId) =>
           exclusive(
             threadId,

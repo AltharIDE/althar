@@ -10,6 +10,14 @@ import { Context, Effect, Layer, PubSub, type Scope, Stream } from 'effect'
 
 export type LiveEvent =
   | { readonly _tag: 'Agent'; readonly threadId: string; readonly event: SessionEvent }
+  /** A message or thought as far as it has streamed, whole each time, keyed by the thread item it will be. */
+  | {
+      readonly _tag: 'Streaming'
+      readonly threadId: string
+      readonly itemId: string
+      readonly kind: 'agent_message' | 'agent_thought'
+      readonly text: string
+    }
   | {
       readonly _tag: 'SessionStarted'
       readonly threadId: string

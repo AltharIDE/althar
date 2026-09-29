@@ -1,8 +1,8 @@
 {
-  "name": "@charrette/runtime",
+  "name": "@charrette/contracts",
   "version": "0.0.0",
   "private": true,
-  "description": "Charrette's runtime: the one writer of the local store, which owns agent sessions, turns, permissions and processes.",
+  "description": "The contract between Charrette's runtime and its clients: the typed API, and the transport it runs over.",
   "license": "UNLICENSED",
   "type": "module",
   "exports": {
@@ -16,10 +16,6 @@
     "verify": "bun run check && bun run test:coverage"
   },
   "dependencies": {
-    "@charrette/contracts": "workspace:*",
-    "@charrette/domain": "workspace:*",
-    "@charrette/persistence-sqlite": "workspace:*",
-    "@charrette/provider-adapters": "workspace:*",
     "effect": "4.0.0-rc.118"
   },
   "devDependencies": {

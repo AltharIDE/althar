@@ -23,22 +23,32 @@ export interface AgentEntry {
  * The agents the runtime starts. In the app they are the registry's, each run
  * as a process; tests put the fake agent here.
  */
-export class Agents extends Context.Service<Agents, { get(agentId: string): Effect.Effect<AgentEntry, UnknownAgent> }>()(
-  '@charrette/runtime/Agents',
-) {
+export class Agents extends Context.Service<
+  Agents,
+  {
+    /** Every agent the runtime can start. */
+    readonly list: ReadonlyArray<AgentEntry>
+    get(agentId: string): Effect.Effect<AgentEntry, UnknownAgent>
+  }
+>()('@charrette/runtime/Agents') {
+  /** Agents from a list of entries. */
+  static readonly from = (entries: ReadonlyArray<AgentEntry>) =>
+    Agents.of({
+      list: entries,
+      get: (agentId) => {
+        const entry = entries.find((candidate) => candidate.definition.id === agentId)
+        return entry === undefined ? Effect.fail(new UnknownAgent({ agentId })) : Effect.succeed(entry)
+      },
+    })
+
   static readonly registry: Layer.Layer<Agents> = Layer.succeed(
     Agents,
-    Agents.of({
-      get: (agentId) => {
-        const definition = Object.values(agents).find((agent) => agent.id === agentId)
-        return definition === undefined
-          ? Effect.fail(new UnknownAgent({ agentId }))
-          : Effect.succeed({
-              definition,
-              transport: (cwd) => ({ _tag: 'Process', spec: definition.launch(process.execPath), cwd }),
-            })
-      },
-    }),
+    Agents.from(
+      Object.values(agents).map((definition) => ({
+        definition,
+        transport: (cwd: string) => ({ _tag: 'Process' as const, spec: definition.launch(process.execPath), cwd }),
+      })),
+    ),
   )
 }
 

@@ -52,22 +52,21 @@ const definition = (id: string): AgentDefinition => ({
  * `process` runs it as a real process with Bun; `missing` names a command
  * that doesn't exist.
  */
-export const fakeAgents = (options: FakeAgentOptions = {}) =>
-  Layer.succeed(
+export const fakeAgents = (options: FakeAgentOptions = {}) => {
+  const entry = (agentId: string): AgentEntry => ({
+    definition: definition(agentId),
+    transport: (cwd) =>
+      agentId === 'process'
+        ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
+        : agentId === 'missing'
+          ? { _tag: 'Process', spec: { command: 'charrette-no-such-agent', args: [] }, cwd }
+          : { _tag: 'InProcess', agent: fakeAgent(options) },
+  })
+  return Layer.succeed(
     Agents,
-    Agents.of({
-      get: (agentId) =>
-        Effect.succeed<AgentEntry>({
-          definition: definition(agentId),
-          transport: (cwd) =>
-            agentId === 'process'
-              ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
-              : agentId === 'missing'
-                ? { _tag: 'Process', spec: { command: 'charrette-no-such-agent', args: [] }, cwd }
-                : { _tag: 'InProcess', agent: fakeAgent(options) },
-        }),
-    }),
+    Agents.of({ list: ['claude-code', 'codex', 'opencode'].map(entry), get: (agentId) => Effect.succeed(entry(agentId)) }),
   )
+}
 
 /** The runtime over a database, with worktrees in a temporary folder and fake agents. */
 export const runtime = (database = ':memory:', options: FakeAgentOptions = {}) =>

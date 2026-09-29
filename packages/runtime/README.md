@@ -2,7 +2,7 @@
 
 Charrette's runtime: the one writer of the local store. It opens folders as projects, gives each task a worktree of its own, starts agent sessions on a task's thread, and delivers the thread's input to them one turn at a time. Everything that happens is recorded: the thread's items, every turn and how it ended, every permission request and its decision, every agent process and how it stopped. Written with [Effect](https://effect.website).
 
-It runs under plain Node: in Electron's utility process in the app, and inside the command-line client (`apps/cli`) until the app exists.
+It runs under plain Node: in Electron's utility process in the desktop app (`apps/desktop`), and inside the command-line client (`apps/cli`).
 
 ## Use it
 
@@ -25,6 +25,18 @@ Effect.runPromise(Effect.scoped(program).pipe(Effect.provide(Runtime.layer({ dat
 - **`Sessions`** starts an agent on a task's thread, in the task's worktree and in the mode that asks. It accepts input into the thread's queue, delivers it a turn at a time (an `interrupt_and_continue` input stops the turn and goes first), changes the model, hands the thread to another agent with a brief (ADR-005), and stops sessions.
 - **`Permissions`** answers every permission request from the rules. What the always-ask list keeps for the person becomes an attention request, answered with `answer`.
 - **`Live`** streams what is happening now: agent events, turns, sessions, and questions for the person.
+
+- **`Queries`** reads what a client's screens show: projects, tasks, and a task's thread.
+
+To serve the API of `@charrette/contracts` over a port, as the desktop app does, build `services` once and launch a `connection` per port:
+
+```ts
+import { emitterPort } from '@charrette/contracts'
+import { connection, services } from '@charrette/runtime'
+
+const context = yield* Layer.build(services({ database, worktreeRoot, appVersion, deviceName }))
+yield* Effect.forkScoped(Layer.launch(connection(emitterPort(port))).pipe(Effect.provideContext(context)))
+```
 
 Commands from a person carry a `CommandEnvelope` (`Runtime.envelope` makes one), so a retry is answered from its receipt instead of running again.
 

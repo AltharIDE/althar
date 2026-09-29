@@ -123,7 +123,13 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       case 'ToolCall':
         return Effect.gen(function* () {
           yield* flush
-          const content = defined({ title: event.title, kind: event.kind, status: event.status, rawInput: event.rawInput })
+          const content = defined({
+            title: event.title,
+            kind: event.kind,
+            status: event.status,
+            rawInput: event.rawInput,
+            locations: event.locations,
+          })
           const existing = yield* toolItem(place.sessionId, event.toolCallId)
           if (existing === undefined) yield* addItem(place, 'tool_call', content, { toolCallId: event.toolCallId })
           else yield* updateItem(place.projectId, existing.id, { ...existing.content, ...content })
@@ -131,7 +137,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       case 'ToolCallUpdate':
         return Effect.gen(function* () {
           yield* flush
-          const content = defined({ title: event.title, status: event.status, rawOutput: event.rawOutput })
+          const content = defined({ title: event.title, status: event.status, rawOutput: event.rawOutput, locations: event.locations })
           const existing = yield* toolItem(place.sessionId, event.toolCallId)
           if (existing === undefined)
             yield* addItem(
@@ -163,7 +169,10 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
     }
   }
 
-  return { record, flush }
+  /** The message being gathered, as far as it has come: what a watching client shows while it streams. */
+  const current = () => (gathering === undefined ? undefined : { id: gathering.id, kind: gathering.kind, text: gathering.text })
+
+  return { record, flush, current }
 }
 
 /** The thread as text, oldest first: what a new agent reads when it takes over (ADR-005). */
