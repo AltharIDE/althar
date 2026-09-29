@@ -3,7 +3,7 @@ import { Deferred, Effect, Exit, Scope, Stream } from 'effect'
 
 import { connect } from '../src/AgentConnection'
 import { AgentExited, AgentStartFailed } from '../src/errors'
-import { type CapturedFrame, childEnvironment, environmentDigest, spawnOwned } from '../src/process'
+import { asNode, type CapturedFrame, childEnvironment, environmentDigest, spawnOwned } from '../src/process'
 import { fakeAgentMain, scenarios } from '../src/testing'
 import { text } from './contract'
 
@@ -170,6 +170,9 @@ describe('childEnvironment', () => {
     assert.strictEqual(childEnvironment({ command: process.execPath, args: [] }, {}, true).ELECTRON_RUN_AS_NODE, '1')
     assert.isUndefined(childEnvironment({ command: 'opencode', args: [] }, {}, true).ELECTRON_RUN_AS_NODE)
     assert.isUndefined(childEnvironment({ command: process.execPath, args: [] }, {}, false).ELECTRON_RUN_AS_NODE)
+    // The sign-in check runs the same binary, with the same flag.
+    assert.deepStrictEqual(asNode({ command: process.execPath, args: [] }, true), { ELECTRON_RUN_AS_NODE: '1' })
+    assert.deepStrictEqual(asNode({ command: 'claude', args: [] }, true), {})
   })
 
   it('digests an environment whatever order it is in', () => {

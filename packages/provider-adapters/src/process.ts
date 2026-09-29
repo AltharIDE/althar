@@ -34,10 +34,12 @@ export const childEnvironment = (
   for (const [key, value] of Object.entries(parent)) {
     if (value !== undefined && (INHERITED.test(key) || spec.inheritEnv?.includes(key) === true)) env[key] = value
   }
-  // Under Electron, `node` is Electron's own binary, which runs as plain Node only when told to.
-  if (underElectron && spec.command === process.execPath) env.ELECTRON_RUN_AS_NODE = '1'
-  return { ...env, ...spec.env }
+  return { ...env, ...asNode(spec, underElectron), ...spec.env }
 }
+
+/** Under Electron, `node` is Electron's own binary, which runs as plain Node only when told to. */
+export const asNode = (spec: LaunchSpec, underElectron = process.versions.electron !== undefined): Record<string, string> =>
+  underElectron && spec.command === process.execPath ? { ELECTRON_RUN_AS_NODE: '1' } : {}
 
 /** A digest of the environment a child started with, for the process record: which variables, and their values. */
 export const environmentDigest = (env: Readonly<Record<string, string>>): string =>

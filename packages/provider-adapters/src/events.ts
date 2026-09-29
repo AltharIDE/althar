@@ -36,6 +36,12 @@ export interface ConfigOption {
   readonly values: ReadonlyArray<string>
 }
 
+/** A file a tool call touches, and the line, when it says. */
+export interface ToolLocation {
+  readonly path: string
+  readonly line?: number
+}
+
 export type SessionEvent =
   | { readonly _tag: 'AgentMessage'; readonly text: string; readonly messageId?: string }
   | { readonly _tag: 'AgentThought'; readonly text: string }
@@ -46,6 +52,8 @@ export type SessionEvent =
       readonly kind: ToolKind
       readonly status: ToolCallStatus
       readonly rawInput?: unknown
+      /** The files it touches, when it says. */
+      readonly locations?: ReadonlyArray<ToolLocation>
     }
   | {
       readonly _tag: 'ToolCallUpdate'
@@ -53,6 +61,7 @@ export type SessionEvent =
       readonly status?: ToolCallStatus
       readonly title?: string
       readonly rawOutput?: unknown
+      readonly locations?: ReadonlyArray<ToolLocation>
     }
   | { readonly _tag: 'Plan'; readonly entries: ReadonlyArray<{ readonly content: string; readonly status: string }> }
   | {
@@ -98,6 +107,11 @@ const asToolKind = (kind: string | null | undefined): ToolKind =>
 
 const defined = <K extends string, V>(key: K, value: V | null | undefined): { [P in K]?: V } =>
   value === null || value === undefined ? {} : ({ [key]: value } as { [P in K]: V })
+
+const locationsOf = (locations: ReadonlyArray<acp.ToolCallLocation> | null | undefined): ReadonlyArray<ToolLocation> | undefined =>
+  locations === null || locations === undefined
+    ? undefined
+    : locations.map((location) => ({ path: location.path, ...defined('line', location.line ?? undefined) }))
 
 const textOf = (content: acp.ContentBlock): string | undefined => (content.type === 'text' ? content.text : undefined)
 
@@ -152,6 +166,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         kind: asToolKind(update.kind),
         status: update.status ?? 'pending',
         ...defined('rawInput', update.rawInput),
+        ...defined('locations', locationsOf(update.locations)),
       }
     case 'tool_call_update':
       return {
@@ -160,6 +175,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('status', update.status),
         ...defined('title', update.title),
         ...defined('rawOutput', update.rawOutput),
+        ...defined('locations', locationsOf(update.locations)),
       }
     case 'plan':
       return { _tag: 'Plan', entries: update.entries.map((entry) => ({ content: entry.content, status: entry.status })) }
