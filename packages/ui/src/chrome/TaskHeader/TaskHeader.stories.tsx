@@ -95,6 +95,9 @@ export const NothingBuilt: Story = {
   },
 }
 
+/** A task with no number yet: the title leads the line. */
+export const Unnumbered: Story = { args: { task: undefined } }
+
 export const SwitchingFaces: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
@@ -114,6 +117,7 @@ export const AllStates: Story = {
         { state: 'ready for you', node: <Header {...ReadyForYou.args} /> },
         { state: 'paused', node: <Header {...Paused.args} /> },
         { state: 'nothing built', node: <Header {...NothingBuilt.args} /> },
+        { state: 'unnumbered', node: <Header task={undefined} /> },
       ]}
     />
   ),

@@ -33,7 +33,8 @@ export const taskHeaderText: TaskHeaderText = {
 }
 
 export interface TaskHeaderProps<F extends string> {
-  task: string
+  /** Its number, when it has one. */
+  task?: string
   title: string
   status: TaskStatus
   /** Where it stands, in words: Security review, Ready for you. */
@@ -105,7 +106,7 @@ export function TaskHeader<F extends string>({
   return (
     <header className={cx(s.header, s[status], className)} aria-labelledby={titleId}>
       <div className={s.titleLine}>
-        <span className={s.task}>{task}</span>
+        {task && <span className={s.task}>{task}</span>}
         <Heading level={headingLevel} id={titleId} className={s.title}>
           {title}
         </Heading>
