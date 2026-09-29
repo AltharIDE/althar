@@ -6,8 +6,8 @@ import { Readable, Writable } from 'node:stream'
 
 import * as acp from '@agentclientprotocol/sdk'
 
-import { fakeAgent } from './FakeAgent'
+import { fakeAgentApp } from './FakeAgent'
 
-fakeAgent({ exit: () => process.exit(3) }).connect(
+fakeAgentApp({ exit: () => process.exit(3) }).connect(
   acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>),
 )

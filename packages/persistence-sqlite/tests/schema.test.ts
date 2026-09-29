@@ -101,7 +101,7 @@ describe('schema', () => {
         })
         yield* Effect.provide(referenced, Layer.fresh(Database.layer({ filename })))
         const rebuildDevices = {
-          key: '0002_rebuild_devices',
+          key: `${String(migrations.length + 1).padStart(4, '0')}_rebuild_devices`,
           statements: [
             'CREATE TABLE devices_new (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, created_at TEXT NOT NULL) STRICT',
             'INSERT INTO devices_new SELECT id, name, created_at FROM devices',
@@ -116,7 +116,7 @@ describe('schema', () => {
           return { applied: applied.map((row) => row.name), deviceId: instance?.deviceId }
         })
         const result = yield* Effect.provide(after, Layer.fresh(Database.layer({ filename, migrations: [...migrations, rebuildDevices] })))
-        assert.deepStrictEqual(result, { applied: ['initial', 'rebuild_devices'], deviceId })
+        assert.deepStrictEqual(result, { applied: [...migrations.map((migration) => migration.key.slice(5)), 'rebuild_devices'], deviceId })
       }),
     ),
   )

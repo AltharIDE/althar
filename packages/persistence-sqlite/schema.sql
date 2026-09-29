@@ -38,7 +38,7 @@
 -- finding_severity: blocking, major, minor, nit
 -- finding_state: open, fixed, set_aside, dismissed
 -- decision_outcome: allow, reject, answer, fix, dismiss
--- decision_scope: once, rule
+-- decision_scope: once, rule, turn
 -- change_set_state: open, published, abandoned
 -- pull_request_state: none, draft, ready, merged, closed
 -- work_item_state: pending, claimed, done, failed, uncertain

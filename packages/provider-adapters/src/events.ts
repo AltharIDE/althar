@@ -1,6 +1,8 @@
 import type * as acp from '@agentclientprotocol/sdk'
 import type { ToolKind } from '@charrette/domain'
 
+import type { Classified } from './failures'
+
 /*
  * What an agent's updates become inside Charrette. The runtime turns these
  * into thread items. An update this version doesn't know is kept as `Other`
@@ -8,6 +10,12 @@ import type { ToolKind } from '@charrette/domain'
  */
 
 export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed'
+
+/** Why a turn stopped, as ACP reports it. */
+export type StopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled'
+
+/** How far an answer to a permission request reaches: this action, the rest of the turn, or the session. */
+export type PermissionScope = 'once' | 'turn' | 'session'
 
 export interface TokenUsage {
   readonly inputTokens: number
@@ -54,10 +62,35 @@ export type SessionEvent =
       readonly cost?: { readonly amount: number; readonly currency: string }
     }
   | { readonly _tag: 'OptionsChanged'; readonly options: ReadonlyArray<ConfigOption> }
-  | { readonly _tag: 'ModeChanged'; readonly modeId: string }
+  /** The mode changed. `byAgent` when Charrette didn't ask for it, such as a plan session leaving plan mode. */
+  | { readonly _tag: 'ModeChanged'; readonly modeId: string; readonly byAgent: boolean }
   | { readonly _tag: 'Notice'; readonly severity: string; readonly title: string; readonly description?: string }
+  /**
+   * Charrette answered a permission request. `optionId` is what was sent to
+   * the agent (null when the request was cancelled), and `stopsTurn` says the
+   * agent stops the turn on it; the adapter then resumes the turn itself.
+   */
+  | {
+      readonly _tag: 'PermissionAnswered'
+      readonly toolCallId: string
+      readonly decision: 'allow' | 'reject'
+      readonly optionId: string | null
+      readonly scope: PermissionScope | null
+      readonly stopsTurn: boolean
+    }
+  /** A permission request was dropped before Charrette decided it: the turn was cancelled, by Charrette or the agent. */
+  | { readonly _tag: 'PermissionWithdrawn'; readonly toolCallId: string }
+  /** The adapter resumed a turn the agent stopped on a rejection, telling it why. */
+  | { readonly _tag: 'Resumed'; readonly reason: string }
+  /** The agent reported a failure in structured form, during a turn or between turns. */
+  | { readonly _tag: 'AgentFailure'; readonly severity: 'warning' | 'error'; readonly classified: Classified }
   | { readonly _tag: 'Other'; readonly update: string; readonly raw: unknown }
-  | { readonly _tag: 'TurnEnded'; readonly stopReason: acp.StopReason; readonly usage?: TokenUsage }
+  /**
+   * The turn is over. `failure` is set when the agent reported one in
+   * structured form, even if the turn itself ended normally, as Claude does
+   * when its account runs out.
+   */
+  | { readonly _tag: 'TurnEnded'; readonly stopReason: StopReason; readonly usage?: TokenUsage; readonly failure?: Classified }
 
 const toolKinds: ReadonlyArray<string> = ['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'switch_mode', 'other']
 const asToolKind = (kind: string | null | undefined): ToolKind =>
@@ -143,7 +176,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
     case 'config_option_update':
       return { _tag: 'OptionsChanged', options: normalizeOptions(update.configOptions) }
     case 'current_mode_update':
-      return { _tag: 'ModeChanged', modeId: update.currentModeId }
+      return { _tag: 'ModeChanged', modeId: update.currentModeId, byAgent: true }
     case 'notice':
       return { _tag: 'Notice', severity: update.severity, title: update.title, ...defined('description', update.description) }
     case 'user_message_chunk':

@@ -10,9 +10,9 @@ The agent adapter of [docs/architecture/03](../../docs/architecture/03-agent-run
 
 | Module | What it does |
 | --- | --- |
-| `registry.ts` | One entry per agent: how to launch it, its asking and read-only modes, its option ids, its sign-in commands, its known gaps |
-| `AgentConnection.ts` | Connects over a process or in this process; starts sessions; streams turns; answers permissions; sets options; cancels |
-| `process.ts` | Starts an agent as a process Charrette owns, in its own group, and stops it in stages |
+| `registry.ts` | One entry per agent: how to launch it, its asking and read-only modes, its option ids and what its permission options mean, what keeps it asking, its sign-in commands, its known gaps |
+| `AgentConnection.ts` | Connects over a process or in this process; starts and closes sessions; runs turns one at a time; answers permissions and questions; sets options; cancels |
+| `process.ts` | Starts an agent as a process Charrette owns, in its own group, with an allowlisted environment; captures the raw protocol; stops it in stages and reports survivors |
 | `events.ts` | Normalizes the agent's updates into Charrette's events |
 | `failures.ts` | Classifies what went wrong, and reads when a usage limit resets |
 | `signIn.ts` | Checks sign-in with each agent's documented status command |
@@ -23,11 +23,12 @@ The agent adapter of [docs/architecture/03](../../docs/architecture/03-agent-run
 - **ACP is the transport; the domain never sees it.** Agent updates become normalized events, and SDK errors become tagged failures. A native side channel or a full native adapter can later replace ACP for one agent without the callers changing (ADR-002).
 - **The registry is data, read from the agents.** Modes and option ids come from `scripts/probe.ts`, run against the real agents; each entry records when, and which versions. Probe again after an upgrade.
 - **Sessions start in a mode Charrette chose** (ADR-007). A session never runs in the agent's default mode: on some machines Claude Code defaults to `bypassPermissions`, which approves every tool call without asking. The mode is set before anything else and checked; an agent with no way to set one is refused.
-- **Answers are one-time.** A permission decision goes back as `allow_once` or `reject_once`. With no one-time option on offer, the request is cancelled rather than allowed always.
-- **OpenCode is made to ask.** It allows most actions unless its config says otherwise, so it is launched with inline config (`OPENCODE_CONFIG_CONTENT`) that sets edits, commands and fetches to ask, overriding the project's own.
+- **Answers are the narrowest that carry the decision out.** Allow is for this action, or for the rest of the turn where the agent offers nothing narrower. Reject skips the action and lets the agent carry on; where the only rejection stops the turn, the adapter resumes it with the reason. Never an "always" option. What each option id means is the registry's, since agents give the same ACP kind to options that do different things.
+- **Every agent is made to ask, whatever its own settings say.** Claude gets ask rules and has bypass turned off per session; Codex runs in `workspace-write`, never its auto-review `agent` mode; OpenCode gets inline config (`OPENCODE_CONFIG_CONTENT`). `test:agents` checks each against a repository whose settings allow everything.
+- **One inbox per session.** Updates, permission answers and prompt endings go into it the moment they arrive, and one reader takes from it, so events keep the order the agent sent them in.
 - **Never fatal on the unknown.** An update type or field this version doesn't know is kept as `Other`, with its raw payload.
 - **The agent's own tool owns sign-in.** Status comes from documented commands (`claude auth status`, `codex login status`, `opencode auth list`), never from reading a credential store. When signed out, Charrette names the agent's own login command.
-- **Processes are owned.** Each agent runs in its own process group. Stopping is TERM to the group, a grace period, then KILL. A process is never found by name.
+- **Processes are owned.** Each agent runs in its own process group, with only an allowlist of Charrette's environment; provider API keys are not on it. Stopping always signals the group, even after the agent has exited: TERM, a grace period, then KILL, and survivors are reported. A process is never found by name; its OS start time is recorded to tell it from a later process with the same pid.
 
 ## Checks
 
@@ -40,5 +41,5 @@ The agent adapter of [docs/architecture/03](../../docs/architecture/03-agent-run
 - **Account status side channels** (ADR-002): Claude's `rate_limit_event` and Codex's app-server rate limits are not read yet. Usage limits are recognised only from errors.
 - **Loading and resuming sessions** are advertised by all three agents but not used yet.
 - **Steering a turn in progress,** which Claude Code and Codex advertise, is not used yet; interrupt-and-continue is a cancel followed by a new prompt.
-- **Raw protocol capture** to its own bounded file (docs/architecture/07) is not written yet.
-- **Permission round trips with the real agents** are covered only by the fake agent so far; the runtime's tests will cover them end to end.
+- **Raw protocol capture** is handed to the caller frame by frame; writing it to its own bounded file (docs/architecture/07) is the runtime's.
+- **Claude hooks** in the user's or repository's settings can decide a tool call; that path is not checked yet.

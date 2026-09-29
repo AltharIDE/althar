@@ -115,13 +115,16 @@ export type PermissionRequestState = typeof PermissionRequestState.Type
 /**
  * What was decided. `allow` and `reject` answer a permission request; `fix`,
  * `answer` and `dismiss` answer a finding or a question. The option sent to the
- * agent is recorded apart, and is always a one-time option (ADR-007).
+ * agent is recorded apart, and is never an "always" option (ADR-007).
  */
 export const DecisionOutcome = Schema.Literals(['allow', 'reject', 'answer', 'fix', 'dismiss'])
 export type DecisionOutcome = typeof DecisionOutcome.Type
 
-/** How far a permission decision reaches: this request only, or a rule for later ones. */
-export const DecisionScope = Schema.Literals(['once', 'rule'])
+/**
+ * How far a permission decision reaches: this request only, the rest of the
+ * turn (when the agent offers nothing narrower), or a rule for later ones.
+ */
+export const DecisionScope = Schema.Literals(['once', 'turn', 'rule'])
 export type DecisionScope = typeof DecisionScope.Type
 
 export const FindingSeverity = Schema.Literals(['blocking', 'major', 'minor', 'nit'])

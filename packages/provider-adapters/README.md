@@ -13,20 +13,26 @@ const program = Effect.scoped(
     if ((yield* signInStatus(agent)) === 'signed_out') return yield* Effect.fail(`Run: ${agent.signIn.login}`)
     const connection = yield* connect({
       transport: { _tag: 'Process', spec: agent.launch(process.execPath), cwd: worktree },
-      onPermission: (request) => Effect.succeed(rules.allows(request) ? 'allow' : 'reject'),
+      onPermission: (request) => Effect.succeed(rules.allows(request) ? { decision: 'allow' } : { decision: 'reject', reason: 'kept for review' }),
+      permissions: agent.permissions,
     })
-    const session = yield* connection.newSession({ cwd: worktree, mode: agent.modes.ask })
+    const session = yield* connection.newSession({
+      cwd: worktree,
+      mode: agent.modes.ask,
+      modeOptionId: agent.options.mode,
+      ...(agent.sessionMeta === undefined ? {} : { meta: agent.sessionMeta() }),
+    })
     yield* session.setOption(agent.options.model, 'gpt-5.6-luna')
     yield* Stream.runForEach(session.prompt('Fix the failing test'), (event) => Effect.log(event._tag))
   }),
 )
 ```
 
-- **The agent runs as a process Charrette owns,** in its own process group. Closing the scope stops it and everything it started.
-- **Every session starts in the mode it is given,** such as the agent's asking mode or its read-only mode, never the one the agent defaults to.
-- **Permission requests go to `onPermission`,** and the answer is sent back as a one-time option only.
-- **A turn is a stream of normalized events,** ending with `TurnEnded` and the tokens it used. An update this version doesn't know arrives as `Other`, never as an error.
-- **Failures are classified.** A usage limit, a missing sign-in, a bad request or a network problem each fails with its own class, with the reset time when the agent gave one. An agent that has gone fails with `AgentExited`.
+- **The agent runs as a process Charrette owns,** in its own process group, with only an allowlist of Charrette's environment. Closing the scope stops it and everything it started, even what outlived the agent, and says how that went.
+- **Every session starts in the mode it is given,** such as the agent's asking mode or its read-only mode, never the one the agent defaults to. Closing its scope closes it with the agent.
+- **A session runs one turn at a time.** A turn is a stream of normalized events in the order they arrived, ending with `TurnEnded`. A prompt during a turn fails with `TurnInProgress`; `interrupt` cancels the turn and waits for it to end. What the agent says between turns arrives on `events`.
+- **Permission requests go to `onPermission`.** The adapter sends the narrowest option that carries the decision out, never an "always" option, and resumes a turn that a rejection stopped. Cancelling a turn answers its waiting requests.
+- **Failures are classified:** usage limit (with its reset time), full context, missing sign-in, bad request, or transient. Claude reports them in structured form. An agent that has gone fails with `AgentExited`. An update this version doesn't know arrives as `Other`, never as an error.
 
 ## Work on it
 

@@ -7,7 +7,7 @@ Charrette must model them separately:
 
 | Plane | Purpose | Examples | Authority |
 |---|---|---|---|
-| `ProviderRuntimeAdapter` | Execute agent work | Claude Code, Codex, OpenCode over ACP | Provider owns its session; Charrette owns the run |
+| `AgentConnection` | Execute agent work | Claude Code, Codex, OpenCode over ACP | Provider owns its session; Charrette owns the run |
 | `DomainConnector` | Synchronize durable business/domain state | GitHub/GitLab, Linear, Jira | External system owns its resources; Charrette owns mappings and workflow state |
 | `MCPConnection` | Expose callable tools and resources to an agent | Search, databases, SaaS actions | Tool server owns operation; Charrette owns grant and audit |
 | `SkillPackage` | Supply procedural knowledge and supporting resources | Review workflow, migration playbook | Package author owns content; Charrette owns resolution and permission policy |

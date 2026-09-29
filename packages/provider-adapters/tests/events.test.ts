@@ -36,6 +36,14 @@ describe('normalize', () => {
     })
   })
 
+  it('says a mode update came from the agent', () => {
+    assert.deepStrictEqual(normalize({ sessionUpdate: 'current_mode_update', currentModeId: 'plan' }), {
+      _tag: 'ModeChanged',
+      modeId: 'plan',
+      byAgent: true,
+    })
+  })
+
   it('reports context usage without a cost when there is none', () => {
     assert.deepStrictEqual(normalize({ sessionUpdate: 'usage_update', used: 10, size: 100 }), { _tag: 'ContextUsage', used: 10, size: 100 })
   })
