@@ -470,14 +470,18 @@ describe('AgentConnection', () => {
       ),
     )
 
-    it.live('refuses a session whose mode did not change when set', () =>
-      withConnection(variant({ modes: 'stuck' }), (connection) =>
-        Effect.gen(function* () {
-          const error = yield* Effect.flip(connection.newSession({ cwd: '/tmp', mode: 'ask' }))
-          assert.instanceOf(error, OptionUnavailable)
-          assert.strictEqual((error as OptionUnavailable).value, 'ask')
-        }),
-      ),
+    it.live('refuses a session whose mode did not change when set, and closes it at once', () =>
+      Effect.gen(function* () {
+        const closed: Array<string> = []
+        yield* withConnection(variant({ modes: 'stuck', closed: (sessionId) => closed.push(sessionId) }), (connection) =>
+          Effect.gen(function* () {
+            const error = yield* Effect.flip(connection.newSession({ cwd: '/tmp', mode: 'ask' }))
+            assert.instanceOf(error, OptionUnavailable)
+            assert.strictEqual((error as OptionUnavailable).value, 'ask')
+            assert.deepStrictEqual(closed, ['fake-1'])
+          }),
+        )
+      }),
     )
 
     it.live('fills in what a bare agent leaves out', () =>

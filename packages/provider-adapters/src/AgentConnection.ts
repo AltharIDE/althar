@@ -1,6 +1,6 @@
 import * as acp from '@agentclientprotocol/sdk'
 import type { ToolKind } from '@charrette/domain'
-import { Cause, Data, DateTime, Deferred, Duration, Effect, Option, PubSub, Queue, Ref, type Scope, Stream } from 'effect'
+import { Cause, Data, DateTime, Deferred, Duration, Effect, Exit, Option, PubSub, Queue, Ref, Scope, Stream } from 'effect'
 
 import { AgentExited, AgentRequestFailed, type AgentStartFailed, OptionUnavailable, TurnInProgress } from './errors'
 import { type ConfigOption, normalize, normalizeOptions, normalizeUsage, type PermissionScope, type SessionEvent } from './events'
@@ -430,7 +430,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       authMethods: (init.authMethods ?? []).map((method) => method.id),
     }
 
-    const newSession = (sessionOptions: NewSessionOptions): Effect.Effect<AgentSession, Failure | OptionUnavailable, Scope.Scope> =>
+    const startSession = (sessionOptions: NewSessionOptions): Effect.Effect<AgentSession, Failure | OptionUnavailable, Scope.Scope> =>
       Effect.gen(function* () {
         const state: SessionState = {
           inbox: yield* Queue.unbounded<Inbound>(),
@@ -666,6 +666,16 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           interrupt,
           setOption,
         } satisfies AgentSession
+      })
+
+    /** Each session gets a scope of its own inside the caller's, so one that fails to start is closed at once. */
+    const newSession = (sessionOptions: NewSessionOptions): Effect.Effect<AgentSession, Failure | OptionUnavailable, Scope.Scope> =>
+      Effect.gen(function* () {
+        const scope = yield* Scope.fork(yield* Scope.Scope, 'sequential')
+        return yield* startSession(sessionOptions).pipe(
+          Scope.provide(scope),
+          Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
+        )
       })
 
     return {
