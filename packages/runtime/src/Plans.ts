@@ -1,6 +1,6 @@
 import { type ActorId, Ids, newId, type ProjectId } from '@charrette/domain'
 import type { Ledger } from '@charrette/persistence-sqlite'
-import { Context, type Crypto, Duration, Effect, Layer, Queue, Semaphore } from 'effect'
+import { Context, type Crypto, Duration, Effect, Layer, Queue } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { postCard, touchCard } from './cards'
@@ -63,25 +63,39 @@ export class Plans extends Context.Service<
           return plan === undefined ? yield* new NotFound({ kind: 'plan', id: planId }) : plan
         })
 
-      /** Records a change to a plan, tells its card, and wakes the countdown. */
-      const record = (
+      type PlanRow = Effect.Success<ReturnType<typeof load>>
+
+      /**
+       * Changes a plan if it still stands as `when` needs, checked and changed
+       * in one transaction, so a start and a hold, or two starts, can't both
+       * happen. Then tells its card and wakes the countdown. Whether it changed.
+       */
+      const transition = (
         planId: string,
-        plan: { readonly projectId: ProjectId; readonly taskId: string },
-        set: Readonly<Record<string, unknown>>,
+        when: (plan: PlanRow) => boolean,
+        set: (plan: PlanRow) => Readonly<Record<string, unknown>>,
         type: string,
         actorId: ActorId,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          yield* sql.withTransaction(
+          const changed = yield* sql.withTransaction(
             Effect.gen(function* () {
-              const revision = yield* change('task_plans', planId, set)
+              const plan = yield* load(planId)
+              if (!when(plan)) return undefined
+              const revision = yield* change('task_plans', planId, set(plan))
               yield* fact({ projectId: plan.projectId, aggregateType: 'task_plan', aggregateId: planId, revision, type, actorId })
+              return plan
             }),
           )
-          yield* touchCard(plan.taskId)
+          if (changed === undefined) return false
+          yield* touchCard(changed.taskId)
           yield* Queue.offer(wake, undefined)
+          return true
         })
+
+      /** Whether a plan still counts down. */
+      const counting = (plan: PlanRow) => plan.state === 'proposed' && plan.startsAt !== null
 
       const propose: Plans['Service']['propose'] = (input) =>
         provide(
@@ -134,18 +148,19 @@ export class Plans extends Context.Service<
           }),
         )
 
-      // One start at a time, so the person pressing Start as the countdown ends starts the plan once.
-      const starting = yield* Semaphore.make(1)
-      const start = (planId: string, actorId: ActorId) =>
+      /** Starts a proposed plan: when the person says, or, `due`, when its countdown has ended and it isn't held. */
+      const start = (planId: string, actorId: ActorId, due = false) =>
         Effect.gen(function* () {
-          const plan = yield* load(planId)
-          if (plan.state !== 'proposed') return false
-          yield* record(planId, plan, { state: 'accepted', startsAt: null, decidedAt: yield* timestamp }, 'task_plan.accepted', actorId)
-          return true
-        }).pipe(
-          starting.withPermits(1),
-          Effect.flatMap((accepted) => (accepted ? runs.run(planId) : Effect.void)),
-        )
+          const at = yield* timestamp
+          const accepted = yield* transition(
+            planId,
+            (plan) => (due ? counting(plan) && plan.startsAt !== null && plan.startsAt <= at : plan.state === 'proposed'),
+            () => ({ state: 'accepted', startsAt: null, decidedAt: at }),
+            'task_plan.accepted',
+            actorId,
+          )
+          if (accepted) yield* runs.run(planId)
+        })
 
       // The countdown: the next plan due starts when its time comes, or sooner if a plan changes.
       const countdown = Effect.gen(function* () {
@@ -162,7 +177,9 @@ export class Plans extends Context.Service<
             yield* Effect.raceFirst(Queue.take(wake), Effect.sleep(Duration.millis(wait)))
             continue
           }
-          yield* start(next.id, instance.systemId).pipe(Effect.catchCause((cause) => Effect.logWarning('A plan could not start', cause)))
+          yield* start(next.id, instance.systemId, true).pipe(
+            Effect.catchCause((cause) => Effect.logWarning('A plan could not start', cause)),
+          )
         }
       })
 
@@ -170,9 +187,9 @@ export class Plans extends Context.Service<
       yield* provide(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const overdue = yield* sql<{ id: string; projectId: ProjectId; taskId: string }>`
-            SELECT id, project_id, task_id FROM task_plans WHERE state = 'proposed' AND starts_at IS NOT NULL AND starts_at < ${yield* timestamp}`
-          for (const plan of overdue) yield* record(plan.id, plan, { startsAt: null }, 'task_plan.held', instance.systemId)
+          const overdue = yield* sql<{ id: string }>`
+            SELECT id FROM task_plans WHERE state = 'proposed' AND starts_at IS NOT NULL AND starts_at < ${yield* timestamp}`
+          for (const plan of overdue) yield* transition(plan.id, counting, () => ({ startsAt: null }), 'task_plan.held', instance.systemId)
         }).pipe(
           Effect.catchCause((cause) => Effect.logWarning('Could not hold the plans that came due while Charrette was closed', cause)),
         ),
@@ -183,20 +200,20 @@ export class Plans extends Context.Service<
         propose,
         start: (planId, actorId) => provide(start(planId, actorId)),
         hold: (planId, actorId) =>
-          provide(
-            Effect.gen(function* () {
-              const plan = yield* load(planId)
-              if (plan.state === 'proposed') yield* record(planId, plan, { startsAt: null }, 'task_plan.held', actorId)
-            }),
-          ),
+          provide(Effect.asVoid(transition(planId, counting, () => ({ startsAt: null }), 'task_plan.held', actorId))),
         change: (planId, steps, actorId) =>
           provide(
-            Effect.gen(function* () {
-              const plan = yield* load(planId)
-              if (plan.state !== 'proposed') return
-              const reason = (JSON.parse(plan.parameters) as { reason?: string | null }).reason ?? null
-              yield* record(planId, plan, { parameters: JSON.stringify({ steps, reason }) }, 'task_plan.changed', actorId)
-            }),
+            Effect.asVoid(
+              transition(
+                planId,
+                (plan) => plan.state === 'proposed',
+                (plan) => ({
+                  parameters: JSON.stringify({ steps, reason: (JSON.parse(plan.parameters) as { reason?: string | null }).reason ?? null }),
+                }),
+                'task_plan.changed',
+                actorId,
+              ),
+            ),
           ),
       })
     }),

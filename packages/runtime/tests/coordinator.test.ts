@@ -67,7 +67,7 @@ describe('the coordinator loop', () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { projectId, threadId } = yield* opened
-      yield* say(threadId, 'Add a retry to checkout. [coordinator:plan] [lead:finish] [review:findings]')
+      yield* say(threadId, 'Add a retry. [coordinator:plan] [lead:finish] [review:findings]')
 
       // The plan shows as a card, then starts on its own when its time comes.
       const [planned] = yield* until(cardsOf(projectId), (cards) => cards.length === 1)
@@ -105,8 +105,10 @@ describe('the coordinator loop', () => {
           ['review', 1, 'succeeded'],
         ],
       )
-      const [finding] = yield* sql<{ severity: string; claim: string }>`SELECT severity, claim FROM findings`
-      assert.deepStrictEqual({ ...finding }, { severity: 'major', claim: 'The heading is wrong.' })
+      // The lead said what became of the finding, and the record keeps it with the settling that did it.
+      const [finding] = yield* sql<{ severity: string; claim: string; state: string; settled: number }>`
+        SELECT severity, claim, state, settled_in_attempt_id IS NOT NULL AS settled FROM findings`
+      assert.deepStrictEqual({ ...finding }, { severity: 'major', claim: 'The heading is wrong.', state: 'fixed', settled: 1 })
       const [run] = yield* sql<{ state: string }>`SELECT state FROM runs`
       assert.strictEqual(run?.state, 'succeeded')
       // The task was drafted by the coordinator, as the record says.
@@ -123,6 +125,18 @@ describe('the coordinator loop', () => {
       assert.match(yield* callTool(access, 'read_thread', { task: 'add-a-retry' }), /\[review, pass\] The change holds\./)
       assert.match(yield* callTool(access, 'propose_plan', { task: 'add-a-retry', lead: { agent: 'codex' } }), /has started already/)
       assert.match(yield* callTool(access, 'message_lead', { task: 'add-a-retry', message: 'Stop.', now: true }), /^Passed on/)
+      // With no step waiting, a lead's summary isn't kept.
+      const lead: ToolAccess = {
+        role: 'lead',
+        projectId,
+        threadId: ready?.threadId ?? '',
+        sessionId: 'none',
+        taskId: ready?.taskId ?? null,
+      }
+      assert.strictEqual(
+        yield* callTool(lead, 'finish_step', { summary: 'Again.' }),
+        'No step is waiting on you, so Charrette keeps no summary now.',
+      )
       // What the person says to a task goes to its lead, not the coordinator.
       assert.instanceOf(yield* Effect.flip(say(ready?.threadId ?? '', 'Hello')), NotFound)
     }).pipe(Effect.provide(withQueries())),
@@ -130,6 +144,7 @@ describe('the coordinator loop', () => {
 
   it.live('stops reviewing after three rounds, and takes a settling that changes nothing as the last word', () =>
     Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
       const { projectId, threadId } = yield* opened
       yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [review:always]')
       const [first] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(60))
@@ -156,6 +171,13 @@ describe('the coordinator loop', () => {
       assert.deepStrictEqual(
         (yield* results(later?.threadId ?? '')).map((step) => step.step),
         ['implement', 'review', 'settle'],
+      )
+      const aside = yield* sql<{ state: string; response: string | null }>`
+        SELECT f.state, f.response FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id JOIN nodes n ON n.id = a.node_id
+        JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${later?.taskId ?? ''}`
+      assert.deepStrictEqual(
+        aside.map((row) => [row.state, row.response]),
+        [['set_aside', 'It reads as intended.']],
       )
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
   )
@@ -472,9 +494,16 @@ describe("the coordinator's tools", () => {
       assert.match(yield* callTool(access, 'read_task', { task: 'nothing' }), /no task nothing/)
       assert.match(yield* callTool(access, 'propose_plan', { task: 'tidy-the-readme', lead: { agent: 'gemini' } }), /no agent gemini/)
       assert.match(yield* callTool(access, 'propose_plan', { task: 'tidy-the-readme' }), /couldn't read that/)
-      assert.match(yield* callTool(access, 'message_lead', { task: 'tidy-the-readme', message: 'Keep it short.' }), /^Passed on/)
+      // With no lead running yet, it says the message waits for one.
+      assert.match(
+        yield* callTool(access, 'message_lead', { task: 'tidy-the-readme', message: 'Keep it short.' }),
+        /^No lead is running on tidy-the-readme/,
+      )
       // A draft needs only a title; a plan needs only its lead.
       assert.match(yield* callTool(access, 'draft_task', { title: 'Bump the version' }), /^Drafted bump-the-version\./)
+      // Called again, unsure the first worked, it gets the same task, not a second.
+      assert.match(yield* callTool(access, 'draft_task', { title: 'Bump the version ' }), /^Drafted bump-the-version\./)
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM tasks WHERE title LIKE 'Bump%'`)[0]?.n, 1)
       assert.match(yield* callTool(access, 'read_task', { task: 'bump-the-version' }), /^bump-the-version: Bump the version\n\nBranch /)
       assert.match(
         yield* callTool(access, 'propose_plan', {

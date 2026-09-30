@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { type CommandEnvelope, type ProjectId } from '@charrette/domain'
 import type { Commands, Ledger } from '@charrette/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
@@ -249,8 +251,10 @@ export class Coordinator extends Context.Service<
       const draft = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const { title, description } = yield* read(Drafted, input)
+          // The same title from the same session is the same command: an agent that calls again, unsure the first worked, gets the first task.
+          const commandId = `cmd_${createHash('sha256').update(`${access.sessionId}\u0000${title.trim().toLowerCase()}`).digest('hex').slice(0, 32)}`
           const created = yield* projects.createTask({
-            envelope: yield* envelope('task.create', { title, description }, undefined, instance.coordinatorId),
+            envelope: yield* envelope('task.create', { title: title.trim().toLowerCase() }, commandId, instance.coordinatorId),
             projectId: access.projectId,
             title,
             ...(description === undefined ? {} : { description }),
@@ -289,6 +293,7 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const { task: reference, message: body, now } = yield* read(Passed, input)
           const task = yield* taskOf(access, reference)
+          const lead = yield* sessions.running(task.threadId)
           yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId: task.threadId, body }, undefined, instance.coordinatorId),
             threadId: task.threadId,
@@ -302,7 +307,10 @@ export class Coordinator extends Context.Service<
             title: 'From the coordinator:',
             description: body,
           })
-          return `Passed on to ${task.slug}'s lead.`
+          // Queued for a lead that isn't running, it waits until one starts: the coordinator says so to the person.
+          return Option.isSome(lead)
+            ? `Passed on to ${task.slug}'s lead.`
+            : `No lead is running on ${task.slug}, so nobody reads this yet; its lead will when one starts. Tell the person.`
         })
 
       const tool = (

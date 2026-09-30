@@ -176,15 +176,24 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
     }
     if (available.has('finish_step')) {
       if (text.includes('Settle each')) {
-        if (!session.markers.has('[lead:set-aside]')) appendFileSync(join(session.cwd, 'settled.txt'), 'settled\n')
-        return await call('finish_step', { summary: 'Fixed the heading.' })
+        const aside = session.markers.has('[lead:set-aside]')
+        if (!aside) appendFileSync(join(session.cwd, 'settled.txt'), 'settled\n')
+        // What became of each finding, by the ids Charrette gave them.
+        const findings = (text.match(/find_[0-9a-f]{32}/g) ?? []).map((id) =>
+          aside ? { id, outcome: 'set_aside', reason: 'It reads as intended.' } : { id, outcome: 'fixed' },
+        )
+        return await call('finish_step', { summary: 'Fixed the heading.', findings })
       }
       if (text.includes('[lead:finish]')) return await call('finish_step', { summary: 'Did the task.' })
       return undefined
     }
     if (available.has('draft_task') && text.includes('[coordinator:plan')) {
       const markers = text.match(/\[(lead|review):[a-z-]+\]/g) ?? []
-      const drafted = await call('draft_task', { title: 'Add a retry', description: `Retry the checkout call. ${markers.join(' ')}` })
+      // The task is what the person asked for: the line with the marker, up to its first stop.
+      // As the thread so far quotes it, after who said it: "[person] Add a retry."
+      const asked = (text.slice(0, text.indexOf('[coordinator:plan')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
+      const title = asked.split(/[.!?]/)[0]?.trim() || 'Add a retry'
+      const drafted = await call('draft_task', { title, description: `Retry the checkout call. ${markers.join(' ')}` })
       const slug = /Drafted (\S+)\./.exec(drafted)?.[1] ?? ''
       return await call('propose_plan', {
         task: slug,

@@ -8,4 +8,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0002_permission_scope_turn': '7507e9be0e6d5b27ebd1606624594b233626fe7f22a4011172fd97364e87951f',
   '0003_thread_items': '5f7480639b03a33318df2a36cf7688b64900a85ce122056282c291c43bffda74',
   '0004_coordinator': '3374d9557030cfd42b504746427a34cf3c8821e77ba638c99272a22b6fd3c496',
+  '0005_run_per_plan': '545054f6f27da6e57b072120a2e2c28e69e41f6f699474c7662467f4edd959dc',
 }

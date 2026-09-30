@@ -50,7 +50,15 @@ const Finding = Schema.Struct({
 })
 type Finding = typeof Finding.Type
 
-const Finished = Schema.Struct({ summary: Schema.String })
+const Finished = Schema.Struct({
+  summary: Schema.String,
+  /** When settling a review: what became of each finding, by its id. */
+  findings: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ id: Schema.String, outcome: Schema.Literals(['fixed', 'set_aside']), reason: Schema.optional(Schema.String) }),
+    ),
+  ),
+})
 const Reviewed = Schema.Struct({
   verdict: Schema.Literals(['pass', 'changes_requested']),
   summary: Schema.String,
@@ -66,11 +74,11 @@ const read = <A>(schema: Schema.Codec<A, unknown>, input: unknown) =>
 /** What the worktree holds now: whether settling changed anything. */
 const digestOf = (worktree: string) => treeOf(worktree).pipe(Effect.orElseSucceed(() => ''))
 
-const findingsText = (findings: ReadonlyArray<Finding>) =>
+const findingsText = (findings: ReadonlyArray<Finding & { readonly id: string }>) =>
   findings
-    .map((finding, index) => {
+    .map((finding) => {
       const where = finding.file === undefined ? '' : ` ${finding.file}${finding.line === undefined ? '' : `:${finding.line}`}`
-      return `${index + 1}. [${finding.severity}]${where}: ${finding.claim}`
+      return `- ${finding.id} [${finding.severity}]${where}: ${finding.claim}`
     })
     .join('\n')
 
@@ -331,7 +339,7 @@ export class Runs extends Context.Service<
         })
 
       /** The lead settles what the review found, in its own session. */
-      const settle = (run: RunRow, round: number, findings: ReadonlyArray<Finding>) =>
+      const settle = (run: RunRow, round: number, findings: ReadonlyArray<Finding & { readonly id: string }>) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [workspace] = yield* sql<{ path: string }>`
@@ -350,7 +358,7 @@ export class Runs extends Context.Service<
           yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId: run.threadId, round, settle: true }),
             threadId: run.threadId,
-            body: `The review found:\n\n${findingsText(findings)}\n\nSettle each: fix what holds, and set aside what doesn't, with a reason. Then call finish_step with what you did about each.`,
+            body: `The review found:\n\n${findingsText(findings)}\n\nSettle each: fix what holds, and set aside what doesn't, with a reason. Then call finish_step with a summary, and in \`findings\` what became of each, by its id: fixed, or set_aside with the reason.`,
             quiet: true,
           })
           yield* sql.withTransaction(started(run, attemptId, sessionId))
@@ -461,20 +469,29 @@ export class Runs extends Context.Service<
       const finishStep = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { summary } = yield* read(Finished, input)
+          const { summary, findings: settled = [] } = yield* read(Finished, input)
           const current = access.taskId === null ? undefined : yield* currentRun(access.taskId)
-          const attempt = current === undefined ? undefined : yield* running(current, ['implement', 'settle'])
-          if (current === undefined || attempt === undefined) {
-            // No step is waiting on it, as when the task was started without a plan: the summary is still what the person reads.
+          const [planned] =
+            access.taskId === null ? [] : yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${access.taskId} LIMIT 1`
+          if (current === undefined && planned === undefined) {
+            // A task started without a plan has no steps: the summary is still what the person reads.
             yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'step_result', {
               step: 'implement',
               summary,
             })
             return 'Charrette has your summary.'
           }
+          const attempt = current === undefined ? undefined : yield* running(current, ['implement', 'settle'])
+          if (current === undefined || attempt === undefined)
+            return yield* new ToolRefused({ message: 'No step is waiting on you, so Charrette keeps no summary now.' })
           const step = attempt.nodeKey === 'settle' ? 'settle' : 'implement'
           yield* sql.withTransaction(
-            Effect.andThen(ended(current, attempt, 'succeeded', { summary }), result(current, { step, round: attempt.iteration, summary })),
+            Effect.gen(function* () {
+              yield* ended(current, attempt, 'succeeded', { summary })
+              yield* result(current, { step, round: attempt.iteration, summary })
+              // What became of each finding, as the lead says: the input to the next round, and to what reviews learn.
+              if (step === 'settle') yield* settleFindings(current, attempt.id, settled)
+            }),
           )
           if (step === 'implement') {
             const next = yield* review(current, 0)
@@ -495,6 +512,38 @@ export class Runs extends Context.Service<
           return 'Charrette has your summary. The task is ready for the person.'
         })
 
+      /** Records what the lead did about each of the run's open findings it names: fixed, or set aside with its reason. */
+      const settleFindings = (
+        run: RunRow,
+        attemptId: string,
+        settled: ReadonlyArray<{ readonly id: string; readonly outcome: 'fixed' | 'set_aside'; readonly reason?: string | undefined }>,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const at = yield* timestamp
+          for (const outcome of settled) {
+            const [finding] = yield* sql<{ id: string }>`
+              SELECT f.id FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id JOIN nodes n ON n.id = a.node_id
+              WHERE f.id = ${outcome.id} AND f.state = 'open' AND n.execution_id = ${run.executionId}`
+            if (finding === undefined) continue
+            const revision = yield* change('findings', finding.id, {
+              state: outcome.outcome,
+              settledInAttemptId: attemptId,
+              response: outcome.reason ?? null,
+              settledAt: at,
+            })
+            yield* fact({
+              projectId: run.projectId,
+              aggregateType: 'finding',
+              aggregateId: finding.id,
+              revision,
+              type: `finding.${outcome.outcome}`,
+              payload: { reason: outcome.reason ?? null },
+              actorId: instance.systemId,
+            })
+          }
+        })
+
       /** The reviewer's findings: the run ends if there are none, and the lead settles them if there are. */
       const reportReview = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
@@ -504,11 +553,14 @@ export class Runs extends Context.Service<
           const current = access.taskId === null ? undefined : yield* currentRun(access.taskId)
           const attempt = current === undefined ? undefined : yield* running(current, ['review'])
           if (current === undefined || attempt === undefined) return yield* new ToolRefused({ message: 'No review is waiting on you.' })
-          yield* sql.withTransaction(
+          const recorded = yield* sql.withTransaction(
             Effect.gen(function* () {
+              const ids: Array<Finding & { readonly id: string }> = []
               for (const finding of findings) {
+                const id = yield* newId(Ids.finding)
+                ids.push({ ...finding, id })
                 yield* sql`INSERT INTO findings ${sql.insert({
-                  id: yield* newId(Ids.finding),
+                  id,
                   projectId: current.projectId,
                   reviewAttemptId: attempt.id,
                   severity: finding.severity,
@@ -532,13 +584,14 @@ export class Runs extends Context.Service<
                 findings,
                 agentId: reviewer?.agentId ?? null,
               })
+              return ids
             }),
           )
           if (reviewed.verdict === 'pass' || findings.length === 0) {
             yield* finish(current, 'succeeded')
             return 'Charrette has your review. The change passes.'
           }
-          yield* settle(current, attempt.iteration, findings)
+          yield* settle(current, attempt.iteration, recorded)
           return 'Charrette has your review. The lead settles your findings; you may be asked to look again.'
         })
 
@@ -568,7 +621,26 @@ export class Runs extends Context.Service<
         tool(
           'finish_step',
           "Tells Charrette you have done your step: the task, or settling a review's findings. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open.",
-          { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] },
+          {
+            type: 'object',
+            properties: {
+              summary: { type: 'string' },
+              findings: {
+                type: 'array',
+                description: 'When settling a review: what became of each finding, by the id Charrette gave it.',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    outcome: { type: 'string', enum: ['fixed', 'set_aside'] },
+                    reason: { type: 'string', description: 'Why it was set aside.' },
+                  },
+                  required: ['id', 'outcome'],
+                },
+              },
+            },
+            required: ['summary'],
+          },
           finishStep,
         ),
       ])

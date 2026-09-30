@@ -877,3 +877,5 @@ CREATE INDEX processes_by_session ON processes (provider_session_id);
 CREATE INDEX processes_live ON processes (runtime_instance_id) WHERE state IN ('launching', 'running');
 
 CREATE UNIQUE INDEX one_live_session_per_thread ON provider_sessions (thread_id) WHERE state IN ('active', 'waiting_approval', 'cancelling');
+
+CREATE UNIQUE INDEX runs_by_plan ON runs (plan_id) WHERE plan_id IS NOT NULL;
