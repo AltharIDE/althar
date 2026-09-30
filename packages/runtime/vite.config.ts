@@ -2,7 +2,8 @@ import { defineConfig } from 'vite-plus'
 
 export default defineConfig({
   test: {
-    include: ['tests/**/*.test.ts'],
+    // The fake agents only, so it runs in CI; the real ones run with `bun run test:agents`.
+    include: ['tests/*.test.ts'],
     environment: 'node',
     testTimeout: 20_000,
     coverage: {

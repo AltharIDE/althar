@@ -106,7 +106,9 @@ reviewers, the default reviewer) is architecture, in
 3. **The coordinator,** and the demo above. Built: the coordinator on the
    agent you last used, plans with the runtime's countdown, Implement then
    Review with settling, task cards in the Talk room, and work folded under
-   what each step reported. Checked with the fake agents; real agents next.
+   what each step reported. Checked with the fake agents, and on real
+   agents (`bun run test:agents` in `packages/runtime`): Claude Code
+   coordinating and implementing, Codex reviewing.
 
 ## Done when
 

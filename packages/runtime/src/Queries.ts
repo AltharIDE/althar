@@ -311,6 +311,7 @@ export class Queries extends Context.Service<
             review: string | null
             lead: string | null
             firstSession: string | null
+            starting: number
           }>`
             SELECT t.id AS thread_id, k.title, k.slug, k.state, w.branch,
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
@@ -320,7 +321,12 @@ export class Queries extends Context.Service<
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') AS waiting,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
-              (SELECT min(started_at) FROM provider_sessions WHERE thread_id = t.id) AS first_session
+              (SELECT min(started_at) FROM provider_sessions WHERE thread_id = t.id) AS first_session,
+              -- A step admitted and not yet running, or a session still starting: its agent is on its way.
+              (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+                WHERE e.run_id = r.id AND a.state = 'admitted')
+              + (SELECT count(*) FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
+                WHERE h.task_id = k.id AND s.state = 'starting') AS starting
             FROM tasks k
             JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             LEFT JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
@@ -332,6 +338,7 @@ export class Queries extends Context.Service<
             SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result'
               AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
           const working =
+            task.starting > 0 ||
             Option.isSome(yield* sessions.running(task.threadId)) ||
             (task.review !== null && Option.isSome(yield* sessions.running(task.review)))
           const phase = ((): TaskPhase => {

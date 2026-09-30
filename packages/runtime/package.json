@@ -14,7 +14,8 @@
     "test": "vp test run",
     "probe:tools": "bun scripts/probe-tools.ts",
     "test:coverage": "vp test run --coverage",
-    "verify": "bun run check && bun run test:coverage"
+    "verify": "bun run check && bun run test:coverage",
+    "test:agents": "vp test run --config vite.agents.config.ts"
   },
   "dependencies": {
     "@charrette/contracts": "workspace:*",
