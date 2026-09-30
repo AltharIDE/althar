@@ -18,6 +18,8 @@ export const scenarios = {
   tool: 'tool',
   /** Like `tool`, but it offers only allow-always and reject-once. */
   toolAlwaysOnly: 'tool-always-only',
+  /** A tool call that says what it is, then asks permission with nothing but its id, as Codex does for an MCP tool. */
+  bareAsk: 'bare-ask',
   /** A plan, context usage, a notice, and the agent changing its own option. */
   updates: 'updates',
   /** One chunk, then waits until cancelled. */
@@ -367,6 +369,18 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             status: allowed ? 'completed' : 'failed',
             rawOutput: { chosen },
           })
+          await say(`chosen=${chosen}`)
+          return ended()
+        }
+        case scenarios.bareAsk: {
+          const described = {
+            toolCallId: 'call-4',
+            title: 'mcp.charrette.draft_task',
+            kind: 'execute' as const,
+            rawInput: { title: 'Probe' },
+          }
+          await update({ sessionUpdate: 'tool_call', ...described, status: 'pending' })
+          const chosen = await ask({ toolCallId: 'call-4' }, permissionOptions(false))
           await say(`chosen=${chosen}`)
           return ended()
         }

@@ -275,6 +275,17 @@ describe('AgentConnection', () => {
       }),
     )
 
+    it.live('describes a request that says only its id from the tool call it is about, as Codex asks for an MCP tool', () =>
+      Effect.gen(function* () {
+        const { events, permissions } = yield* turn(scenarios.bareAsk, allow)
+        assert.strictEqual(text(events), 'chosen=allow-once')
+        assert.deepStrictEqual(
+          { title: permissions[0]?.title, kind: permissions[0]?.kind, rawInput: permissions[0]?.rawInput },
+          { title: 'mcp.charrette.draft_task', kind: 'execute', rawInput: { title: 'Probe' } },
+        )
+      }),
+    )
+
     it.live("picks the rejection that carries on, by the agent's option meanings", () =>
       Effect.gen(function* () {
         const { events } = yield* turn(scenarios.commandChoices, reject)
