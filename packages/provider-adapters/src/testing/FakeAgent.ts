@@ -1,4 +1,9 @@
+import { appendFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import * as acp from '@agentclientprotocol/sdk'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
 import type { InProcessAgent } from '../AgentConnection'
 
@@ -115,6 +120,82 @@ interface SessionState {
   abort: AbortController | undefined
   directories: number
   mcpServers: number
+  /** Where the session works, for a step that writes. */
+  cwd: string
+  /** Charrette's tools, when the session was given them over HTTP. */
+  tools: { readonly url: string; readonly headers: Record<string, string> } | undefined
+  /** The role markers the session has been given, in any turn. */
+  markers: Set<string>
+}
+
+/**
+ * Calls Charrette's tools over the MCP server a session was given. The fake
+ * plays a role when its prompt carries a marker, as a task's description or
+ * the person's message can: `[coordinator:plan]` drafts and plans a task,
+ * passing on the `[lead:…]` and `[review:…]` markers it was given;
+ * `[lead:finish]` finishes the step; `[review:pass]` and `[review:findings]`
+ * report a review. Settling findings, it writes a file, so the change changes,
+ * and finishes; a later review round passes. The session remembers its
+ * markers: `[review:always]` finds something every round, and
+ * `[lead:set-aside]` settles without changing anything.
+ */
+const playRole = async (session: SessionState, text: string): Promise<string | undefined> => {
+  for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
+  const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ')
+  if (session.tools === undefined || !asked) return undefined
+  const client = new Client({ name: 'fake-agent', version: '1.0.0' })
+  const transport = new StreamableHTTPClientTransport(new URL(session.tools.url), { requestInit: { headers: session.tools.headers } })
+  // The SDK's transport types its optional fields loosely, which strict optional types reject.
+  await client.connect(transport as Parameters<typeof client.connect>[0])
+  try {
+    const available = new Set((await client.listTools()).tools.map((tool) => tool.name))
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = await client.callTool({ name, arguments: args })
+      const content = Array.isArray(result.content) ? result.content : []
+      return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
+    }
+    if (available.has('report_review')) {
+      if (session.markers.has('[review:always]'))
+        return await call('report_review', {
+          verdict: 'changes_requested',
+          summary: 'Still not right.',
+          findings: [
+            { severity: 'minor', claim: 'Name it better.' },
+            { severity: 'nit', file: 'README.md', claim: 'A typo.' },
+          ],
+        })
+      if (text.includes('[review:findings]') && !text.startsWith('Round '))
+        return await call('report_review', {
+          verdict: 'changes_requested',
+          summary: 'The heading needs fixing.',
+          findings: [{ severity: 'major', file: 'README.md', line: 1, claim: 'The heading is wrong.' }],
+        })
+      if (text.includes('[review:') || text.startsWith('Round '))
+        return await call('report_review', { verdict: 'pass', summary: 'The change holds.' })
+      return undefined
+    }
+    if (available.has('finish_step')) {
+      if (text.includes('Settle each')) {
+        if (!session.markers.has('[lead:set-aside]')) appendFileSync(join(session.cwd, 'settled.txt'), 'settled\n')
+        return await call('finish_step', { summary: 'Fixed the heading.' })
+      }
+      if (text.includes('[lead:finish]')) return await call('finish_step', { summary: 'Did the task.' })
+      return undefined
+    }
+    if (available.has('draft_task') && text.includes('[coordinator:plan')) {
+      const markers = text.match(/\[(lead|review):[a-z-]+\]/g) ?? []
+      const drafted = await call('draft_task', { title: 'Add a retry', description: `Retry the checkout call. ${markers.join(' ')}` })
+      const slug = /Drafted (\S+)\./.exec(drafted)?.[1] ?? ''
+      return await call('propose_plan', {
+        task: slug,
+        lead: { agent: 'claude-code', reason: 'It knows the code.' },
+        review: text.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
+      })
+    }
+    return undefined
+  } finally {
+    await client.close()
+  }
 }
 
 const MODES = ['ask', 'read-only', 'bypass']
@@ -191,6 +272,14 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         abort: undefined,
         directories: params.additionalDirectories?.length ?? 0,
         mcpServers: params.mcpServers.length,
+        cwd: params.cwd,
+        tools: (() => {
+          const server = params.mcpServers.find((candidate) => 'type' in candidate && candidate.type === 'http')
+          return server === undefined || !('url' in server)
+            ? undefined
+            : { url: server.url, headers: Object.fromEntries(server.headers.map((header) => [header.name, header.value])) }
+        })(),
+        markers: new Set(),
       }
       sessions.set(sessionId, session)
       return {
@@ -245,6 +334,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         session.abort = undefined
         if (answer === undefined) return 'withdrawn'
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
+      }
+
+      // With Charrette's tools, a marker in the prompt says which role to play.
+      const played = await playRole(session, text)
+      if (played !== undefined) {
+        await say(played)
+        return ended()
       }
 
       const resumed = text.includes("not allowed by the project's rules")

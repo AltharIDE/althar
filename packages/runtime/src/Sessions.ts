@@ -937,7 +937,7 @@ export class Sessions extends Context.Service<
             SELECT i.content FROM thread_items i JOIN threads t ON t.id = i.thread_id
             WHERE t.task_id = ${thread.taskId} AND t.kind = 'task' AND i.kind = 'step_result'
             ORDER BY i.sequence DESC LIMIT 1`
-          const summary = lead === undefined ? '' : String((JSON.parse(lead.content) as { summary?: unknown }).summary ?? '')
+          const summary = lead === undefined ? '' : ((JSON.parse(lead.content) as { summary?: string }).summary ?? '')
           return [
             "You are reviewing another agent's change, in Charrette. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
             `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,

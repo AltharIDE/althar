@@ -5,6 +5,7 @@ import { SqlClient } from 'effect/sql'
 
 import { postCard, touchCard } from './cards'
 import { NotFound } from './errors'
+import { RuntimeConfig } from './Config'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
 import { type PlanStep, Runs } from './Runs'
@@ -21,7 +22,7 @@ import { type PlanStep, Runs } from './Runs'
 /** How long a proposed plan waits before it starts on its own (docs/plans/mvp.md). */
 export const COUNTDOWN = Duration.seconds(25)
 
-type Store = SqlClient.SqlClient | Instance | Runs | Ledger | Crypto.Crypto
+type Store = SqlClient.SqlClient | Instance | Runs | Ledger | Crypto.Crypto | RuntimeConfig
 
 export class Plans extends Context.Service<
   Plans,
@@ -49,6 +50,7 @@ export class Plans extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const runs = yield* Runs
+      const countdownOf = (yield* RuntimeConfig).countdown ?? COUNTDOWN
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       /** Wakes the countdown when a plan changes. */
       const wake = yield* Queue.sliding<void>(1)
@@ -88,7 +90,7 @@ export class Plans extends Context.Service<
             const planId = yield* newId(Ids.taskPlan)
             const workflowVersionId = yield* runs.workflowVersion
             const at = yield* timestamp
-            const startsAt = new Date(Date.parse(at) + Duration.toMillis(input.startsIn ?? COUNTDOWN)).toISOString()
+            const startsAt = new Date(Date.parse(at) + Duration.toMillis(input.startsIn ?? countdownOf)).toISOString()
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 // A task has one plan waiting: a new proposal replaces the one before.

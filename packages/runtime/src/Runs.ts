@@ -7,7 +7,7 @@ import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
 import { Instance } from './Instance'
-import { git } from './git'
+import { treeOf } from './git'
 import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
 import { Sessions } from './Sessions'
@@ -63,14 +63,8 @@ const read = <A>(schema: Schema.Codec<A, unknown>, input: unknown) =>
     Effect.mapError((error) => new ToolRefused({ message: `Charrette couldn't read that: ${error.message}` })),
   )
 
-/** What the worktree holds now, as a digest: whether settling changed anything. */
-const digestOf = (worktree: string, base: string | null) =>
-  Effect.gen(function* () {
-    const quiet = (effect: Effect.Effect<string, unknown>) => effect.pipe(Effect.orElseSucceed(() => ''))
-    const diff = yield* quiet(git(worktree, 'diff', base ?? 'HEAD'))
-    const status = yield* quiet(git(worktree, 'status', '--porcelain'))
-    return createHash('sha256').update(`${diff}\u0000${status}`).digest('hex')
-  })
+/** What the worktree holds now: whether settling changed anything. */
+const digestOf = (worktree: string) => treeOf(worktree).pipe(Effect.orElseSucceed(() => ''))
 
 const findingsText = (findings: ReadonlyArray<Finding>) =>
   findings
@@ -340,9 +334,9 @@ export class Runs extends Context.Service<
       const settle = (run: RunRow, round: number, findings: ReadonlyArray<Finding>) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [workspace] = yield* sql<{ path: string; baseCommit: string | null }>`
-            SELECT path, base_commit FROM workspaces WHERE task_id = ${run.taskId} AND device_id = ${instance.deviceId}`
-          const before = workspace === undefined ? '' : yield* digestOf(workspace.path, workspace.baseCommit)
+          const [workspace] = yield* sql<{ path: string }>`
+            SELECT path FROM workspaces WHERE task_id = ${run.taskId} AND device_id = ${instance.deviceId}`
+          const before = workspace === undefined ? '' : yield* digestOf(workspace.path)
           const { implement } = yield* stepsOf(run)
           const { attemptId } = yield* sql.withTransaction(admit(run, 'settle', round, implement ?? {}, { before }))
           const live = yield* sessions.running(run.threadId)
@@ -489,10 +483,10 @@ export class Runs extends Context.Service<
               : 'Charrette has your summary. A review starts now; wait for its findings.'
           }
           // Another round only if settling changed the code, and rounds are left.
-          const [workspace] = yield* sql<{ path: string; baseCommit: string | null }>`
-            SELECT path, base_commit FROM workspaces WHERE task_id = ${current.taskId} AND device_id = ${instance.deviceId}`
-          const before = String((JSON.parse(attempt.input) as { before?: unknown }).before ?? '')
-          const after = workspace === undefined ? before : yield* digestOf(workspace.path, workspace.baseCommit)
+          const [workspace] = yield* sql<{ path: string }>`
+            SELECT path FROM workspaces WHERE task_id = ${current.taskId} AND device_id = ${instance.deviceId}`
+          const before = (JSON.parse(attempt.input) as { before?: string }).before ?? ''
+          const after = workspace === undefined ? before : yield* digestOf(workspace.path)
           if (after !== before && attempt.iteration + 1 < ROUNDS) {
             yield* review(current, attempt.iteration + 1, summary)
             return 'Charrette has your summary. The review looks again.'

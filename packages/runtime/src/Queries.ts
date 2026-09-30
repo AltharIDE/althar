@@ -325,7 +325,8 @@ export class Queries extends Context.Service<
             WHERE k.id = ${taskId}`
           if (task === undefined) return undefined
           const [latest] = yield* sql<{ content: string }>`
-            SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result' ORDER BY sequence DESC LIMIT 1`
+            SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result'
+              AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
           const working =
             Option.isSome(yield* sessions.running(task.threadId)) ||
             (task.review !== null && Option.isSome(yield* sessions.running(task.review)))

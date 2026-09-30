@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { PermissionRequest } from '@charrette/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 
-import { commandOf, decide, essentials, parseCommandLine, pathsOf, type RuleContext } from '../src/rules'
+import { CHARRETTE_TOOL, commandOf, decide, decideReader, essentials, parseCommandLine, pathsOf, type RuleContext } from '../src/rules'
 
 const worktree = '/work/meridian/retry/app'
 const context: RuleContext = { worktree, defaultBranch: 'main', taskBranch: 'charrette/retry', currentBranch: 'charrette/retry' }
@@ -253,5 +253,55 @@ describe('what the record keeps', () => {
       commandOf(request({ rawInput: essentials({ command: 'git push origin main', cwd: '/w' }).input })),
       'git push origin main',
     )
+  })
+})
+
+describe('a role that only reads', () => {
+  const verdict = (fields: Partial<PermissionRequest>) => decideReader(request(fields)).verdict
+
+  it("calls Charrette's own tools, as each agent names them", () => {
+    for (const title of ['mcp__charrette__draft_task', 'mcp.charrette.propose_plan', 'charrette_list_tasks'])
+      assert.strictEqual(verdict({ kind: 'other', title }), 'allow', title)
+    assert.isFalse(CHARRETTE_TOOL.test('mcp__github__create_issue'))
+    assert.strictEqual(verdict({ kind: 'other', title: 'mcp__github__create_issue' }), 'deny')
+  })
+
+  it('reads, searches and fetches, and runs what only looks', () => {
+    for (const kind of ['read', 'search', 'think', 'fetch'] as const) assert.strictEqual(verdict({ kind, title: 'Look' }), 'allow', kind)
+    for (const command of [
+      'git log --oneline -20',
+      'git diff main -- src',
+      'cd src && rg "retry" | head -20',
+      'git branch -a',
+      'git stash list',
+      'find . -name "*.ts" -newer package.json',
+      'sed -n 1,40p src/checkout.ts',
+      'ls -la > /dev/null',
+    ])
+      assert.strictEqual(verdict({ kind: 'execute', title: command, rawInput: { command } }), 'allow', command)
+  })
+
+  it('refuses every write, and what it cannot tell, with a reason', () => {
+    for (const kind of ['edit', 'delete', 'move'] as const) assert.strictEqual(verdict({ kind, title: 'Change it' }), 'deny', kind)
+    const reasons = [
+      'echo hi > notes.md',
+      'git commit -m x',
+      'git branch -D old',
+      'git checkout -b new',
+      'npm install',
+      'find . -delete',
+      'sed -i s/a/b/ x',
+      'env X=1 node build.js',
+      'echo $(rm -rf /)',
+    ].map((command) => {
+      const decided = decideReader(request({ kind: 'execute', title: command, rawInput: { command } }))
+      return decided.verdict === 'deny' ? decided.reason : ''
+    })
+    assert.isTrue(
+      reasons.every((reason) => reason.endsWith('this role only reads.')),
+      reasons.join('\n'),
+    )
+    assert.strictEqual(verdict({ kind: 'other', title: 'api.github.com' }), 'deny')
+    assert.strictEqual(verdict({ kind: 'execute', title: '' }), 'deny')
   })
 })

@@ -18,8 +18,8 @@ import { addItem } from './threads'
 const cardOf = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const [card] = yield* sql<{ id: string; projectId: ProjectId }>`
-      SELECT i.id, i.project_id FROM thread_items i JOIN threads t ON t.id = i.thread_id
+    const [card] = yield* sql<{ id: string; projectId: ProjectId; content: string }>`
+      SELECT i.id, i.project_id, i.content FROM thread_items i JOIN threads t ON t.id = i.thread_id
       WHERE t.kind = 'coordinator' AND i.kind = 'task' AND json_extract(i.content, '$.taskId') = ${taskId}`
     return card
   })
@@ -42,7 +42,8 @@ export const touchCard = (taskId: string) =>
     if (card === undefined) return
     yield* sql.withTransaction(
       Effect.gen(function* () {
-        const revision = yield* change('thread_items', card.id, {})
+        // The item itself doesn't change; its revision moves on, so the feed says it did.
+        const revision = yield* change('thread_items', card.id, { content: card.content })
         yield* ledger.notify({ projectId: card.projectId, aggregateType: 'thread_item', aggregateId: card.id, aggregateRevision: revision })
       }),
     )

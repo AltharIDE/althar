@@ -1,4 +1,7 @@
 import { execFile } from 'node:child_process'
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 
 import { Effect } from 'effect'
 
@@ -16,11 +19,19 @@ export const git = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<
 
 /** A git command that gives up after `timeout` milliseconds, for those that reach the network. */
 export const gitWithin = (timeout: number, cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
+  run(timeout, cwd, args)
+
+const run = (
+  timeout: number,
+  cwd: string,
+  args: ReadonlyArray<string>,
+  env: Readonly<Record<string, string>> = {},
+): Effect.Effect<string, GitFailed> =>
   Effect.callback<string, GitFailed>((resume) => {
     execFile(
       'git',
       ['-c', 'core.hooksPath=/dev/null', ...args],
-      { cwd, timeout, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' } },
+      { cwd, timeout, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...env } },
       (error, stdout, stderr) =>
         resume(
           error === null
@@ -29,6 +40,29 @@ export const gitWithin = (timeout: number, cwd: string, ...args: ReadonlyArray<s
         ),
     )
   })
+
+/**
+ * What a worktree holds, as a tree id: tracked and untracked files alike,
+ * ignored ones aside, so any edit changes it. It stages into a copy of the
+ * index, leaving the agent's own staging as it was.
+ */
+export const treeOf = (cwd: string): Effect.Effect<string, GitFailed> =>
+  Effect.acquireUseRelease(
+    Effect.gen(function* () {
+      const index = resolve(cwd, yield* git(cwd, 'rev-parse', '--git-path', 'index'))
+      return yield* Effect.try({
+        try: () => {
+          const copy = join(mkdtempSync(join(tmpdir(), 'charrette-index-')), 'index')
+          if (existsSync(index)) copyFileSync(index, copy)
+          return copy
+        },
+        catch: (error) => new GitFailed({ args: ['add', '-A'], cwd, stderr: String(error) }),
+      })
+    }),
+    (copy) =>
+      Effect.andThen(run(60_000, cwd, ['add', '-A'], { GIT_INDEX_FILE: copy }), run(60_000, cwd, ['write-tree'], { GIT_INDEX_FILE: copy })),
+    (copy) => Effect.sync(() => rmSync(dirname(copy), { recursive: true, force: true })),
+  )
 
 /** The top of the repository a path is in. */
 export const topLevel = (path: string) => git(path, 'rev-parse', '--show-toplevel')
