@@ -10,9 +10,11 @@ import { took } from './time'
  * in the coordinator's thread, and the lines that mark a change of scene.
  * Text still streaming replaces the stored text of its item.
  *
- * Once a turn is over, its work folds (docs/plans/mvp.md, "Work is
- * collapsed"): what came before its last message, or all of it when a step's
- * result follows, since the step's summary is what the person reads.
+ * A turn's work folds (docs/plans/mvp.md, "Work is collapsed"): its tool
+ * calls, thoughts and plan, and what it said on the way, under how long it
+ * worked. Only its last message stays open, or nothing when a step's result
+ * follows, since the step's summary is what the person reads. While it runs,
+ * the fold says how long it has worked so far and what it is doing now.
  */
 
 export type Part =
@@ -45,11 +47,18 @@ export type Block =
       readonly id: string
       readonly agentId: string | null
       readonly at: string
+      /** Everything it did and said, in order. */
       readonly parts: ReadonlyArray<Part>
-      /** How many of its parts, from the first, fold under how long it worked; none while it runs. */
-      readonly folded: number
-      /** How long it worked, from its first item to its last. */
+      /** What folds: all but its last message. */
+      readonly work: ReadonlyArray<Part>
+      /** What stays open under the fold: its last message, unless a step's result follows. */
+      readonly said: ReadonlyArray<Part>
+      /** It is still running. */
+      readonly live: boolean
+      /** How long it worked, from its first item to its last, or until now while it runs. */
       readonly took: string
+      /** While it runs, what it is doing now, in a few words. */
+      readonly doing: string | null
     }
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
   | { readonly kind: 'step'; readonly id: string; readonly at: string; readonly result: StepResult }
@@ -227,18 +236,35 @@ export interface ThreadSource {
   readonly worktree: string | null
 }
 
-/** How much of a finished turn folds: all of it before a step's result, else what came before its last message. */
-const foldOf = (parts: ReadonlyArray<Part>, beforeStep: boolean): number => {
-  if (beforeStep) return parts.length
-  const last = parts.findLastIndex((part) => part.kind === 'message')
-  return last === -1 ? parts.length : last
+/** A turn's work and what it said: all but its last message folds, and all of it before a step's result. */
+const splitOf = (parts: ReadonlyArray<Part>, beforeStep: boolean) => {
+  const last = beforeStep ? -1 : parts.findLastIndex((part) => part.kind === 'message')
+  return { work: parts.filter((_, index) => index !== last), said: last === -1 ? [] : parts.slice(last, last + 1) }
 }
+
+/** What a running turn is doing, from the last thing it did. */
+const doingOf = (work: ReadonlyArray<Part>): string | null => {
+  const last = work.at(-1)
+  switch (last?.kind) {
+    case 'tool':
+      return `${last.verb} ${last.target}`
+    case 'thought':
+      return text.thinking
+    case 'plan':
+      return text.planning
+    default:
+      return null
+  }
+}
+
+export const text = { thinking: 'Thinking', planning: 'Planning' }
 
 /** The blocks of a thread, oldest first, with what is still being written but not yet read at the end. */
 export const blocksOf = (
   source: ThreadSource,
   streaming: ReadonlyMap<string, Streamed>,
   ago: (iso: string) => string,
+  now: string = new Date().toISOString(),
 ): ReadonlyArray<Block> => {
   const { turnRunning, worktree } = source
   const blocks: Array<Block> = []
@@ -252,7 +278,7 @@ export const blocksOf = (
       if (span !== undefined) spans.set(last.id, { ...span, to: at })
       return
     }
-    blocks.push({ kind: 'turn', id: part.id, agentId, at: ago(at), parts: [part], folded: 0, took: '' })
+    blocks.push({ kind: 'turn', id: part.id, agentId, at: ago(at), parts: [part], work: [], said: [], live: false, took: '', doing: null })
     spans.set(part.id, { from: at, to: at })
   }
   for (const item of source.items) {
@@ -289,15 +315,20 @@ export const blocksOf = (
     if (read.has(id)) continue
     add(streamed.agentId, streamed.at, { kind: streamed.kind === 'agent_thought' ? 'thought' : 'message', id, text: streamed.text })
   }
-  // Every turn but the one still running folds its work.
+  // Each turn folds its work; the one still running says what it is doing now.
   const live = turnRunning ? blocks.findLastIndex((block) => block.kind === 'turn') : -1
   return blocks.map((block, index) => {
-    if (block.kind !== 'turn' || index === live) return block
+    if (block.kind !== 'turn') return block
     const span = spans.get(block.id)
+    const running = index === live
+    const { work, said } = splitOf(block.parts, !running && blocks[index + 1]?.kind === 'step')
     return {
       ...block,
-      folded: foldOf(block.parts, blocks[index + 1]?.kind === 'step'),
-      took: span === undefined ? '' : took(span.from, span.to),
+      work,
+      said,
+      live: running,
+      took: span === undefined ? '' : took(span.from, running ? now : span.to),
+      doing: running ? doingOf(work) : null,
     }
   })
 }

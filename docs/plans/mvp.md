@@ -72,9 +72,10 @@ reviewers, the default reviewer) is architecture, in
   it last ran on in this project, or for a new project the one you last used
   anywhere. If that agent isn't signed in, the Talk room says so and offers
   the ones that are.
-- **Work is collapsed.** Once a turn is over, its tool calls and messages
-  fold under one "Worked for" line, with the summary the agent reported
-  under it. What stays open is what needs you.
+- **Work is collapsed.** A turn's tool calls, thoughts and messages fold
+  under one "Worked for" line, with the summary the agent reported under it;
+  while it runs, the line says how long it has worked so far and what it is
+  doing now. What stays open is the agent's last message, and what needs you.
 
 ## For now
 

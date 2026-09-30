@@ -1,6 +1,6 @@
 import { type ActorId, Ids, newId, type ProjectId } from '@charrette/domain'
 import type { Ledger } from '@charrette/persistence-sqlite'
-import { Context, type Crypto, Duration, Effect, Layer, Queue } from 'effect'
+import { Context, type Crypto, Duration, Effect, Layer, Queue, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { postCard, touchCard } from './cards'
@@ -134,13 +134,18 @@ export class Plans extends Context.Service<
           }),
         )
 
+      // One start at a time, so the person pressing Start as the countdown ends starts the plan once.
+      const starting = yield* Semaphore.make(1)
       const start = (planId: string, actorId: ActorId) =>
         Effect.gen(function* () {
           const plan = yield* load(planId)
-          if (plan.state !== 'proposed') return
+          if (plan.state !== 'proposed') return false
           yield* record(planId, plan, { state: 'accepted', startsAt: null, decidedAt: yield* timestamp }, 'task_plan.accepted', actorId)
-          yield* runs.run(planId)
-        })
+          return true
+        }).pipe(
+          starting.withPermits(1),
+          Effect.flatMap((accepted) => (accepted ? runs.run(planId) : Effect.void)),
+        )
 
       // The countdown: the next plan due starts when its time comes, or sooner if a plan changes.
       const countdown = Effect.gen(function* () {

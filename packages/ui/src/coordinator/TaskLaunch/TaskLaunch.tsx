@@ -72,6 +72,8 @@ export interface TaskLaunchText {
   alsoWaits: (steps: string, until: string) => string
   held: string
   startsIn: (seconds: number) => string
+  /** Its time has come, and what keeps its clock is starting it. */
+  starting: string
   startsAfterSeen: (seconds: number) => string
   /** Said once to a screen reader when the plan is first seen: that it starts on its own. */
   announce: (seconds: number) => string
@@ -100,6 +102,7 @@ export const taskLaunchText: TaskLaunchText = {
   alsoWaits: (steps, until) => `${steps} waits until ${until}`,
   held: 'Held. Starts when you say',
   startsIn: (n) => `Starts in ${n}s`,
+  starting: 'Starting…',
   startsAfterSeen: (n) => `Starts ${n}s after you’ve seen it`,
   announce: (n) => `The plan starts on its own in ${n} seconds. Hold it to take your time.`,
   hold: 'Hold',
@@ -155,7 +158,7 @@ export interface TaskLaunchProps {
   limited?: { name: string; until: string }
   /** Seconds before it starts on its own, once seen: the whole wait, when `startsAt` keeps the time. */
   wait?: number
-  /** When it starts, in milliseconds since the epoch, when something else keeps the clock: it counts down to then, seen or not. */
+  /** When it starts, in milliseconds since the epoch, when something else keeps the clock and starts it: it counts down to then, seen or not, and then says it is starting. */
   startsAt?: number
   /** Held: the clock stops until you start it. */
   held?: boolean
@@ -216,19 +219,18 @@ export function TaskLaunch({
     return () => window.clearTimeout(id)
   }, [startsAt, seen, left, held, started])
   useEffect(() => {
-    if (startsAt === undefined || held || started) return
-    /* the kept time: it ticks on the second before it, and starts it when it comes */
-    const id = window.setTimeout(
-      () => (Date.now() >= startsAt - 1000 ? startWhenDue() : setNow(Date.now())),
-      Math.max(0, Math.min(1000, startsAt - 1000 - Date.now())),
-    )
+    if (startsAt === undefined || held || started || now >= startsAt) return
+    /* the kept time: it ticks each second until then; whatever keeps it starts the plan */
+    const id = window.setTimeout(() => setNow(Date.now()), Math.max(0, Math.min(1000, startsAt - Date.now())))
     return () => window.clearTimeout(id)
   }, [startsAt, now, held, started])
+  const due = startsAt !== undefined && !held && now >= startsAt
 
   const [announced, setAnnounced] = useState(false)
   if (seen && !announced) setAnnounced(true)
   const when = (() => {
     if (held) return t.held
+    if (due) return t.starting
     if (seen || startsAt !== undefined) return t.startsIn(left)
     return t.startsAfterSeen(left)
   })()

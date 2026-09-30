@@ -309,7 +309,9 @@ describe('the coordinator loop', () => {
       // Held, it doesn't start on its own.
       yield* Effect.sleep('600 millis')
       assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'held')
-      yield* plans.start(planId, actor)
+      // Started twice at once, as when the person presses Start as the countdown ends, it runs once.
+      yield* Effect.all([plans.start(planId, actor), plans.start(planId, actor)], { concurrency: 'unbounded' })
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM runs`)[0]?.n, 1)
       const [lead] = yield* until(
         sql<{ agentId: string }>`SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.kind = 'task'`,
         (rows) => rows.length === 1,

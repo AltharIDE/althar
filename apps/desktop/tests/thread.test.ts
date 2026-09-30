@@ -2,7 +2,17 @@ import type { ThreadItem } from '@charrette/contracts'
 import { Delivery, PlanState, ToolKind, ToolState } from '@charrette/ui'
 import { describe, expect, it } from 'vitest'
 
-import { blocksOf, planStateOf, type Streamed, targetOf, toolKindOf, toolStateOf, verbFor, verbs } from '../src/renderer/shared/thread'
+import {
+  type Block,
+  blocksOf,
+  planStateOf,
+  type Streamed,
+  targetOf,
+  toolKindOf,
+  toolStateOf,
+  verbFor,
+  verbs,
+} from '../src/renderer/shared/thread'
 import { card, items } from './fixtures'
 
 const at = () => 'just now'
@@ -110,25 +120,46 @@ describe('a thread as blocks', () => {
   })
 })
 
-describe('work, once done', () => {
+describe('work, folded', () => {
   const later = (item: ThreadItem, seconds: number): ThreadItem => ({
     ...item,
     createdAt: new Date(Date.parse(item.createdAt) + seconds * 1000).toISOString(),
   })
+  const counts = (block: Block | undefined) =>
+    block?.kind === 'turn' ? { work: block.work.map((part) => part.kind), said: block.said.map((part) => part.kind) } : undefined
 
-  it('folds a finished turn under how long it worked, all but its last message', () => {
+  it('folds a turn under how long it worked, all but its last message', () => {
     const thread = [
       items.you('Why is it slow?'),
+      items.says('Looking.'),
       items.tool(),
-      later(items.tool({ title: 'Run tests' }), 30),
+      later(items.tool({ title: 'Run tests', toolKind: 'execute', command: 'npm test' }), 30),
       later(items.says('The index is missing.'), 125),
+      later(items.notice({ severity: 'warning', title: 'Context is filling up' }), 125),
     ]
     const [, turn] = blocksOf(source(thread), new Map(), at)
-    expect(turn).toMatchObject({ kind: 'turn', folded: 2, took: '2m 5s' })
-    // While it runs, nothing folds; a turn that only spoke has nothing to fold.
-    expect(blocksOf(source(thread, true), new Map(), at)[1]).toMatchObject({ folded: 0 })
-    expect(blocksOf(source([items.says('Hi.')]), new Map(), at)[0]).toMatchObject({ folded: 0, took: '0s' })
-    expect(blocksOf(source([items.tool(), items.thinks('Hm')]), new Map(), at)[0]).toMatchObject({ folded: 2 })
+    expect(turn).toMatchObject({ live: false, took: '2m 5s', doing: null })
+    expect(counts(turn)).toEqual({ work: ['message', 'tool', 'tool', 'notice'], said: ['message'] })
+    // A turn that only spoke has nothing to fold; one that said nothing folds whole.
+    expect(counts(blocksOf(source([items.says('Hi.')]), new Map(), at)[0])).toEqual({ work: [], said: ['message'] })
+    expect(counts(blocksOf(source([items.tool(), items.thinks('Hm')]), new Map(), at)[0])).toEqual({ work: ['tool', 'thought'], said: [] })
+  })
+
+  it('folds a running turn too, saying how long it has worked so far and what it is doing now', () => {
+    const thread = [
+      items.you('Go'),
+      items.says('I’ll look at the call.'),
+      items.tool({ status: 'in_progress', locations: [{ path: '/w/meridian/src/a.ts' }] }),
+    ]
+    const [, turn] = blocksOf(source(thread, true), new Map(), at, '2026-09-29T12:01:12.000Z')
+    expect(turn).toMatchObject({ live: true, took: '1m 12s', doing: 'Reading src/a.ts' })
+    expect(counts(turn)).toEqual({ work: ['tool'], said: ['message'] })
+    const thinking = blocksOf(source([items.thinks('Hm')], true), new Map(), at)[0]
+    expect(thinking).toMatchObject({ doing: 'Thinking' })
+    const planning = blocksOf(source([items.plan([{ content: 'Test', status: 'pending' }])], true), new Map(), at)[0]
+    expect(planning).toMatchObject({ doing: 'Planning' })
+    const noted = blocksOf(source([items.notice({ title: 'Hm' })], true), new Map(), at)[0]
+    expect(noted).toMatchObject({ doing: null })
   })
 
   it("folds all of a turn a step's result ends, and stands the result under it; a task's card is a block of its own", () => {
@@ -136,7 +167,8 @@ describe('work, once done', () => {
     const thread = [items.tool(), items.says('Done.'), result, items.card(card())]
     const blocks = blocksOf(source(thread), new Map(), at)
     expect(blocks.map((block) => block.kind)).toEqual(['turn', 'step', 'card'])
-    expect(blocks[0]).toMatchObject({ folded: 2, took: '1m 30s' })
+    expect(blocks[0]).toMatchObject({ took: '1m 30s' })
+    expect(counts(blocks[0])).toEqual({ work: ['tool', 'message'], said: [] })
     expect(blocks[1]).toMatchObject({ result: { step: 'implement', summary: 'Added the retry.' } })
     expect(blocks[2]).toMatchObject({ card: { slug: 'add-a-retry' } })
   })

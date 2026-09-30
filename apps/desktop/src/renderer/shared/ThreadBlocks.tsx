@@ -26,8 +26,9 @@ import s from './ThreadBlocks.module.css'
 
 /*
  * A thread's blocks as the kit draws them, the same in a task and in the
- * coordinator's thread. A finished turn's work folds under how long it
- * worked; a step's result stands open under it. A task's card is the host's
+ * coordinator's thread. A turn's work folds under how long it worked, or is
+ * working, with its last message open under it; a step's result stands open
+ * under the work that led to it. A task's card is the host's
  * to draw, since what it can do with one is the host's.
  */
 
@@ -155,24 +156,21 @@ export function ThreadBlocks({
         return <StepView key={block.id} id={block.id} result={block.result} of={of} agentName={agentName} />
       case 'card':
         return <Fragment key={block.id}>{card?.(block.card)}</Fragment>
-      case 'turn': {
-        const folded = block.parts.slice(0, block.folded)
-        const shown = block.parts.slice(block.folded)
+      case 'turn':
         return (
           <Turn key={block.id} model={modelInfo({ id: block.agentId ?? 'agent', name: agentName(block.agentId) }, null)} at={block.at}>
-            {folded.length > 0 && (
-              <WorkedFor took={block.took}>
-                {folded.map((part) => (
+            {block.work.length > 0 && (
+              <WorkedFor took={block.took} live={block.live} {...(block.doing === null ? {} : { summary: block.doing })}>
+                {block.work.map((part) => (
                   <PartView key={part.id} part={part} />
                 ))}
               </WorkedFor>
             )}
-            {shown.map((part) => (
+            {block.said.map((part) => (
               <PartView key={part.id} part={part} />
             ))}
           </Turn>
         )
-      }
     }
   })
 }

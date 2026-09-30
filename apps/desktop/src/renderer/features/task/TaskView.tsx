@@ -22,7 +22,7 @@ import {
 } from '@charrette/ui'
 
 import { modelInfo } from '../../shared/agents'
-import { ago } from '../../shared/time'
+import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import s from './Task.module.css'
@@ -89,6 +89,8 @@ function Call({ request, project, onAnswer }: { request: AttentionRequest; proje
 export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => void }) {
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState<string | null>(null)
+  // A running turn says how long it has worked so far.
+  const now = useNow(model.snapshot?.session?.turnRunning ?? false)
   const snapshot = model.snapshot
   if (snapshot === null) {
     return (
@@ -210,8 +212,11 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
             </ThreadDivider>
           )}
           <ThreadBlocks
-            blocks={blocksOf({ items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree }, model.streaming, (iso) =>
-              ago(iso),
+            blocks={blocksOf(
+              { items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree },
+              model.streaming,
+              (iso) => ago(iso),
+              now,
             )}
             agentName={agentName}
           />

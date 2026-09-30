@@ -58,6 +58,17 @@ export const Opening: Story = {
   },
 }
 export const Open: Story = { args: { defaultOpen: true } }
+
+/** While the turn runs, its work folds under how long it has worked so far, and what it is doing now. */
+export const Working: Story = {
+  args: { live: true, took: '1m 12s', summary: 'Reading src/refunds/router.ts' },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const row = c.getByRole('button', { name: /Working for 1m 12s/ })
+    await expect(row).toHaveAttribute('aria-busy', 'true')
+    await expect(c.getByText('Reading src/refunds/router.ts')).toBeInTheDocument()
+  },
+}
 export const WithoutSummary: Story = { args: { summary: undefined } }
 
 export const AllStates: Story = {
@@ -73,6 +84,7 @@ export const AllStates: Story = {
         })),
         { state: 'open', node: <WorkedFor {...args} defaultOpen /> },
         { state: 'no summary', node: <WorkedFor {...args} summary={undefined} /> },
+        { state: 'working', node: <WorkedFor {...args} live took="1m 12s" summary="Reading src/refunds/router.ts" /> },
       ]}
     />
   ),

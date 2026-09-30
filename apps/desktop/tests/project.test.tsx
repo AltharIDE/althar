@@ -142,8 +142,9 @@ describe('the Talk room', () => {
     withServices(<Project />, client)
     const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
     expect(screen.getByText('Queued · the coordinator reads it next')).toBeTruthy()
-    // While it works, nothing folds.
-    expect(screen.getByText('checkout.ts')).toBeTruthy()
+    // While it works, its work folds too, under how long it has worked so far and what it is doing now.
+    expect(screen.queryByText('checkout.ts')).toBeNull()
+    expect(screen.getByRole('button', { name: /Working for .*Reading checkout\.ts/ })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Interrupt/ }))
     expect(client.interrupt).toHaveBeenCalledWith('thc')
     await userEvent.type(busy, 'Stop{Meta>}{Enter}{/Meta}')

@@ -118,14 +118,15 @@ export const StartsOnItsOwn: Story = {
 
 const due = fn()
 
-/** The runtime keeps the time: the plan starts at a set time whether or not a window shows it, so the clock counts down to then from the moment it is drawn. Here, with no ending to pick, as for a task that ends on its branch. */
+/** The runtime keeps the time: the plan starts at a set time whether or not a window shows it, so the clock counts down to then from the moment it is drawn, and then says it is starting, since the runtime starts it. Here, with no ending to pick, as for a task that ends on its branch. */
 export const KeptByTheRuntime: Story = {
   render: () => <Launch wait={25} startsAt={Date.now() + 2500} hideEnd estimate={undefined} onStart={due} />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByText(/^Starts in [23]s$/)).toBeInTheDocument()
     await expect(c.queryByRole('button', { name: /When the work is done/ })).not.toBeInTheDocument()
-    await waitFor(() => expect(due).toHaveBeenCalled(), { timeout: 4000 })
+    await waitFor(() => expect(c.getByText('Starting…')).toBeInTheDocument(), { timeout: 4000 })
+    await expect(due).not.toHaveBeenCalled()
   },
 }
 

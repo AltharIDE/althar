@@ -15,7 +15,7 @@ import {
   TitleBar,
 } from '@charrette/ui'
 
-import { ago } from '../../shared/time'
+import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { Card, type CardActions } from './Card'
@@ -51,6 +51,8 @@ export function ProjectView({ model, onBack, onTask }: { model: ProjectModel; on
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState<string | null>(null)
   const [planning, setPlanning] = useState(false)
+  // A running turn says how long it has worked so far.
+  const now = useNow(model.coordinator?.session?.turnRunning ?? false)
   const coordinator = model.coordinator
   const session = coordinator?.session ?? null
   const suggested = coordinator?.suggested ?? null
@@ -159,7 +161,7 @@ export function ProjectView({ model, onBack, onTask }: { model: ProjectModel; on
             )}
             {coordinator.items.length === 0 && model.streaming.size === 0 && <p className={s.quiet}>{text.empty}</p>}
             <ThreadBlocks
-              blocks={blocksOf({ items: coordinator.items, turnRunning: busy, worktree: null }, model.streaming, (iso) => ago(iso))}
+              blocks={blocksOf({ items: coordinator.items, turnRunning: busy, worktree: null }, model.streaming, (iso) => ago(iso), now)}
               agentName={agentName}
               card={(card) => <Card card={card} actions={actions} />}
               queued={text.queued}

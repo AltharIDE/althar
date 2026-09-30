@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 /*
  * Times as the thread says them: "just now", "4m ago", "2h ago", then the
  * date. The kit's components take them already written.
@@ -21,4 +23,15 @@ export const took = (from: string, to: string): string => {
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m ${seconds % 60}s`
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
+/** The time now, as an ISO string, again each second while `ticking`: for how long a running turn has worked. */
+export const useNow = (ticking: boolean): string => {
+  const [now, setNow] = useState(() => new Date().toISOString())
+  useEffect(() => {
+    if (!ticking) return
+    const id = setInterval(() => setNow(new Date().toISOString()), 1000)
+    return () => clearInterval(id)
+  }, [ticking])
+  return now
 }

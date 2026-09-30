@@ -56,8 +56,8 @@ Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view
 - **The page is locked down** (07's renderer list). Sandboxed, context-isolated, no Node, a strict Content Security Policy, no new windows and no navigation away, no web permissions granted, and no paths. Links open in the person's browser, for `https:` and local `http:` only.
 - **Test hooks stay out of packaged builds.** `CHARRETTE_FAKE_AGENTS` works only in a build made with `bun run build`; `bun run build:package` leaves the code out.
 - **Words on screen follow [the glossary](../../docs/glossary.md).**
-- **Work folds; results stand.** Once a turn is over, what came before its last message folds under how long it worked, and all of it when a step's result follows, since the step's summary is what the person reads. Nothing folds while it runs.
-- **The runtime keeps a plan's clock.** A plan card counts down to the time the runtime starts it, seen or not; holding, changing and starting it go to the runtime, and the card shows what comes back.
+- **Work folds; results stand.** A turn's work (its tool calls, thoughts, plan, and what it said on the way) folds under how long it worked; only its last message stays open, and nothing when a step's result follows, since the step's summary is what the person reads. While a turn runs, the fold says how long it has worked so far and what it is doing now.
+- **The runtime keeps a plan's clock.** A plan card counts down to the time the runtime starts it, seen or not, then says it is starting; the runtime starts it, not the window. Holding, changing and starting it now go to the runtime, and the card shows what comes back.
 
 ## Checks
 
