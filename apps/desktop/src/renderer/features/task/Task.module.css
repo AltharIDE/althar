@@ -40,22 +40,3 @@
   color: var(--danger);
   font-size: 13px;
 }
-
-.info,
-.warning,
-.error {
-  margin: 4px 0;
-  font-size: 13px;
-}
-
-.info {
-  color: var(--t-2);
-}
-
-.warning {
-  color: var(--t-1);
-}
-
-.error {
-  color: var(--danger);
-}

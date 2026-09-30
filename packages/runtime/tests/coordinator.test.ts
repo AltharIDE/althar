@@ -81,7 +81,7 @@ describe('the coordinator loop', () => {
       )
       assert.strictEqual(planned?.plan?.reason, 'It knows the code.')
       const [ready] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
-      assert.strictEqual(ready?.summary, 'Fixed the heading.')
+      assert.deepStrictEqual([ready?.summary, ready?.lead, ready?.startedAt !== null], ['Fixed the heading.', 'claude-code', true])
 
       // Implement, a review with a finding, the lead settling it, and a second review that passes.
       const steps = yield* results(ready?.threadId ?? '')

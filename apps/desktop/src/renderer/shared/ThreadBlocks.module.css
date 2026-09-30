@@ -1,0 +1,26 @@
+.info,
+.warning,
+.error {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.info {
+  color: var(--t-2);
+}
+
+.warning {
+  color: var(--t-1);
+}
+
+.error {
+  color: var(--danger);
+}
+
+/* A review's summary, under its row, where a step's summary opens. */
+.said {
+  padding: 4px 0 2px 98px;
+  color: var(--t-2);
+  font-size: 13px;
+  line-height: 1.55;
+}

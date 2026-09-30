@@ -116,6 +116,53 @@ export const StartsOnItsOwn: Story = {
   },
 }
 
+const due = fn()
+
+/** The runtime keeps the time: the plan starts at a set time whether or not a window shows it, so the clock counts down to then from the moment it is drawn. Here, with no ending to pick, as for a task that ends on its branch. */
+export const KeptByTheRuntime: Story = {
+  render: () => <Launch wait={25} startsAt={Date.now() + 2500} hideEnd estimate={undefined} onStart={due} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/^Starts in [23]s$/)).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: /When the work is done/ })).not.toBeInTheDocument()
+    await waitFor(() => expect(due).toHaveBeenCalled(), { timeout: 4000 })
+  },
+}
+
+const heldChanged = fn()
+const startedHeld = fn()
+
+/** A plan whose hold the consumer keeps, as a runtime does. */
+function HeldElsewhere() {
+  const [held, setHeld] = useState(false)
+  const [startsAt] = useState(() => Date.now() + 20_000)
+  return (
+    <Launch
+      wait={25}
+      startsAt={startsAt}
+      held={held}
+      onHeldChange={(next) => {
+        heldChanged(next)
+        setHeld(next)
+      }}
+      onStart={startedHeld}
+    />
+  )
+}
+
+/** Held where the plan is kept, not only on screen: Hold says so, and a plan held elsewhere shows held. */
+export const HeldByTheRuntime: Story = {
+  render: () => <HeldElsewhere />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Hold' }))
+    await expect(heldChanged).toHaveBeenCalledWith(true)
+    await expect(c.getByText('Held. Starts when you say')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Start' }))
+    await expect(startedHeld).toHaveBeenCalled()
+  },
+}
+
 /** A runtime is out: its steps wait for the reset, unless you move them. */
 export const AgentOut: Story = {
   render: () => (
@@ -138,6 +185,11 @@ export const AllStates: Story = {
         { state: 'counting down', node: <Launch /> },
         { state: 'an agent is out', node: <Launch plan={PLAN_433} limited={{ name: 'Claude Code', until: '14:00' }} /> },
         { state: 'a step skipped', node: <Launch plan={PLAN_432.map((st) => (st.id === 'dry' ? { ...st, skipped: true } : st))} /> },
+        {
+          state: 'kept by the runtime, no ending',
+          node: <Launch wait={25} startsAt={Date.now() + 600_000} hideEnd estimate={undefined} />,
+        },
+        { state: 'held', node: <Launch defaultHeld hideEnd /> },
       ]}
     />
   ),

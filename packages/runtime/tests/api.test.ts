@@ -92,6 +92,13 @@ describe('the API', () => {
           (yield* client.ListTasks({ projectId: project.id })).tasks.map((summary) => summary.title),
           ['Say hello'],
         )
+        // A task made by hand shows in the coordinator's thread as its card, once however often it was asked for.
+        assert.deepStrictEqual(
+          (yield* client.GetCoordinator({ projectId: project.id })).items.map((item) =>
+            item.kind === 'task' ? [item.content.slug, item.content.plan, item.content.lead, item.content.startedAt] : [],
+          ),
+          [['say-hello', null, null, null]],
+        )
 
         // Watching from the list's cursor: what changed since, each change with its thread when it has one.
         const changed = yield* Effect.forkChild(

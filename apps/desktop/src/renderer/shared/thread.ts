@@ -1,11 +1,18 @@
-import type { ThreadItem, ThreadSnapshot } from '@charrette/contracts'
+import type { ThreadItem } from '@charrette/contracts'
 import { Delivery, PlanState, ToolKind, ToolState } from '@charrette/ui'
+
+import { took } from './time'
 
 /*
  * A thread's items as the blocks the kit draws, in order: what the person
  * said, each turn of the agent (its messages, thoughts, tool calls and plan,
- * grouped under one name), and the lines that mark a change of scene. Text
- * still streaming replaces the stored text of its item.
+ * grouped under one name), what a step reported when it ended, a task's card
+ * in the coordinator's thread, and the lines that mark a change of scene.
+ * Text still streaming replaces the stored text of its item.
+ *
+ * Once a turn is over, its work folds (docs/plans/mvp.md, "Work is
+ * collapsed"): what came before its last message, or all of it when a step's
+ * result follows, since the step's summary is what the person reads.
  */
 
 export type Part =
@@ -28,6 +35,9 @@ export type Part =
     }
   | { readonly kind: 'notice'; readonly id: string; readonly text: string; readonly tone: 'info' | 'warning' | 'error' }
 
+export type StepResult = Extract<ThreadItem, { kind: 'step_result' }>['content']
+export type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
+
 export type Block =
   | { readonly kind: 'you'; readonly id: string; readonly text: string; readonly at: string; readonly delivery: Delivery }
   | {
@@ -36,8 +46,14 @@ export type Block =
       readonly agentId: string | null
       readonly at: string
       readonly parts: ReadonlyArray<Part>
+      /** How many of its parts, from the first, fold under how long it worked; none while it runs. */
+      readonly folded: number
+      /** How long it worked, from its first item to its last. */
+      readonly took: string
     }
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
+  | { readonly kind: 'step'; readonly id: string; readonly at: string; readonly result: StepResult }
+  | { readonly kind: 'card'; readonly id: string; readonly card: TaskCardContent }
 
 /** ACP's tool kinds, as the kit's. */
 export const toolKindOf = (kind: string): ToolKind => {
@@ -163,7 +179,7 @@ export interface Streamed {
 const noticeText = (content: NoticeContent) => (content.description === null ? content.title : `${content.title} ${content.description}`)
 
 const partOf = (
-  item: Exclude<ThreadItem, { kind: 'user_message' }>,
+  item: Extract<ThreadItem, { kind: 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'notice' }>,
   streaming: ReadonlyMap<string, Streamed>,
   turnRunning: boolean,
   worktree: string | null,
@@ -204,38 +220,84 @@ const partOf = (
   }
 }
 
+/** What blocks are made from: a thread's items, whether its agent is mid-turn, and the worktree its paths are under. */
+export interface ThreadSource {
+  readonly items: ReadonlyArray<ThreadItem>
+  readonly turnRunning: boolean
+  readonly worktree: string | null
+}
+
+/** How much of a finished turn folds: all of it before a step's result, else what came before its last message. */
+const foldOf = (parts: ReadonlyArray<Part>, beforeStep: boolean): number => {
+  if (beforeStep) return parts.length
+  const last = parts.findLastIndex((part) => part.kind === 'message')
+  return last === -1 ? parts.length : last
+}
+
 /** The blocks of a thread, oldest first, with what is still being written but not yet read at the end. */
 export const blocksOf = (
-  snapshot: ThreadSnapshot,
+  source: ThreadSource,
   streaming: ReadonlyMap<string, Streamed>,
   ago: (iso: string) => string,
 ): ReadonlyArray<Block> => {
-  const turnRunning = snapshot.session?.turnRunning ?? false
+  const { turnRunning, worktree } = source
   const blocks: Array<Block> = []
+  /** When each turn began and last grew, by its id. */
+  const spans = new Map<string, { from: string; to: string }>()
   const add = (agentId: string | null, at: string, part: Part) => {
     const last = blocks.at(-1)
-    if (last?.kind === 'turn' && last.agentId === agentId) blocks[blocks.length - 1] = { ...last, parts: [...last.parts, part] }
-    else blocks.push({ kind: 'turn', id: part.id, agentId, at: ago(at), parts: [part] })
+    if (last?.kind === 'turn' && last.agentId === agentId) {
+      blocks[blocks.length - 1] = { ...last, parts: [...last.parts, part] }
+      const span = spans.get(last.id)
+      if (span !== undefined) spans.set(last.id, { ...span, to: at })
+      return
+    }
+    blocks.push({ kind: 'turn', id: part.id, agentId, at: ago(at), parts: [part], folded: 0, took: '' })
+    spans.set(part.id, { from: at, to: at })
   }
-  for (const item of snapshot.items) {
-    if (item.kind === 'user_message') {
-      const delivery =
-        item.input?.state === 'queued' ? (item.input.interrupting ? Delivery.Interrupting : Delivery.Queued) : Delivery.Delivered
-      blocks.push({ kind: 'you', id: item.id, text: item.content.text, at: ago(item.createdAt), delivery })
-      continue
+  for (const item of source.items) {
+    switch (item.kind) {
+      case 'user_message': {
+        const delivery =
+          item.input?.state === 'queued' ? (item.input.interrupting ? Delivery.Interrupting : Delivery.Queued) : Delivery.Delivered
+        blocks.push({ kind: 'you', id: item.id, text: item.content.text, at: ago(item.createdAt), delivery })
+        continue
+      }
+      case 'step_result': {
+        // The step ended with this: the turn that did the work ran until now.
+        const last = blocks.at(-1)
+        const span = last?.kind === 'turn' ? spans.get(last.id) : undefined
+        if (last?.kind === 'turn' && span !== undefined) spans.set(last.id, { ...span, to: item.createdAt })
+        blocks.push({ kind: 'step', id: item.id, at: ago(item.createdAt), result: item.content })
+        continue
+      }
+      case 'task':
+        blocks.push({ kind: 'card', id: item.id, card: item.content })
+        continue
+      case 'notice':
+        // What Charrette itself says, such as a change of agent or a restart, is a line across the thread.
+        if (item.content.source === 'runtime') {
+          blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
+          continue
+        }
     }
-    // What Charrette itself says, such as a change of agent or a restart, is a line across the thread.
-    if (item.kind === 'notice' && item.content.source === 'runtime') {
-      blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
-      continue
-    }
-    add(item.agentId, item.createdAt, partOf(item, streaming, turnRunning, snapshot.task.worktree))
+    add(item.agentId, item.createdAt, partOf(item, streaming, turnRunning, worktree))
   }
   // A message the store has placed but the window hasn't read yet shows from its first words.
-  const read = new Set(snapshot.items.map((item) => item.id))
+  const read = new Set(source.items.map((item) => item.id))
   for (const [id, streamed] of streaming) {
     if (read.has(id)) continue
     add(streamed.agentId, streamed.at, { kind: streamed.kind === 'agent_thought' ? 'thought' : 'message', id, text: streamed.text })
   }
-  return blocks
+  // Every turn but the one still running folds its work.
+  const live = turnRunning ? blocks.findLastIndex((block) => block.kind === 'turn') : -1
+  return blocks.map((block, index) => {
+    if (block.kind !== 'turn' || index === live) return block
+    const span = spans.get(block.id)
+    return {
+      ...block,
+      folded: foldOf(block.parts, blocks[index + 1]?.kind === 'step'),
+      took: span === undefined ? '' : took(span.from, span.to),
+    }
+  })
 }

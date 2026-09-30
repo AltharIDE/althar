@@ -75,6 +75,7 @@ describe('the API', () => {
         },
         step: null,
         summary: null,
+        lead: null,
         branch: null,
         startedAt: null,
       },

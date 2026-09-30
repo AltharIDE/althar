@@ -1,19 +1,14 @@
+import type { ThreadItem } from '@charrette/contracts'
 import { Delivery, PlanState, ToolKind, ToolState } from '@charrette/ui'
 import { describe, expect, it } from 'vitest'
 
-import {
-  blocksOf,
-  planStateOf,
-  type Streamed,
-  targetOf,
-  toolKindOf,
-  toolStateOf,
-  verbFor,
-  verbs,
-} from '../src/renderer/features/task/thread'
-import { items, snapshot } from './fixtures'
+import { blocksOf, planStateOf, type Streamed, targetOf, toolKindOf, toolStateOf, verbFor, verbs } from '../src/renderer/shared/thread'
+import { card, items } from './fixtures'
 
 const at = () => 'just now'
+
+/** A thread's items, with its agent idle, in the fixtures' worktree. */
+const source = (thread: ReadonlyArray<ThreadItem>, turnRunning = false) => ({ items: thread, turnRunning, worktree: '/w/meridian' })
 
 describe('a thread as blocks', () => {
   it('groups what one agent does in a row into one turn, and marks changes of scene', () => {
@@ -39,7 +34,7 @@ describe('a thread as blocks', () => {
         null,
       ),
     ]
-    const blocks = blocksOf(snapshot({ items: thread }), new Map(), at)
+    const blocks = blocksOf(source(thread), new Map(), at)
     expect(blocks.map((block) => block.kind)).toEqual(['you', 'turn', 'divider', 'turn', 'divider'])
     const [you, first, divider, second, restarted] = blocks
     expect(you).toMatchObject({ text: 'Add a retry', delivery: Delivery.Delivered, at: 'just now' })
@@ -67,7 +62,7 @@ describe('a thread as blocks', () => {
     const message = items.says('Hel')
     const live = (text: string): Streamed => ({ kind: 'agent_message', agentId: 'claude-code', text, at: '2026-09-30T12:00:00.000Z' })
     const shown = (text: string) => {
-      const [turn] = blocksOf(snapshot({ items: [message] }), new Map([[message.id, live(text)]]), at)
+      const [turn] = blocksOf(source([message]), new Map([[message.id, live(text)]]), at)
       return turn?.kind === 'turn' && turn.parts[0]?.kind === 'message' ? turn.parts[0].text : undefined
     }
     expect(shown('Hello')).toBe('Hello')
@@ -75,7 +70,7 @@ describe('a thread as blocks', () => {
   })
 
   it('shows a message from its first words, before the window has read it, under the agent writing it', () => {
-    const thread = snapshot({ items: [items.you('Go'), items.says('Looking.')] })
+    const thread = source([items.you('Go'), items.says('Looking.')], true)
     const streaming = new Map<string, Streamed>([
       ['unread', { kind: 'agent_message', agentId: 'claude-code', text: 'Found the call', at: '2026-09-30T12:00:00.000Z' }],
       ['thinking', { kind: 'agent_thought', agentId: 'codex', text: 'Hmm', at: '2026-09-30T12:00:01.000Z' }],
@@ -94,9 +89,7 @@ describe('a thread as blocks', () => {
       items.you('now', { state: 'queued', interrupting: true }),
       items.you('old', null),
     ]
-    expect(
-      blocksOf(snapshot({ items: thread }), new Map(), at).map((block) => (block.kind === 'you' ? [block.text, block.delivery] : null)),
-    ).toEqual([
+    expect(blocksOf(source(thread), new Map(), at).map((block) => (block.kind === 'you' ? [block.text, block.delivery] : null))).toEqual([
       ['next', Delivery.Queued],
       ['now', Delivery.Interrupting],
       ['old', Delivery.Delivered],
@@ -104,20 +97,48 @@ describe('a thread as blocks', () => {
   })
 
   it('runs a plan step and a tool call only while their turn does', () => {
-    const running = snapshot({ items: [items.plan([{ content: 'Test', status: 'in_progress' }]), items.tool({ status: 'in_progress' })] })
-    const [turn] = blocksOf(
-      { ...running, session: running.session === null ? null : { ...running.session, turnRunning: true } },
-      new Map(),
-      at,
-    )
+    const running = [items.plan([{ content: 'Test', status: 'in_progress' }]), items.tool({ status: 'in_progress' })]
+    const [turn] = blocksOf(source(running, true), new Map(), at)
     expect(
       turn?.kind === 'turn' &&
         turn.parts.map((part) =>
           part.kind === 'plan' ? part.steps[0]?.state : part.kind === 'tool' ? [part.verb, part.state] : undefined,
         ),
     ).toEqual([PlanState.Running, ['Reading', ToolState.Running]])
-    const [stopped] = blocksOf(snapshot({ ...running, session: null }), new Map(), at)
+    const [stopped] = blocksOf(source(running), new Map(), at)
     expect(stopped?.kind === 'turn' && stopped.parts[1]).toMatchObject({ verb: 'Read', state: ToolState.Cancelled })
+  })
+})
+
+describe('work, once done', () => {
+  const later = (item: ThreadItem, seconds: number): ThreadItem => ({
+    ...item,
+    createdAt: new Date(Date.parse(item.createdAt) + seconds * 1000).toISOString(),
+  })
+
+  it('folds a finished turn under how long it worked, all but its last message', () => {
+    const thread = [
+      items.you('Why is it slow?'),
+      items.tool(),
+      later(items.tool({ title: 'Run tests' }), 30),
+      later(items.says('The index is missing.'), 125),
+    ]
+    const [, turn] = blocksOf(source(thread), new Map(), at)
+    expect(turn).toMatchObject({ kind: 'turn', folded: 2, took: '2m 5s' })
+    // While it runs, nothing folds; a turn that only spoke has nothing to fold.
+    expect(blocksOf(source(thread, true), new Map(), at)[1]).toMatchObject({ folded: 0 })
+    expect(blocksOf(source([items.says('Hi.')]), new Map(), at)[0]).toMatchObject({ folded: 0, took: '0s' })
+    expect(blocksOf(source([items.tool(), items.thinks('Hm')]), new Map(), at)[0]).toMatchObject({ folded: 2 })
+  })
+
+  it("folds all of a turn a step's result ends, and stands the result under it; a task's card is a block of its own", () => {
+    const result = later(items.step({ step: 'implement', summary: 'Added the retry.' }), 90)
+    const thread = [items.tool(), items.says('Done.'), result, items.card(card())]
+    const blocks = blocksOf(source(thread), new Map(), at)
+    expect(blocks.map((block) => block.kind)).toEqual(['turn', 'step', 'card'])
+    expect(blocks[0]).toMatchObject({ folded: 2, took: '1m 30s' })
+    expect(blocks[1]).toMatchObject({ result: { step: 'implement', summary: 'Added the retry.' } })
+    expect(blocks[2]).toMatchObject({ card: { slug: 'add-a-retry' } })
   })
 })
 

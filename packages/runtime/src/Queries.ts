@@ -309,6 +309,8 @@ export class Queries extends Context.Service<
             step: string | null
             waiting: number
             review: string | null
+            lead: string | null
+            firstSession: string | null
           }>`
             SELECT t.id AS thread_id, k.title, k.slug, k.state, w.branch,
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
@@ -316,7 +318,9 @@ export class Queries extends Context.Service<
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state IN ('admitted', 'running') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') AS waiting,
-              (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review
+              (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
+              (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
+              (SELECT min(started_at) FROM provider_sessions WHERE thread_id = t.id) AS first_session
             FROM tasks k
             JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             LEFT JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
@@ -340,6 +344,15 @@ export class Queries extends Context.Service<
           })()
           const parameters = parse(task.parameters)
           const steps = field(parameters, 'steps')
+          const planned = (Array.isArray(steps) ? steps : []).map((step) => {
+            const model = field(step, 'model')
+            return {
+              key: text(step, 'key') === 'review' ? ('review' as const) : ('implement' as const),
+              agentId: text(step, 'agentId'),
+              model: typeof model === 'string' ? model : null,
+              skipped: field(step, 'skipped') === true,
+            }
+          })
           return {
             id: row.id,
             sequence: row.sequence,
@@ -357,22 +370,15 @@ export class Queries extends Context.Service<
                   ? null
                   : {
                       id: task.planId,
-                      steps: (Array.isArray(steps) ? steps : []).map((step) => {
-                        const model = field(step, 'model')
-                        return {
-                          key: text(step, 'key') === 'review' ? 'review' : 'implement',
-                          agentId: text(step, 'agentId'),
-                          model: typeof model === 'string' ? model : null,
-                          skipped: field(step, 'skipped') === true,
-                        }
-                      }),
+                      steps: planned,
                       startsAt: task.planState === 'proposed' ? task.startsAt : null,
                       reason: text(parameters, 'reason') || null,
                     },
               step: task.step,
               summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
+              lead: task.lead ?? (planned.find((step) => step.key === 'implement')?.agentId || null),
               branch: task.branch,
-              startedAt: task.runAt,
+              startedAt: task.runAt ?? task.firstSession,
             },
           } satisfies ThreadItem
         })

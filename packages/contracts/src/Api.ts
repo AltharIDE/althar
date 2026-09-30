@@ -217,6 +217,8 @@ export const TaskItem = Schema.Struct({
     step: Schema.NullOr(Schema.String),
     /** The latest summary the lead reported. */
     summary: Schema.NullOr(Schema.String),
+    /** The agent that leads it, or last did: the plan's lead until one starts. */
+    lead: Schema.NullOr(Schema.String),
     branch: Schema.NullOr(Schema.String),
     startedAt: Schema.NullOr(Schema.String),
   }),

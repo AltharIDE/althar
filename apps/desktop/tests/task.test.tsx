@@ -44,6 +44,9 @@ describe('a task', () => {
     expect(screen.getByText('charrette/add-a-retry')).toBeTruthy()
     expect(screen.getByText('Idle')).toBeTruthy()
     expect(screen.getByText('it')).toBeTruthy()
+    // The turn is over: what it did before its last message is folded.
+    expect(screen.queryByText('src/checkout.ts')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /^Worked for 0s/ }))
     expect(screen.getByText('src/checkout.ts')).toBeTruthy()
     expect(screen.getByText('Write the test')).toBeTruthy()
     expect(screen.getByText('Context is filling up')).toBeTruthy()
@@ -175,6 +178,7 @@ describe('a task', () => {
       getThread: vi.fn(async () => thread({ items: [items.tool({ title: 'python3', toolKind: 'execute', command: script })] })),
     })
     withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: /^Worked for/ }))
     await userEvent.click(await screen.findByText("python3 - <<'EOF' …"))
     expect(await screen.findByText("print('hi')")).toBeTruthy()
   })
@@ -193,10 +197,47 @@ describe('a task', () => {
       ),
     })
     withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: /^Worked for/ }))
     await userEvent.click(await screen.findByText(pipeline))
     expect(await screen.findByRole('figure')).toBeTruthy()
     // A short one has nothing more to show, so its row doesn't open.
     expect(screen.getByText(short).closest('button')).toBeNull()
+  })
+
+  it("folds the lead's work under what its step reported, and shows what the review found", async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [
+            items.tool({ title: 'Edit checkout.ts', toolKind: 'edit' }),
+            items.step({ summary: 'Added the retry, and a test.' }),
+            items.step({
+              step: 'review',
+              verdict: 'changes_requested',
+              summary: 'One thing to fix.',
+              agentId: 'codex',
+              findings: [
+                { severity: 'major', file: 'src/checkout.ts', line: 12, claim: 'The retry never stops.' },
+                { severity: 'nit', file: 'README.md', line: null, claim: 'A typo.' },
+                { severity: 'minor', file: null, line: null, claim: 'Name it better.' },
+              ],
+            }),
+            items.step({ step: 'settle', summary: 'Capped the retries at three.' }),
+            items.step({ step: 'review', round: 1, verdict: 'pass', summary: '', agentId: 'mystery' }),
+          ],
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Added the retry, and a test.')).toBeTruthy()
+    expect(screen.queryByText('checkout.ts')).toBeNull()
+    expect(screen.getByText('Capped the retries at three.')).toBeTruthy()
+    expect(screen.getByText('One thing to fix.')).toBeTruthy()
+    expect(screen.getByText(/round 2/)).toBeTruthy()
+    await userEvent.click(screen.getAllByRole('button', { name: /findings|Details/i })[0]!)
+    expect(await screen.findByText('The retry never stops.')).toBeTruthy()
+    expect(screen.getByText('src/checkout.ts:12')).toBeTruthy()
+    expect(screen.getByText('README.md')).toBeTruthy()
   })
 
   it('shows earlier items when asked', async () => {
