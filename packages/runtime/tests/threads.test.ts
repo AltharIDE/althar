@@ -5,6 +5,7 @@ import type { SessionEvent } from '@charrette/provider-adapters'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Exit, Stream } from 'effect'
+import { SqlClient } from 'effect/sql'
 
 import { Agents, WebCrypto } from '../src/Config'
 import { UnknownAgent } from '../src/errors'
@@ -70,6 +71,36 @@ describe('the thread recorder', () => {
       assert.deepStrictEqual(tool?.content.locations, [{ path: '/w/tests/a.test.ts', line: 4 }])
       // An input that arrives in an update is kept, as Claude Code sends it.
       assert.deepStrictEqual(tool?.content.rawInput, { command: 'bun test a' })
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live("keeps a tool call's command and paths, not what it writes or what came back, and says what it left out", () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const record = recorder(where)
+      yield* record.record({ _tag: 'ToolCall', toolCallId: 'write', title: 'Write .env', kind: 'edit', status: 'pending' })
+      yield* record.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'write',
+        rawInput: { file_path: '/w/.env', content: 'API_KEY=sk-canary-123' },
+      })
+      yield* record.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'write',
+        status: 'completed',
+        rawOutput: { written: 'API_KEY=sk-canary-123' },
+      })
+      const tool = (yield* items(where.threadId)).find((item) => item.kind === 'tool_call')
+      assert.deepStrictEqual(tool?.content, {
+        title: 'Write .env',
+        kind: 'edit',
+        status: 'completed',
+        rawInput: { file_path: '/w/.env' },
+        cut: ['content', 'output'],
+      })
+      const sql = yield* SqlClient.SqlClient
+      const stored = yield* sql<{ content: string }>`SELECT content FROM thread_items WHERE thread_id = ${where.threadId}`
+      assert.isFalse(stored.some((row) => row.content.includes('sk-canary')))
     }).pipe(Effect.provide(runtime())),
   )
 

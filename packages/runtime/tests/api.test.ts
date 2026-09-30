@@ -166,6 +166,26 @@ describe('the API', () => {
     ),
   )
 
+  it.live('hears a change as soon as it is written, not at the next poll', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const { cursor } = yield* client.ListProjects()
+        const heard = yield* Effect.forkChild(
+          Stream.runHead(Stream.filter(client.Watch({ since: cursor }), (event) => event._tag === 'Changed')),
+        )
+        // Let the watch reach its wait, so only a wake-up can bring the change in time.
+        yield* Effect.sleep('100 millis')
+        const started = Date.now()
+        yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Quick' })
+        yield* Fiber.join(heard)
+        // The fallback read is a second away; the signal brings it far sooner.
+        assert.isBelow(Date.now() - started, 500)
+      }),
+    ),
+  )
+
   it.live('asks the person, and takes their answer', () =>
     Effect.scoped(
       Effect.gen(function* () {

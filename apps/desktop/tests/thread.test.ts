@@ -166,7 +166,12 @@ describe('tool calls', () => {
     expect(targetOf(tool({ title: 'Write hello.txt', toolKind: 'edit' }), '/w')).toBe('hello.txt')
     expect(targetOf(tool({ title: 'mcp__linear__search', toolKind: 'other' }), '/w')).toBe('mcp__linear__search')
     expect(targetOf(tool({ title: 'format sql', toolKind: 'other' }), '/w')).toBe('format sql')
+    expect(targetOf(tool({ title: 'Use format_sql', toolKind: 'other' }), '/w')).toBe('format_sql')
     // A command's title is the command: none of it is a verb to take off.
     expect(targetOf(tool({ title: 'grep -n "touch" src/hall.css', toolKind: 'execute' }), '/w')).toBe('grep -n "touch" src/hall.css')
+    // Codex's titles start with a verb of their own, which the row's verb says already.
+    expect(targetOf(tool({ title: 'Run command', toolKind: 'execute' }), '/w')).toBe('command')
+    expect(targetOf(tool({ title: 'Read file', toolKind: 'read' }), '/w')).toBe('file')
+    expect(targetOf(tool({ title: 'List files', toolKind: 'search' }), '/w')).toBe('files')
   })
 })

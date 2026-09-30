@@ -179,6 +179,26 @@ describe('a task', () => {
     expect(await screen.findByText("print('hi')")).toBeTruthy()
   })
 
+  it('opens a long one-line command too, since its row clips it', async () => {
+    const pipeline = `python3 -c "import json,sys; print(json.load(sys.stdin)['name'])" < package.json | tr a-z A-Z | tee out.txt`
+    const short = 'bun test'
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [
+            items.tool({ title: 'python3', toolKind: 'execute', command: pipeline }),
+            items.tool({ title: 'bun', toolKind: 'execute', command: short }),
+          ],
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByText(pipeline))
+    expect(await screen.findByRole('figure')).toBeTruthy()
+    // A short one has nothing more to show, so its row doesn't open.
+    expect(screen.getByText(short).closest('button')).toBeNull()
+  })
+
   it('shows earlier items when asked', async () => {
     const newest = thread({ items: [items.says('The newest.', 'claude-code', 'newest')], earlier: true })
     const { client } = fakeClient({

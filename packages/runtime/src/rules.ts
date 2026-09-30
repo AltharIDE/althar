@@ -62,6 +62,43 @@ const quoteWord = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${
 
 const PATH_KEYS = ['file_path', 'filePath', 'path', 'notebook_path', 'old_path', 'new_path', 'destination', 'source', 'target']
 
+/** How much of a command the store keeps. The rules read all of it, in memory. */
+const COMMAND_KEPT = 4_000
+
+/**
+ * What of a tool call's input the store keeps (docs/architecture/07: no file
+ * contents, and so no secrets, in the record): the command, the paths, and
+ * which files a patch touches, without what it writes. What is left out is
+ * named, so the record says it was cut. The rules decide on the whole input;
+ * this is only what is written down.
+ */
+export const essentials = (
+  rawInput: unknown,
+): { readonly input: Readonly<Record<string, unknown>>; readonly cut: ReadonlyArray<string> } => {
+  if (typeof rawInput !== 'object' || rawInput === null || Array.isArray(rawInput))
+    return { input: {}, cut: rawInput === undefined || rawInput === null ? [] : ['input'] }
+  const input: Record<string, unknown> = {}
+  const cut: Array<string> = []
+  for (const [key, value] of Object.entries(rawInput)) {
+    if (key === 'command' || key === 'cmd') {
+      const whole = typeof value === 'string' ? value : Array.isArray(value) ? value : undefined
+      if (typeof whole === 'string' && whole.length > COMMAND_KEPT) {
+        input[key] = `${whole.slice(0, COMMAND_KEPT)}…`
+        cut.push(`${key} after ${COMMAND_KEPT} characters`)
+      } else if (whole !== undefined) input[key] = whole
+      else cut.push(key)
+    } else if (PATH_KEYS.includes(key) && typeof value === 'string') input[key] = value
+    else if (key === 'changes' && typeof value === 'object' && value !== null) {
+      // A patch's files, without their contents.
+      input.changes = Array.isArray(value)
+        ? value.map((change) => ({ path: field(change, 'path') }))
+        : Object.fromEntries(Object.keys(value).map((path) => [path, {}]))
+      cut.push('changes (contents)')
+    } else cut.push(key)
+  }
+  return { input, cut }
+}
+
 /** Every path an action names: the agent's locations, path fields of its raw input, and the files of a patch (Codex's `changes`). */
 export const pathsOf = (request: PermissionRequest): ReadonlyArray<string> => {
   const changes = field(request.rawInput, 'changes')

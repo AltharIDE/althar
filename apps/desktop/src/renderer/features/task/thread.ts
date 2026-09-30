@@ -117,18 +117,38 @@ type NoticeContent = Extract<ThreadItem, { kind: 'notice' }>['content']
 const within = (path: string, worktree: string | null) =>
   worktree !== null && path.startsWith(`${worktree}/`) ? path.slice(worktree.length + 1) : path
 
+/** Words an agent's title may start with that say what it does, which the row's own verb says already. */
+const TITLE_VERBS = new Set([
+  'read',
+  'write',
+  'edit',
+  'create',
+  'delete',
+  'move',
+  'list',
+  'search',
+  'find',
+  'fetch',
+  'run',
+  'open',
+  'call',
+  'use',
+])
+
 /**
  * What a tool call acts on: the file it touches or the command it runs when
- * it says, and otherwise its title. A command's title is the command itself;
- * any other title that starts with a verb of its own ("Write hello.txt")
- * gives the rest, since the verb comes from the call's kind.
+ * it says, and otherwise its title. A title that starts with a verb of its
+ * own ("Write hello.txt", Codex's "Run command") gives the rest, since the
+ * row's verb comes from the call's kind. Any other title, such as a command
+ * Claude gives as its title ("grep -n …"), is kept whole.
  */
 export const targetOf = (content: ToolContent, worktree: string | null): string => {
   const path = content.locations[0]?.path
   if (path !== undefined) return within(path, worktree)
   if (content.command !== null) return content.command
   const space = content.title.indexOf(' ')
-  return space > 0 && content.toolKind !== 'other' && content.toolKind !== 'execute' ? content.title.slice(space + 1) : content.title
+  const first = space > 0 ? content.title.slice(0, space).toLowerCase() : ''
+  return TITLE_VERBS.has(first) ? content.title.slice(space + 1) : content.title
 }
 
 /** Text an agent is still writing, by the item it will be. */

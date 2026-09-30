@@ -20,7 +20,7 @@ import { currentBranch } from './git'
 import { Instance } from './Instance'
 import { Live } from './Live'
 import { change, fact, timestamp } from './records'
-import { commandOf, decide, pathsOf, type RuleContext } from './rules'
+import { commandOf, decide, essentials, pathsOf, type RuleContext } from './rules'
 
 /*
  * Permission requests, answered from the project rules (ADR-007). Every
@@ -186,6 +186,7 @@ export class Permissions extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const requestId = yield* newId(Ids.permissionRequest)
           const digest = actionDigest(request)
+          const kept = essentials(request.rawInput)
           yield* sql.withTransaction(
             Effect.gen(function* () {
               yield* sql`INSERT INTO permission_requests ${sql.insert({
@@ -195,7 +196,8 @@ export class Permissions extends Context.Service<
                 toolCallId: request.toolCallId,
                 toolKind: request.kind,
                 title: request.title,
-                rawInput: JSON.stringify(request.rawInput ?? {}),
+                // The rules read the whole input; the record keeps its command and paths (07), and names what it left out.
+                rawInput: JSON.stringify(kept.cut.length === 0 ? kept.input : { ...kept.input, _cut: kept.cut }),
                 options: JSON.stringify(request.options),
                 actionDigest: digest,
                 state: 'open',

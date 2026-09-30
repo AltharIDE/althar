@@ -1,4 +1,5 @@
 import { API_VERSION, Api, ApiError, type AgentStatus, type PortLike, serverProtocol, type WatchEvent } from '@charrette/contracts'
+import { Ledger } from '@charrette/persistence-sqlite'
 import { signInStatus, type SignInStatus } from '@charrette/provider-adapters'
 import { Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
@@ -22,8 +23,8 @@ import { expected, words } from './words'
  * the person can't put right goes to the log whole.
  */
 
-/** How often the change feed is read for what a client should read again. */
-const FEED_INTERVAL = '50 millis'
+/** How often the change feed is read when nothing says it grew: a fallback, not the way changes arrive. */
+const FEED_FALLBACK = '1 second'
 
 /** How long an agent's sign-in is taken as it was last checked. */
 const SIGN_IN_TTL = Duration.minutes(1)
@@ -40,6 +41,7 @@ export const handlers = Api.toLayer(
     const queries = yield* Queries
     const folders = yield* Folders
     const live = yield* Live
+    const ledger = yield* Ledger
     const agents = yield* Agents
     const config = yield* RuntimeConfig
     const envelope = (type: string, payload: unknown, commandId: string) =>
@@ -90,22 +92,30 @@ export const handlers = Api.toLayer(
         return { id: entry.definition.id, name: entry.definition.name, signIn: status, login: entry.definition.signIn.login }
       })
 
-    /* Changes from the store's feed after `since`, or from now: the window reads again what shows them. */
+    /*
+     * Changes from the store's feed after `since`, or from now: the window
+     * reads again what shows them. It reads when the ledger says the feed grew,
+     * so it is quick when something happens and idle when nothing does, and
+     * once a second in case a signal is ever missed.
+     */
     const changes = (since: number | undefined): Stream.Stream<WatchEvent, ApiError> =>
       Stream.unwrap(
         api(
-          Effect.map(since === undefined ? queries.cursor : Effect.succeed(since), (start) =>
-            Stream.paginate(start, (cursor) =>
+          Effect.gen(function* () {
+            // Listening starts before the first read, so nothing added in between is missed.
+            const grown = yield* ledger.listen
+            const start = since ?? (yield* queries.cursor)
+            return Stream.paginate(start, (cursor) =>
               api(
                 Effect.gen(function* () {
                   const batch = yield* queries.changesSince(cursor, 500)
-                  if (batch.length === 0) yield* Effect.sleep(FEED_INTERVAL)
+                  if (batch.length === 0) yield* Effect.raceFirst(grown, Effect.sleep(FEED_FALLBACK))
                   const events: ReadonlyArray<WatchEvent> = batch.map((change) => ({ _tag: 'Changed', ...change }))
                   return [events, Option.some(batch.at(-1)?.cursor ?? cursor)] as const
                 }),
               ),
-            ),
-          ),
+            )
+          }),
         ),
       )
 

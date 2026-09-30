@@ -41,6 +41,9 @@ import type { TaskModel } from './useTask'
  * thread. Everything drawn here is the kit's; this view only arranges it.
  */
 
+/** How long a command can be before its row, at the thread's width, clips it. */
+const LONG_COMMAND = 72
+
 export const text = {
   thread: 'Thread',
   noLead: 'No lead',
@@ -94,8 +97,10 @@ function PartView({ part }: { part: Part }) {
           state={part.state}
           {...(part.command === null ? {} : { copy: part.command })}
         >
-          {/* A command over several lines shows its first in the row, and the rest when the row opens. */}
-          {part.command?.includes('\n') === true ? <CodeBlock code={part.command} lang={text.shell} /> : undefined}
+          {/* A command too long for its row, or over several lines, opens to show all of it. */}
+          {part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND) ? (
+            <CodeBlock code={part.command} lang={text.shell} />
+          ) : undefined}
         </Tool>
       )
     case 'plan':

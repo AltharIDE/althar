@@ -1,5 +1,5 @@
 import { ActorId, AggregateType, CommandId, Ids, newId, now, ProjectId, RecordEventId, Timestamp } from '@charrette/domain'
-import { Context, Crypto, Effect, Layer, Schema } from 'effect'
+import { Context, Crypto, Effect, Layer, PubSub, Schema, type Scope } from 'effect'
 import { SqlClient, type SqlError, SqlSchema } from 'effect/sql'
 
 /** A fact to add to the operational record. */
@@ -62,6 +62,14 @@ export class Ledger extends Context.Service<
     notify(change: ChangeInput): Effect.Effect<void, SqlError.SqlError | Schema.SchemaError>
     /** Changes after `cursor`, oldest first, at most `limit` of them. A client resumes from the last cursor it saw. */
     changesSince(cursor: number, limit: number): Effect.Effect<ReadonlyArray<Change>, SqlError.SqlError | Schema.SchemaError>
+    /**
+     * Listens for the feed to grow, from now until the scope closes: the
+     * effect it gives waits until something is added, or returns at once if
+     * something was since it last returned. A reader woken by a write inside a
+     * transaction reads after the commit, since the store's one connection is
+     * held by the transaction until then.
+     */
+    readonly listen: Effect.Effect<Effect.Effect<void>, never, Scope.Scope>
   }
 >()('@charrette/persistence-sqlite/Ledger') {
   static readonly layer: Layer.Layer<Ledger, never, SqlClient.SqlClient | Crypto.Crypto> = Layer.effect(
@@ -69,6 +77,9 @@ export class Ledger extends Context.Service<
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const crypto = yield* Crypto.Crypto
+      // Each listener needs only to know something was added since it last looked.
+      const grew = yield* PubSub.sliding<void>(1)
+      const signal = PubSub.publish(grew, undefined)
 
       const record = Effect.fn('Ledger.record')(function* (input: RecordEventInput) {
         const event = yield* Schema.decodeUnknownEffect(RecordEventInput)(input)
@@ -96,6 +107,7 @@ export class Ledger extends Context.Service<
           aggregateRevision: event.aggregateRevision,
           changedAt: occurredAt,
         })}`
+        yield* signal
         return yield* Schema.decodeUnknownEffect(RecordedEvent)({ sequence: row?.sequence, id, occurredAt })
       }, sql.withTransaction)
 
@@ -108,6 +120,7 @@ export class Ledger extends Context.Service<
           aggregateRevision: change.aggregateRevision,
           changedAt: yield* now,
         })}`
+        yield* signal
       })
 
       const findChanges = SqlSchema.findAll({
@@ -120,7 +133,9 @@ export class Ledger extends Context.Service<
         return yield* findChanges({ cursor, limit: Math.max(1, Math.min(limit, 1000)) })
       })
 
-      return Ledger.of({ record, notify, changesSince })
+      const listen = Effect.map(PubSub.subscribe(grew), (subscription) => Effect.asVoid(PubSub.take(subscription)))
+
+      return Ledger.of({ record, notify, changesSince, listen })
     }),
   )
 }
