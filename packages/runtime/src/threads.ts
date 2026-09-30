@@ -5,6 +5,7 @@ import { Clock, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { change, timestamp } from './records'
+import { essentials } from './rules'
 
 /*
  * The thread's items: what the person reads (docs/architecture/01). An
@@ -74,6 +75,10 @@ const toolItem = (sessionId: string, toolCallId: string) =>
 const WRITE_EVERY_CHARACTERS = 2_000
 const WRITE_EVERY_MILLIS = 2_000
 
+/** What was left out of a stored tool call, as it says. */
+const cutOf = (content: Record<string, unknown> | undefined): ReadonlyArray<string> =>
+  Array.isArray(content?.cut) ? content.cut.filter((entry): entry is string => typeof entry === 'string') : []
+
 const defined = (entries: Record<string, unknown>) => Object.fromEntries(Object.entries(entries).filter(([, value]) => value !== undefined))
 
 /**
@@ -121,32 +126,25 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       case 'AgentThought':
         return gather('agent_thought', event.text)
       case 'ToolCall':
-        return Effect.gen(function* () {
-          yield* flush
-          const content = defined({
-            title: event.title,
-            kind: event.kind,
-            status: event.status,
-            rawInput: event.rawInput,
-            locations: event.locations,
-          })
-          const existing = yield* toolItem(place.sessionId, event.toolCallId)
-          if (existing === undefined) yield* addItem(place, 'tool_call', content, { toolCallId: event.toolCallId })
-          else yield* updateItem(place.projectId, existing.id, { ...existing.content, ...content })
-        })
       case 'ToolCallUpdate':
         return Effect.gen(function* () {
           yield* flush
-          const content = defined({ title: event.title, status: event.status, rawOutput: event.rawOutput, locations: event.locations })
+          // The call's command and paths are kept, not what it writes or what came back (docs/architecture/07).
+          const kept = event.rawInput === undefined ? undefined : essentials(event.rawInput)
+          const output = event._tag === 'ToolCallUpdate' && event.rawOutput !== undefined
+          const content = defined({
+            title: event.title,
+            kind: event._tag === 'ToolCall' ? event.kind : undefined,
+            status: event.status,
+            rawInput: kept?.input,
+            locations: event.locations,
+          })
           const existing = yield* toolItem(place.sessionId, event.toolCallId)
+          const cut = [...new Set([...cutOf(existing?.content), ...(kept?.cut ?? []), ...(output ? ['output'] : [])])]
+          const marked = cut.length === 0 ? content : { ...content, cut }
           if (existing === undefined)
-            yield* addItem(
-              place,
-              'tool_call',
-              { title: '', kind: 'other', status: 'pending', ...content },
-              { toolCallId: event.toolCallId },
-            )
-          else yield* updateItem(place.projectId, existing.id, { ...existing.content, ...content })
+            yield* addItem(place, 'tool_call', { title: '', kind: 'other', status: 'pending', ...marked }, { toolCallId: event.toolCallId })
+          else yield* updateItem(place.projectId, existing.id, { ...existing.content, ...marked })
         })
       case 'Plan':
         return Effect.gen(function* () {

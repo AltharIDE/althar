@@ -170,3 +170,19 @@ export const changed = (
   projectId,
   threadId,
 })
+
+/** Text an agent is still writing, as the runtime streams it. */
+export const streamed = (
+  itemId: string,
+  text: string,
+  threadId = 'th1',
+  kind: 'agent_message' | 'agent_thought' = 'agent_message',
+  agentId = 'claude-code',
+): WatchEvent => ({
+  _tag: 'Streaming',
+  threadId,
+  itemId,
+  kind,
+  agentId,
+  text,
+})

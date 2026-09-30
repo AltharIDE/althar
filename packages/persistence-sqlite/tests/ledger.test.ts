@@ -26,6 +26,32 @@ describe('Ledger', () => {
     }).pipe(Effect.provide(Env)),
   )
 
+  it.live('wakes a listener when the feed grows, and only then', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const ledger = yield* Ledger
+        const { actorId, projectId } = yield* seed
+        const grown = yield* ledger.listen
+        // Nothing yet: the wait doesn't return.
+        assert.isTrue(Exit.isFailure(yield* Effect.exit(Effect.timeout(grown, '10 millis'))))
+        yield* ledger.notify({ projectId, aggregateType: 'thread_item', aggregateId: 'item_1', aggregateRevision: 1 })
+        yield* grown
+        yield* ledger.record({
+          aggregateType: 'project',
+          aggregateId: projectId,
+          aggregateRevision: 1,
+          type: 'project.renamed',
+          payload: {},
+          actorId,
+        })
+        yield* ledger.notify({ projectId, aggregateType: 'thread_item', aggregateId: 'item_1', aggregateRevision: 2 })
+        // Several changes since it last looked wake it once, not once each.
+        yield* grown
+        assert.isTrue(Exit.isFailure(yield* Effect.exit(Effect.timeout(grown, '10 millis'))))
+      }),
+    ).pipe(Effect.provide(Env)),
+  )
+
   it.effect('records a fact and tells clients the aggregate changed', () =>
     Effect.gen(function* () {
       const ledger = yield* Ledger

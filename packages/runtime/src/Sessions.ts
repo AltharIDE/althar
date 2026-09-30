@@ -115,7 +115,7 @@ export const errorClassOf = (
 }
 
 /** How often a message's text, as far as it has come, goes to watching clients. */
-const STREAM_EVERY = 80
+const STREAM_EVERY = 50
 
 export class Sessions extends Context.Service<
   Sessions,
@@ -306,7 +306,14 @@ export class Sessions extends Context.Service<
             const open = items.current()
             return open === undefined
               ? Effect.void
-              : live.publish({ _tag: 'Streaming', threadId: thread.threadId, itemId: open.id, kind: open.kind, text: open.text })
+              : live.publish({
+                  _tag: 'Streaming',
+                  threadId: thread.threadId,
+                  itemId: open.id,
+                  kind: open.kind,
+                  agentId: running.entry.definition.id,
+                  text: open.text,
+                })
           })
           const stream = Effect.suspend(() => {
             const wait = STREAM_EVERY - (Date.now() - streaming.sentAt)

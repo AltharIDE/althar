@@ -1,7 +1,16 @@
 import { Delivery, PlanState, ToolKind, ToolState } from '@charrette/ui'
 import { describe, expect, it } from 'vitest'
 
-import { blocksOf, planStateOf, targetOf, toolKindOf, toolStateOf, verbFor, verbs } from '../src/renderer/features/task/thread'
+import {
+  blocksOf,
+  planStateOf,
+  type Streamed,
+  targetOf,
+  toolKindOf,
+  toolStateOf,
+  verbFor,
+  verbs,
+} from '../src/renderer/features/task/thread'
 import { items, snapshot } from './fixtures'
 
 const at = () => 'just now'
@@ -56,12 +65,27 @@ describe('a thread as blocks', () => {
 
   it('shows text still streaming in place of what the store has, until the store catches up', () => {
     const message = items.says('Hel')
-    const shown = (live: string) => {
-      const [turn] = blocksOf(snapshot({ items: [message] }), new Map([[message.id, live]]), at)
+    const live = (text: string): Streamed => ({ kind: 'agent_message', agentId: 'claude-code', text, at: '2026-09-30T12:00:00.000Z' })
+    const shown = (text: string) => {
+      const [turn] = blocksOf(snapshot({ items: [message] }), new Map([[message.id, live(text)]]), at)
       return turn?.kind === 'turn' && turn.parts[0]?.kind === 'message' ? turn.parts[0].text : undefined
     }
     expect(shown('Hello')).toBe('Hello')
     expect(shown('H')).toBe('Hel')
+  })
+
+  it('shows a message from its first words, before the window has read it, under the agent writing it', () => {
+    const thread = snapshot({ items: [items.you('Go'), items.says('Looking.')] })
+    const streaming = new Map<string, Streamed>([
+      ['unread', { kind: 'agent_message', agentId: 'claude-code', text: 'Found the call', at: '2026-09-30T12:00:00.000Z' }],
+      ['thinking', { kind: 'agent_thought', agentId: 'codex', text: 'Hmm', at: '2026-09-30T12:00:01.000Z' }],
+    ])
+    const blocks = blocksOf(thread, streaming, at)
+    expect(blocks.map((block) => (block.kind === 'turn' ? [block.agentId, block.parts.map((part) => part.kind)] : block.kind))).toEqual([
+      'you',
+      ['claude-code', ['message', 'message']],
+      ['codex', ['thought']],
+    ])
   })
 
   it('says where a message stands with the lead', () => {
@@ -142,5 +166,12 @@ describe('tool calls', () => {
     expect(targetOf(tool({ title: 'Write hello.txt', toolKind: 'edit' }), '/w')).toBe('hello.txt')
     expect(targetOf(tool({ title: 'mcp__linear__search', toolKind: 'other' }), '/w')).toBe('mcp__linear__search')
     expect(targetOf(tool({ title: 'format sql', toolKind: 'other' }), '/w')).toBe('format sql')
+    expect(targetOf(tool({ title: 'Use format_sql', toolKind: 'other' }), '/w')).toBe('format_sql')
+    // A command's title is the command: none of it is a verb to take off.
+    expect(targetOf(tool({ title: 'grep -n "touch" src/hall.css', toolKind: 'execute' }), '/w')).toBe('grep -n "touch" src/hall.css')
+    // Codex's titles start with a verb of their own, which the row's verb says already.
+    expect(targetOf(tool({ title: 'Run command', toolKind: 'execute' }), '/w')).toBe('command')
+    expect(targetOf(tool({ title: 'Read file', toolKind: 'read' }), '/w')).toBe('file')
+    expect(targetOf(tool({ title: 'List files', toolKind: 'search' }), '/w')).toBe('files')
   })
 })

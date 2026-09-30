@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@charrette/contracts'
 
 import { messageOf } from '../../data/client'
+import type { Streamed } from './thread'
 import { useServices, useWatch } from '../../data/services'
 
 /*
@@ -16,13 +17,13 @@ import { useServices, useWatch } from '../../data/services'
  */
 
 /** How long changes are gathered before they are read. */
-const GATHER = 60
+const GATHER = 25
 
 export interface TaskModel {
   /** The thread's head and the items read so far, oldest first. */
   readonly snapshot: ThreadSnapshot | null
   /** Text still streaming, by thread item. */
-  readonly streaming: ReadonlyMap<string, string>
+  readonly streaming: ReadonlyMap<string, Streamed>
   /** Agents that could lead: signed in, or that don't say. */
   readonly agents: ReadonlyArray<AgentStatus>
   readonly error: string | null
@@ -50,11 +51,11 @@ export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: Readonl
 }
 
 /** Streamed text the store now holds in full needs no streamed copy. */
-const caughtUp = (streaming: ReadonlyMap<string, string>, items: ReadonlyArray<ThreadItem>): ReadonlyMap<string, string> => {
+const caughtUp = (streaming: ReadonlyMap<string, Streamed>, items: ReadonlyArray<ThreadItem>): ReadonlyMap<string, Streamed> => {
   const kept = new Map(streaming)
   for (const item of items) {
     const live = kept.get(item.id)
-    if (live !== undefined && 'text' in item.content && item.content.text.length >= live.length) kept.delete(item.id)
+    if (live !== undefined && 'text' in item.content && item.content.text.length >= live.text.length) kept.delete(item.id)
   }
   return kept.size === streaming.size ? streaming : kept
 }
@@ -62,7 +63,7 @@ const caughtUp = (streaming: ReadonlyMap<string, string>, items: ReadonlyArray<T
 export const useTask = (threadId: string): TaskModel => {
   const { client } = useServices()
   const [snapshot, setSnapshot] = useState<ThreadSnapshot | null>(null)
-  const [streaming, setStreaming] = useState<ReadonlyMap<string, string>>(new Map())
+  const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
   const [since, setSince] = useState<number | null>(null)
   const [agents, setAgents] = useState<ReadonlyArray<AgentStatus>>([])
   const [error, setError] = useState<string | null>(null)
@@ -110,7 +111,15 @@ export const useTask = (threadId: string): TaskModel => {
 
   useWatch((event) => {
     if (event._tag === 'Streaming') {
-      if (event.threadId === threadId) setStreaming((current) => new Map(current).set(event.itemId, event.text))
+      if (event.threadId !== threadId) return
+      setStreaming((current) =>
+        new Map(current).set(event.itemId, {
+          kind: event.kind,
+          agentId: event.agentId,
+          text: event.text,
+          at: current.get(event.itemId)?.at ?? new Date().toISOString(),
+        }),
+      )
       return
     }
     if (event.threadId !== threadId) return

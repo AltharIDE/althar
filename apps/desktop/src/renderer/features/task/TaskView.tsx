@@ -4,6 +4,7 @@ import type { AttentionRequest, ThreadSnapshot } from '@charrette/contracts'
 import {
   BackCrumb,
   Button,
+  CodeBlock,
   Composer,
   Decision,
   LinkButton,
@@ -40,6 +41,9 @@ import type { TaskModel } from './useTask'
  * thread. Everything drawn here is the kit's; this view only arranges it.
  */
 
+/** How long a command can be before its row, at the thread's width, clips it. */
+const LONG_COMMAND = 72
+
 export const text = {
   thread: 'Thread',
   noLead: 'No lead',
@@ -58,6 +62,7 @@ export const text = {
   thought: 'Thought',
   dismiss: 'Dismiss',
   earlier: 'Earlier in this task',
+  shell: 'Shell',
   showEarlier: 'Show',
   loadingEarlier: 'Showing…',
 }
@@ -84,7 +89,20 @@ function PartView({ part }: { part: Part }) {
         </Reasoning>
       )
     case 'tool':
-      return <Tool kind={part.toolKind} verb={part.verb} target={part.target} state={part.state} />
+      return (
+        <Tool
+          kind={part.toolKind}
+          verb={part.verb}
+          target={part.target}
+          state={part.state}
+          {...(part.command === null ? {} : { copy: part.command })}
+        >
+          {/* A command too long for its row, or over several lines, opens to show all of it. */}
+          {part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND) ? (
+            <CodeBlock code={part.command} lang={text.shell} />
+          ) : undefined}
+        </Tool>
+      )
     case 'plan':
       return <Plan steps={part.steps} />
     case 'notice':

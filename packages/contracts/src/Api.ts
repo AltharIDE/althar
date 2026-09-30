@@ -221,6 +221,9 @@ export const WatchEvent = Schema.Union([
     _tag: Schema.Literal('Streaming'),
     threadId: Schema.String,
     itemId: Schema.String,
+    /** What it is and who is saying it, so a client can show it before it has read the item. */
+    kind: Schema.Literals(['agent_message', 'agent_thought']),
+    agentId: Schema.String,
     text: Schema.String,
   }),
 ])

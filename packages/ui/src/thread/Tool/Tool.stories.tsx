@@ -100,6 +100,21 @@ export const Declined: Story = {
   args: { kind: ToolKind.Run, verb: 'Run', target: 'psql $STAGING_URL -f backfill.sql', state: ToolState.Declined, meta: undefined },
 }
 
+/** A command written over several lines, such as a script fed in with a heredoc: the row shows its first line and says there is more. */
+export const LongCommand: Story = {
+  args: {
+    kind: ToolKind.Run,
+    verb: 'Ran',
+    target:
+      "python3 - <<'EOF'\nfrom pathlib import Path\np = Path('src/charges/limit.ts')\np.write_text(p.read_text().replace('100', '120'))\nEOF",
+    meta: undefined,
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText("python3 - <<'EOF' …")).toBeInTheDocument()
+  },
+}
+
 /** Stopped with the turn, part way through. */
 export const Cancelled: Story = {
   args: { kind: ToolKind.Run, verb: 'Ran', target: 'pnpm test', state: ToolState.Cancelled, took: '38s', meta: undefined },
@@ -186,6 +201,7 @@ export const AllStates: Story = {
         { state: 'failed', node: <Tool {...args} {...Failed.args} /> },
         { state: 'declined', node: <Tool {...args} {...Declined.args} /> },
         { state: 'cancelled', node: <Tool {...args} {...Cancelled.args} /> },
+        { state: 'long command', node: <Tool {...args} {...LongCommand.args} /> },
         { state: 'live', node: <Tool {...args} {...Live.args} /> },
         {
           state: 'group, folded',

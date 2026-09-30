@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { PermissionRequest } from '@charrette/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 
-import { commandOf, decide, parseCommandLine, pathsOf, type RuleContext } from '../src/rules'
+import { commandOf, decide, essentials, parseCommandLine, pathsOf, type RuleContext } from '../src/rules'
 
 const worktree = '/work/meridian/retry/app'
 const context: RuleContext = { worktree, defaultBranch: 'main', taskBranch: 'charrette/retry', currentBranch: 'charrette/retry' }
@@ -223,5 +223,35 @@ describe('edits', () => {
     assert.strictEqual(edit({ paths: [join(tree, 'link', 'file.ts')] }, real).verdict, 'ask')
     assert.strictEqual(edit({ paths: ['link/nested/new.ts'] }, { ...real }).verdict, 'ask')
     assert.strictEqual(run(`echo x > ${join(tree, 'link', 'f')}`, real).verdict, 'ask')
+  })
+})
+
+describe('what the record keeps', () => {
+  it("keeps a call's command and paths, and names what it leaves out", () => {
+    assert.deepStrictEqual(essentials({ command: 'bun test', cwd: '/w', description: 'Run the tests' }), {
+      input: { command: 'bun test' },
+      cut: ['cwd', 'description'],
+    })
+    assert.deepStrictEqual(essentials({ file_path: '/w/a.ts', old_string: 'a', new_string: 'b' }), {
+      input: { file_path: '/w/a.ts' },
+      cut: ['old_string', 'new_string'],
+    })
+    assert.deepStrictEqual(essentials({ changes: { 'src/a.ts': { add: { content: 'secret' } } } }), {
+      input: { changes: { 'src/a.ts': {} } },
+      cut: ['changes (contents)'],
+    })
+    assert.deepStrictEqual(essentials({ changes: [{ path: 'x.ts', diff: '+secret' }] }).input, { changes: [{ path: 'x.ts' }] })
+    assert.deepStrictEqual(essentials({ cmd: ['bash', '-lc', 'make'] }).input, { cmd: ['bash', '-lc', 'make'] })
+    assert.deepStrictEqual(essentials({ command: 42, path: 7 }), { input: {}, cut: ['command', 'path'] })
+    const long = essentials({ command: `cat > big <<'EOF'\n${'x'.repeat(5_000)}\nEOF` })
+    assert.strictEqual(String(long.input.command).length, 4_001)
+    assert.deepStrictEqual(long.cut, ['command after 4000 characters'])
+    assert.deepStrictEqual(essentials(undefined), { input: {}, cut: [] })
+    assert.deepStrictEqual(essentials('plain text'), { input: {}, cut: ['input'] })
+    // What the record keeps is still enough for the rules and the window to read.
+    assert.strictEqual(
+      commandOf(request({ rawInput: essentials({ command: 'git push origin main', cwd: '/w' }).input })),
+      'git push origin main',
+    )
   })
 })

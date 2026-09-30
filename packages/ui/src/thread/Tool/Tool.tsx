@@ -86,7 +86,7 @@ export interface ToolProps extends Disclosable {
   kind: ToolKind
   /** What it did: Read, Ran, Edited. */
   verb: string
-  /** What it did it to: a path, a command. */
+  /** What it did it to: a path, a command. The row shows one line of it; a command over several says there is more. */
   target: string
   /** A trailing note: a count, lines changed. */
   meta?: ReactNode
@@ -103,6 +103,12 @@ export interface ToolProps extends Disclosable {
   /** Opens what it acted on, like the file it edited. With it, the target is a link of its own. */
   onOpenTarget?: () => void
   text?: Partial<ToolText>
+}
+
+/** A target as the row shows it: its first line, and an ellipsis when there are more. */
+export const oneLine = (target: string): string => {
+  const [first = '', ...rest] = target.split('\n')
+  return rest.some((line) => line.trim() !== '') ? `${first.trimEnd()} …` : first
 }
 
 export function Tool({
@@ -128,12 +134,12 @@ export function Tool({
   const sheetable = sheet || run
   const glyph = state === ToolState.Running ? <Spinner size="small" /> : <Icon name={glyphOf(kind)} size={12} />
   const linked = onOpenTarget != null
+  const shown = oneLine(target)
   /* a linked target is its own button, beside the toggle rather than in it; the toggle still says it for its name */
   const head = (
     <>
       <span className={s.glyph}>{glyph}</span>
-      <span className={s.verb}>{verb}</span>{' '}
-      {linked ? <VisuallyHidden>{target}</VisuallyHidden> : <span className={s.target}>{target}</span>}
+      <span className={s.verb}>{verb}</span> {linked ? <VisuallyHidden>{shown}</VisuallyHidden> : <span className={s.target}>{shown}</span>}
     </>
   )
   const note = (
@@ -174,8 +180,8 @@ export function Tool({
         )}
         {linked && (
           <>
-            <button type="button" className={s.link} onClick={onOpenTarget} aria-label={t.openTarget(target)}>
-              {target}
+            <button type="button" className={s.link} onClick={onOpenTarget} aria-label={t.openTarget(shown)}>
+              {shown}
             </button>
             {note}
           </>

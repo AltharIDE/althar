@@ -6,7 +6,7 @@ import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { ApiError } from '@charrette/contracts'
 
-import { agents, changed, fakeClient, status, task } from './fixtures'
+import { agents, changed, fakeClient, status, task, streamed } from './fixtures'
 import { withServices } from './render'
 
 function Project({ onBack = vi.fn(), onTask = vi.fn() }: { onBack?: () => void; onTask?: (threadId: string) => void }) {
@@ -43,7 +43,7 @@ describe('a project', () => {
     emit(changed('task', 't1'))
     emit(changed('task', 't9', null, 'p9'))
     emit(changed('thread_item', 'i1'))
-    emit({ _tag: 'Streaming', threadId: 'th1', itemId: 'i1', text: 'Hi' })
+    emit(streamed('i1', 'Hi'))
     await waitFor(() => expect(client.listTasks).toHaveBeenCalledTimes(2))
   })
 

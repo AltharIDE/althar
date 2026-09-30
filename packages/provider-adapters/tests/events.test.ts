@@ -62,6 +62,12 @@ describe('normalize', () => {
       toolCallId: 't',
       locations: [{ path: '/w/c.ts' }],
     })
+    // Claude Code sends the input once it has all of it, in an update.
+    assert.deepStrictEqual(normalize({ sessionUpdate: 'tool_call_update', toolCallId: 't', rawInput: { command: 'grep -n x a.css' } }), {
+      _tag: 'ToolCallUpdate',
+      toolCallId: 't',
+      rawInput: { command: 'grep -n x a.css' },
+    })
   })
 
   it('says a mode update came from the agent', () => {
