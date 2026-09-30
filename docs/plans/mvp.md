@@ -103,7 +103,10 @@ reviewers, the default reviewer) is architecture, in
 2. **The desktop shell.** Electron, with the runtime in a utility process, and
    the UI kit showing a real thread. Built (`apps/desktop`): projects, tasks,
    a task's thread with its calls, and the lead's controls.
-3. **The coordinator,** and the demo above.
+3. **The coordinator,** and the demo above. Built: the coordinator on the
+   agent you last used, plans with the runtime's countdown, Implement then
+   Review with settling, task cards in the Talk room, and work folded under
+   what each step reported. Checked with the fake agents; real agents next.
 
 ## Done when
 

@@ -43,9 +43,9 @@ MVVM in feature folders ([ADR-010](../../docs/decisions/010-desktop-app-mvvm.md)
 | --- | --- |
 | `data/` | The client: Effect inside, plain promises and a subscription outside; the services view models reach through React |
 | `features/start` | The agents on this Mac and the projects; opening a folder by the button, ⌘N or a drop |
-| `features/project` | A project's tasks, and starting one: its worktree, then its lead |
-| `features/task` | A task's thread as the kit's blocks, the calls waiting on you, and the composer |
-| `shared/` | How agents and times are drawn |
+| `features/project` | A project's Talk room: the coordinator's thread with each task's card (its plan before it starts, then where it stands), the agent the coordinator runs on, and a task you plan yourself, beside it |
+| `features/task` | A task's thread, the calls waiting on you, and the composer |
+| `shared/` | A thread's items as blocks, drawn with the kit (finished work folded, steps' results under it), and how agents and times are drawn |
 
 Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view (`*View.tsx`) and its styles. `router.tsx` puts the routes together, with the place in the hash, since the page loads from a file.
 
@@ -56,16 +56,19 @@ Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view
 - **The page is locked down** (07's renderer list). Sandboxed, context-isolated, no Node, a strict Content Security Policy, no new windows and no navigation away, no web permissions granted, and no paths. Links open in the person's browser, for `https:` and local `http:` only.
 - **Test hooks stay out of packaged builds.** `CHARRETTE_FAKE_AGENTS` works only in a build made with `bun run build`; `bun run build:package` leaves the code out.
 - **Words on screen follow [the glossary](../../docs/glossary.md).**
+- **Work folds; results stand.** Once a turn is over, what came before its last message folds under how long it worked, and all of it when a step's result follows, since the step's summary is what the person reads. Nothing folds while it runs.
+- **The runtime keeps a plan's clock.** A plan card counts down to the time the runtime starts it, seen or not; holding, changing and starting it go to the runtime, and the card shows what comes back.
 
 ## Checks
 
 - `bun run check`: format, type-aware lint and type checks.
 - `bun run test:coverage`: view models and views with Testing Library against a fake client; the client against the real runtime over a `MessageChannel`, with the fake agent. Gated at 90% of lines and branches; the entry and the routes are left to the end-to-end tests.
-- `bun run test:e2e`: the built app under Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back. `e2e/real.spec.ts` runs a real agent when asked.
+- `bun run test:e2e`: the built app under Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; and the coordinator planning a task that is implemented, reviewed, settled and ready. `e2e/real.spec.ts` runs a real agent when asked.
 
 ## Gaps
 
-- **No coordinator, no workflow graph.** A task is its lead; steps, reviews and the project conversation come with step 3 of the MVP plan.
+- **No board.** The Talk room is the project's only room; the kit's Board and the switch between them come later.
+- **Findings are shown, not answered.** A review's findings are left to the lead, which settles them; the kit's answers to them aren't wired up.
 - **Views are tested with Testing Library,** not with Storybook stories fed view-model output as ADR-010 says; the app has no Storybook of its own yet.
 - **Tasks have no numbers.** The kit's headers show a task's number; the app shows the title alone.
 - **An answered call disappears** once the thread is read again, rather than folding to a line saying what was said.

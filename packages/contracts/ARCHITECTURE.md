@@ -16,6 +16,7 @@ The versioned client and runtime schemas of [docs/architecture/02](../../docs/ar
 ## Principles
 
 - **Projections, not tables.** A query returns what a screen shows (`ThreadSnapshot`, `ProjectSummary`), shaped by the runtime, never rows for the client to join. A tool call carries the command it runs and the files it touches, not its raw input and output.
+- **What Charrette posts is a thread item too.** A step's result (`StepResultItem`) and a task's card (`TaskItem`) come in the thread like what an agent says; a card's content is read from the task when it is asked for, so it is always current.
 - **Checked on both sides.** Every payload, result and event is a schema, a thread item's content too (a union by kind); a client and a runtime that disagree fail at the boundary, not deep inside.
 - **Versioned.** `API_VERSION` goes up when a change would break a client built against an older API; `Status` says which the runtime speaks.
 - **Commands carry the client's id.** Every command takes a `commandId` the client makes; the same id again is a retry, answered with the first one's result.
