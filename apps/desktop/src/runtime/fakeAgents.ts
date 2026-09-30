@@ -13,7 +13,7 @@ import { Layer } from 'effect'
 
 const definition = (real: AgentDefinition): AgentDefinition => ({
   ...real,
-  modes: { ask: 'ask', readOnly: 'read-only' },
+  modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
   options: { mode: 'mode', model: 'model' },
   signIn: { status: () => ({ command: 'true', args: [] }), read: () => true, login: real.signIn.login },
   permissions: codexLikeMeanings,

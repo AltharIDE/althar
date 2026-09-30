@@ -38,7 +38,7 @@ const definition = (id: string): AgentDefinition => ({
   name: `Fake ${id}`,
   source: 'bundled',
   launch: () => ({ command: 'bun', args: [fakeAgentMain] }),
-  modes: { ask: 'ask', readOnly: 'read-only' },
+  modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
   options: { mode: 'mode', model: 'model' },
   signIn: { status: () => ({ command: 'true', args: [] }), read: () => true, login: 'true' },
   permissions: codexLikeMeanings,

@@ -5,6 +5,7 @@ import { SqlClient } from 'effect/sql'
 import { statements as initial } from './0001_initial'
 import { statements as permissionScopeTurn } from './0002_permission_scope_turn'
 import { statements as threadItems } from './0003_thread_items'
+import { statements as coordinator } from './0004_coordinator'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -21,6 +22,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0001_initial', statements: initial },
   { key: '0002_permission_scope_turn', statements: permissionScopeTurn },
   { key: '0003_thread_items', statements: threadItems },
+  { key: '0004_coordinator', statements: coordinator },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>
