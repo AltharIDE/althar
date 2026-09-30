@@ -50,6 +50,8 @@ const cardsOf = (projectId: string) =>
     return snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : []))
   })
 
+const pick = (record: Record<string, unknown>, keys: ReadonlyArray<string>) => Object.fromEntries(keys.map((key) => [key, record[key]]))
+
 /** The runtime with the queries screens read, as the API has it. */
 const withQueries = (...args: Parameters<typeof runtime>) => Queries.layer.pipe(Layer.provideMerge(runtime(...args)))
 
@@ -156,12 +158,29 @@ describe('the coordinator loop', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('stops reviewing after three rounds, and takes a settling that changes nothing as the last word', () =>
+  it.live('stops after three rounds for the person, and takes a settling that changes nothing as the last word', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      const runs = yield* Runs
       const { projectId, threadId } = yield* opened
       yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [review:always]')
-      const [first] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(60))
+      // Out of rounds, with settled changes no review has seen: it needs the person, with the findings still open.
+      const [waiting] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting', Duration.seconds(60))
+      const [call] = yield* sql<{ id: string; payload: string }>`SELECT id, payload FROM attention_requests WHERE kind = 'stuck'`
+      assert.deepStrictEqual(pick(JSON.parse(call?.payload ?? '{}') as Record<string, unknown>, ['step', 'why', 'round', 'open']), {
+        step: 'review',
+        why: 'round_limit',
+        round: 3,
+        open: 0,
+      })
+      // Accepted as it is, it's ready.
+      yield* runs.answerStuck({
+        envelope: yield* Runtime.envelope('attention.answer', {}),
+        attentionId: call?.id ?? '',
+        answer: { kind: 'abandon' },
+      })
+      const [first] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(10))
+      assert.strictEqual(first?.taskId, waiting?.taskId)
       assert.deepStrictEqual(
         (yield* results(first?.threadId ?? '')).map((step) => [step.step, step.verdict ?? null]),
         [
@@ -229,13 +248,34 @@ describe('the coordinator loop', () => {
       yield* plans.hold(replaced, actor)
       yield* plans.start(replaced, actor)
       assert.strictEqual((yield* cardsOf(projectId)).length, 1)
-      yield* Effect.flip(plans.start(planId, actor))
-      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'stopped')
+      // The lead can't start: Implement needs the person, who can hand it to another agent.
+      yield* plans.start(planId, actor)
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting')
       assert.strictEqual(card?.plan?.steps[0]?.agentId, 'missing')
-      const [run] = yield* sql<{ state: string }>`SELECT state FROM runs`
-      assert.strictEqual(run?.state, 'failed')
-      // Started again, a plan runs once.
+      const [call] = yield* sql<{ id: string; payload: string }>`SELECT id, payload FROM attention_requests WHERE kind = 'stuck'`
+      assert.deepStrictEqual(pick(JSON.parse(call?.payload ?? '{}') as Record<string, unknown>, ['step', 'why', 'agentId']), {
+        step: 'implement',
+        why: 'failed_to_start',
+        agentId: 'missing',
+      })
+      // Handed to Codex, Implement carries on there.
       const runs = yield* Runs
+      const answer = {
+        envelope: yield* Runtime.envelope('attention.answer', {}),
+        attentionId: call?.id ?? '',
+        answer: { kind: 'retry', agentId: 'codex' },
+      } as const
+      yield* runs.answerStuck(answer)
+      const [lead] = yield* until(
+        sql<{ agentId: string; state: string }>`
+          SELECT s.agent_id, a.state FROM provider_sessions s JOIN node_attempts a ON a.provider_session_id = s.id WHERE s.agent_id = 'codex'`,
+        (rows) => rows.length === 1,
+      )
+      assert.deepStrictEqual({ ...lead }, { agentId: 'codex', state: 'running' })
+      // Answered once: a second answer finds it closed.
+      const closed = yield* Effect.flip(runs.answerStuck(answer))
+      assert.strictEqual((closed as { readonly _tag?: string })._tag, 'AttentionClosed')
+      // Started again, a plan runs once.
       yield* plans.start(planId, actor)
       yield* runs.run(planId)
       yield* runs.run('pln_missing')
@@ -289,11 +329,11 @@ describe('the coordinator loop', () => {
         actorId: actor,
       })
       yield* plans.start(planId, actor)
-      // The review is under way, and the lead has stopped.
+      // The review is under way (or, as this reviewer never reports on its own, waiting on the person), and the lead has stopped.
       yield* until(
-        sql<{
-          id: string
-        }>`SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'review' AND a.state = 'running'`,
+        sql<{ id: string }>`
+          SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+          WHERE n.node_key = 'review' AND a.state IN ('running', 'waiting_attention')`,
         (rows) => rows.length === 1,
       )
       yield* sessions.stop(task.threadId)
@@ -387,6 +427,213 @@ describe('the coordinator loop', () => {
       const refused = yield* Effect.flip(say(threadId, 'Hello'))
       assert.instanceOf(refused, CoordinatorUnavailable)
     }).pipe(Effect.provide(withQueries(undefined, undefined, { signedOut: ['claude-code'] }))),
+  )
+})
+
+/** A task planned by hand and started: its lead, and a review when given one. */
+const planned = (title: string, description: string, steps: ReadonlyArray<{ key: 'implement' | 'review'; agentId: string }>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const plans = yield* Plans
+    const projects = yield* Projects
+    const { projectId } = yield* opened
+    const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
+    const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
+    const task = yield* projects.createTask({
+      envelope: yield* Runtime.envelope('task.create', {}),
+      projectId,
+      title,
+      description,
+      draft: true,
+    })
+    const planId = yield* plans.propose({
+      projectId: projectId as Parameters<typeof plans.propose>[0]['projectId'],
+      taskId: task.taskId,
+      steps: steps.map((step) => ({ ...step, model: null, skipped: false })),
+      reason: null,
+      actorId: actor,
+    })
+    yield* plans.start(planId, actor)
+    return { projectId, task }
+  })
+
+/** The task's open call for a step that needs the person, as its payload says. */
+const stuckCall = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [call] = yield* until(
+      sql<{
+        id: string
+        payload: string
+      }>`SELECT id, payload FROM attention_requests WHERE task_id = ${taskId} AND kind = 'stuck' AND state = 'open'`,
+      (rows) => rows.length === 1,
+    )
+    return { id: call?.id ?? '', ...(JSON.parse(call?.payload ?? '{}') as { step: string; why: string; agentId: string | null }) }
+  })
+
+const answer = (
+  attentionId: string,
+  reply:
+    | { readonly kind: 'tell'; readonly note: string }
+    | { readonly kind: 'retry'; readonly agentId: string }
+    | { readonly kind: 'abandon' },
+) =>
+  Effect.gen(function* () {
+    const runs = yield* Runs
+    yield* runs.answerStuck({ envelope: yield* Runtime.envelope('attention.answer', {}), attentionId, answer: reply })
+  })
+
+describe('a step that needs the person', () => {
+  it.live('reminds a lead that ends its turn without reporting once, then needs the person, and carries on when told', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, task } = yield* planned('Quietly', 'Nothing to say.', [{ key: 'implement', agentId: 'claude-code' }])
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why, call.agentId], ['implement', 'no_report', 'claude-code'])
+      const turns = yield* sql<{
+        prompt: string
+      }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at`
+      assert.match(turns[1]?.prompt ?? '', /isn't done until you call Charrette's finish_step tool/)
+      assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'waiting')
+      // Told what to do, the lead reports, and with no review the task is ready.
+      yield* answer(call.id, { kind: 'tell', note: 'You are done: report it. [lead:finish]' })
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      assert.strictEqual(card?.summary, 'Did the task.')
+      const [answered] = yield* sql<{ state: string }>`SELECT state FROM attention_requests WHERE id = ${call.id}`
+      assert.strictEqual(answered?.state, 'answered')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('needs the person when the lead goes in the middle of its step, and stops when they abandon it', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const { projectId, task } = yield* planned('Long one', '[lead:wait]', [{ key: 'implement', agentId: 'codex' }])
+      yield* until(
+        Effect.map(sessions.running(task.threadId), (running) => (running._tag === 'Some' && running.value.turnRunning ? [running] : [])),
+        (rows) => rows.length === 1,
+      )
+      // Handed to another agent mid-step, the step carries on there: the old one going isn't the lead going.
+      yield* sessions.switchAgent({ threadId: task.threadId, agentId: 'claude-code' })
+      yield* Effect.sleep('200 millis')
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM attention_requests WHERE kind = 'stuck'`)[0]?.n, 0)
+      yield* sessions.stop(task.threadId)
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why], ['implement', 'session_ended'])
+      yield* answer(call.id, { kind: 'abandon' })
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'stopped')
+      assert.strictEqual(card?.title, 'Long one')
+      const [run] = yield* sql<{ state: string }>`SELECT state FROM runs`
+      assert.strictEqual(run?.state, 'cancelled')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('needs the person for a step a restart stopped', () =>
+    Effect.gen(function* () {
+      const file = join(mkdtempSync(join(tmpdir(), 'charrette-steps-')), 'charrette.sqlite')
+      const taskId = yield* Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task } = yield* planned('Interrupted', '[lead:wait]', [{ key: 'implement', agentId: 'codex' }])
+        yield* until(
+          Effect.map(sessions.running(task.threadId), (running) => (running._tag === 'Some' && running.value.turnRunning ? [running] : [])),
+          (rows) => rows.length === 1,
+        )
+        return task.taskId
+      }).pipe(Effect.provide(withQueries(file)))
+      const call = yield* stuckCall(taskId).pipe(Effect.provide(withQueries(file)))
+      assert.deepStrictEqual([call.step, call.why, call.agentId], ['implement', 'restarted', 'codex'])
+    }),
+  )
+
+  it.live("reminds a reviewer that doesn't report, then needs the person, who tells it to", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, task } = yield* planned('Looked at', '[lead:finish]', [
+        { key: 'implement', agentId: 'claude-code' },
+        { key: 'review', agentId: 'codex' },
+      ])
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why, call.agentId], ['review', 'no_report', 'codex'])
+      // Told, it looks again in a new round, and reports.
+      yield* answer(call.id, { kind: 'tell', note: 'Report what you found. [review:pass]' })
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      const attempts = yield* sql<{ state: string }>`
+        SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'review' ORDER BY a.admitted_at`
+      assert.deepStrictEqual(
+        attempts.map((attempt) => attempt.state),
+        ['failed', 'succeeded'],
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('hands a review that never reports to another reviewer, whose round starts afresh', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { task } = yield* planned('Looked at again', '[lead:finish]', [
+        { key: 'implement', agentId: 'claude-code' },
+        { key: 'review', agentId: 'codex' },
+      ])
+      const call = yield* stuckCall(task.taskId)
+      yield* answer(call.id, { kind: 'retry', agentId: 'claude-code' })
+      const reviewers = yield* until(
+        sql<{ agentId: string; state: string }>`
+          SELECT s.agent_id, s.state FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+          WHERE t.kind = 'step' ORDER BY s.started_at`,
+        (rows) => rows.length === 2 && rows[0]?.state !== 'active',
+      )
+      assert.deepStrictEqual(
+        reviewers.map((reviewer) => reviewer.agentId),
+        ['codex', 'claude-code'],
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('hands a settling that never reports to another agent, with the findings still open', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { task } = yield* planned('Settled quietly', '[lead:finish] [review:findings] [lead:settle-quietly]', [
+        { key: 'implement', agentId: 'claude-code' },
+        { key: 'review', agentId: 'codex' },
+      ])
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why], ['settle', 'no_report'])
+      yield* answer(call.id, { kind: 'retry', agentId: 'codex' })
+      const [told] = yield* until(
+        sql<{ prompt: string }>`
+          SELECT d.prompt FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id
+          WHERE s.agent_id = 'codex' AND d.thread_id = ${task.threadId} AND d.prompt LIKE '%Settle each%'`,
+        (rows) => rows.length === 1,
+      )
+      assert.match(told?.prompt ?? '', /find_[0-9a-f]{32} \[major\] README\.md:1: The heading is wrong\./)
+      // A call that isn't there can't be answered.
+      const runs = yield* Runs
+      const missing = yield* Effect.flip(
+        runs.answerStuck({
+          envelope: yield* Runtime.envelope('attention.answer', {}),
+          attentionId: 'attn_missing',
+          answer: { kind: 'abandon' },
+        }),
+      )
+      assert.instanceOf(missing, NotFound)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live("needs the person when the reviewer can't start, and reviews with the agent they pick", () =>
+    Effect.gen(function* () {
+      const { projectId, task } = yield* planned('Checked', '[lead:finish] [review:pass]', [
+        { key: 'implement', agentId: 'claude-code' },
+        { key: 'review', agentId: 'missing' },
+      ])
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why, call.agentId], ['review', 'failed_to_start', 'missing'])
+      yield* answer(call.id, { kind: 'retry', agentId: 'codex' })
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      const reviews = (yield* results(task.threadId)).filter((step) => step.step === 'review')
+      assert.deepStrictEqual(
+        reviews.map((step) => step.verdict),
+        ['pass'],
+      )
+    }).pipe(Effect.provide(withQueries())),
   )
 })
 

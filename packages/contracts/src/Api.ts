@@ -239,13 +239,36 @@ export const SessionSummary = Schema.Struct({
 })
 export type SessionSummary = typeof SessionSummary.Type
 
+/**
+ * A step of a task's plan that needs the person (docs/architecture/05): its
+ * agent didn't report after a reminder, went, couldn't start, or a restart
+ * stopped it; or review ran out of rounds with changes it hasn't seen.
+ */
+export const StuckStep = Schema.Struct({
+  step: Schema.Literals(['implement', 'review', 'settle']),
+  why: Schema.Literals(['no_report', 'session_ended', 'failed_to_start', 'restarted', 'round_limit']),
+  /** What went wrong, in the agent's or Charrette's words; for the last round, the lead's summary. */
+  detail: Schema.NullOr(Schema.String),
+  /** The agent on the step. */
+  agentId: Schema.NullOr(Schema.String),
+  /** The review round, from 0. */
+  round: Schema.Number,
+  /** Review findings the lead hasn't settled. */
+  open: Schema.Number,
+})
+export type StuckStep = typeof StuckStep.Type
+
+/** A call waiting on the person: a permission the rules keep for them, or a step that needs them. */
 export const AttentionRequest = Schema.Struct({
   id: Schema.String,
+  kind: Schema.Literals(['permission', 'stuck']),
   /** What the agent wants to do, as it put it. */
   title: Schema.String,
   /** Why it waits for the person: the rule that keeps it for them. */
   reason: Schema.String,
   command: Schema.NullOr(Schema.String),
+  /** For a step that needs the person: which, and why. */
+  stuck: Schema.NullOr(StuckStep),
   createdAt: Schema.String,
 })
 export type AttentionRequest = typeof AttentionRequest.Type
@@ -264,6 +287,8 @@ export const ThreadSnapshot = Schema.Struct({
     branch: Schema.NullOr(Schema.String),
     worktree: Schema.NullOr(Schema.String),
     baseRef: Schema.NullOr(Schema.String),
+    /** Where it stands, as its card says: ready once its run passed review. */
+    phase: Schema.NullOr(TaskPhase),
   }),
   session: Schema.NullOr(SessionSummary),
   attention: Schema.Array(AttentionRequest),
@@ -367,6 +392,19 @@ export const Api = RpcGroup.make(
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
   command('Send', { threadId: Schema.String, body: Schema.String, disposition: Disposition }, Schema.Void),
+  /** The person's answer to a step that needs them: tell its agent what to do, hand it to an agent, or abandon it (a review is gone on without). */
+  command(
+    'AnswerStuck',
+    {
+      attentionId: Schema.String,
+      answer: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal('tell'), note: Schema.String }),
+        Schema.Struct({ kind: Schema.Literal('retry'), agentId: Schema.String }),
+        Schema.Struct({ kind: Schema.Literal('abandon') }),
+      ]),
+    },
+    Schema.Void,
+  ),
   command(
     'Answer',
     { attentionId: Schema.String, decision: Schema.Literals(['allow', 'reject']), reason: Schema.optional(Schema.String) },

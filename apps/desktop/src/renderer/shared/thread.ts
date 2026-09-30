@@ -315,13 +315,26 @@ export const blocksOf = (
     if (read.has(id)) continue
     add(streamed.agentId, streamed.at, { kind: streamed.kind === 'agent_thought' ? 'thought' : 'message', id, text: streamed.text })
   }
+  // What an agent says after its step's result, closing its turn, folds with the work that led to it.
+  const lastTurn = blocks.findLastIndex((block) => block.kind === 'turn')
+  const merged: Array<Block> = []
+  blocks.forEach((block, index) => {
+    const step = merged.at(-1)
+    const before = merged.at(-2)
+    const closing = block.kind === 'turn' && step?.kind === 'step' && before?.kind === 'turn' && before.agentId === block.agentId
+    if (!closing || (turnRunning && index === lastTurn)) return void merged.push(block)
+    const span = spans.get(before.id)
+    const after = spans.get(block.id)
+    if (span !== undefined && after !== undefined) spans.set(before.id, { ...span, to: after.to })
+    merged[merged.length - 2] = { ...before, parts: [...before.parts, ...block.parts] }
+  })
   // Each turn folds its work; the one still running says what it is doing now.
-  const live = turnRunning ? blocks.findLastIndex((block) => block.kind === 'turn') : -1
-  return blocks.map((block, index) => {
+  const live = turnRunning ? merged.findLastIndex((block) => block.kind === 'turn') : -1
+  return merged.map((block, index) => {
     if (block.kind !== 'turn') return block
     const span = spans.get(block.id)
     const running = index === live
-    const { work, said } = splitOf(block.parts, !running && blocks[index + 1]?.kind === 'step')
+    const { work, said } = splitOf(block.parts, !running && merged[index + 1]?.kind === 'step')
     return {
       ...block,
       work,

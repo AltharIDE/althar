@@ -65,7 +65,7 @@ export interface StuckText {
 
 export const stuckText: StuckText = {
   kicker: 'Stuck',
-  after: (step, tries) => `${step}, after ${tries} ${tries === 1 ? 'try' : 'tries'}`,
+  after: (step, tries) => (tries === 0 ? step : `${step}, after ${tries} ${tries === 1 ? 'try' : 'tries'}`),
   tried: 'What it tried',
   read: 'Why, as the lead reads it',
   tell: 'Tell the lead',
@@ -184,20 +184,23 @@ export function Stuck({
   const retrying = onRetry && agents.length > 0
   return (
     <AskCard icon="stop" kicker={t.kicker} who={t.after(step, tried.length)} what={what} className={className}>
-      <section className={s.section}>
-        <Heading level={headingLevel} className={s.label}>
-          {t.tried}
-        </Heading>
-        <ol className={s.tried}>
-          {tried.map((a) => (
-            <li key={a.id} className={s.attempt}>
-              <Icon name="close" size={10} className={s.failed} />
-              <span className={s.what}>{a.what}</span>
-              <span className={s.result}>{a.result}</span>
-            </li>
-          ))}
-        </ol>
-      </section>
+      {/* when it came straight to you, as when the agent couldn't start, there is nothing it tried */}
+      {tried.length > 0 && (
+        <section className={s.section}>
+          <Heading level={headingLevel} className={s.label}>
+            {t.tried}
+          </Heading>
+          <ol className={s.tried}>
+            {tried.map((a) => (
+              <li key={a.id} className={s.attempt}>
+                <Icon name="close" size={10} className={s.failed} />
+                <span className={s.what}>{a.what}</span>
+                <span className={s.result}>{a.result}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
       {read && (
         <section className={s.section}>
           <Heading level={headingLevel} className={s.label}>

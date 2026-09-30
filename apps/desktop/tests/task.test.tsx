@@ -2,9 +2,10 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type ThreadSnapshot } from '@charrette/contracts'
+import { ApiError, type StuckStep, type ThreadSnapshot } from '@charrette/contracts'
 import { TaskStatus } from '@charrette/ui'
 
+import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
 import { statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { changed, fakeClient, items, snapshot, streamed } from './fixtures'
@@ -96,6 +97,8 @@ describe('a task', () => {
   it('answers what the rules keep for the person', async () => {
     const call = {
       id: 'a1',
+      kind: 'permission' as const,
+      stuck: null,
       title: 'Run git push',
       reason: 'Pushing leaves the worktree.',
       command: 'git push',
@@ -116,6 +119,72 @@ describe('a task', () => {
     await userEvent.type(within(card).getByPlaceholderText('Say what to do instead'), 'Open a PR instead')
     await userEvent.click(within(card).getByRole('button', { name: /^Deny/ }))
     await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a2', decision: 'reject', reason: 'Open a PR instead' }))
+  })
+
+  it('shows a step that needs the person, and takes their answer: tell the lead, hand it on, or abandon it', async () => {
+    const stuck = (overrides: Partial<StuckStep> = {}) => ({
+      id: 'st1',
+      kind: 'stuck' as const,
+      title: '',
+      reason: '',
+      command: null,
+      createdAt: '2026-09-29T12:00:00.000Z',
+      stuck: {
+        step: 'implement' as const,
+        why: 'no_report' as const,
+        detail: null,
+        agentId: 'claude-code',
+        round: 0,
+        open: 0,
+        ...overrides,
+      },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [stuck()] })) })
+    const view = withServices(<Task />, client)
+    expect(await screen.findByText('Claude Code ended its turn twice without saying the step is done.')).toBeTruthy()
+    expect(screen.getByText('Reminded it to report')).toBeTruthy()
+    expect(screen.getByText('Needs you')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Tell the lead' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'What should it do instead?' }), 'Report it now.')
+    await userEvent.click(screen.getByRole('button', { name: 'Send to the lead' }))
+    await waitFor(() =>
+      expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st1', answer: { kind: 'tell', note: 'Report it now.' } }),
+    )
+
+    // A review that couldn't start: another reviewer, or none.
+    view.unmount()
+    vi.mocked(client.getThread).mockImplementation(async () =>
+      thread({ attention: [stuck({ step: 'review', why: 'failed_to_start', detail: 'It isn’t signed in.', agentId: 'codex' })] }),
+    )
+    const again = withServices(<Task />, client)
+    expect(await screen.findByText("Codex couldn't start. It isn’t signed in.")).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Review again' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Claude Code/ }))
+    await waitFor(() =>
+      expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st1', answer: { kind: 'retry', agentId: 'claude-code' } }),
+    )
+
+    // Out of review rounds: accepted as it is.
+    again.unmount()
+    vi.mocked(client.getThread).mockImplementation(async () =>
+      thread({ attention: [stuck({ step: 'review', why: 'round_limit', open: 2 })] }),
+    )
+    withServices(<Task />, client)
+    expect(await screen.findByText(/Three rounds of review are done.*2 findings are still open\./)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Accept it as it is' }))
+    await waitFor(() => expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st1', answer: { kind: 'abandon' } }))
+  })
+
+  it('says why each step needed the person', () => {
+    const at = (why: StuckStep['why'], detail: string | null = null, open = 0) =>
+      stuckWords.what({ step: 'implement', why, detail, agentId: null, round: 0, open }, 'Codex')
+    expect([at('session_ended'), at('restarted'), at('failed_to_start'), at('round_limit', null, 1)]).toEqual([
+      'Codex stopped before the step was done.',
+      'Charrette restarted while this step was running.',
+      "Codex couldn't start.",
+      "Three rounds of review are done, and the lead's last changes haven't been reviewed. One finding is still open.",
+    ])
   })
 
   it('starts a lead when none is working, with the one that last led', async () => {
@@ -295,6 +364,13 @@ describe('a task', () => {
     expect(statusOf(base)).toEqual({ status: TaskStatus.Running, state: 'Idle' })
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
     expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })
-    expect(statusOf({ ...base, attention: [{ id: 'a', title: 't', reason: 'r', command: null, createdAt: '' }] }).state).toBe('Needs you')
+    expect(statusOf({ ...base, task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Done, state: 'Ready' })
+    expect(statusOf({ ...running(), task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Running, state: 'Working' })
+    expect(
+      statusOf({
+        ...base,
+        attention: [{ id: 'a', kind: 'permission', title: 't', reason: 'r', command: null, stuck: null, createdAt: '' }],
+      }).state,
+    ).toBe('Needs you')
   })
 })

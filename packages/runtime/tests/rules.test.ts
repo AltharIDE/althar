@@ -290,6 +290,12 @@ describe('a role that only reads', () => {
       'git -C ../other --no-pager log -1',
       'git diff --stat main',
       'date -u +%Y',
+      'git',
+      'rg -e retry -- src',
+      'rg --max-count=2 retry',
+      'uniq -f 2 counts.txt',
+      'sort -k2 counts.txt',
+      'file -b --mime README.md',
     ])
       assert.strictEqual(verdict({ kind: 'execute', title: command, rawInput: { command } }), 'allow', command)
   })
@@ -332,6 +338,8 @@ describe('a role that only reads', () => {
       'file -C -m magic',
       'date -s 2020-01-01',
       'ag --pager "touch /tmp/x" retry',
+      'rg --no-such-flag retry',
+      'uniq -c -- in.txt out.txt',
     ].map((command) => {
       const decided = decideReader(request({ kind: 'execute', title: command, rawInput: { command } }))
       return decided.verdict === 'deny' ? decided.reason : ''

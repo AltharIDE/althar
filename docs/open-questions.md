@@ -18,13 +18,11 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
   backstop. Plan modes stay out while they refuse MCP tools.
   [ADR-004](decisions/004-coordinator-is-an-agent-session.md),
   [architecture 04](architecture/04-coordinator.md).
-- [ ] **What an agent's closing words are for, once a step reports.** A lead
-  ends its step with `finish_step` and a summary; anything it says after
-  that shows as a turn of its own under the step. Fold it too, or drop it
-  from the thread? Leaning: fold it with the work.
-- [ ] **A ready task's header.** A task whose run passed review says "Idle"
-  in its own header, since the header reads the lead's session; its card says
-  "Ready". Leaning: the header reads the run too.
+- [x] **What an agent's closing words are for, once a step reports.**
+  Settled on 30 September 2026 in the review of #15: they fold with the work
+  that led to the step's result.
+- [x] **A ready task's header.** Settled on 30 September 2026 in the review of
+  #15: the header reads the run, as the card does, and says Ready.
 
 ## The desktop app, 29 September
 

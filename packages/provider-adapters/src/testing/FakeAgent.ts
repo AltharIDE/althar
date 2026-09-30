@@ -137,7 +137,8 @@ interface SessionState {
  * report a review. Settling findings, it writes a file, so the change changes,
  * and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
- * `[lead:set-aside]` settles without changing anything.
+ * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
+ * until it is stopped, and `[lead:settle-quietly]` settles without reporting.
  */
 const playRole = async (session: SessionState, text: string): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
@@ -176,6 +177,7 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
     }
     if (available.has('finish_step')) {
       if (text.includes('Settle each')) {
+        if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
         if (!aside) appendFileSync(join(session.cwd, 'settled.txt'), 'settled\n')
         // What became of each finding, by the ids Charrette gave them.
@@ -185,6 +187,11 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
         return await call('finish_step', { summary: 'Fixed the heading.', findings })
       }
       if (text.includes('[lead:finish]')) return await call('finish_step', { summary: 'Did the task.' })
+      // Works until it is stopped: for a lead that goes in the middle of its step.
+      if (text.includes('[lead:wait]')) {
+        for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        return 'Stopped working.'
+      }
       return undefined
     }
     if (available.has('draft_task') && text.includes('[coordinator:plan')) {
@@ -347,6 +354,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
 
       // With Charrette's tools, a marker in the prompt says which role to play.
       const played = await playRole(session, text)
+      // Stopped while it played its part, the turn was cancelled, as an agent says.
+      if (played !== undefined && session.cancelled) return { stopReason: 'cancelled' }
       if (played !== undefined) {
         await say(played)
         return ended()

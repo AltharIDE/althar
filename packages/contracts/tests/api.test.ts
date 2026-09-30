@@ -113,6 +113,7 @@ describe('the API', () => {
               StartPlan: () => Effect.void,
               HoldPlan: () => Effect.void,
               ChangePlan: () => Effect.void,
+              AnswerStuck: () => Effect.void,
               StartSession: ({ commandId: id }) => Effect.succeed(id),
               SwitchAgent: () => Effect.die('unused'),
               SetModel: () => Effect.void,

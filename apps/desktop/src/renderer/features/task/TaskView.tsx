@@ -25,6 +25,7 @@ import { modelInfo } from '../../shared/agents'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
+import { StuckCall } from './StuckCall'
 import s from './Task.module.css'
 import type { TaskModel } from './useTask'
 
@@ -47,6 +48,7 @@ export const text = {
   placeholderNone: 'Start a lead to talk to it',
   working: 'Working',
   needsYou: 'Needs you',
+  ready: 'Ready',
   idle: 'Idle',
   stopped: 'Stopped',
   dismiss: 'Dismiss',
@@ -58,6 +60,9 @@ export const text = {
 /** Where a task stands, for its header. */
 export const statusOf = (snapshot: ThreadSnapshot): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
+  if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: text.working }
+  // A run that passed review is ready, whatever its lead is doing now.
+  if (snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled') return { status: TaskStatus.Done, state: text.ready }
   if (snapshot.session === null) return { status: TaskStatus.Stopped, state: text.stopped }
   return snapshot.session.turnRunning
     ? { status: TaskStatus.Running, state: text.working }
@@ -220,9 +225,20 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
             )}
             agentName={agentName}
           />
-          {snapshot.attention.map((request) => (
-            <Call key={request.id} request={request} project={snapshot.project.name} onAnswer={model.answer} />
-          ))}
+          {snapshot.attention.map((request) =>
+            request.kind === 'stuck' && request.stuck !== null ? (
+              <StuckCall
+                key={request.id}
+                request={request}
+                stuck={request.stuck}
+                agents={model.agents}
+                agentName={agentName}
+                onAnswer={(attentionId, answer) => void model.answerStuck(attentionId, answer)}
+              />
+            ) : (
+              <Call key={request.id} request={request} project={snapshot.project.name} onAnswer={model.answer} />
+            ),
+          )}
         </Thread>
       </TaskFace>
     </div>

@@ -172,6 +172,16 @@ describe('work, folded', () => {
     expect(blocks[1]).toMatchObject({ result: { step: 'implement', summary: 'Added the retry.' } })
     expect(blocks[2]).toMatchObject({ card: { slug: 'add-a-retry' } })
   })
+
+  it('folds what the agent says after its step reported with the work that led to it, once it has said it', () => {
+    const thread = [items.tool(), items.step({ summary: 'Added the retry.' }), later(items.says('A review starts now.'), 12)]
+    const blocks = blocksOf(source(thread), new Map(), at)
+    expect(blocks.map((block) => block.kind)).toEqual(['turn', 'step'])
+    expect(counts(blocks[0])).toEqual({ work: ['tool', 'message'], said: [] })
+    expect(blocks[0]).toMatchObject({ took: '12s' })
+    // While it is still saying it, it stays where it is.
+    expect(blocksOf(source(thread, true), new Map(), at).map((block) => block.kind)).toEqual(['turn', 'step', 'turn'])
+  })
 })
 
 describe('tool calls', () => {

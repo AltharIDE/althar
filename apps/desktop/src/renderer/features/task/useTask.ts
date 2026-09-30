@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@charrette/contracts'
 
-import { messageOf } from '../../data/client'
+import { messageOf, type StuckAnswer } from '../../data/client'
 import { caughtUp, mergeItems, waiting } from '../../shared/items'
 import type { Streamed } from '../../shared/thread'
 import { useServices, useWatch } from '../../data/services'
@@ -41,6 +41,8 @@ export interface TaskModel {
   readonly setModel: (model: string) => Promise<void>
   readonly stop: () => Promise<void>
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string) => Promise<void>
+  /** Answers a step that needs the person. */
+  readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
   readonly dismissError: () => void
 }
 
@@ -164,6 +166,7 @@ export const useTask = (threadId: string): TaskModel => {
     stop: () => act(() => client.stopSession(threadId)),
     answer: (attentionId, decision, reason) =>
       act(() => client.answer({ attentionId, decision, ...(reason === undefined || reason === '' ? {} : { reason }) })),
+    answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
     dismissError: () => setError(null),
   }
 }

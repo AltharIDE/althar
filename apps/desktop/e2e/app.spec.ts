@@ -56,14 +56,19 @@ test('opens a project, starts a task, and talks to its lead', async () => {
     await page.screenshot({ path: 'test-results/project.png' })
     await page.getByRole('button', { name: 'New task' }).click()
     await page.getByLabel('What should change').fill('Add a retry to the checkout call')
+    // Its lead reports Implement done at once, with no review, so what follows is talking to it.
+    await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
+    await page.getByRole('combobox', { name: 'Review' }).click()
+    await page.getByRole('option', { name: 'No review' }).click()
     await page.getByRole('button', { name: 'Start the task' }).click()
+    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
 
     // Its card shows in the Talk room, and opens the task.
     await page.getByRole('button', { name: /Open task/ }).click()
 
-    // The lead is briefed first; the fake echoes what it was told.
+    // The lead is briefed first, and reports its step; its summary is what shows, its work folded above it.
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call' })).toBeVisible()
-    await expect(page.getByText(/^echo: /).first()).toBeVisible()
+    await expect(page.getByText('Did the task.')).toBeVisible()
 
     await say(page, 'hello')
     await expect(page.getByText('Hello', { exact: true })).toBeVisible()
@@ -111,7 +116,9 @@ test('opens a project, starts a task, and talks to its lead', async () => {
     })
     expect(killed).toBe(true)
     await expect(page.getByText(/Charrette restarted\. The lead stopped with it/)).toBeVisible({ timeout: 20_000 })
-    await expect(page.getByText('Stopped', { exact: true })).toBeVisible()
+    // Its run passed, so the task is still ready, with no lead running.
+    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
+    await expect(page.getByText('No agent is working on this task.')).toBeVisible()
     await page.screenshot({ path: 'test-results/restarted.png' })
   } finally {
     await electronApp.close()

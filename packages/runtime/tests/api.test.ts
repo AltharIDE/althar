@@ -14,7 +14,7 @@ import { RpcClient } from 'effect/rpc'
 import { connection, services } from '../src/Api'
 import { GitFailed, ModelUnchanged, NotARepository, NotFound, SessionFailed } from '../src/errors'
 import { Folders } from '../src/Folders'
-import { itemOf } from '../src/Queries'
+import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
 import { fakeAgents, repository } from './support'
 
@@ -375,6 +375,37 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
+  it.live('shows a step that needs the person as a call, and takes their answer', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Nobody home',
+          steps: [{ key: 'implement', agentId: 'missing', model: null, skipped: false }],
+        })
+        const waiting = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
+        const call = waiting.attention[0]
+        assert.deepStrictEqual(
+          [call?.kind, call?.stuck?.step, call?.stuck?.why, call?.stuck?.agentId],
+          ['stuck', 'implement', 'failed_to_start', 'missing'],
+        )
+        const answering = { commandId: commandId(), attentionId: call?.id ?? '', answer: { kind: 'retry' as const, agentId: 'codex' } }
+        yield* client.AnswerStuck(answering)
+        // Sent again by a retry, it is answered once.
+        yield* client.AnswerStuck(answering)
+        const after = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 0)
+        assert.strictEqual(after.session?.agentId, 'codex')
+        assert.strictEqual(
+          (yield* Effect.flip(client.AnswerStuck({ ...answering, commandId: commandId() }))).message,
+          'That call was already answered, or the agent took it back.',
+        )
+      }),
+    ),
+  )
+
   it.live("offers the person another agent when the coordinator's isn't signed in", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -475,6 +506,22 @@ describe('words', () => {
     assert.strictEqual(summarize(Cause.fail(new AgentExited({ code: 1, signal: null, stderr: '' }))), 'The agent stopped.')
     assert.strictEqual(summarize(Cause.die(new Error('It broke'))), 'It broke.')
     assert.strictEqual(summarize(Cause.empty), '')
+  })
+})
+
+describe('steps that need the person', () => {
+  it('reads what a call says, and makes do with what it lacks', () => {
+    assert.deepStrictEqual(stuckOf({ step: 'settle', why: 'round_limit', detail: 'Fixed.', agentId: 'codex', round: 3, open: 2 }), {
+      step: 'settle',
+      why: 'round_limit',
+      detail: 'Fixed.',
+      agentId: 'codex',
+      round: 3,
+      open: 2,
+    })
+    for (const why of ['no_report', 'session_ended', 'restarted']) assert.strictEqual(stuckOf({ why }).why, why)
+    assert.strictEqual(stuckOf({ step: 'review' }).step, 'review')
+    assert.deepStrictEqual(stuckOf({}), { step: 'implement', why: 'failed_to_start', detail: null, agentId: null, round: 0, open: 0 })
   })
 })
 

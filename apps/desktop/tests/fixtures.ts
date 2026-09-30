@@ -164,6 +164,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     branch: 'charrette/add-a-retry',
     worktree: '/w/meridian',
     baseRef: 'main',
+    phase: 'running',
   },
   session: {
     id: 's1',
@@ -204,6 +205,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     startPlan: vi.fn(async () => {}),
     holdPlan: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
+    answerStuck: vi.fn(async () => {}),
     watch: (listener, since) => {
       watching.push(since)
       listeners.add(listener)

@@ -182,6 +182,7 @@ describe('the client', () => {
           StartPlan: () => Effect.die('unused'),
           HoldPlan: () => Effect.die('unused'),
           ChangePlan: () => Effect.die('unused'),
+          AnswerStuck: () => Effect.die('unused'),
           Watch: ({ since }) => {
             watches.push(since)
             return Stream.make({

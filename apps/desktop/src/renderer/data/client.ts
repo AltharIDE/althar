@@ -72,10 +72,18 @@ export interface Client {
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>) => Promise<void>
+  /** The person's answer to a step that needs them. */
+  readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
   /** Calls `listener` with each change after `since` (or from now) until the returned function is called. */
   readonly watch: (listener: (event: WatchEvent) => void, since?: number) => () => void
   readonly close: () => Promise<void>
 }
+
+/** Tell a step's agent what to do, hand the step to an agent, or abandon it. */
+export type StuckAnswer =
+  | { readonly kind: 'tell'; readonly note: string }
+  | { readonly kind: 'retry'; readonly agentId: string }
+  | { readonly kind: 'abandon' }
 
 /** What went wrong with a call, in words a view can show. */
 export const messageOf = (error: unknown): string =>
@@ -137,6 +145,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
     changePlan: (planId, steps) => command((commandId) => api.ChangePlan({ commandId, planId, steps })),
+    answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     watch: (listener, since) => {
       let cursor = since
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.

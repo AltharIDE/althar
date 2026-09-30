@@ -23,7 +23,7 @@ const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(yield* Laye
 const status = yield* client.Status({})
 ```
 
-- **`Api`** holds every call: status and sign-in, projects, tasks, a task's thread a page at a time (`GetThread`) and one of its items (`GetThreadItem`), sessions (start, switch, model, interrupt, stop), sending to a thread, answering a call, the coordinator's thread (`GetCoordinator`) with each task's card, a task's plan (`StartTask` for one the person plans, and `StartPlan`, `HoldPlan`, `ChangePlan`), and `Watch`, the stream of what changes after a cursor.
+- **`Api`** holds every call: status and sign-in, projects, tasks, a task's thread a page at a time (`GetThread`) and one of its items (`GetThreadItem`), sessions (start, switch, model, interrupt, stop), sending to a thread, answering a call, the coordinator's thread (`GetCoordinator`) with each task's card, a task's plan (`StartTask` for one the person plans, and `StartPlan`, `HoldPlan`, `ChangePlan`), answering a step that needs the person (`AnswerStuck`), and `Watch`, the stream of what changes after a cursor.
 - **Commands** each take a `commandId` the client makes (`cmd_` and 32 hex digits); sending the same one again is a safe retry.
 - **`ApiError`** is the one error a call fails with: the runtime's own error tag as `reason`, and a message a person can read.
 - **`serverProtocol` and `clientProtocol`** run Effect's RPC over any port, as a worker would: the server says it is ready, and ends when the client closes or its port does.

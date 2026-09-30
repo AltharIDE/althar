@@ -3,6 +3,7 @@ import {
   PAGE,
   type TaskPhase,
   type ProjectList,
+  type StuckStep,
   type TaskList,
   type TaskSummary,
   type ThreadItem,
@@ -67,6 +68,24 @@ interface ItemRow {
  * touches), not its raw input and output. Kinds the contract doesn't have yet,
  * such as a step's result, are left out.
  */
+/** A step that needs the person, as its call's payload holds it. */
+export const stuckOf = (payload: unknown): StuckStep => {
+  const step = text(payload, 'step')
+  const why = text(payload, 'why')
+  const detail = field(payload, 'detail')
+  const agentId = field(payload, 'agentId')
+  const round = field(payload, 'round')
+  const open = field(payload, 'open')
+  return {
+    step: step === 'review' || step === 'settle' ? step : 'implement',
+    why: why === 'no_report' || why === 'session_ended' || why === 'restarted' || why === 'round_limit' ? why : 'failed_to_start',
+    detail: typeof detail === 'string' ? detail : null,
+    agentId: typeof agentId === 'string' ? agentId : null,
+    round: typeof round === 'number' ? round : 0,
+    open: typeof open === 'number' ? open : 0,
+  }
+}
+
 export const itemOf = (row: ItemRow): ThreadItem | undefined => {
   const content = parse(row.content)
   const base = { id: row.id, sequence: row.sequence, agentId: row.agentId, createdAt: row.createdAt }
@@ -289,11 +308,19 @@ export class Queries extends Context.Service<
        * A task's card in the coordinator's thread: where it stands, worked out
        * from its plan, its run, the calls waiting and the agents working.
        */
+      /** A task's card, as its item in the coordinator's thread shows it. */
       const cardOf = (row: ItemRow) =>
+        Effect.map(cardFor(text(parse(row.content), 'taskId')), (content) =>
+          content === undefined
+            ? undefined
+            : ({ id: row.id, sequence: row.sequence, agentId: null, createdAt: row.createdAt, kind: 'task', content } satisfies ThreadItem),
+        )
+
+      /** Where a task stands, read from it, its plan, its run and its sessions: what its card and its header show. */
+      const cardFor = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
-          const taskId = text(parse(row.content), 'taskId')
           const [task] = yield* sql<{
             threadId: string
             title: string
@@ -361,33 +388,26 @@ export class Queries extends Context.Service<
             }
           })
           return {
-            id: row.id,
-            sequence: row.sequence,
-            agentId: null,
-            createdAt: row.createdAt,
-            kind: 'task',
-            content: {
-              taskId,
-              threadId: task.threadId,
-              title: task.title,
-              slug: task.slug,
-              phase,
-              plan:
-                task.planId === null
-                  ? null
-                  : {
-                      id: task.planId,
-                      steps: planned,
-                      startsAt: task.planState === 'proposed' ? task.startsAt : null,
-                      reason: text(parameters, 'reason') || null,
-                    },
-              step: task.step,
-              summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
-              lead: task.lead ?? (planned.find((step) => step.key === 'implement')?.agentId || null),
-              branch: task.branch,
-              startedAt: task.runAt ?? task.firstSession,
-            },
-          } satisfies ThreadItem
+            taskId,
+            threadId: task.threadId,
+            title: task.title,
+            slug: task.slug,
+            phase,
+            plan:
+              task.planId === null
+                ? null
+                : {
+                    id: task.planId,
+                    steps: planned,
+                    startsAt: task.planState === 'proposed' ? task.startsAt : null,
+                    reason: text(parameters, 'reason') || null,
+                  },
+            step: task.step,
+            summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
+            lead: task.lead ?? (planned.find((step) => step.key === 'implement')?.agentId || null),
+            branch: task.branch,
+            startedAt: task.runAt ?? task.firstSession,
+          } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
 
       /** A page of a thread's items, as screens show them. */
@@ -425,8 +445,8 @@ export class Queries extends Context.Service<
             WHERE t.id = ${threadId} AND t.kind = 'task'`
           if (head === undefined) return yield* new NotFound({ kind: 'task thread', id: threadId })
           const { items, earlier } = yield* pageOf(threadId, page)
-          const attention = yield* sql<{ id: string; payload: string; createdAt: string }>`
-            SELECT id, payload, created_at FROM attention_requests WHERE task_id = ${head.taskId} AND state = 'open' ORDER BY created_at`
+          const attention = yield* sql<{ id: string; kind: string; payload: string; createdAt: string }>`
+            SELECT id, kind, payload, created_at FROM attention_requests WHERE task_id = ${head.taskId} AND state = 'open' ORDER BY created_at`
           return {
             threadId,
             cursor: at,
@@ -440,15 +460,18 @@ export class Queries extends Context.Service<
               branch: head.branch,
               worktree: head.worktree,
               baseRef: head.baseRef,
+              phase: (yield* cardFor(head.taskId))?.phase ?? null,
             },
             session: yield* sessionOf(threadId),
             attention: attention.map((request) => {
               const payload = parse(request.payload)
               return {
                 id: request.id,
+                kind: request.kind === 'stuck' ? 'stuck' : 'permission',
                 title: text(payload, 'title'),
                 reason: text(payload, 'reason'),
                 command: text(payload, 'command') || null,
+                stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
                 createdAt: request.createdAt,
               }
             }),

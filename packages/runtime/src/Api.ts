@@ -15,6 +15,7 @@ import { Queries } from './Queries'
 import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
 import { Plans } from './Plans'
+import { Runs } from './Runs'
 import { Sessions } from './Sessions'
 import { SignIns } from './SignIns'
 import { expected, words } from './words'
@@ -44,6 +45,7 @@ export const handlers = Api.toLayer(
     const live = yield* Live
     const signIns = yield* SignIns
     const plans = yield* Plans
+    const runs = yield* Runs
     const coordinator = yield* Coordinator
     const instance = yield* Instance
     const sql = yield* SqlClient.SqlClient
@@ -243,6 +245,19 @@ export const handlers = Api.toLayer(
       StartPlan: ({ commandId, planId }) => once(commandId, api(plans.start(planId, instance.personId))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps }) => once(commandId, api(plans.change(planId, steps, instance.personId))),
+      AnswerStuck: ({ commandId, attentionId, answer }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              yield* runs.answerStuck({
+                envelope: yield* envelope('attention.answer_stuck', { attentionId, answer }, commandId),
+                attentionId,
+                answer,
+              })
+            }),
+          ),
+        ),
       Answer: ({ commandId, attentionId, decision, reason }) =>
         api(
           Effect.gen(function* () {
