@@ -8,6 +8,7 @@ import { Live } from './Live'
 import { Permissions } from './Permissions'
 import { Projects } from './Projects'
 import { Sessions } from './Sessions'
+import { ToolServer } from './ToolServer'
 
 export interface RuntimeLayerOptions extends RuntimeOptions {
   /** The profile's database file, or `:memory:` for tests. */
@@ -27,7 +28,7 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(Database.layer({ filename: options.database })),
     Layer.provideMerge(WebCrypto),
   )
-  const base = Layer.mergeAll(Instance.layer, Live.layer).pipe(
+  const base = Layer.mergeAll(Instance.layer, Live.layer, ToolServer.layer).pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry),

@@ -463,3 +463,158 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   }
   return ALLOW
 }
+
+// ---- Roles that only read ----------------------------------------------------
+
+/*
+ * A role that only reads, such as the coordinator (docs/architecture/04) or a
+ * reviewer, is never asked about and never asks: what it may do, it does, and
+ * the rest is refused with a reason it reads. It may read anything, search,
+ * fetch from the web, and run commands that only look. It may call
+ * Charrette's own tools, which are how it changes anything. Every write, and
+ * every command that could write, is refused. A change is a task.
+ */
+
+export type ReaderVerdict = { readonly verdict: 'allow' } | { readonly verdict: 'deny'; readonly reason: string }
+
+const deny = (reason: string): ReaderVerdict => ({ verdict: 'deny', reason })
+
+/** Charrette's own tools, as each agent names them: `mcp__charrette__…` (Claude Code), `mcp.charrette.…` (Codex), `charrette_…` (OpenCode). */
+export const CHARRETTE_TOOL = /^(mcp__charrette__|mcp\.charrette\.|charrette_)/
+
+/** Programs that only look. Each is checked further below where some of its flags write. */
+const LOOKS = new Set([
+  'ls',
+  'cat',
+  'head',
+  'tail',
+  'wc',
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'ag',
+  'find',
+  'fd',
+  'tree',
+  'file',
+  'stat',
+  'pwd',
+  'echo',
+  'printf',
+  'which',
+  'sort',
+  'uniq',
+  'cut',
+  'tr',
+  'jq',
+  'diff',
+  'basename',
+  'dirname',
+  'realpath',
+  'du',
+  'nl',
+  'true',
+  'sed',
+  'git',
+  'cd',
+  'date',
+  'env',
+  'test',
+  '[',
+])
+
+/** Git's subcommands that only look, and those that look only when given nothing to change. */
+const GIT_LOOKS = new Set([
+  'log',
+  'diff',
+  'show',
+  'status',
+  'blame',
+  'grep',
+  'ls-files',
+  'ls-tree',
+  'rev-parse',
+  'rev-list',
+  'shortlog',
+  'describe',
+  'cat-file',
+  'reflog',
+  'show-ref',
+  'merge-base',
+  'whatchanged',
+  'name-rev',
+  'for-each-ref',
+  'count-objects',
+])
+const GIT_LISTS = new Set(['branch', 'tag', 'remote', 'stash'])
+const GIT_LIST_FLAGS = new Set([
+  '-a',
+  '-r',
+  '-v',
+  '-vv',
+  '-l',
+  '--list',
+  '--all',
+  '--remotes',
+  '--show-current',
+  '--verbose',
+  '--contains',
+  '--merged',
+  '--no-merged',
+  'list',
+  'show',
+])
+
+/** Why a command a reader wants to run would change something, or nothing when it only looks. */
+const readerCommandReason = (text: string): string | undefined => {
+  const { commands, opaque } = parseCommandLine(text)
+  if (opaque) return "Charrette can't tell what this command does until it runs, and this role only reads."
+  for (const words of commands) {
+    const program = (words[0] ?? '').split('/').at(-1) ?? ''
+    const written = writes(words).filter((target) => target !== '/dev/null')
+    if (written.length > 0) return `It would write to ${written[0]}, and this role only reads.`
+    if (!LOOKS.has(program)) return `\`${program}\` isn't on the list of commands that only look, and this role only reads.`
+    if (
+      program === 'find' &&
+      words.some((word) => ['-exec', '-execdir', '-delete', '-ok', '-okdir', '-fprint', '-fprintf', '-fls'].includes(word))
+    )
+      return '`find` with an action would change things, and this role only reads.'
+    if (program === 'sed' && words.some((word) => word.startsWith('-i') || word === '--in-place'))
+      return '`sed -i` edits files, and this role only reads.'
+    if (program === 'env' && words.length > 1) return '`env` runs another command, and this role only reads.'
+    if (program === 'git') {
+      const call = gitCall(words, '.')
+      const subcommand = call?.subcommand ?? ''
+      if (GIT_LOOKS.has(subcommand)) continue
+      if (GIT_LISTS.has(subcommand) && (call?.args ?? []).every((arg) => GIT_LIST_FLAGS.has(arg))) continue
+      return `\`git ${subcommand}\` can change the repository, and this role only reads.`
+    }
+  }
+  return undefined
+}
+
+/**
+ * Decides a request from a role that only reads. Nothing here asks a person:
+ * a reader's request is allowed or refused.
+ */
+export const decideReader = (request: PermissionRequest): ReaderVerdict => {
+  if (CHARRETTE_TOOL.test(request.title)) return ALLOW
+  switch (request.kind) {
+    case 'read':
+    case 'search':
+    case 'think':
+    case 'fetch':
+      return ALLOW
+    case 'edit':
+    case 'delete':
+    case 'move':
+      return deny('This role only reads: a change is a task.')
+    default: {
+      const command = commandIn(request.rawInput) ?? (request.kind === 'execute' ? request.title : undefined)
+      if (command === undefined || command === '') return deny("Charrette can't tell what this does, and this role only reads.")
+      const reason = readerCommandReason(command)
+      return reason === undefined ? ALLOW : deny(reason)
+    }
+  }
+}
