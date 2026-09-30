@@ -64,6 +64,15 @@ export const treeOf = (cwd: string): Effect.Effect<string, GitFailed> =>
     (copy) => Effect.sync(() => rmSync(dirname(copy), { recursive: true, force: true })),
   )
 
+/** Commits a tree on top of a parent without touching any branch, as Charrette: a snapshot a worktree can check out. */
+export const commitTree = (cwd: string, tree: string, parent: string, message: string): Effect.Effect<string, GitFailed> =>
+  run(60_000, cwd, ['commit-tree', tree, '-p', parent, '-m', message], {
+    GIT_AUTHOR_NAME: 'Charrette',
+    GIT_AUTHOR_EMAIL: 'charrette@localhost',
+    GIT_COMMITTER_NAME: 'Charrette',
+    GIT_COMMITTER_EMAIL: 'charrette@localhost',
+  })
+
 /** The top of the repository a path is in. */
 export const topLevel = (path: string) => git(path, 'rev-parse', '--show-toplevel')
 

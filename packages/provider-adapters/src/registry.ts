@@ -70,9 +70,10 @@ export interface AgentDefinition {
   readonly permissions: PermissionMeanings
   /**
    * What goes in `_meta` on `session/new`, to keep the agent asking whatever
-   * its settings say (ADR-007).
+   * its settings say (ADR-007): for a lead, or for a role that only reads
+   * (the coordinator, a reviewer), whose writes are refused outright.
    */
-  readonly sessionMeta?: () => Readonly<Record<string, unknown>>
+  readonly sessionMeta?: (role?: 'lead' | 'reader') => Readonly<Record<string, unknown>>
   /** What it does differently, for the support matrix. */
   readonly knownGaps: ReadonlyArray<string>
 }
@@ -145,6 +146,25 @@ const claudeAsks = {
   },
 }
 
+/**
+ * Claude Code for a role that only reads: its edit tools denied, which also
+ * denies its sandbox's writes, and every shell command asking, so each one
+ * reaches Charrette's reader rules rather than running because the sandbox
+ * would contain it. What it reads is a throwaway copy all the same.
+ */
+const claudeReads = {
+  claudeCode: {
+    options: {
+      allowDangerouslySkipPermissions: false,
+      strictMcpConfig: true,
+      settings: {
+        permissions: { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'], ask: ['Bash', 'WebFetch'] },
+        sandbox: { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false, failIfUnavailable: false },
+      },
+    },
+  },
+}
+
 export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
   'claude-code': {
     id: 'claude-code',
@@ -164,7 +184,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     },
     /* From claude-agent-acp's permissions/options/shared.js. Rejecting skips the action and Claude carries on. */
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
-    sessionMeta: () => claudeAsks,
+    sessionMeta: (role = 'lead') => (role === 'reader' ? claudeReads : claudeAsks),
     knownGaps: [
       'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Charrette always sets the mode.',
       "Hooks in the repository's or the user's settings run as code on the Mac whenever Claude uses a tool; they cannot approve past the ask rules.",

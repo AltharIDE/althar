@@ -54,7 +54,7 @@ From `packages/runtime`:
 | `bun run test` | The tests, against in-memory databases, temporary git repositories and the fake agent |
 | `bun run test:coverage` | The same, with the coverage gate: 90% of lines and branches |
 | `bun run verify` | Check and coverage, as CI runs them |
-| `bun run test:agents` | The coordinator loop on the real agents signed in on this Mac: a small repository, one request, and the plan run until the task is ready. It costs usage; set `CHARRETTE_ASK` to ask something else |
+| `bun run test:agents` | On the real agents signed in on this Mac: the coordinator loop (a small repository, one request, and the plan run until the task is ready), and a reader refused a write. It costs usage; set `CHARRETTE_ASK` to ask the loop something else |
 
 The process tests run the fake agent with Bun. To try the runtime with real agents by hand, use the command-line client in `apps/cli`.
 

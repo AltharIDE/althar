@@ -243,7 +243,7 @@ type AgentDefinition = {
   options: { mode: string; model: string; effort?: string } // config option ids
   signIn: { status: (node: string) => LaunchSpec; read: (output, exitCode) => boolean | undefined; login: string }
   permissions: PermissionMeanings // what its option ids mean
-  sessionMeta?: () => Record<string, unknown> // `_meta` for session/new that keeps it asking
+  sessionMeta?: (role?: 'lead' | 'reader') => Record<string, unknown> // `_meta` for session/new: asking, or read-only
   knownGaps: string[]
 }
 ```

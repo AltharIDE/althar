@@ -8,6 +8,7 @@ import { SqlClient } from 'effect/sql'
 import { touchCard } from './cards'
 import { Instance } from './Instance'
 import { treeOf } from './git'
+import { snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
 import { Sessions } from './Sessions'
@@ -309,6 +310,22 @@ export class Runs extends Context.Service<
           const { review: step } = yield* stepsOf(run)
           if (step === undefined) return yield* finish(run, 'succeeded')
           const { nodeId, attemptId } = yield* sql.withTransaction(admit(run, 'review', round, step))
+          // The round reads a copy of the work as it stands now, and the record keeps which code that was (ADR-008).
+          const [workspace] = yield* sql<{ id: string; path: string }>`
+            SELECT id, path FROM workspaces WHERE task_id = ${run.taskId} AND device_id = ${instance.deviceId}`
+          if (workspace !== undefined) {
+            const snapshot = yield* snapshotForReview(workspace.path, round)
+            yield* sql`INSERT INTO workspace_snapshots ${sql.insert({
+              id: yield* newId(Ids.workspaceSnapshot),
+              projectId: run.projectId,
+              workspaceId: workspace.id,
+              nodeAttemptId: attemptId,
+              commitSha: snapshot.commit,
+              treeSha: snapshot.tree,
+              reason: 'node_started',
+              takenAt: yield* timestamp,
+            })}`
+          }
           const [thread] = yield* sql<{ id: string }>`
             SELECT id FROM threads WHERE task_id = ${run.taskId} AND kind = 'step' AND node_key = 'review'`
           const threadId = thread?.id ?? (yield* newId(Ids.thread))
@@ -330,7 +347,7 @@ export class Runs extends Context.Service<
             yield* sessions.send({
               envelope: yield* envelope('thread.send', { threadId, round }),
               threadId,
-              body: `Round ${round + 1}. The lead settled your findings:\n\n${settled ?? ''}\n\nReview the change again. Check that the fixes hold, and don't raise again what the lead set aside unless you have new evidence; then say which finding you repeat, and why.`,
+              body: `Round ${round + 1}. The lead settled your findings:\n\n${settled ?? ''}\n\nYour copy now holds the settled work. Review the change again. Check that the fixes hold, and don't raise again what the lead set aside unless you have new evidence; then say which finding you repeat, and why.`,
               quiet: true,
             })
           yield* sql.withTransaction(started(run, attemptId, sessionId))

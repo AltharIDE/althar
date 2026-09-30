@@ -19,6 +19,7 @@ import { Live } from './Live'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { change, fact, timestamp } from './records'
 import { git } from './git'
+import { reviewCopyOf } from './reviewCopy'
 import { addItem, recorder, transcript } from './threads'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
@@ -229,7 +230,9 @@ export class Sessions extends Context.Service<
               JOIN tasks k ON k.id = t.task_id
               JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
               WHERE t.id = ${threadId}`
-            if (step !== undefined) return { role: 'reviewer', ...step } satisfies ThreadContext as ThreadContext
+            // A reviewer reads a throwaway copy of the lead's work, not the worktree itself.
+            if (step !== undefined)
+              return { role: 'reviewer', ...step, worktree: reviewCopyOf(step.worktree) } satisfies ThreadContext as ThreadContext
           }
           const [row] = yield* sql<Omit<TaskThread, 'role'>>`
             SELECT t.id AS thread_id, t.project_id, t.task_id, k.title, k.description, w.path AS worktree, w.branch,
@@ -666,7 +669,9 @@ export class Sessions extends Context.Service<
                 mode: thread.role === 'task' ? definition.modes.ask : definition.modes.reader,
                 modeOptionId: definition.options.mode,
                 mcpServers: [tools.server],
-                ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta() }),
+                ...(definition.sessionMeta === undefined
+                  ? {}
+                  : { meta: definition.sessionMeta(thread.role === 'task' ? 'lead' : 'reader') }),
               })
               if (model !== undefined) yield* agent.setOption(definition.options.model, model)
               return { connection, agent }
@@ -941,7 +946,7 @@ export class Sessions extends Context.Service<
           return [
             "You are reviewing another agent's change, in Charrette. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
             `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
-            `The change is in ${thread.worktree}. See it with \`git diff ${thread.baseCommit ?? 'HEAD'}\` and \`git status\` there; new files show in git status.`,
+            `The change is in ${thread.worktree}: a copy of the lead's work as it stood when this round began, which Charrette throws away after; nothing you do there reaches the lead. See the change with \`git diff ${thread.baseCommit ?? 'HEAD~1'}\` there; new files are in it.`,
             ...(summary === '' ? [] : [`The lead says:\n${summary}`]),
             "Look for what would make the change wrong or unsafe to merge: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Then call Charrette's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), where it is, and what is wrong. With no findings worth fixing, the verdict is pass.",
             ...(yield* threadSoFar(thread.threadId)),

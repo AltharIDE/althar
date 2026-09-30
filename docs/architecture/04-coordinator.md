@@ -46,18 +46,27 @@ role: its brief, its tools, and its read-only rule.
 
 ## Read-only by construction
 
-Read-only is enforced by what the coordinator can reach, not by its prompt.
+Read-only is enforced by what the coordinator can reach, not by its prompt,
+in three layers ([ADR-004](../decisions/004-coordinator-is-an-agent-session.md)).
+A reviewer, the other role that only reads, gets the same.
 
-- Its session starts in the agent's read-only mode where the agent has one
-  (Claude Code's plan mode, Codex's read-only sandbox, OpenCode's plan agent).
-- Its rule denies every write and every command outside a short read-only
-  list (`git log`, `git diff`, search). Charrette answers its permission
-  requests from that rule and never asks you.
-- Its working directory is a Charrette-owned folder holding one worktree per
-  bound repository, detached at the default branch. They are refreshed from
-  the remote's default branch when you start a turn, so nothing written there
-  survives or reaches a task. A project with no repositories gets an empty
-  folder.
+- It reads throwaway copies. Its working directory is a Charrette-owned
+  folder holding one worktree per bound repository, detached at the default
+  branch. They are refreshed from the remote's default branch when you start
+  a turn, so nothing written there survives or reaches a task. A project with
+  no repositories gets an empty folder. A reviewer reads a copy of the lead's
+  worktree, snapshotted when its round begins, so it reads what the round is
+  about even if the lead moves on, and the record keeps which code it was.
+- The agent's own sandbox is read-only where it has one that still lets it
+  call Charrette's tools: Codex's `read-only` sandbox, and Claude Code with its
+  edit tools denied (which also denies its sandbox's writes) and every shell
+  command asking. Claude Code's plan mode and OpenCode's plan agent would be
+  simpler, but both refuse MCP tools. OpenCode has no sandbox yet, so for it
+  the copy is the boundary.
+- Charrette's reader rules are the backstop. They allow reads, searches and
+  fetches, and commands that only look, each with the flags it may take (no
+  `rg --pre`, `git -c`, `sort -o`). They refuse everything else with a reason,
+  and never ask you.
 - Its only way to change anything is its tools. They issue the same commands
   the interface does: validated, recorded, idempotent, and never beyond your
   own authority.

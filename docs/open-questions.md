@@ -11,23 +11,13 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
 
 ## The coordinator loop, 30 September
 
-- [ ] **How read-only the coordinator and reviewers are, when agents' own
-  read-only modes refuse Charrette's tools.** ADR-004 and architecture 04 say
-  the coordinator starts in the agent's read-only mode where it has one. A
-  probe (`packages/runtime/scripts/probe-tools.ts`) found that Claude Code's
-  plan mode and OpenCode's plan agent won't call an MCP tool, so a
-  coordinator in them can't draft or plan anything; Codex's read-only sandbox
-  does call them, though it asks permission with a blank title. The loop
-  runs them in a *reader* mode instead (`modes.reader`: Claude's `default`,
-  Codex's `read-only`, OpenCode's `build`) and relies on Charrette's reader
-  rules, which allow reads, searches and commands that only look, refuse
-  everything else, and never ask you. The coordinator's copies are also thrown
-  away each turn. So the rule is now the boundary rather than the backstop
-  for Claude and OpenCode. Alternatives: keep the agents' read-only modes and
-  give Charrette's tools another way in (a side channel); ask the agents to
-  let plan mode call named MCP tools; or accept the rules as the boundary and
-  amend ADR-004 and 04. Leaning: amend them, keeping Codex's read-only sandbox,
-  and re-probe when agents change their plan modes.
+- [x] **How read-only the coordinator and reviewers are.** Settled on 30
+  September 2026 in the review of #15: every reader reads a throwaway copy,
+  its agent's sandbox is read-only where that still lets it call Charrette's
+  tools, and the reader rules, an allowlist of commands and flags, are the
+  backstop. Plan modes stay out while they refuse MCP tools.
+  [ADR-004](decisions/004-coordinator-is-an-agent-session.md),
+  [architecture 04](architecture/04-coordinator.md).
 - [ ] **What an agent's closing words are for, once a step reports.** A lead
   ends its step with `finish_step` and a summary; anything it says after
   that shows as a turn of its own under the step. Fold it too, or drop it

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -111,6 +111,20 @@ describe('the coordinator loop', () => {
       assert.deepStrictEqual({ ...finding }, { severity: 'major', claim: 'The heading is wrong.', state: 'fixed', settled: 1 })
       const [run] = yield* sql<{ state: string }>`SELECT state FROM runs`
       assert.strictEqual(run?.state, 'succeeded')
+      // Each round read a copy of the work as it stood, and the record keeps which code that was; the lead's branch is untouched.
+      const snapshots = yield* sql<{ commitSha: string; nodeKey: string }>`
+        SELECT s.commit_sha, n.node_key FROM workspace_snapshots s JOIN node_attempts a ON a.id = s.node_attempt_id
+        JOIN nodes n ON n.id = a.node_id ORDER BY s.taken_at`
+      assert.deepStrictEqual(
+        snapshots.map((snapshot) => snapshot.nodeKey),
+        ['review', 'review'],
+      )
+      const [workspace] = yield* sql<{ path: string; baseCommit: string }>`SELECT path, base_commit FROM workspaces`
+      const copy = join(dirname(workspace?.path ?? ''), '.review', basename(workspace?.path ?? ''))
+      const head = (cwd: string) => execFileSync('git', ['rev-parse', 'HEAD'], { cwd }).toString().trim()
+      assert.strictEqual(head(copy), snapshots.at(-1)?.commitSha)
+      assert.strictEqual(head(workspace?.path ?? ''), workspace?.baseCommit)
+      assert.isTrue(existsSync(join(copy, 'settled.txt')))
       // The task was drafted by the coordinator, as the record says.
       const [author] = yield* sql<{ kind: string; agentId: string }>`
         SELECT a.kind, a.agent_id FROM tasks k JOIN actors a ON a.id = k.created_by_actor_id`
