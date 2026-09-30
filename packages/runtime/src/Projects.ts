@@ -98,12 +98,17 @@ export class Projects extends Context.Service<
       readonly envelope: CommandEnvelope
       readonly path: string
     }): Effect.Effect<OpenedProject, NotARepository | GitFailed | Failure>
-    /** Creates a task, its thread, and its worktree. */
+    /**
+     * Creates a task, its thread, and its worktree. A draft is a task the
+     * coordinator planned, which starts when its plan does; its worktree is
+     * made now, so it is ready by then.
+     */
     createTask(input: {
       readonly envelope: CommandEnvelope
       readonly projectId: string
       readonly title: string
       readonly description?: string
+      readonly draft?: boolean
     }): Effect.Effect<CreatedTask, NotFound | GitFailed | Failure>
   }
 >()('@charrette/runtime/Projects') {
@@ -188,6 +193,7 @@ export class Projects extends Context.Service<
         readonly projectId: string
         readonly title: string
         readonly description?: string
+        readonly draft?: boolean
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -227,7 +233,7 @@ export class Projects extends Context.Service<
                 title: input.title,
                 description: input.description ?? '',
                 slug,
-                state: 'open',
+                state: input.draft === true ? 'draft' : 'open',
                 createdByActorId: envelope.actorId,
                 createdAt,
               })}`

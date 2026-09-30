@@ -15,15 +15,23 @@ export interface InstanceInfo {
   readonly personId: ActorId
   /** Charrette itself: the actor of what the rules decide and the runtime observes. */
   readonly systemId: ActorId
+  /** The coordinator (docs/architecture/04): the actor of the tasks it drafts and the messages it passes on. */
+  readonly coordinatorId: ActorId
 }
 
-const findOrCreateActor = (kind: 'person' | 'system', displayName: string) =>
+/**
+ * One person and one Charrette per profile; an agent actor by its agent id.
+ * The coordinator's is `coordinator`, its role: it runs on whichever agent is
+ * chosen, and each of its sessions records which.
+ */
+const findOrCreateActor = (kind: 'person' | 'system' | 'agent', displayName: string, agentId: string | null = null) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const [existing] = yield* sql<{ id: ActorId }>`SELECT id FROM actors WHERE kind = ${kind} ORDER BY created_at, id LIMIT 1`
+    const [existing] = yield* sql<{ id: ActorId }>`
+      SELECT id FROM actors WHERE kind = ${kind} AND agent_id IS ${agentId} ORDER BY created_at, id LIMIT 1`
     if (existing !== undefined) return existing.id
     const id = yield* newId(Ids.actor)
-    yield* sql`INSERT INTO actors ${sql.insert({ id, kind, displayName, agentId: null, createdAt: yield* now })}`
+    yield* sql`INSERT INTO actors ${sql.insert({ id, kind, displayName, agentId, createdAt: yield* now })}`
     return id
   })
 
@@ -51,9 +59,10 @@ export class Instance extends Context.Service<Instance, InstanceInfo>()('@charre
             yield* sql`INSERT INTO devices ${sql.insert({ id: deviceId, name: config.deviceName, createdAt: yield* now })}`
           const personId = yield* findOrCreateActor('person', 'You')
           const systemId = yield* findOrCreateActor('system', 'Charrette')
+          const coordinatorId = yield* findOrCreateActor('agent', 'Coordinator', 'coordinator')
           const id = yield* newId(Ids.runtimeInstance)
           yield* sql`INSERT INTO runtime_instances ${sql.insert({ id, deviceId, pid: process.pid, appVersion: config.appVersion, startedAt: yield* now })}`
-          return { id, deviceId, personId, systemId }
+          return { id, deviceId, personId, systemId, coordinatorId }
         }),
       )
       yield* reconcile(info)

@@ -393,6 +393,34 @@ describe('thread items', () => {
       description: null,
     })
     assert.deepStrictEqual(itemOf({ ...row('agent_message', null), content: 'not json' })?.content, { text: '' })
-    assert.isUndefined(itemOf(row('step_result', {})))
+    assert.isUndefined(itemOf(row('something_new', {})))
+    assert.deepStrictEqual(
+      itemOf(
+        row('step_result', {
+          step: 'review',
+          round: 1,
+          verdict: 'changes_requested',
+          summary: 'One thing.',
+          findings: [{ severity: 'loud', claim: 'x', line: 3 }],
+          agentId: 'codex',
+        }),
+      )?.content,
+      {
+        step: 'review',
+        round: 1,
+        summary: 'One thing.',
+        verdict: 'changes_requested',
+        findings: [{ severity: 'minor', file: null, line: 3, claim: 'x' }],
+        agentId: 'codex',
+      },
+    )
+    assert.deepStrictEqual(itemOf(row('step_result', { summary: 'Done.' }))?.content, {
+      step: 'implement',
+      round: 0,
+      summary: 'Done.',
+      verdict: null,
+      findings: [],
+      agentId: null,
+    })
   })
 })

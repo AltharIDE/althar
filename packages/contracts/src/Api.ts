@@ -147,6 +147,35 @@ export const NoticeItem = Schema.Struct({
   }),
 })
 
+/** Something a review found: how much it matters, where it is, and what is wrong. */
+export const Finding = Schema.Struct({
+  severity: Schema.Literals(['blocking', 'major', 'minor', 'nit']),
+  file: Schema.NullOr(Schema.String),
+  line: Schema.NullOr(Schema.Number),
+  claim: Schema.String,
+})
+export type Finding = typeof Finding.Type
+
+/**
+ * What a step reported when it ended: the lead's summary of its work or of
+ * settling a review, or the review's verdict and findings. The person reads
+ * this rather than the work itself.
+ */
+export const StepResultItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('step_result'),
+  content: Schema.Struct({
+    step: Schema.Literals(['implement', 'review', 'settle']),
+    /** The review round, from 0. */
+    round: Schema.Number,
+    summary: Schema.String,
+    verdict: Schema.NullOr(Schema.Literals(['pass', 'changes_requested'])),
+    findings: Schema.Array(Finding),
+    /** Who reported it, for a review. */
+    agentId: Schema.NullOr(Schema.String),
+  }),
+})
+
 /** A step of a task's plan: which kind, who does it, and whether it is skipped. For now only Implement and Review. */
 export const PlanStep = Schema.Struct({
   key: Schema.Literals(['implement', 'review']),
@@ -193,7 +222,7 @@ export const TaskItem = Schema.Struct({
   }),
 })
 
-export const ThreadItem = Schema.Union([UserMessageItem, AgentTextItem, ToolCallItem, PlanItem, NoticeItem, TaskItem])
+export const ThreadItem = Schema.Union([UserMessageItem, AgentTextItem, ToolCallItem, PlanItem, NoticeItem, StepResultItem, TaskItem])
 export type ThreadItem = typeof ThreadItem.Type
 
 export const SessionSummary = Schema.Struct({

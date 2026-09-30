@@ -41,6 +41,19 @@ describe('the API', () => {
     // A tool call's content is its own; a message's text is no tool call.
     assert.throws(() => decode({ ...base, kind: 'tool_call', content: { text: 'Hi' } }))
     assert.throws(() => decode({ ...base, kind: 'step_result', content: {} }))
+    const review = decode({
+      ...base,
+      kind: 'step_result',
+      content: {
+        step: 'review',
+        round: 0,
+        summary: 'One thing to fix.',
+        verdict: 'changes_requested',
+        findings: [{ severity: 'major', file: 'src/a.ts', line: 3, claim: 'The retry never stops.' }],
+        agentId: 'codex',
+      },
+    })
+    assert.strictEqual(review.kind === 'step_result' && review.content.findings.length, 1)
     // A task in the coordinator's thread: its plan, then its card.
     const task = decode({
       ...base,

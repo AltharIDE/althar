@@ -68,10 +68,29 @@ interface CoordinatorThread {
   readonly folder: CoordinatorFolder
 }
 
-type ThreadContext = TaskThread | CoordinatorThread
+/**
+ * A task's review step (docs/architecture/05): another agent reads the task's
+ * worktree under the rules of a role that only reads, and reports what it
+ * found through Charrette's tool. Its thread spans the review's rounds.
+ */
+interface ReviewThread {
+  readonly role: 'reviewer'
+  readonly threadId: string
+  readonly projectId: ProjectId
+  readonly taskId: string
+  readonly title: string
+  readonly description: string
+  readonly worktree: string
+  readonly baseCommit: string | null
+}
+
+type ThreadContext = TaskThread | CoordinatorThread | ReviewThread
 
 /** Where a thread's agent works. */
-const cwdOf = (thread: ThreadContext) => (thread.role === 'task' ? thread.worktree : thread.folder.folder)
+const cwdOf = (thread: ThreadContext) => (thread.role === 'coordinator' ? thread.folder.folder : thread.worktree)
+
+/** A role's Charrette tools. */
+const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
 
 interface Running {
   readonly sessionId: string
@@ -156,6 +175,8 @@ export class Sessions extends Context.Service<
       readonly threadId: string
       readonly body: string
       readonly disposition?: Disposition
+      /** Input Charrette writes, such as findings to settle: delivered, but shown in the thread by what it came from, not as the person's message. */
+      readonly quiet?: boolean
     }): Effect.Effect<AcceptedInput, NotFound | Failure>
     /** Changes the session's model; the session and its context carry on. */
     setModel(input: { readonly threadId: string; readonly model: string }): Effect.Effect<void, NoSession | ModelUnchanged | Failure>
@@ -201,6 +222,15 @@ export class Sessions extends Context.Service<
               projectName: kind.projectName,
               folder: yield* coordinatorFolder(kind.projectId),
             } satisfies ThreadContext as ThreadContext
+          if (kind?.kind === 'step') {
+            const [step] = yield* sql<Omit<ReviewThread, 'role'>>`
+              SELECT t.id AS thread_id, t.project_id, t.task_id, k.title, k.description, w.path AS worktree, w.base_commit
+              FROM threads t
+              JOIN tasks k ON k.id = t.task_id
+              JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
+              WHERE t.id = ${threadId}`
+            if (step !== undefined) return { role: 'reviewer', ...step } satisfies ThreadContext as ThreadContext
+          }
           const [row] = yield* sql<Omit<TaskThread, 'role'>>`
             SELECT t.id AS thread_id, t.project_id, t.task_id, k.title, k.description, w.path AS worktree, w.branch,
               w.base_ref, w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch
@@ -565,10 +595,11 @@ export class Sessions extends Context.Service<
                 source: 'runtime',
                 severity: 'warning',
                 title: `${running.entry.definition.name} stopped on its own.`,
-                description:
-                  running.thread.role === 'task'
-                    ? 'Start the lead again to carry on; it picks up from the thread.'
-                    : 'Say something to start the coordinator again; it picks up from the thread.',
+                description: {
+                  task: 'Start the lead again to carry on; it picks up from the thread.',
+                  coordinator: 'Say something to start the coordinator again; it picks up from the thread.',
+                  reviewer: 'The review waits; Charrette starts the reviewer again when the task resumes.',
+                }[running.thread.role],
               },
             )
           yield* live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state })
@@ -605,7 +636,7 @@ export class Sessions extends Context.Service<
           const requestContext: RequestContext = {
             projectId: thread.projectId,
             threadId: thread.threadId,
-            taskId: thread.role === 'task' ? thread.taskId : null,
+            taskId: thread.role === 'coordinator' ? null : thread.taskId,
             sessionId,
             meanings: definition.permissions,
             rules:
@@ -613,13 +644,13 @@ export class Sessions extends Context.Service<
                 ? { role: 'task', context: { worktree: thread.worktree, defaultBranch: thread.defaultBranch, taskBranch: thread.branch } }
                 : { role: 'reader' },
           }
-          // Charrette's tools for the session's role: the coordinator's plan tasks; a lead's report its work.
+          // Charrette's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
           const tools = yield* toolServer.grant({
-            role: thread.role === 'task' ? 'lead' : 'coordinator',
+            role: toolRoleOf(thread),
             projectId: thread.projectId,
             threadId: thread.threadId,
             sessionId,
-            taskId: thread.role === 'task' ? thread.taskId : null,
+            taskId: thread.role === 'coordinator' ? null : thread.taskId,
           })
           const scope = yield* Scope.fork(sessionsScope, 'sequential')
           const started = yield* Effect.exit(
@@ -631,7 +662,7 @@ export class Sessions extends Context.Service<
               })
               const agent = yield* connection.newSession({
                 cwd: cwdOf(thread),
-                // The coordinator only reads: in the agent's read-only mode where that still lets it call Charrette's tools.
+                // The coordinator and a reviewer only read: in the agent's read-only mode where that still lets it call Charrette's tools.
                 mode: thread.role === 'task' ? definition.modes.ask : definition.modes.reader,
                 modeOptionId: definition.options.mode,
                 mcpServers: [tools.server],
@@ -773,7 +804,10 @@ export class Sessions extends Context.Service<
             const sessionId = yield* createSession(thread, entry.definition.id)
             const connected = yield* connectSession(thread, sessionId, entry, input.model)
             // Every session starts from a brief (ADR-005), even the first on a task.
-            return yield* activate(connected, { text: yield* briefFor(thread, { kind: 'start' }), closing: 'Start on the task.' })
+            return yield* activate(connected, {
+              text: yield* briefFor(thread, { kind: 'start' }),
+              closing: thread.role === 'reviewer' ? 'Review the change.' : 'Start on the task.',
+            })
           }),
         )
 
@@ -782,6 +816,7 @@ export class Sessions extends Context.Service<
         readonly threadId: string
         readonly body: string
         readonly disposition?: Disposition
+        readonly quiet?: boolean
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -811,12 +846,13 @@ export class Sessions extends Context.Service<
                 state: 'queued',
                 acceptedAt: yield* timestamp,
               })}`
-              yield* addItem(
-                { projectId: thread.projectId, threadId: input.threadId },
-                'user_message',
-                { text: input.body },
-                { userInputId: inputId },
-              )
+              if (input.quiet !== true)
+                yield* addItem(
+                  { projectId: thread.projectId, threadId: input.threadId },
+                  'user_message',
+                  { text: input.body },
+                  { userInputId: inputId },
+                )
               yield* fact({
                 projectId: thread.projectId,
                 aggregateType: 'user_input',
@@ -891,7 +927,26 @@ export class Sessions extends Context.Service<
         thread: ThreadContext,
         why: { readonly kind: 'start' } | { readonly kind: 'takeover'; readonly from: string | undefined },
       ): Effect.Effect<string, SqlError.SqlError, Store> =>
-        thread.role === 'coordinator' ? coordinatorBrief(thread) : taskBrief(thread, why)
+        thread.role === 'coordinator' ? coordinatorBrief(thread) : thread.role === 'reviewer' ? reviewBrief(thread) : taskBrief(thread, why)
+
+      /** A reviewer's brief: the task, how to see the change, what it may do, and how to report. */
+      const reviewBrief = (thread: ReviewThread) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [lead] = yield* sql<{ content: string }>`
+            SELECT i.content FROM thread_items i JOIN threads t ON t.id = i.thread_id
+            WHERE t.task_id = ${thread.taskId} AND t.kind = 'task' AND i.kind = 'step_result'
+            ORDER BY i.sequence DESC LIMIT 1`
+          const summary = lead === undefined ? '' : String((JSON.parse(lead.content) as { summary?: unknown }).summary ?? '')
+          return [
+            "You are reviewing another agent's change, in Charrette. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
+            `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
+            `The change is in ${thread.worktree}. See it with \`git diff ${thread.baseCommit ?? 'HEAD'}\` and \`git status\` there; new files show in git status.`,
+            ...(summary === '' ? [] : [`The lead says:\n${summary}`]),
+            "Look for what would make the change wrong or unsafe to merge: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Then call Charrette's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), where it is, and what is wrong. With no findings worth fixing, the verdict is pass.",
+            ...(yield* threadSoFar(thread.threadId)),
+          ].join('\n\n')
+        })
 
       const taskBrief = (
         thread: TaskThread,

@@ -1,8 +1,18 @@
-import { PAGE, type ProjectList, type TaskList, type TaskSummary, type ThreadItem, type ThreadSnapshot } from '@charrette/contracts'
+import {
+  type CoordinatorSnapshot,
+  PAGE,
+  type TaskPhase,
+  type ProjectList,
+  type TaskList,
+  type TaskSummary,
+  type ThreadItem,
+  type ThreadSnapshot,
+} from '@charrette/contracts'
 import { Context, Effect, Layer, Option } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Agents } from './Config'
+import { Coordinator } from './Coordinator'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { commandIn } from './rules'
@@ -117,6 +127,34 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         },
       }
     }
+    case 'step_result': {
+      const step = text(content, 'step')
+      const verdict = text(content, 'verdict')
+      const findings = field(content, 'findings')
+      const round = field(content, 'round')
+      const agentId = text(content, 'agentId')
+      return {
+        ...base,
+        kind: 'step_result',
+        content: {
+          step: step === 'review' || step === 'settle' ? step : 'implement',
+          round: typeof round === 'number' ? round : 0,
+          summary: text(content, 'summary'),
+          verdict: verdict === 'pass' || verdict === 'changes_requested' ? verdict : null,
+          findings: (Array.isArray(findings) ? findings : []).map((finding) => {
+            const severity = text(finding, 'severity')
+            const line = field(finding, 'line')
+            return {
+              severity: severity === 'blocking' || severity === 'major' || severity === 'nit' ? severity : 'minor',
+              file: text(finding, 'file') || null,
+              line: typeof line === 'number' ? line : null,
+              claim: text(finding, 'claim'),
+            }
+          }),
+          agentId: agentId === '' ? null : agentId,
+        },
+      }
+    }
     default:
       return undefined
   }
@@ -131,7 +169,7 @@ export interface ThreadChange {
   readonly threadId: string | null
 }
 
-type Store = SqlClient.SqlClient | Instance | Agents | Sessions
+type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator
 
 export class Queries extends Context.Service<
   Queries,
@@ -145,6 +183,11 @@ export class Queries extends Context.Service<
       page?: { readonly before?: number; readonly limit?: number },
     ): Effect.Effect<ThreadSnapshot, SqlError.SqlError | NotFound>
     item(threadId: string, itemId: string): Effect.Effect<ThreadItem, SqlError.SqlError | NotFound>
+    /** The project's coordinator thread, with the newest `limit` items before `before`. */
+    coordinator(
+      projectId: string,
+      page?: { readonly before?: number; readonly limit?: number },
+    ): Effect.Effect<CoordinatorSnapshot, unknown>
     /** Changes after `cursor`, oldest first, each with its thread. */
     changesSince(cursor: number, limit: number): Effect.Effect<ReadonlyArray<ThreadChange>, SqlError.SqlError>
     /** The newest cursor in the feed. */
@@ -214,11 +257,139 @@ export class Queries extends Context.Service<
           return { items: rows.slice(0, where.limit).toReversed(), earlier: rows.length > where.limit }
         })
 
-      const thread = (threadId: string, page: { readonly before?: number; readonly limit?: number } = {}) =>
+      /** The session working on a thread now, as a screen shows it. */
+      const sessionOf = (threadId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
           const agents = yield* Agents
+          const [session] = yield* sql<{ id: string; agentId: string; state: string; model: string | null; config: string }>`
+            SELECT id, agent_id, state, model, config FROM provider_sessions
+            WHERE thread_id = ${threadId} AND state IN (${sql.unsafe(live)}) ORDER BY started_at DESC LIMIT 1`
+          if (session === undefined) return null
+          const running = yield* sessions.running(threadId)
+          const definition = Option.getOrUndefined(yield* Effect.option(agents.get(session.agentId)))
+          const options = field(parse(session.config), 'options')
+          const modelOption = Array.isArray(options)
+            ? options.find((option) => field(option, 'id') === definition?.definition.options.model)
+            : undefined
+          const values = field(modelOption, 'values')
+          return {
+            id: session.id,
+            agentId: session.agentId,
+            agentName: definition?.definition.name ?? session.agentId,
+            state: session.state,
+            model: session.model,
+            models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
+            turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
+          }
+        })
+
+      /**
+       * A task's card in the coordinator's thread: where it stands, worked out
+       * from its plan, its run, the calls waiting and the agents working.
+       */
+      const cardOf = (row: ItemRow) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const sessions = yield* Sessions
+          const taskId = text(parse(row.content), 'taskId')
+          const [task] = yield* sql<{
+            threadId: string
+            title: string
+            slug: string
+            state: string
+            branch: string | null
+            planId: string | null
+            planState: string | null
+            parameters: string | null
+            startsAt: string | null
+            runState: string | null
+            runAt: string | null
+            step: string | null
+            waiting: number
+            review: string | null
+          }>`
+            SELECT t.id AS thread_id, k.title, k.slug, k.state, w.branch,
+              p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
+              r.state AS run_state, r.created_at AS run_at,
+              (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+                WHERE e.run_id = r.id AND a.state IN ('admitted', 'running') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
+              (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') AS waiting,
+              (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review
+            FROM tasks k
+            JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            LEFT JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
+            LEFT JOIN task_plans p ON p.id = (SELECT id FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1)
+            LEFT JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
+            WHERE k.id = ${taskId}`
+          if (task === undefined) return undefined
+          const [latest] = yield* sql<{ content: string }>`
+            SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result' ORDER BY sequence DESC LIMIT 1`
+          const working =
+            Option.isSome(yield* sessions.running(task.threadId)) ||
+            (task.review !== null && Option.isSome(yield* sessions.running(task.review)))
+          const phase = ((): TaskPhase => {
+            if (task.state === 'done' || task.state === 'abandoned') return 'settled'
+            if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
+            if (task.runState === 'succeeded') return 'ready'
+            if (task.runState !== null && task.runState !== 'running') return 'stopped'
+            if (task.waiting > 0) return 'waiting'
+            return working ? 'running' : 'stopped'
+          })()
+          const parameters = parse(task.parameters)
+          const steps = field(parameters, 'steps')
+          return {
+            id: row.id,
+            sequence: row.sequence,
+            agentId: null,
+            createdAt: row.createdAt,
+            kind: 'task',
+            content: {
+              taskId,
+              threadId: task.threadId,
+              title: task.title,
+              slug: task.slug,
+              phase,
+              plan:
+                task.planId === null
+                  ? null
+                  : {
+                      id: task.planId,
+                      steps: (Array.isArray(steps) ? steps : []).map((step) => {
+                        const model = field(step, 'model')
+                        return {
+                          key: text(step, 'key') === 'review' ? 'review' : 'implement',
+                          agentId: text(step, 'agentId'),
+                          model: typeof model === 'string' ? model : null,
+                          skipped: field(step, 'skipped') === true,
+                        }
+                      }),
+                      startsAt: task.planState === 'proposed' ? task.startsAt : null,
+                      reason: text(parameters, 'reason') || null,
+                    },
+              step: task.step,
+              summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
+              branch: task.branch,
+              startedAt: task.runAt,
+            },
+          } satisfies ThreadItem
+        })
+
+      /** A page of a thread's items, as screens show them. */
+      const pageOf = (threadId: string, page: { readonly before?: number; readonly limit?: number }) =>
+        Effect.gen(function* () {
+          const { items, earlier } = yield* itemRows(threadId, {
+            ...(page.before === undefined ? {} : { before: page.before }),
+            limit: page.limit ?? PAGE,
+          })
+          const shown = yield* Effect.forEach(items, (row) => (row.kind === 'task' ? cardOf(row) : Effect.succeed(itemOf(row))))
+          return { items: shown.flatMap((item) => (item === undefined ? [] : [item])), earlier }
+        })
+
+      const thread = (threadId: string, page: { readonly before?: number; readonly limit?: number } = {}) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
           const at = yield* cursor
           const [head] = yield* sql<{
             threadId: string
@@ -237,27 +408,11 @@ export class Queries extends Context.Service<
               w.branch, w.path AS worktree, w.base_ref
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
             LEFT JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
-            WHERE t.id = ${threadId}`
+            WHERE t.id = ${threadId} AND t.kind = 'task'`
           if (head === undefined) return yield* new NotFound({ kind: 'task thread', id: threadId })
-
-          const [session] = yield* sql<{ id: string; agentId: string; state: string; model: string | null; config: string }>`
-            SELECT id, agent_id, state, model, config FROM provider_sessions
-            WHERE thread_id = ${threadId} AND state IN (${sql.unsafe(live)}) ORDER BY started_at DESC LIMIT 1`
-          const running = yield* sessions.running(threadId)
-          const definition = session === undefined ? undefined : Option.getOrUndefined(yield* Effect.option(agents.get(session.agentId)))
-          const options = field(parse(session?.config ?? null), 'options')
-          const modelOption = Array.isArray(options)
-            ? options.find((option) => field(option, 'id') === definition?.definition.options.model)
-            : undefined
-          const values = field(modelOption, 'values')
-
-          const { items, earlier } = yield* itemRows(threadId, {
-            ...(page.before === undefined ? {} : { before: page.before }),
-            limit: page.limit ?? PAGE,
-          })
+          const { items, earlier } = yield* pageOf(threadId, page)
           const attention = yield* sql<{ id: string; payload: string; createdAt: string }>`
             SELECT id, payload, created_at FROM attention_requests WHERE task_id = ${head.taskId} AND state = 'open' ORDER BY created_at`
-
           return {
             threadId,
             cursor: at,
@@ -272,18 +427,7 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               baseRef: head.baseRef,
             },
-            session:
-              session === undefined
-                ? null
-                : {
-                    id: session.id,
-                    agentId: session.agentId,
-                    agentName: definition?.definition.name ?? session.agentId,
-                    state: session.state,
-                    model: session.model,
-                    models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
-                    turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
-                  },
+            session: yield* sessionOf(threadId),
             attention: attention.map((request) => {
               const payload = parse(request.payload)
               return {
@@ -294,15 +438,37 @@ export class Queries extends Context.Service<
                 createdAt: request.createdAt,
               }
             }),
-            items: items.flatMap((row) => itemOf(row) ?? []),
+            items,
             earlier,
           } satisfies ThreadSnapshot
+        })
+
+      /** The project's coordinator thread: the agent on it, the one it would start on, and a page of its items. */
+      const coordinator = (projectId: string, page: { readonly before?: number; readonly limit?: number } = {}) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const coordinators = yield* Coordinator
+          const at = yield* cursor
+          const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${projectId}`
+          if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+          const threadId = yield* coordinators.thread(projectId)
+          const { items, earlier } = yield* pageOf(threadId, page)
+          return {
+            threadId,
+            cursor: at,
+            project: { id: projectId, name: project.name },
+            session: yield* sessionOf(threadId),
+            suggested: yield* coordinators.suggested(projectId),
+            items,
+            earlier,
+          } satisfies CoordinatorSnapshot
         })
 
       const item = (threadId: string, itemId: string) =>
         Effect.gen(function* () {
           const { items } = yield* itemRows(threadId, { itemId, limit: 1 })
-          const found = items[0] === undefined ? undefined : itemOf(items[0])
+          const row = items[0]
+          const found = row === undefined ? undefined : row.kind === 'task' ? yield* cardOf(row) : itemOf(row)
           return found === undefined ? yield* new NotFound({ kind: 'thread item', id: itemId }) : found
         })
 
@@ -344,6 +510,7 @@ export class Queries extends Context.Service<
           ),
         thread: (threadId, page) => run(thread(threadId, page)),
         item: (threadId, itemId) => run(item(threadId, itemId)),
+        coordinator: (projectId, page) => run(coordinator(projectId, page)),
         changesSince: (after, limit) => run(changesSince(after, limit)),
         cursor: run(cursor),
       })
