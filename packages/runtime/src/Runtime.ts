@@ -1,6 +1,6 @@
-import { CommandEnvelope, Ids, newId, now } from '@charrette/domain'
+import { CommandEnvelope, CommandId, Ids, newId, now } from '@charrette/domain'
 import { Commands, Database, Ledger } from '@charrette/persistence-sqlite'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Schema } from 'effect'
 
 import { Agents, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
 import { Instance } from './Instance'
@@ -35,12 +35,16 @@ export const layer = (options: RuntimeLayerOptions) => {
   return Layer.mergeAll(Projects.layer, Sessions.layer).pipe(Layer.provideMerge(Permissions.layer.pipe(Layer.provideMerge(base))))
 }
 
-/** A command from the person using this profile, ready to send. */
-export const envelope = (commandType: string, payload: unknown) =>
+/**
+ * A command from the person using this profile, ready to send. A client
+ * gives its own id, so a retry is answered from the first one's receipt.
+ */
+export const envelope = (commandType: string, payload: unknown, commandId?: string) =>
   Effect.gen(function* () {
     const instance = yield* Instance
     return new CommandEnvelope({
-      commandId: yield* newId(Ids.command),
+      commandId:
+        commandId === undefined ? yield* newId(Ids.command) : yield* Effect.orDie(Schema.decodeUnknownEffect(CommandId)(commandId)),
       commandType,
       schemaVersion: 1,
       actorId: instance.personId,

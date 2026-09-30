@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 
 import { Effect } from 'effect'
 
+import { asNode } from './process'
 import type { AgentDefinition } from './registry'
 
 export type SignInStatus = 'signed_in' | 'signed_out' | 'unknown'
@@ -14,10 +15,15 @@ export type SignInStatus = 'signed_in' | 'signed_out' | 'unknown'
 export const signInStatus = (agent: AgentDefinition, node: string = process.execPath): Effect.Effect<SignInStatus> =>
   Effect.callback<SignInStatus>((resume) => {
     const spec = agent.signIn.status(node)
-    execFile(spec.command, [...spec.args], { timeout: 15_000, env: { ...process.env, ...spec.env } }, (error, stdout, stderr) => {
-      if (error !== null && typeof error.code !== 'number') return resume(Effect.succeed('unknown'))
-      const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : null
-      const signedIn = agent.signIn.read(`${stdout}\n${stderr}`, exitCode)
-      resume(Effect.succeed(signedIn === undefined ? 'unknown' : signedIn ? 'signed_in' : 'signed_out'))
-    })
+    execFile(
+      spec.command,
+      [...spec.args],
+      { timeout: 15_000, env: { ...process.env, ...asNode(spec), ...spec.env } },
+      (error, stdout, stderr) => {
+        if (error !== null && typeof error.code !== 'number') return resume(Effect.succeed('unknown'))
+        const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : null
+        const signedIn = agent.signIn.read(`${stdout}\n${stderr}`, exitCode)
+        resume(Effect.succeed(signedIn === undefined ? 'unknown' : signedIn ? 'signed_in' : 'signed_out'))
+      },
+    )
   })

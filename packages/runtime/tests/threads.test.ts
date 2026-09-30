@@ -34,6 +34,7 @@ describe('the thread recorder', () => {
       const events: ReadonlyArray<SessionEvent> = [
         { _tag: 'ToolCallUpdate', toolCallId: 'early', status: 'in_progress' },
         { _tag: 'ToolCall', toolCallId: 'early', title: 'Run tests', kind: 'execute', status: 'in_progress' },
+        { _tag: 'ToolCallUpdate', toolCallId: 'early', locations: [{ path: '/w/tests/a.test.ts', line: 4 }] },
         { _tag: 'AgentMessage', text: 'Look' },
         { _tag: 'AgentMessage', text: 'ing' },
         { _tag: 'Plan', entries: [{ content: 'Write it', status: 'pending' }] },
@@ -59,6 +60,9 @@ describe('the thread recorder', () => {
         ['notice', 'Context is filling up'],
         ['notice', 'Rate limited'],
       ])
+      // What it touched stays with it, for the thread to show.
+      const tool = (yield* items(where.threadId)).find((item) => item.kind === 'tool_call')
+      assert.deepStrictEqual(tool?.content.locations, [{ path: '/w/tests/a.test.ts', line: 4 }])
     }).pipe(Effect.provide(runtime())),
   )
 

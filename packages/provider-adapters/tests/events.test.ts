@@ -36,6 +36,34 @@ describe('normalize', () => {
     })
   })
 
+  it('keeps the files a tool call touches', () => {
+    assert.deepStrictEqual(
+      normalize({
+        sessionUpdate: 'tool_call',
+        toolCallId: 't',
+        title: 'Edit',
+        kind: 'edit',
+        locations: [
+          { path: '/w/a.ts', line: 3 },
+          { path: '/w/b.ts', line: null },
+        ],
+      }),
+      {
+        _tag: 'ToolCall',
+        toolCallId: 't',
+        title: 'Edit',
+        kind: 'edit',
+        status: 'pending',
+        locations: [{ path: '/w/a.ts', line: 3 }, { path: '/w/b.ts' }],
+      },
+    )
+    assert.deepStrictEqual(normalize({ sessionUpdate: 'tool_call_update', toolCallId: 't', locations: [{ path: '/w/c.ts' }] }), {
+      _tag: 'ToolCallUpdate',
+      toolCallId: 't',
+      locations: [{ path: '/w/c.ts' }],
+    })
+  })
+
   it('says a mode update came from the agent', () => {
     assert.deepStrictEqual(normalize({ sessionUpdate: 'current_mode_update', currentModeId: 'plan' }), {
       _tag: 'ModeChanged',

@@ -1,0 +1,61 @@
+.window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--n-2);
+}
+
+.head {
+  flex: none;
+  padding: 20px 24px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.face {
+  flex: 1;
+  min-height: 0;
+}
+
+.loading {
+  display: grid;
+  flex: 1;
+  place-items: center;
+}
+
+.composer {
+  display: grid;
+  gap: 8px;
+}
+
+.start {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--t-2);
+  font-size: 13px;
+}
+
+.failure {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.info,
+.warning,
+.error {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.info {
+  color: var(--t-2);
+}
+
+.warning {
+  color: var(--t-1);
+}
+
+.error {
+  color: var(--danger);
+}

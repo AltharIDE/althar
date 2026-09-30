@@ -52,22 +52,21 @@ const definition = (id: string): AgentDefinition => ({
  * `process` runs it as a real process with Bun; `missing` names a command
  * that doesn't exist.
  */
-export const fakeAgents = (options: FakeAgentOptions = {}) =>
-  Layer.succeed(
+export const fakeAgents = (options: FakeAgentOptions = {}) => {
+  const entry = (agentId: string): AgentEntry => ({
+    definition: definition(agentId),
+    transport: (cwd) =>
+      agentId === 'process'
+        ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
+        : agentId === 'missing'
+          ? { _tag: 'Process', spec: { command: 'charrette-no-such-agent', args: [] }, cwd }
+          : { _tag: 'InProcess', agent: fakeAgent(options) },
+  })
+  return Layer.succeed(
     Agents,
-    Agents.of({
-      get: (agentId) =>
-        Effect.succeed<AgentEntry>({
-          definition: definition(agentId),
-          transport: (cwd) =>
-            agentId === 'process'
-              ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
-              : agentId === 'missing'
-                ? { _tag: 'Process', spec: { command: 'charrette-no-such-agent', args: [] }, cwd }
-                : { _tag: 'InProcess', agent: fakeAgent(options) },
-        }),
-    }),
+    Agents.of({ list: ['claude-code', 'codex', 'opencode'].map(entry), get: (agentId) => Effect.succeed(entry(agentId)) }),
   )
+}
 
 /** The runtime over a database, with worktrees in a temporary folder and fake agents. */
 export const runtime = (database = ':memory:', options: FakeAgentOptions = {}) =>
@@ -137,4 +136,14 @@ export const turns = (threadId: string) =>
       SELECT t.id, t.state, t.stop_reason, t.error_class, t.usage, t.provider_session_id, t.prompt,
         (SELECT count(*) FROM turn_delivery_inputs i WHERE i.delivery_id = t.id) AS inputs
       FROM turn_deliveries t WHERE t.thread_id = ${threadId} ORDER BY t.requested_at, t.id`
+  })
+
+/** The notices on a thread, as their titles and descriptions, oldest first. */
+export const notices = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{
+      content: string
+    }>`SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice' ORDER BY sequence`
+    return rows.map((row) => JSON.parse(row.content) as Readonly<Record<string, string>>)
   })

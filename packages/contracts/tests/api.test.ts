@@ -1,0 +1,111 @@
+import { MessageChannel } from 'node:worker_threads'
+
+import { assert, describe, it } from '@effect/vitest'
+import { Effect, Layer, Schema, Stream } from 'effect'
+import { RpcClient, RpcServer } from 'effect/rpc'
+
+import { Api, ApiError, CommandId, PAGE, ThreadItem, WatchEvent } from '../src/Api'
+import { clientProtocol, emitterPort, serverProtocol } from '../src/transport'
+
+const at = '2026-09-29T12:00:00.000Z'
+const commandId = `cmd_${'a'.repeat(32)}`
+
+describe('the API', () => {
+  it('knows each kind of thread item by its content, and nothing else', () => {
+    const decode = Schema.decodeUnknownSync(ThreadItem)
+    const base = { id: 'i1', sequence: 1, agentId: 'codex', createdAt: at }
+    assert.strictEqual(
+      decode({ ...base, kind: 'user_message', content: { text: 'Hi' }, input: { state: 'queued', interrupting: false } }).kind,
+      'user_message',
+    )
+    assert.strictEqual(decode({ ...base, kind: 'agent_thought', content: { text: 'Hmm' } }).kind, 'agent_thought')
+    const tool = decode({
+      ...base,
+      kind: 'tool_call',
+      content: {
+        title: 'Edit a.ts',
+        toolKind: 'edit',
+        status: 'completed',
+        command: null,
+        locations: [{ path: '/w/a.ts', line: 3 }],
+        declined: false,
+      },
+    })
+    assert.deepStrictEqual(tool.kind === 'tool_call' && tool.content.locations, [{ path: '/w/a.ts', line: 3 }])
+    assert.strictEqual(decode({ ...base, kind: 'plan', content: { entries: [{ content: 'Test it', status: 'pending' }] } }).kind, 'plan')
+    assert.strictEqual(
+      decode({ ...base, kind: 'notice', content: { source: 'runtime', severity: 'info', title: 'Codex takes over.', description: null } })
+        .kind,
+      'notice',
+    )
+    // A tool call's content is its own; a message's text is no tool call.
+    assert.throws(() => decode({ ...base, kind: 'tool_call', content: { text: 'Hi' } }))
+    assert.throws(() => decode({ ...base, kind: 'step_result', content: {} }))
+  })
+
+  it('takes a command id only in its own shape, and a change with its cursor', () => {
+    assert.strictEqual(Schema.decodeUnknownSync(CommandId)(commandId), commandId)
+    assert.throws(() => Schema.decodeUnknownSync(CommandId)('cmd_nope'))
+    assert.throws(() =>
+      Schema.decodeUnknownSync(WatchEvent)({ _tag: 'Changed', aggregateType: 'task', aggregateId: 't', projectId: null, threadId: null }),
+    )
+    assert.strictEqual(PAGE, 100)
+  })
+
+  it.live('runs over a port, checking what is sent on the way', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const channel = new MessageChannel()
+        yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
+        const handlers = Api.toLayer(
+          Effect.succeed(
+            Api.of({
+              Status: ({ recheck }) => Effect.succeed({ apiVersion: 1, appVersion: recheck === true ? 'rechecked' : 'cached', agents: [] }),
+              ListProjects: () => Effect.succeed({ cursor: 0, projects: [] }),
+              OpenProject: ({ grant }) => Effect.fail(new ApiError({ reason: 'NotFound', message: `No folder was chosen as ${grant}.` })),
+              ListTasks: () => Effect.succeed({ cursor: 0, tasks: [] }),
+              CreateTask: () => Effect.die('unused'),
+              GetThread: () => Effect.die('unused'),
+              GetThreadItem: () => Effect.die('unused'),
+              StartSession: ({ commandId: id }) => Effect.succeed(id),
+              SwitchAgent: () => Effect.die('unused'),
+              SetModel: () => Effect.void,
+              Interrupt: () => Effect.void,
+              StopSession: () => Effect.void,
+              Send: () => Effect.void,
+              Answer: () => Effect.void,
+              Watch: ({ since }) =>
+                Stream.make({
+                  _tag: 'Changed' as const,
+                  cursor: (since ?? 0) + 1,
+                  aggregateType: 'task',
+                  aggregateId: 't1',
+                  projectId: 'p1',
+                  threadId: 'th1',
+                }),
+            }),
+          ),
+        )
+        yield* Effect.forkScoped(
+          Layer.launch(
+            RpcServer.layer(Api).pipe(Layer.provide(handlers), Layer.provide(serverProtocol(emitterPort(channel.port1, (data) => data)))),
+          ),
+        )
+        const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
+        const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+
+        assert.strictEqual((yield* client.Status({ recheck: true })).appVersion, 'rechecked')
+        assert.strictEqual(yield* client.StartSession({ commandId, threadId: 'th1', agentId: 'codex' }), commandId)
+        const refused = yield* Effect.flip(client.OpenProject({ commandId, grant: 'g1' }))
+        assert.strictEqual(refused.message, 'No folder was chosen as g1.')
+        assert.deepStrictEqual(
+          (yield* Stream.runCollect(client.Watch({ since: 41 }))).map((event) => event._tag === 'Changed' && event.cursor),
+          [42],
+        )
+        // A command without its id doesn't leave the client.
+        const bad = yield* Effect.exit(client.Send({ commandId: 'cmd_nope', threadId: 'th1', body: 'Hi', disposition: 'after_current' }))
+        assert.strictEqual(bad._tag, 'Failure')
+      }),
+    ),
+  )
+})
