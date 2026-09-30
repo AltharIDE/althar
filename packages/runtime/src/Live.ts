@@ -16,6 +16,7 @@ export type LiveEvent =
       readonly threadId: string
       readonly itemId: string
       readonly kind: 'agent_message' | 'agent_thought'
+      readonly agentId: string
       readonly text: string
     }
   | {

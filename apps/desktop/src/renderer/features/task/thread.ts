@@ -18,6 +18,8 @@ export type Part =
       readonly verb: string
       readonly target: string
       readonly state: ToolState
+      /** The whole command, when it runs one: what the row opens to, and what Copy takes. */
+      readonly command: string | null
     }
   | {
       readonly kind: 'plan'
@@ -117,29 +119,39 @@ const within = (path: string, worktree: string | null) =>
 
 /**
  * What a tool call acts on: the file it touches or the command it runs when
- * it says, and otherwise its title. A title that starts with a verb of its own
- * ("Write hello.txt") gives the rest; the verb comes from the call's kind.
+ * it says, and otherwise its title. A command's title is the command itself;
+ * any other title that starts with a verb of its own ("Write hello.txt")
+ * gives the rest, since the verb comes from the call's kind.
  */
 export const targetOf = (content: ToolContent, worktree: string | null): string => {
   const path = content.locations[0]?.path
   if (path !== undefined) return within(path, worktree)
   if (content.command !== null) return content.command
   const space = content.title.indexOf(' ')
-  return space > 0 && content.toolKind !== 'other' ? content.title.slice(space + 1) : content.title
+  return space > 0 && content.toolKind !== 'other' && content.toolKind !== 'execute' ? content.title.slice(space + 1) : content.title
+}
+
+/** Text an agent is still writing, by the item it will be. */
+export interface Streamed {
+  readonly kind: 'agent_message' | 'agent_thought'
+  readonly agentId: string
+  readonly text: string
+  /** When it was first heard. */
+  readonly at: string
 }
 
 const noticeText = (content: NoticeContent) => (content.description === null ? content.title : `${content.title} ${content.description}`)
 
 const partOf = (
   item: Exclude<ThreadItem, { kind: 'user_message' }>,
-  streaming: ReadonlyMap<string, string>,
+  streaming: ReadonlyMap<string, Streamed>,
   turnRunning: boolean,
   worktree: string | null,
 ): Part => {
   switch (item.kind) {
     case 'agent_message':
     case 'agent_thought': {
-      const live = streaming.get(item.id)
+      const live = streaming.get(item.id)?.text
       // Streaming text is whole each time; the store catches up behind it.
       const text = live !== undefined && live.length >= item.content.text.length ? live : item.content.text
       return { kind: item.kind === 'agent_thought' ? 'thought' : 'message', id: item.id, text }
@@ -147,7 +159,15 @@ const partOf = (
     case 'tool_call': {
       const toolKind = toolKindOf(item.content.toolKind)
       const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
-      return { kind: 'tool', id: item.id, toolKind, verb: verbFor(toolKind, state), target: targetOf(item.content, worktree), state }
+      return {
+        kind: 'tool',
+        id: item.id,
+        toolKind,
+        verb: verbFor(toolKind, state),
+        target: targetOf(item.content, worktree),
+        state,
+        command: item.content.command,
+      }
     }
     case 'plan':
       return {
@@ -164,14 +184,19 @@ const partOf = (
   }
 }
 
-/** The blocks of a thread, oldest first. */
+/** The blocks of a thread, oldest first, with what is still being written but not yet read at the end. */
 export const blocksOf = (
   snapshot: ThreadSnapshot,
-  streaming: ReadonlyMap<string, string>,
+  streaming: ReadonlyMap<string, Streamed>,
   ago: (iso: string) => string,
 ): ReadonlyArray<Block> => {
   const turnRunning = snapshot.session?.turnRunning ?? false
   const blocks: Array<Block> = []
+  const add = (agentId: string | null, at: string, part: Part) => {
+    const last = blocks.at(-1)
+    if (last?.kind === 'turn' && last.agentId === agentId) blocks[blocks.length - 1] = { ...last, parts: [...last.parts, part] }
+    else blocks.push({ kind: 'turn', id: part.id, agentId, at: ago(at), parts: [part] })
+  }
   for (const item of snapshot.items) {
     if (item.kind === 'user_message') {
       const delivery =
@@ -184,13 +209,13 @@ export const blocksOf = (
       blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
       continue
     }
-    const part = partOf(item, streaming, turnRunning, snapshot.task.worktree)
-    const last = blocks.at(-1)
-    if (last?.kind === 'turn' && last.agentId === item.agentId) {
-      blocks[blocks.length - 1] = { ...last, parts: [...last.parts, part] }
-    } else {
-      blocks.push({ kind: 'turn', id: item.id, agentId: item.agentId, at: ago(item.createdAt), parts: [part] })
-    }
+    add(item.agentId, item.createdAt, partOf(item, streaming, turnRunning, snapshot.task.worktree))
+  }
+  // A message the store has placed but the window hasn't read yet shows from its first words.
+  const read = new Set(snapshot.items.map((item) => item.id))
+  for (const [id, streamed] of streaming) {
+    if (read.has(id)) continue
+    add(streamed.agentId, streamed.at, { kind: streamed.kind === 'agent_thought' ? 'thought' : 'message', id, text: streamed.text })
   }
   return blocks
 }

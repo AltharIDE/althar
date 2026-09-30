@@ -60,6 +60,8 @@ export type SessionEvent =
       readonly toolCallId: string
       readonly status?: ToolCallStatus
       readonly title?: string
+      /** Some agents, Claude Code's among them, send a call's input only once they have all of it, in an update. */
+      readonly rawInput?: unknown
       readonly rawOutput?: unknown
       readonly locations?: ReadonlyArray<ToolLocation>
     }
@@ -174,6 +176,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         toolCallId: update.toolCallId,
         ...defined('status', update.status),
         ...defined('title', update.title),
+        ...defined('rawInput', update.rawInput),
         ...defined('rawOutput', update.rawOutput),
         ...defined('locations', locationsOf(update.locations)),
       }

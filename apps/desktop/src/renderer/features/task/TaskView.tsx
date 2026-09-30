@@ -4,6 +4,7 @@ import type { AttentionRequest, ThreadSnapshot } from '@charrette/contracts'
 import {
   BackCrumb,
   Button,
+  CodeBlock,
   Composer,
   Decision,
   LinkButton,
@@ -58,6 +59,7 @@ export const text = {
   thought: 'Thought',
   dismiss: 'Dismiss',
   earlier: 'Earlier in this task',
+  shell: 'Shell',
   showEarlier: 'Show',
   loadingEarlier: 'Showing…',
 }
@@ -84,7 +86,18 @@ function PartView({ part }: { part: Part }) {
         </Reasoning>
       )
     case 'tool':
-      return <Tool kind={part.toolKind} verb={part.verb} target={part.target} state={part.state} />
+      return (
+        <Tool
+          kind={part.toolKind}
+          verb={part.verb}
+          target={part.target}
+          state={part.state}
+          {...(part.command === null ? {} : { copy: part.command })}
+        >
+          {/* A command over several lines shows its first in the row, and the rest when the row opens. */}
+          {part.command?.includes('\n') === true ? <CodeBlock code={part.command} lang={text.shell} /> : undefined}
+        </Tool>
+      )
     case 'plan':
       return <Plan steps={part.steps} />
     case 'notice':

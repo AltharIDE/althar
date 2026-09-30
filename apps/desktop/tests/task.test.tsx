@@ -7,7 +7,7 @@ import { TaskStatus } from '@charrette/ui'
 
 import { statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
-import { changed, fakeClient, items, snapshot } from './fixtures'
+import { changed, fakeClient, items, snapshot, streamed } from './fixtures'
 import { withServices } from './render'
 
 function Task({ onBack = vi.fn() }: { onBack?: () => void }) {
@@ -139,8 +139,8 @@ describe('a task', () => {
       await screen.findByText('it')
       // It watches from the cursor its first read had.
       expect(watching).toEqual([10])
-      act(() => emit({ _tag: 'Streaming', threadId: 'th1', itemId: 'reply', text: 'Found it, and a second call.' }))
-      act(() => emit({ _tag: 'Streaming', threadId: 'other', itemId: 'reply', text: 'Not this thread' }))
+      act(() => emit(streamed('reply', 'Found it, and a second call.')))
+      act(() => emit(streamed('reply', 'Not this thread', 'other')))
       await screen.findByText('Found it, and a second call.')
 
       vi.mocked(client.getThreadItem).mockImplementation(async (_threadId, itemId) =>
@@ -167,6 +167,16 @@ describe('a task', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('shows a command over several lines on one, and all of it when its row opens', async () => {
+    const script = "python3 - <<'EOF'\nprint('hi')\nEOF"
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ items: [items.tool({ title: 'python3', toolKind: 'execute', command: script })] })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByText("python3 - <<'EOF' …"))
+    expect(await screen.findByText("print('hi')")).toBeTruthy()
   })
 
   it('shows earlier items when asked', async () => {

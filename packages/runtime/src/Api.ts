@@ -23,7 +23,7 @@ import { expected, words } from './words'
  */
 
 /** How often the change feed is read for what a client should read again. */
-const FEED_INTERVAL = '150 millis'
+const FEED_INTERVAL = '50 millis'
 
 /** How long an agent's sign-in is taken as it was last checked. */
 const SIGN_IN_TTL = Duration.minutes(1)
@@ -115,7 +115,14 @@ export const handlers = Api.toLayer(
         events.pipe(
           Stream.flatMap((event): Stream.Stream<WatchEvent> =>
             event._tag === 'Streaming'
-              ? Stream.make({ _tag: 'Streaming', threadId: event.threadId, itemId: event.itemId, text: event.text })
+              ? Stream.make({
+                  _tag: 'Streaming',
+                  threadId: event.threadId,
+                  itemId: event.itemId,
+                  kind: event.kind,
+                  agentId: event.agentId,
+                  text: event.text,
+                })
               : Stream.empty,
           ),
         ),

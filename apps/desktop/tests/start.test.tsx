@@ -8,7 +8,7 @@ import { RuntimeState } from '@charrette/ui'
 import { useServices } from '../src/renderer/data/services'
 import { runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { useStart } from '../src/renderer/features/start/useStart'
-import { agents, changed, fakeClient, fakeHost, project } from './fixtures'
+import { agents, changed, fakeClient, fakeHost, project, streamed } from './fixtures'
 import { withServices } from './render'
 
 function Start({ onProject }: { onProject: (id: string) => void }) {
@@ -33,7 +33,7 @@ describe('the start', () => {
     expect(client.status).toHaveBeenCalledWith({ recheck: true })
     emit(changed('task', 't1'))
     emit(changed('thread_item', 'i1'))
-    emit({ _tag: 'Streaming', threadId: 'th1', itemId: 'i1', text: 'Hi' })
+    emit(streamed('i1', 'Hi'))
     await waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(2))
     // A later read doesn't start the watch again.
     expect(watching).toEqual([3])

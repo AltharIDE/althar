@@ -137,7 +137,13 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       case 'ToolCallUpdate':
         return Effect.gen(function* () {
           yield* flush
-          const content = defined({ title: event.title, status: event.status, rawOutput: event.rawOutput, locations: event.locations })
+          const content = defined({
+            title: event.title,
+            status: event.status,
+            rawInput: event.rawInput,
+            rawOutput: event.rawOutput,
+            locations: event.locations,
+          })
           const existing = yield* toolItem(place.sessionId, event.toolCallId)
           if (existing === undefined)
             yield* addItem(
