@@ -24,7 +24,10 @@ import type { PermissionRequest } from '@charrette/provider-adapters'
  * lives in the main repository, outside the sandbox.
  */
 
-export type Verdict = { readonly verdict: 'allow' } | { readonly verdict: 'ask'; readonly reason: string }
+export type Verdict =
+  | { readonly verdict: 'allow' }
+  | { readonly verdict: 'ask'; readonly reason: string }
+  | { readonly verdict: 'deny'; readonly reason: string }
 
 export interface RuleContext {
   /** The task's worktree, where the agent works. */
@@ -43,6 +46,66 @@ export interface RuleContext {
 
 const ALLOW: Verdict = { verdict: 'allow' }
 const ask = (reason: string): Verdict => ({ verdict: 'ask', reason })
+
+// ---- Code hosts --------------------------------------------------------------
+
+/*
+ * Agents reach code hosts only through Charrette (ADR-011): Charrette pushes
+ * and opens the task's pull request, and the lead reads and answers on it with
+ * Charrette's tools. So `gh` and `glab` may only look; anything else is
+ * refused with what to do instead. Agents run without the person's sign-ins
+ * for either, so what slips past these words fails anyway.
+ */
+
+/** What `gh` and `glab` may do: their read-only commands, by command and subcommand. */
+const HOST_LOOKS: Readonly<Record<string, ReadonlySet<string>>> = {
+  pr: new Set(['view', 'list', 'diff', 'checks', 'status']),
+  mr: new Set(['view', 'list', 'diff']),
+  issue: new Set(['view', 'list', 'status']),
+  run: new Set(['view', 'list', 'watch']),
+  ci: new Set(['view', 'list', 'status', 'trace']),
+  workflow: new Set(['view', 'list']),
+  repo: new Set(['view', 'list']),
+  release: new Set(['view', 'list']),
+  search: new Set(['repos', 'issues', 'prs', 'code', 'commits']),
+}
+
+const HOST_WRITE_FLAGS = new Set(['-f', '-F', '--field', '--raw-field', '--input', '-d', '--data'])
+
+/** Why an agent may not run a `gh` or `glab` command, or nothing when it only looks. */
+const hostReason = (words: ReadonlyArray<string>): string | undefined => {
+  const program = (words[0] ?? '').split('/').at(-1) ?? ''
+  if (program !== 'gh' && program !== 'glab') return undefined
+  const [command, subcommand] = words.slice(1).filter((word) => !word.startsWith('-'))
+  if (command === undefined || command === 'help' || command === 'version' || words.includes('--help') || words.includes('--version'))
+    return undefined
+  if (command === 'api') {
+    const method =
+      words
+        .map((word, index) =>
+          words[index - 1] === '-X' || words[index - 1] === '--method'
+            ? word
+            : word.startsWith('--method=')
+              ? word.slice('--method='.length)
+              : /^-X[A-Za-z]+$/.test(word)
+                ? word.slice(2)
+                : undefined,
+        )
+        .find((found) => found !== undefined) ?? 'GET'
+    if (method.toUpperCase() === 'GET' && !words.some((word) => HOST_WRITE_FLAGS.has(word.split('=')[0] ?? ''))) return undefined
+    return "Agents don't change things on the code host themselves; Charrette does that for the task. Tell the person what's needed."
+  }
+  if (HOST_LOOKS[command]?.has(subcommand ?? '') === true) return undefined
+  if ((command === 'pr' || command === 'mr') && subcommand === 'merge') return "Merging is the person's to do; Charrette doesn't merge."
+  if ((command === 'pr' || command === 'mr') && (subcommand === 'comment' || subcommand === 'review' || subcommand === 'note'))
+    return "Answer on the task's pull request with Charrette's reply_on_pull_request tool."
+  if (command === 'pr' || command === 'mr')
+    return "Charrette opens and updates the task's pull request itself. Commit, then call Charrette's publish_changes tool; read it with read_pull_request."
+  if (command === 'issue')
+    return "Charrette doesn't change issues from a task. Read one with read_issue, and tell the person what it needs."
+  if (command === 'auth') return "Agents run without the person's sign-in to the code host; Charrette's tools reach it for the task."
+  return "Agents don't change things on the code host themselves; Charrette does that for the task. Tell the person what's needed."
+}
 
 const field = (value: unknown, key: string): unknown =>
   typeof value === 'object' && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined
@@ -414,7 +477,6 @@ const commandReason = (text: string, context: RuleContext): string | undefined =
   for (const words of commands) {
     const joined = words.join(' ')
     if (DEPLOY.test(joined)) return 'Deploying or publishing always asks.'
-    if (/^(gh\s+pr\s+merge|glab\s+mr\s+merge)\b/.test(joined)) return 'A merge always asks.'
     if (words[0] === 'cd') {
       cwd = locate(where, cwd, words[1] ?? '~')
       continue
@@ -450,6 +512,11 @@ const commandReason = (text: string, context: RuleContext): string | undefined =
  */
 export const decide = (request: PermissionRequest, context: RuleContext): Verdict => {
   if (request.kind === 'execute' || request.kind === 'other') {
+    // A code host is reached through Charrette: `gh` and `glab` only look, wherever they are in the command.
+    const refused = parseCommandLine(commandOf(request))
+      .commands.map((words) => hostReason(unwrap(words)))
+      .find((reason) => reason !== undefined)
+    if (refused !== undefined) return { verdict: 'deny', reason: refused }
     const reason = commandReason(commandOf(request), context)
     if (reason !== undefined) return ask(reason)
   }

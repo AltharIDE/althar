@@ -1,3 +1,8 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { available, type Fetch, type Product, type ProductInfo } from '@charrette/connectors'
 import { agents, type AgentDefinition, type Transport } from '@charrette/provider-adapters'
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
@@ -11,6 +16,10 @@ export interface RuntimeOptions {
   readonly deviceName: string
   /** How long a proposed plan waits before it starts on its own: 25 seconds unless a test says otherwise. */
   readonly countdown?: Duration.Duration
+  /** How often a task's pull requests are asked for news while it listens: 30 seconds unless a test says otherwise. */
+  readonly listenEvery?: Duration.Duration
+  /** The public ids of Charrette's apps registered with code hosts and trackers, for their browser sign-in. */
+  readonly clientIds?: Partial<Record<Product, string>>
 }
 
 export class RuntimeConfig extends Context.Service<RuntimeConfig, RuntimeOptions>()('@charrette/runtime/RuntimeConfig') {}
@@ -43,15 +52,27 @@ export class Agents extends Context.Service<
       },
     })
 
-  static readonly registry: Layer.Layer<Agents> = Layer.succeed(
-    Agents,
-    Agents.from(
+  /**
+   * The registry's agents, each run as a process without the person's
+   * sign-ins to `gh` and `glab`: their config folders point at an empty one,
+   * so agents reach code hosts only through Charrette (ADR-011).
+   */
+  static readonly registry: Layer.Layer<Agents> = Layer.sync(Agents, () => {
+    const signedOut = mkdtempSync(join(tmpdir(), 'charrette-no-sign-in-'))
+    return Agents.from(
       Object.values(agents).map((definition) => ({
         definition,
-        transport: (cwd: string) => ({ _tag: 'Process' as const, spec: definition.launch(process.execPath), cwd }),
+        transport: (cwd: string) => {
+          const spec = definition.launch(process.execPath)
+          return {
+            _tag: 'Process' as const,
+            spec: { ...spec, env: { ...spec.env, GH_CONFIG_DIR: signedOut, GLAB_CONFIG_DIR: signedOut } },
+            cwd,
+          }
+        },
       })),
-    ),
-  )
+    )
+  })
 }
 
 /** Crypto from the platform's Web Crypto, which Node and Electron both have. */
@@ -66,3 +87,24 @@ export const WebCrypto: Layer.Layer<Crypto.Crypto> = Layer.succeed(
       ),
   }),
 )
+
+/**
+ * The code hosts and trackers the runtime connects to (docs/architecture/06):
+ * each product it has an adapter for, how it calls their APIs, the public ids
+ * of Charrette's own apps registered with them (a product without one takes
+ * a pasted token), and the loopback port a browser sign-in comes back to.
+ * Tests put fakes here.
+ */
+export class Connectors extends Context.Service<
+  Connectors,
+  {
+    readonly products: ReadonlyArray<ProductInfo>
+    readonly fetch: Fetch
+    readonly clientIds: Partial<Record<Product, string>>
+    readonly callbackPort: number
+  }
+>()('@charrette/runtime/Connectors') {
+  /** The products with adapters, over the network. */
+  static readonly live = (clientIds: Partial<Record<Product, string>> = {}): Layer.Layer<Connectors> =>
+    Layer.succeed(Connectors, Connectors.of({ products: available(), fetch: globalThis.fetch, clientIds, callbackPort: 47821 }))
+}

@@ -6,6 +6,8 @@ import { Cause, Context, type Crypto, Effect, Layer, Option, Schema, Stream } fr
 import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
+import { Changes, type Published } from './Changes'
+import { NotConnected } from './Connections'
 import { AttentionClosed, NotFound } from './errors'
 import { Instance } from './Instance'
 import { Live, type LiveEvent } from './Live'
@@ -42,8 +44,21 @@ export const PlanStep = Schema.Struct({
 })
 export type PlanStep = typeof PlanStep.Type
 
-/** What a plan holds: its steps, and why the lead was chosen. */
-export const PlanParameters = Schema.Struct({ steps: Schema.Array(PlanStep), reason: Schema.NullOr(Schema.String) })
+/**
+ * What a task does when its steps are done (the kit's "When the work is
+ * done"): open a draft pull request, open one for review, or push its branch
+ * only. Null where nothing reaches the repository's host: the task ends ready
+ * on its branch.
+ */
+export const TaskEnd = Schema.Literals(['draft', 'ready', 'none'])
+export type TaskEnd = typeof TaskEnd.Type
+
+/** What a plan holds: its steps, why the lead was chosen, and what happens when the work is done. */
+export const PlanParameters = Schema.Struct({
+  steps: Schema.Array(PlanStep),
+  reason: Schema.NullOr(Schema.String),
+  end: Schema.optional(Schema.NullOr(TaskEnd)),
+})
 export type PlanParameters = typeof PlanParameters.Type
 
 const Finding = Schema.Struct({
@@ -96,14 +111,14 @@ interface RunRow {
   readonly parameters: string
 }
 
-type Store = SqlClient.SqlClient | Instance | Sessions | ToolServer | Crypto.Crypto | Ledger | Live
+type Store = SqlClient.SqlClient | Instance | Sessions | ToolServer | Crypto.Crypto | Ledger | Live | Changes
 
 /** Why a step needs the person (docs/architecture/05): its agent didn't report after a reminder, went, couldn't start, or a restart stopped it; or review ran out of rounds. */
-export type StuckWhy = 'no_report' | 'session_ended' | 'failed_to_start' | 'restarted' | 'round_limit'
+export type StuckWhy = 'no_report' | 'session_ended' | 'failed_to_start' | 'restarted' | 'round_limit' | 'not_connected'
 
 /** What a stuck step's call says: the step, why, what went wrong in words, who was on it, the round, and the findings still open. */
 export interface StuckInfo {
-  readonly step: 'implement' | 'review' | 'settle'
+  readonly step: 'implement' | 'review' | 'settle' | 'publish'
   readonly why: StuckWhy
   readonly detail: string | null
   readonly agentId: string | null
@@ -140,6 +155,7 @@ export class Runs extends Context.Service<
       const sessions = yield* Sessions
       const toolServer = yield* ToolServer
       const live = yield* Live
+      const changes = yield* Changes
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
       /** The workflow every task runs, for now: made once per profile. */
@@ -204,10 +220,17 @@ export class Runs extends Context.Service<
         Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(run.parameters), (parameters) => ({
           implement: parameters.steps.find((step) => step.key === 'implement'),
           review: parameters.steps.find((step) => step.key === 'review' && !step.skipped),
+          end: parameters.end ?? null,
         }))
 
       /** Adds a node for a step, for a round of the review loop, and admits an attempt at it. */
-      const admit = (run: RunRow, key: 'implement' | 'review' | 'settle', iteration: number, config: unknown, input: unknown = {}) =>
+      const admit = (
+        run: RunRow,
+        key: 'implement' | 'review' | 'settle' | 'publish',
+        iteration: number,
+        config: unknown,
+        input: unknown = {},
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const at = yield* timestamp
@@ -221,7 +244,8 @@ export class Runs extends Context.Service<
               executionId: run.executionId,
               nodeKey: key,
               iteration,
-              type: 'agent',
+              // What Charrette does itself, outside, is an integration node; the rest is an agent's.
+              type: key === 'publish' ? 'integration' : 'agent',
               addedInRevision: 1,
               config: JSON.stringify(config),
               state: 'running',
@@ -332,6 +356,78 @@ export class Runs extends Context.Service<
           yield* touchCard(run.taskId)
         })
 
+      /** What a step that Charrette does itself reported, in a line. */
+      const publishedSummary = (published: Published, end: TaskEnd) => {
+        switch (published.kind) {
+          case 'opened': {
+            const noun = published.change.words.noun
+            const name = `${noun} ${published.change.words.prefix}${published.change.number}`
+            return end === 'ready' || !published.change.draft ? `Opened ${name} for review.` : `Opened draft ${name}.`
+          }
+          case 'pushed':
+            return `Pushed ${published.branch}.`
+          case 'nothing':
+            return 'The branch has no commits to propose, so nothing was pushed.'
+        }
+      }
+
+      /**
+       * The work is done: the task's ending, if its plan has one, then the
+       * run is over and the task ready. Pushing and opening its pull request
+       * is Charrette's own step; if it can't, the person decides.
+       */
+      const conclude = (run: RunRow) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { end } = yield* stepsOf(run)
+          if (end === null) return yield* finish(run, 'succeeded')
+          const { nodeId, attemptId } = yield* sql.withTransaction(admit(run, 'publish', 0, { end }))
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* change('node_attempts', attemptId, { state: 'running', startedAt: yield* timestamp })
+              yield* fact({
+                projectId: run.projectId,
+                aggregateType: 'node_attempt',
+                aggregateId: attemptId,
+                revision,
+                type: 'node_attempt.running',
+                actorId: instance.systemId,
+              })
+            }),
+          )
+          yield* touchCard(run.taskId)
+          const published = yield* Effect.exit(changes.publish({ projectId: run.projectId, taskId: run.taskId, runId: run.runId, end }))
+          if (published._tag === 'Failure') {
+            const error = Cause.findErrorOption(published.cause)
+            const notConnected = Option.isSome(error) && error.value instanceof NotConnected
+            return yield* stuck(
+              run,
+              { id: attemptId },
+              {
+                step: 'publish',
+                why: notConnected ? 'not_connected' : 'failed_to_start',
+                detail: summarize(published.cause) || null,
+                agentId: null,
+                round: 0,
+                open: 0,
+              },
+            )
+          }
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              yield* ended(run, { id: attemptId, nodeId }, 'succeeded', published.value)
+              yield* unstuck(run)
+              yield* result(run, {
+                step: 'publish',
+                round: 0,
+                summary: publishedSummary(published.value, end),
+                ...(published.value.kind === 'opened' ? { change: published.value.change } : {}),
+              })
+            }),
+          )
+          yield* finish(run, 'succeeded')
+        })
+
       /**
        * A step needs the person (docs/architecture/05): its attempt waits on
        * them, and a call in the task says why. A run has one such call open at
@@ -431,7 +527,8 @@ export class Runs extends Context.Service<
           return run === undefined ? undefined : { ...row, run, step: stepOf(row.nodeKey) }
         })
 
-      const stepOf = (key: string): StuckInfo['step'] => (key === 'review' ? 'review' : key === 'settle' ? 'settle' : 'implement')
+      const stepOf = (key: string): StuckInfo['step'] =>
+        key === 'review' ? 'review' : key === 'settle' ? 'settle' : key === 'publish' ? 'publish' : 'implement'
 
       /** Told once when its turn ends without the report its step needs. */
       const reminders = {
@@ -499,7 +596,7 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { review: planned } = yield* stepsOf(run)
-          if (planned === undefined) return yield* finish(run, 'succeeded')
+          if (planned === undefined) return yield* conclude(run)
           const step = reviewer === undefined || reviewer === planned.agentId ? planned : { ...planned, agentId: reviewer, model: null }
           const { nodeId, attemptId } = yield* sql.withTransaction(admit(run, 'review', round, step))
           const begun = yield* Effect.exit(reviewRound(run, round, settled, step, attemptId))
@@ -782,7 +879,7 @@ export class Runs extends Context.Service<
             })
             return 'Charrette has your summary. That was the last round of review, so the person decides what comes next.'
           }
-          yield* finish(current, 'succeeded')
+          yield* conclude(current)
           return 'Charrette has your summary. The task is ready for the person.'
         })
 
@@ -863,7 +960,7 @@ export class Runs extends Context.Service<
             }),
           )
           if (reviewed.verdict === 'pass' || findings.length === 0) {
-            yield* finish(current, 'succeeded')
+            yield* conclude(current)
             return 'Charrette has your review. The change passes.'
           }
           yield* settle(current, attempt.iteration, recorded)
@@ -1038,11 +1135,20 @@ export class Runs extends Context.Service<
                     })
                   }),
                 )
+          if (info.step === 'publish') {
+            // Gone on without its ending, the task is ready on its branch; otherwise Charrette tries again.
+            if (answer.kind === 'abandon') {
+              yield* endAttempt('cancelled', { skipped: true })
+              return yield* finish(current, 'succeeded')
+            }
+            yield* endAttempt('failed', { again: true })
+            return yield* conclude(current)
+          }
           if (info.step === 'review') {
             if (answer.kind === 'abandon') {
               // Gone on without the review, the task is ready, with what was found left open.
               yield* endAttempt('cancelled', { skipped: true })
-              return yield* finish(current, 'succeeded')
+              return yield* conclude(current)
             }
             yield* endAttempt('failed', { handedTo: answer.kind === 'retry' ? answer.agentId : info.agentId })
             const [last] = yield* sql<{ summary: string }>`

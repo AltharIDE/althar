@@ -148,3 +148,45 @@ export const remoteUrls = (cwd: string) =>
 /** Adds a worktree on a new branch from a base. */
 export const addWorktree = (repository: string, path: string, branch: string, base: string) =>
   git(repository, 'worktree', 'add', '-b', branch, path, base)
+
+/** Whether the worktree has changes not yet committed: tracked or untracked, ignored files aside. */
+export const uncommitted = (cwd: string) => Effect.map(git(cwd, 'status', '--porcelain'), (output) => output !== '')
+
+/**
+ * Commits everything in the worktree, as whoever the repository says commits
+ * there (as the agents' own commits are), or as Charrette when no one is set.
+ */
+export const commitAll = (cwd: string, message: string) =>
+  Effect.gen(function* () {
+    const email = yield* git(cwd, 'config', 'user.email').pipe(Effect.orElseSucceed(() => ''))
+    yield* git(cwd, 'add', '-A')
+    yield* run(
+      60_000,
+      cwd,
+      ['commit', '--quiet', '--no-verify', '-m', message],
+      email === ''
+        ? {
+            GIT_AUTHOR_NAME: 'Charrette',
+            GIT_AUTHOR_EMAIL: 'charrette@localhost',
+            GIT_COMMITTER_NAME: 'Charrette',
+            GIT_COMMITTER_EMAIL: 'charrette@localhost',
+          }
+        : {},
+    )
+  })
+
+/** How many commits HEAD has that a base doesn't. */
+export const commitsAhead = (cwd: string, base: string) => Effect.map(git(cwd, 'rev-list', '--count', `${base}..HEAD`), Number)
+
+/**
+ * Pushes HEAD to a branch of a remote by URL, never forced. The header that
+ * signs the push in goes to git through its environment, so it is in no
+ * process's arguments.
+ */
+export const pushTo = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string) =>
+  run(
+    120_000,
+    cwd,
+    ['push', '--quiet', '--no-verify', target.url, `HEAD:refs/heads/${branch}`],
+    target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
+  )

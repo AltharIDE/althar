@@ -232,6 +232,14 @@ export class Permissions extends Context.Service<
           // Where a push without a destination goes depends on the branch checked out now.
           const current = request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(rules.worktree) : undefined
           const verdict = decide(request, { ...rules, ...(current === undefined ? {} : { currentBranch: current }) })
+          // What the rules refuse outright, such as an agent changing things on the code host, is answered at once with what to do instead.
+          if (verdict.verdict === 'deny') {
+            const decision: PermissionDecision = { decision: 'reject', reason: verdict.reason }
+            yield* sql.withTransaction(
+              recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
+            )
+            return decision
+          }
           if (verdict.verdict === 'allow') {
             const decision: PermissionDecision = { decision: 'allow', reason: 'Allowed by the project rules.' }
             yield* sql.withTransaction(

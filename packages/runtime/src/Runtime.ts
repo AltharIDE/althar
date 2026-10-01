@@ -1,14 +1,18 @@
 import { Commands, Database, Ledger } from '@charrette/persistence-sqlite'
 import { Layer } from 'effect'
 
-import { Agents, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
+import { Changes } from './Changes'
+import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
+import { Connections } from './Connections'
 import { Instance } from './Instance'
+import { Issues } from './Issues'
 import { Live } from './Live'
 import { Permissions } from './Permissions'
 import { Projects } from './Projects'
 import { Coordinator } from './Coordinator'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
+import { Secrets } from './Secrets'
 import { Sessions } from './Sessions'
 import { SignIns } from './SignIns'
 import { ToolServer } from './ToolServer'
@@ -18,6 +22,10 @@ export interface RuntimeLayerOptions extends RuntimeOptions {
   readonly database: string
   /** The agents it may start. The registry's, unless a test gives others. */
   readonly agents?: Layer.Layer<Agents>
+  /** Where secrets are kept: the system keychain, unless a test keeps them in memory. */
+  readonly secrets?: Layer.Layer<Secrets>
+  /** The code hosts and trackers it connects to: theirs, over the network, unless a test gives fakes. */
+  readonly connectors?: Layer.Layer<Connectors>
 }
 
 /**
@@ -35,10 +43,14 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry),
+    Layer.provideMerge(options.secrets ?? Secrets.keychain),
+    Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds)),
   )
   const core = Layer.mergeAll(Projects.layer, Sessions.layer).pipe(Layer.provideMerge(Permissions.layer.pipe(Layer.provideMerge(base))))
+  // A task's pull request and issue, through the person's connections to code hosts and trackers.
+  const linked = Layer.mergeAll(Changes.layer, Issues.layer).pipe(Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(core))))
   // Runs drive a task's steps; plans start runs when their time comes; the coordinator plans tasks and passes messages on.
-  const work = Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(core))))
+  const work = Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))
   return Coordinator.layer.pipe(Layer.provideMerge(SignIns.layer.pipe(Layer.provideMerge(work))))
 }
 
