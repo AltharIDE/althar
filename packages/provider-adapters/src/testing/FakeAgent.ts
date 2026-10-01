@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -139,6 +140,11 @@ interface SessionState {
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
  * until it is stopped, and `[lead:settle-quietly]` settles without reporting.
+ * `[lead:edit]` leaves a change in the worktree, uncommitted, when it
+ * finishes. Told what people said on its pull request, `[lead:answer]`
+ * replies there; told its checks failed, `[lead:fix]` commits a fix and
+ * publishes it. Asked to plan a change with a link in it, the coordinator
+ * drafts the task from that issue.
  */
 const playRole = async (session: SessionState, text: string): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
@@ -186,7 +192,26 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
         )
         return await call('finish_step', { summary: 'Fixed the heading.', findings })
       }
-      if (text.includes('[lead:finish]')) return await call('finish_step', { summary: 'Did the task.' })
+      if (text.includes('[lead:finish]')) {
+        if (session.markers.has('[lead:edit]')) appendFileSync(join(session.cwd, 'change.txt'), 'changed\n')
+        return await call('finish_step', { summary: 'Did the task.' })
+      }
+      // What people said on the task's pull request, and its checks.
+      if (available.has('reply_on_pull_request') && session.markers.has('[lead:answer]') && / commented on /.test(text)) {
+        const thread = /\(thread (\S+)\)/.exec(text)?.[1]
+        return await call('reply_on_pull_request', {
+          body: 'Seconds, the same as charges.',
+          ...(thread === undefined ? {} : { thread_id: thread }),
+        })
+      }
+      if (available.has('publish_changes') && session.markers.has('[lead:fix]') && text.startsWith('Checks failed')) {
+        appendFileSync(join(session.cwd, 'fixed.txt'), 'fixed\n')
+        const git = (...args: Array<string>) =>
+          execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@charrette.test', ...args], { cwd: session.cwd })
+        git('add', '-A')
+        git('commit', '-q', '-m', 'Fix the failing check')
+        return await call('publish_changes', {})
+      }
       // Works until it is stopped: for a lead that goes in the middle of its step.
       if (text.includes('[lead:wait]')) {
         for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
@@ -199,9 +224,18 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
       // The task is what the person asked for: the line with the marker, up to its first stop.
       // As the thread so far quotes it, after who said it: "[person] Add a retry."
       const asked = (text.slice(0, text.indexOf('[coordinator:plan')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
-      const title = asked.split(/[.!?]/)[0]?.trim() || 'Add a retry'
-      const drafted = await call('draft_task', { title, description: `Retry the checkout call. ${markers.join(' ')}` })
-      const slug = /Drafted (\S+)\./.exec(drafted)?.[1] ?? ''
+      const title =
+        asked
+          .replace(/https?:\/\/\S+/g, '')
+          .split(/[.!?]/)[0]
+          ?.trim() || 'Add a retry'
+      const link = /https?:\/\/\S+/.exec(asked)?.[0]
+      const drafted = await call('draft_task', {
+        title,
+        description: `Retry the checkout call. ${markers.join(' ')}`,
+        ...(link === undefined ? {} : { issue: link }),
+      })
+      const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
       return await call('propose_plan', {
         task: slug,
         lead: { agent: 'claude-code', reason: 'It knows the code.' },

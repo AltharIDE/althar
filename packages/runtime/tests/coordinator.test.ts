@@ -3,8 +3,6 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { scenarios } from '@charrette/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
@@ -20,7 +18,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
-import { repository, runtime, until } from './support'
+import { callTool, repository, runtime, until } from './support'
 
 /*
  * The coordinator loop (docs/plans/mvp.md): the person asks the coordinator,
@@ -638,26 +636,6 @@ describe('a step that needs the person', () => {
 })
 
 /** Calls one of Charrette's tools as a session with this access would. */
-const callTool = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>
-  Effect.gen(function* () {
-    const toolServer = yield* ToolServer
-    const granted = yield* toolServer.grant(access)
-    const server = granted.server
-    if (server.type !== 'http') return ''
-    return yield* Effect.promise(async () => {
-      const client = new Client({ name: 'test', version: '1.0.0' })
-      const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: server.headers } })
-      await client.connect(transport as Parameters<typeof client.connect>[0])
-      try {
-        const result = await client.callTool(args === undefined ? { name } : { name, arguments: args })
-        const content = Array.isArray(result.content) ? result.content : []
-        return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
-      } finally {
-        await client.close()
-      }
-    })
-  })
-
 describe('the coordinator', () => {
   it.live('speaks when spoken to, in its read-only copies, and is refused a write', () =>
     Effect.gen(function* () {

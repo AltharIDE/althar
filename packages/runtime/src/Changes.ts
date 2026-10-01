@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import { ChangeRequest, type Check, Comment, ConnectorFailed, type Product, type Repository, type Review } from '@charrette/connectors'
+import { ChangeRequest, Comment, ConnectorFailed, type Product, type Repository } from '@charrette/connectors'
 import { Ids, newId, type ProjectId } from '@charrette/domain'
 import type { Ledger } from '@charrette/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema } from 'effect'
@@ -14,6 +14,21 @@ import { NotFound } from './errors'
 import { commitAll, commitOf, commitsAhead, pushTo, uncommitted } from './git'
 import { Instance } from './Instance'
 import { outward, reconcileOutward } from './outward'
+import {
+  answerHint,
+  bodyOf,
+  checksForLead,
+  checksLine,
+  checksOf,
+  type ChecksSum,
+  commentForLead,
+  commentLine,
+  logOf,
+  nameOf,
+  reviewForLead,
+  reviewLine,
+  standing,
+} from './pullRequestWords'
 import { change, fact, timestamp } from './records'
 import { Sessions } from './Sessions'
 import { addItem } from './threads'
@@ -62,7 +77,6 @@ const Snapshot = Schema.Struct({
   ),
 })
 type Snapshot = typeof Snapshot.Type
-type Checks = NonNullable<Snapshot['checks']>
 
 /** A task's change, as the card, the header and the accept view show it. */
 export interface ChangeSummary extends Snapshot {
@@ -81,27 +95,11 @@ export type Published =
 const LOGS_TO_LEAD = 2
 const COMMENTS_SHOWN = 30
 
-/** Sums up a head's checks: passed, failed, still running, and how they stand overall. */
-export const checksOf = (sha: string, checks: ReadonlyArray<Check>): Checks => {
-  const failed = checks.filter((check) => check.state === 'failed')
-  const running = checks.filter((check) => check.state === 'queued' || check.state === 'running').length
-  const passed = checks.filter((check) => check.state === 'passed').length
-  return {
-    sha,
-    outcome: checks.length === 0 ? 'none' : running > 0 ? 'running' : failed.length > 0 ? 'failed' : 'passed',
-    passed,
-    failed: failed.length,
-    running,
-    total: checks.length,
-    failing: failed.map((check) => check.name),
-  }
-}
-
 const snapshotOf = (
   change: ChangeRequest,
   repository: ReadonlyArray<string>,
   words: Snapshot['words'],
-  checks: Checks | null,
+  checks: ChecksSum | null,
 ): Snapshot => ({
   number: change.number,
   title: change.title,
@@ -116,19 +114,6 @@ const snapshotOf = (
   words: { noun: words.noun, short: words.short, prefix: words.prefix },
   checks,
 })
-
-/** The pull request's name, as people say it: `PR #12`, `MR !4`. */
-export const nameOf = (snapshot: Pick<Snapshot, 'number' | 'words'>) => `${snapshot.words.short} ${snapshot.words.prefix}${snapshot.number}`
-
-/** Where a comment is: a line of a file, or the conversation. */
-const whereOf = (comment: Comment) => (comment.path === null ? '' : ` on ${comment.path}${comment.line === null ? '' : `:${comment.line}`}`)
-
-const quoted = (text: string) =>
-  text
-    .trim()
-    .split('\n')
-    .map((line) => `> ${line}`)
-    .join('\n')
 
 type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections | Sessions | RuntimeConfig | ToolServer
 
@@ -236,27 +221,15 @@ export class Changes extends Context.Service<
                 AND json_extract(content, '$.step') = 'review' ORDER BY sequence DESC LIMIT 1) AS verdict,
               (SELECT count(*) FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
                 AND json_extract(content, '$.step') = 'review') AS rounds`
-          const parts: Array<string> = []
-          if (lead?.summary != null && lead.summary !== '') parts.push(lead.summary)
-          if (reviewed !== undefined && reviewed.rounds > 0) {
-            const rounds = reviewed.rounds === 1 ? 'one round' : `${reviewed.rounds} rounds`
-            parts.push(`### Review\n\n${reviewed.verdict === 'pass' ? `Passed after ${rounds} of review.` : `Reviewed in ${rounds}.`}`)
-            if (findings.length > 0)
-              parts.push(
-                findings
-                  .map((finding) => {
-                    const location = JSON.parse(finding.location) as { file?: string | null; line?: number | null }
-                    const where = location.file == null ? '' : ` \`${location.file}${location.line == null ? '' : `:${location.line}`}\``
-                    const outcome = finding.state === 'fixed' ? 'Fixed' : finding.state === 'set_aside' ? 'Set aside' : 'Open'
-                    const reason = finding.state === 'set_aside' && finding.response !== null ? ` (${finding.response})` : ''
-                    return `- ${outcome}: ${finding.severity}${where}: ${finding.claim}${reason}`
-                  })
-                  .join('\n'),
-              )
-          }
-          if (issue !== null) parts.push(issue.sameHost ? `Issue: ${issue.key}` : `Issue: [${issue.key}](${issue.url})`)
-          parts.push('<sub>Opened by Charrette.</sub>')
-          return parts.join('\n\n')
+          return bodyOf({
+            lead: lead?.summary ?? null,
+            review: reviewed === undefined ? null : reviewed,
+            findings: findings.map((finding) => {
+              const location = JSON.parse(finding.location) as { file?: string | null; line?: number | null }
+              return { ...finding, file: location.file ?? null, line: location.line ?? null }
+            }),
+            issue,
+          })
         })
 
       const publish = (input: {
@@ -516,20 +489,14 @@ export class Changes extends Context.Service<
         Effect.gen(function* () {
           const { snapshot, host, repository, account } = yield* current(taskId)
           const now = yield* host.change(repository, snapshot.number)
-          const lines: Array<string> = [
-            `${nameOf(snapshot)}, "${now.title}" (${now.state === 'open' ? (now.draft ? 'draft' : 'open') : now.state}): ${now.url}`,
-          ]
+          const lines: Array<string> = [`${nameOf(snapshot)}, "${now.title}" (${standing(now)}): ${now.url}`]
           if (now.headSha !== null) {
             const checks = yield* host.checks(repository, now.headSha)
             const sum = checksOf(now.headSha, checks)
-            lines.push(
-              sum.total === 0
-                ? 'No checks have run.'
-                : `Checks: ${sum.passed} passed, ${sum.failed} failed, ${sum.running} running${sum.failing.length === 0 ? '' : ` (failed: ${sum.failing.join(', ')})`}.`,
-            )
+            lines.push(checksLine(sum))
             for (const check of checks.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_TO_LEAD)) {
               const log = yield* host.checkLog(repository, check).pipe(Effect.orElseSucceed(() => null))
-              if (log !== null) lines.push(`The end of ${check.name}'s log:\n\`\`\`\n${log}\n\`\`\``)
+              if (log !== null) lines.push(logOf(check.name, log))
             }
           }
           const activity = yield* host.activity(repository, snapshot.number, null)
@@ -548,11 +515,6 @@ export class Changes extends Context.Service<
           )
           return lines.join('\n\n')
         })
-
-      const commentLine = (comment: Comment) =>
-        `- ${comment.author.login}${whereOf(comment)}${comment.threadId === null ? '' : ` (thread ${comment.threadId})`}${comment.author.bot ? ' [bot]' : ''}:\n${quoted(comment.body)}`
-      const reviewLine = (review: Review) =>
-        `- ${review.author.login} reviewed: ${review.verdict === 'approved' ? 'approved' : review.verdict === 'changes_requested' ? 'changes requested' : 'commented'}${review.body === '' ? '' : `\n${quoted(review.body)}`}`
 
       /** Records something heard once; whether it was new. */
       const heard = (link: LinkRow, kind: string, id: string, payload: Readonly<Record<string, unknown>>) =>
@@ -616,7 +578,7 @@ export class Changes extends Context.Service<
             if (
               finished &&
               (before.checks?.sha !== sum.sha || before.checks.outcome !== sum.outcome) &&
-              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}`, sum))
+              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}`, { ...sum }))
             ) {
               yield* arrive(link, {
                 kind: 'checks',
@@ -632,15 +594,9 @@ export class Changes extends Context.Service<
                 const all = yield* host.checks(repository, now.headSha)
                 for (const check of all.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_TO_LEAD)) {
                   const log = yield* host.checkLog(repository, check).pipe(Effect.orElseSucceed(() => null))
-                  if (log !== null) logs.push(`The end of ${check.name}'s log:\n\`\`\`\n${log}\n\`\`\``)
+                  if (log !== null) logs.push(logOf(check.name, log))
                 }
-                forLead.push(
-                  [
-                    `Checks failed on ${name}: ${sum.failing.join(', ')}.`,
-                    ...logs,
-                    'Fix what broke, commit, and call publish_changes; or, if it isn’t the task’s to fix, say why.',
-                  ].join('\n\n'),
-                )
+                forLead.push(checksForLead(sum, name, logs))
               }
             }
             checks = sum
@@ -660,10 +616,7 @@ export class Changes extends Context.Service<
               text: review.body,
               url: review.url,
             })
-            if (!review.author.bot && review.verdict !== 'approved')
-              forLead.push(
-                `${review.author.login} reviewed ${name}: ${review.verdict === 'changes_requested' ? 'changes requested' : 'commented'}.${review.body === '' ? '' : `\n${quoted(review.body)}`}`,
-              )
+            if (!review.author.bot && review.verdict !== 'approved') forLead.push(reviewForLead(review, name))
           }
           for (const comment of activity.comments) {
             if (comment.author.id === adapters.info.account.id || comment.author.bot) continue
@@ -677,14 +630,9 @@ export class Changes extends Context.Service<
               line: comment.line,
               url: comment.url,
             })
-            forLead.push(
-              `${comment.author.login} commented on ${name}${whereOf(comment)}${comment.threadId === null ? '' : ` (thread ${comment.threadId})`}:\n${quoted(comment.body)}`,
-            )
+            forLead.push(commentForLead(comment, name))
           }
-          if (forLead.some((part) => !part.startsWith('Checks failed')))
-            forLead.push(
-              'Answer on the pull request with reply_on_pull_request (in a thread, by its id), or change the code, commit, and call publish_changes. If it needs the person, say so.',
-            )
+          if (forLead.some((part) => !part.startsWith('Checks failed'))) forLead.push(answerHint)
           const after = snapshotOf(now, before.repository, before.words, checks)
           if (after.state !== before.state) {
             if (after.state === 'merged') yield* arrive(link, { kind: 'merged', from: null, where: name, url: now.url })
@@ -795,7 +743,7 @@ export class Changes extends Context.Service<
                         message: 'This task has no pull request yet. Charrette opens one when the plan’s steps are done.',
                       }),
                     )
-                  if (error instanceof NotConnected)
+                  if (error instanceof NotConnected || (error instanceof NotFound && error.kind === 'connection'))
                     return Effect.fail(
                       new ToolRefused({
                         message:

@@ -39,54 +39,61 @@ export class Secrets extends Context.Service<
     })
 
   /** The macOS login keychain. Elsewhere, every call says there is no keychain yet. */
-  static readonly keychain: Layer.Layer<Secrets> = Layer.succeed(
-    Secrets,
-    process.platform === 'darwin'
-      ? Secrets.of({
-          // Base64 keeps the value one word for `security -i`, whatever it holds.
-          set: (name, value) =>
-            Effect.suspend(() =>
-              interactive(`add-generic-password -U -s ${SERVICE} -a ${word(name)} -w ${Buffer.from(value).toString('base64')}\n`),
-            ),
-          get: (name) =>
-            Effect.callback<string | null, SecretsUnavailable>((resume) => {
-              execFile(
-                'security',
-                ['find-generic-password', '-s', SERVICE, '-a', name, '-w'],
-                { timeout: 15_000 },
-                (error, stdout, stderr) => {
-                  // 44: no such item.
-                  if (error !== null && error.code === 44) return resume(Effect.succeed(null))
-                  if (error !== null) return resume(Effect.fail(new SecretsUnavailable({ reason: stderr.trim() || error.message })))
-                  resume(Effect.succeed(Buffer.from(stdout.trim(), 'base64').toString('utf8')))
-                },
-              )
-            }),
-          remove: (name) =>
-            Effect.callback<void, SecretsUnavailable>((resume) => {
-              execFile('security', ['delete-generic-password', '-s', SERVICE, '-a', name], { timeout: 15_000 }, (error, _stdout, stderr) =>
-                resume(
-                  error === null || error.code === 44
-                    ? Effect.void
-                    : Effect.fail(new SecretsUnavailable({ reason: stderr.trim() || error.message })),
-                ),
-              )
-            }),
-        })
-      : Secrets.of({
-          set: () =>
-            Effect.fail(new SecretsUnavailable({ reason: 'Charrette keeps secrets in the macOS keychain, and this is not macOS.' })),
-          get: () => Effect.succeed(null),
-          remove: () => Effect.void,
-        }),
-  )
+  static readonly keychain: Layer.Layer<Secrets> = Layer.suspend(() => Secrets.keychainOn(process.platform))
+
+  /** The keychain as it is on a platform: for tests, which run macOS's `security` as a stand-in on any. */
+  static readonly keychainOn = (platform: NodeJS.Platform): Layer.Layer<Secrets> =>
+    Layer.succeed(
+      Secrets,
+      platform === 'darwin'
+        ? Secrets.of({
+            // Base64 keeps the value one word for `security -i`, whatever it holds.
+            set: (name, value) =>
+              Effect.suspend(() =>
+                word(name)
+                  ? interactive(`add-generic-password -U -s ${SERVICE} -a ${name} -w ${Buffer.from(value).toString('base64')}\n`)
+                  : Effect.fail(new SecretsUnavailable({ reason: `Not a keychain name: ${name}` })),
+              ),
+            get: (name) =>
+              Effect.callback<string | null, SecretsUnavailable>((resume) => {
+                execFile(
+                  'security',
+                  ['find-generic-password', '-s', SERVICE, '-a', name, '-w'],
+                  { timeout: 15_000 },
+                  (error, stdout, stderr) => {
+                    // 44: no such item.
+                    if (error !== null && error.code === 44) return resume(Effect.succeed(null))
+                    if (error !== null) return resume(Effect.fail(new SecretsUnavailable({ reason: stderr.trim() || error.message })))
+                    resume(Effect.succeed(Buffer.from(stdout.trim(), 'base64').toString('utf8')))
+                  },
+                )
+              }),
+            remove: (name) =>
+              Effect.callback<void, SecretsUnavailable>((resume) => {
+                execFile(
+                  'security',
+                  ['delete-generic-password', '-s', SERVICE, '-a', name],
+                  { timeout: 15_000 },
+                  (error, _stdout, stderr) =>
+                    resume(
+                      error === null || error.code === 44
+                        ? Effect.void
+                        : Effect.fail(new SecretsUnavailable({ reason: stderr.trim() || error.message })),
+                    ),
+                )
+              }),
+          })
+        : Secrets.of({
+            set: () =>
+              Effect.fail(new SecretsUnavailable({ reason: 'Charrette keeps secrets in the macOS keychain, and this is not macOS.' })),
+            get: () => Effect.succeed(null),
+            remove: () => Effect.void,
+          }),
+    )
 }
 
-/** A name as one word for `security -i`: names are Charrette's own ids, so this only guards against a mistake. */
-const word = (name: string) => {
-  if (!/^[\w.-]+$/.test(name)) throw new Error(`Not a keychain name: ${name}`)
-  return name
-}
+/** Whether a name is one word for `security -i`: names are Charrette's own ids, so this only guards against a mistake. */
+const word = (name: string) => /^[\w.-]+$/.test(name)
 
 /** Runs `security` commands from standard input, so no secret is in its arguments. */
 const interactive = (commands: string): Effect.Effect<void, SecretsUnavailable> =>

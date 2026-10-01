@@ -53,8 +53,11 @@ export interface FakeControls {
   reviewAs(number: number, author: string, verdict: Verdict, body?: string): Review
   setChecks(number: number, checks: ReadonlyArray<Pick<Check, 'name' | 'state'> & { readonly log?: string }>): void
   merge(number: number): void
-  /** The next call to `method` fails with this. */
-  failNext(method: string, reason: ConnectorFailed['reason']): void
+  close(number: number): void
+  /** Someone marks a draft ready on the host itself. */
+  readyByHand(number: number): void
+  /** The next call to `method` fails with this, and when to try again for a rate limit. */
+  failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string): void
   /** Every change opened, with every comment on it, Charrette's included. */
   readonly changes: ReadonlyArray<ChangeRequest>
   commentsOn(number: number): ReadonlyArray<Comment>
@@ -86,7 +89,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const assigned = new Set<string>()
   const issueComments = new Map<string, Array<string>>()
   const links = new Map<string, Array<{ readonly url: string; readonly title: string }>>()
-  const failures = new Map<string, ConnectorFailed['reason']>()
+  const failures = new Map<string, { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string }>()
   const calls: Array<string> = []
   let ids = 0
   const nextId = () => String((ids += 1))
@@ -95,10 +98,17 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const called = (method: string) =>
     Effect.suspend(() => {
       calls.push(method)
-      const reason = failures.get(method)
-      if (reason === undefined) return Effect.void
+      const failure = failures.get(method)
+      if (failure === undefined) return Effect.void
       failures.delete(method)
-      return Effect.fail(new ConnectorFailed({ product, reason, message: `The fake ${method} failed (${reason})` }))
+      return Effect.fail(
+        new ConnectorFailed({
+          product,
+          reason: failure.reason,
+          message: `The fake ${method} failed (${failure.reason})`,
+          ...(failure.retryAt === undefined ? {} : { retryAt: failure.retryAt }),
+        }),
+      )
     })
   const missing = (what: string) => new ConnectorFailed({ product, reason: 'not_found', message: `No ${what}` })
   const changeNumbered = (number: number) => {
@@ -301,7 +311,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       )
     },
     merge: (number) => update(number, { state: 'merged' }),
-    failNext: (method, reason) => void failures.set(method, reason),
+    close: (number) => update(number, { state: 'closed' }),
+    readyByHand: (number) => update(number, { draft: false }),
+    failNext: (method, reason, retryAt) => void failures.set(method, { reason, ...(retryAt === undefined ? {} : { retryAt }) }),
     get changes() {
       return [...changes]
     },

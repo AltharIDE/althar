@@ -95,6 +95,16 @@ const Stored = Schema.Union([
 ])
 type Stored = typeof Stored.Type
 
+/**
+ * The credential a kept secret makes: an OAuth token is sent as a bearer; a
+ * pasted one as its product sends them (a bearer, a key as it is, or with the
+ * account's email).
+ */
+export const credentialFor = (kind: Credential['kind'], kept: Stored): Credential => {
+  if (kept.kind === 'oauth') return { kind: 'bearer', token: kept.accessToken }
+  return kind === 'basic' ? { kind, user: kept.user ?? '', token: kept.token } : { kind, token: kept.token }
+}
+
 interface Row {
   readonly id: string
   readonly product: Product
@@ -218,11 +228,7 @@ export class Connections extends Context.Service<
           )
         })
 
-      const credentialFrom = (product: Product, kept: Stored): Credential => {
-        if (kept.kind === 'oauth') return { kind: 'bearer', token: kept.accessToken }
-        const kind = infoOf(product)?.token.kind ?? 'bearer'
-        return kind === 'basic' ? { kind, user: kept.user ?? '', token: kept.token } : { kind, token: kept.token }
-      }
+      const credentialFrom = (product: Product, kept: Stored): Credential => credentialFor(infoOf(product)?.token.kind ?? 'bearer', kept)
 
       /** Renewals, one at a time per connection, so a rotated refresh token is never used twice. */
       const renewing = new Map<string, Semaphore.Semaphore>()
@@ -454,40 +460,38 @@ export class Connections extends Context.Service<
           flows.set(flowId, { state: { state: 'waiting' }, fiber })
         })
 
-      /** Waits for the browser to come back to the loopback address with its code, and answers it with a page to close. */
-      const callback = (port: number, state: string, productName: string) =>
-        Effect.acquireUseRelease(
-          Effect.callback<{ readonly server: Server; readonly code: Deferred.Deferred<string, ConnectorFailed> }, ConnectorFailed>(
-            (resume) => {
-              const code = Deferred.makeUnsafe<string, ConnectorFailed>()
-              const server = createServer((req, res) => {
-                const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`)
-                if (url.pathname !== '/callback') return void res.writeHead(404).end()
-                const given = url.searchParams.get('code')
-                const ok = given !== null && url.searchParams.get('state') === state
-                res.writeHead(ok ? 200 : 400, { 'content-type': 'text/html; charset=utf-8' })
-                res.end(
-                  `<!doctype html><meta charset="utf-8"><title>Charrette</title><body style="font:15px system-ui;margin:3rem">${
-                    ok
-                      ? `Signed in to ${productName}. You can close this tab and go back to Charrette.`
-                      : 'That sign-in didn’t come from Charrette.'
-                  }</body>`,
-                )
-                if (ok) Deferred.doneUnsafe(code, Exit.succeed(given))
-              })
-              server.once('error', (error) =>
-                resume(
-                  Effect.fail(
-                    new ConnectorFailed({ product: 'linear', reason: 'unreachable', message: `Port ${port} is busy: ${error.message}` }),
-                  ),
-                ),
-              )
-              server.listen(port, '127.0.0.1', () => resume(Effect.succeed({ server, code })))
-            },
-          ),
-          ({ code }) => Deferred.await(code),
-          ({ server }) => Effect.sync(() => void server.close()),
-        )
+      /**
+       * Listens on the loopback address for the browser to come back with its
+       * code, answering it with a page to close; listening before the address
+       * is handed out, so a quick browser finds it there.
+       */
+      const listenForCode = (port: number, state: string, productName: string) =>
+        Effect.callback<{ readonly code: Deferred.Deferred<string>; readonly close: Effect.Effect<void> }, ConnectorFailed>((resume) => {
+          const code = Deferred.makeUnsafe<string>()
+          const server: Server = createServer((req, res) => {
+            const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`)
+            if (url.pathname !== '/callback') return void res.writeHead(404).end()
+            const given = url.searchParams.get('code')
+            const ok = given !== null && url.searchParams.get('state') === state
+            res.writeHead(ok ? 200 : 400, { 'content-type': 'text/html; charset=utf-8' })
+            res.end(
+              `<!doctype html><meta charset="utf-8"><title>Charrette</title><body style="font:15px system-ui;margin:3rem">${
+                ok
+                  ? `Signed in to ${productName}. You can close this tab and go back to Charrette.`
+                  : 'That sign-in didn’t come from Charrette.'
+              }</body>`,
+            )
+            if (ok) Deferred.doneUnsafe(code, Exit.succeed(given))
+          })
+          server.once('error', (error) =>
+            resume(
+              Effect.fail(
+                new ConnectorFailed({ product: 'linear', reason: 'unreachable', message: `Port ${port} is busy: ${error.message}` }),
+              ),
+            ),
+          )
+          server.listen(port, '127.0.0.1', () => resume(Effect.succeed({ code, close: Effect.sync(() => void server.close()) })))
+        })
 
       const startSignIn = (input: { readonly product: Product; readonly webUrl?: string; readonly actorId: ActorId }) =>
         Effect.gen(function* () {
@@ -530,10 +534,11 @@ export class Connections extends Context.Service<
           const browser = info.browser
           const pkce = makePkce()
           const redirectUri = `http://127.0.0.1:${connectors.callbackPort}/callback`
+          const listening = yield* listenForCode(connectors.callbackPort, pkce.state, info.name)
           yield* follow(
             flowId,
             Effect.gen(function* () {
-              const code = yield* callback(connectors.callbackPort, pkce.state, info.name).pipe(
+              const code = yield* Deferred.await(listening.code).pipe(
                 Effect.timeoutOrElse({
                   duration: BROWSER_WAIT,
                   orElse: () => Effect.fail(new SignInEnded({ product: input.product, reason: 'expired' })),
@@ -549,7 +554,7 @@ export class Connections extends Context.Service<
                 pkce,
               })
               return yield* save({ product: input.product, webUrl, auth: 'pkce', secret: token, actorId: input.actorId })
-            }),
+            }).pipe(Effect.ensuring(listening.close)),
           )
           return {
             flowId,
