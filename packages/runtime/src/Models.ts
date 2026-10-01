@@ -15,10 +15,11 @@ import { SignIns } from './SignIns'
  * own). An agent says so in its session's settings: a select in the `model`
  * category, and one in `thought_level`. Charrette reads them from the latest
  * session an agent had, and what it is on from what that session was last
- * set to. An agent it has never run, it asks once a launch: it
- * starts it in an empty folder, in its read-only mode, reads the settings,
- * and stops it, recording nothing, as a sign-in check does. What can't be
- * read is left empty; a picker offers the agent's own default.
+ * set to. An agent it has never run, or whose latest session was kept before
+ * Charrette kept the names, it asks once a launch: it starts the agent in an
+ * empty folder, in its read-only mode, reads the settings, and stops it,
+ * recording nothing, as a sign-in check does. What can't be read is left
+ * empty; a picker offers the agent's own default.
  */
 
 export interface AgentModels {
@@ -120,20 +121,21 @@ export class Models extends Context.Service<
           const [latest] = yield* sql<{ config: string; model: string | null; effort: string | null }>`
             SELECT config, model, effort FROM provider_sessions WHERE agent_id = ${definition.id} AND config IS NOT NULL
             ORDER BY started_at DESC LIMIT 1`
-          const seen =
-            latest === undefined
-              ? undefined
-              : { ...modelsOf(definition, settingsIn(latest.config)), model: latest.model, effort: latest.effort }
-          if (seen !== undefined && seen.models.length > 0) return { ...seen, probing: false }
+          const settings = latest === undefined ? [] : settingsIn(latest.config)
+          const seen = modelsOf(definition, settings)
+          const now = latest === undefined ? {} : { model: latest.model, effort: latest.effort }
+          // Settings kept before Charrette kept their names say only ids: the agent is asked for its names.
+          const named = settings.some((option) => option.choices !== undefined)
+          if (seen.models.length > 0 && named) return { ...seen, ...now, probing: false }
           const asked = probed.get(definition.id)
-          if (asked !== undefined) return { ...(asked ?? modelsOf(definition, [])), probing: false }
-          // Never seen, and not asked yet this launch: asked now, in the background, if it is signed in.
+          if (asked !== undefined) return { ...(asked ?? seen), ...now, probing: false }
+          // Not asked yet this launch: asked now, in the background, if it is signed in.
           if (!probing.has(definition.id) && (yield* signIns.of(definition.id)) !== 'signed_out') {
             probing.add(definition.id)
             yield* Effect.forkDetach(probe(entry))
-            return { ...modelsOf(definition, []), probing: true }
+            return { ...seen, ...now, probing: true }
           }
-          return { ...modelsOf(definition, []), probing: probing.has(definition.id) }
+          return { ...seen, ...now, probing: probing.has(definition.id) }
         })
 
       return Models.of({

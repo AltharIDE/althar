@@ -62,8 +62,10 @@ export const makerOf = (agentId: string, words: string): Brand | undefined => {
 export const text = {
   /** An agent's own default, as it names it ("Default (recommended)"), or an agent whose models aren't known. */
   agentDefault: (agent: string) => `${agent} default`,
-  /** A name two agents share, told apart. */
-  via: (model: string, agent: string) => `${model} · ${agent}`,
+  /** A name two models share, told apart by the provider or the agent that offers each. */
+  via: (model: string, by: string) => `${model} · ${by}`,
+  /** Effort levels the agents write as one word. */
+  efforts: { xhigh: 'Extra high' } as Readonly<Record<string, string>>,
   how: { signed_in: 'signed in', unknown: 'this Mac', signed_out: 'signed out' } satisfies Record<AgentStatus['signIn'], string>,
 }
 
@@ -75,40 +77,70 @@ export interface Catalog {
   readonly agents: ReadonlyMap<string, AgentModels>
 }
 
+/** The family a name leaves out, from the model's id: `GPT-` for gpt-6-sol, which its agent calls "6 Sol". */
+const familyOf = (id: string): string | undefined => {
+  const family = /^([a-z]+)-\d/i.exec(id.slice(id.lastIndexOf('/') + 1))?.[1]
+  if (family === undefined) return undefined
+  return family.length <= 3 ? `${family.toUpperCase()}-` : `${family.charAt(0).toUpperCase()}${family.slice(1)} `
+}
+
+/**
+ * A model's name in a list of every agent's models: what an agent calls its
+ * own default says whose it is, a provider before a slash ("OpenCode Zen/Big
+ * Pickle") is kept apart, and a name that starts at the version has its
+ * family back.
+ */
+export const nameOf = (
+  agentName: string,
+  model: { readonly id: string; readonly name: string },
+): { readonly name: string; readonly provider: string | undefined } => {
+  if (/^default\b/i.test(model.name)) return { name: text.agentDefault(agentName), provider: undefined }
+  const slash = model.name.indexOf('/')
+  const provider = slash > 0 ? model.name.slice(0, slash).trim() : undefined
+  const name = model.name.slice(slash + 1).trim()
+  const family = /^\d/.test(name) ? familyOf(model.id) : undefined
+  return { name: family === undefined ? name : `${family}${name}`, provider }
+}
+
+/** An effort level as the picker writes it: the agent's word, unless it runs two together. */
+const effortWord = (name: string): string => text.efforts[name.toLowerCase()] ?? name
+
 /** The agents' models as one list, for the agents a picker offers. */
 export const catalogOf = (known: ReadonlyArray<AgentModels>, agents: ReadonlyArray<AgentStatus>): Catalog => {
   const byId = new Map(known.map((offered) => [offered.agentId, offered]))
   const entries = agents.flatMap((agent) => {
     const offered = byId.get(agent.id)
-    const efforts = (offered?.efforts ?? []).map((effort) => effort.name)
+    const efforts = (offered?.efforts ?? []).map((effort) => effortWord(effort.name))
     const models = offered?.models ?? []
     if (models.length === 0) {
       const mark = makerOf(agent.id, '')
       const name = text.agentDefault(agent.name)
-      return [{ agent, info: { id: keyOf(agent.id, null), name, short: name, runtime: agent.id, efforts, ...(mark ? { mark } : {}) } }]
+      const info: ModelInfo = { id: keyOf(agent.id, null), name, short: name, runtime: agent.id, efforts, ...(mark ? { mark } : {}) }
+      return [{ info, by: agent.name }]
     }
     return models.map((model) => {
       const mark = makerOf(agent.id, `${model.id} ${model.name}`)
-      // An agent's own default says which agent's it is; a provider's prefix is noise in a short name.
-      const name = /^default\b/i.test(model.name) ? text.agentDefault(agent.name) : model.name
+      const { name, provider } = nameOf(agent.name, model)
       const info: ModelInfo = {
         id: keyOf(agent.id, model.id),
         name,
-        short: name.replace(/^[^/\s]+\//, ''),
+        short: name,
         runtime: agent.id,
         efforts,
         ...(mark ? { mark } : {}),
         ...(model.description === null ? {} : { note: model.description }),
       }
-      return { agent, info }
+      return { info, by: provider ?? agent.name }
     })
   })
-  // A name two agents share says which agent's each is.
-  const shared = (name: string) => new Set(entries.filter((entry) => entry.info.name === name).map((entry) => entry.agent.id)).size > 1
+  // A name two models share says whose each is: its provider's, or its agent's.
+  const shared = (name: string) => entries.filter((entry) => entry.info.name === name).length > 1
   return {
-    models: entries.map(({ agent, info }) =>
-      shared(info.name) ? { ...info, name: text.via(info.name, agent.name), short: text.via(info.short, agent.name) } : info,
-    ),
+    models: entries.map(({ info, by }) => {
+      if (!shared(info.name)) return info
+      const told = text.via(info.name, by)
+      return { ...info, name: told, short: told }
+    }),
     runtimes: agents.map((agent) => {
       const brand = AGENT_BRANDS[agent.id]
       return { id: agent.id, name: agent.name, how: text.how[agent.signIn], ...(brand ? { brand } : {}) }
@@ -133,17 +165,20 @@ export const infoOf = (catalog: Catalog, choice: { readonly agentId: string; rea
 /** A model's name as its agent gives it, for a line that already names the agent; null for the agent's own default. */
 export const modelName = (catalog: Catalog, agentId: string, model: string | null): string | null => {
   if (model === null) return null
-  const name = catalog.agents.get(agentId)?.models.find((offered) => offered.id === model)?.name ?? model
-  return /^default\b/i.test(name) ? null : name
+  const offered = catalog.agents.get(agentId)?.models.find((candidate) => candidate.id === model)
+  if (offered === undefined) return model
+  return /^default\b/i.test(offered.name) ? null : nameOf('', offered).name
 }
 
 /** An effort's name, as the agent says it, from its id. */
-export const effortName = (catalog: Catalog, agentId: string, effort: string | null): string | null =>
-  catalog.agents.get(agentId)?.efforts.find((offered) => offered.id === effort)?.name ?? null
+export const effortName = (catalog: Catalog, agentId: string, effort: string | null): string | null => {
+  const name = catalog.agents.get(agentId)?.efforts.find((offered) => offered.id === effort)?.name
+  return name === undefined ? null : effortWord(name)
+}
 
 /** An effort's id, from the name the kit shows. */
 export const effortId = (catalog: Catalog, agentId: string, name: string): string =>
-  catalog.agents.get(agentId)?.efforts.find((offered) => offered.name === name)?.id ?? name
+  catalog.agents.get(agentId)?.efforts.find((offered) => effortWord(offered.name) === name)?.id ?? name
 
 /** Until the person pins a model: each agent's current one. */
 export const defaultPins = (catalog: Catalog): ReadonlyArray<string> =>

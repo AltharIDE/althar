@@ -47,7 +47,7 @@ describe('the models every agent offers', () => {
     expect(choiceOf(keyOf('codex', null))).toEqual({ agentId: 'codex', model: null })
   })
 
-  it('say which agent’s a shared name is, drop a provider’s prefix when short, and carry the maker’s mark', () => {
+  it('say whose a shared name is, keep a provider apart, put back a family a name leaves out, and carry the maker’s mark', () => {
     const opencode: AgentStatus = { id: 'opencode', name: 'OpenCode', signIn: 'signed_in', login: 'opencode auth login' }
     const offered: AgentModels = {
       agentId: 'opencode',
@@ -55,8 +55,13 @@ describe('the models every agent offers', () => {
         { id: 'anthropic/opus', name: 'Opus', description: null },
         { id: 'qwen/qwen3-coder', name: 'qwen/Qwen3 Coder', description: null },
         { id: 'local', name: 'My own', description: null },
+        { id: 'opencode/big-pickle', name: 'OpenCode Zen/Big Pickle', description: null },
+        { id: 'other/big-pickle', name: 'Other / Big Pickle', description: null },
+        { id: 'openai/gpt-6-sol', name: 'OpenAI/6 Sol', description: null },
+        { id: 'gemini-3-pro', name: '3 Pro', description: null },
+        { id: 'v2', name: '2', description: null },
       ],
-      efforts: [],
+      efforts: [{ id: 'xhigh', name: 'Xhigh' }],
       model: null,
       effort: null,
       probing: false,
@@ -64,8 +69,23 @@ describe('the models every agent offers', () => {
     const both = catalogOf([...models, offered], [...signedIn, opencode])
     const named = (id: string) => both.models.find((info) => info.id === id)
     expect([named('claude-code:opus')?.name, named('opencode:anthropic/opus')?.short]).toEqual(['Opus · Claude Code', 'Opus · OpenCode'])
-    expect(named('opencode:qwen/qwen3-coder')).toMatchObject({ name: 'qwen/Qwen3 Coder', short: 'Qwen3 Coder', mark: Brand.Alibaba })
+    expect(named('opencode:qwen/qwen3-coder')).toMatchObject({ name: 'Qwen3 Coder', short: 'Qwen3 Coder', mark: Brand.Alibaba })
     expect(named('opencode:local')?.mark).toBeUndefined()
+    expect([named('opencode:opencode/big-pickle')?.name, named('opencode:other/big-pickle')?.name]).toEqual([
+      'Big Pickle · OpenCode Zen',
+      'Big Pickle · Other',
+    ])
+    expect([named('opencode:openai/gpt-6-sol'), named('opencode:gemini-3-pro')?.name, named('opencode:v2')?.name]).toEqual([
+      expect.objectContaining({ name: 'GPT-6 Sol', mark: Brand.OpenAI }),
+      'Gemini 3 Pro',
+      '2',
+    ])
+    // Effort levels an agent runs together are written apart.
+    expect([named('opencode:local')?.efforts, effortName(both, 'opencode', 'xhigh'), effortId(both, 'opencode', 'Extra high')]).toEqual([
+      ['Extra high'],
+      'Extra high',
+      'xhigh',
+    ])
     expect(both.runtimes.at(-1)).toEqual({ id: 'opencode', name: 'OpenCode', how: 'signed in' })
     expect([makerOf('opencode', 'gemini-3-pro'), makerOf('opencode', 'o4-mini'), makerOf('codex', 'whatever')]).toEqual([
       Brand.Google,
@@ -100,6 +120,8 @@ describe('the models every agent offers', () => {
     expect(defaultPins(catalog)).toEqual(['claude-code:default', 'codex:gpt-5.2-codex'])
     expect([modelName(catalog, 'claude-code', 'sonnet'), modelName(catalog, 'claude-code', 'default')]).toEqual(['Sonnet', null])
     expect([modelName(catalog, 'codex', 'gpt-4.1'), modelName(catalog, 'codex', null)]).toEqual(['gpt-4.1', null])
+    const sol = catalogOf([{ ...models[1]!, models: [{ id: 'gpt-6-sol', name: '6 Sol', description: null }] }], signedIn)
+    expect(modelName(sol, 'codex', 'gpt-6-sol')).toBe('GPT-6 Sol')
     expect([effortName(catalog, 'codex', 'extra-high'), effortName(catalog, 'codex', null)]).toEqual(['Extra high', null])
     expect([effortId(catalog, 'codex', 'Extra high'), effortId(catalog, 'opencode', 'Deep')]).toEqual(['extra-high', 'Deep'])
   })

@@ -101,6 +101,30 @@ describe('the models each agent offers', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('are asked again of an agent whose latest session was kept without their names', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const models = yield* Models
+      const sql = yield* SqlClient.SqlClient
+      const threadId = yield* thread
+      yield* sessions.start({ threadId, agentId: 'codex', model: 'large', effort: 'high' })
+      // As a session started before Charrette kept the names recorded it: values alone.
+      const [row] = yield* sql<{ id: string; config: string }>`SELECT id, config FROM provider_sessions WHERE agent_id = 'codex'`
+      const config = JSON.parse(row?.config ?? '{}') as { options: Array<Record<string, unknown>> }
+      const bare = { ...config, options: config.options.map(({ choices: _, ...option }) => option) }
+      yield* sql`UPDATE provider_sessions SET config = ${JSON.stringify(bare)} WHERE id = ${row?.id ?? ''}`
+      const codex = () => Effect.map(models.catalog, (all) => all.find((agent) => agent.agentId === 'codex'))
+      const first = yield* codex()
+      assert.deepStrictEqual([first?.probing, first?.models.map((model) => model.name), first?.model], [true, ['small', 'large'], 'large'])
+      // Named once it has said, and still on what its session was set to.
+      const [named] = yield* until(
+        Effect.map(models.catalog, (all) => all.filter((agent) => agent.agentId === 'codex')),
+        (found) => found[0]?.probing === false,
+      )
+      assert.deepStrictEqual(named, { agentId: 'codex', ...OFFERED, model: 'large', effort: 'high', probing: false })
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('aren’t asked of an agent that is signed out, nor again of one that couldn’t say', () =>
     Effect.gen(function* () {
       const models = yield* Models
