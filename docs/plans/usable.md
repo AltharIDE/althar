@@ -64,13 +64,34 @@ One pull request each:
 
 Then the integrations plan's next step, GitLab.
 
-## Leanings, to confirm
+## Decided
+
+Confirmed with the user on 1 October 2026:
 
 - **Merging a pull request** is a button in the app, as the person's click,
   as marking it ready is.
 - **A task without a pull request** merges into its base locally, as the
   person's click.
-- **Three tasks at once** per project, changeable.
-- **On a usage limit:** move to the next agent free, else wait for the reset.
+- **Three tasks at once** per project.
 - **Permission asks** are the lead's to answer within the project's rules;
   only the "always ask me" list reaches the person.
+- **A usage limit is handled as configured:** stop and wait for the reset, or
+  move to the next agent automatically. Where it is set comes later; the
+  setting exists from the start.
+
+## Open: which model the next agent runs
+
+When work moves to another agent, its model, in this order:
+
+1. **The plan's choice.** The model the plan named for that agent on this
+   step, if it named one.
+2. **The person's last.** The model the person last used with that agent in
+   this project, since that is the choice they made, on their plan.
+3. **The agent's default.** Its own default, as its CLI would start, which
+   respects the person's own config.
+
+Later, match the tier of the model it replaces, strongest for strongest,
+from a small table of known model families. The move is said in the thread:
+which agent reached its limit, when it resets, and which agent and model
+took over and why. The next agent is the next free one in the order of the
+person's connections, as the kit already words it.
