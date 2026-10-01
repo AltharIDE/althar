@@ -143,9 +143,7 @@ describe('the client', () => {
     expect(failure).toBeInstanceOf(ApiError)
     expect(messageOf(failure)).toBe("That folder isn't there any more.")
     await expect(client.answer({ attentionId: 'nothing', decision: 'allow' })).rejects.toBeInstanceOf(ApiError)
-    expect(messageOf(await client.openChange('task_none').catch((error: unknown) => error))).toBe(
-      "The task's work isn't done yet. Its pull request opens when it is.",
-    )
+    expect(messageOf(await client.openChange('task_none').catch((error: unknown) => error))).toBe("That task isn't there any more.")
     await client.close()
   })
 
