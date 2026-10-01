@@ -326,7 +326,13 @@ through ACP and the context carries over. The prompt cache is per model, so the
 first turn after a switch costs more. An agent whose ACP can't change model per
 session restarts with a different configuration and loads its session again
 where it can, or the change is handled as an agent switch. None of the MVP's
-agents needs this today.
+agents needs this today. Effort is the same: a config option (`thought_level`)
+set as a session starts and changed within it.
+
+What each agent offers comes from the agent, in its own ids and names: the
+choices of its session's model and effort options. Charrette keeps no table of
+models; it reads them from the agent's latest session, and asks an agent it has
+never run by starting it once in an empty folder, read-only, and stopping it.
 
 **Agent.** A session can't move between agents. A switch starts a new session
 on the new agent, in the same workspace, from a brief. The new session belongs

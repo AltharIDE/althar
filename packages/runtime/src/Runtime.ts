@@ -14,6 +14,7 @@ import { Plans } from './Plans'
 import { Runs } from './Runs'
 import { Secrets } from './Secrets'
 import { Sessions } from './Sessions'
+import { Models } from './Models'
 import { SignIns } from './SignIns'
 import { ToolServer } from './ToolServer'
 
@@ -51,7 +52,9 @@ export const layer = (options: RuntimeLayerOptions) => {
   const linked = Layer.mergeAll(Changes.layer, Issues.layer).pipe(Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(core))))
   // Runs drive a task's steps; plans start runs when their time comes; the coordinator plans tasks and passes messages on.
   const work = Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))
-  return Coordinator.layer.pipe(Layer.provideMerge(SignIns.layer.pipe(Layer.provideMerge(work))))
+  // The models each agent offers, read from its sessions, or asked of it once.
+  const known = Models.layer.pipe(Layer.provideMerge(SignIns.layer.pipe(Layer.provideMerge(work))))
+  return Coordinator.layer.pipe(Layer.provideMerge(known))
 }
 
 export { envelope } from './envelope'

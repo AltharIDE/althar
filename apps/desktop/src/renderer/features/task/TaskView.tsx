@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import type { ChangeSummary, ThreadSnapshot } from '@charrette/contracts'
 import {
@@ -12,7 +12,6 @@ import {
   Issue,
   LinkButton,
   type ModelInfo,
-  Select,
   SidePanel,
   SidePanelBody,
   SidePanelTitle,
@@ -27,7 +26,10 @@ import {
   TitleBar,
 } from '@charrette/ui'
 
+import { useModels } from '../../data/models'
 import { modelInfo } from '../../shared/agents'
+import { ModelChoice } from '../../shared/ModelChoice'
+import { catalogOf, type Choice, modelName, runningOn } from '../../shared/models'
 import { checkOf } from '../../shared/checks'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { ago, useNow } from '../../shared/time'
@@ -53,11 +55,12 @@ export const text = {
   noLeadNote: 'No agent is working on this task.',
   startLead: 'Start the lead',
   lead: 'Lead',
-  handTo: 'Hand to',
-  model: 'Model',
   placeholderBusy: 'Add to the queue, or interrupt the lead',
   placeholder: (lead: string) => `Tell ${lead} something`,
   placeholderNone: 'Start a lead to talk to it',
+  handsOver: (agent: string) => `hands the task to ${agent}`,
+  takesOver: (to: string, from: string) => `${to} takes over from a brief; ${from}’s turn stops.`,
+  handOver: 'Hand it over',
   working: 'Working',
   needsYou: 'Needs you',
   ready: 'Ready',
@@ -91,7 +94,7 @@ export const statusOf = (snapshot: ThreadSnapshot): { readonly status: TaskStatu
     : { status: TaskStatus.Running, state: text.idle }
 }
 
-const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', context: 0, efforts: [] }
+const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', efforts: [] }
 
 /** A task's pull request beside its thread: the kit's change set, and what the person can do with it here. */
 function ChangePanel({
@@ -173,8 +176,10 @@ function ChangePanel({
 
 export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => void }) {
   const [draft, setDraft] = useState('')
-  const [pick, setPick] = useState<string | null>(null)
+  const [pick, setPick] = useState<Choice | null>(null)
   const [showChange, setShowChange] = useState(false)
+  const known = useModels()
+  const catalog = useMemo(() => catalogOf(known ?? [], model.agents), [known, model.agents])
   const files = model.snapshot?.task.files ?? []
   const changes = useChanges(model.snapshot?.task.id ?? null, files[0]?.path ?? null)
   // ⌘D opens what the task changed, when it changed something. With its modifier, never set off by typing or by voice.
@@ -204,13 +209,17 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
   const session = snapshot.session
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
-  const lead = session === null ? noLead : modelInfo({ id: session.agentId, name: session.agentName }, session.model)
+  const lead =
+    session === null
+      ? noLead
+      : modelInfo({ id: session.agentId, name: session.agentName }, modelName(catalog, session.agentId, session.model))
   const { status, state } = statusOf(snapshot)
   const busy = session?.turnRunning ?? false
-  const others = model.agents.filter((agent) => agent.id !== session?.agentId)
   // A stopped task picks up with the agent that last led it, when it still can.
   const last = snapshot.items.findLast((item) => item.agentId !== null)?.agentId
-  const chosen = pick ?? model.agents.find((agent) => agent.id === last)?.id ?? model.agents[0]?.id ?? null
+  const resume = model.agents.find((agent) => agent.id === last) ?? model.agents[0]
+  const chosen: Choice | null = pick ?? (resume === undefined ? null : { agentId: resume.id, model: null, effort: null })
+  const choice = session === null ? chosen : runningOn(session)
 
   const send = (body: string, now: boolean) => {
     setDraft('')
@@ -239,25 +248,6 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
     ) : (
       <>
         {changeButton}
-        {session.models.length > 0 && (
-          <Select
-            label={text.model}
-            variant="quiet"
-            value={session.model}
-            options={session.models.map((value) => ({ value, label: value }))}
-            onChange={(value) => void model.setModel(value)}
-          />
-        )}
-        {others.length > 0 && (
-          <Select
-            label={text.handTo}
-            variant="quiet"
-            value={null}
-            placeholder={text.handTo}
-            options={others.map((agent) => ({ value: agent.id, label: agent.name }))}
-            onChange={(agentId) => void model.switchAgent(agentId)}
-          />
-        )}
         <TaskMenu status={status} onStop={() => void model.stop()} />
       </>
     )
@@ -272,19 +262,10 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
       {session === null && (
         <div className={s.start}>
           <span>{text.noLeadNote}</span>
-          {model.agents.length > 0 && chosen !== null && (
-            <>
-              <Select
-                label={text.lead}
-                variant="filled"
-                value={chosen}
-                options={model.agents.map((agent) => ({ value: agent.id, label: agent.name }))}
-                onChange={setPick}
-              />
-              <Button variant="signal" size="small" busy={model.pending} onClick={() => void model.start(chosen)}>
-                {text.startLead}
-              </Button>
-            </>
+          {chosen !== null && (
+            <Button variant="signal" size="small" busy={model.pending} onClick={() => void model.start(chosen)}>
+              {text.startLead}
+            </Button>
           )}
         </div>
       )}
@@ -296,6 +277,21 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
         placeholder={session === null ? text.placeholderNone : busy ? text.placeholderBusy : text.placeholder(session.agentName)}
+        // Another agent's model hands the task to that agent.
+        picker={
+          model.agents.length > 0 &&
+          choice !== null && (
+            <ModelChoice
+              owner={text.lead}
+              agents={model.agents}
+              value={choice}
+              onChange={(next) => (session === null ? setPick(next) : void model.choose(next))}
+              // A lead that runs is handed over by another agent's model; one at work, only once the person says.
+              {...(session === null ? {} : { handover: { note: text.handsOver, ask: busy ? text.takesOver : null } })}
+              text={{ proceed: text.handOver }}
+            />
+          )
+        }
       />
     </div>
   )

@@ -10,7 +10,6 @@ import {
   Composer,
   Heading,
   LinkButton,
-  Select,
   SidePanel,
   SidePanelBody,
   SidePanelTitle,
@@ -25,6 +24,8 @@ import {
   WorkStatus,
 } from '@charrette/ui'
 
+import { ModelChoice } from '../../shared/ModelChoice'
+import { type Choice, runningOn } from '../../shared/models'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
@@ -58,6 +59,9 @@ export const text = {
   coordinator: 'Coordinator',
   empty: 'Ask the coordinator about the project, or say what should change.',
   placeholder: 'Tell the coordinator something',
+  handsOver: (agent: string) => `hands the conversation to ${agent}`,
+  takesOver: (to: string, from: string) => `${to} takes over from a brief; ${from}’s turn stops.`,
+  handOver: 'Hand it over',
   queued: 'Queued · the coordinator reads it next',
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in, so the coordinator starts on ${instead}.`,
@@ -114,7 +118,7 @@ export function ProjectView({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
   const [draft, setDraft] = useState('')
-  const [pick, setPick] = useState<string | null>(null)
+  const [pick, setPick] = useState<Choice | null>(null)
   // What opens beside the conversation: a task you plan, or the connections.
   const [panel, setPanel] = useState<'task' | 'connections' | null>(null)
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts.
@@ -126,7 +130,12 @@ export function ProjectView({
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Whatever it ran on last, while that agent can; otherwise the first that can.
-  const chosen = session?.agentId ?? pick ?? (suggested?.available === true ? suggested.agentId : null) ?? model.agents[0]?.id ?? null
+  const first = model.agents[0]
+  const chosen: Choice | null =
+    (session === null ? null : runningOn(session)) ??
+    pick ??
+    (suggested?.available === true ? { agentId: suggested.agentId, model: suggested.model, effort: suggested.effort } : null) ??
+    (first === undefined ? null : { agentId: first.id, model: null, effort: null })
   const name = model.project?.name ?? coordinator?.project.name ?? text.project
 
   const actions: CardActions = {
@@ -153,7 +162,7 @@ export function ProjectView({
       )}
       {session === null && model.agents.length === 0 && <p className={s.quiet}>{text.needsAgent}</p>}
       {session === null && suggested !== null && !suggested.available && chosen !== null && (
-        <p className={s.quiet}>{text.signedOut(suggested.agentName, agentName(chosen))}</p>
+        <p className={s.quiet}>{text.signedOut(suggested.agentName, agentName(chosen.agentId))}</p>
       )}
       <Composer
         value={draft}
@@ -164,13 +173,15 @@ export function ProjectView({
         busy={busy}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
         picker={
-          model.agents.length > 0 && (
-            <Select
-              label={text.coordinator}
-              variant="quiet"
+          model.agents.length > 0 &&
+          chosen !== null && (
+            <ModelChoice
+              owner={text.coordinator}
+              agents={model.agents}
               value={chosen}
-              options={model.agents.map((agent) => ({ value: agent.id, label: agent.name }))}
-              onChange={(agentId) => (session === null ? setPick(agentId) : void model.switchAgent(agentId))}
+              onChange={(next) => (session === null ? setPick(next) : void model.choose(next))}
+              {...(session === null ? {} : { handover: { note: text.handsOver, ask: busy ? text.takesOver : null } })}
+              text={{ proceed: text.handOver }}
             />
           )
         }

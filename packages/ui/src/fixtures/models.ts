@@ -48,13 +48,12 @@ export const MODEL_LIST: readonly ModelInfo[] = [
   m('llama-4-maverick', 'Llama 4 Maverick', 'Llama 4', Lab.Meta, 'openrouter', 1000),
 ]
 
-/** A model the runtimes do not describe: no mark, no efforts, its id for a name. */
+/** A model the runtimes do not describe: no mark, no efforts, no context window, its id for a name. */
 export const UNKNOWN_MODEL: ModelInfo = {
   id: 'some-new-model',
   name: 'some-new-model',
   short: 'some-new-model',
   runtime: 'ollama',
-  context: 200,
   efforts: [],
 }
 

@@ -13,13 +13,24 @@ import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
-import { type GitFailed, ModelUnchanged, NoSession, NotFound, SessionFailed, SessionRunning, type UnknownAgent } from './errors'
+import {
+  EffortUnchanged,
+  type GitFailed,
+  ModelUnchanged,
+  NoSession,
+  NotFound,
+  SessionFailed,
+  SessionRunning,
+  type UnknownAgent,
+} from './errors'
 import { Instance } from './Instance'
 import { Live } from './Live'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
+import { touchCard } from './cards'
 import { change, fact, timestamp } from './records'
 import { git } from './git'
 import { reviewCopyOf } from './reviewCopy'
+import { defaultEffortOf } from './preferences'
 import { addItem, recorder, transcript } from './threads'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
@@ -169,6 +180,8 @@ export class Sessions extends Context.Service<
       readonly threadId: string
       readonly agentId: string
       readonly model?: string
+      /** How hard it thinks, where the agent offers a choice; the agent's own default without one. */
+      readonly effort?: string
     }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | Failure>
     /** Accepts input into the thread's queue, and delivers it when the session can take it. */
     send(input: {
@@ -181,11 +194,14 @@ export class Sessions extends Context.Service<
     }): Effect.Effect<AcceptedInput, NotFound | Failure>
     /** Changes the session's model; the session and its context carry on. */
     setModel(input: { readonly threadId: string; readonly model: string }): Effect.Effect<void, NoSession | ModelUnchanged | Failure>
+    /** How hard the running session's agent thinks, from here on. */
+    setEffort(input: { readonly threadId: string; readonly effort: string }): Effect.Effect<void, NoSession | EffortUnchanged | Failure>
     /** Hands the thread to another agent: a new session, briefed with the thread so far (ADR-005). */
     switchAgent(input: {
       readonly threadId: string
       readonly agentId: string
       readonly model?: string
+      readonly effort?: string
     }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
     interrupt(threadId: string): Effect.Effect<void, NoSession>
@@ -360,6 +376,8 @@ export class Sessions extends Context.Service<
           )
           running.brief = undefined
           running.turnRunning = true
+          // A task's card says when its lead or reviewer is at work.
+          if (thread.role !== 'coordinator') yield* touchCard(thread.taskId)
           yield* live.publish({ _tag: 'TurnStarted', threadId: thread.threadId, turnId })
 
           const items = recorder({
@@ -464,6 +482,8 @@ export class Sessions extends Context.Service<
             // Tried again shortly, rather than straight away.
             yield* Effect.forkIn(Effect.delay(Queue.offer(running.wake, undefined), Duration.seconds(1)), running.scope)
           }
+          // A step can report mid-turn, so its task is ready only once the turn is over: its card is read again.
+          if (thread.role !== 'coordinator') yield* touchCard(thread.taskId)
           const resetsAt =
             Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed' ? failure.value.resetsAt : ended?.failure?.resetsAt
           if (errorClass === 'usage_limit') yield* accountLimited(running, resetsAt)
@@ -614,7 +634,13 @@ export class Sessions extends Context.Service<
        * its process. The session stays `starting`: it takes over the thread
        * only when `activate` runs, so a failed start leaves the thread as it was.
        */
-      const connectSession = (thread: ThreadContext, sessionId: string, entry: AgentEntry, model: string | undefined) =>
+      const connectSession = (
+        thread: ThreadContext,
+        sessionId: string,
+        entry: AgentEntry,
+        model: string | undefined,
+        effort: string | undefined,
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { definition } = entry
@@ -674,6 +700,13 @@ export class Sessions extends Context.Service<
                   : { meta: definition.sessionMeta(thread.role === 'task' ? 'lead' : 'reader') }),
               })
               if (model !== undefined) yield* agent.setOption(definition.options.model, model)
+              if (definition.options.effort !== undefined) {
+                // Without an effort of its own, the person's default for the model it is on, where they set one.
+                const on = model ?? optionValue(yield* agent.options, definition.options.model)
+                const wanted = effort ?? (on === null ? null : yield* defaultEffortOf(definition.id, on))
+                // An effort the model doesn't offer leaves it at the agent's own: no reason not to start.
+                if (wanted !== null) yield* agent.setOption(definition.options.effort, wanted).pipe(Effect.ignore)
+              }
               return { connection, agent }
             }).pipe(Scope.provide(scope)),
           )
@@ -799,7 +832,7 @@ export class Sessions extends Context.Service<
           return lock.withPermits(1)(effect)
         })
 
-      const start = (input: { readonly threadId: string; readonly agentId: string; readonly model?: string }) =>
+      const start = (input: { readonly threadId: string; readonly agentId: string; readonly model?: string; readonly effort?: string }) =>
         exclusive(
           input.threadId,
           Effect.gen(function* () {
@@ -807,7 +840,7 @@ export class Sessions extends Context.Service<
             const thread = yield* loadThread(input.threadId)
             const entry = yield* (yield* Agents).get(input.agentId)
             const sessionId = yield* createSession(thread, entry.definition.id)
-            const connected = yield* connectSession(thread, sessionId, entry, input.model)
+            const connected = yield* connectSession(thread, sessionId, entry, input.model, input.effort)
             // Every session starts from a brief (ADR-005), even the first on a task.
             return yield* activate(connected, {
               text: yield* briefFor(thread, { kind: 'start' }),
@@ -907,6 +940,35 @@ export class Sessions extends Context.Service<
             source: 'runtime',
             severity: 'info',
             title: `Model changed to ${input.model}.`,
+          })
+        })
+
+      const setEffort = (input: { readonly threadId: string; readonly effort: string }) =>
+        Effect.gen(function* () {
+          const running = threads.get(input.threadId)
+          if (running === undefined) return yield* new NoSession({ threadId: input.threadId })
+          const { definition } = running.entry
+          const unchanged = (summary: string) => new EffortUnchanged({ agentId: definition.id, effort: input.effort, summary })
+          if (definition.options.effort === undefined) return yield* unchanged('It offers no choice of effort.')
+          const options = yield* running.agent
+            .setOption(definition.options.effort, input.effort)
+            .pipe(Effect.mapError((error) => unchanged(agentSaid(error) ?? error.message)))
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* change('provider_sessions', running.sessionId, {
+                effort: optionValue(options, definition.options.effort),
+              })
+              yield* sessionFact(running.thread, running.sessionId, revision, 'provider_session.effort_changed', { effort: input.effort })
+            }),
+          )
+          const named = options
+            .find((option) => option.id === definition.options.effort)
+            ?.choices.find((choice) => choice.value === input.effort)
+          yield* addItem({ projectId: running.thread.projectId, threadId: input.threadId, sessionId: running.sessionId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `Effort changed to ${(named?.name ?? input.effort).toLowerCase()}.`,
           })
         })
 
@@ -1016,7 +1078,12 @@ export class Sessions extends Context.Service<
        * the old agent working. The brief is written after the old one stops, so
        * it holds everything the old one did.
        */
-      const switchAgent = (input: { readonly threadId: string; readonly agentId: string; readonly model?: string }) =>
+      const switchAgent = (input: {
+        readonly threadId: string
+        readonly agentId: string
+        readonly model?: string
+        readonly effort?: string
+      }) =>
         exclusive(
           input.threadId,
           Effect.gen(function* () {
@@ -1025,7 +1092,7 @@ export class Sessions extends Context.Service<
             const previous = threads.get(input.threadId)
             const from = previous?.entry.definition.name
             const sessionId = yield* createSession(thread, entry.definition.id)
-            const connected = yield* connectSession(thread, sessionId, entry, input.model)
+            const connected = yield* connectSession(thread, sessionId, entry, input.model, input.effort)
             if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
             yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
               source: 'runtime',
@@ -1053,6 +1120,7 @@ export class Sessions extends Context.Service<
         start: (input) => run(start(input)),
         send: (input) => run(send(input)),
         setModel: (input) => run(setModel(input)),
+        setEffort: (input) => run(setEffort(input)),
         switchAgent: (input) => run(switchAgent(input)),
         interrupt: (threadId) =>
           Effect.suspend(() => {

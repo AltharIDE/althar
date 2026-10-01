@@ -15,7 +15,16 @@ function Project({ onBack = vi.fn(), onTask = vi.fn() }: { onBack?: () => void; 
   return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onBack={onBack} onTask={onTask} />
 }
 
-const session = { id: 'sc', agentId: 'claude-code', agentName: 'Claude Code', state: 'active', model: null, models: [], turnRunning: false }
+const session = {
+  id: 'sc',
+  agentId: 'claude-code',
+  agentName: 'Claude Code',
+  state: 'active',
+  model: null,
+  effort: null,
+  models: [],
+  turnRunning: false,
+}
 
 /** The coordinator's thread with a conversation and two cards: one running, one planned. */
 const talk = (overrides: Partial<CoordinatorSnapshot> = {}) =>
@@ -83,14 +92,26 @@ describe('the Talk room', () => {
   it('holds, changes and starts a plan before it starts on its own', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(card())] })) })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('combobox', { name: 'Review' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'Claude Code' }))
+    // Each step's agent, model and effort.
+    await userEvent.click(await screen.findByRole('button', { name: 'Review: gpt-5.2-codex Medium' }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'High' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenCalledWith(
         'pln1',
         [
           { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
-          { key: 'review', agentId: 'claude-code', model: null, skipped: false },
+          { key: 'review', agentId: 'codex', model: null, effort: 'high', skipped: false },
+        ],
+        null,
+      ),
+    )
+    await userEvent.click(await screen.findByRole('radio', { name: /Claude Code default/ }))
+    await waitFor(() =>
+      expect(client.changePlan).toHaveBeenLastCalledWith(
+        'pln1',
+        [
+          { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+          { key: 'review', agentId: 'claude-code', model: 'default', effort: null, skipped: false },
         ],
         null,
       ),
@@ -101,7 +122,7 @@ describe('the Talk room', () => {
         'pln1',
         [
           { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
-          { key: 'review', agentId: 'claude-code', model: null, skipped: true },
+          { key: 'review', agentId: 'claude-code', model: 'default', effort: null, skipped: true },
         ],
         null,
       ),
@@ -121,17 +142,22 @@ describe('the Talk room', () => {
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Add a retry', disposition: 'after_current' }))
     expect(client.startSession).not.toHaveBeenCalled()
 
-    await userEvent.click(screen.getByRole('combobox', { name: 'Coordinator' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'Codex' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    expect(screen.getByRole('button', { name: 'Coordinator: gpt-5.2-codex Medium' })).toBeTruthy()
+    await userEvent.click(await screen.findByRole('radio', { name: 'Low' }))
+    await userEvent.keyboard('{Escape}')
     await userEvent.type(box, 'And a test{Enter}')
-    await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'codex' }))
+    await waitFor(() =>
+      expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'codex', model: 'gpt-5.2-codex', effort: 'low' }),
+    )
     expect(client.send).toHaveBeenLastCalledWith({ threadId: 'thc', body: 'And a test', disposition: 'after_current' })
   })
 
   it("says when the agent it last ran on isn't signed in, and starts it on one that is", async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
-        coordinatorSnapshot({ suggested: { agentId: 'opencode', agentName: 'OpenCode', model: null, available: false } }),
+        coordinatorSnapshot({ suggested: { agentId: 'opencode', agentName: 'OpenCode', model: null, effort: null, available: false } }),
       ),
     })
     withServices(<Project />, client)
@@ -159,9 +185,14 @@ describe('the Talk room', () => {
     expect(client.interrupt).toHaveBeenCalledWith('thc')
     await userEvent.type(busy, 'Stop{Meta>}{Enter}{/Meta}')
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Stop', disposition: 'interrupt_and_continue' }))
-    await userEvent.click(screen.getByRole('combobox', { name: 'Coordinator' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'Codex' }))
-    expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'codex' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'High' }))
+    await waitFor(() => expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'thc', effort: 'high' }))
+    // At work, another agent takes over only once the person says.
+    await userEvent.click(screen.getByRole('radio', { name: /gpt-5\.2-codexhands the conversation to Codex/ }))
+    expect(screen.getByText('Codex takes over from a brief; Claude Code’s turn stops.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Hand it over' }))
+    await waitFor(() => expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'codex', model: 'gpt-5.2-codex' }))
   })
 
   it("reads a changed item alone, its head for anything else, and the cards when the project's tasks move", async () => {
@@ -202,6 +233,36 @@ describe('the Talk room', () => {
     }
   })
 
+  it('keeps a card as it was read last, when an earlier read comes back after it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      let answerFirst: (item: ReturnType<typeof items.card>) => void = () => undefined
+      const getThreadItem = vi
+        .fn()
+        .mockImplementationOnce(() => new Promise((resolve) => (answerFirst = resolve)))
+        .mockImplementation(async () => items.card(card({ phase: 'ready', summary: 'Retried twice.' }), 'c1'))
+      const { client, emit } = fakeClient({
+        getCoordinator: vi.fn(async () =>
+          coordinatorSnapshot({ items: [items.card(card({ phase: 'running', step: 'implement' }), 'c1')] }),
+        ),
+        getThreadItem,
+      })
+      withServices(<Project />, client)
+      await screen.findByText('Implementing')
+      act(() => emit(changed('thread_item', 'c1', 'thc')))
+      await vi.advanceTimersByTimeAsync(50)
+      act(() => emit(changed('thread_item', 'c1', 'thc')))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(await screen.findByText('Retried twice.')).toBeTruthy()
+      // The first read answers last, with the card as it was then: it doesn't put it back.
+      await act(async () => answerFirst(items.card(card({ phase: 'running', step: 'implement' }), 'c1')))
+      expect(screen.getByText('Retried twice.')).toBeTruthy()
+      expect(screen.queryByText('Implementing')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('shows earlier items when asked', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async (_projectId: string, page?: { before?: number }) =>
@@ -232,7 +293,7 @@ describe('a task the person plans', () => {
     await userEvent.type(within(panel).getByLabelText('What should change'), '  Add a retry  ')
     await userEvent.type(within(panel).getByLabelText('Anything the lead should know'), ' Only the checkout call. ')
     // Another agent reviews by default.
-    expect(within(within(panel).getByRole('combobox', { name: 'Review' })).getByText('Codex')).toBeTruthy()
+    expect(await within(panel).findByRole('button', { name: 'Review: gpt-5.2-codex Medium' })).toBeTruthy()
     await userEvent.click(within(panel).getByRole('button', { name: 'Start the task' }))
     await waitFor(() =>
       expect(client.startTask).toHaveBeenCalledWith({
@@ -240,8 +301,8 @@ describe('a task the person plans', () => {
         title: 'Add a retry',
         description: 'Only the checkout call.',
         steps: [
-          { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
-          { key: 'review', agentId: 'codex', model: null, skipped: false },
+          { key: 'implement', agentId: 'claude-code', model: null, effort: null, skipped: false },
+          { key: 'review', agentId: 'codex', model: null, effort: null, skipped: false },
         ],
         // The repository's host isn't connected here: the task ends on its branch.
         end: null,
@@ -258,16 +319,20 @@ describe('a task the person plans', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'New task' }))
     const panel = await screen.findByRole('complementary', { name: 'New task' })
     await userEvent.type(within(panel).getByLabelText('What should change'), 'Bump the version')
-    await userEvent.click(within(panel).getByRole('combobox', { name: 'Lead' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'Codex' }))
-    await userEvent.click(within(panel).getByRole('combobox', { name: 'Review' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'No review' }))
+    await userEvent.click(await within(panel).findByRole('button', { name: 'Lead: Claude Code default Medium' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    // The review goes to another agent than the lead's; without one, it can be added back.
+    await userEvent.click(await within(panel).findByRole('button', { name: 'Review: Claude Code default Medium' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'No review' }))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Add a review' }))
+    await userEvent.click(await within(panel).findByRole('button', { name: 'Review: Claude Code default Medium' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'No review' }))
     await userEvent.click(within(panel).getByRole('button', { name: 'Start the task' }))
     expect(await screen.findByText("git worktree didn't work.")).toBeTruthy()
     expect(client.startTask).toHaveBeenCalledWith({
       projectId: 'p1',
       title: 'Bump the version',
-      steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+      steps: [{ key: 'implement', agentId: 'codex', model: 'gpt-5.2-codex', effort: null, skipped: false }],
       end: null,
     })
     // It stays open, to try again; Close puts it away, and Dismiss the message.
@@ -285,7 +350,7 @@ describe('what can go wrong', () => {
     })
     withServices(<Project />, client)
     expect(await screen.findByText('No agent is signed in. Sign one in with its own tool, then come back.')).toBeTruthy()
-    expect(screen.queryByRole('combobox', { name: 'Coordinator' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Coordinator:/ })).toBeNull()
   })
 
   it("says when the project can't be read, or the runtime didn't answer", async () => {

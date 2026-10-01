@@ -116,6 +116,7 @@ export interface FakeAgentOptions {
 interface SessionState {
   mode: string
   model: string
+  effort: string
   cancelled: boolean
   stubborn: boolean
   abort: AbortController | undefined
@@ -262,6 +263,8 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
 
 const MODES = ['ask', 'read-only', 'bypass']
 const MODELS = ['small', 'large']
+/** How hard the fake thinks, as agents offer it: a select in the `thought_level` category. */
+const EFFORTS = ['low', 'medium', 'high']
 
 const modeOption = (session: SessionState): acp.SessionConfigOption => ({
   id: 'mode',
@@ -278,7 +281,25 @@ const modelOption = (session: SessionState): acp.SessionConfigOption => ({
   category: 'model',
   type: 'select',
   currentValue: session.model,
-  options: [{ group: 'all', name: 'All', options: MODELS.map((value) => ({ value, name: value })) }],
+  options: [
+    {
+      group: 'all',
+      name: 'All',
+      options: [
+        { value: 'small', name: 'Small', description: 'Quick, for small things' },
+        { value: 'large', name: 'Large', description: 'The most capable' },
+      ],
+    },
+  ],
+})
+
+const effortOption = (session: SessionState): acp.SessionConfigOption => ({
+  id: 'effort',
+  name: 'Effort',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: session.effort,
+  options: EFFORTS.map((value) => ({ value, name: value.charAt(0).toUpperCase() + value.slice(1) })),
 })
 
 const permissionOptions = (alwaysOnly: boolean): Array<acp.PermissionOption> =>
@@ -301,7 +322,9 @@ export const fakeAgent = (options: FakeAgentOptions = {}): InProcessAgent => ({ 
 export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
   const modes = options.modes ?? 'config'
   const configOptions = (session: SessionState): Array<acp.SessionConfigOption> =>
-    modes === 'config' || modes === 'stuck' ? [modeOption(session), modelOption(session)] : [modelOption(session)]
+    modes === 'config' || modes === 'stuck'
+      ? [modeOption(session), modelOption(session), effortOption(session)]
+      : [modelOption(session), effortOption(session)]
   const sessions = new Map<string, SessionState>()
   let created = 0
   const sessionOf = (sessionId: string): SessionState => {
@@ -329,6 +352,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const session: SessionState = {
         mode: 'bypass',
         model: 'small',
+        effort: 'medium',
         cancelled: false,
         stubborn: false,
         abort: undefined,
@@ -361,6 +385,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const value = String(params.value)
       if (params.configId === 'mode' && MODES.includes(value)) session.mode = modes === 'stuck' ? session.mode : value
       else if (params.configId === 'model' && MODELS.includes(value)) session.model = value
+      else if (params.configId === 'effort' && EFFORTS.includes(value)) session.effort = value
       else throw acp.RequestError.invalidParams(params, `No option ${params.configId}=${value}`)
       return { configOptions: configOptions(session) }
     })

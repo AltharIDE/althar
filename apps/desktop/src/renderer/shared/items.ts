@@ -30,3 +30,21 @@ export const caughtUp = (streaming: ReadonlyMap<string, Streamed>, items: Readon
 /** What the person said that still waits: a change to what they said moves it on, so these are read again. */
 export const waiting = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<string> =>
   items.flatMap((item) => (item.kind === 'user_message' && item.input?.state === 'queued' ? [item.id] : []))
+
+/**
+ * Reads that can come back out of order, as the runtime answers each on its
+ * own: an answer is kept only if no read of the same thing began after it,
+ * so an earlier answer never puts back what a later one replaced.
+ */
+export const newestReads = () => {
+  const begun = new Map<string, number>()
+  let reads = 0
+  return <A>(key: string, read: Promise<A>, keep: (value: A) => void, fail: (failure: unknown) => void): Promise<void> => {
+    reads += 1
+    const mine = reads
+    begun.set(key, mine)
+    return read.then((value) => {
+      if (begun.get(key) === mine) keep(value)
+    }, fail)
+  }
+}

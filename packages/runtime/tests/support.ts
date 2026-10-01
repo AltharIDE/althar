@@ -41,13 +41,13 @@ export const repository = () => {
   return path
 }
 
-const definition = (id: string, signedOut: ReadonlyArray<string> = []): AgentDefinition => ({
+export const definition = (id: string, signedOut: ReadonlyArray<string> = []): AgentDefinition => ({
   id: id as AgentId,
   name: `Fake ${id}`,
   source: 'bundled',
   launch: () => ({ command: 'bun', args: [fakeAgentMain] }),
   modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
-  options: { mode: 'mode', model: 'model' },
+  options: { mode: 'mode', model: 'model', effort: 'effort' },
   signIn: { status: () => ({ command: 'true', args: [] }), read: () => !signedOut.includes(id), login: 'true' },
   permissions: codexLikeMeanings,
   // One fake agent passes session options, as Claude Code's entry does.

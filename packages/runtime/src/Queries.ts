@@ -397,8 +397,15 @@ export class Queries extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
           const agents = yield* Agents
-          const [session] = yield* sql<{ id: string; agentId: string; state: string; model: string | null; config: string }>`
-            SELECT id, agent_id, state, model, config FROM provider_sessions
+          const [session] = yield* sql<{
+            id: string
+            agentId: string
+            state: string
+            model: string | null
+            effort: string | null
+            config: string
+          }>`
+            SELECT id, agent_id, state, model, effort, config FROM provider_sessions
             WHERE thread_id = ${threadId} AND state IN (${sql.unsafe(live)}) ORDER BY started_at DESC LIMIT 1`
           if (session === undefined) return null
           const running = yield* sessions.running(threadId)
@@ -414,6 +421,7 @@ export class Queries extends Context.Service<
             agentName: definition?.definition.name ?? session.agentId,
             state: session.state,
             model: session.model,
+            effort: session.effort,
             models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
             turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
           }
@@ -502,10 +510,10 @@ export class Queries extends Context.Service<
        */
       /** A task's card, as its item in the coordinator's thread shows it. */
       const cardOf = (row: ItemRow) =>
-        Effect.map(cardFor(text(parse(row.content), 'taskId')), (content) =>
+        Effect.map(cardFor(text(parse(row.content), 'taskId')), (content): ThreadItem | undefined =>
           content === undefined
             ? undefined
-            : ({ id: row.id, sequence: row.sequence, agentId: null, createdAt: row.createdAt, kind: 'task', content } satisfies ThreadItem),
+            : { id: row.id, sequence: row.sequence, agentId: null, createdAt: row.createdAt, kind: 'task', content },
         )
 
       /** Where a task stands, read from it, its plan, its run and its sessions: what its card and its header show. */

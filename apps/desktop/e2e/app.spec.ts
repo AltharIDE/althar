@@ -62,8 +62,10 @@ test('opens a project, starts a task, and talks to its lead', async () => {
     await page.getByLabel('What should change').fill('Add a retry to the checkout call')
     // Its lead reports Implement done at once, with no review, so what follows is talking to it.
     await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
-    await page.getByRole('combobox', { name: 'Review' }).click()
-    await page.getByRole('option', { name: 'No review' }).click()
+    await expect(page.getByRole('button', { name: /^Review: Small · Codex/ })).toBeVisible()
+    await page.screenshot({ path: 'test-results/new-task.png', animations: 'disabled' })
+    await page.getByRole('button', { name: /^Review:/ }).click()
+    await page.getByRole('button', { name: 'No review' }).click()
     await page.getByRole('button', { name: 'Start the task' }).click()
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
 
@@ -76,6 +78,14 @@ test('opens a project, starts a task, and talks to its lead', async () => {
 
     await say(page, 'hello')
     await expect(page.getByText('Hello', { exact: true })).toBeVisible()
+
+    // The lead's model and how hard it thinks, from the composer: the agent offers them, and says when they change.
+    await page.getByRole('button', { name: /^Lead:/ }).click()
+    await expect(page.getByRole('radio', { name: /Small · Claude Code/ })).toBeVisible()
+    await page.screenshot({ path: 'test-results/model-picker.png', animations: 'disabled' })
+    await page.getByRole('radio', { name: 'High' }).click()
+    await page.keyboard.press('Escape')
+    await expect(page.getByText('Effort changed to high.')).toBeVisible()
 
     // An edit inside the worktree: the project's rules allow it without asking.
     await say(page, 'tool')
@@ -98,6 +108,8 @@ test('opens a project, starts a task, and talks to its lead', async () => {
 
     await say(page, 'think')
     await expect(page.getByText('Done', { exact: true })).toBeVisible()
+    // Its fold says how long it worked once the turn has ended; until then it is still working.
+    await expect(page.getByRole('button', { name: /^Working for/ })).toHaveCount(0)
     await page
       .getByRole('button', { name: /^Worked for/ })
       .last()

@@ -12,6 +12,7 @@ import { Folders } from './Folders'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { Live } from './Live'
+import { Models } from './Models'
 import { Permissions } from './Permissions'
 import { Projects } from './Projects'
 import { Queries } from './Queries'
@@ -47,6 +48,7 @@ export const handlers = Api.toLayer(
     const folders = yield* Folders
     const live = yield* Live
     const signIns = yield* SignIns
+    const models = yield* Models
     const plans = yield* Plans
     const runs = yield* Runs
     const coordinator = yield* Coordinator
@@ -217,11 +219,30 @@ export const handlers = Api.toLayer(
       GetThreadItem: ({ threadId, itemId }) => api(queries.item(threadId, itemId)),
       GetFileDiff: ({ taskId, path }) => api(queries.fileDiff(taskId, path)),
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
-      StartSession: ({ commandId, threadId, agentId, model }) =>
-        once(commandId, api(sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }) }))),
-      SwitchAgent: ({ commandId, threadId, agentId, model }) =>
-        once(commandId, api(sessions.switchAgent({ threadId, agentId, ...(model === undefined ? {} : { model }) }))),
+      StartSession: ({ commandId, threadId, agentId, model, effort }) =>
+        once(
+          commandId,
+          api(
+            sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
+          ),
+        ),
+      SwitchAgent: ({ commandId, threadId, agentId, model, effort }) =>
+        once(
+          commandId,
+          api(
+            sessions.switchAgent({
+              threadId,
+              agentId,
+              ...(model === undefined ? {} : { model }),
+              ...(effort === undefined ? {} : { effort }),
+            }),
+          ),
+        ),
       SetModel: ({ commandId, threadId, model }) => once(commandId, api(sessions.setModel({ threadId, model }))),
+      SetEffort: ({ commandId, threadId, effort }) => once(commandId, api(sessions.setEffort({ threadId, effort }))),
+      GetModels: () => api(models.catalog),
+      SetDefaultEffort: ({ commandId, agentId, model, effort }) =>
+        once(commandId, api(models.setDefaultEffort({ agentId, model, effort }))),
       Interrupt: ({ commandId, threadId }) => once(commandId, api(sessions.interrupt(threadId))),
       StopSession: ({ commandId, threadId }) => once(commandId, api(sessions.stop(threadId))),
       Send: ({ commandId, threadId, body, disposition }) =>

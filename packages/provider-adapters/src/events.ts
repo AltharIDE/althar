@@ -34,6 +34,8 @@ export interface ConfigOption {
   readonly currentValue: string | boolean
   /** Every value a select option allows, flattened out of any groups. Empty for a boolean. */
   readonly values: ReadonlyArray<string>
+  /** The same values, each with the name the agent gives it and what it says of it: Opus 4.1, the most capable. */
+  readonly choices: ReadonlyArray<{ readonly value: string; readonly name: string; readonly description?: string }>
 }
 
 /** A file a tool call touches, and the line, when it says. */
@@ -119,11 +121,13 @@ const textOf = (content: acp.ContentBlock): string | undefined => (content.type 
 
 export const normalizeOptions = (options: ReadonlyArray<acp.SessionConfigOption> | null | undefined): ReadonlyArray<ConfigOption> =>
   (options ?? []).map((option) => {
-    const values: Array<string> = []
+    const choices: Array<{ readonly value: string; readonly name: string; readonly description?: string }> = []
+    const choice = (entry: acp.SessionConfigSelectOption) =>
+      choices.push({ value: entry.value, name: entry.name, ...defined('description', entry.description ?? undefined) })
     if (option.type === 'select') {
       for (const entry of option.options) {
-        if ('value' in entry) values.push(entry.value)
-        else if ('options' in entry) for (const inner of entry.options) values.push(inner.value)
+        if ('value' in entry) choice(entry)
+        else if ('options' in entry) for (const inner of entry.options) choice(inner)
       }
     }
     return {
@@ -132,7 +136,8 @@ export const normalizeOptions = (options: ReadonlyArray<acp.SessionConfigOption>
       ...defined('category', option.category),
       type: option.type,
       currentValue: option.currentValue,
-      values,
+      values: choices.map((entry) => entry.value),
+      choices,
     }
   })
 

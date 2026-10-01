@@ -41,6 +41,8 @@ export const PlanStep = Schema.Struct({
   key: Schema.Literals(['implement', 'review']),
   agentId: Schema.String,
   model: Schema.NullOr(Schema.String),
+  /** How hard its agent thinks; the agent's own default without one. */
+  effort: Schema.optional(Schema.NullOr(Schema.String)),
   skipped: Schema.Boolean,
 })
 export type PlanStep = typeof PlanStep.Type
@@ -659,7 +661,12 @@ export class Runs extends Context.Service<
           const live = Option.filter(running, (session) => session.agentId === step.agentId)
           const sessionId = Option.isSome(live)
             ? live.value.sessionId
-            : yield* sessions.start({ threadId, agentId: step.agentId, ...(step.model === null ? {} : { model: step.model }) })
+            : yield* sessions.start({
+                threadId,
+                agentId: step.agentId,
+                ...(step.model === null ? {} : { model: step.model }),
+                ...(step.effort == null ? {} : { effort: step.effort }),
+              })
           if (Option.isSome(live) || round > 0)
             yield* sessions.send({
               envelope: yield* envelope('thread.send', { threadId, round }),
@@ -720,8 +727,15 @@ export class Runs extends Context.Service<
           const live = yield* sessions.running(run.threadId)
           if (Option.isSome(live) && (agentId === undefined || live.value.agentId === agentId)) return live.value.sessionId
           if (Option.isSome(live)) return yield* sessions.switchAgent({ threadId: run.threadId, agentId: wanted })
+          // The plan's model and effort are for the plan's lead; another the person picked starts on its own.
           const model = agentId === undefined ? (implement?.model ?? null) : null
-          return yield* sessions.start({ threadId: run.threadId, agentId: wanted, ...(model === null ? {} : { model }) })
+          const effort = agentId === undefined ? (implement?.effort ?? null) : null
+          return yield* sessions.start({
+            threadId: run.threadId,
+            agentId: wanted,
+            ...(model === null ? {} : { model }),
+            ...(effort === null ? {} : { effort }),
+          })
         })
 
       const run = (planId: string) =>
