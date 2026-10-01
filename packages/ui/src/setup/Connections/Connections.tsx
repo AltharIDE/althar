@@ -286,7 +286,7 @@ function SigningIn({
   switch (signing.kind) {
     case 'device':
       return (
-        <div className={s.panel} role="group" aria-label={t.typeCode(service.name)}>
+        <div className={s.panel}>
           <p className={s.prompt}>{t.typeCode(service.name)}</p>
           <div className={s.code}>
             <span className={s.codeText}>{signing.code}</span>
@@ -309,7 +309,7 @@ function SigningIn({
       )
     case 'browser':
       return (
-        <div className={s.panel} role="group" aria-label={t.approve(service.name)}>
+        <div className={s.panel}>
           <p className={s.prompt}>{t.approve(service.name)}</p>
           <div className={s.foot}>
             <a className={s.link} href={safeHref(signing.url)} target="_blank" rel="noreferrer">
