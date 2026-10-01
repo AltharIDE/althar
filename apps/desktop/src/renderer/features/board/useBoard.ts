@@ -8,14 +8,32 @@ import { useServices, useWatch } from '../../data/services'
 /*
  * A project's board: every task it hasn't settled, the most recently
  * settled, and every call that waits on the person, as the runtime reads them
- * in one go. It is read once, then again whenever anything of the project
- * changes, gathered a moment so a burst of changes reads once. From it the
+ * in one go. It is read once, then again whenever something it shows changes,
+ * gathered a moment so a burst of changes reads once. From it the
  * person answers calls, accepts a pull request by merging it, or sends the
  * work back to its lead with a note.
  */
 
 /** How long changes are gathered before the board is read again. */
 const GATHER = 60
+
+/**
+ * What changes what the board shows: a task, its plan, run, steps and
+ * sessions, an agent's turn starting or ending, a call, a pull request, a
+ * worktree. Not what is said in a thread, which changes far more often and
+ * none of this.
+ */
+const BOARD = new Set([
+  'task',
+  'task_plan',
+  'run',
+  'node_attempt',
+  'provider_session',
+  'turn_delivery',
+  'attention_request',
+  'external_link',
+  'workspace',
+])
 
 export interface BoardModel {
   readonly board: BoardSnapshot | null
@@ -24,8 +42,8 @@ export interface BoardModel {
   readonly merging: string | null
   /** The task a note is on its way back to. */
   readonly sending: string | null
-  /** Merges a ready task's pull request; whether it went through. */
-  readonly merge: (taskId: string) => Promise<boolean>
+  /** Merges a ready task's pull request at the head the person saw; whether it went through. */
+  readonly merge: (taskId: string, head: string) => Promise<boolean>
   /** Sends a ready task back to its lead with a note, starting the lead again if it stopped; whether it went through. */
   readonly sendBack: (task: BoardTask, note: string) => Promise<boolean>
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string) => Promise<void>
@@ -58,7 +76,7 @@ export const useBoard = (projectId: string): BoardModel => {
   }, [read])
 
   useWatch((event) => {
-    if (event._tag === 'Streaming' || event.projectId !== projectId) return
+    if (event._tag === 'Streaming' || event.projectId !== projectId || !BOARD.has(event.aggregateType)) return
     timer.current ??= setTimeout(read, GATHER)
   }, since)
 
@@ -68,11 +86,11 @@ export const useBoard = (projectId: string): BoardModel => {
     merging,
     sending,
     merge: useCallback(
-      async (taskId) => {
+      async (taskId, head) => {
         setMerging(taskId)
         setError(null)
         try {
-          await client.merge(taskId)
+          await client.merge(taskId, head)
           return true
         } catch (failure) {
           fail(failure)

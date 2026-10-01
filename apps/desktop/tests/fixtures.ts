@@ -205,6 +205,7 @@ export const change = (overrides: Partial<ChangeSummary> = {}): ChangeSummary =>
   additions: 12,
   deletions: 3,
   changedFiles: 2,
+  head: 'abc123',
   checks: {
     outcome: 'failed',
     passed: 1,

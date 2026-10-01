@@ -12,13 +12,14 @@ import { Cause, Context, Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
 import { connection, services } from '../src/Api'
-import { GitFailed, ModelUnchanged, NotARepository, NotFound, SessionFailed } from '../src/errors'
+import { ChangedSinceSeen, GitFailed, ModelUnchanged, NotARepository, NotFound, OutwardUncertain, SessionFailed } from '../src/errors'
+import { NotConnected } from '../src/Connections'
 import { Folders } from '../src/Folders'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
 import { Connectors } from '../src/Config'
 import { Secrets } from '../src/Secrets'
-import { products } from '@charrette/connectors'
+import { ConnectorFailed, products } from '@charrette/connectors'
 import { makeFakeService } from '@charrette/connectors/testing'
 
 import { fakeAgents, fakeConnectors, HOST, hosted, repository } from './support'
@@ -618,6 +619,29 @@ describe('words', () => {
     assert.strictEqual(said({ _tag: 'CommandIdReused' }), 'That request was already used for something else. Try again.')
     assert.strictEqual(said({ _tag: 'DatabaseInUse' }), 'Another copy of Charrette is using this profile.')
     assert.strictEqual(said(new TurnInProgress({ sessionId: 's' })), 'The lead is still on its last turn.')
+    // What a code host or tracker said, or why it couldn't be asked.
+    const host = (reason: ConnectorFailed['reason'], message = '') => said(new ConnectorFailed({ product: 'github', reason, message }))
+    assert.strictEqual(host('unauthorized'), "GitHub no longer takes Charrette's sign-in. Sign in to it again.")
+    assert.strictEqual(host('forbidden', 'Resource not accessible'), "GitHub won't let this account do that: Resource not accessible.")
+    assert.strictEqual(host('forbidden'), "GitHub won't let this account do that.")
+    assert.strictEqual(host('not_found'), "GitHub can't find it any more.")
+    assert.strictEqual(host('rate_limited'), 'GitHub is asking Charrette to slow down. Try again in a little while.')
+    assert.strictEqual(host('unreachable'), "Charrette couldn't reach GitHub. Try again in a moment.")
+    assert.strictEqual(host('invalid_response'), "GitHub answered in a way Charrette didn't understand.")
+    assert.strictEqual(host('rejected', 'Pull Request is not mergeable'), 'GitHub said no: Pull Request is not mergeable.')
+    assert.strictEqual(said(new ConnectorFailed({ product: 'gitea' as never, reason: 'rejected', message: '' })), 'The service said no.')
+    assert.strictEqual(
+      said(new NotConnected({ product: 'linear', what: 'MER-1' })),
+      "Charrette isn't connected to Linear. Connect it, then try again.",
+    )
+    assert.strictEqual(
+      said(new OutwardUncertain({ operation: 'merge' })),
+      "Charrette can't tell whether that went through: its answer was lost. Look on the host before trying again.",
+    )
+    assert.strictEqual(
+      said(new ChangedSinceSeen({ taskId: 't' })),
+      'The pull request changed since you looked at it. Have another look before you accept it.',
+    )
     assert.deepStrictEqual(words(new Error('boom'), name), {
       reason: 'Unknown',
       message: "Charrette's runtime couldn't do that. Its log has the details.",

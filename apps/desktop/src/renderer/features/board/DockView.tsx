@@ -149,7 +149,8 @@ export function DockView({
           lead={lead}
           files={(head?.task.files ?? []).map((file) => ({ path: file.path, add: file.add, del: file.del }))}
           checks={(change.checks?.list ?? []).map(checkOf)}
-          onAccept={() => void model.merge(task.taskId)}
+          // The head the dock showed: a pull request that moved on since isn't merged unseen.
+          onAccept={() => void model.merge(task.taskId, change.head ?? '')}
           onSendBack={(note) => void model.sendBack(task, note)}
           onOpenFile={(path) => onChanges(task, path)}
           accepting={model.merging === task.taskId}

@@ -59,7 +59,11 @@ One pull request each:
    - The kit's ChangeView shows it over the whole window. It opens from the
      task's header, from a file in its pull request, or with ⌘D.
 2. **The board,** and the chrome's counts. Merging from it, as the person's
-   click. Local merging for a task without a pull request comes with step 3.
+   click, at the head the person saw. Local merging for a task without a pull
+   request comes with step 3, and so does sending work back as a step of its
+   own: a new run of the task with the note as its input, which ends with the
+   lead's summary and a push, rather than a message the lead may or may not
+   push after.
 3. **Work that doesn't need you.**
 4. **Conversations.**
 

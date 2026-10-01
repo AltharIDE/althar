@@ -10,7 +10,7 @@ import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import { envelope } from './envelope'
-import { NotFound } from './errors'
+import { ChangedSinceSeen, NotFound } from './errors'
 import { commitOf, commitsAhead, pushTo, uncommitted, uncommittedFiles } from './git'
 import { Instance } from './Instance'
 import { outward, reconcileOutward } from './outward'
@@ -188,8 +188,12 @@ export class Changes extends Context.Service<
     pushChanges(taskId: string): Effect.Effect<{ readonly change: ChangeSummary }, unknown>
     /** Marks the task's draft pull request ready for review: the person's to do. */
     markReady(taskId: string): Effect.Effect<void, unknown>
-    /** Merges the task's pull request, because the person said to, marking a draft ready first; agents never merge. */
-    merge(taskId: string): Effect.Effect<void, unknown>
+    /**
+     * Merges the task's pull request at the head the person saw, because
+     * they said to, marking a draft ready first; one that moved on since
+     * isn't merged. Agents never merge.
+     */
+    merge(taskId: string, head: string): Effect.Effect<void, unknown>
     /** Replies on the task's pull request, in a comment's thread or its conversation, signed as from Charrette and the agent that wrote it. */
     reply(
       taskId: string,
@@ -531,29 +535,39 @@ export class Changes extends Context.Service<
         })
 
       /**
-       * Merges the task's pull request, as the person asked: a draft is
-       * marked ready first, and only the head last read is merged. Read back
-       * at once, merged, its task settles.
+       * Merges the task's pull request at the head the person saw, as they
+       * asked: a draft is marked ready first. If it has moved on since, by a
+       * push now or while the host merges, it isn't merged, and the person
+       * looks again. Read back at once, merged, its task settles.
        */
-      const merge = (taskId: string) =>
+      const merge = (taskId: string, head: string) =>
         Effect.gen(function* () {
           const { link, snapshot, host, repository } = yield* current(taskId)
           if (snapshot.state !== 'open') return
-          if (snapshot.draft) yield* markReady(taskId)
           const read = yield* host.change(repository, snapshot.number)
-          if (read.state === 'open')
+          if (read.state === 'open') {
+            if (read.headSha !== head) return yield* new ChangedSinceSeen({ taskId })
+            if (read.draft) yield* markReady(taskId)
             yield* outward({
               projectId: link.projectId,
               subject: { type: 'external_link', id: link.id },
               target: `${host.product}:${snapshot.repository.join('/')}`,
               operation: 'merge',
-              key: `merge:${link.id}`,
-              request: { number: snapshot.number, head: read.headSha },
+              // A merge at another head is another merge.
+              key: `merge:${link.id}:${head}`,
+              request: { number: snapshot.number, head },
               retryable: false,
-              perform: host.merge(repository, read),
+              perform: host.merge(repository, { ...read, headSha: head }).pipe(
+                // GitHub says 409 when the head moved while it merged.
+                Effect.catchIf(
+                  (error) => error instanceof ConnectorFailed && error.status === 409,
+                  () => Effect.fail(new ChangedSinceSeen({ taskId })),
+                ),
+              ),
               encode: (answer) => answer,
               decode: (kept) => Option.getOrUndefined(Schema.decodeUnknownOption(ChangeRequest)(kept)),
             })
+          }
           const [now] = (yield* linksOf(taskId)).filter((candidate) => candidate.id === link.id)
           if (now !== undefined) yield* poll(now)
         })
@@ -967,7 +981,7 @@ export class Changes extends Context.Service<
         publish: (input) => provide(publish(input)),
         pushChanges: (taskId) => provide(locked(taskId)(pushChanges(taskId))),
         markReady: (taskId) => provide(locked(taskId)(markReady(taskId))),
-        merge: (taskId) => provide(locked(taskId)(merge(taskId))),
+        merge: (taskId, head) => provide(locked(taskId)(merge(taskId, head))),
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),

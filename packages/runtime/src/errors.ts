@@ -58,3 +58,8 @@ export class AttentionClosed extends Schema.TaggedError<AttentionClosed>()('Atte
 export class OutwardUncertain extends Schema.TaggedError<OutwardUncertain>()('OutwardUncertain', {
   operation: Schema.String,
 }) {}
+
+/** The pull request moved on since the person looked: accepting it would merge what they didn't see. */
+export class ChangedSinceSeen extends Schema.TaggedError<ChangedSinceSeen>()('ChangedSinceSeen', {
+  taskId: Schema.String,
+}) {}

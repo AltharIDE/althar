@@ -209,6 +209,8 @@ export const ChangeSummary = Schema.Struct({
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),
   checks: Schema.NullOr(ChecksSummary),
+  /** The commit at its head, as last seen: what accepting it merges, and nothing newer. */
+  head: Schema.NullOr(Schema.String),
   /** Charrette asks its host for news while the task is open. */
   listening: Schema.Boolean,
 })
@@ -749,8 +751,12 @@ export const Api = RpcGroup.make(
   call('ListIssues', { projectId: Schema.String }, IssueList),
   /** Marks the task's draft pull request ready for review. */
   command('MarkReady', { taskId: Schema.String }, Schema.Void),
-  /** Merges the task's pull request, because the person said to; a draft is marked ready first. Agents never merge. */
-  command('Merge', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Merges the task's pull request at the head the person saw, because they
+   * said to; a draft is marked ready first. A pull request that moved on
+   * since isn't merged. Agents never merge.
+   */
+  command('Merge', { taskId: Schema.String, head: Schema.String }, Schema.Void),
   /** Asks the task's pull request for news now. */
   command('RefreshTask', { taskId: Schema.String }, Schema.Void),
   /** What changes after `since`, or from now without it. */

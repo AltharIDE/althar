@@ -151,6 +151,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
             failing: Array.isArray(failing) ? failing.filter((name) => typeof name === 'string') : [],
             list: Option.getOrElse(decodeChecks(field(checks, 'list') ?? []), () => []),
           },
+    head: text(value, 'headSha') || null,
     listening,
   }
 }
@@ -555,16 +556,22 @@ export class Queries extends Context.Service<
           const [latest] = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result'
               AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
-          const working =
+          const lead = yield* sessions.running(task.threadId)
+          const reviewer = task.review === null ? Option.none() : yield* sessions.running(task.review)
+          const working = task.starting > 0 || Option.isSome(lead) || Option.isSome(reviewer)
+          // An agent mid-turn: work under way, whatever the run that came before it said.
+          const busy =
             task.starting > 0 ||
-            Option.isSome(yield* sessions.running(task.threadId)) ||
-            (task.review !== null && Option.isSome(yield* sessions.running(task.review)))
+            Option.exists(lead, (session) => session.turnRunning) ||
+            Option.exists(reviewer, (session) => session.turnRunning)
           const phase = ((): TaskPhase => {
             if (task.state === 'done' || task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
-            if (task.runState === 'succeeded') return 'ready'
-            if (task.runState !== null && task.runState !== 'running') return 'stopped'
+            // A call waiting on the person, and work under way, come before being ready: work sent back isn't ready again
+            // until its lead is done with the note.
             if (task.waiting > 0) return 'waiting'
+            if (task.runState === 'succeeded') return busy ? 'running' : 'ready'
+            if (task.runState !== null && task.runState !== 'running') return 'stopped'
             return working ? 'running' : 'stopped'
           })()
           const parameters = parse(task.parameters)
@@ -608,6 +615,8 @@ export class Queries extends Context.Service<
 
       /** How many settled tasks the board shows: the most recent. */
       const SETTLED_SHOWN = 30
+      /* Settled work doesn't change, so its card is worked out once, by when it settled. */
+      const settledCards = new Map<string, BoardSnapshot['tasks'][number]>()
 
       /** A project's board: its tasks, each as its card, and every call that waits on the person. */
       const board = (projectId: string) =>
@@ -631,6 +640,8 @@ export class Queries extends Context.Service<
             ORDER BY k.created_at, k.id`
           const tasks = yield* Effect.forEach(rows, (row) =>
             Effect.gen(function* () {
+              const settled = row.settledAt === null ? undefined : settledCards.get(`${row.id}:${row.settledAt}`)
+              if (settled !== undefined) return [settled]
               const card = yield* cardFor(row.id)
               if (card === undefined) return []
               // Ready without a pull request, its size is its branch's, read from git.
@@ -642,9 +653,14 @@ export class Queries extends Context.Service<
                       del: files.reduce((sum, file) => sum + file.del, 0),
                     }))
                   : null
-              return [{ ...card, state: row.state, createdAt: row.createdAt, settledAt: row.settledAt, changed }]
+              const read = { ...card, state: row.state, createdAt: row.createdAt, settledAt: row.settledAt, changed }
+              if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, read)
+              return [read]
             }),
           )
+          // Only what the board still shows is kept.
+          const shown = new Set(rows.map((row) => `${row.id}:${row.settledAt}`))
+          for (const key of settledCards.keys()) if (!shown.has(key)) settledCards.delete(key)
           const calls = yield* sql<{
             id: string
             kind: string

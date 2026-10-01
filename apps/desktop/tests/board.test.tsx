@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -12,7 +12,7 @@ import { useBoard } from '../src/renderer/features/board/useBoard'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
-import { agents, card, change, fakeClient, snapshot } from './fixtures'
+import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
 import { withServices } from './render'
 
 function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
@@ -196,7 +196,8 @@ describe('the board', () => {
     expect(await within(dock).findByText('GitHub says: Pull Request is not mergeable')).toBeTruthy()
     await userEvent.click(within(dock).getByRole('button', { name: /Accept and merge/ }))
     await waitFor(() => expect(merge).toHaveBeenCalledTimes(2))
-    expect(merge).toHaveBeenLastCalledWith('t4')
+    // At the head the dock showed.
+    expect(merge).toHaveBeenLastCalledWith('t4', 'abc123')
     // Sent back, its lead, which stopped, starts again to read the note.
     await userEvent.click(within(dock).getByRole('button', { name: /Send back/ }))
     await userEvent.type(within(dock).getByRole('textbox'), 'Name it better.')
@@ -238,6 +239,28 @@ describe('the board', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Changes' })).toBeNull())
     await userEvent.click(within(dock).getByRole('button', { name: 'Open the task' }))
     expect(onTask).toHaveBeenCalledWith('th5')
+  })
+
+  it('is read again when something it shows changes, not for what is said in a thread', async () => {
+    const getBoard = vi.fn(async () => board())
+    const { client, emit } = fakeClient({ getBoard })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await screen.findByRole('region', { name: 'The project’s work' })
+    const reads = getBoard.mock.calls.length
+    await act(async () => {
+      emit(changed('thread_item', 'i9', 'th2'))
+      emit(changed('user_input', 'u1', 'th2'))
+      // Another project's task isn't this board's.
+      emit(changed('task', 't9', null, 'p2'))
+      await new Promise((resolve) => setTimeout(resolve, 120))
+    })
+    expect(getBoard.mock.calls.length).toBe(reads)
+    await act(async () => {
+      emit(changed('turn_delivery', 'd1', 'th2'))
+      emit(changed('external_link', 'x1', null))
+    })
+    await waitFor(() => expect(getBoard.mock.calls.length).toBe(reads + 1))
   })
 
   it('says when it can’t be read', async () => {
