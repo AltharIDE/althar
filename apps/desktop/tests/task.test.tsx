@@ -41,7 +41,8 @@ describe('a task', () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     withServices(<Task onBack={onBack} />, client)
     await screen.findByRole('heading', { name: 'Add a retry', level: 1 })
-    expect(screen.getAllByText('Claude Code · opus').length).toBeGreaterThan(0)
+    // The lead's model, by the name its agent gives it.
+    expect((await screen.findAllByText('Claude Code · Opus')).length).toBeGreaterThan(0)
     expect(screen.getByText('charrette/add-a-retry')).toBeTruthy()
     expect(screen.getByText('Idle')).toBeTruthy()
     expect(screen.getByText('it')).toBeTruthy()
@@ -80,18 +81,66 @@ describe('a task', () => {
     )
   })
 
-  it('changes its model, hands it to another agent, and stops it', async () => {
+  it('changes how hard its lead thinks and its model, hands it to another agent, and stops it', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('combobox', { name: 'Model' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'sonnet' }))
-    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'sonnet' })
-    await userEvent.click(screen.getByRole('combobox', { name: 'Hand to' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'Codex' }))
-    expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex' })
+    // The lead's model and effort, in the composer.
+    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'Low' }))
+    await waitFor(() => expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', effort: 'low' }))
+    // Every model is one step away, whichever agent offers it.
+    await userEvent.click(screen.getByRole('button', { name: /All models/ }))
+    const browser = await screen.findByRole('dialog')
+    expect(within(browser).getByRole('button', { name: 'Use gpt-5.2' })).toBeTruthy()
+    // An agent that is signed out offers nothing.
+    expect(within(browser).queryByText(/OpenCode/)).toBeNull()
+    await userEvent.click(within(browser).getByRole('button', { name: 'Use Sonnet' }))
+    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'sonnet' }))
+    expect(client.setEffort).toHaveBeenCalledTimes(1)
+    // Another agent's model hands the task to that agent, on its own effort.
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    await waitFor(() => expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2-codex' }))
     await userEvent.click(screen.getByRole('button', { name: 'More for this task' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: /Stop the task/ }))
     expect(client.stopSession).toHaveBeenCalledWith('th1')
+  })
+
+  it('keeps the person’s pinned models and default efforts in this window', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Opus High' }))
+    // Until the person pins one, each agent's current model is pinned; the one in use shows first.
+    const pinned = await screen.findByRole('radiogroup', { name: 'Pinned models' })
+    expect(
+      within(pinned)
+        .getAllByRole('radio')
+        .map((radio) => radio.textContent),
+    ).toEqual(['Opusnot pinned', 'Claude Code default', 'gpt-5.2-codex'])
+    // High is not what Claude Code is on; the person makes it Opus's.
+    expect(screen.getByText(/default Medium/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Make this default' }))
+    expect(await screen.findByText('Opus default')).toBeTruthy()
+
+    await userEvent.click(screen.getByRole('button', { name: /All models/ }))
+    const browser = await screen.findByRole('dialog')
+    await userEvent.click(within(browser).getByRole('button', { name: 'Pin Opus' }))
+    await userEvent.click(within(browser).getByRole('combobox', { name: 'Default effort for gpt-5.2' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Extra high' }))
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(JSON.parse(window.localStorage.getItem('charrette.models') ?? '{}')).toEqual({
+      pins: ['claude-code:default', 'codex:gpt-5.2-codex', 'claude-code:opus'],
+      efforts: { 'claude-code:opus': 'high', 'codex:gpt-5.2': 'extra-high' },
+    })
+
+    // A model with the person's default effort starts on it.
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Opus High' }))
+    await userEvent.click(screen.getByRole('button', { name: /All models/ }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Use gpt-5.2' }))
+    await waitFor(() =>
+      expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2', effort: 'extra-high' }),
+    )
   })
 
   it('answers what the rules keep for the person', async () => {
@@ -193,11 +242,10 @@ describe('a task', () => {
     await screen.findByText('No agent is working on this task.')
     expect(screen.getByText('Stopped')).toBeTruthy()
     expect(screen.getByRole('textbox', { name: 'Start a lead to talk to it' })).toBeTruthy()
-    expect(within(screen.getByRole('combobox', { name: 'Lead' })).getByText('Codex')).toBeTruthy()
-    await userEvent.click(screen.getByRole('combobox', { name: 'Lead' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'Claude Code' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Lead: gpt-5.2-codex Medium' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /Claude Code default/ }))
     await userEvent.click(screen.getByRole('button', { name: 'Start the lead' }))
-    expect(client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code' })
+    expect(client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'default' })
     await userEvent.click(screen.getByRole('button', { name: 'More for this task' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: /Resume/ }))
     expect(client.startSession).toHaveBeenCalledTimes(2)
@@ -336,8 +384,9 @@ describe('a task', () => {
       ),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('combobox', { name: 'Model' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'sonnet' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Opus High' }))
+    await userEvent.click(screen.getByRole('button', { name: /All models/ }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Use Sonnet' }))
     await screen.findByText(/still on its old model/)
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
     expect(screen.queryByText(/still on its old model/)).toBeNull()

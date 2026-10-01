@@ -4,14 +4,15 @@ import { type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@c
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { caughtUp, mergeItems, waiting } from '../../shared/items'
+import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 import { useServices, useWatch } from '../../data/services'
 
 /*
  * A task's view model: its thread as the store has it, the text an agent is
  * streaming, and what the person can do: talk to the lead, interrupt it,
- * answer its calls, change its model, hand the task to another agent, stop
- * it. It reads the thread's newest page once, then only what changes: an item
+ * answer its calls, change its model and effort or hand the task to another
+ * agent with one, stop it. It reads the thread's newest page once, then only what changes: an item
  * that changed is read alone, and anything else about the thread (the agent
  * working, the calls waiting) reads the thread's head again, without its
  * items. Earlier items are read a page at a time, when asked for.
@@ -36,9 +37,10 @@ export interface TaskModel {
   readonly send: (body: string) => Promise<void>
   readonly sendNow: (body: string) => Promise<void>
   readonly interrupt: () => Promise<void>
-  readonly start: (agentId: string) => Promise<void>
-  readonly switchAgent: (agentId: string) => Promise<void>
-  readonly setModel: (model: string) => Promise<void>
+  /** Starts a lead, as the person chose it. */
+  readonly start: (choice: Choice) => Promise<void>
+  /** Puts the lead on another model or effort, or hands the task to another agent with one. */
+  readonly choose: (choice: Choice) => Promise<void>
   readonly stop: () => Promise<void>
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string) => Promise<void>
   /** Answers a step that needs the person. */
@@ -169,9 +171,12 @@ export const useTask = (threadId: string): TaskModel => {
     send: (body) => act(() => client.send({ threadId, body, disposition: 'after_current' })),
     sendNow: (body) => act(() => client.send({ threadId, body, disposition: 'interrupt_and_continue' })),
     interrupt: () => act(() => client.interrupt(threadId)),
-    start: (agentId) => act(() => client.startSession({ threadId, agentId })),
-    switchAgent: (agentId) => act(() => client.switchAgent({ threadId, agentId })),
-    setModel: (model) => act(() => client.setModel({ threadId, model })),
+    start: (choice) => act(() => client.startSession(startOf(threadId, choice))),
+    choose: (choice) =>
+      act(async () => {
+        const session = snapshot?.session
+        await (session == null ? client.startSession(startOf(threadId, choice)) : moveTo(client, threadId, runningOn(session), choice))
+      }),
     stop: () => act(() => client.stopSession(threadId)),
     answer: (attentionId, decision, reason) =>
       act(() => client.answer({ attentionId, decision, ...(reason === undefined || reason === '' ? {} : { reason }) })),

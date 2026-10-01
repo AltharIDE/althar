@@ -373,9 +373,10 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
   removes the wait. Open: should the coordinator move an optional step to a
   free agent by itself, and only leave rule-pinned steps waiting?
   *Prototype:* Coordinator → "Plan, an agent is out".
-- [ ] **Effort in the plan.** Each step's agent now has its own effort
-  (the composer's picker). Does the coordinator recommend effort per step,
-  or always start at the model's default?
+- [ ] **Effort in the plan.** Each step carries its own model and effort,
+  which the person sets on the plan's card; the coordinator proposes neither,
+  so a step starts on the agent's own. Does the coordinator recommend effort
+  per step, or always start at the model's default?
 - [ ] **Allow all, with always-ask items in the stack.** "Allow all 7"
   currently covers pushing to main too. Should items the rules keep for you
   be left out of Allow all?

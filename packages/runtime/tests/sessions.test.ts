@@ -306,9 +306,12 @@ describe('sessions', () => {
         const sessions = yield* Sessions
         const { task: created } = yield* task('Tidy the logs')
         yield* say(created.threadId, 'start with the worker')
-        const sessionId = yield* sessions.switchAgent({ threadId: created.threadId, agentId: 'codex', model: 'large' })
+        const sessionId = yield* sessions.switchAgent({ threadId: created.threadId, agentId: 'codex', model: 'large', effort: 'high' })
         yield* ended(created.threadId, 1)
         assert.strictEqual((yield* session(sessionId))?.model, 'large')
+        const sql = yield* SqlClient.SqlClient
+        const [chosen] = yield* sql<{ effort: string | null }>`SELECT effort FROM provider_sessions WHERE id = ${sessionId}`
+        assert.strictEqual(chosen?.effort, 'high')
         const notes = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'notice').map((item) => item.content.title)
         assert.deepStrictEqual(notes, ['Fake codex takes over.'])
         const reply = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'agent_message').at(-1)?.content.text as string

@@ -31,5 +31,9 @@ if (typeof window !== 'undefined') {
   for (const [name, value] of Object.entries(missing)) {
     if (!(name in Element.prototype)) Object.defineProperty(Element.prototype, name, { value, configurable: true })
   }
-  afterEach(() => cleanup())
+  afterEach(() => {
+    cleanup()
+    // What a view keeps in storage, like the person's pinned models, starts empty in each test.
+    window.localStorage.clear()
+  })
 }

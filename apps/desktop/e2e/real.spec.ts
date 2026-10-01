@@ -39,10 +39,14 @@ test('a real agent leads a task and answers', async () => {
     await page
       .getByLabel('Anything the lead should know')
       .fill('Reply with the single word "ready" and nothing else. Do not run any tools.')
-    await page.getByRole('combobox', { name: 'Lead' }).click()
-    await page.getByRole('option', { name }).click()
-    await page.getByRole('combobox', { name: 'Review' }).click()
-    await page.getByRole('option', { name: 'No review' }).click()
+    // The agent's first model, from every model, by agent.
+    await page.getByRole('button', { name: /^Lead:/ }).click()
+    await page.getByRole('button', { name: /All models/ }).click()
+    const models = page.getByRole('dialog')
+    await models.getByRole('radio', { name: new RegExp(`^${name}`) }).click()
+    await models.getByRole('button', { name: /^Use / }).first().click()
+    await page.getByRole('button', { name: /^Review:/ }).click()
+    await page.getByRole('button', { name: 'No review' }).click()
     await page.getByRole('button', { name: 'Start the task' }).click()
     await page.getByRole('button', { name: /Open task/ }).click()
     await expect(page.getByRole('heading', { name: 'Say hello', level: 1 })).toBeVisible()

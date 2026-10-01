@@ -327,8 +327,8 @@ describe('the coordinator loop', () => {
         projectId: projectId as Parameters<typeof plans.propose>[0]['projectId'],
         taskId: task.taskId,
         steps: [
-          { key: 'implement', agentId: 'claude-code', model: 'large', skipped: false },
-          { key: 'review', agentId: 'codex', model: null, skipped: false },
+          { key: 'implement', agentId: 'claude-code', model: 'large', effort: 'high', skipped: false },
+          { key: 'review', agentId: 'codex', model: null, effort: 'low', skipped: false },
         ],
         reason: null,
         actorId: actor,
@@ -360,11 +360,20 @@ describe('the coordinator loop', () => {
         (yield* results(card?.threadId ?? '')).map((step) => step.step),
         ['implement', 'review', 'settle', 'review'],
       )
-      const leads = yield* sql<{ model: string | null }>`SELECT model FROM provider_sessions WHERE thread_id = ${task.threadId}`
+      const leads = yield* sql<{ model: string | null; effort: string | null }>`
+        SELECT model, effort FROM provider_sessions WHERE thread_id = ${task.threadId}`
       assert.deepStrictEqual(
-        leads.map((lead) => lead.model),
-        ['large', 'large'],
+        leads.map((lead) => [lead.model, lead.effort]),
+        [
+          ['large', 'high'],
+          ['large', 'high'],
+        ],
       )
+      // Each review ran at the effort the plan gave it.
+      const reviewers = yield* sql<{ effort: string | null }>`
+        SELECT effort FROM provider_sessions WHERE agent_id = 'codex' AND project_id = ${projectId}`
+      assert.isNotEmpty(reviewers)
+      assert.isTrue(reviewers.every((reviewer) => reviewer.effort === 'low'))
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -428,7 +437,10 @@ describe('the coordinator loop', () => {
       const coordinator = yield* Coordinator
       const { projectId, threadId } = yield* opened
       const suggested = yield* coordinator.suggested(projectId)
-      assert.deepStrictEqual({ ...suggested }, { agentId: 'claude-code', agentName: 'Fake claude-code', model: null, available: false })
+      assert.deepStrictEqual(
+        { ...suggested },
+        { agentId: 'claude-code', agentName: 'Fake claude-code', model: null, effort: null, available: false },
+      )
       const refused = yield* Effect.flip(say(threadId, 'Hello'))
       assert.instanceOf(refused, CoordinatorUnavailable)
     }).pipe(Effect.provide(withQueries(undefined, undefined, { signedOut: ['claude-code'] }))),

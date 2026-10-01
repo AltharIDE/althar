@@ -99,8 +99,11 @@ describe('the client', () => {
     expect(events.some((event) => event._tag === 'Streaming' && event.threadId === task.threadId)).toBe(true)
 
     await client.setModel({ threadId: task.threadId, model: 'large' })
+    await client.setEffort({ threadId: task.threadId, effort: 'high' })
+    const offered = await client.getModels()
+    expect(offered.find((agent) => agent.agentId === 'claude-code')).toMatchObject({ model: 'large', effort: 'high' })
     await client.interrupt(task.threadId)
-    await client.switchAgent({ threadId: task.threadId, agentId: 'codex' })
+    await client.switchAgent({ threadId: task.threadId, agentId: 'codex', model: 'small', effort: 'low' })
     await client.stopSession(task.threadId)
     unwatch()
     await client.close()
@@ -172,6 +175,8 @@ describe('the client', () => {
           },
           SwitchAgent: () => Effect.die('unused'),
           SetModel: () => Effect.die('unused'),
+          SetEffort: () => Effect.die('unused'),
+          GetModels: () => Effect.die('unused'),
           // A refusal is an answer: it isn't tried again.
           Interrupt: ({ commandId }) => {
             commands.push(commandId)

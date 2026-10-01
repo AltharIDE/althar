@@ -107,6 +107,10 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
         const summary = text(error, 'summary')
         return `${agentName(text(error, 'agentId'))} couldn't start.${summary === '' ? '' : ` ${summary}`}`
       }
+      case 'EffortUnchanged': {
+        const summary = text(error, 'summary')
+        return `${agentName(text(error, 'agentId'))} still thinks as hard as it did.${summary === '' ? '' : ` ${summary}`}`
+      }
       case 'ModelUnchanged': {
         const summary = text(error, 'summary')
         return `${agentName(text(error, 'agentId'))} is still on its old model.${summary === '' ? '' : ` ${summary}`}`

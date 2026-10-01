@@ -37,6 +37,7 @@ export interface Suggested {
   readonly agentId: string
   readonly agentName: string
   readonly model: string | null
+  readonly effort: string | null
   readonly available: boolean
 }
 
@@ -115,10 +116,10 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const threadId = yield* thread(projectId)
-          const [here] = yield* sql<{ agentId: string; model: string | null }>`
-            SELECT agent_id, model FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC LIMIT 1`
-          const [anywhere] = yield* sql<{ agentId: string; model: string | null }>`
-            SELECT agent_id, model FROM provider_sessions ORDER BY started_at DESC LIMIT 1`
+          const [here] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
+            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC LIMIT 1`
+          const [anywhere] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
+            SELECT agent_id, model, effort FROM provider_sessions ORDER BY started_at DESC LIMIT 1`
           const last = here ?? anywhere
           const agentId =
             last !== undefined && agents.list.some((entry) => entry.definition.id === last.agentId)
@@ -130,6 +131,7 @@ export class Coordinator extends Context.Service<
             agentId,
             agentName: nameOf(agentId),
             model: last?.agentId === agentId ? last.model : null,
+            effort: last?.agentId === agentId ? last.effort : null,
             available: status !== 'signed_out',
           } satisfies Suggested
         })
@@ -157,6 +159,7 @@ export class Coordinator extends Context.Service<
               threadId: input.threadId,
               agentId: pick.agentId,
               ...(pick.model === null ? {} : { model: pick.model }),
+              ...(pick.effort === null ? {} : { effort: pick.effort }),
             })
             return
           }

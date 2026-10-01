@@ -67,6 +67,13 @@ One pull request each:
 3. **Work that doesn't need you.**
 4. **Conversations.**
 
+Brought forward from step 4, after the board: **the model picker.** Every
+agent's models in one list, read from the agents themselves, with effort, pins
+and default efforts, in the coordinator's and a task's composer, a new task's
+lead and review, and each step of a plan. Picking another agent's model hands
+the conversation to it. The context ring stays with step 4: ACP doesn't say a
+model's context window, so the browser shows none.
+
 Then the integrations plan's next step, GitLab.
 
 ## Decided
