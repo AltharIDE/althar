@@ -169,8 +169,14 @@ export const SigningIn: Story = {
 }
 
 const signing: ServiceSignIn = { service: 'github', kind: 'device', code: 'WDJB-MJHT', url: 'https://github.com/login/device' }
-/** In a narrow column, the actions go under the row. */
+/** In a narrow column, as the side panel is: a service’s name and what connects it share a line, and how it stands runs under both. */
 export const Narrow: Story = {
   decorators: [(Story) => <div style={{ width: 340 }}>{Story()}</div>],
   args: { connections: CONNECTED, signingIn: signing },
+}
+
+/** Connected, in the side panel’s width. */
+export const InThePanel: Story = {
+  decorators: [(Story) => <div style={{ width: 420 }}>{Story()}</div>],
+  args: { connections: CONNECTED },
 }

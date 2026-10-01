@@ -120,6 +120,8 @@ function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; 
       }}
       // Where the repository's host isn't connected, the task ends on its branch, and there is no ending to pick.
       {...(end === null ? { hideEnd: true } : { end: ENDS[end], onEndChange: (next: TaskEnd) => change(steps, endOf(next)) })}
+      // A draft pull request is where tasks end until projects have rules for it, so no rule is named.
+      text={{ endByRule: () => '', ruleNote: (_project, note) => note }}
       onStart={() => actions.onStart(plan.id)}
     />
   )

@@ -194,16 +194,14 @@ export function Connections({
         const open = tokenFor?.service === service.id
         return (
           <li key={service.id} className={s.service}>
-            <div className={s.row}>
+            <div className={cx(s.row, s.head)}>
               <span className={s.mark}>
                 {service.brand ? <BrandMark brand={service.brand} size={18} /> : <Icon name="plug" size={16} />}
               </span>
-              <span className={s.body}>
-                <span className={s.name}>{service.name}</span>
-                {mine.length === 0 && (
-                  <span className={s.line}>{service.what ? `${t.notConnected} · ${service.what}` : t.notConnected}</span>
-                )}
-              </span>
+              <span className={s.name}>{service.name}</span>
+              {mine.length === 0 && (
+                <span className={cx(s.line, s.status)}>{service.what ? `${t.notConnected} · ${service.what}` : t.notConnected}</span>
+              )}
               {mine.length === 0 && signing === null && !open && (
                 <span className={s.actions}>
                   {service.browserSignIn ? (

@@ -168,6 +168,7 @@ describe('the thread, reaching outside', () => {
                 repository: 'meridian/api',
               },
             ]),
+            items.step(),
             items.step({ step: 'publish', summary: 'Opened draft pull request #12.', change: change() }),
             items.arrival({ path: 'src/limit.ts', line: 14 }),
             items.arrival({ kind: 'review', from: 'lee', verdict: 'changes_requested', text: 'Name it better.' }),
@@ -183,6 +184,9 @@ describe('the thread, reaching outside', () => {
     expect(screen.getByText('meridian/api · Merged')).toBeTruthy()
     expect(screen.getByText('Opened draft pull request #12.')).toBeTruthy()
     expect(screen.getByText('meridian/api · Draft')).toBeTruthy()
+    // Implement, then the pull request: two steps, numbered as such.
+    expect(screen.getByRole('img', { name: 'Step 1 of 2' })).toBeTruthy()
+    expect(screen.getByRole('img', { name: 'Step 2 of 2' })).toBeTruthy()
     expect(screen.getByText('commented on PR #12 · src/limit.ts:14')).toBeTruthy()
     expect(screen.getByText('Seconds or a date?')).toBeTruthy()
     expect(screen.getByText('asked for changes on PR #12')).toBeTruthy()
@@ -365,8 +369,11 @@ describe('a project, reaching outside', () => {
     withServices(<Project />, client)
     expect((await screen.findAllByText('MER-231')).length).toBeGreaterThan(0)
     expect(screen.getByText('PR #12')).toBeTruthy()
+    // No rule of the project's picked the draft pull request, so none is named.
+    expect(screen.queryByText(/rule/)).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: /Open a draft PR/ }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: /Push the branch only/ }))
+    await waitFor(() => expect(screen.getByText('this task only')).toBeTruthy())
     await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.any(Array), 'none'))
   })
 })

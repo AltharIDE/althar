@@ -20,6 +20,26 @@
   gap: 14px;
   min-height: 30px;
 }
+/* A service: its mark, its name over how it stands, and what connects it. */
+.head {
+  grid-template-areas:
+    'mark name actions'
+    'mark status actions';
+  row-gap: 0;
+}
+.head > .mark {
+  grid-area: mark;
+}
+.head > .name {
+  grid-area: name;
+}
+.head > .status {
+  grid-area: status;
+  margin-top: 2px;
+}
+.head > .actions {
+  grid-area: actions;
+}
 .account {
   min-height: 28px;
 }
@@ -132,12 +152,15 @@
   color: var(--t-3);
 }
 
+/* Narrow, as in a side panel: the name and what connects it share a line, and how it stands runs under both. */
 @container (max-width: 440px) {
-  .row {
-    grid-template-columns: 20px minmax(0, 1fr);
+  .head {
+    grid-template-areas:
+      'mark name actions'
+      '. status status';
   }
-  .actions {
-    grid-column: 2;
+  .account .line {
+    white-space: normal;
   }
   .panel {
     margin-left: 0;

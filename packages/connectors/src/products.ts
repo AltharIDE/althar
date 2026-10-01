@@ -1,6 +1,7 @@
 import type { AdapterOptions, Credential } from './credential'
 import { makeGitHub } from './github'
 import { makeLinear } from './linear'
+import type { KnownHosts } from './links'
 import type { CodeHost, Product, Tracker } from './model'
 
 /*
@@ -175,3 +176,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
 
 /** The products Charrette can connect to now: those with an adapter. */
 export const available = (): ReadonlyArray<ProductInfo> => Object.values(products).filter((info) => info.make !== null)
+
+/** The hosts of these products' hosted services, for reading their links and remotes. */
+export const hostedOf = (infos: ReadonlyArray<ProductInfo>): KnownHosts =>
+  new Map(infos.flatMap((info) => (info.hosted === null ? [] : [[new URL(info.hosted.webUrl).hostname, info.product] as const])))

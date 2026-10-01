@@ -38,6 +38,9 @@ One pull request each:
    - Agents' tools, and the rules for `gh` and `glab`.
    - Issues unfurled and tasks from issues.
    - The Connections panel and the accept card.
+   - Built on the `integrations` branch. Not yet run against real
+     accounts: Charrette's GitHub App and Linear app aren't registered, so
+     both take pasted tokens until they are.
 2. **GitLab,** hosted and self-managed, with its issues.
 3. **Jira,** Cloud and Data Center.
 4. **Bitbucket,** Cloud and Data Center, and **Trello.**

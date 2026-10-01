@@ -3,7 +3,7 @@ import { hostname } from 'node:os'
 import { join } from 'node:path'
 
 import { emitterPort } from '@charrette/contracts'
-import { connection, Folders, services } from '@charrette/runtime'
+import { connection, Folders, Secrets, services } from '@charrette/runtime'
 import { Cause, Context, Effect, Exit, Fiber, Layer, Queue } from 'effect'
 
 /*
@@ -35,6 +35,21 @@ const required = (name: string) => {
 const profile = required('CHARRETTE_PROFILE')
 mkdirSync(profile, { recursive: true })
 
+/**
+ * The public ids of Charrette's own apps registered with code hosts and
+ * trackers, for their browser sign-in, as the build or the environment gives
+ * them. A service without one takes a pasted token.
+ */
+const clientIds = Object.fromEntries(
+  (
+    [
+      ['github', process.env.CHARRETTE_GITHUB_CLIENT_ID],
+      ['gitlab', process.env.CHARRETTE_GITLAB_CLIENT_ID],
+      ['linear', process.env.CHARRETTE_LINEAR_CLIENT_ID],
+    ] as const
+  ).flatMap(([product, id]) => (id === undefined || id === '' ? [] : [[product, id]])),
+)
+
 const options = {
   database: join(profile, 'charrette.sqlite'),
   worktreeRoot: required('CHARRETTE_WORKTREES'),
@@ -51,12 +66,16 @@ const ready = new Promise<Context.Context<Folders>>((resolve) => {
 })
 
 const program = Effect.gen(function* () {
-  // The end-to-end tests drive the app against a scripted agent. Packaged builds leave this out.
+  // The end-to-end tests drive the app against a scripted agent and a fake code host, keeping tokens in memory. Packaged builds leave this out.
   const fake =
     __CHARRETTE_TEST_HOOKS__ && process.env.CHARRETTE_FAKE_AGENTS === '1'
-      ? (yield* Effect.promise(() => import('./fakeAgents'))).fakeAgents
+      ? {
+          agents: (yield* Effect.promise(() => import('./fakeAgents'))).fakeAgents,
+          connectors: (yield* Effect.promise(() => import('./fakeConnectors'))).fakeConnectors,
+          secrets: Secrets.memory(),
+        }
       : undefined
-  const context = yield* Layer.build(services(fake === undefined ? options : { ...options, agents: fake }))
+  const context = yield* Layer.build(services(fake === undefined ? { ...options, clientIds } : { ...options, ...fake }))
   isReady(context)
   const ports = yield* Queue.unbounded<Port>()
   accept = (port) => void Queue.offerUnsafe(ports, port)

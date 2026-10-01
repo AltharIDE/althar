@@ -8,7 +8,7 @@ import {
   ConnectorFailed,
   type Credential,
   exchangeCode,
-  HOSTED,
+  hostedOf,
   type KnownHosts,
   type LinkRef,
   makePkce,
@@ -571,7 +571,7 @@ export class Connections extends Context.Service<
         })
 
       const knownHosts = Effect.map(rows, (all): KnownHosts => {
-        const hosts = new Map(HOSTED)
+        const hosts = new Map(hostedOf(connectors.products))
         for (const row of all) {
           try {
             hosts.set(new URL(row.webUrl).hostname.toLowerCase(), row.product)

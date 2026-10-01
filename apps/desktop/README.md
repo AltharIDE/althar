@@ -18,7 +18,9 @@ The app shares its profile and worktrees with the command-line client (`apps/cli
 | --- | --- |
 | `CHARRETTE_PROFILE` | `~/Library/Application Support/Charrette` on macOS |
 | `CHARRETTE_WORKTREES` | `~/Charrette` |
-| `CHARRETTE_FAKE_AGENTS=1` | Off. Runs the scripted fake agent under Claude Code's and Codex's names, for the end-to-end tests. Packaged builds leave it out |
+| `CHARRETTE_FAKE_AGENTS=1` | Off. Runs the scripted fake agent under Claude Code's and Codex's names, and a fake GitHub at `https://github.test`, keeping tokens in memory rather than the Keychain, for the end-to-end tests. Packaged builds leave it out |
+| `CHARRETTE_FAKE_REMOTE` | None. With the fakes, the bare repository that pushes to the fake GitHub land in |
+| `CHARRETTE_GITHUB_CLIENT_ID`, `CHARRETTE_GITLAB_CLIENT_ID`, `CHARRETTE_LINEAR_CLIENT_ID` | None. The public ids of Charrette's apps on those services, for signing in through the browser; without one, the service takes a pasted token |
 
 ## Work on it
 
@@ -32,7 +34,7 @@ From `apps/desktop`:
 | `bun run check` | Format, type-aware lint and type checks |
 | `bun run test` | The window's view models and views against a fake client, and its client against the real runtime |
 | `bun run test:coverage` | The same, with the coverage gate: 90% of lines and branches |
-| `bun run test:e2e` | Builds the app and drives it with Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back |
+| `bun run test:e2e` | Builds the app and drives it with Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; and, with the fake GitHub, connecting it and a task ending in a draft pull request |
 | `bun run verify` | Check, coverage and the end-to-end tests, as CI runs them |
 
 To run the end-to-end test against a real agent, signed in on this machine (it uses a little of its usage):

@@ -108,13 +108,15 @@ function PartView({ part }: { part: Part }) {
 
 /** What a step reported: the lead's summary, open under its work, or the review's verdict and findings. */
 function StepView({ id, result, of, agentName }: { id: string; result: StepResult; of: number; agentName: (id: string | null) => string }) {
+  // Implement is the first step, a review and settling it the second, and the pull request the last.
+  const n = result.step === 'implement' ? 1 : result.step === 'publish' ? of : 2
   const model = result.agentId === null ? undefined : modelInfo({ id: result.agentId, name: agentName(result.agentId) }, null)
   if (result.step === 'publish') {
     const change = result.change
     return (
       <Step
-        n={of + 1}
-        of={of + 1}
+        n={n}
+        of={of}
         label={change === null ? text.pushed : text.step.publish}
         state={StepState.Done}
         defaultOpen
@@ -139,7 +141,7 @@ function StepView({ id, result, of, agentName }: { id: string; result: StepResul
   if (result.step !== 'review')
     return (
       <Step
-        n={result.step === 'implement' ? 1 : of}
+        n={n}
         of={of}
         label={text.step[result.step]}
         state={StepState.Done}
@@ -160,7 +162,7 @@ function StepView({ id, result, of, agentName }: { id: string; result: StepResul
   return (
     <>
       <Review
-        n={of}
+        n={n}
         of={of}
         reviewers={model === undefined ? [] : [{ model }]}
         verdict={result.verdict === 'pass' ? Verdict.Pass : Verdict.Changes}
@@ -255,8 +257,9 @@ export function ThreadBlocks({
   /** What a message still waiting says: who reads it next. */
   queued?: string
 }) {
-  // A task that was reviewed has two steps; the review, and settling it, are the second.
-  const of = blocks.some((block) => block.kind === 'step' && block.result.step !== 'implement') ? 2 : 1
+  // A task that was reviewed has two steps, the review and settling it being the second; its pull request, once opened, is one more.
+  const done = new Set(blocks.flatMap((block) => (block.kind === 'step' ? [block.result.step] : [])))
+  const of = 1 + (done.has('review') || done.has('settle') ? 1 : 0) + (done.has('publish') ? 1 : 0)
   return blocks.map((block) => {
     switch (block.kind) {
       case 'you':

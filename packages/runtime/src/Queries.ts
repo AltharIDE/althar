@@ -18,7 +18,7 @@ import {
 import { Context, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
-import { HOSTED, parseRemote } from '@charrette/connectors'
+import { hostedOf, parseRemote } from '@charrette/connectors'
 
 import { Agents } from './Config'
 import { Connections } from './Connections'
@@ -673,9 +673,10 @@ export class Queries extends Context.Service<
             const { info } = yield* connections.adapters(connected.connectionId)
             return { product: info.product, name: info.name, webUrl: info.webUrl, connected: true }
           }
+          const hosted = hostedOf(connections.products)
           for (const remote of remotes) {
             const ref = parseRemote(remote)
-            const product = ref === null ? undefined : HOSTED.get(ref.host)
+            const product = ref === null ? undefined : hosted.get(ref.host)
             const info = product === undefined ? undefined : connections.products.find((candidate) => candidate.product === product)
             if (info !== undefined && info.host && ref !== null)
               return { product: info.product, name: info.name, webUrl: `https://${ref.host}`, connected: false }

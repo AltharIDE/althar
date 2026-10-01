@@ -54,7 +54,7 @@ Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view
 - **The kit draws; the app arranges.** Views compose `@charrette/ui` and add layout and page margins, nothing that looks like a component of its own. When a view needs something the kit lacks, it goes into the kit, with its stories.
 - **The runtime owns the state.** View models hold what the runtime last said and what is streaming; they read again rather than patch.
 - **The page is locked down** (07's renderer list). Sandboxed, context-isolated, no Node, a strict Content Security Policy, no new windows and no navigation away, no web permissions granted, and no paths. Links open in the person's browser, for `https:` and local `http:` only.
-- **Test hooks stay out of packaged builds.** `CHARRETTE_FAKE_AGENTS` works only in a build made with `bun run build`; `bun run build:package` leaves the code out.
+- **Test hooks stay out of packaged builds.** `CHARRETTE_FAKE_AGENTS` works only in a build made with `bun run build`; `bun run build:package` leaves the code out. It swaps in the fake agent, the connectors' fake GitHub, and secrets kept in memory, so the end-to-end tests never reach a network or the Keychain.
 - **Words on screen follow [the glossary](../../docs/glossary.md).**
 - **Work folds; results stand.** A turn's work (its tool calls, thoughts, plan, and what it said on the way) folds under how long it worked; only its last message stays open, and nothing when a step's result follows, since the step's summary is what the person reads. While a turn runs, the fold says how long it has worked so far and what it is doing now.
 - **A step that needs you is a call in the task.** It says what went wrong and what Charrette tried, with the kit's `Stuck`: tell the lead, hand the step to another agent, or abandon it; for a review, review again or go on without it.
@@ -64,7 +64,7 @@ Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view
 
 - `bun run check`: format, type-aware lint and type checks.
 - `bun run test:coverage`: view models and views with Testing Library against a fake client; the client against the real runtime over a `MessageChannel`, with the fake agent. Gated at 90% of lines and branches; the entry and the routes are left to the end-to-end tests.
-- `bun run test:e2e`: the built app under Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; and the coordinator planning a task that is implemented, reviewed, settled and ready. `e2e/real.spec.ts` runs a real agent when asked.
+- `bun run test:e2e`: the built app under Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; the coordinator planning a task that is implemented, reviewed, settled and ready; and connecting GitHub with a token, a planned task ending in a draft pull request that is pushed and opened, and marking it ready. `e2e/real.spec.ts` runs a real agent when asked.
 
 ## Gaps
 

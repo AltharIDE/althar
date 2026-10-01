@@ -20,7 +20,6 @@ import {
   checksForLead,
   checksLine,
   checksOf,
-  type ChecksSum,
   commentForLead,
   commentLine,
   logOf,

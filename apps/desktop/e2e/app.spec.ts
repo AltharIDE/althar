@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,12 +12,14 @@ import { repository } from '../tests/repository'
  * talk to its lead; or ask the coordinator, which plans the task, and follow
  * it through Implement and Review until it is ready. Every agent here is the
  * scripted fake (CHARRETTE_FAKE_AGENTS): what is said to it picks what it
- * does, and markers like `[coordinator:plan]` pick the role it plays.
+ * does, and markers like `[coordinator:plan]` pick the role it plays. GitHub
+ * is a fake too, at https://github.test, connected with a pasted token; what
+ * is pushed to it lands in a bare repository on disk.
  */
 
 const app = join(import.meta.dirname, '..')
 
-const launch = async (home: string) => {
+const launch = async (home: string, env: Record<string, string> = {}) => {
   const electronApp = await electron.launch({
     args: [app],
     env: {
@@ -24,6 +27,7 @@ const launch = async (home: string) => {
       CHARRETTE_PROFILE: join(home, 'profile'),
       CHARRETTE_WORKTREES: join(home, 'worktrees'),
       CHARRETTE_FAKE_AGENTS: '1',
+      ...env,
     },
   })
   return { electronApp, page: await electronApp.firstWindow() }
@@ -159,6 +163,69 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await expect(page.getByText(/round 2/)).toBeVisible()
     await expect(page.getByRole('button', { name: /^Worked for/ }).first()).toBeVisible()
     await page.screenshot({ path: 'test-results/steps.png' })
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('connects GitHub, and a planned task ends in a draft pull request', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'charrette-e2e-'))
+  const repo = repository(home)
+  // The project's remote is on the fake GitHub; what is pushed there lands in a bare repository.
+  const remote = join(home, 'api.git')
+  execFileSync('git', ['init', '-q', '--bare', remote])
+  execFileSync('git', ['remote', 'add', 'origin', 'https://github.test/meridian/api.git'], { cwd: repo })
+  const { electronApp, page } = await launch(home, { CHARRETTE_FAKE_REMOTE: remote })
+  try {
+    await chooseFolder(electronApp, repo)
+    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+
+    // Its remote is on GitHub, which isn't connected yet: tasks would end on their branch.
+    await expect(page.getByText("Charrette isn't connected to GitHub, so tasks here end on their branch.")).toBeVisible()
+    await page.getByRole('button', { name: 'Connect GitHub' }).click()
+
+    // GitHub has no sign-in of Charrette's in this build, so it takes a token.
+    const services = page.getByRole('list', { name: 'Code hosts and trackers' })
+    await services.getByRole('button', { name: 'Add a token' }).click()
+    await services.getByLabel('GitHub token').fill('github_pat_e2e')
+    await page.screenshot({ path: 'test-results/token.png', animations: 'disabled' })
+    await services.getByRole('button', { name: 'Save' }).click()
+    await expect(services.getByText('Signed in as you')).toBeVisible()
+    await expect(page.getByText(/isn't connected to/)).toHaveCount(0)
+    await page.screenshot({ path: 'test-results/connected.png', animations: 'disabled' })
+    await page.keyboard.press('Escape')
+
+    const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
+    await box.fill('Add a retry to the checkout call. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+    await box.press('Enter')
+
+    // The plan ends in a draft pull request, as the project's host allows.
+    await expect(page.getByText(/^Starts in \d+s$/)).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByText('Draft PR')).toBeVisible()
+    await page.screenshot({ path: 'test-results/plan-end.png', animations: 'disabled' })
+    await page.getByRole('button', { name: 'Start now' }).click()
+
+    // The lead commits nothing itself; Charrette commits, pushes and opens the pull request.
+    await expect(page.getByText('PR #1')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
+    await page.screenshot({ path: 'test-results/pull-request.png', animations: 'disabled' })
+    const pushed = execFileSync('git', ['--git-dir', remote, 'branch', '--list'], { encoding: 'utf8' })
+    expect(pushed).toMatch(/charrette\//)
+
+    await page.getByRole('button', { name: /Open task/ }).click()
+    await expect(page.getByText('Opened draft pull request #1.')).toBeVisible()
+    await page.getByRole('button', { name: 'PR #1' }).click()
+    await expect(page.getByText('change.txt')).toBeVisible()
+    // A trial click waits for the panel to finish sliding in.
+    await page.getByRole('button', { name: 'Mark ready for review' }).click({ trial: true })
+    await expect(page.getByText('None have run yet')).toBeVisible()
+    await page.screenshot({ path: 'test-results/change.png', animations: 'disabled' })
+
+    // Marked ready here, it is ready on GitHub: merging it is the person's, there.
+    await page.getByRole('button', { name: 'Mark ready for review' }).click()
+    await expect(page.getByText('Merge it on GitHub when you’re ready')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Mark ready for review' })).toHaveCount(0)
   } finally {
     await electronApp.close()
   }

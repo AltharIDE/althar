@@ -2,13 +2,22 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import { authorizationOf } from '../src/credential'
-import { available, products } from '../src/products'
+import { HOSTED } from '../src/links'
+import { available, hostedOf, products } from '../src/products'
 
 describe('the products', () => {
   it('available now are the ones with an adapter', () => {
     assert.deepStrictEqual(
       available().map((info) => info.product),
       ['github', 'linear'],
+    )
+  })
+
+  it('name their hosted services’ hosts, as links and remotes read them', () => {
+    assert.deepStrictEqual(hostedOf(Object.values(products)), HOSTED)
+    assert.deepStrictEqual(
+      [...hostedOf([{ ...products.github, hosted: { webUrl: 'https://github.test', apiUrl: '' } }])],
+      [['github.test', 'github']],
     )
   })
 

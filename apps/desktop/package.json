@@ -21,6 +21,7 @@
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.84.0",
     "@agentclientprotocol/codex-acp": "2.0.0",
+    "@charrette/connectors": "workspace:*",
     "@charrette/contracts": "workspace:*",
     "@charrette/provider-adapters": "workspace:*",
     "@charrette/runtime": "workspace:*",
