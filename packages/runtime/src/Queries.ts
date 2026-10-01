@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 
 import {
+  type BoardSnapshot,
   type ChangeSummary,
   ChecksSummary,
   type CoordinatorSnapshot,
@@ -73,12 +74,6 @@ interface ItemRow {
   readonly createdAt: string
 }
 
-/**
- * A stored item as the contract has it: each kind with its own content. A
- * tool call keeps what a screen shows (the command it runs and the files it
- * touches), not its raw input and output. Kinds the contract doesn't have yet,
- * such as a step's result, are left out.
- */
 /** A step that needs the person, as its call's payload holds it. */
 export const stuckOf = (payload: unknown): StuckStep => {
   const step = text(payload, 'step')
@@ -103,6 +98,20 @@ export const stuckOf = (payload: unknown): StuckStep => {
 const number = (value: unknown, key: string): number | null => {
   const found = field(value, key)
   return typeof found === 'number' ? found : null
+}
+
+/** A call that waits on the person, as a screen shows it: what was asked, why it waits, and, for a step that needs them, which and why. */
+const callOf = (request: { readonly id: string; readonly kind: string; readonly payload: string; readonly createdAt: string }) => {
+  const payload = parse(request.payload)
+  return {
+    id: request.id,
+    kind: request.kind === 'stuck' ? ('stuck' as const) : ('permission' as const),
+    title: text(payload, 'title'),
+    reason: text(payload, 'reason'),
+    command: text(payload, 'command') || null,
+    stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
+    createdAt: request.createdAt,
+  }
 }
 
 /** A pull request as Charrette last saw it (its external link's snapshot), in the contract's shape. */
@@ -151,6 +160,12 @@ const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
 const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
 
+/**
+ * A stored item as the contract has it: each kind with its own content. A
+ * tool call keeps what a screen shows (the command it runs and the files it
+ * touches), not its raw input and output. Kinds the contract doesn't have yet,
+ * such as a step's result, are left out.
+ */
 export const itemOf = (row: ItemRow): ThreadItem | undefined => {
   const content = parse(row.content)
   const base = { id: row.id, sequence: row.sequence, agentId: row.agentId, createdAt: row.createdAt }
@@ -299,6 +314,8 @@ export class Queries extends Context.Service<
     item(threadId: string, itemId: string): Effect.Effect<ThreadItem, SqlError.SqlError | NotFound>
     /** One file a task changed, as a diff from its base to its worktree; only a file it changed. */
     fileDiff(taskId: string, path: string): Effect.Effect<FileDiff, unknown>
+    /** A project's board: its tasks, by card, and the calls that wait on the person. */
+    board(projectId: string): Effect.Effect<BoardSnapshot, unknown>
     /** The project's coordinator thread, with the newest `limit` items before `before`. */
     coordinator(
       projectId: string,
@@ -589,6 +606,71 @@ export class Queries extends Context.Service<
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
 
+      /** How many settled tasks the board shows: the most recent. */
+      const SETTLED_SHOWN = 30
+
+      /** A project's board: its tasks, each as its card, and every call that waits on the person. */
+      const board = (projectId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const at = yield* cursor
+          const rows = yield* sql<{
+            id: string
+            state: string
+            createdAt: string
+            settledAt: string | null
+            worktree: string | null
+            baseRef: string | null
+            baseCommit: string | null
+          }>`
+            SELECT k.id, k.state, k.created_at, k.settled_at, w.path AS worktree, w.base_ref, w.base_commit
+            FROM tasks k LEFT JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
+            WHERE k.project_id = ${projectId} AND (k.state NOT IN ('done', 'abandoned') OR k.id IN (
+              SELECT id FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')
+              ORDER BY settled_at DESC LIMIT ${SETTLED_SHOWN}))
+            ORDER BY k.created_at, k.id`
+          const tasks = yield* Effect.forEach(rows, (row) =>
+            Effect.gen(function* () {
+              const card = yield* cardFor(row.id)
+              if (card === undefined) return []
+              // Ready without a pull request, its size is its branch's, read from git.
+              const changed =
+                card.phase === 'ready' && card.change === null
+                  ? yield* Effect.map(changedOf(row.worktree, row.baseRef, row.baseCommit), ({ files }) => ({
+                      files: files.length,
+                      add: files.reduce((sum, file) => sum + file.add, 0),
+                      del: files.reduce((sum, file) => sum + file.del, 0),
+                    }))
+                  : null
+              return [{ ...card, state: row.state, createdAt: row.createdAt, settledAt: row.settledAt, changed }]
+            }),
+          )
+          const calls = yield* sql<{
+            id: string
+            kind: string
+            payload: string
+            createdAt: string
+            taskId: string
+            threadId: string
+            taskTitle: string
+            taskSlug: string
+          }>`
+            SELECT a.id, a.kind, a.payload, a.created_at, k.id AS task_id, t.id AS thread_id, k.title AS task_title, k.slug AS task_slug
+            FROM attention_requests a JOIN tasks k ON k.id = a.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE a.project_id = ${projectId} AND a.state = 'open' ORDER BY a.created_at, a.id`
+          return {
+            cursor: at,
+            tasks: tasks.flat(),
+            calls: calls.map((call) => ({
+              ...callOf(call),
+              taskId: call.taskId,
+              threadId: call.threadId,
+              taskTitle: call.taskTitle,
+              taskSlug: call.taskSlug,
+            })),
+          } satisfies BoardSnapshot
+        })
+
       /** A page of a thread's items, as screens show them. */
       const pageOf = (threadId: string, page: { readonly before?: number; readonly limit?: number }) =>
         Effect.gen(function* () {
@@ -645,18 +727,7 @@ export class Queries extends Context.Service<
               ...(yield* changedOf(head.worktree, head.baseRef, head.baseCommit)),
             },
             session: yield* sessionOf(threadId),
-            attention: attention.map((request) => {
-              const payload = parse(request.payload)
-              return {
-                id: request.id,
-                kind: request.kind === 'stuck' ? 'stuck' : 'permission',
-                title: text(payload, 'title'),
-                reason: text(payload, 'reason'),
-                command: text(payload, 'command') || null,
-                stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
-                createdAt: request.createdAt,
-              }
-            }),
+            attention: attention.map(callOf),
             items,
             earlier,
           } satisfies ThreadSnapshot
@@ -761,6 +832,7 @@ export class Queries extends Context.Service<
           ),
         thread: (threadId, page) => run(thread(threadId, page)),
         fileDiff: (taskId, path) => run(diffOf(taskId, path)),
+        board: (projectId) => run(board(projectId)),
         item: (threadId, itemId) => run(item(threadId, itemId)),
         coordinator: (projectId, page) => run(coordinator(projectId, page)),
         changesSince: (after, limit) => run(changesSince(after, limit)),

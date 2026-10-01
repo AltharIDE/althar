@@ -155,7 +155,7 @@ describe('a task that ends in a pull request', () => {
       )
 
       // Merged, the task is settled, and nothing listens any more.
-      github.merge(1)
+      github.mergeByHand(1)
       yield* until(cards(projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(10))
       const after = yield* arrivals(threadId)
       assert.deepStrictEqual(
@@ -216,6 +216,34 @@ describe('a task that ends in a pull request', () => {
       const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       assert.lengthOf(github.changes, 1)
       assert.strictEqual(ready?.change?.title, 'By hand')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('merges when the person says so, marking a draft ready first, and says why the host won’t', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const changes = yield* Changes
+      const taskId = ready?.taskId ?? ''
+      // The host says no: its words come back, and nothing changed.
+      github.failNext('merge', 'rejected')
+      assert.include(String(yield* Effect.flip(changes.merge(taskId))), 'rejected')
+      assert.strictEqual(github.changes[0]?.state, 'open')
+      // Asked again, it is merged, a draft marked ready first, and the task settles at once.
+      yield* changes.merge(taskId)
+      assert.deepInclude(github.changes[0], { state: 'merged', draft: false })
+      const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(5))
+      assert.strictEqual(settled?.change?.state, 'merged')
+      // Merged, there is nothing more to merge.
+      yield* changes.merge(taskId)
+      assert.lengthOf(
+        github.calls.filter((call) => call === 'merge'),
+        2,
+      )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

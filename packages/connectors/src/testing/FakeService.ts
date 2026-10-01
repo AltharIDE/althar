@@ -56,7 +56,8 @@ export interface FakeControls {
   ): Comment
   reviewAs(number: number, author: string, verdict: Verdict, body?: string, options?: { readonly member?: boolean }): Review
   setChecks(number: number, checks: ReadonlyArray<Pick<Check, 'name' | 'state'> & { readonly log?: string }>): void
-  merge(number: number): void
+  /** Someone merges a change on the host itself. */
+  mergeByHand(number: number): void
   close(number: number): void
   /** Someone marks a draft ready on the host itself. */
   readyByHand(number: number): void
@@ -184,6 +185,21 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         update(change.number, { draft: false })
         return Effect.succeed(changeNumbered(change.number))
       }),
+    merge: (_repository, change) =>
+      Effect.andThen(called('merge'), () => {
+        const now = changeNumbered(change.number)
+        // As GitHub: a draft, or a change already merged or closed, isn't merged.
+        if (now.draft || now.state !== 'open')
+          return Effect.fail(
+            new ConnectorFailed({
+              product,
+              reason: 'rejected',
+              message: now.draft ? 'Pull request is in draft state' : 'Pull request is not mergeable',
+            }),
+          )
+        update(change.number, { state: 'merged' })
+        return Effect.succeed(changeNumbered(change.number))
+      }),
     checks: (_repository, sha) =>
       Effect.andThen(called('checks'), () => {
         const change =
@@ -258,6 +274,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         defaultBranch,
         webUrl: `https://${product === 'gitlab' ? 'gitlab.com' : 'github.com'}/${path.join('/')}`,
         canPush: true,
+        merges: ['squash', 'merge'],
       }
       repositories.set(path.join('/'), repository)
       return repository
@@ -324,7 +341,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         }),
       )
     },
-    merge: (number) => update(number, { state: 'merged' }),
+    mergeByHand: (number) => update(number, { state: 'merged' }),
     close: (number) => update(number, { state: 'closed' }),
     readyByHand: (number) => update(number, { draft: false }),
     failNext: (method, reason, retryAt) => void failures.set(method, { reason, ...(retryAt === undefined ? {} : { retryAt }) }),

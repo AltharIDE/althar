@@ -40,6 +40,10 @@ const RepositoryAnswer = Schema.Struct({
   default_branch: Schema.String,
   html_url: Schema.String,
   permissions: Schema.optional(Schema.Struct({ push: Schema.optional(Schema.Boolean) })),
+  // Said only to someone who can push; anyone else can't merge anyway.
+  allow_squash_merge: Schema.optional(Schema.Boolean),
+  allow_merge_commit: Schema.optional(Schema.Boolean),
+  allow_rebase_merge: Schema.optional(Schema.Boolean),
 })
 
 const PullAnswer = Schema.Struct({
@@ -276,6 +280,11 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         defaultBranch: answer.default_branch,
         webUrl: answer.html_url,
         canPush: answer.permissions?.push ?? false,
+        merges: [
+          ...(answer.allow_squash_merge === true ? (['squash'] as const) : []),
+          ...(answer.allow_merge_commit !== false ? (['merge'] as const) : []),
+          ...(answer.allow_rebase_merge === true ? (['rebase'] as const) : []),
+        ],
       })),
     findChange,
     openChange: (repository, change) =>
@@ -307,6 +316,14 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           'mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { id } } }',
           { id: change.id },
         )
+        .pipe(Effect.andThen(Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`), changeOf))),
+    merge: (repository, change) =>
+      http
+        .json(Schema.Unknown, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
+          merge_method: repository.merges[0] ?? 'merge',
+          // Only the head Charrette last saw: a push since then isn't merged unseen.
+          ...(change.headSha === null ? {} : { sha: change.headSha }),
+        })
         .pipe(Effect.andThen(Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`), changeOf))),
     checks: (repository, sha) =>
       Effect.gen(function* () {

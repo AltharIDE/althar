@@ -1,21 +1,17 @@
 import { useEffect, useState } from 'react'
 
-import type { AttentionRequest, ChangeSummary, ThreadSnapshot } from '@charrette/contracts'
+import type { ChangeSummary, ThreadSnapshot } from '@charrette/contracts'
 import {
   BackCrumb,
   Button,
-  type ChangeCheck,
   ChangeSet,
   ChangeState,
   ChangeView,
-  CheckState,
   ChromeButton,
   Composer,
-  Decision,
   Issue,
   LinkButton,
   type ModelInfo,
-  Permission,
   Select,
   SidePanel,
   SidePanelBody,
@@ -32,10 +28,12 @@ import {
 } from '@charrette/ui'
 
 import { modelInfo } from '../../shared/agents'
+import { checkOf } from '../../shared/checks'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
+import { PermissionCall } from './PermissionCall'
 import { StuckCall } from './StuckCall'
 import s from './Task.module.css'
 import { useChanges } from './useChanges'
@@ -81,24 +79,6 @@ export const text = {
   diffKey: '⌘D',
 }
 
-/** A check as the kit lists it: one that was skipped or said nothing counts as passed, with what it said. */
-const checkOf = (check: NonNullable<ChangeSummary['checks']>['list'][number], index: number): ChangeCheck => {
-  const state = ((): CheckState => {
-    switch (check.state) {
-      case 'queued':
-        return CheckState.Queued
-      case 'running':
-        return CheckState.Running
-      case 'failed':
-        return CheckState.Failed
-      default:
-        return CheckState.Passed
-    }
-  })()
-  const said = check.state === 'skipped' || check.state === 'neutral' || check.state === 'cancelled' ? check.state : check.summary
-  return { id: `${index}-${check.name}`, name: check.name, state, ...(said === null ? {} : { detail: said }) }
-}
-
 /** Where a task stands, for its header. */
 export const statusOf = (snapshot: ThreadSnapshot): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
@@ -112,26 +92,6 @@ export const statusOf = (snapshot: ThreadSnapshot): { readonly status: TaskStatu
 }
 
 const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', context: 0, efforts: [] }
-
-function Call({ request, project, onAnswer }: { request: AttentionRequest; project: string; onAnswer: TaskModel['answer'] }) {
-  return (
-    <Permission
-      id={request.id}
-      what={request.title}
-      cmd={request.command ?? request.title}
-      why={request.reason}
-      offers={[Decision.AllowOnce, Decision.Deny]}
-      project={project}
-      onAnswer={(answer) =>
-        void onAnswer(
-          request.id,
-          answer.decision === Decision.AllowOnce ? 'allow' : 'reject',
-          answer.decision === Decision.Deny ? answer.note : undefined,
-        )
-      }
-    />
-  )
-}
 
 /** A task's pull request beside its thread: the kit's change set, and what the person can do with it here. */
 function ChangePanel({
@@ -423,7 +383,7 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
                 onAnswer={(attentionId, answer) => void model.answerStuck(attentionId, answer)}
               />
             ) : (
-              <Call key={request.id} request={request} project={snapshot.project.name} onAnswer={model.answer} />
+              <PermissionCall key={request.id} request={request} project={snapshot.project.name} onAnswer={model.answer} />
             ),
           )}
         </Thread>

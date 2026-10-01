@@ -14,6 +14,7 @@ import s from './SettledRow.module.css'
 const glyph = (outcome: Outcome): IconName => {
   switch (outcome) {
     case Outcome.Merged:
+    case Outcome.Done:
       return 'check'
     case Outcome.Answered:
       return 'answer'
@@ -36,6 +37,7 @@ export interface SettledRowText {
 export const settledRowText: SettledRowText = {
   outcome: {
     [Outcome.Merged]: 'Merged',
+    [Outcome.Done]: 'Done',
     [Outcome.Answered]: 'Answered',
     [Outcome.Artifact]: 'Artifact',
     [Outcome.Knowledge]: 'Knowledge',

@@ -188,6 +188,8 @@ export class Changes extends Context.Service<
     pushChanges(taskId: string): Effect.Effect<{ readonly change: ChangeSummary }, unknown>
     /** Marks the task's draft pull request ready for review: the person's to do. */
     markReady(taskId: string): Effect.Effect<void, unknown>
+    /** Merges the task's pull request, because the person said to, marking a draft ready first; agents never merge. */
+    merge(taskId: string): Effect.Effect<void, unknown>
     /** Replies on the task's pull request, in a comment's thread or its conversation, signed as from Charrette and the agent that wrote it. */
     reply(
       taskId: string,
@@ -526,6 +528,34 @@ export class Changes extends Context.Service<
             decode: (kept) => Option.getOrUndefined(Schema.decodeUnknownOption(ChangeRequest)(kept)),
           })
           yield* saveSnapshot(link, { ...snapshot, draft: ready.draft, state: ready.state })
+        })
+
+      /**
+       * Merges the task's pull request, as the person asked: a draft is
+       * marked ready first, and only the head last read is merged. Read back
+       * at once, merged, its task settles.
+       */
+      const merge = (taskId: string) =>
+        Effect.gen(function* () {
+          const { link, snapshot, host, repository } = yield* current(taskId)
+          if (snapshot.state !== 'open') return
+          if (snapshot.draft) yield* markReady(taskId)
+          const read = yield* host.change(repository, snapshot.number)
+          if (read.state === 'open')
+            yield* outward({
+              projectId: link.projectId,
+              subject: { type: 'external_link', id: link.id },
+              target: `${host.product}:${snapshot.repository.join('/')}`,
+              operation: 'merge',
+              key: `merge:${link.id}`,
+              request: { number: snapshot.number, head: read.headSha },
+              retryable: false,
+              perform: host.merge(repository, read),
+              encode: (answer) => answer,
+              decode: (kept) => Option.getOrUndefined(Schema.decodeUnknownOption(ChangeRequest)(kept)),
+            })
+          const [now] = (yield* linksOf(taskId)).filter((candidate) => candidate.id === link.id)
+          if (now !== undefined) yield* poll(now)
         })
 
       const reply = (taskId: string, input: { readonly body: string; readonly threadId: string | null; readonly by: string | null }) =>
@@ -937,6 +967,7 @@ export class Changes extends Context.Service<
         publish: (input) => provide(publish(input)),
         pushChanges: (taskId) => provide(locked(taskId)(pushChanges(taskId))),
         markReady: (taskId) => provide(locked(taskId)(markReady(taskId))),
+        merge: (taskId) => provide(locked(taskId)(merge(taskId))),
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),

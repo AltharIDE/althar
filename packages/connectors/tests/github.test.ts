@@ -13,6 +13,7 @@ const repository: Repository = {
   defaultBranch: 'main',
   webUrl: 'https://github.com/meridian/api',
   canPush: true,
+  merges: ['squash', 'merge'],
 }
 
 const github = (routes: ReadonlyArray<Route>, apiUrl = API) => {
@@ -66,6 +67,9 @@ describe('GitHub as a code host', () => {
               default_branch: 'trunk',
               html_url: 'https://github.com/meridian/api',
               permissions: { push: true },
+              allow_squash_merge: true,
+              allow_merge_commit: true,
+              allow_rebase_merge: false,
             },
           },
         ],
@@ -76,7 +80,34 @@ describe('GitHub as a code host', () => {
         ],
       ])
       assert.deepStrictEqual(yield* host.repository(['meridian', 'api']), { ...repository, defaultBranch: 'trunk' })
-      assert.isFalse((yield* host.repository(['meridian', 'web'])).canPush)
+      // Without push, GitHub doesn't say how it merges: a merge commit, as it would by default.
+      const web = yield* host.repository(['meridian', 'web'])
+      assert.isFalse(web.canPush)
+      assert.deepStrictEqual(web.merges, ['merge'])
+    }),
+  )
+
+  it.effect('merges in the first way the repository allows, only the head it last saw, and says why it can’t', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        ['PUT', `${REPO}/pulls/12/merge`, { json: { merged: true } }],
+        ['GET', `${REPO}/pulls/12`, { json: pull({ merged_at: '2026-10-01T12:00:00Z', state: 'closed' }) }],
+      ])
+      const open = yield* host.change(repository, 12)
+      const merged = yield* host.merge(repository, open)
+      assert.strictEqual(merged.state, 'merged')
+      const asked = sent.find((request) => request.method === 'PUT')
+      assert.deepStrictEqual(asked?.body, { merge_method: 'squash', sha: open.headSha })
+      const refusing = github([
+        ['PUT', `${REPO}/pulls/12/merge`, { status: 405, json: { message: 'Pull Request is not mergeable' } }],
+        ['GET', `${REPO}/pulls/12`, { json: pull() }],
+      ])
+      const refused = yield* Effect.flip(refusing.host.merge({ ...repository, merges: [] }, yield* refusing.host.change(repository, 12)))
+      assert.deepInclude(refused, { reason: 'rejected', message: 'Pull Request is not mergeable' })
+      assert.deepStrictEqual(refusing.sent.find((request) => request.method === 'PUT')?.body, {
+        merge_method: 'merge',
+        sha: open.headSha,
+      })
     }),
   )
 

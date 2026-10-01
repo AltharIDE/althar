@@ -408,12 +408,24 @@ describe('the coordinator, through the API', () => {
           [call?.kind, call?.stuck?.step, call?.stuck?.why, call?.stuck?.agentId],
           ['stuck', 'implement', 'failed_to_start', 'missing'],
         )
+        // On the board, the call waits on the person, with the task it holds, and the task says it waits.
+        const board = yield* client.GetBoard({ projectId: project.id })
+        assert.deepStrictEqual(
+          board.calls.map((waits) => [waits.id, waits.kind, waits.taskTitle, waits.threadId]),
+          [[call?.id, 'stuck', 'Nobody home', task.threadId]],
+        )
+        assert.deepInclude(board.tasks[0], { taskId: task.id, phase: 'waiting', state: 'open', changed: null })
         const answering = { commandId: commandId(), attentionId: call?.id ?? '', answer: { kind: 'retry' as const, agentId: 'codex' } }
         yield* client.AnswerStuck(answering)
         // Sent again by a retry, it is answered once.
         yield* client.AnswerStuck(answering)
         const after = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 0)
         assert.strictEqual(after.session?.agentId, 'codex')
+        // Answered, it leaves the board.
+        assert.notInclude(
+          (yield* client.GetBoard({ projectId: project.id })).calls.map((waits) => waits.id),
+          call?.id,
+        )
         assert.strictEqual(
           (yield* Effect.flip(client.AnswerStuck({ ...answering, commandId: commandId() }))).message,
           'That call was already answered, or the agent took it back.',
@@ -554,6 +566,10 @@ describe('code hosts and trackers, through the API', () => {
         assert.strictEqual(refused._tag, 'ApiError')
         yield* client.MarkReady({ commandId: commandId(), taskId: started.id })
         assert.isFalse((yield* client.GetThread({ threadId: started.threadId })).task.changes[0]?.draft)
+        // On the board it is ready to accept, its pull request with it.
+        const ready = (yield* client.GetBoard({ projectId: project.id })).tasks.find((task) => task.taskId === started.id)
+        assert.deepInclude(ready, { phase: 'ready', changed: null })
+        assert.strictEqual(ready?.change?.number, 1)
         yield* client.RefreshTask({ commandId: commandId(), taskId: started.id })
 
         // A task created from #12 keeps it as its issue.

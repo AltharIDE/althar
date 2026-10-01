@@ -157,6 +157,8 @@ describe('the client', () => {
         Api.of({
           Status: () => Effect.die('unused'),
           GetFileDiff: () => Effect.die('unused'),
+          GetBoard: () => Effect.die('unused'),
+          Merge: () => Effect.die('unused'),
           ListProjects: () => Effect.die('unused'),
           OpenProject: () => Effect.die('unused'),
           ListTasks: () => Effect.die('unused'),

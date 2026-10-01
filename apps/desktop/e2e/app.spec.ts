@@ -235,6 +235,20 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await page.screenshot({ path: 'test-results/changes.png', animations: 'disabled' })
     await page.keyboard.press('Escape')
     await expect(changes).toHaveCount(0)
+
+    // Back in the project, the board has it ready to accept; accepted from the dock, it is merged, and settles.
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    await page.keyboard.press('Meta+2')
+    const work = page.getByRole('region', { name: 'The project’s work' })
+    await expect(work.getByText('Ready to accept')).toBeVisible()
+    await page.screenshot({ path: 'test-results/board.png', animations: 'disabled' })
+    await work.getByRole('button', { name: 'Add a retry to the checkout call' }).click()
+    const dock = page.getByRole('complementary', { name: 'Beside the board' })
+    await dock.getByRole('button', { name: /Accept and merge/ }).click({ trial: true })
+    await page.screenshot({ path: 'test-results/accept.png', animations: 'disabled' })
+    await dock.getByRole('button', { name: /Accept and merge/ }).click()
+    await expect(work.getByText('PR #1 merged')).toBeVisible({ timeout: 10_000 })
+    await page.screenshot({ path: 'test-results/settled.png', animations: 'disabled' })
   } finally {
     await electronApp.close()
   }

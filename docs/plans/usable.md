@@ -57,8 +57,9 @@ One pull request each:
      - its files, from its base to its worktree, committed or not;
      - a file's diff, in hunks.
    - The kit's ChangeView shows it over the whole window. It opens from the
-     task's header, from a file in its pull request, or with D.
-2. **The board,** and the chrome's counts.
+     task's header, from a file in its pull request, or with ⌘D.
+2. **The board,** and the chrome's counts. Merging from it, as the person's
+   click. Local merging for a task without a pull request comes with step 3.
 3. **Work that doesn't need you.**
 4. **Conversations.**
 

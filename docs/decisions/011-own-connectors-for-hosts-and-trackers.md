@@ -37,6 +37,8 @@
   - Agents reach the hosts only through Charrette:
     - Pushing a task's branch, opening its pull request and marking it ready
       are Charrette's, done as steps of the plan.
+    - Merging is the person's: accepting the change in Charrette merges it,
+      or they merge it on the host. Never an agent's.
     - Agents read pull requests and issues, and reply on a pull request,
       through Charrette's tools, which only reach the task's own repository.
     - Agents run without the person's ways into a host: `gh` and `glab`

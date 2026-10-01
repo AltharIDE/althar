@@ -32,12 +32,18 @@ export type Account = typeof Account.Type
 // ---- Code hosts -----------------------------------------------------------
 
 /** A repository on a code host: its path (owner and name, or GitLab's nested groups), and the host's own id. */
+/** How a change can be merged: squashed to one commit, with a merge commit, or rebased. */
+export const MergeMethod = Schema.Literals(['squash', 'merge', 'rebase'])
+export type MergeMethod = typeof MergeMethod.Type
+
 export const Repository = Schema.Struct({
   id: Schema.String,
   path: Schema.Array(Schema.String),
   defaultBranch: Schema.String,
   webUrl: Schema.String,
   canPush: Schema.Boolean,
+  /** How the repository lets changes be merged, as its settings say, in the order Charrette prefers them. */
+  merges: Schema.Array(MergeMethod),
 })
 export type Repository = typeof Repository.Type
 
@@ -158,6 +164,12 @@ export interface CodeHost {
   ): Effect.Effect<ChangeRequest, ConnectorFailed>
   change(repository: Repository, number: number): Effect.Effect<ChangeRequest, ConnectorFailed>
   markReady(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * Merges a change, because the person said to: never on an agent's word.
+   * In the first way the repository allows; refused, as a draft or with
+   * checks or reviews it still needs, with the host's own words.
+   */
+  merge(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
   checks(repository: Repository, sha: string): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
   /** The end of a check's log, when the host keeps one Charrette can read. */
   checkLog(repository: Repository, check: Check): Effect.Effect<string | null, ConnectorFailed>

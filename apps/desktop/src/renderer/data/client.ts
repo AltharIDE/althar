@@ -1,6 +1,7 @@
 import {
   Api,
   ApiError,
+  type BoardSnapshot,
   clientProtocol,
   type ConnectionList,
   type ConnectionSummary,
@@ -56,6 +57,8 @@ export interface Client {
   readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem>
   /** One file a task changed, as a diff from its base to its worktree. */
   readonly getFileDiff: (taskId: string, path: string) => Promise<FileDiff>
+  /** A project's board: its tasks, by card, and the calls that wait on the person. */
+  readonly getBoard: (projectId: string) => Promise<BoardSnapshot>
   readonly startSession: (input: { readonly threadId: string; readonly agentId: string; readonly model?: string }) => Promise<string>
   readonly switchAgent: (input: { readonly threadId: string; readonly agentId: string; readonly model?: string }) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
@@ -104,6 +107,8 @@ export interface Client {
   readonly listIssues: (projectId: string) => Promise<IssueList>
   /** Marks a task's draft pull request ready for review. */
   readonly markReady: (taskId: string) => Promise<void>
+  /** Merges the task's pull request, as the person said to; a draft is marked ready first. */
+  readonly merge: (taskId: string) => Promise<void>
   /** Asks a task's pull request for news now. */
   readonly refreshTask: (taskId: string) => Promise<void>
   /** The person's answer to a step that needs them. */
@@ -168,6 +173,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
     getFileDiff: (taskId, path) => settle(api.GetFileDiff({ taskId, path })),
+    getBoard: (projectId) => settle(api.GetBoard({ projectId })),
     startSession: (input) => command((commandId) => api.StartSession({ commandId, ...input })),
     switchAgent: (input) => command((commandId) => api.SwitchAgent({ commandId, ...input })),
     setModel: (input) => command((commandId) => api.SetModel({ commandId, ...input })),
@@ -190,6 +196,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
     listIssues: (projectId) => settle(api.ListIssues({ projectId })),
     markReady: (taskId) => command((commandId) => api.MarkReady({ commandId, taskId })),
+    merge: (taskId) => command((commandId) => api.Merge({ commandId, taskId })),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     watch: (listener, since) => {
