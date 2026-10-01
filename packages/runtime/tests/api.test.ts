@@ -12,7 +12,16 @@ import { Cause, Context, Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
 import { connection, services } from '../src/Api'
-import { ChangedSinceSeen, GitFailed, ModelUnchanged, NotARepository, NotFound, OutwardUncertain, SessionFailed } from '../src/errors'
+import {
+  ChangedSinceSeen,
+  GitFailed,
+  NoChangeToOpen,
+  ModelUnchanged,
+  NotARepository,
+  NotFound,
+  OutwardUncertain,
+  SessionFailed,
+} from '../src/errors'
 import { NotConnected } from '../src/Connections'
 import { Folders } from '../src/Folders'
 import { itemOf, stuckOf } from '../src/Queries'
@@ -572,6 +581,9 @@ describe('code hosts and trackers, through the API', () => {
         assert.deepInclude(ready, { phase: 'ready', changed: null })
         assert.strictEqual(ready?.change?.number, 1)
         yield* client.RefreshTask({ commandId: commandId(), taskId: started.id })
+        // It has its pull request already: there is none to open.
+        const opened = yield* Effect.flip(client.OpenChange({ commandId: commandId(), taskId: started.id }))
+        assert.deepStrictEqual([opened.reason, opened.message], ['NoChangeToOpen', 'The task already has its pull request.'])
 
         // A task created from #12 keeps it as its issue.
         const created = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Fix the limit', issue: '#12' })
@@ -641,6 +653,10 @@ describe('words', () => {
     assert.strictEqual(
       said(new ChangedSinceSeen({ taskId: 't' })),
       'The pull request changed since you looked at it. Have another look before you accept it.',
+    )
+    assert.strictEqual(
+      said(new NoChangeToOpen({ taskId: 't', why: 'working' })),
+      "The task's work isn't done yet. Its pull request opens when it is.",
     )
     assert.deepStrictEqual(words(new Error('boom'), name), {
       reason: 'Unknown',

@@ -1,6 +1,16 @@
 import { createHash } from 'node:crypto'
 
-import { type Account, ChangeRequest, Comment, ConnectorFailed, type Person, type Product, type Repository } from '@charrette/connectors'
+import {
+  type Account,
+  ChangeRequest,
+  Comment,
+  ConnectorFailed,
+  hostedOf,
+  parseRemote,
+  type Person,
+  type Product,
+  type Repository,
+} from '@charrette/connectors'
 import { Ids, newId, type ProjectId } from '@charrette/domain'
 import type { Ledger } from '@charrette/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore } from 'effect'
@@ -99,6 +109,14 @@ export interface ChangeSummary extends Snapshot {
   readonly linkId: string
   readonly product: Product
   readonly listening: boolean
+}
+
+/** The code host a project's repository is on, as its remotes say, and whether Charrette is connected to it there. */
+export interface Host {
+  readonly product: Product
+  readonly name: string
+  readonly webUrl: string
+  readonly connected: boolean
 }
 
 /**
@@ -207,6 +225,8 @@ export class Changes extends Context.Service<
     refresh(taskId: string): Effect.Effect<void>
     /** What a new task of the project does when its work is done: a draft pull request when its repository's host is connected, else nothing outside. */
     endFor(projectId: string): Effect.Effect<'draft' | null, unknown>
+    /** The code host the project's repository is on, and whether Charrette is connected to it; null where its remotes name none Charrette knows. */
+    hostFor(projectId: string): Effect.Effect<Host | null>
   }
 >()('@charrette/runtime/Changes') {
   static readonly layer: Layer.Layer<Changes, never, Store> = Layer.effect(
@@ -296,6 +316,31 @@ export class Changes extends Context.Service<
             issue,
           })
         })
+
+      const hostFor = (projectId: string): Effect.Effect<Host | null, never, Store> =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [binding] = yield* sql<{ remotes: string }>`
+            SELECT remote_fingerprints AS remotes FROM repository_bindings WHERE project_id = ${projectId} AND detached_at IS NULL ORDER BY created_at LIMIT 1`
+          const remotes =
+            binding === undefined
+              ? []
+              : Option.getOrElse(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(binding.remotes), () => [])
+          const connected = yield* connections.hostOf(remotes)
+          if (connected !== null) {
+            const { info } = yield* connections.adapters(connected.connectionId)
+            return { product: info.product, name: info.name, webUrl: info.webUrl, connected: true }
+          }
+          const hosted = hostedOf(connections.products)
+          for (const remote of remotes) {
+            const ref = parseRemote(remote)
+            const product = ref === null ? undefined : hosted.get(ref.host)
+            const info = product === undefined ? undefined : connections.products.find((candidate) => candidate.product === product)
+            if (info !== undefined && info.host && ref !== null)
+              return { product: info.product, name: info.name, webUrl: `https://${ref.host}`, connected: false }
+          }
+          return null
+        }).pipe(Effect.orElseSucceed(() => null))
 
       const publish = (input: {
         readonly projectId: ProjectId
@@ -991,17 +1036,8 @@ export class Changes extends Context.Service<
             news(taskId),
             Effect.sync(() => wakeNow(taskId)),
           ),
-        endFor: (projectId) =>
-          provide(
-            Effect.gen(function* () {
-              const sql = yield* SqlClient.SqlClient
-              const [binding] = yield* sql<{ remotes: string }>`
-                SELECT remote_fingerprints AS remotes FROM repository_bindings WHERE project_id = ${projectId} AND detached_at IS NULL ORDER BY created_at LIMIT 1`
-              if (binding === undefined) return null
-              const remotes = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(binding.remotes)
-              return (yield* connections.hostOf(remotes)) === null ? null : 'draft'
-            }),
-          ),
+        endFor: (projectId) => Effect.map(provide(hostFor(projectId)), (host) => (host?.connected === true ? 'draft' : null)),
+        hostFor: (projectId) => provide(hostFor(projectId)),
       })
     }),
   )

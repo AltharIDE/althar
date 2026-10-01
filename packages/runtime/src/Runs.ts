@@ -8,7 +8,7 @@ import { SqlClient } from 'effect/sql'
 import { touchCard } from './cards'
 import { Changes, type Published } from './Changes'
 import { NotConnected } from './Connections'
-import { AttentionClosed, NotFound } from './errors'
+import { AttentionClosed, NoChangeToOpen, NotFound } from './errors'
 import { Instance } from './Instance'
 import { Live, type LiveEvent } from './Live'
 import { treeOf, uncommittedFiles } from './git'
@@ -140,6 +140,12 @@ export class Runs extends Context.Service<
     run(planId: string): Effect.Effect<void, unknown>
     /** The workflow version every task's plan runs, for now. */
     readonly workflowVersion: Effect.Effect<string, unknown>
+    /**
+     * Opens the pull request of a task whose work ended on its branch, a
+     * draft, as the person said: pushes the branch and opens it, as the
+     * task's own ending would have.
+     */
+    publish(taskId: string): Effect.Effect<void, unknown>
     /** The person's answer to a step that needs them. */
     answerStuck(input: {
       readonly envelope: CommandEnvelope
@@ -331,7 +337,7 @@ export class Runs extends Context.Service<
         })
 
       /** A step's result, in the task's thread: what the person reads instead of the work. */
-      const result = (run: RunRow, content: Readonly<Record<string, unknown>>) =>
+      const result = (run: Pick<RunRow, 'projectId' | 'threadId'>, content: Readonly<Record<string, unknown>>) =>
         addItem({ projectId: run.projectId, threadId: run.threadId }, 'step_result', content)
 
       /** The run is over: the task is ready for the person, or stopped. */
@@ -375,6 +381,47 @@ export class Runs extends Context.Service<
         return published.left.length === 0 ? did : `${did} Left out what the lead didn't commit: ${filesLine(published.left)}.`
       }
 
+      /** A task that ends on its branch says why, and how its pull request can still open. */
+      const onBranch = (run: RunRow) =>
+        Effect.gen(function* () {
+          const host = yield* changes.hostFor(run.projectId)
+          yield* addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            ...(host === null
+              ? {
+                  title: 'The task ends on its branch.',
+                  description: "Its repository isn't on a code host Charrette knows, so nothing was pushed.",
+                }
+              : {
+                  title: `The task ends on its branch: ${host.name} isn't connected.`,
+                  description: `Nothing was pushed. Connect ${host.name} from the project, then open the pull request from here.`,
+                }),
+          })
+        })
+
+      const publish = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [last] = yield* sql<{ runId: string; projectId: ProjectId; threadId: string; state: string }>`
+            SELECT r.id AS run_id, r.project_id, t.id AS thread_id, r.state FROM runs r
+            JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task'
+            WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC LIMIT 1`
+          if (last === undefined || last.state !== 'succeeded') return yield* new NoChangeToOpen({ taskId, why: 'working' })
+          if ((yield* changes.ofTask(taskId)).length > 0) return yield* new NoChangeToOpen({ taskId, why: 'opened' })
+          const published = yield* changes.publish({ projectId: last.projectId, taskId, runId: last.runId, end: 'draft' })
+          yield* result(
+            { projectId: last.projectId, threadId: last.threadId },
+            {
+              step: 'publish',
+              round: 0,
+              summary: publishedSummary(published, 'draft'),
+              ...(published.kind === 'opened' ? { change: published.change } : {}),
+            },
+          )
+          yield* touchCard(taskId)
+        })
+
       /**
        * The work is done: the task's ending, if its plan has one, then the
        * run is over and the task ready. Pushing and opening its pull request
@@ -383,8 +430,12 @@ export class Runs extends Context.Service<
       const conclude = (run: RunRow) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { end } = yield* stepsOf(run)
-          if (end === null) return yield* finish(run, 'succeeded')
+          // A plan made while the repository's host wasn't connected opens its pull request if it is by now.
+          const end = (yield* stepsOf(run)).end ?? (yield* changes.endFor(run.projectId))
+          if (end === null) {
+            yield* onBranch(run)
+            return yield* finish(run, 'succeeded')
+          }
           const { nodeId, attemptId } = yield* sql.withTransaction(admit(run, 'publish', 0, { end }))
           yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -1260,6 +1311,7 @@ export class Runs extends Context.Service<
       return Runs.of({
         run: (planId) => provide(run(planId)),
         workflowVersion: provide(workflowVersion),
+        publish: (taskId) => provide(publish(taskId)),
         answerStuck: (input) => provide(answerStuck(input)),
       })
     }),

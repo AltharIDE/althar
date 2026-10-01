@@ -189,6 +189,7 @@ describe('the API', () => {
               Disconnect: () => Effect.void,
               ListIssues: () => Effect.succeed({ issues: [] }),
               MarkReady: () => Effect.void,
+              OpenChange: () => Effect.void,
               RefreshTask: () => Effect.void,
               Watch: ({ since }) =>
                 Stream.make({

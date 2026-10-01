@@ -43,6 +43,8 @@ describe('a task', () => {
     await screen.findByRole('heading', { name: 'Add a retry', level: 1 })
     expect(screen.getAllByText('Claude Code · opus').length).toBeGreaterThan(0)
     expect(screen.getByText('charrette/add-a-retry')).toBeTruthy()
+    // Work under way has no pull request to open yet.
+    expect(screen.queryByRole('button', { name: 'Open a pull request' })).toBeNull()
     expect(screen.getByText('Idle')).toBeTruthy()
     expect(screen.getByText('it')).toBeTruthy()
     // The turn is over: what it did before its last message is folded.
@@ -92,6 +94,15 @@ describe('a task', () => {
     await userEvent.click(screen.getByRole('button', { name: 'More for this task' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: /Stop the task/ }))
     expect(client.stopSession).toHaveBeenCalledWith('th1')
+  })
+
+  it('opens the pull request of work that ended on its branch', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ session: null, task: { ...snapshot().task, phase: 'ready', commits: 2 } })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Open a pull request' }))
+    await waitFor(() => expect(client.openChange).toHaveBeenCalledWith('t1'))
   })
 
   it('answers what the rules keep for the person', async () => {

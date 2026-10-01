@@ -73,6 +73,7 @@ export const text = {
   readyNote: (host: string) => `Merge it on ${host} when you’re ready`,
   closed: (change: ChangeSummary, host: string) => `${text.change(change)} was closed on ${host}.`,
   markReady: 'Mark ready for review',
+  openChange: 'Open a pull request',
   openOn: (host: string) => `Open on ${host}`,
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
@@ -219,9 +220,16 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
 
   const change = snapshot.task.changes[0] ?? null
   const issue = snapshot.task.issue
+  // Work that ended on its branch can still open its pull request, as the person says.
+  const unpublished = snapshot.task.phase === 'ready' && change === null && snapshot.task.commits > 0
   // Its pull request opens beside the thread.
   const changeButton = (
     <>
+      {unpublished && (
+        <Button size="small" busy={model.pending} onClick={() => void model.openChange()}>
+          {text.openChange}
+        </Button>
+      )}
       {files.length > 0 && (
         <ChromeButton icon="file" label={text.files(files.length)} expanded={changes.open} onClick={() => changes.show()} />
       )}

@@ -124,6 +124,10 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
         return 'That request was already used for something else. Try again.'
       case 'DatabaseInUse':
         return 'Another copy of Charrette is using this profile.'
+      case 'NoChangeToOpen':
+        return text(error, 'why') === 'opened'
+          ? 'The task already has its pull request.'
+          : "The task's work isn't done yet. Its pull request opens when it is."
       case 'ChangedSinceSeen':
         return 'The pull request changed since you looked at it. Have another look before you accept it.'
       case 'NotConnected':
@@ -166,6 +170,7 @@ const hostSaid = (host: string, reason: string, said: string) => {
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
   'ChangedSinceSeen',
+  'NoChangeToOpen',
   'NotConnected',
   'NotARepository',
   'NotFound',

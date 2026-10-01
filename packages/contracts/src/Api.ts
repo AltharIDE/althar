@@ -751,6 +751,8 @@ export const Api = RpcGroup.make(
   call('ListIssues', { projectId: Schema.String }, IssueList),
   /** Marks the task's draft pull request ready for review. */
   command('MarkReady', { taskId: Schema.String }, Schema.Void),
+  /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */
+  command('OpenChange', { taskId: Schema.String }, Schema.Void),
   /**
    * Merges the task's pull request at the head the person saw, because they
    * said to; a draft is marked ready first. A pull request that moved on
