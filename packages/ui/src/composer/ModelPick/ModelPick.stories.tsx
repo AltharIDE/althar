@@ -101,6 +101,33 @@ export const Open: Story = { render: () => <Example open /> }
 export const NoEffort: Story = { render: () => <Example initial="qwen3-coder" open /> }
 /** The model in use is not one of your pins; it shows first, marked. */
 export const NotPinned: Story = { render: () => <Example initial="gemini-3-flash" open /> }
+/**
+ * Models of another runtime hand the conversation over, and say so; while
+ * its agent works, picking one asks first.
+ */
+export const HandingOver: Story = {
+  args: {
+    pinned: [OPUS, model('gpt-5.2-codex'), model('gemini-3-pro')],
+    defaultOpen: true,
+    note: (x) => (x.runtime === OPUS.runtime ? undefined : `hands the task to ${RUNTIMES.find((r) => r.id === x.runtime)?.name}`),
+    confirm: (x) => (x.runtime === OPUS.runtime ? undefined : 'Codex takes over from a brief; Claude Code’s turn stops.'),
+    text: { proceed: 'Hand it over' },
+  },
+  play: async ({ args }) => {
+    const page = within(document.body)
+    await expect(page.getByText('hands the task to Codex')).toBeInTheDocument()
+    await userEvent.click(page.getByRole('radio', { name: /GPT-5.2 Codex/ }))
+    await expect(page.getByText('Codex takes over from a brief; Claude Code’s turn stops.')).toBeInTheDocument()
+    await expect(page.getByRole('button', { name: 'Hand it over' })).toHaveFocus()
+    await expect(args.onChange).not.toHaveBeenCalled()
+    await userEvent.click(page.getByRole('button', { name: 'Cancel' }))
+    await expect(page.queryByText(/takes over from a brief/)).not.toBeInTheDocument()
+    await userEvent.click(page.getByRole('radio', { name: /GPT-5.2 Codex/ }))
+    await userEvent.click(page.getByRole('button', { name: 'Hand it over' }))
+    await expect(args.onChange).toHaveBeenCalledWith('gpt-5.2-codex')
+  },
+}
+
 /** Without onMakeDefault and onBrowse, the picker only picks. */
 export const PickOnly: Story = { args: { effort: 'Max', defaultOpen: true } }
 

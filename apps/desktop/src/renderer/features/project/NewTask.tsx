@@ -1,8 +1,21 @@
 import { useEffect, useId, useRef, useState } from 'react'
 
 import type { AgentStatus, IssueSummary, TaskEnd } from '@charrette/contracts'
-import { Button, Field, FieldError, Select, SidePanel, SidePanelBody, SidePanelTitle, taskEndText, TaskEnd as End } from '@charrette/ui'
+import {
+  Button,
+  Field,
+  FieldError,
+  LinkButton,
+  Select,
+  SidePanel,
+  SidePanelBody,
+  SidePanelTitle,
+  taskEndText,
+  TaskEnd as End,
+} from '@charrette/ui'
 
+import { ModelChoice } from '../../shared/ModelChoice'
+import type { Choice } from '../../shared/models'
 import { productName } from '../../shared/products'
 
 import type { NewTask as Planned } from './useProject'
@@ -24,6 +37,7 @@ export const text = {
   lead: 'Lead',
   review: 'Review',
   noReview: 'No review',
+  addReview: 'Add a review',
   start: 'Start the task',
   starting: 'Starting…',
   needsTitle: 'Say what the task is.',
@@ -41,8 +55,11 @@ const ENDS: ReadonlyArray<{ readonly value: TaskEnd; readonly kit: End }> = [
   { value: 'none', kit: End.PushOnly },
 ]
 
-/** What `review` holds for no review: the list's values can't be empty. */
+/** What `issue` holds for no issue: the list's values can't be empty. */
 const NONE = 'none'
+
+/** An agent on its own model and effort. */
+const ownOf = (agentId: string): Choice => ({ agentId, model: null, effort: null })
 
 export function NewTask({
   agents,
@@ -65,15 +82,17 @@ export function NewTask({
   const [end, setEnd] = useState<TaskEnd>('draft')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [lead, setLead] = useState<string | null>(null)
-  const [reviewer, setReviewer] = useState<string | null>(null)
+  const [lead, setLead] = useState<Choice | null>(null)
+  // Undefined until the person picks: another agent than the lead's. Null for no review.
+  const [reviewer, setReviewer] = useState<Choice | null | undefined>(undefined)
   const [missing, setMissing] = useState(false)
   const titleRef = useRef<HTMLInputElement>(null)
   const ids = { title: useId(), description: useId(), missing: useId() }
-  const chosenLead = lead ?? agents[0]?.id ?? null
+  const first = agents[0]
+  const chosenLead = lead ?? (first === undefined ? null : ownOf(first.id))
   // By default, another agent reviews what the lead did.
-  const chosenReviewer = reviewer ?? agents.find((agent) => agent.id !== chosenLead)?.id ?? NONE
-  const options = agents.map((agent) => ({ value: agent.id, label: agent.name }))
+  const other = agents.find((agent) => agent.id !== chosenLead?.agentId)
+  const chosenReviewer = reviewer === undefined ? (other === undefined ? null : ownOf(other.id)) : reviewer
 
   // The person's issues, for a task to come from: read once, when the panel opens.
   useEffect(() => {
@@ -106,7 +125,7 @@ export function NewTask({
       title,
       description,
       lead: chosenLead,
-      reviewer: chosenReviewer === NONE ? null : chosenReviewer,
+      reviewer: chosenReviewer,
       issue: issue === NONE ? null : issue,
       end: connected ? end : null,
     })
@@ -154,16 +173,29 @@ export function NewTask({
             value={description}
             onChange={(event) => setDescription(event.target.value)}
           />
-          <span>{text.lead}</span>
-          <Select label={text.lead} variant="filled" value={chosenLead} options={options} onChange={setLead} />
-          <span>{text.review}</span>
-          <Select
-            label={text.review}
-            variant="filled"
-            value={chosenReviewer}
-            options={[...options, { value: NONE, label: text.noReview }]}
-            onChange={setReviewer}
-          />
+          {chosenLead !== null && (
+            <>
+              <span>{text.lead}</span>
+              <ModelChoice owner={text.lead} agents={agents} value={chosenLead} onChange={setLead} variant="field" placement="below" />
+              <span>{text.review}</span>
+              {chosenReviewer === null ? (
+                <span>
+                  <LinkButton onClick={() => setReviewer(ownOf(other?.id ?? chosenLead.agentId))}>{text.addReview}</LinkButton>
+                </span>
+              ) : (
+                <ModelChoice
+                  owner={text.review}
+                  agents={agents}
+                  value={chosenReviewer}
+                  onChange={setReviewer}
+                  onRemove={() => setReviewer(null)}
+                  variant="field"
+                  placement="below"
+                  text={{ remove: text.noReview }}
+                />
+              )}
+            </>
+          )}
           {connected && (
             <>
               <span>{text.end}</span>

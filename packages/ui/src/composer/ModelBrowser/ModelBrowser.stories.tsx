@@ -2,11 +2,11 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { effortFor, MODEL_LIST, RUNTIMES, useModelPrefs } from '../../fixtures/models'
+import { effortFor, MODEL_LIST, RUNTIMES, UNKNOWN_MODEL, useModelPrefs } from '../../fixtures/models'
 import { Button } from '../../primitives/Button/Button'
 import { ModelBrowser } from './ModelBrowser'
 
-function Example({ onConnect }: { onConnect?: () => void }) {
+function Example({ onConnect, models = MODEL_LIST }: { onConnect?: () => void; models?: typeof MODEL_LIST }) {
   const [open, setOpen] = useState(true)
   const [model, setModel] = useState('claude-opus-5')
   const prefs = useModelPrefs()
@@ -15,7 +15,7 @@ function Example({ onConnect }: { onConnect?: () => void }) {
       <Button onClick={() => setOpen(true)}>Browse models ({model})</Button>
       {open && (
         <ModelBrowser
-          models={MODEL_LIST}
+          models={models}
           runtimes={RUNTIMES}
           value={model}
           pins={prefs.pins}
@@ -77,6 +77,17 @@ export const NoMatch: Story = {
   render: () => <Example />,
   play: async () => {
     await userEvent.type(within(document.body).getByRole('searchbox'), 'mistral')
+  },
+}
+
+/** A model its runtime doesn't describe: no mark, no effort, no context window. */
+export const Undescribed: Story = {
+  render: () => <Example models={[...MODEL_LIST, UNKNOWN_MODEL]} />,
+  play: async () => {
+    const body = within(document.body)
+    await userEvent.type(body.getByRole('searchbox'), 'some-new')
+    const row = body.getByRole('button', { name: 'Use some-new-model' }).closest('li')
+    await expect(row).toHaveTextContent('—')
   },
 }
 

@@ -42,6 +42,13 @@ export class SessionFailed extends Schema.TaggedError<SessionFailed>()('SessionF
   summary: Schema.String,
 }) {}
 
+/** The agent didn't take the effort it was asked for, or offers none; it carries on as it was. */
+export class EffortUnchanged extends Schema.TaggedError<EffortUnchanged>()('EffortUnchanged', {
+  agentId: Schema.String,
+  effort: Schema.String,
+  summary: Schema.String,
+}) {}
+
 /** The agent didn't take the model it was asked for; it carries on with the one it had. */
 export class ModelUnchanged extends Schema.TaggedError<ModelUnchanged>()('ModelUnchanged', {
   agentId: Schema.String,

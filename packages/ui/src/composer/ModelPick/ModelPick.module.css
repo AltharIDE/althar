@@ -80,9 +80,39 @@
   font-weight: 400;
   color: var(--t-3);
 }
+.note {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .check {
+  flex: none;
   margin-left: auto;
   visibility: hidden;
+}
+
+/* A pick that asks first: what it would do, and the answer. */
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 9px 9px 8px;
+  border-top: 1px solid var(--line);
+}
+.question {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-2);
+}
+.answers {
+  display: flex;
+  gap: 6px;
 }
 .current .check {
   visibility: visible;

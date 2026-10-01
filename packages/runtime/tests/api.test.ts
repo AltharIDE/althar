@@ -14,6 +14,7 @@ import { RpcClient } from 'effect/rpc'
 import { connection, services } from '../src/Api'
 import {
   ChangedSinceSeen,
+  EffortUnchanged,
   GitFailed,
   NoChangeToOpen,
   ModelUnchanged,
@@ -191,6 +192,16 @@ describe('the API', () => {
         yield* client.SetModel(choosing)
         yield* client.SetModel(choosing)
         assert.strictEqual((yield* client.GetThread({ threadId: task.threadId })).session?.model, 'large')
+        yield* client.SetEffort({ commandId: commandId(), threadId: task.threadId, effort: 'high' })
+        assert.strictEqual((yield* client.GetThread({ threadId: task.threadId })).session?.effort, 'high')
+        const offered = yield* client.GetModels({})
+        assert.deepStrictEqual(
+          offered.map((agent) => agent.agentId),
+          ['claude-code', 'codex', 'opencode'],
+        )
+        yield* client.SetDefaultEffort({ commandId: commandId(), agentId: 'codex', model: 'large', effort: 'high' })
+        const codex = (yield* client.GetModels({})).find((agent) => agent.agentId === 'codex')
+        assert.deepStrictEqual(codex?.defaults, [{ model: 'large', effort: 'high' }])
         yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
         yield* client.StopSession({ commandId: commandId(), threadId: task.threadId })
         assert.isNull((yield* client.GetThread({ threadId: task.threadId })).session)
@@ -450,7 +461,13 @@ describe('the coordinator, through the API', () => {
         const { client, grant } = yield* connected({ signedOut: ['claude-code'] })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const snapshot = yield* client.GetCoordinator({ projectId: project.id })
-        assert.deepStrictEqual(snapshot.suggested, { agentId: 'claude-code', agentName: 'Fake claude-code', model: null, available: false })
+        assert.deepStrictEqual(snapshot.suggested, {
+          agentId: 'claude-code',
+          agentName: 'Fake claude-code',
+          model: null,
+          effort: null,
+          available: false,
+        })
         const refused = yield* Effect.flip(
           client.Send({ commandId: commandId(), threadId: snapshot.threadId, body: 'Hello', disposition: 'after_current' }),
         )
@@ -462,20 +479,21 @@ describe('the coordinator, through the API', () => {
           ],
         )
         // Started on another agent, it waits for what the person says.
-        yield* client.StartSession({ commandId: commandId(), threadId: snapshot.threadId, agentId: 'codex', model: 'large' })
+        yield* client.StartSession({ commandId: commandId(), threadId: snapshot.threadId, agentId: 'codex', model: 'large', effort: 'low' })
         yield* client.Send({ commandId: commandId(), threadId: snapshot.threadId, body: 'Hello', disposition: 'after_current' })
         const answered = yield* eventually(
           client.GetCoordinator({ projectId: project.id }),
           (coordinator) => coordinator.items.filter((item) => item.kind === 'agent_message').length > 0,
         )
         assert.deepStrictEqual([answered.session?.agentId, answered.session?.model], ['codex', 'large'])
-        assert.deepStrictEqual((yield* client.GetCoordinator({ projectId: project.id })).suggested?.model, 'large')
+        const { suggested } = yield* client.GetCoordinator({ projectId: project.id })
+        assert.deepStrictEqual([suggested?.model, suggested?.effort], ['large', 'low'])
         // Stopped, it starts again on the same agent and model when the person next says something.
         yield* client.StopSession({ commandId: commandId(), threadId: snapshot.threadId })
         yield* eventually(client.GetCoordinator({ projectId: project.id }), (coordinator) => coordinator.session === null)
         yield* client.Send({ commandId: commandId(), threadId: snapshot.threadId, body: 'Again', disposition: 'after_current' })
         const again = yield* eventually(client.GetCoordinator({ projectId: project.id }), (coordinator) => coordinator.session !== null)
-        assert.deepStrictEqual([again.session?.agentId, again.session?.model], ['codex', 'large'])
+        assert.deepStrictEqual([again.session?.agentId, again.session?.model, again.session?.effort], ['codex', 'large', 'low'])
       }),
     ),
   )
@@ -622,6 +640,11 @@ describe('words', () => {
       "Codex is still on its old model. The agent doesn't offer huge.",
     )
     assert.strictEqual(said(new ModelUnchanged({ agentId: 'codex', model: 'huge', summary: '' })), 'Codex is still on its old model.')
+    assert.strictEqual(
+      said(new EffortUnchanged({ agentId: 'codex', effort: 'max', summary: 'It offers no choice of effort.' })),
+      'Codex still thinks as hard as it did. It offers no choice of effort.',
+    )
+    assert.strictEqual(said(new EffortUnchanged({ agentId: 'codex', effort: 'max', summary: '' })), 'Codex still thinks as hard as it did.')
     assert.strictEqual(said({ _tag: 'AttentionClosed' }), 'That call was already answered, or the agent took it back.')
     assert.strictEqual(
       said(new GitFailed({ args: ['worktree', 'add'], cwd: '/r', stderr: 'fatal: a branch named x already exists\n' })),

@@ -15,8 +15,8 @@ export interface ModelInfo {
   mark?: Brand
   /** The runtime that drives it, by id. */
   runtime: string
-  /** Context window, in thousands of tokens. */
-  context: number
+  /** Context window, in thousands of tokens, where the runtime says. */
+  context?: number
   /** Effort levels in the runtime's own words, lowest first. Empty: no effort control. */
   efforts: readonly string[]
   note?: string

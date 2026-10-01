@@ -1,4 +1,5 @@
 import {
+  type AgentModels,
   Api,
   ApiError,
   type BoardSnapshot,
@@ -59,9 +60,15 @@ export interface Client {
   readonly getFileDiff: (taskId: string, path: string) => Promise<FileDiff>
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   readonly getBoard: (projectId: string) => Promise<BoardSnapshot>
-  readonly startSession: (input: { readonly threadId: string; readonly agentId: string; readonly model?: string }) => Promise<string>
-  readonly switchAgent: (input: { readonly threadId: string; readonly agentId: string; readonly model?: string }) => Promise<string>
+  readonly startSession: (input: Start) => Promise<string>
+  readonly switchAgent: (input: Start) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
+  /** How hard the thread's agent thinks, as the agent names it. */
+  readonly setEffort: (input: { readonly threadId: string; readonly effort: string }) => Promise<void>
+  /** The models each agent offers, and its efforts, as far as they are known. */
+  readonly getModels: () => Promise<ReadonlyArray<AgentModels>>
+  /** The person's default effort for one of an agent's models: every session on it starts there. */
+  readonly setDefaultEffort: (input: { readonly agentId: string; readonly model: string; readonly effort: string }) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
   readonly stopSession: (threadId: string) => Promise<void>
   readonly send: (input: {
@@ -118,6 +125,14 @@ export interface Client {
   /** Calls `listener` with each change after `since` (or from now) until the returned function is called. */
   readonly watch: (listener: (event: WatchEvent) => void, since?: number) => () => void
   readonly close: () => Promise<void>
+}
+
+/** An agent to start on a thread; without a model or effort, the agent's own. */
+export interface Start {
+  readonly threadId: string
+  readonly agentId: string
+  readonly model?: string
+  readonly effort?: string
 }
 
 /** Tell a step's agent what to do, hand the step to an agent, or abandon it. */
@@ -179,6 +194,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     startSession: (input) => command((commandId) => api.StartSession({ commandId, ...input })),
     switchAgent: (input) => command((commandId) => api.SwitchAgent({ commandId, ...input })),
     setModel: (input) => command((commandId) => api.SetModel({ commandId, ...input })),
+    setEffort: (input) => command((commandId) => api.SetEffort({ commandId, ...input })),
+    getModels: () => settle(api.GetModels({})),
+    setDefaultEffort: (input) => command((commandId) => api.SetDefaultEffort({ commandId, ...input })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     stopSession: (threadId) => command((commandId) => api.StopSession({ commandId, threadId })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),

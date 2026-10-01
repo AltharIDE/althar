@@ -42,6 +42,25 @@ export const AgentStatus = Schema.Struct({
 })
 export type AgentStatus = typeof AgentStatus.Type
 
+/**
+ * The models an agent offers, and how hard each can be asked to think, in
+ * the agent's own names: from its latest session, or asked of it once.
+ */
+export const AgentModels = Schema.Struct({
+  agentId: Schema.String,
+  models: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, description: Schema.NullOr(Schema.String) })),
+  /** Lowest first; empty where the agent has no such choice. */
+  efforts: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  /** What it is on, as last seen: its own default, or what it was last set to. */
+  model: Schema.NullOr(Schema.String),
+  effort: Schema.NullOr(Schema.String),
+  /** The person's default effort for each model they set one for: a session on it starts there. */
+  defaults: Schema.Array(Schema.Struct({ model: Schema.String, effort: Schema.String })),
+  /** Being asked now, for an agent not seen before: read again shortly. */
+  probing: Schema.Boolean,
+})
+export type AgentModels = typeof AgentModels.Type
+
 export const Status = Schema.Struct({
   apiVersion: Schema.Number,
   appVersion: Schema.String,
@@ -374,6 +393,8 @@ export const PlanStep = Schema.Struct({
   key: Schema.Literals(['implement', 'review']),
   agentId: Schema.String,
   model: Schema.NullOr(Schema.String),
+  /** How hard its agent thinks; the agent's own default without one. */
+  effort: Schema.optional(Schema.NullOr(Schema.String)),
   skipped: Schema.Boolean,
 })
 export type PlanStep = typeof PlanStep.Type
@@ -449,6 +470,8 @@ export const SessionSummary = Schema.Struct({
   agentName: Schema.String,
   state: Schema.String,
   model: Schema.NullOr(Schema.String),
+  /** How hard it thinks, where the agent offers a choice. */
+  effort: Schema.NullOr(Schema.String),
   /** The models the agent offers for this session. */
   models: Schema.Array(Schema.String),
   turnRunning: Schema.Boolean,
@@ -609,9 +632,15 @@ export const CoordinatorSnapshot = Schema.Struct({
   cursor: Cursor,
   project: Schema.Struct({ id: Schema.String, name: Schema.String }),
   session: Schema.NullOr(SessionSummary),
-  /** The agent and model it starts on: whatever you used last. Unavailable when that agent isn't signed in. */
+  /** The agent, model and effort it starts on: whatever you used last. Unavailable when that agent isn't signed in. */
   suggested: Schema.NullOr(
-    Schema.Struct({ agentId: Schema.String, agentName: Schema.String, model: Schema.NullOr(Schema.String), available: Schema.Boolean }),
+    Schema.Struct({
+      agentId: Schema.String,
+      agentName: Schema.String,
+      model: Schema.NullOr(Schema.String),
+      effort: Schema.NullOr(Schema.String),
+      available: Schema.Boolean,
+    }),
   ),
   items: Schema.Array(ThreadItem),
   earlier: Schema.Boolean,
@@ -709,9 +738,23 @@ export const Api = RpcGroup.make(
     { planId: Schema.String, steps: Schema.Array(PlanStep), end: Schema.optional(Schema.NullOr(TaskEnd)) },
     Schema.Void,
   ),
-  command('StartSession', { threadId: Schema.String, agentId: Schema.String, model: Schema.optional(Schema.String) }, Schema.String),
-  command('SwitchAgent', { threadId: Schema.String, agentId: Schema.String, model: Schema.optional(Schema.String) }, Schema.String),
+  command(
+    'StartSession',
+    { threadId: Schema.String, agentId: Schema.String, model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) },
+    Schema.String,
+  ),
+  command(
+    'SwitchAgent',
+    { threadId: Schema.String, agentId: Schema.String, model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) },
+    Schema.String,
+  ),
   command('SetModel', { threadId: Schema.String, model: Schema.String }, Schema.Void),
+  /** How hard the thread's agent thinks, from here on. */
+  command('SetEffort', { threadId: Schema.String, effort: Schema.String }, Schema.Void),
+  /** Every agent's models and efforts, as far as Charrette knows them. */
+  call('GetModels', {}, Schema.Array(AgentModels)),
+  /** The person's default effort for one of an agent's models, kept for the profile. */
+  command('SetDefaultEffort', { agentId: Schema.String, model: Schema.String, effort: Schema.String }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
   command('Send', { threadId: Schema.String, body: Schema.String, disposition: Disposition }, Schema.Void),

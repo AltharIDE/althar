@@ -1,4 +1,5 @@
 import type {
+  AgentModels,
   AgentStatus,
   ChangeSummary,
   ConnectionList,
@@ -28,6 +29,38 @@ export const agents: ReadonlyArray<AgentStatus> = [
 ]
 
 export const status: Status = { apiVersion: 1, appVersion: '0.0.0', agents }
+
+const efforts = (...names: ReadonlyArray<string>) => names.map((name) => ({ id: name.toLowerCase().replace(' ', '-'), name }))
+
+/** What the agents offer: Claude Code's own default first, Codex's models by id, OpenCode still being asked. */
+export const models: ReadonlyArray<AgentModels> = [
+  {
+    agentId: 'claude-code',
+    models: [
+      { id: 'default', name: 'Default (recommended)', description: 'Opus for complex work' },
+      { id: 'opus', name: 'Opus', description: null },
+      { id: 'sonnet', name: 'Sonnet', description: 'For everyday tasks' },
+    ],
+    efforts: efforts('Low', 'Medium', 'High'),
+    model: 'default',
+    effort: 'medium',
+    defaults: [],
+    probing: false,
+  },
+  {
+    agentId: 'codex',
+    models: [
+      { id: 'gpt-5.2-codex', name: 'gpt-5.2-codex', description: null },
+      { id: 'gpt-5.2', name: 'gpt-5.2', description: null },
+    ],
+    efforts: efforts('Low', 'Medium', 'High', 'Extra high'),
+    model: 'gpt-5.2-codex',
+    effort: 'medium',
+    defaults: [],
+    probing: false,
+  },
+  { agentId: 'opencode', models: [], efforts: [], model: null, effort: null, defaults: [], probing: true },
+]
 
 export const project: ProjectSummary = {
   id: 'p1',
@@ -183,7 +216,7 @@ export const coordinatorSnapshot = (overrides: Partial<CoordinatorSnapshot> = {}
   cursor: 5,
   project: { id: 'p1', name: 'meridian' },
   session: null,
-  suggested: { agentId: 'claude-code', agentName: 'Claude Code', model: null, available: true },
+  suggested: { agentId: 'claude-code', agentName: 'Claude Code', model: null, effort: null, available: true },
   items: [],
   earlier: false,
   host: null,
@@ -247,6 +280,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     agentName: 'Claude Code',
     state: 'active',
     model: 'opus',
+    effort: 'high',
     models: ['opus', 'sonnet'],
     turnRunning: false,
   },
@@ -322,6 +356,9 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     startSession: vi.fn(async () => 's1'),
     switchAgent: vi.fn(async () => 's2'),
     setModel: vi.fn(async () => {}),
+    setEffort: vi.fn(async () => {}),
+    getModels: vi.fn(async () => models),
+    setDefaultEffort: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     stopSession: vi.fn(async () => {}),
     send: vi.fn(async () => {}),

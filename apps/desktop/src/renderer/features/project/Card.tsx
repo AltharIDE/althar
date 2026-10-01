@@ -1,19 +1,20 @@
 import { useState } from 'react'
 
 import type { AgentStatus, PlanStep, TaskEnd as End } from '@charrette/contracts'
-import { type IssueRefProps, type LaunchStep, Select, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@charrette/ui'
+import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@charrette/ui'
 
 import { modelInfo } from '../../shared/agents'
+import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
 import { ago } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
 
 /*
  * A task's card in the Talk room. Before it starts, its plan: who does each
- * step, why the coordinator chose the lead, and the time it starts on its
- * own, which the runtime keeps. You can change who does a step, skip the
- * review, hold it, or start it now. Once it starts, where it stands, and a
- * way in.
+ * step, on which model and how hard it thinks, why the coordinator chose the
+ * lead, and the time it starts on its own, which the runtime keeps. You can
+ * change who does a step, skip the review, hold it, or start it now. Once it
+ * starts, where it stands, and a way in.
  */
 
 /** How long a plan waits before it starts on its own: the runtime's countdown. */
@@ -92,7 +93,6 @@ function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; 
     actions.onChange(plan.id, next, nextEnd)
   }
   const from = fromOf(card)
-  const options = actions.agents.map((agent) => ({ value: agent.id, label: agent.name }))
   return (
     <TaskLaunch
       task={card.slug}
@@ -103,15 +103,21 @@ function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; 
       onStepsChange={(next) =>
         change(steps.map((step) => ({ ...step, skipped: next.find((launch) => launch.id === step.key)?.skipped ?? step.skipped })))
       }
-      picker={({ step, owner }) => (
-        <Select
-          label={owner}
-          variant="filled"
-          value={steps.find((planned) => planned.key === step.id)?.agentId ?? null}
-          options={options}
-          onChange={(agentId) => change(steps.map((planned) => (planned.key === step.id ? { ...planned, agentId, model: null } : planned)))}
-        />
-      )}
+      picker={({ step, owner }) => {
+        const planned = steps.find((candidate) => candidate.key === step.id)
+        return (
+          planned !== undefined && (
+            <ModelChoice
+              owner={owner}
+              agents={actions.agents}
+              value={{ agentId: planned.agentId, model: planned.model, effort: planned.effort ?? null }}
+              onChange={(choice) => change(steps.map((candidate) => (candidate.key === step.id ? { ...candidate, ...choice } : candidate)))}
+              variant="field"
+              placement="below"
+            />
+          )
+        )
+      }}
       wait={COUNTDOWN}
       {...(plan.startsAt === null ? {} : { startsAt: Date.parse(plan.startsAt) })}
       held={card.phase === 'held'}

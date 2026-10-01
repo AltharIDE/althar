@@ -14,7 +14,8 @@ import {
 
 import { messageOf } from '../../data/client'
 import { useServices, useWatch } from '../../data/services'
-import { caughtUp, mergeItems, waiting } from '../../shared/items'
+import { caughtUp, mergeItems, newestReads, waiting } from '../../shared/items'
+import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 
 /*
@@ -36,9 +37,9 @@ const CARDS = new Set(['provider_session', 'attention_request', 'task_plan', 'ru
 export interface NewTask {
   readonly title: string
   readonly description: string
-  readonly lead: string
+  readonly lead: Choice
   /** Who reviews it, or null for no review. */
-  readonly reviewer: string | null
+  readonly reviewer: Choice | null
   /** The issue it comes from, by its ref, if any. */
   readonly issue: string | null
   /** What happens when the work is done; null where the repository's host isn't connected. */
@@ -61,11 +62,13 @@ export interface ProjectModel {
   readonly loadingEarlier: boolean
   readonly loadEarlier: () => Promise<void>
   /** Says something to the coordinator, which starts it on `agentId` if it isn't running. */
-  readonly say: (body: string, agentId: string | null) => Promise<void>
+  /** Tells the coordinator something; a coordinator not running starts as the person chose, when they did. */
+  readonly say: (body: string, choice: Choice | null) => Promise<void>
   readonly sayNow: (body: string) => Promise<void>
   readonly interrupt: () => Promise<void>
   /** Moves the running coordinator to another agent. */
-  readonly switchAgent: (agentId: string) => Promise<void>
+  /** Puts the coordinator on another model or effort, or another agent with one. */
+  readonly choose: (choice: Choice) => Promise<void>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
@@ -88,6 +91,7 @@ export const useProject = (projectId: string): ProjectModel => {
   const [starting, setStarting] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const [newest] = useState(newestReads)
   const changed = useRef({ head: false, cards: false, items: new Set<string>() })
   const threadId = coordinator?.threadId ?? null
 
@@ -101,13 +105,13 @@ export const useProject = (projectId: string): ProjectModel => {
   /** The thread's head again: the agent working, the one it would start on. Its items stay as they are. */
   const readHead = useCallback(
     () =>
-      client
-        .getCoordinator(projectId, { limit: 0 })
-        .then(
-          (head) => setCoordinator((current) => (current === null ? head : { ...head, items: current.items, earlier: current.earlier })),
-          fail,
-        ),
-    [client, projectId, fail],
+      newest(
+        'head',
+        client.getCoordinator(projectId, { limit: 0 }),
+        (head) => setCoordinator((current) => (current === null ? head : { ...head, items: current.items, earlier: current.earlier })),
+        fail,
+      ),
+    [client, projectId, newest, fail],
   )
 
   useEffect(() => {
@@ -130,8 +134,8 @@ export const useProject = (projectId: string): ProjectModel => {
     if (head) void readHead()
     const read = new Set(items)
     if (cards) for (const item of coordinator?.items ?? []) if (item.kind === 'task') read.add(item.id)
-    for (const itemId of read) void client.getThreadItem(threadId, itemId).then((item) => arrived([item]), fail)
-  }, [client, threadId, coordinator, readHead, arrived, fail])
+    for (const itemId of read) void newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail)
+  }, [client, threadId, coordinator, readHead, newest, arrived, fail])
 
   useWatch((event) => {
     if (event._tag === 'Streaming') {
@@ -200,8 +204,8 @@ export const useProject = (projectId: string): ProjectModel => {
           title: input.title.trim(),
           ...(input.description.trim() === '' ? {} : { description: input.description.trim() }),
           steps: [
-            { key: 'implement', agentId: input.lead, model: null, skipped: false },
-            ...(input.reviewer === null ? [] : [{ key: 'review' as const, agentId: input.reviewer, model: null, skipped: false }]),
+            { key: 'implement', ...input.lead, skipped: false },
+            ...(input.reviewer === null ? [] : [{ key: 'review' as const, ...input.reviewer, skipped: false }]),
           ],
           ...(input.issue === null ? {} : { issue: input.issue }),
           end: input.end,
@@ -242,16 +246,26 @@ export const useProject = (projectId: string): ProjectModel => {
     starting,
     loadingEarlier,
     loadEarlier,
-    say: (body, agentId) =>
+    say: (body, choice) =>
       act(async () => {
-        // The runtime starts it on the agent last used; another, the person picked, starts first.
-        if (threadId !== null && coordinator?.session === null && agentId !== null && agentId !== coordinator.suggested?.agentId)
-          await client.startSession({ threadId, agentId })
+        // The runtime starts it as it ran last; anything else the person picked starts first.
+        const suggested = coordinator?.suggested
+        const same =
+          suggested != null &&
+          choice?.agentId === suggested.agentId &&
+          choice.model === suggested.model &&
+          choice.effort === suggested.effort
+        if (threadId !== null && coordinator?.session === null && choice !== null && !same)
+          await client.startSession(startOf(threadId, choice))
         await send(body, 'after_current')
       }),
     sayNow: (body) => act(() => send(body, 'interrupt_and_continue')),
     interrupt: () => act(async () => (threadId === null ? undefined : client.interrupt(threadId))),
-    switchAgent: (agentId) => act(async () => (threadId === null ? undefined : client.switchAgent({ threadId, agentId }))),
+    choose: (choice) =>
+      act(async () => {
+        const session = coordinator?.session
+        if (threadId !== null && session != null) await moveTo(client, threadId, runningOn(session), choice)
+      }),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     changePlan: (planId, steps, end) => act(() => client.changePlan(planId, steps, end)),

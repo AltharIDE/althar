@@ -41,6 +41,8 @@ export interface ModelBrowserText {
   pinTitle: (pinned: boolean) => string
   /** A context window, in thousands of tokens. */
   context: (k: number) => string
+  /** A model whose runtime doesn't say its context window. */
+  noContext: string
   empty: (query: string) => string
   keys: { escape: string; up: string; down: string; enter: string; pin: string }
   move: string
@@ -65,6 +67,7 @@ export const modelBrowserText: ModelBrowserText = {
   pin: (model) => `Pin ${model}`,
   pinTitle: (pinned) => (pinned ? 'Unpin' : 'Pin'),
   context: (k) => (k >= 1000 ? `${k / 1000}M` : `${k}k`),
+  noContext: '—',
   empty: (q) => `No model matches “${q}”.`,
   keys: { escape: 'esc', up: '↑', down: '↓', enter: '↵', pin: '⌘P' },
   move: 'move',
@@ -310,7 +313,7 @@ export function ModelBrowser({
                         )}
                       </span>
                       <span className={s.ctx} id={ctx}>
-                        {t.context(m.context)}
+                        {m.context === undefined ? t.noContext : t.context(m.context)}
                       </span>
                       {m.efforts.length > 0 ? (
                         <Select

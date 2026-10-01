@@ -2,8 +2,8 @@ import { Brand, type ModelInfo } from '@charrette/ui'
 
 /*
  * How an agent is drawn: its mark, and a ModelInfo for the kit's components,
- * which take one already resolved. The model's own name comes from the agent;
- * Charrette doesn't keep a catalogue of models yet.
+ * which take one already resolved. The model's own name comes from the agent
+ * (see models.ts).
  */
 
 const BRANDS: Readonly<Record<string, Brand>> = {
@@ -23,7 +23,6 @@ export const modelInfo = (agent: { readonly id: string; readonly name: string },
     short: model === null ? agent.name : `${agent.name} · ${model}`,
     ...(mark === undefined ? {} : { mark }),
     runtime: agent.id,
-    context: 0,
     efforts: [],
   }
 }

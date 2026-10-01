@@ -41,12 +41,12 @@ MVVM in feature folders ([ADR-010](../../docs/decisions/010-desktop-app-mvvm.md)
 
 | Folder | What it holds |
 | --- | --- |
-| `data/` | The client: Effect inside, plain promises and a subscription outside; the services view models reach through React |
+| `data/` | The client: Effect inside, plain promises and a subscription outside; the services view models reach through React; the models each agent offers, read once for the window |
 | `features/start` | The agents on this Mac and the projects; opening a folder by the button, ⌘N or a drop |
 | `features/project` | A project's window: the coordinator's thread with each task's card (its plan before it starts, then where it stands), the agent the coordinator runs on, and a task you plan yourself, beside it |
 | `features/board` | A project's board: its lanes, the dock beside them, and what you answer, accept or send back from it |
 | `features/task` | A task's thread, the calls waiting on you, the composer, and what it changed |
-| `shared/` | A thread's items as blocks, drawn with the kit (finished work folded, steps' results under it), and how agents and times are drawn |
+| `shared/` | A thread's items as blocks, drawn with the kit (finished work folded, steps' results under it); the model picker every conversation and plan step uses; how agents and times are drawn |
 
 Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view (`*View.tsx`) and its styles. `router.tsx` puts the routes together, with the place in the hash, since the page loads from a file.
 
@@ -57,6 +57,7 @@ Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view
 - **The page is locked down** (07's renderer list). Sandboxed, context-isolated, no Node, a strict Content Security Policy, no new windows and no navigation away, no web permissions granted, and no paths. Links open in the person's browser, for `https:` and local `http:` only.
 - **Test hooks stay out of packaged builds.** `CHARRETTE_FAKE_AGENTS` works only in a build made with `bun run build`; `bun run build:package` leaves the code out. It swaps in the fake agent, the connectors' fake GitHub, and secrets kept in memory, so the end-to-end tests never reach a network or the Keychain.
 - **Words on screen follow [the glossary](../../docs/glossary.md).**
+- **One model picker for every agent.** Every agent's models are one list, each known by its agent and its own id; picking another agent's model hands the conversation to that agent, which the picker says on those models, and asks before while a turn is under way. Default efforts are the runtime's, so every way a session starts uses them; pins are only how this window lists models, so they stay in its storage, as conveniences that may be lost. Until the person pins one, each agent's current model is pinned.
 - **Work folds; results stand.** A turn's work (its tool calls, thoughts, plan, and what it said on the way) folds under how long it worked; only its last message stays open, and nothing when a step's result follows, since the step's summary is what the person reads. While a turn runs, the fold says how long it has worked so far and what it is doing now.
 - **A step that needs you is a call in the task.** It says what went wrong and what Charrette tried, with the kit's `Stuck`: tell the lead, hand the step to another agent, or abandon it; for a review, review again or go on without it.
 - **A project is a conversation, a board, or both** (⌘1–3). The board reads every task's card and every call in one go (`GetBoard`) and reads again when something it shows changes: a task, plan, run, step, session, turn, call, pull request or worktree, not what is said in a thread. What you open from it goes in the dock beside it: a call is answered there as in its task, work ready to accept is merged at the head the dock showed, or sent back to its lead, and a task's changes open over the window. The bar says how much runs and how much needs you, and opens the first of it.

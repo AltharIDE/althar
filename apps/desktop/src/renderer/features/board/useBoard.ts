@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BoardSnapshot, BoardTask } from '@charrette/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
+import { newestReads } from '../../shared/items'
 import { useServices, useWatch } from '../../data/services'
 
 /*
@@ -65,15 +66,21 @@ export const useBoard = (projectId: string): BoardModel => {
   // Watched from the first read on; later reads don't start the watch again.
   const [since, setSince] = useState<number | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const [newest] = useState(newestReads)
 
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
   const read = useCallback(() => {
     timer.current = undefined
-    client.getBoard(projectId).then((read) => {
-      setBoard(read)
-      setSince((first) => first ?? read.cursor)
-    }, fail)
-  }, [client, projectId, fail])
+    void newest(
+      'board',
+      client.getBoard(projectId),
+      (read) => {
+        setBoard(read)
+        setSince((first) => first ?? read.cursor)
+      },
+      fail,
+    )
+  }, [client, projectId, newest, fail])
 
   useEffect(() => {
     read()

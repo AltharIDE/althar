@@ -29,7 +29,7 @@
 -- account_state: ok, warning, limited
 -- account_status_source: error, side_channel
 -- provider_session_state: probing, auth_required, ready, starting, active, waiting_approval, completed, cancelling, cancelled, lost, reconciling, uncertain, failed, superseded
--- process_purpose: agent, verify, setup, git, other
+-- process_purpose: agent, verify, setup, git, other, probe
 -- process_state: launching, running, exited, killed, unknown
 -- tool_kind: read, edit, delete, move, search, execute, think, fetch, switch_mode, other
 -- permission_request_state: open, decided, cancelled
@@ -932,3 +932,11 @@ CREATE INDEX external_links_by_task ON external_links (task_id);
 CREATE INDEX external_links_listening ON external_links (listening) WHERE listening = 1;
 
 CREATE UNIQUE INDEX observations_once ON observations (subject_type, subject_id, kind, json_extract(payload, '$.id')) WHERE json_extract(payload, '$.id') IS NOT NULL;
+
+CREATE TABLE model_preferences (
+  agent_id TEXT NOT NULL,
+  model TEXT NOT NULL,
+  effort TEXT NOT NULL,
+  updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  PRIMARY KEY (agent_id, model)
+) STRICT;

@@ -90,6 +90,20 @@ describe('normalize', () => {
     ]) {
       assert.strictEqual(normalize(update as acp.SessionUpdate)._tag, 'Other')
     }
+    // Ungrouped choices keep their names too.
+    assert.deepStrictEqual(
+      normalizeOptions([
+        {
+          id: 'effort',
+          name: 'Effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'high',
+          options: [{ value: 'high', name: 'High' }],
+        },
+      ])[0]?.choices,
+      [{ value: 'high', name: 'High' }],
+    )
   })
 })
 
@@ -107,8 +121,8 @@ describe('normalizeOptions', () => {
             group: 'g',
             name: 'G',
             options: [
-              { value: 'a', name: 'A' },
-              { value: 'b', name: 'B' },
+              { value: 'a', name: 'A', description: 'The first' },
+              { value: 'b', name: 'B', description: null },
             ],
           },
         ],
@@ -116,8 +130,19 @@ describe('normalizeOptions', () => {
       { id: 'fast', name: 'Fast', type: 'boolean', currentValue: false },
     ]
     assert.deepStrictEqual(normalizeOptions(options), [
-      { id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: 'a', values: ['a', 'b'] },
-      { id: 'fast', name: 'Fast', type: 'boolean', currentValue: false, values: [] },
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'a',
+        values: ['a', 'b'],
+        choices: [
+          { value: 'a', name: 'A', description: 'The first' },
+          { value: 'b', name: 'B' },
+        ],
+      },
+      { id: 'fast', name: 'Fast', type: 'boolean', currentValue: false, values: [], choices: [] },
     ])
     assert.deepStrictEqual(normalizeOptions(null), [])
   })
