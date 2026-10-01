@@ -223,6 +223,8 @@ export class Changes extends Context.Service<
     ofTask(taskId: string): Effect.Effect<ReadonlyArray<ChangeSummary>, unknown>
     /** Asks the code host now, rather than at the next turn of listening. */
     refresh(taskId: string): Effect.Effect<void>
+    /** Does something with a task's pull request as one action: one at a time with replying, pushing, marking ready and merging. */
+    exclusive<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
     /** What a new task of the project does when its work is done: a draft pull request when its repository's host is connected, else nothing outside. */
     endFor(projectId: string): Effect.Effect<'draft' | null, unknown>
     /** The code host the project's repository is on, and whether Charrette is connected to it; null where its remotes name none Charrette knows. */
@@ -1026,6 +1028,7 @@ export class Changes extends Context.Service<
         publish: (input) => provide(publish(input)),
         pushChanges: (taskId) => provide(locked(taskId)(pushChanges(taskId))),
         markReady: (taskId) => provide(locked(taskId)(markReady(taskId))),
+        exclusive: (taskId, effect) => locked(taskId)(effect),
         merge: (taskId, head) => provide(locked(taskId)(merge(taskId, head))),
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),

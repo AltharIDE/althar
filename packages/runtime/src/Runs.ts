@@ -400,27 +400,37 @@ export class Runs extends Context.Service<
           })
         })
 
+      // One action on the task's pull request: two quick clicks open one, and the second hears it has one.
       const publish = (taskId: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const [last] = yield* sql<{ runId: string; projectId: ProjectId; threadId: string; state: string }>`
+        changes.exclusive(
+          taskId,
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${taskId}`
+            if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+            // A settled task's branch stays as it is.
+            if (task.state === 'done' || task.state === 'abandoned') return yield* new NoChangeToOpen({ taskId, why: 'settled' })
+            const [last] = yield* sql<{ runId: string; projectId: ProjectId; threadId: string; state: string }>`
             SELECT r.id AS run_id, r.project_id, t.id AS thread_id, r.state FROM runs r
             JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task'
             WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC LIMIT 1`
-          if (last === undefined || last.state !== 'succeeded') return yield* new NoChangeToOpen({ taskId, why: 'working' })
-          if ((yield* changes.ofTask(taskId)).length > 0) return yield* new NoChangeToOpen({ taskId, why: 'opened' })
-          const published = yield* changes.publish({ projectId: last.projectId, taskId, runId: last.runId, end: 'draft' })
-          yield* result(
-            { projectId: last.projectId, threadId: last.threadId },
-            {
-              step: 'publish',
-              round: 0,
-              summary: publishedSummary(published, 'draft'),
-              ...(published.kind === 'opened' ? { change: published.change } : {}),
-            },
-          )
-          yield* touchCard(taskId)
-        })
+            if (last === undefined || !['succeeded', 'failed', 'cancelled'].includes(last.state))
+              return yield* new NoChangeToOpen({ taskId, why: 'working' })
+            if (last.state !== 'succeeded') return yield* new NoChangeToOpen({ taskId, why: 'stopped' })
+            if ((yield* changes.ofTask(taskId)).length > 0) return yield* new NoChangeToOpen({ taskId, why: 'opened' })
+            const published = yield* changes.publish({ projectId: last.projectId, taskId, runId: last.runId, end: 'draft' })
+            yield* result(
+              { projectId: last.projectId, threadId: last.threadId },
+              {
+                step: 'publish',
+                round: 0,
+                summary: publishedSummary(published, 'draft'),
+                ...(published.kind === 'opened' ? { change: published.change } : {}),
+              },
+            )
+            yield* touchCard(taskId)
+          }),
+        )
 
       /**
        * The work is done: the task's ending, if its plan has one, then the

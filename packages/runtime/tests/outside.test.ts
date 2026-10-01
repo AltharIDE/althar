@@ -3,13 +3,13 @@ import { execFileSync } from 'node:child_process'
 import { makeFakeService } from '@charrette/connectors/testing'
 import type { ProjectId } from '@charrette/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Cause, Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
 import { Connections, credentialFor, NotConnected } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
-import { NoChangeToOpen } from '../src/errors'
+import { NoChangeToOpen, NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { Issues } from '../src/Issues'
 import { Plans } from '../src/Plans'
@@ -318,10 +318,21 @@ describe('a task that ends on its branch', () => {
       assert.instanceOf(yield* Effect.flip(runs.publish(task.taskId)), NotConnected)
 
       yield* connect('github')
-      yield* runs.publish(task.taskId)
+      // Two quick clicks are one action: one pull request, one line in the thread, and the second hears it has one.
+      const [first, second] = yield* Effect.all([Effect.exit(runs.publish(task.taskId)), Effect.exit(runs.publish(task.taskId))], {
+        concurrency: 2,
+      })
+      assert.deepStrictEqual(
+        [first, second].map((exit) => (Exit.isSuccess(exit) ? 'done' : (Cause.squash(exit.cause) as NoChangeToOpen).why)).sort(),
+        ['done', 'opened'],
+      )
+      assert.lengthOf(github.changes, 1)
       assert.deepStrictEqual([github.changes[0]?.title, github.changes[0]?.draft], ['Retry the checkout [lead:edit] [lead:finish]', true])
-      const opened = (yield* said).findLast((item) => item.kind === 'step_result')
-      assert.deepStrictEqual([opened?.content.step, opened?.content.summary], ['publish', 'Opened draft pull request #1.'])
+      const results = (yield* said).filter((item) => item.kind === 'step_result' && item.content.step === 'publish')
+      assert.deepStrictEqual(
+        results.map((item) => item.content.summary),
+        ['Opened draft pull request #1.'],
+      )
       const [card] = yield* until(cards, (all) => all[0]?.change !== null)
       assert.strictEqual(card?.change?.number, 1)
       // Once is enough; and a task whose work isn't done has none to open yet.
@@ -334,6 +345,13 @@ describe('a task that ends on its branch', () => {
         title: 'Not started',
       })
       assert.strictEqual(((yield* Effect.flip(runs.publish(fresh.taskId))) as NoChangeToOpen).why, 'working')
+      // Work that stopped short has none; a settled task keeps its branch as it is.
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE runs SET state = 'failed' WHERE task_id = ${task.taskId}`
+      assert.strictEqual(((yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen).why, 'stopped')
+      yield* sql`UPDATE tasks SET state = 'done' WHERE id = ${task.taskId}`
+      assert.strictEqual(((yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen).why, 'settled')
+      assert.instanceOf(yield* Effect.flip(runs.publish('task_none')), NotFound)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
   })
 

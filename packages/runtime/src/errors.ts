@@ -59,10 +59,14 @@ export class OutwardUncertain extends Schema.TaggedError<OutwardUncertain>()('Ou
   operation: Schema.String,
 }) {}
 
-/** A task's pull request opens once its work is done, and once: it is still working, or it has one. */
+/**
+ * A task's pull request opens once its work is done, once, and while the
+ * task is open: it is still working, its work stopped short, it is settled,
+ * or it has one.
+ */
 export class NoChangeToOpen extends Schema.TaggedError<NoChangeToOpen>()('NoChangeToOpen', {
   taskId: Schema.String,
-  why: Schema.Literals(['working', 'opened']),
+  why: Schema.Literals(['working', 'stopped', 'settled', 'opened']),
 }) {}
 
 /** The pull request moved on since the person looked: accepting it would merge what they didn't see. */
