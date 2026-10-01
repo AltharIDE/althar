@@ -4,8 +4,10 @@ import {
   type AgentStatus,
   type CoordinatorSnapshot,
   PAGE,
+  type IssueSummary,
   type PlanStep,
   type ProjectSummary,
+  type TaskEnd,
   type TaskSummary,
   type ThreadItem,
 } from '@charrette/contracts'
@@ -37,6 +39,10 @@ export interface NewTask {
   readonly lead: string
   /** Who reviews it, or null for no review. */
   readonly reviewer: string | null
+  /** The issue it comes from, by its ref, if any. */
+  readonly issue: string | null
+  /** What happens when the work is done; null where the repository's host isn't connected. */
+  readonly end: TaskEnd | null
 }
 
 export interface ProjectModel {
@@ -62,9 +68,11 @@ export interface ProjectModel {
   readonly switchAgent: (agentId: string) => Promise<void>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
-  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>) => Promise<void>
+  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
   /** Plans and starts a task; the task, or null when it couldn't. */
   readonly startTask: (input: NewTask) => Promise<TaskSummary | null>
+  /** The person's open issues, for a task to come from. */
+  readonly listIssues: () => Promise<ReadonlyArray<IssueSummary>>
   readonly dismissError: () => void
 }
 
@@ -143,7 +151,8 @@ export const useProject = (projectId: string): ProjectModel => {
       else changed.current.head = true
       // A message delivered changes its input, not its item: read again what still shows as queued.
       if (event.aggregateType === 'user_input') for (const id of waiting(coordinator?.items ?? [])) changed.current.items.add(id)
-    } else if (event.projectId === projectId && CARDS.has(event.aggregateType)) changed.current.cards = true
+    } else if (event.aggregateType === 'connection') changed.current.head = true
+    else if (event.projectId === projectId && CARDS.has(event.aggregateType)) changed.current.cards = true
     else return
     timer.current ??= setTimeout(readChanged, GATHER)
   }, since)
@@ -194,6 +203,8 @@ export const useProject = (projectId: string): ProjectModel => {
             { key: 'implement', agentId: input.lead, model: null, skipped: false },
             ...(input.reviewer === null ? [] : [{ key: 'review' as const, agentId: input.reviewer, model: null, skipped: false }]),
           ],
+          ...(input.issue === null ? {} : { issue: input.issue }),
+          end: input.end,
         })
       } catch (failure) {
         fail(failure)
@@ -202,6 +213,19 @@ export const useProject = (projectId: string): ProjectModel => {
         setStarting(false)
       }
     },
+    [client, projectId, fail],
+  )
+
+  // Kept the same across renders: the new-task panel reads the issues once, when it opens.
+  const listIssues = useCallback(
+    () =>
+      client.listIssues(projectId).then(
+        (list) => list.issues,
+        (failure: unknown) => {
+          fail(failure)
+          return []
+        },
+      ),
     [client, projectId, fail],
   )
 
@@ -230,8 +254,9 @@ export const useProject = (projectId: string): ProjectModel => {
     switchAgent: (agentId) => act(async () => (threadId === null ? undefined : client.switchAgent({ threadId, agentId }))),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
-    changePlan: (planId, steps) => act(() => client.changePlan(planId, steps)),
+    changePlan: (planId, steps, end) => act(() => client.changePlan(planId, steps, end)),
     startTask,
+    listIssues,
     dismissError: () => setError(null),
   }
 }

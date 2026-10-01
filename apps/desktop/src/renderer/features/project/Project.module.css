@@ -18,6 +18,16 @@
   gap: 16px;
 }
 
+.host {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 10px 0 0;
+  color: var(--t-2);
+  font-size: 12.5px;
+}
+
 .repository {
   margin: 4px 0 0;
   color: var(--t-3);

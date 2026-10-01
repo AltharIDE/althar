@@ -53,3 +53,8 @@ export class ModelUnchanged extends Schema.TaggedError<ModelUnchanged>()('ModelU
 export class AttentionClosed extends Schema.TaggedError<AttentionClosed>()('AttentionClosed', {
   attentionId: Schema.String,
 }) {}
+
+/** An outward action's earlier answer was lost, and doing it again could do it twice: the person checks. */
+export class OutwardUncertain extends Schema.TaggedError<OutwardUncertain>()('OutwardUncertain', {
+  operation: Schema.String,
+}) {}

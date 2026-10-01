@@ -16,7 +16,13 @@ export const caughtUp = (streaming: ReadonlyMap<string, Streamed>, items: Readon
   const kept = new Map(streaming)
   for (const item of items) {
     const live = kept.get(item.id)
-    if (live !== undefined && 'text' in item.content && item.content.text.length >= live.text.length) kept.delete(item.id)
+    if (
+      live !== undefined &&
+      'text' in item.content &&
+      typeof item.content.text === 'string' &&
+      item.content.text.length >= live.text.length
+    )
+      kept.delete(item.id)
   }
   return kept.size === streaming.size ? streaming : kept
 }

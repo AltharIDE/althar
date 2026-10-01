@@ -4,6 +4,7 @@ import { Brand } from '../foundations/brands/brands'
 import { ConnectKind, RuntimeState, SourceOrigin } from '../foundations/vocabulary'
 import type { SelectOption } from '../primitives/Select/Select'
 import type { ConnectOption } from '../setup/ConnectAgent/ConnectAgent'
+import type { ServiceConnection, ServiceOption } from '../setup/Connections/Connections'
 import type { RuntimeEntry } from '../setup/Runtimes/Runtimes'
 import type { SourceEntry } from '../setup/SourceMap/SourceMap'
 
@@ -202,3 +203,48 @@ export function useSourceMap(initial: readonly SourceEntry[]) {
     },
   }
 }
+
+/* The code hosts and trackers a person can connect: GitHub signs in in the browser; Linear and Jira take a token here. */
+export const SERVICES: ServiceOption[] = [
+  {
+    id: 'github',
+    name: 'GitHub',
+    brand: Brand.GitHub,
+    what: 'Pull requests and issues',
+    hostedUrl: 'https://github.com',
+    selfHosted: true,
+    browserSignIn: true,
+    tokenNeedsUser: false,
+    tokenHelp: 'https://github.com/settings/personal-access-tokens/new',
+  },
+  {
+    id: 'linear',
+    name: 'Linear',
+    brand: Brand.Linear,
+    what: 'Issues',
+    hostedUrl: 'https://linear.app',
+    selfHosted: false,
+    browserSignIn: false,
+    tokenNeedsUser: false,
+    tokenHelp: 'https://linear.app/settings/account/security',
+  },
+  {
+    id: 'jira_cloud',
+    name: 'Jira',
+    brand: Brand.Jira,
+    what: 'Issues',
+    hostedUrl: null,
+    selfHosted: false,
+    browserSignIn: false,
+    tokenNeedsUser: true,
+    tokenHelp: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+    instanceExample: 'https://your-site.atlassian.net',
+  },
+]
+
+/* Signed in to GitHub twice, on github.com and a company's own server; Linear's token stopped working. */
+export const CONNECTED: ServiceConnection[] = [
+  { id: 'conn_1', service: 'github', account: 'you' },
+  { id: 'conn_2', service: 'github', account: 'you', instance: 'https://git.meridian.dev' },
+  { id: 'conn_3', service: 'linear', account: 'You', needsSignIn: true },
+]

@@ -24,7 +24,10 @@ import type { PermissionRequest } from '@charrette/provider-adapters'
  * lives in the main repository, outside the sandbox.
  */
 
-export type Verdict = { readonly verdict: 'allow' } | { readonly verdict: 'ask'; readonly reason: string }
+export type Verdict =
+  | { readonly verdict: 'allow' }
+  | { readonly verdict: 'ask'; readonly reason: string }
+  | { readonly verdict: 'deny'; readonly reason: string }
 
 export interface RuleContext {
   /** The task's worktree, where the agent works. */
@@ -43,6 +46,89 @@ export interface RuleContext {
 
 const ALLOW: Verdict = { verdict: 'allow' }
 const ask = (reason: string): Verdict => ({ verdict: 'ask', reason })
+
+// ---- Code hosts --------------------------------------------------------------
+
+/*
+ * Agents reach code hosts only through Charrette (ADR-011): Charrette pushes
+ * and opens the task's pull request, and the lead reads and answers on it with
+ * Charrette's tools. So `gh` and `glab` may only look; anything else is
+ * refused with what to do instead.
+ *
+ * The boundary is the agent's environment, not these words: agents run with
+ * `gh` and `glab` signed out, git's credential helpers reset, and no SSH agent
+ * (Config.ts), and Charrette's own sign-ins are sealed where only the app can
+ * open them. What is left within a shell's reach, the keychain through
+ * `security` and git's helpers called directly, is refused here, for every
+ * role. Files the person keeps credentials in, under their home folder, are
+ * still readable by an agent that goes looking; only a sandbox closes that
+ * (docs/open-questions.md).
+ */
+
+const CREDENTIALS_REFUSED =
+  "Agents don't read the person's credentials or the keychain. Charrette reaches the code host for the task; tell the person what's needed."
+
+/** Why an agent may not run a command that reads credentials: the keychain's `security`, or git's credential helpers. */
+const credentialReason = (words: ReadonlyArray<string>): string | undefined => {
+  const program = (words[0] ?? '').split('/').at(-1) ?? ''
+  if (program === 'security' || program.startsWith('git-credential')) return CREDENTIALS_REFUSED
+  if (program !== 'git') return undefined
+  // Git's own options before its command, and their values: `git -C dir -c k=v credential fill`.
+  let index = 1
+  while ((words[index] ?? '').startsWith('-'))
+    index += ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path'].includes(words[index] ?? '') ? 2 : 1
+  return (words[index] ?? '').startsWith('credential') ? CREDENTIALS_REFUSED : undefined
+}
+
+/** What `gh` and `glab` may do: their read-only commands, by command and subcommand. */
+const HOST_LOOKS: Readonly<Record<string, ReadonlySet<string>>> = {
+  pr: new Set(['view', 'list', 'diff', 'checks', 'status']),
+  mr: new Set(['view', 'list', 'diff']),
+  issue: new Set(['view', 'list', 'status']),
+  run: new Set(['view', 'list', 'watch']),
+  ci: new Set(['view', 'list', 'status', 'trace']),
+  workflow: new Set(['view', 'list']),
+  repo: new Set(['view', 'list']),
+  release: new Set(['view', 'list']),
+  search: new Set(['repos', 'issues', 'prs', 'code', 'commits']),
+}
+
+const HOST_WRITE_FLAGS = new Set(['-f', '-F', '--field', '--raw-field', '--input', '-d', '--data'])
+
+/** Why an agent may not run a `gh` or `glab` command, or nothing when it only looks. */
+const hostReason = (words: ReadonlyArray<string>): string | undefined => {
+  const program = (words[0] ?? '').split('/').at(-1) ?? ''
+  if (program !== 'gh' && program !== 'glab') return undefined
+  const [command, subcommand] = words.slice(1).filter((word) => !word.startsWith('-'))
+  if (command === undefined || command === 'help' || command === 'version' || words.includes('--help') || words.includes('--version'))
+    return undefined
+  if (command === 'api') {
+    const method =
+      words
+        .map((word, index) =>
+          words[index - 1] === '-X' || words[index - 1] === '--method'
+            ? word
+            : word.startsWith('--method=')
+              ? word.slice('--method='.length)
+              : /^-X[A-Za-z]+$/.test(word)
+                ? word.slice(2)
+                : undefined,
+        )
+        .find((found) => found !== undefined) ?? 'GET'
+    if (method.toUpperCase() === 'GET' && !words.some((word) => HOST_WRITE_FLAGS.has(word.split('=')[0] ?? ''))) return undefined
+    return "Agents don't change things on the code host themselves; Charrette does that for the task. Tell the person what's needed."
+  }
+  if (HOST_LOOKS[command]?.has(subcommand ?? '') === true) return undefined
+  if ((command === 'pr' || command === 'mr') && subcommand === 'merge') return "Merging is the person's to do; Charrette doesn't merge."
+  if ((command === 'pr' || command === 'mr') && (subcommand === 'comment' || subcommand === 'review' || subcommand === 'note'))
+    return "Answer on the task's pull request with Charrette's reply_on_pull_request tool."
+  if (command === 'pr' || command === 'mr')
+    return "Charrette opens and updates the task's pull request itself. Commit, then call Charrette's publish_changes tool; read it with read_pull_request."
+  if (command === 'issue')
+    return "Charrette doesn't change issues from a task. Read one with read_issue, and tell the person what it needs."
+  if (command === 'auth') return "Agents run without the person's sign-in to the code host; Charrette's tools reach it for the task."
+  return "Agents don't change things on the code host themselves; Charrette does that for the task. Tell the person what's needed."
+}
 
 const field = (value: unknown, key: string): unknown =>
   typeof value === 'object' && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined
@@ -414,7 +500,6 @@ const commandReason = (text: string, context: RuleContext): string | undefined =
   for (const words of commands) {
     const joined = words.join(' ')
     if (DEPLOY.test(joined)) return 'Deploying or publishing always asks.'
-    if (/^(gh\s+pr\s+merge|glab\s+mr\s+merge)\b/.test(joined)) return 'A merge always asks.'
     if (words[0] === 'cd') {
       cwd = locate(where, cwd, words[1] ?? '~')
       continue
@@ -450,6 +535,11 @@ const commandReason = (text: string, context: RuleContext): string | undefined =
  */
 export const decide = (request: PermissionRequest, context: RuleContext): Verdict => {
   if (request.kind === 'execute' || request.kind === 'other') {
+    // A code host is reached through Charrette: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
+    const refused = parseCommandLine(commandOf(request))
+      .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)))
+      .find((reason) => reason !== undefined)
+    if (refused !== undefined) return { verdict: 'deny', reason: refused }
     const reason = commandReason(commandOf(request), context)
     if (reason !== undefined) return ask(reason)
   }
@@ -917,7 +1007,10 @@ export const decideReader = (request: PermissionRequest): ReaderVerdict => {
     default: {
       const command = commandIn(request.rawInput) ?? (request.kind === 'execute' ? request.title : undefined)
       if (command === undefined || command === '') return deny("Charrette can't tell what this does, and this role only reads.")
-      const reason = readerCommandReason(command)
+      const reason =
+        parseCommandLine(command)
+          .commands.map((words) => credentialReason(unwrap(words)))
+          .find((found) => found !== undefined) ?? readerCommandReason(command)
       return reason === undefined ? ALLOW : deny(reason)
     }
   }

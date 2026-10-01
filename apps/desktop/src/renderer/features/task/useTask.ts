@@ -43,6 +43,8 @@ export interface TaskModel {
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string) => Promise<void>
   /** Answers a step that needs the person. */
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
+  /** Marks the task's draft pull request ready for review. */
+  readonly markReady: () => Promise<void>
   readonly dismissError: () => void
 }
 
@@ -57,6 +59,13 @@ export const useTask = (threadId: string): TaskModel => {
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const changed = useRef({ head: false, items: new Set<string>() })
+  const taskId = snapshot?.task.id ?? null
+  const hasChange = (snapshot?.task.changes.length ?? 0) > 0
+
+  // A task with a pull request asks its host for news as it opens, rather than at the next turn of listening.
+  useEffect(() => {
+    if (taskId !== null && hasChange) client.refreshTask(taskId).catch(() => undefined)
+  }, [client, taskId, hasChange])
 
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
 
@@ -167,6 +176,7 @@ export const useTask = (threadId: string): TaskModel => {
     answer: (attentionId, decision, reason) =>
       act(() => client.answer({ attentionId, decision, ...(reason === undefined || reason === '' ? {} : { reason }) })),
     answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
+    markReady: () => act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id))),
     dismissError: () => setError(null),
   }
 }

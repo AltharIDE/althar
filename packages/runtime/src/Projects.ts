@@ -11,6 +11,7 @@ import { RuntimeConfig } from './Config'
 import { type GitFailed, NotARepository, NotFound } from './errors'
 import { addWorktree, branchExists, commitOf, defaultBranch, fetchBranch, remoteUrls, topLevel } from './git'
 import { Instance } from './Instance'
+import { branchKey } from './Issues'
 import { change, fact, timestamp } from './records'
 
 /*
@@ -110,6 +111,8 @@ export class Projects extends Context.Service<
       readonly title: string
       readonly description?: string
       readonly draft?: boolean
+      /** The key of the issue it comes from, which its branch carries, so the tracker's own Git integration finds it. */
+      readonly issueKey?: string
     }): Effect.Effect<CreatedTask, NotFound | GitFailed | Failure>
   }
 >()('@charrette/runtime/Projects') {
@@ -195,6 +198,7 @@ export class Projects extends Context.Service<
         readonly title: string
         readonly description?: string
         readonly draft?: boolean
+        readonly issueKey?: string
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -242,7 +246,7 @@ export class Projects extends Context.Service<
               yield* sql`INSERT INTO threads ${sql.insert({ id: threadId, projectId: project.id, kind: 'task', taskId, createdAt })}`
               const workspaceId = yield* newId(Ids.workspace)
               const worktree = join(config.worktreeRoot, project.slug, slug, project.bindingSlug)
-              const branch = `charrette/${slug}`
+              const branch = input.issueKey === undefined ? `charrette/${slug}` : `charrette/${branchKey(input.issueKey)}-${slug}`
               yield* sql`INSERT INTO workspaces ${sql.insert({
                 id: workspaceId,
                 projectId: project.id,

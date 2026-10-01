@@ -48,7 +48,7 @@ export class ToolServer extends Context.Service<
   {
     /** The server a session is given, and how to take it back. */
     grant(access: ToolAccess): Effect.Effect<{ readonly server: McpServer; readonly revoke: Effect.Effect<void> }>
-    /** Sets a role's tools. Services that own the tools set them once they are built. */
+    /** Adds tools to a role, replacing any of the same name. Each service that owns tools adds them once it is built. */
     serve(role: ToolRole, tools: ReadonlyArray<Tool>): Effect.Effect<void>
   }
 >()('@charrette/runtime/ToolServer') {
@@ -112,7 +112,11 @@ export class ToolServer extends Context.Service<
               revoke: Effect.sync(() => void grants.delete(token)),
             }
           }),
-        serve: (role, tools) => Effect.sync(() => void roles.set(role, tools)),
+        serve: (role, tools) =>
+          Effect.sync(() => {
+            const kept = (roles.get(role) ?? []).filter((tool) => !tools.some((added) => added.name === tool.name))
+            roles.set(role, [...kept, ...tools])
+          }),
       })
     }),
   )

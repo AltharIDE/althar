@@ -8,7 +8,7 @@ import { NotFound } from './errors'
 import { RuntimeConfig } from './Config'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
-import { type PlanStep, Runs } from './Runs'
+import { type PlanStep, Runs, type TaskEnd } from './Runs'
 
 /*
  * A task's plan before it runs (docs/architecture/04): its steps and who does
@@ -35,13 +35,15 @@ export class Plans extends Context.Service<
       readonly reason: string | null
       readonly actorId: ActorId
       readonly startsIn?: Duration.Duration
+      /** What happens when the work is done: a pull request, the branch pushed, or nothing outside. */
+      readonly end?: TaskEnd | null
     }): Effect.Effect<string, unknown>
     /** Starts a proposed plan now. */
     start(planId: string, actorId: ActorId): Effect.Effect<void, unknown>
     /** Holds a proposed plan until someone starts it. */
     hold(planId: string, actorId: ActorId): Effect.Effect<void, unknown>
-    /** Changes a proposed plan's steps: who does them, or which are skipped. */
-    change(planId: string, steps: ReadonlyArray<PlanStep>, actorId: ActorId): Effect.Effect<void, unknown>
+    /** Changes a proposed plan's steps (who does them, or which are skipped), and what happens when the work is done. */
+    change(planId: string, steps: ReadonlyArray<PlanStep>, actorId: ActorId, end?: TaskEnd | null): Effect.Effect<void, unknown>
   }
 >()('@charrette/runtime/Plans') {
   static readonly layer: Layer.Layer<Plans, never, Store> = Layer.effect(
@@ -125,7 +127,7 @@ export class Plans extends Context.Service<
                   projectId: input.projectId,
                   taskId: input.taskId,
                   workflowVersionId,
-                  parameters: JSON.stringify({ steps: input.steps, reason: input.reason }),
+                  parameters: JSON.stringify({ steps: input.steps, reason: input.reason, end: input.end ?? null }),
                   proposedByActorId: input.actorId,
                   state: 'proposed',
                   proposedAt: at,
@@ -137,7 +139,7 @@ export class Plans extends Context.Service<
                   aggregateId: planId,
                   revision: 1,
                   type: 'task_plan.proposed',
-                  payload: { steps: input.steps, reason: input.reason, startsAt },
+                  payload: { steps: input.steps, reason: input.reason, end: input.end ?? null, startsAt },
                   actorId: input.actorId,
                 })
               }),
@@ -201,15 +203,22 @@ export class Plans extends Context.Service<
         start: (planId, actorId) => provide(start(planId, actorId)),
         hold: (planId, actorId) =>
           provide(Effect.asVoid(transition(planId, counting, () => ({ startsAt: null }), 'task_plan.held', actorId))),
-        change: (planId, steps, actorId) =>
+        change: (planId, steps, actorId, end) =>
           provide(
             Effect.asVoid(
               transition(
                 planId,
                 (plan) => plan.state === 'proposed',
-                (plan) => ({
-                  parameters: JSON.stringify({ steps, reason: (JSON.parse(plan.parameters) as { reason?: string | null }).reason ?? null }),
-                }),
+                (plan) => {
+                  const before = JSON.parse(plan.parameters) as { reason?: string | null; end?: TaskEnd | null }
+                  return {
+                    parameters: JSON.stringify({
+                      steps,
+                      reason: before.reason ?? null,
+                      end: end === undefined ? (before.end ?? null) : end,
+                    }),
+                  }
+                },
                 'task_plan.changed',
                 actorId,
               ),

@@ -3,7 +3,18 @@ import { stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { app, BrowserWindow, dialog, ipcMain, MessageChannelMain, session, shell, utilityProcess, type UtilityProcess } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  MessageChannelMain,
+  safeStorage,
+  session,
+  shell,
+  utilityProcess,
+  type UtilityProcess,
+} from 'electron'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -11,7 +22,10 @@ import { app, BrowserWindow, dialog, ipcMain, MessageChannelMain, session, shell
  * state. It starts the runtime in a utility process and restarts it if it
  * crashes, gives each window a message port to it, and on quit asks the
  * runtime to stop its sessions before the app goes. Folders reach the runtime
- * from here, never from the window, which gets a grant for each.
+ * from here, never from the window, which gets a grant for each. It seals and
+ * opens the runtime's secrets, such as a code host's token, with Electron's
+ * safeStorage, whose key the keychain keeps for this app alone: the runtime
+ * keeps them sealed and never holds the key.
  */
 
 const here = import.meta.dirname
@@ -38,6 +52,32 @@ const locations = () => ({
 /** Grants the runtime has yet to confirm, by request. */
 const granting = new Map<string, (grant: string | null) => void>()
 
+interface RuntimeMessage {
+  readonly type?: string
+  readonly requestId?: string
+  readonly grant?: string
+  readonly value?: unknown
+}
+
+/** Seals a secret for the runtime, or opens one it kept, and answers with the result or why not. */
+const seal = (child: UtilityProcess, message: RuntimeMessage) => {
+  if (message.requestId === undefined || typeof message.value !== 'string') return
+  const { requestId, value } = message
+  try {
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('The keychain Charrette seals sign-ins with isn’t available.')
+    child.postMessage({
+      type: 'sealed',
+      requestId,
+      value:
+        message.type === 'seal'
+          ? safeStorage.encryptString(value).toString('base64')
+          : safeStorage.decryptString(Buffer.from(value, 'base64')),
+    })
+  } catch (error) {
+    child.postMessage({ type: 'sealed', requestId, error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
 const startRuntime = () => {
   const { profile, worktrees } = locations()
   const child = utilityProcess.fork(join(here, '../runtime/runtime.js'), [], {
@@ -45,7 +85,8 @@ const startRuntime = () => {
     stdio: 'inherit',
     env: { ...process.env, CHARRETTE_PROFILE: profile, CHARRETTE_WORKTREES: worktrees, CHARRETTE_APP_VERSION: app.getVersion() },
   })
-  child.on('message', (message: { readonly type?: string; readonly requestId?: string; readonly grant?: string }) => {
+  child.on('message', (message: RuntimeMessage) => {
+    if (message.type === 'seal' || message.type === 'open') return seal(child, message)
     if (message.type !== 'folder-allowed' || message.requestId === undefined) return
     granting.get(message.requestId)?.(message.grant ?? null)
     granting.delete(message.requestId)

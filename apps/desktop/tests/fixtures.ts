@@ -1,11 +1,15 @@
 import type {
   AgentStatus,
+  ChangeSummary,
+  ConnectionList,
+  ConnectionSummary,
   CoordinatorSnapshot,
   ProjectSummary,
   Status,
   TaskSummary,
   ThreadItem,
   ThreadSnapshot,
+  Unfurl,
   WatchEvent,
 } from '@charrette/contracts'
 import { vi } from 'vitest'
@@ -59,11 +63,12 @@ export const items = {
   you: (
     text: string,
     input: Extract<ThreadItem, { kind: 'user_message' }>['input'] = { state: 'delivered', interrupting: false },
+    links: ReadonlyArray<Unfurl> = [],
   ): ThreadItem => ({
     ...next(),
     agentId: null,
     kind: 'user_message',
-    content: { text },
+    content: { text, links },
     input,
   }),
   says: (text: string, agentId = 'claude-code', id?: string): ThreadItem => ({
@@ -102,7 +107,37 @@ export const items = {
     ...next(),
     agentId: null,
     kind: 'step_result',
-    content: { step: 'implement', round: 0, summary: 'Added the retry.', verdict: null, findings: [], agentId: null, ...content },
+    content: {
+      step: 'implement',
+      round: 0,
+      summary: 'Added the retry.',
+      verdict: null,
+      findings: [],
+      agentId: null,
+      change: null,
+      ...content,
+    },
+  }),
+  arrival: (content: Partial<Extract<ThreadItem, { kind: 'arrival' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'arrival',
+    content: {
+      source: 'github',
+      kind: 'comment',
+      from: 'dana',
+      where: 'PR #12',
+      text: 'Seconds or a date?',
+      verdict: null,
+      path: null,
+      line: null,
+      passed: null,
+      failed: null,
+      failing: [],
+      url: null,
+      outsider: false,
+      ...content,
+    },
   }),
   card: (content: TaskCardContent, id?: string): ThreadItem => ({
     ...next(),
@@ -130,7 +165,10 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
     ],
     startsAt: new Date(Date.now() + 20_000).toISOString(),
     reason: 'It knows the code.',
+    end: null,
   },
+  issue: null,
+  change: null,
   step: null,
   summary: null,
   lead: 'claude-code',
@@ -148,6 +186,38 @@ export const coordinatorSnapshot = (overrides: Partial<CoordinatorSnapshot> = {}
   suggested: { agentId: 'claude-code', agentName: 'Claude Code', model: null, available: true },
   items: [],
   earlier: false,
+  host: null,
+  ...overrides,
+})
+
+/** A task's pull request, as last seen: a draft on GitHub, one check failed. */
+export const change = (overrides: Partial<ChangeSummary> = {}): ChangeSummary => ({
+  product: 'github',
+  number: 12,
+  title: 'Add a retry',
+  url: 'https://github.com/meridian/api/pull/12',
+  state: 'open',
+  draft: true,
+  noun: 'pull request',
+  short: 'PR',
+  prefix: '#',
+  repository: 'meridian/api',
+  additions: 12,
+  deletions: 3,
+  changedFiles: 2,
+  checks: {
+    outcome: 'failed',
+    passed: 1,
+    failed: 1,
+    running: 0,
+    total: 2,
+    failing: ['test'],
+    list: [
+      { name: 'test', state: 'failed', summary: '2 failed' },
+      { name: 'lint', state: 'passed', summary: null },
+    ],
+  },
+  listening: true,
   ...overrides,
 })
 
@@ -165,6 +235,10 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     worktree: '/w/meridian',
     baseRef: 'main',
     phase: 'running',
+    issue: null,
+    changes: [],
+    files: [],
+    commits: 0,
   },
   session: {
     id: 's1',
@@ -180,6 +254,46 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
   earlier: false,
   ...overrides,
 })
+
+export const githubConnection: ConnectionSummary = {
+  id: 'conn1',
+  product: 'github',
+  name: 'GitHub',
+  webUrl: 'https://github.com',
+  account: { login: 'you', name: 'You' },
+  auth: 'device_flow',
+  state: 'ready',
+}
+
+/** What can be connected here, and what is: GitHub signs in in the browser, Linear takes a token; nothing connected yet. */
+export const connectionList: ConnectionList = {
+  cursor: 2,
+  connections: [],
+  products: [
+    {
+      product: 'github',
+      name: 'GitHub',
+      host: true,
+      tracker: true,
+      hostedUrl: 'https://github.com',
+      selfHosted: true,
+      browserSignIn: true,
+      tokenNeedsUser: false,
+      tokenHelp: 'https://github.com/settings/personal-access-tokens/new',
+    },
+    {
+      product: 'linear',
+      name: 'Linear',
+      host: false,
+      tracker: true,
+      hostedUrl: 'https://linear.app',
+      selfHosted: false,
+      browserSignIn: false,
+      tokenNeedsUser: false,
+      tokenHelp: 'https://linear.app/settings/account/security',
+    },
+  ],
+}
 
 /** A client whose every call resolves with the fixtures, and whose watch the test drives with `emit`. */
 export const fakeClient = (overrides: Partial<Client> = {}) => {
@@ -206,6 +320,21 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     holdPlan: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
     answerStuck: vi.fn(async () => {}),
+    listConnections: vi.fn(async () => connectionList),
+    startSignIn: vi.fn(async () => ({
+      flowId: 'flow1',
+      kind: 'device' as const,
+      userCode: 'ABCD-1234',
+      verificationUri: 'https://github.com/login/device',
+      expiresAt: NOW,
+    })),
+    getSignIn: vi.fn(async () => ({ state: 'waiting' as const })),
+    cancelSignIn: vi.fn(async () => {}),
+    connectToken: vi.fn(async () => connectionList.connections[0] ?? githubConnection),
+    disconnect: vi.fn(async () => {}),
+    listIssues: vi.fn(async () => ({ issues: [] })),
+    markReady: vi.fn(async () => {}),
+    refreshTask: vi.fn(async () => {}),
     watch: (listener, since) => {
       watching.push(since)
       listeners.add(listener)

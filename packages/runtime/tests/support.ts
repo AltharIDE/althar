@@ -8,9 +8,17 @@ import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, fakeAgentMain } fr
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { Agents, type AgentEntry } from '../src/Config'
+import { type Fetch, products } from '@charrette/connectors'
+import type { FakeService } from '@charrette/connectors/testing'
+
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+
+import { Agents, type AgentEntry, Connectors } from '../src/Config'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
+import { ToolServer, type ToolAccess } from '../src/ToolServer'
+import { Secrets } from '../src/Secrets'
 
 /** A git repository with one commit on `main`. */
 export const repository = () => {
@@ -68,11 +76,40 @@ export const fakeAgents = (options: FakeAgentOptions = {}, signedOut: ReadonlyAr
   )
 }
 
+/**
+ * Code hosts and trackers for tests: GitHub and Linear, each answered by a
+ * fake service, and sign-in endpoints answered by `fetch`, a stand-in.
+ */
+export const fakeConnectors = (
+  services: { readonly github?: FakeService; readonly linear?: FakeService },
+  more: { readonly fetch?: Fetch; readonly clientIds?: Readonly<Record<string, string>>; readonly callbackPort?: number } = {},
+) =>
+  Layer.succeed(
+    Connectors,
+    Connectors.of({
+      products: [
+        {
+          ...products.github,
+          make: () => (services.github === undefined ? {} : { host: services.github, tracker: services.github }),
+        },
+        { ...products.linear, make: () => (services.linear === undefined ? {} : { tracker: services.linear }) },
+      ],
+      fetch: more.fetch ?? (() => Promise.reject(new Error('No network in tests'))),
+      clientIds: more.clientIds ?? {},
+      callbackPort: more.callbackPort ?? 0,
+    }),
+  )
+
 /** The runtime over a database, with worktrees in a temporary folder and fake agents, and a plan's countdown of a moment. */
 export const runtime = (
   database = ':memory:',
   options: FakeAgentOptions = {},
-  more: { readonly signedOut?: ReadonlyArray<string>; readonly countdown?: Duration.Duration } = {},
+  more: {
+    readonly signedOut?: ReadonlyArray<string>
+    readonly countdown?: Duration.Duration
+    readonly connectors?: Layer.Layer<Connectors>
+    readonly listenEvery?: Duration.Duration
+  } = {},
 ) =>
   Runtime.layer({
     database,
@@ -81,7 +118,26 @@ export const runtime = (
     deviceName: 'Test Mac',
     agents: fakeAgents(options, more.signedOut),
     countdown: more.countdown ?? Duration.millis(300),
+    secrets: Secrets.memory(),
+    connectors: more.connectors ?? fakeConnectors({}),
+    ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),
   })
+
+/** A GitHub instance that never answers: `.test` names nothing, so git's fetches fail at once, and the fake service stands in for its API. */
+export const HOST = 'https://github.test'
+
+/**
+ * A repository whose origin is on a GitHub instance, as far as its remote
+ * says, and a bare repository on disk that takes what is pushed to it.
+ */
+export const hosted = (path: ReadonlyArray<string> = ['meridian', 'api']) => {
+  const working = repository()
+  execFileSync('git', ['remote', 'add', 'origin', `${HOST}/${path.join('/')}.git`], { cwd: working })
+  const bare = mkdtempSync(join(tmpdir(), 'charrette-remote-'))
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bare })
+  execFileSync('git', ['push', '-q', bare, 'main'], { cwd: working })
+  return { working, bare }
+}
 
 /** Opens a new repository as a project and creates a task in it. */
 export const task = (title = 'Retry checkout') =>
@@ -151,4 +207,25 @@ export const notices = (threadId: string) =>
       content: string
     }>`SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice' ORDER BY sequence`
     return rows.map((row) => JSON.parse(row.content) as Readonly<Record<string, string>>)
+  })
+
+/** Calls one of Charrette's tools as an agent with this access would: over MCP, with the session's token. */
+export const callTool = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>
+  Effect.gen(function* () {
+    const toolServer = yield* ToolServer
+    const granted = yield* toolServer.grant(access)
+    const server = granted.server
+    if (server.type !== 'http') return ''
+    return yield* Effect.promise(async () => {
+      const client = new Client({ name: 'test', version: '1.0.0' })
+      const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: server.headers } })
+      await client.connect(transport as Parameters<typeof client.connect>[0])
+      try {
+        const result = await client.callTool(args === undefined ? { name } : { name, arguments: args })
+        const content = Array.isArray(result.content) ? result.content : []
+        return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
+      } finally {
+        await client.close()
+      }
+    })
   })

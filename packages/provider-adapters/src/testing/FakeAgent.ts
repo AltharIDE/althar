@@ -1,4 +1,5 @@
-import { appendFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { appendFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 import * as acp from '@agentclientprotocol/sdk'
@@ -134,12 +135,28 @@ interface SessionState {
  * the person's message can: `[coordinator:plan]` drafts and plans a task,
  * passing on the `[lead:…]` and `[review:…]` markers it was given;
  * `[lead:finish]` finishes the step; `[review:pass]` and `[review:findings]`
- * report a review. Settling findings, it writes a file, so the change changes,
- * and finishes; a later review round passes. The session remembers its
+ * report a review. Settling findings, it writes a file and commits it, so
+ * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
  * until it is stopped, and `[lead:settle-quietly]` settles without reporting.
+ * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
+ * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
+ * Charrette says it isn't committed. Told what people said on its pull
+ * request, `[lead:answer]`
+ * replies there; told its checks failed, `[lead:fix]` commits a fix and
+ * publishes it. Asked to plan a change with a link in it, the coordinator
+ * drafts the task from that issue.
  */
+/** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
+const commitIn = (cwd: string, file: string, message: string) => {
+  appendFileSync(join(cwd, file), `${file.replace(/\.txt$/, '')}\n`)
+  const git = (...args: Array<string>) =>
+    execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@charrette.test', ...args], { cwd })
+  git('add', '-A')
+  git('commit', '-q', '-m', message)
+}
+
 const playRole = async (session: SessionState, text: string): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
   const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ')
@@ -179,14 +196,34 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
-        if (!aside) appendFileSync(join(session.cwd, 'settled.txt'), 'settled\n')
+        if (!aside) commitIn(session.cwd, 'settled.txt', 'Settle the review')
         // What became of each finding, by the ids Charrette gave them.
         const findings = (text.match(/find_[0-9a-f]{32}/g) ?? []).map((id) =>
           aside ? { id, outcome: 'set_aside', reason: 'It reads as intended.' } : { id, outcome: 'fixed' },
         )
         return await call('finish_step', { summary: 'Fixed the heading.', findings })
       }
-      if (text.includes('[lead:finish]')) return await call('finish_step', { summary: 'Did the task.' })
+      if (text.includes('[lead:finish]')) {
+        if (session.markers.has('[lead:edit]')) commitIn(session.cwd, 'change.txt', 'Change it')
+        if (!session.markers.has('[lead:scratch]')) return await call('finish_step', { summary: 'Did the task.' })
+        appendFileSync(join(session.cwd, 'scratch.log'), 'trying things\n')
+        const answer = await call('finish_step', { summary: 'Did the task.' })
+        if (!/These aren.t committed/.test(answer)) return answer
+        rmSync(join(session.cwd, 'scratch.log'))
+        return await call('finish_step', { summary: 'Did the task.' })
+      }
+      // What people said on the task's pull request, and its checks.
+      if (available.has('reply_on_pull_request') && session.markers.has('[lead:answer]') && / commented on /.test(text)) {
+        const thread = /\(thread (\S+)\)/.exec(text)?.[1]
+        return await call('reply_on_pull_request', {
+          body: 'Seconds, the same as charges.',
+          ...(thread === undefined ? {} : { thread_id: thread }),
+        })
+      }
+      if (available.has('publish_changes') && session.markers.has('[lead:fix]') && text.startsWith('Checks failed')) {
+        commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
+        return await call('publish_changes', {})
+      }
       // Works until it is stopped: for a lead that goes in the middle of its step.
       if (text.includes('[lead:wait]')) {
         for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
@@ -199,9 +236,18 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
       // The task is what the person asked for: the line with the marker, up to its first stop.
       // As the thread so far quotes it, after who said it: "[person] Add a retry."
       const asked = (text.slice(0, text.indexOf('[coordinator:plan')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
-      const title = asked.split(/[.!?]/)[0]?.trim() || 'Add a retry'
-      const drafted = await call('draft_task', { title, description: `Retry the checkout call. ${markers.join(' ')}` })
-      const slug = /Drafted (\S+)\./.exec(drafted)?.[1] ?? ''
+      const title =
+        asked
+          .replace(/https?:\/\/\S+/g, '')
+          .split(/[.!?]/)[0]
+          ?.trim() || 'Add a retry'
+      const link = /https?:\/\/\S+/.exec(asked)?.[0]
+      const drafted = await call('draft_task', {
+        title,
+        description: `Retry the checkout call. ${markers.join(' ')}`,
+        ...(link === undefined ? {} : { issue: link }),
+      })
+      const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
       return await call('propose_plan', {
         task: slug,
         lead: { agent: 'claude-code', reason: 'It knows the code.' },

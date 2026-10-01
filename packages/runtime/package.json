@@ -18,6 +18,7 @@
     "test:agents": "vp test run --config vite.agents.config.ts"
   },
   "dependencies": {
+    "@charrette/connectors": "workspace:*",
     "@charrette/contracts": "workspace:*",
     "@charrette/domain": "workspace:*",
     "@charrette/persistence-sqlite": "workspace:*",

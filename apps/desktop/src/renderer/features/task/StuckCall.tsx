@@ -12,7 +12,7 @@ import { modelInfo } from '../../shared/agents'
  */
 
 export const text = {
-  step: { implement: 'Implement', review: 'Review', settle: 'Settle' } satisfies Record<StuckStep['step'], string>,
+  step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<StuckStep['step'], string>,
   what: (stuck: StuckStep, agent: string): string => {
     switch (stuck.why) {
       case 'no_report':
@@ -27,7 +27,19 @@ export const text = {
         return `Three rounds of review are done, and the lead's last changes haven't been reviewed.${
           stuck.open === 0 ? '' : stuck.open === 1 ? ' One finding is still open.' : ` ${stuck.open} findings are still open.`
         }`
+      case 'not_connected':
+        return "Charrette isn't connected to this repository's host, so it can't push the branch or open the pull request. Connect it, then try again."
     }
+  },
+  /** For the pull request, which Charrette opens itself: what went wrong. */
+  publishing: (stuck: StuckStep): string =>
+    stuck.why === 'restarted'
+      ? 'Charrette restarted while it was opening the pull request.'
+      : `Charrette couldn't open the pull request.${stuck.detail === null ? '' : ` ${stuck.detail}`}`,
+  publish: {
+    abandon: 'Go on without it',
+    abandoned: 'Went on without it',
+    abandonedNote: 'the task is ready on its branch',
   },
   reminded: { what: 'Reminded it to report', result: 'its turn ended again without a report' },
   review: {
@@ -63,6 +75,18 @@ export function StuckCall({
   // A review can run again on the agent it had; a lead's step goes to another.
   const others = agents.filter((candidate) => review || candidate.id !== stuck.agentId)
   const lastRound = stuck.why === 'round_limit'
+  // Opening the pull request is Charrette's own step: tried again as it was, or gone on without.
+  if (stuck.step === 'publish')
+    return (
+      <Stuck
+        step={text.step.publish}
+        what={stuck.why === 'not_connected' ? text.what(stuck, agent) : text.publishing(stuck)}
+        tried={[]}
+        onAgain={() => onAnswer(request.id, { kind: 'retry', agentId: 'charrette' })}
+        onAbandon={() => onAnswer(request.id, { kind: 'abandon' })}
+        text={text.publish}
+      />
+    )
   return (
     <Stuck
       step={text.step[stuck.step]}

@@ -54,10 +54,12 @@ export interface StuckText {
   empty: string
   retry: string
   retryLabel: string
+  again: string
   abandon: string
   told: string
   retried: (agent: string) => string
   retriedNote: string
+  tryingAgain: string
   abandoned: string
   abandonedNote: string
   undo: string
@@ -75,10 +77,12 @@ export const stuckText: StuckText = {
   empty: 'Say what it should do first',
   retry: 'Try another agent',
   retryLabel: 'Hand the step to',
+  again: 'Try again',
   abandon: 'Abandon',
   told: 'Told the lead',
   retried: (agent) => `Handed to ${agent}`,
   retriedNote: 'the step starts again from the task’s record',
+  tryingAgain: 'Trying again',
   abandoned: 'Abandoned',
   abandonedNote: 'the branch and what it found are kept',
   undo: 'Undo',
@@ -88,6 +92,7 @@ export const stuckText: StuckText = {
 export type StuckResult =
   | { kind: StuckAnswer.Told; note: string }
   | { kind: StuckAnswer.Retried; agent: ModelInfo }
+  | { kind: StuckAnswer.Again }
   | { kind: StuckAnswer.Abandoned }
 
 export interface StuckProps {
@@ -107,6 +112,8 @@ export interface StuckProps {
   onTell?: (note: string) => void
   /** Hand the step to another agent. Without it (or `agents`), no Try another agent. */
   onRetry?: (model: ModelInfo) => void
+  /** Run the step again as it was, for one no agent does: Charrette's own, such as opening the pull request. Without it, no Try again. */
+  onAgain?: () => void
   /** Settle the task without finishing it. Without it, no Abandon. */
   onAbandon?: () => void
   /** Take an answer back. Without it there is no Undo, as when the lead has already acted on it. */
@@ -130,6 +137,7 @@ export function Stuck({
   agents = [],
   onTell,
   onRetry,
+  onAgain,
   onAbandon,
   onUndo,
   result: resultProp,
@@ -170,6 +178,8 @@ export function Stuck({
             <AskNote>· {t.retriedNote}</AskNote>
           </AskAnswered>
         )
+      case StuckAnswer.Again:
+        return <AskAnswered said={t.tryingAgain} {...line} />
       case StuckAnswer.Abandoned:
         return (
           <AskAnswered denied said={t.abandoned} {...line}>
@@ -230,7 +240,7 @@ export function Stuck({
           />
         </div>
       ) : (
-        (onTell || retrying || onAbandon) && (
+        (onTell || retrying || onAgain || onAbandon) && (
           <AskFoot>
             {onTell && (
               <Button ref={tellRef} variant="signal" onClick={() => setTelling(true)}>
@@ -260,6 +270,17 @@ export function Stuck({
                   </MenuItem>
                 ))}
               </Menu>
+            )}
+            {onAgain && (
+              <Button
+                variant={onTell ? 'default' : 'signal'}
+                onClick={() => {
+                  onAgain()
+                  give({ kind: StuckAnswer.Again })
+                }}
+              >
+                {t.again}
+              </Button>
             )}
             {onAbandon && (
               <Button

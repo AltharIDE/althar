@@ -148,3 +148,30 @@ export const remoteUrls = (cwd: string) =>
 /** Adds a worktree on a new branch from a base. */
 export const addWorktree = (repository: string, path: string, branch: string, base: string) =>
   git(repository, 'worktree', 'add', '-b', branch, path, base)
+
+/** Whether the worktree has changes not yet committed: tracked or untracked, ignored files aside. */
+export const uncommitted = (cwd: string) => Effect.map(git(cwd, 'status', '--porcelain'), (output) => output !== '')
+
+/** The files the worktree hasn't committed, changed, new or deleted, ignored files aside; by path, sorted. */
+export const uncommittedFiles = (cwd: string) =>
+  Effect.gen(function* () {
+    const changed = yield* git(cwd, '-c', 'core.quotePath=false', 'diff', '--name-only', 'HEAD')
+    const added = yield* git(cwd, '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard')
+    return [...new Set([...changed.split('\n'), ...added.split('\n')].filter((path) => path !== ''))].toSorted()
+  })
+
+/** How many commits HEAD has that a base doesn't. */
+export const commitsAhead = (cwd: string, base: string) => Effect.map(git(cwd, 'rev-list', '--count', `${base}..HEAD`), Number)
+
+/**
+ * Pushes HEAD to a branch of a remote by URL, never forced. The header that
+ * signs the push in goes to git through its environment, so it is in no
+ * process's arguments.
+ */
+export const pushTo = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string) =>
+  run(
+    120_000,
+    cwd,
+    ['push', '--quiet', '--no-verify', target.url, `HEAD:refs/heads/${branch}`],
+    target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
+  )

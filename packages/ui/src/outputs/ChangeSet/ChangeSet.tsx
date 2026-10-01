@@ -52,6 +52,8 @@ export interface ChangeSetText {
   openFile: (path: string) => string
   checks: string
   passed: (passed: number, total: number) => string
+  /** Before any check has started, as on a pull request just opened. */
+  noChecks: string
   accept: (repos: number) => string
   order: (numbers: readonly number[]) => string
   sendBack: string
@@ -75,6 +77,7 @@ export const changeSetText: ChangeSetText = {
   openFile: (path) => `Open the diff of ${path}`,
   checks: 'Checks',
   passed: (passed, total) => `${passed} of ${total} passed`,
+  noChecks: 'None have run yet',
   accept: (repos) => {
     if (repos > 2) return `Accept and merge all ${repos}`
     if (repos === 2) return 'Accept and merge both'
@@ -267,9 +270,9 @@ export function ChangeSet({
         <section className={s.section} aria-label={t.checks}>
           <header className={s.sub}>
             <span>{t.checks}</span>
-            <span className={s.sum}>{t.passed(passedOf(checks), checks.length)}</span>
+            <span className={s.sum}>{checks.length === 0 ? t.noChecks : t.passed(passedOf(checks), checks.length)}</span>
           </header>
-          <Checks checks={checks} />
+          {checks.length > 0 && <Checks checks={checks} />}
         </section>
       </div>
 

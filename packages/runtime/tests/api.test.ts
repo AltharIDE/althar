@@ -16,12 +16,23 @@ import { GitFailed, ModelUnchanged, NotARepository, NotFound, SessionFailed } fr
 import { Folders } from '../src/Folders'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
-import { fakeAgents, repository } from './support'
+import { Connectors } from '../src/Config'
+import { Secrets } from '../src/Secrets'
+import { products } from '@charrette/connectors'
+import { makeFakeService } from '@charrette/connectors/testing'
+
+import { fakeAgents, fakeConnectors, HOST, hosted, repository } from './support'
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
 
 /** The runtime serving the API on one end of a channel, and a client on the other, as the app's window has it. */
-const connected = (options: { readonly countdown?: Duration.Duration; readonly signedOut?: ReadonlyArray<string> } = {}) =>
+const connected = (
+  options: {
+    readonly countdown?: Duration.Duration
+    readonly signedOut?: ReadonlyArray<string>
+    readonly connectors?: Layer.Layer<Connectors>
+  } = {},
+) =>
   Effect.gen(function* () {
     const channel = new MessageChannel()
     yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
@@ -32,6 +43,8 @@ const connected = (options: { readonly countdown?: Duration.Duration; readonly s
         appVersion: '0.0.0-test',
         deviceName: 'Test Mac',
         agents: fakeAgents({}, options.signedOut),
+        secrets: Secrets.memory(),
+        connectors: options.connectors ?? fakeConnectors({}),
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
       }),
     )
@@ -308,8 +321,11 @@ describe('the coordinator, through the API', () => {
             { key: 'implement', agentId: 'codex', model: 'large', skipped: false },
             { key: 'review', agentId: 'claude-code', model: null, skipped: true },
           ],
+          // What happens when the work is done can change too: here, the branch pushed only.
+          end: 'none',
         })
         const held = yield* client.GetThreadItem({ threadId: planned.threadId, itemId: card?.id ?? '' })
+        assert.strictEqual(held.kind === 'task' ? held.content.plan?.end : undefined, 'none')
         assert.deepStrictEqual(
           held.kind === 'task' ? [held.content.phase, held.content.plan?.steps.map((step) => [step.agentId, step.skipped])] : [],
           [
@@ -443,6 +459,114 @@ describe('the coordinator, through the API', () => {
   )
 })
 
+describe('code hosts and trackers, through the API', () => {
+  it.live('connects them, lists the person’s issues, starts a task from one, and marks its pull request ready', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { working, bare } = hosted()
+        const github = makeFakeService({ pushUrl: () => bare })
+        github.addRepository(['meridian', 'api'])
+        github.addIssue({ ref: 'meridian/api#12', title: 'Refunds ignore the limit' })
+        const linear = makeFakeService({ product: 'linear' })
+        linear.addIssue({ ref: 'MER-231', title: 'Rate-limit refunds like charges' })
+        const jira = makeFakeService({ product: 'jira_dc' })
+        const { client, grant } = yield* connected({
+          countdown: Duration.millis(100),
+          connectors: Layer.succeed(
+            Connectors,
+            Connectors.of({
+              ...Context.get(yield* Layer.build(fakeConnectors({ github, linear })), Connectors),
+              // A product only on a company's own server, offered by its address.
+              products: [
+                ...Context.get(yield* Layer.build(fakeConnectors({ github, linear })), Connectors).products,
+                { ...products.jira_dc, make: () => ({ tracker: jira }) },
+              ],
+            }),
+          ),
+        })
+
+        const offered = yield* client.ListConnections()
+        assert.deepStrictEqual(
+          offered.products.map((product) => [product.product, product.browserSignIn, product.selfHosted, product.hostedUrl]),
+          [
+            ['github', false, true, 'https://github.com'],
+            ['linear', false, false, 'https://linear.app'],
+            ['jira_dc', false, true, null],
+          ],
+        )
+        assert.lengthOf(offered.connections, 0)
+        // Without Charrette's app registered, the browser sign-in isn't offered; a pasted token is.
+        const unavailable = yield* Effect.flip(client.StartSignIn({ commandId: commandId(), product: 'github' }))
+        assert.strictEqual(unavailable.reason, 'SignInUnavailable')
+        assert.strictEqual((yield* Effect.flip(client.GetSignIn({ flowId: 'nope' }))).reason, 'NotFound')
+        yield* client.CancelSignIn({ commandId: commandId(), flowId: 'nope' })
+        const signedIn = yield* client.ConnectToken({ commandId: commandId(), product: 'github', webUrl: HOST, token: 'ghp_x' })
+        assert.deepInclude(signedIn, { product: 'github', webUrl: HOST, auth: 'token', state: 'ready' })
+        yield* client.ConnectToken({ commandId: commandId(), product: 'linear', token: 'lin_api_x' })
+        // A company's own server, by its address, with a token that goes with the account's email.
+        const own = yield* client.ConnectToken({
+          commandId: commandId(),
+          product: 'jira_dc',
+          webUrl: 'https://jira.meridian.dev',
+          user: 'you@meridian.dev',
+          token: 'pat',
+        })
+        assert.strictEqual(own.webUrl, 'https://jira.meridian.dev')
+        assert.strictEqual(
+          (yield* Effect.flip(client.StartSignIn({ commandId: commandId(), product: 'github', webUrl: 'https://git.meridian.dev' })))
+            .reason,
+          'SignInUnavailable',
+        )
+        assert.lengthOf((yield* client.ListConnections()).connections, 3)
+
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(working) })
+        const { issues } = yield* client.ListIssues({ projectId: project.id })
+        assert.sameMembers(
+          issues.map((issue) => issue.key),
+          ['MER-231', '#12'],
+        )
+
+        // A task from an issue, ending with a draft pull request since GitHub is connected.
+        const started = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Rate-limit refunds',
+          description: '[lead:finish] [lead:edit]',
+          steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+          issue: 'MER-231',
+        })
+        assert.strictEqual(started.branch, 'charrette/mer-231-rate-limit-refunds')
+        const thread = yield* eventually(client.GetThread({ threadId: started.threadId }), (snapshot) => snapshot.task.changes.length === 1)
+        assert.strictEqual(thread.task.issue?.key, 'MER-231')
+        assert.deepInclude(thread.task.changes[0], { number: 1, draft: true, state: 'open', short: 'PR', prefix: '#' })
+        // What its branch changed, as the accept view lists it.
+        assert.deepStrictEqual(thread.task.files, [{ path: 'change.txt', add: 1, del: 0 }])
+        assert.strictEqual(thread.task.commits, 1)
+        yield* client.MarkReady({ commandId: commandId(), taskId: started.id })
+        assert.isFalse((yield* client.GetThread({ threadId: started.threadId })).task.changes[0]?.draft)
+        yield* client.RefreshTask({ commandId: commandId(), taskId: started.id })
+
+        // A task created from #12 keeps it as its issue.
+        const created = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Fix the limit', issue: '#12' })
+        assert.strictEqual(created.branch, 'charrette/issue-12-fix-the-limit')
+
+        // A planned task's ending can change before it starts.
+        const planned = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Push only',
+          steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+          end: 'none',
+        })
+        assert.strictEqual(planned.title, 'Push only')
+
+        yield* client.Disconnect({ commandId: commandId(), connectionId: signedIn.id })
+        assert.lengthOf((yield* client.ListConnections()).connections, 2)
+      }),
+    ),
+  )
+})
+
 describe('words', () => {
   const name = (agentId: string) => (agentId === 'codex' ? 'Codex' : agentId)
 
@@ -550,7 +674,7 @@ describe('thread items', () => {
       agentId: 'codex',
       createdAt: '2026-09-29T12:00:00.000Z',
       kind: 'user_message',
-      content: { text: 'Now' },
+      content: { text: 'Now', links: [] },
       input: { state: 'queued', interrupting: true },
     })
     const tool = itemOf(
@@ -608,6 +732,7 @@ describe('thread items', () => {
           { severity: 'nit', file: null, line: null, claim: 'z' },
         ],
         agentId: 'codex',
+        change: null,
       },
     )
     assert.deepStrictEqual(itemOf(row('step_result', { summary: 'Done.' }))?.content, {
@@ -617,6 +742,7 @@ describe('thread items', () => {
       verdict: null,
       findings: [],
       agentId: null,
+      change: null,
     })
   })
 })

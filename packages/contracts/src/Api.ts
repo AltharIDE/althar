@@ -83,6 +83,165 @@ export type TaskSummary = typeof TaskSummary.Type
 export const TaskList = Schema.Struct({ cursor: Cursor, tasks: Schema.Array(TaskSummary) })
 export type TaskList = typeof TaskList.Type
 
+/* ---- Code hosts and trackers (docs/architecture/06) ---- */
+
+/** A code host or tracker Charrette connects to. Cloud and Data Center are separate products. */
+export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
+export type Product = typeof Product.Type
+
+/** A person's sign-in to a code host or tracker, on this Mac. */
+export const ConnectionSummary = Schema.Struct({
+  id: Schema.String,
+  product: Product,
+  /** The product's name: GitHub, Linear. */
+  name: Schema.String,
+  /** The instance: https://github.com, or a company's own server. */
+  webUrl: Schema.String,
+  account: Schema.Struct({ login: Schema.String, name: Schema.NullOr(Schema.String) }),
+  auth: Schema.Literals(['device_flow', 'pkce', 'token']),
+  /** Ready, or its token stopped working and it needs signing in again. */
+  state: Schema.Literals(['ready', 'reauth_required']),
+})
+export type ConnectionSummary = typeof ConnectionSummary.Type
+
+/** A product a person can connect, and how they sign in to it. */
+export const ProductOption = Schema.Struct({
+  product: Product,
+  name: Schema.String,
+  host: Schema.Boolean,
+  tracker: Schema.Boolean,
+  /** The hosted service's address; null for one that only runs on a company's own server. */
+  hostedUrl: Schema.NullOr(Schema.String),
+  /** An instance on a company's own server can be connected, by its address. */
+  selfHosted: Schema.Boolean,
+  /** The service's own sign-in, in the browser, is set up here; otherwise a pasted token. */
+  browserSignIn: Schema.Boolean,
+  /** A pasted token goes with the account's email. */
+  tokenNeedsUser: Schema.Boolean,
+  /** Where the person makes a token, on the hosted service. */
+  tokenHelp: Schema.String,
+})
+export type ProductOption = typeof ProductOption.Type
+
+export const ConnectionList = Schema.Struct({
+  cursor: Cursor,
+  connections: Schema.Array(ConnectionSummary),
+  products: Schema.Array(ProductOption),
+})
+export type ConnectionList = typeof ConnectionList.Type
+
+/** A sign-in under way: a code to type on the service's page, or a page to approve in the browser. */
+export const SignInStart = Schema.Union([
+  Schema.Struct({
+    flowId: Schema.String,
+    kind: Schema.Literal('device'),
+    userCode: Schema.String,
+    verificationUri: Schema.String,
+    expiresAt: Schema.String,
+  }),
+  Schema.Struct({ flowId: Schema.String, kind: Schema.Literal('browser'), url: Schema.String }),
+])
+export type SignInStart = typeof SignInStart.Type
+
+export const SignInState = Schema.Union([
+  Schema.Struct({ state: Schema.Literal('waiting') }),
+  Schema.Struct({ state: Schema.Literal('done'), connectionId: Schema.String }),
+  Schema.Struct({ state: Schema.Literal('ended'), reason: Schema.Literals(['denied', 'expired', 'failed']), message: Schema.String }),
+])
+export type SignInState = typeof SignInState.Type
+
+/** Where an issue stands: in the tracker's words, and as a category every tracker's statuses fall into. */
+export const IssueStatus = Schema.Struct({
+  name: Schema.String,
+  category: Schema.Literals(['triage', 'backlog', 'todo', 'started', 'done', 'cancelled']),
+})
+
+/** An issue on a connected tracker, or in the project's repository. */
+export const IssueSummary = Schema.Struct({
+  product: Product,
+  /** What it is read by again: its key, or owner/repo#12. */
+  ref: Schema.String,
+  key: Schema.String,
+  title: Schema.String,
+  url: Schema.String,
+  status: IssueStatus,
+  priority: Schema.NullOr(Schema.Struct({ level: Schema.String, name: Schema.String })),
+  container: Schema.NullOr(Schema.String),
+})
+export type IssueSummary = typeof IssueSummary.Type
+
+export const IssueList = Schema.Struct({ issues: Schema.Array(IssueSummary) })
+export type IssueList = typeof IssueList.Type
+
+/** A head's checks, summed up: how many passed, failed and still run, and which failed. */
+export const ChecksSummary = Schema.Struct({
+  outcome: Schema.Literals(['none', 'running', 'passed', 'failed']),
+  passed: Schema.Number,
+  failed: Schema.Number,
+  running: Schema.Number,
+  total: Schema.Number,
+  failing: Schema.Array(Schema.String),
+  /** Each check, by name, as it stands, with what it said of itself. */
+  list: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      state: Schema.Literals(['queued', 'running', 'passed', 'failed', 'skipped', 'cancelled', 'neutral']),
+      summary: Schema.NullOr(Schema.String),
+    }),
+  ),
+})
+export type ChecksSummary = typeof ChecksSummary.Type
+
+/** A task's pull request (GitLab's merge request), as last seen, in its host's words. */
+export const ChangeSummary = Schema.Struct({
+  product: Product,
+  number: Schema.Number,
+  title: Schema.String,
+  url: Schema.String,
+  state: Schema.Literals(['open', 'merged', 'closed']),
+  draft: Schema.Boolean,
+  /** The host's words: pull request or merge request, PR or MR, # or !. */
+  noun: Schema.String,
+  short: Schema.String,
+  prefix: Schema.String,
+  repository: Schema.String,
+  additions: Schema.NullOr(Schema.Number),
+  deletions: Schema.NullOr(Schema.Number),
+  changedFiles: Schema.NullOr(Schema.Number),
+  checks: Schema.NullOr(ChecksSummary),
+  /** Charrette asks its host for news while the task is open. */
+  listening: Schema.Boolean,
+})
+export type ChangeSummary = typeof ChangeSummary.Type
+
+/** What a task does when its steps are done: open a draft pull request, open one for review, or push its branch only. */
+export const TaskEnd = Schema.Literals(['draft', 'ready', 'none'])
+export type TaskEnd = typeof TaskEnd.Type
+
+/** A link the person pasted, unfurled: an issue, or a pull request. */
+export const Unfurl = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal('issue'),
+    product: Product,
+    key: Schema.String,
+    title: Schema.String,
+    url: Schema.String,
+    status: IssueStatus,
+    priority: Schema.NullOr(Schema.Struct({ level: Schema.String, name: Schema.String })),
+    container: Schema.NullOr(Schema.String),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal('change'),
+    product: Product,
+    key: Schema.String,
+    title: Schema.String,
+    url: Schema.String,
+    state: Schema.Literals(['draft', 'open', 'merged', 'closed']),
+    repository: Schema.String,
+  }),
+])
+export type Unfurl = typeof Unfurl.Type
+
 /* ---- A thread's items, each kind with its own content ---- */
 
 /** A file a tool call touches, and the line, when it says. */
@@ -100,7 +259,8 @@ const itemFields = {
 export const UserMessageItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('user_message'),
-  content: Schema.Struct({ text: Schema.String }),
+  /** What they said, and the links in it Charrette could unfurl. */
+  content: Schema.Struct({ text: Schema.String, links: Schema.Array(Unfurl) }),
   input: Schema.NullOr(Schema.Struct({ state: Schema.Literals(['queued', 'delivered', 'superseded']), interrupting: Schema.Boolean })),
 })
 
@@ -165,14 +325,45 @@ export const StepResultItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('step_result'),
   content: Schema.Struct({
-    step: Schema.Literals(['implement', 'review', 'settle']),
+    step: Schema.Literals(['implement', 'review', 'settle', 'publish']),
     /** The review round, from 0. */
     round: Schema.Number,
     summary: Schema.String,
+    /** For publishing: the pull request it opened. */
+    change: Schema.NullOr(ChangeSummary),
     verdict: Schema.NullOr(Schema.Literals(['pass', 'changes_requested'])),
     findings: Schema.Array(Finding),
     /** Who reported it, for a review. */
     agentId: Schema.NullOr(Schema.String),
+  }),
+})
+
+/**
+ * Something heard from outside, written by someone else: a comment or a
+ * review on the task's pull request, its checks finishing, its being merged,
+ * closed or marked ready. It reads as a quoted note, not either side of the
+ * conversation.
+ */
+export const ArrivalItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('arrival'),
+  content: Schema.Struct({
+    source: Product,
+    kind: Schema.Literals(['comment', 'review', 'checks', 'merged', 'closed', 'ready']),
+    /** Who: a login; null for what the host itself says. */
+    from: Schema.NullOr(Schema.String),
+    /** Where: PR #12. */
+    where: Schema.String,
+    text: Schema.NullOr(Schema.String),
+    verdict: Schema.NullOr(Schema.Literals(['approved', 'changes_requested', 'commented'])),
+    path: Schema.NullOr(Schema.String),
+    line: Schema.NullOr(Schema.Number),
+    passed: Schema.NullOr(Schema.Number),
+    failed: Schema.NullOr(Schema.Number),
+    failing: Schema.Array(Schema.String),
+    url: Schema.NullOr(Schema.String),
+    /** Said by someone who can't write to the repository, as anyone can on a public one: not passed to the lead, for the person to pass on. */
+    outsider: Schema.Boolean,
   }),
 })
 
@@ -211,8 +402,14 @@ export const TaskItem = Schema.Struct({
         startsAt: Schema.NullOr(Schema.String),
         /** Why the coordinator chose the lead. */
         reason: Schema.NullOr(Schema.String),
+        /** What happens when the work is done; null where nothing reaches the repository's host. */
+        end: Schema.NullOr(TaskEnd),
       }),
     ),
+    /** The issue it came from. */
+    issue: Schema.NullOr(Schema.Struct({ product: Product, key: Schema.String, title: Schema.String, url: Schema.String })),
+    /** Its pull request, once opened. */
+    change: Schema.NullOr(ChangeSummary),
     /** The step it is on, by key, while it runs. */
     step: Schema.NullOr(Schema.String),
     /** The latest summary the lead reported. */
@@ -224,7 +421,16 @@ export const TaskItem = Schema.Struct({
   }),
 })
 
-export const ThreadItem = Schema.Union([UserMessageItem, AgentTextItem, ToolCallItem, PlanItem, NoticeItem, StepResultItem, TaskItem])
+export const ThreadItem = Schema.Union([
+  UserMessageItem,
+  AgentTextItem,
+  ToolCallItem,
+  PlanItem,
+  NoticeItem,
+  StepResultItem,
+  TaskItem,
+  ArrivalItem,
+])
 export type ThreadItem = typeof ThreadItem.Type
 
 export const SessionSummary = Schema.Struct({
@@ -245,8 +451,8 @@ export type SessionSummary = typeof SessionSummary.Type
  * stopped it; or review ran out of rounds with changes it hasn't seen.
  */
 export const StuckStep = Schema.Struct({
-  step: Schema.Literals(['implement', 'review', 'settle']),
-  why: Schema.Literals(['no_report', 'session_ended', 'failed_to_start', 'restarted', 'round_limit']),
+  step: Schema.Literals(['implement', 'review', 'settle', 'publish']),
+  why: Schema.Literals(['no_report', 'session_ended', 'failed_to_start', 'restarted', 'round_limit', 'not_connected']),
   /** What went wrong, in the agent's or Charrette's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
   /** The agent on the step. */
@@ -289,6 +495,13 @@ export const ThreadSnapshot = Schema.Struct({
     baseRef: Schema.NullOr(Schema.String),
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
+    /** The issue it came from. */
+    issue: Schema.NullOr(IssueSummary),
+    /** Its pull requests, as last seen. */
+    changes: Schema.Array(ChangeSummary),
+    /** What its branch changed since it started, file by file, and in how many commits; empty without a worktree here. */
+    files: Schema.Array(Schema.Struct({ path: Schema.String, add: Schema.Number, del: Schema.Number })),
+    commits: Schema.Number,
   }),
   session: Schema.NullOr(SessionSummary),
   attention: Schema.Array(AttentionRequest),
@@ -315,6 +528,8 @@ export const CoordinatorSnapshot = Schema.Struct({
   ),
   items: Schema.Array(ThreadItem),
   earlier: Schema.Boolean,
+  /** Where the project's repository is hosted, when its remote says, and whether Charrette is connected to it there. */
+  host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
 })
 export type CoordinatorSnapshot = typeof CoordinatorSnapshot.Type
 
@@ -368,7 +583,11 @@ export const Api = RpcGroup.make(
   /** Opens the folder the person chose, by the grant the app gave for it: the window never names a path. */
   command('OpenProject', { grant: Schema.String }, ProjectSummary),
   call('ListTasks', { projectId: Schema.String }, TaskList),
-  command('CreateTask', { projectId: Schema.String, title: Schema.String, description: Schema.optional(Schema.String) }, TaskSummary),
+  command(
+    'CreateTask',
+    { projectId: Schema.String, title: Schema.String, description: Schema.optional(Schema.String), issue: Schema.optional(Schema.String) },
+    TaskSummary,
+  ),
   /** The thread, with the newest `limit` items before `before` (a sequence), or none with `limit: 0`. */
   call('GetThread', { threadId: Schema.String, before: Schema.optional(Schema.Int), limit }, ThreadSnapshot),
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
@@ -377,7 +596,16 @@ export const Api = RpcGroup.make(
   /** Starts a task you planned yourself: it shows in the coordinator's thread like one it planned, and starts at once. */
   command(
     'StartTask',
-    { projectId: Schema.String, title: Schema.String, description: Schema.optional(Schema.String), steps: Schema.Array(PlanStep) },
+    {
+      projectId: Schema.String,
+      title: Schema.String,
+      description: Schema.optional(Schema.String),
+      steps: Schema.Array(PlanStep),
+      /** The issue it comes from: its link or its key. */
+      issue: Schema.optional(Schema.String),
+      /** What happens when the work is done; without it, a draft pull request where the repository's host is connected. */
+      end: Schema.optional(Schema.NullOr(TaskEnd)),
+    },
     TaskSummary,
   ),
   /** Starts a planned task now, rather than when its time runs out. */
@@ -385,7 +613,11 @@ export const Api = RpcGroup.make(
   /** Holds a planned task: it waits until you start it. */
   command('HoldPlan', { planId: Schema.String }, Schema.Void),
   /** Changes who does a planned task's steps, or skips one, before it starts. */
-  command('ChangePlan', { planId: Schema.String, steps: Schema.Array(PlanStep) }, Schema.Void),
+  command(
+    'ChangePlan',
+    { planId: Schema.String, steps: Schema.Array(PlanStep), end: Schema.optional(Schema.NullOr(TaskEnd)) },
+    Schema.Void,
+  ),
   command('StartSession', { threadId: Schema.String, agentId: Schema.String, model: Schema.optional(Schema.String) }, Schema.String),
   command('SwitchAgent', { threadId: Schema.String, agentId: Schema.String, model: Schema.optional(Schema.String) }, Schema.String),
   command('SetModel', { threadId: Schema.String, model: Schema.String }, Schema.Void),
@@ -410,6 +642,26 @@ export const Api = RpcGroup.make(
     { attentionId: Schema.String, decision: Schema.Literals(['allow', 'reject']), reason: Schema.optional(Schema.String) },
     Schema.Void,
   ),
+  /** The connections on this Mac, and the code hosts and trackers a person can connect. */
+  Rpc.make('ListConnections', { success: ConnectionList, error: ApiError }),
+  /** Starts the service's own sign-in: a code to type on its page, or a page to approve in the browser. */
+  command('StartSignIn', { product: Product, webUrl: Schema.optional(Schema.String) }, SignInStart),
+  /** How a sign-in stands. */
+  call('GetSignIn', { flowId: Schema.String }, SignInState),
+  command('CancelSignIn', { flowId: Schema.String }, Schema.Void),
+  /** Connects with a token the person pasted, which goes to the keychain. */
+  command(
+    'ConnectToken',
+    { product: Product, webUrl: Schema.optional(Schema.String), user: Schema.optional(Schema.String), token: Schema.String },
+    ConnectionSummary,
+  ),
+  command('Disconnect', { connectionId: Schema.String }, Schema.Void),
+  /** The person's open issues on the connected trackers, and in the project's repository. */
+  call('ListIssues', { projectId: Schema.String }, IssueList),
+  /** Marks the task's draft pull request ready for review. */
+  command('MarkReady', { taskId: Schema.String }, Schema.Void),
+  /** Asks the task's pull request for news now. */
+  command('RefreshTask', { taskId: Schema.String }, Schema.Void),
   /** What changes after `since`, or from now without it. */
   Rpc.make('Watch', { payload: { since: Schema.optional(Cursor) }, success: WatchEvent, error: ApiError, stream: true }),
 )

@@ -68,6 +68,29 @@ export const Abandoning: Story = {
   },
 }
 
+/** A step Charrette does itself, such as opening the pull request: tried again as it was, or gone on without. */
+export const OneCharretteDoes: Story = {
+  args: {
+    step: 'Pull request',
+    tried: [],
+    read: undefined,
+    output: undefined,
+    agents: [],
+    onTell: undefined,
+    onRetry: undefined,
+    onAgain: fn(),
+    what: 'Charrette couldn’t push the branch: the host said the token can’t write to meridian/api.',
+    text: { abandon: 'Go on without it' },
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Try again' }))
+    await expect(args.onAgain).toHaveBeenCalledOnce()
+    await expect(document.activeElement).toHaveTextContent('Trying again')
+  },
+}
+
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'button:first-of-type', focus: 'button:first-of-type', pressed: 'button:first-of-type' }),
   render: (args) => (

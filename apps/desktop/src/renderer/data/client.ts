@@ -2,13 +2,20 @@ import {
   Api,
   ApiError,
   clientProtocol,
+  type ConnectionList,
+  type ConnectionSummary,
   type CoordinatorSnapshot,
   type DomMessagePort,
   domPort,
+  type IssueList,
+  type Product,
   type ProjectList,
   type ProjectSummary,
   type PlanStep,
+  type SignInStart,
+  type SignInState,
   type Status,
+  type TaskEnd,
   type TaskList,
   type TaskSummary,
   type ThreadItem,
@@ -41,6 +48,7 @@ export interface Client {
     readonly projectId: string
     readonly title: string
     readonly description?: string
+    readonly issue?: string
   }) => Promise<TaskSummary>
   /** The thread, with the newest `limit` items before `before`. */
   readonly getThread: (threadId: string, page?: { readonly before?: number; readonly limit?: number }) => Promise<ThreadSnapshot>
@@ -68,10 +76,33 @@ export interface Client {
     readonly title: string
     readonly description?: string
     readonly steps: ReadonlyArray<PlanStep>
+    /** The issue it comes from: its link or key. */
+    readonly issue?: string
+    readonly end?: TaskEnd | null
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
-  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>) => Promise<void>
+  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
+  /** The connections on this Mac, and the code hosts and trackers a person can connect. */
+  readonly listConnections: () => Promise<ConnectionList>
+  /** Starts a service's own sign-in. */
+  readonly startSignIn: (product: Product, webUrl?: string) => Promise<SignInStart>
+  readonly getSignIn: (flowId: string) => Promise<SignInState>
+  readonly cancelSignIn: (flowId: string) => Promise<void>
+  /** Connects with a pasted token. */
+  readonly connectToken: (input: {
+    readonly product: Product
+    readonly webUrl?: string
+    readonly user?: string
+    readonly token: string
+  }) => Promise<ConnectionSummary>
+  readonly disconnect: (connectionId: string) => Promise<void>
+  /** The person's open issues, for a project. */
+  readonly listIssues: (projectId: string) => Promise<IssueList>
+  /** Marks a task's draft pull request ready for review. */
+  readonly markReady: (taskId: string) => Promise<void>
+  /** Asks a task's pull request for news now. */
+  readonly refreshTask: (taskId: string) => Promise<void>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
   /** Calls `listener` with each change after `since` (or from now) until the returned function is called. */
@@ -144,7 +175,18 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
-    changePlan: (planId, steps) => command((commandId) => api.ChangePlan({ commandId, planId, steps })),
+    changePlan: (planId, steps, end) =>
+      command((commandId) => api.ChangePlan({ commandId, planId, steps, ...(end === undefined ? {} : { end }) })),
+    listConnections: () => settle(api.ListConnections()),
+    startSignIn: (product, webUrl) =>
+      command((commandId) => api.StartSignIn({ commandId, product, ...(webUrl === undefined ? {} : { webUrl }) })),
+    getSignIn: (flowId) => settle(api.GetSignIn({ flowId })),
+    cancelSignIn: (flowId) => command((commandId) => api.CancelSignIn({ commandId, flowId })),
+    connectToken: (input) => command((commandId) => api.ConnectToken({ commandId, ...input })),
+    disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
+    listIssues: (projectId) => settle(api.ListIssues({ projectId })),
+    markReady: (taskId) => command((commandId) => api.MarkReady({ commandId, taskId })),
+    refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     watch: (listener, since) => {
       let cursor = since

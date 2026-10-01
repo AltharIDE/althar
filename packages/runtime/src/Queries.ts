@@ -1,6 +1,12 @@
+import { existsSync } from 'node:fs'
+
 import {
+  type ChangeSummary,
+  ChecksSummary,
   type CoordinatorSnapshot,
+  type IssueSummary,
   PAGE,
+  Unfurl,
   type TaskPhase,
   type ProjectList,
   type StuckStep,
@@ -9,13 +15,17 @@ import {
   type ThreadItem,
   type ThreadSnapshot,
 } from '@charrette/contracts'
-import { Context, Effect, Layer, Option } from 'effect'
+import { Context, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
+import { hostedOf, parseRemote } from '@charrette/connectors'
+
 import { Agents } from './Config'
+import { Connections } from './Connections'
 import { Coordinator } from './Coordinator'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
+import { git } from './git'
 import { commandIn } from './rules'
 import { Sessions } from './Sessions'
 
@@ -77,14 +87,68 @@ export const stuckOf = (payload: unknown): StuckStep => {
   const round = field(payload, 'round')
   const open = field(payload, 'open')
   return {
-    step: step === 'review' || step === 'settle' ? step : 'implement',
-    why: why === 'no_report' || why === 'session_ended' || why === 'restarted' || why === 'round_limit' ? why : 'failed_to_start',
+    step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
+    why:
+      why === 'no_report' || why === 'session_ended' || why === 'restarted' || why === 'round_limit' || why === 'not_connected'
+        ? why
+        : 'failed_to_start',
     detail: typeof detail === 'string' ? detail : null,
     agentId: typeof agentId === 'string' ? agentId : null,
     round: typeof round === 'number' ? round : 0,
     open: typeof open === 'number' ? open : 0,
   }
 }
+
+const number = (value: unknown, key: string): number | null => {
+  const found = field(value, key)
+  return typeof found === 'number' ? found : null
+}
+
+/** A pull request as Charrette last saw it (its external link's snapshot), in the contract's shape. */
+export const changeOf = (value: unknown, product: string, listening: boolean): ChangeSummary | null => {
+  const state = text(value, 'state')
+  const words = field(value, 'words')
+  const repository = field(value, 'repository')
+  const checks = field(value, 'checks')
+  const productIs = PRODUCTS.find((candidate) => candidate === product)
+  const n = number(value, 'number')
+  if (n === null || productIs === undefined || (state !== 'open' && state !== 'merged' && state !== 'closed')) return null
+  const outcome = text(checks, 'outcome')
+  const failing = field(checks, 'failing')
+  return {
+    product: productIs,
+    number: n,
+    title: text(value, 'title'),
+    url: text(value, 'url'),
+    state,
+    draft: field(value, 'draft') === true,
+    noun: text(words, 'noun') || 'pull request',
+    short: text(words, 'short') || 'PR',
+    prefix: text(words, 'prefix') || '#',
+    repository: Array.isArray(repository) ? repository.filter((part) => typeof part === 'string').join('/') : '',
+    additions: number(value, 'additions'),
+    deletions: number(value, 'deletions'),
+    changedFiles: number(value, 'changedFiles'),
+    checks:
+      checks === null || checks === undefined
+        ? null
+        : {
+            outcome: outcome === 'running' || outcome === 'passed' || outcome === 'failed' ? outcome : 'none',
+            passed: number(checks, 'passed') ?? 0,
+            failed: number(checks, 'failed') ?? 0,
+            running: number(checks, 'running') ?? 0,
+            total: number(checks, 'total') ?? 0,
+            failing: Array.isArray(failing) ? failing.filter((name) => typeof name === 'string') : [],
+            list: Option.getOrElse(decodeChecks(field(checks, 'list') ?? []), () => []),
+          },
+    listening,
+  }
+}
+
+const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
+const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
+
+const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
 
 export const itemOf = (row: ItemRow): ThreadItem | undefined => {
   const content = parse(row.content)
@@ -94,7 +158,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return {
         ...base,
         kind: 'user_message',
-        content: { text: text(content, 'text') },
+        content: { text: text(content, 'text'), links: Option.getOrElse(decodeLinks(field(content, 'links') ?? []), () => []) },
         input: row.inputState === null ? null : { state: row.inputState, interrupting: row.disposition === 'interrupt_and_continue' },
       }
     case 'agent_message':
@@ -156,9 +220,10 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         ...base,
         kind: 'step_result',
         content: {
-          step: step === 'review' || step === 'settle' ? step : 'implement',
+          step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
           round: typeof round === 'number' ? round : 0,
           summary: text(content, 'summary'),
+          change: changeOf(field(content, 'change'), text(field(content, 'change'), 'product'), false),
           verdict: verdict === 'pass' || verdict === 'changes_requested' ? verdict : null,
           findings: (Array.isArray(findings) ? findings : []).map((finding) => {
             const severity = text(finding, 'severity')
@@ -171,6 +236,35 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
             }
           }),
           agentId: agentId === '' ? null : agentId,
+        },
+      }
+    }
+    case 'arrival': {
+      const source = text(content, 'source')
+      const kind = text(content, 'kind')
+      const verdict = text(content, 'verdict')
+      const failing = field(content, 'failing')
+      const product = PRODUCTS.find((candidate) => candidate === source)
+      const kinds = ['comment', 'review', 'checks', 'merged', 'closed', 'ready'] as const
+      const what = kinds.find((candidate) => candidate === kind)
+      if (product === undefined || what === undefined) return undefined
+      return {
+        ...base,
+        kind: 'arrival',
+        content: {
+          source: product,
+          kind: what,
+          from: text(content, 'from') || null,
+          where: text(content, 'where'),
+          text: text(content, 'text') || null,
+          verdict: verdict === 'approved' || verdict === 'changes_requested' || verdict === 'commented' ? verdict : null,
+          path: text(content, 'path') || null,
+          line: number(content, 'line'),
+          passed: number(content, 'passed'),
+          failed: number(content, 'failed'),
+          failing: Array.isArray(failing) ? failing.filter((name) => typeof name === 'string') : [],
+          url: text(content, 'url') || null,
+          outsider: field(content, 'outsider') === true,
         },
       }
     }
@@ -188,7 +282,7 @@ export interface ThreadChange {
   readonly threadId: string | null
 }
 
-type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator
+type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Connections
 
 export class Queries extends Context.Service<
   Queries,
@@ -304,6 +398,80 @@ export class Queries extends Context.Service<
           }
         })
 
+      /** What a task's branch changed since it started, file by file, read from git in its worktree; nothing without one. */
+      const changedOf = (worktree: string | null, base: string | null) =>
+        worktree === null || base === null || !existsSync(worktree)
+          ? Effect.succeed({ files: [], commits: 0 })
+          : Effect.gen(function* () {
+              const numstat = yield* git(worktree, 'diff', '--numstat', base, 'HEAD')
+              const commits = yield* git(worktree, 'rev-list', '--count', `${base}..HEAD`)
+              return {
+                files: numstat
+                  .split('\n')
+                  .filter((line) => line !== '')
+                  .map((line) => {
+                    const [add = '0', del = '0', ...path] = line.split('\t')
+                    // A binary file counts no lines.
+                    return { path: path.join('\t'), add: Number(add) || 0, del: Number(del) || 0 }
+                  }),
+                commits: Number(commits) || 0,
+              }
+            }).pipe(Effect.orElseSucceed(() => ({ files: [], commits: 0 })))
+
+      /** A task's issue and pull requests, as their external links last saw them. */
+      const linksOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const links = yield* sql<{
+            kind: string
+            product: string
+            ref: string
+            key: string
+            url: string
+            snapshot: string
+            listening: number
+          }>`
+            SELECT kind, product, ref, key, url, snapshot, listening FROM external_links WHERE task_id = ${taskId} ORDER BY created_at`
+          const issueRow = links.find((link) => link.kind === 'issue')
+          const issue = ((): IssueSummary | null => {
+            if (issueRow === undefined) return null
+            const kept = parse(issueRow.snapshot)
+            const product = PRODUCTS.find((candidate) => candidate === issueRow.product)
+            if (product === undefined) return null
+            const status = field(kept, 'status')
+            const category = text(status, 'category')
+            const priority = field(kept, 'priority')
+            return {
+              product,
+              ref: issueRow.ref,
+              key: issueRow.key,
+              title: text(kept, 'title') || issueRow.key,
+              url: issueRow.url,
+              status: {
+                name: text(status, 'name') || 'Todo',
+                category:
+                  category === 'triage' ||
+                  category === 'backlog' ||
+                  category === 'started' ||
+                  category === 'done' ||
+                  category === 'cancelled'
+                    ? category
+                    : 'todo',
+              },
+              priority:
+                priority === null || priority === undefined ? null : { level: text(priority, 'level'), name: text(priority, 'name') },
+              container: text(kept, 'container') || null,
+            }
+          })()
+          const changes = links
+            .filter((link) => link.kind === 'change')
+            .flatMap((link) => {
+              const found = changeOf(parse(link.snapshot), link.product, link.listening === 1)
+              return found === null ? [] : [found]
+            })
+          return { issue, changes }
+        })
+
       /**
        * A task's card in the coordinator's thread: where it stands, worked out
        * from its plan, its run, the calls waiting and the agents working.
@@ -387,6 +555,8 @@ export class Queries extends Context.Service<
               skipped: field(step, 'skipped') === true,
             }
           })
+          const end = text(parameters, 'end')
+          const { issue, changes } = yield* linksOf(taskId)
           return {
             taskId,
             threadId: task.threadId,
@@ -401,7 +571,10 @@ export class Queries extends Context.Service<
                     steps: planned,
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,
                     reason: text(parameters, 'reason') || null,
+                    end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
                   },
+            issue: issue === null ? null : { product: issue.product, key: issue.key, title: issue.title, url: issue.url },
+            change: changes[0] ?? null,
             step: task.step,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (planned.find((step) => step.key === 'implement')?.agentId || null),
@@ -437,9 +610,10 @@ export class Queries extends Context.Service<
             branch: string | null
             worktree: string | null
             baseRef: string | null
+            baseCommit: string | null
           }>`
             SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.slug, k.state,
-              w.branch, w.path AS worktree, w.base_ref
+              w.branch, w.path AS worktree, w.base_ref, w.base_commit
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
             LEFT JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
             WHERE t.id = ${threadId} AND t.kind = 'task'`
@@ -461,6 +635,8 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               baseRef: head.baseRef,
               phase: (yield* cardFor(head.taskId))?.phase ?? null,
+              ...(yield* linksOf(head.taskId)),
+              ...(yield* changedOf(head.worktree, head.baseCommit)),
             },
             session: yield* sessionOf(threadId),
             attention: attention.map((request) => {
@@ -480,6 +656,35 @@ export class Queries extends Context.Service<
           } satisfies ThreadSnapshot
         })
 
+      /**
+       * Where a project's repository is hosted, from its remotes: on a
+       * connected instance, or on a hosted service Charrette knows; null when
+       * its remotes name neither, as a local one doesn't.
+       */
+      const hostOf = (projectId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const connections = yield* Connections
+          const [binding] = yield* sql<{ remotes: string }>`
+            SELECT remote_fingerprints AS remotes FROM repository_bindings WHERE project_id = ${projectId} AND detached_at IS NULL ORDER BY created_at LIMIT 1`
+          const listed = binding === undefined ? [] : parse(binding.remotes)
+          const remotes = Array.isArray(listed) ? listed.filter((remote): remote is string => typeof remote === 'string') : []
+          const connected = yield* connections.hostOf(remotes)
+          if (connected !== null) {
+            const { info } = yield* connections.adapters(connected.connectionId)
+            return { product: info.product, name: info.name, webUrl: info.webUrl, connected: true }
+          }
+          const hosted = hostedOf(connections.products)
+          for (const remote of remotes) {
+            const ref = parseRemote(remote)
+            const product = ref === null ? undefined : hosted.get(ref.host)
+            const info = product === undefined ? undefined : connections.products.find((candidate) => candidate.product === product)
+            if (info !== undefined && info.host && ref !== null)
+              return { product: info.product, name: info.name, webUrl: `https://${ref.host}`, connected: false }
+          }
+          return null
+        }).pipe(Effect.orElseSucceed(() => null))
+
       /** The project's coordinator thread: the agent on it, the one it would start on, and a page of its items. */
       const coordinator = (projectId: string, page: { readonly before?: number; readonly limit?: number } = {}) =>
         Effect.gen(function* () {
@@ -498,6 +703,7 @@ export class Queries extends Context.Service<
             suggested: yield* coordinators.suggested(projectId),
             items,
             earlier,
+            host: yield* hostOf(projectId),
           } satisfies CoordinatorSnapshot
         })
 
@@ -526,6 +732,8 @@ export class Queries extends Context.Service<
                 WHEN 'workspace' THEN (SELECT t.id FROM workspaces w
                   JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task' WHERE w.id = c.aggregate_id)
                 WHEN 'task' THEN (SELECT id FROM threads WHERE task_id = c.aggregate_id AND kind = 'task')
+                WHEN 'external_link' THEN (SELECT t.id FROM external_links x
+                  JOIN threads t ON t.task_id = x.task_id AND t.kind = 'task' WHERE x.id = c.aggregate_id)
               END AS thread_id
             FROM change_log c WHERE c.cursor > ${after} ORDER BY c.cursor LIMIT ${limit}`
         })

@@ -28,6 +28,8 @@ export interface ArrivedProps {
   /** The service it came from. Without one, a generic glyph. */
   mark?: Brand
   children?: ReactNode
+  /** A quiet line under it: what became of it, and what the person can do. */
+  foot?: ReactNode
   text?: Partial<ArrivedText>
 }
 
@@ -36,7 +38,7 @@ export interface ArrivedProps {
  * its pull request, a change to its issue. Written by someone else, so it
  * reads as a quoted note, not as either side of the conversation.
  */
-export function Arrived({ from, verb, where, at, mark, children, text }: ArrivedProps) {
+export function Arrived({ from, verb, where, at, mark, children, foot, text }: ArrivedProps) {
   const t = { ...arrivedText, ...text }
   const did = verb ?? t.verb
   return (
@@ -50,6 +52,7 @@ export function Arrived({ from, verb, where, at, mark, children, text }: Arrived
         {at && <span className={s.at}>{at}</span>}
       </div>
       {children && <blockquote className={s.body}>{children}</blockquote>}
+      {foot && <div className={s.foot}>{foot}</div>}
     </article>
   )
 }

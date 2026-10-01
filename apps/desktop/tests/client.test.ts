@@ -183,6 +183,15 @@ describe('the client', () => {
           HoldPlan: () => Effect.die('unused'),
           ChangePlan: () => Effect.die('unused'),
           AnswerStuck: () => Effect.die('unused'),
+          ListConnections: () => Effect.die('unused'),
+          StartSignIn: () => Effect.die('unused'),
+          GetSignIn: () => Effect.die('unused'),
+          CancelSignIn: () => Effect.die('unused'),
+          ConnectToken: () => Effect.die('unused'),
+          Disconnect: () => Effect.die('unused'),
+          ListIssues: () => Effect.die('unused'),
+          MarkReady: () => Effect.die('unused'),
+          RefreshTask: () => Effect.die('unused'),
           Watch: ({ since }) => {
             watches.push(since)
             return Stream.make({

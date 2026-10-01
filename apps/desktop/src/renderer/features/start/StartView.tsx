@@ -5,6 +5,8 @@ import { Button, Heading, type RuntimeEntry, Runtimes, RuntimeState, Spinner, Ti
 import { Start } from '@charrette/ui/screens'
 
 import { brandOf } from '../../shared/agents'
+import { ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
+import type { ConnectionsModel } from '../connections/useConnections'
 import s from './Start.module.css'
 import type { StartModel } from './useStart'
 
@@ -60,7 +62,15 @@ function ProjectRow({ project, onOpen }: { project: ProjectSummary; onOpen: () =
   )
 }
 
-export function StartView({ model, onProject }: { model: StartModel; onProject: (projectId: string) => void }) {
+export function StartView({
+  model,
+  connections,
+  onProject,
+}: {
+  model: StartModel
+  connections: ConnectionsModel
+  onProject: (projectId: string) => void
+}) {
   const opened = (project: ProjectSummary | null) => {
     if (project !== null) onProject(project.id)
   }
@@ -130,12 +140,20 @@ export function StartView({ model, onProject }: { model: StartModel; onProject: 
             </ul>
           )}
         </section>
-        <section aria-labelledby="agents" className={s.agents}>
-          <Heading level={2} id="agents">
-            {text.agents}
-          </Heading>
-          {model.status === null ? <p className={s.quiet}>{text.connecting}</p> : <Runtimes label={text.agents} runtimes={runtimes} />}
-        </section>
+        <div className={s.side}>
+          <section aria-labelledby="agents" className={s.agents}>
+            <Heading level={2} id="agents">
+              {text.agents}
+            </Heading>
+            {model.status === null ? <p className={s.quiet}>{text.connecting}</p> : <Runtimes label={text.agents} runtimes={runtimes} />}
+          </section>
+          <section aria-labelledby="connections" className={s.agents}>
+            <Heading level={2} id="connections">
+              {connectionsText.label}
+            </Heading>
+            <ConnectionsView model={connections} />
+          </section>
+        </div>
       </main>
     </div>
   )

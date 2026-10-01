@@ -19,6 +19,15 @@ type Story = StoryObj<typeof meta>
 export const Ready: Story = {}
 /** Still being checked: a draft, with the review a rule added still running. */
 export const Draft: Story = { args: CHANGE_DRAFT }
+/** Just opened: its checks haven't started, and it says so rather than counting none. */
+export const NoChecksYet: Story = {
+  args: { ...CHANGE_DRAFT, checks: [] },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('None have run yet')).toBeInTheDocument()
+    await expect(c.queryByText(/0 of 0/)).not.toBeInTheDocument()
+  },
+}
 /** A check waits on your call; the change waits with it. */
 export const Held: Story = { args: CHANGE_HELD }
 export const Merged: Story = { args: CHANGE_MERGED }

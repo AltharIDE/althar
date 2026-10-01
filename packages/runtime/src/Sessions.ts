@@ -977,6 +977,8 @@ export class Sessions extends Context.Service<
             `The worktree is ${thread.worktree}, on the branch ${thread.branch}, which started from ${thread.baseRef}${thread.baseCommit === null ? '' : ` at ${thread.baseCommit.slice(0, 12)}`}.`,
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
             "When you have done the task, or can't go further without the person, call Charrette's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
+            // Charrette reaches the code host for the task (ADR-011).
+            "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Charrette pushes the branch and opens the task's pull request. After that, read it with Charrette's read_pull_request tool, answer what people say on it with reply_on_pull_request, and after new commits call publish_changes. read_issue reads the issue the task came from, or any other.",
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),
             ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
             ...(status === '' ? [] : [`Not yet committed:\n${cap(status)}`]),
@@ -999,6 +1001,7 @@ export class Sessions extends Context.Service<
               '- draft_task, with a title that says what should change, in a line, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.',
               '- propose_plan, for the task you drafted: who implements it (its lead) and why, in a sentence, and who reviews it, or no review for something trivial. The reviewer only reads; the lead then settles what it finds. By default, review with an agent from a different provider. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
               '- list_tasks, read_task and read_thread, to see what is under way and how it went.',
+              "- read_issue and find_issues, for the issues on the person's connected trackers and in the project's repository. When the person points at an issue, read it, and draft the task from it with its link or key as draft_task's issue.",
               "- message_lead, to pass something to a task's lead.",
             ].join('\n'),
             `The agents you can give work to:\n${agents.list.map((entry) => `- ${entry.definition.id} (${entry.definition.name})`).join('\n')}`,

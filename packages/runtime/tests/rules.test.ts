@@ -22,6 +22,59 @@ const request = (fields: Partial<PermissionRequest>): PermissionRequest => ({
 
 const run = (command: string, overrides: Partial<RuleContext> = {}) => decide(request({ title: command }), { ...context, ...overrides })
 
+describe('a code host, reached only through Charrette', () => {
+  it.each([
+    ['gh pr view 12', undefined],
+    ['gh pr list --state open', undefined],
+    ['gh pr checks', undefined],
+    ['gh pr diff 12', undefined],
+    ['gh run view 123 --log-failed', undefined],
+    ['gh issue view 7', undefined],
+    ['gh api repos/meridian/api/pulls/12/comments', undefined],
+    ['glab mr view 4', undefined],
+    ['glab ci trace', undefined],
+    ['gh --version', undefined],
+    ['gh pr create --help', undefined],
+    ['gh', undefined],
+    ['gh pr create --fill', 'publish_changes'],
+    ['gh pr edit 12 --title x', 'publish_changes'],
+    ['gh pr ready 12', 'publish_changes'],
+    ['glab mr create', 'publish_changes'],
+    ['gh pr comment 12 --body done', 'reply_on_pull_request'],
+    ['gh pr review 12 --approve', 'reply_on_pull_request'],
+    ['glab mr note 4 -m x', 'reply_on_pull_request'],
+    ['gh pr merge 12 --squash', "Merging is the person's to do"],
+    ['glab mr merge 4', "Merging is the person's to do"],
+    ['gh issue create --title x', 'read_issue'],
+    ['gh issue close 7', 'read_issue'],
+    ['gh auth login', "without the person's sign-in"],
+    ['gh api -X POST repos/meridian/api/issues', "Agents don't change things on the code host"],
+    ['gh api repos/meridian/api/issues -f title=x', "Agents don't change things on the code host"],
+    ['gh api --method=PATCH repos/x', "Agents don't change things on the code host"],
+    ['gh release delete v1', "Agents don't change things on the code host"],
+    ['gh workflow run deploy.yml', "Agents don't change things on the code host"],
+    ['gh -R meridian/api pr create', "Agents don't change things on the code host"],
+    ['cd sub && /opt/homebrew/bin/gh pr create', 'publish_changes'],
+    ['GH_CONFIG_DIR=~/.config/gh gh pr create', 'publish_changes'],
+    ['bash -lc "git commit -am x && gh pr create"', 'publish_changes'],
+    // Credentials are the person's: the keychain, and git's helpers, whichever way they're asked.
+    ['security find-generic-password -s Charrette -w', "don't read the person's credentials"],
+    ['/usr/bin/security dump-keychain', "don't read the person's credentials"],
+    ["printf 'host=github.com\\n' | git credential fill", "don't read the person's credentials"],
+    ['git -C /w -c x=y credential-osxkeychain get', "don't read the person's credentials"],
+    ['git-credential-osxkeychain get', "don't read the person's credentials"],
+    ['git config --get credential.helper', undefined],
+    ['git commit -m credential', undefined],
+  ])('%s: %s', (command, refused) => {
+    const verdict = run(command)
+    if (refused === undefined) assert.notStrictEqual(verdict.verdict, 'deny')
+    else {
+      assert.strictEqual(verdict.verdict, 'deny')
+      assert.include(verdict.verdict === 'deny' ? verdict.reason : '', refused)
+    }
+  })
+})
+
 describe('reading commands', () => {
   it('splits commands and words as a shell would', () => {
     assert.deepStrictEqual(parseCommandLine(`cd "my dir" && git commit -m 'it is done'; echo a\\ b | tee x 2>&1`), {
@@ -117,7 +170,6 @@ describe('the always-ask list', () => {
     ['git push origin HEAD:refs/notes/x', "Charrette can't tell what `refs/notes/x` is, so it asks."],
     ['git push --weird origin', "Charrette can't tell what `--weird` does to a push, so it asks."],
     ['git push origin $(git branch --show-current)', "Charrette can't tell what this command does until it runs, so it asks."],
-    ['gh pr merge 12 --squash', 'A merge always asks.'],
     ['make deploy', 'Deploying or publishing always asks.'],
     ['npx wrangler deploy', 'Deploying or publishing always asks.'],
     ['vercel --prod', 'Deploying or publishing always asks.'],
@@ -350,5 +402,12 @@ describe('a role that only reads', () => {
     )
     assert.strictEqual(verdict({ kind: 'other', title: 'api.github.com' }), 'deny')
     assert.strictEqual(verdict({ kind: 'execute', title: '' }), 'deny')
+  })
+
+  it('never reads credentials either, and says so', () => {
+    for (const command of ['security find-generic-password -s Charrette -w', 'git credential fill', 'cat x | git-credential-store get']) {
+      const decided = decideReader(request({ kind: 'execute', title: command, rawInput: { command } }))
+      assert.include(decided.verdict === 'deny' ? decided.reason : '', "don't read the person's credentials", command)
+    }
   })
 })

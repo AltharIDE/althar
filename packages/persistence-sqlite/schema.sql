@@ -20,7 +20,7 @@
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
 -- hold_reason: usage_limit, agent_unavailable
 -- thread_kind: coordinator, task, step
--- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task
+-- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
 -- user_input_state: queued, delivered, superseded
 -- turn_delivery_state: pending, delivered, completed, interrupted, interruption_uncertain, failed
@@ -43,7 +43,11 @@
 -- pull_request_state: none, draft, ready, merged, closed
 -- work_item_state: pending, claimed, done, failed, uncertain
 -- mutation_state: intended, confirmed, failed, uncertain
--- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item
+-- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link
+-- connection_product: github, gitlab, bitbucket_cloud, bitbucket_dc, linear, jira_cloud, jira_dc, trello
+-- connection_auth: device_flow, pkce, token
+-- connection_state: ready, reauth_required, removed
+-- external_kind: issue, change
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -879,3 +883,52 @@ CREATE INDEX processes_live ON processes (runtime_instance_id) WHERE state IN ('
 CREATE UNIQUE INDEX one_live_session_per_thread ON provider_sessions (thread_id) WHERE state IN ('active', 'waiting_approval', 'cancelling');
 
 CREATE UNIQUE INDEX runs_by_plan ON runs (plan_id) WHERE plan_id IS NOT NULL;
+
+CREATE TABLE connections (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'conn_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
+  device_id TEXT NOT NULL REFERENCES devices (id),
+  product TEXT NOT NULL REFERENCES vocab_connection_product (word),
+  web_url TEXT NOT NULL,
+  api_url TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  account_login TEXT NOT NULL,
+  account_name TEXT,
+  auth TEXT NOT NULL REFERENCES vocab_connection_auth (word),
+  credential_ref TEXT NOT NULL,
+  expires_at TEXT CHECK (expires_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  state TEXT NOT NULL REFERENCES vocab_connection_state (word),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
+) STRICT;
+
+CREATE UNIQUE INDEX one_connection_per_account ON connections (device_id, product, web_url, account_id) WHERE state <> 'removed';
+
+CREATE TABLE external_links (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 6) = 'xlink_' AND length(id) = 38 AND substr(id, 7) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  task_id TEXT NOT NULL,
+  connection_id TEXT REFERENCES connections (id),
+  product TEXT NOT NULL REFERENCES vocab_connection_product (word),
+  kind TEXT NOT NULL REFERENCES vocab_external_kind (word),
+  external_id TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  key TEXT NOT NULL,
+  url TEXT NOT NULL,
+  snapshot TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(snapshot)),
+  listening INTEGER NOT NULL DEFAULT 0 CHECK (listening IN (0, 1)),
+  cursor TEXT,
+  polled_at TEXT CHECK (polled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  UNIQUE (task_id, kind, product, external_id),
+  FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
+  UNIQUE (id, project_id)
+) STRICT;
+
+CREATE INDEX external_links_by_task ON external_links (task_id);
+
+CREATE INDEX external_links_listening ON external_links (listening) WHERE listening = 1;
+
+CREATE UNIQUE INDEX observations_once ON observations (subject_type, subject_id, kind, json_extract(payload, '$.id')) WHERE json_extract(payload, '$.id') IS NOT NULL;

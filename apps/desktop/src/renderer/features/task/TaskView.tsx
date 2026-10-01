@@ -1,15 +1,24 @@
 import { useState } from 'react'
 
-import type { AttentionRequest, ThreadSnapshot } from '@charrette/contracts'
+import type { AttentionRequest, ChangeSummary, ThreadSnapshot } from '@charrette/contracts'
 import {
   BackCrumb,
   Button,
+  type ChangeCheck,
+  ChangeSet,
+  ChangeState,
+  CheckState,
+  ChromeButton,
   Composer,
   Decision,
+  Issue,
   LinkButton,
   type ModelInfo,
   Permission,
   Select,
+  SidePanel,
+  SidePanelBody,
+  SidePanelTitle,
   Spinner,
   TaskFace,
   TaskHeader,
@@ -22,6 +31,7 @@ import {
 } from '@charrette/ui'
 
 import { modelInfo } from '../../shared/agents'
+import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
@@ -55,6 +65,31 @@ export const text = {
   earlier: 'Earlier in this task',
   showEarlier: 'Show',
   loadingEarlier: 'Showing…',
+  change: (change: ChangeSummary) => `${change.short} ${change.prefix}${change.number}`,
+  changePanel: (change: ChangeSummary) => (change.noun === 'merge request' ? 'Merge request' : 'Pull request'),
+  draftNote: 'Its checks run on it; mark it ready when you are',
+  readyNote: (host: string) => `Merge it on ${host} when you’re ready`,
+  closed: (change: ChangeSummary, host: string) => `${text.change(change)} was closed on ${host}.`,
+  markReady: 'Mark ready for review',
+  openOn: (host: string) => `Open on ${host}`,
+}
+
+/** A check as the kit lists it: one that was skipped or said nothing counts as passed, with what it said. */
+const checkOf = (check: NonNullable<ChangeSummary['checks']>['list'][number], index: number): ChangeCheck => {
+  const state = ((): CheckState => {
+    switch (check.state) {
+      case 'queued':
+        return CheckState.Queued
+      case 'running':
+        return CheckState.Running
+      case 'failed':
+        return CheckState.Failed
+      default:
+        return CheckState.Passed
+    }
+  })()
+  const said = check.state === 'skipped' || check.state === 'neutral' || check.state === 'cancelled' ? check.state : check.summary
+  return { id: `${index}-${check.name}`, name: check.name, state, ...(said === null ? {} : { detail: said }) }
 }
 
 /** Where a task stands, for its header. */
@@ -91,9 +126,82 @@ function Call({ request, project, onAnswer }: { request: AttentionRequest; proje
   )
 }
 
+/** A task's pull request beside its thread: the kit's change set, and what the person can do with it here. */
+function ChangePanel({
+  snapshot,
+  change,
+  lead,
+  agentName,
+  onReady,
+  onClose,
+  pending,
+}: {
+  snapshot: ThreadSnapshot
+  change: ChangeSummary
+  lead: ModelInfo
+  agentName: (id: string | null) => string
+  onReady: () => void
+  onClose: () => void
+  pending: boolean
+}) {
+  const host = productName(change.product)
+  const reviewers = [
+    ...new Set(
+      snapshot.items.flatMap((item) =>
+        item.kind === 'step_result' && item.content.step === 'review' && item.content.agentId !== null ? [item.content.agentId] : [],
+      ),
+    ),
+  ].map((id) => modelInfo({ id, name: agentName(id) }, null))
+  const state = change.state === 'merged' ? ChangeState.Merged : change.draft ? ChangeState.Draft : ChangeState.Ready
+  return (
+    <SidePanel label={text.changePanel(change)} head={<SidePanelTitle>{text.changePanel(change)}</SidePanelTitle>} onClose={onClose}>
+      <SidePanelBody>
+        {change.state === 'closed' ? (
+          <p className={s.quiet}>{text.closed(change, host)}</p>
+        ) : (
+          <ChangeSet
+            state={state}
+            host={{ name: host, brand: productBrand(change.product) }}
+            {...(state === ChangeState.Draft
+              ? { note: text.draftNote }
+              : state === ChangeState.Ready
+                ? { note: text.readyNote(host) }
+                : {})}
+            title={change.title}
+            branch={snapshot.task.branch ?? ''}
+            base={(snapshot.task.baseRef ?? '').replace(/^origin\//, '')}
+            commits={snapshot.task.commits}
+            lead={lead}
+            reviewers={reviewers}
+            prs={[{ repo: change.repository, number: change.number, url: change.url, files: snapshot.task.files }]}
+            checks={(change.checks?.list ?? []).map(checkOf)}
+            headingLevel={3}
+            text={{
+              number: (n) => `${change.prefix}${n}`,
+              prs: () => text.changePanel(change),
+              onHostLabel: (repo, n, on) => `Open ${repo} ${change.prefix}${n} on ${on}`,
+            }}
+          />
+        )}
+        <div className={s.changeActions}>
+          {change.state === 'open' && change.draft && (
+            <Button variant="signal" busy={pending} onClick={onReady}>
+              {text.markReady}
+            </Button>
+          )}
+          <a className={s.external} href={change.url} target="_blank" rel="noreferrer">
+            {text.openOn(host)}
+          </a>
+        </div>
+      </SidePanelBody>
+    </SidePanel>
+  )
+}
+
 export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => void }) {
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState<string | null>(null)
+  const [showChange, setShowChange] = useState(false)
   // A running turn says how long it has worked so far.
   const now = useNow(model.snapshot?.session?.turnRunning ?? false)
   const snapshot = model.snapshot
@@ -122,11 +230,21 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
     void (now ? model.sendNow(body) : model.send(body))
   }
 
+  const change = snapshot.task.changes[0] ?? null
+  const issue = snapshot.task.issue
+  // Its pull request opens beside the thread.
+  const changeButton = change !== null && (
+    <ChromeButton icon="pr" label={text.change(change)} expanded={showChange} onClick={() => setShowChange((open) => !open)} />
+  )
   const actions =
     session === null ? (
-      chosen !== null && <TaskMenu status={status} onResume={() => void model.start(chosen)} />
+      <>
+        {changeButton}
+        {chosen !== null && <TaskMenu status={status} onResume={() => void model.start(chosen)} />}
+      </>
     ) : (
       <>
+        {changeButton}
         {session.models.length > 0 && (
           <Select
             label={text.model}
@@ -205,8 +323,41 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
           />
         </ThreadMeasure>
       </div>
-      <TaskFace className={s.face} composer={composer}>
+      <TaskFace
+        className={s.face}
+        composer={composer}
+        panel={
+          showChange && change !== null ? (
+            <ChangePanel
+              snapshot={snapshot}
+              change={change}
+              lead={lead}
+              agentName={agentName}
+              pending={model.pending}
+              onReady={() => void model.markReady()}
+              onClose={() => setShowChange(false)}
+            />
+          ) : undefined
+        }
+      >
         <Thread label={text.thread} busy={busy}>
+          {issue !== null && !snapshot.earlier && (
+            <div className={s.issue}>
+              <Issue
+                mark={productBrand(issue.product)}
+                source={productName(issue.product)}
+                id={issue.key}
+                tone={issue.product === 'linear' ? 'linear' : 'plain'}
+                title={issue.title}
+                href={issue.url}
+                status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
+                {...(issue.priority === null || issue.priority.level === 'none'
+                  ? {}
+                  : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
+                {...(issue.container === null ? {} : { meta: issue.container })}
+              />
+            </div>
+          )}
           {snapshot.earlier && (
             <ThreadDivider
               icon="up"
@@ -224,6 +375,7 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
               now,
             )}
             agentName={agentName}
+            onPassOn={(words) => void model.send(words)}
           />
           {snapshot.attention.map((request) =>
             request.kind === 'stuck' && request.stuck !== null ? (

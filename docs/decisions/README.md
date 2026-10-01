@@ -18,3 +18,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [008](008-shortcuts-in-behaviour-not-in-records.md) | Shortcuts in behaviour, never in recorded facts |
 | [009](009-effect-on-the-runtime-side.md) | Effect on the runtime side |
 | [010](010-desktop-app-mvvm.md) | The desktop app is MVVM, in feature folders |
+| [011](011-own-connectors-for-hosts-and-trackers.md) | Charrette's own connectors for code hosts and trackers |

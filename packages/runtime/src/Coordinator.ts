@@ -5,9 +5,11 @@ import type { Commands, Ledger } from '@charrette/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Changes } from './Changes'
 import { Agents } from './Config'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
+import { Issues } from './Issues'
 import { Plans } from './Plans'
 import { Projects } from './Projects'
 import { envelope } from './envelope'
@@ -50,8 +52,11 @@ type Store =
   | Ledger
   | Commands
   | Crypto.Crypto
+  | Changes
+  | Issues
 
-const Drafted = Schema.Struct({ title: Schema.String, description: Schema.optional(Schema.String) })
+const Drafted = Schema.Struct({ title: Schema.String, description: Schema.optional(Schema.String), issue: Schema.optional(Schema.String) })
+const Asked = Schema.Struct({ issue: Schema.String })
 const Proposed = Schema.Struct({
   task: Schema.String,
   lead: Schema.Struct({ agent: Schema.String, model: Schema.optional(Schema.String), reason: Schema.optional(Schema.String) }),
@@ -92,6 +97,8 @@ export class Coordinator extends Context.Service<
       const plans = yield* Plans
       const signIns = yield* SignIns
       const toolServer = yield* ToolServer
+      const changes = yield* Changes
+      const issues = yield* Issues
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const nameOf = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
 
@@ -250,7 +257,18 @@ export class Coordinator extends Context.Service<
 
       const draft = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          const { title, description } = yield* read(Drafted, input)
+          const { title, description, issue: from } = yield* read(Drafted, input)
+          // The issue it comes from is read first: its key goes in the task's branch.
+          const issue =
+            from === undefined
+              ? undefined
+              : yield* issues
+                  .read(from, access.projectId)
+                  .pipe(
+                    Effect.mapError(
+                      () => new ToolRefused({ message: `Charrette can't read ${from}. Draft the task without it, or check the link.` }),
+                    ),
+                  )
           // The same title from the same session is the same command: an agent that calls again, unsure the first worked, gets the first task.
           const commandId = `cmd_${createHash('sha256').update(`${access.sessionId}\u0000${title.trim().toLowerCase()}`).digest('hex').slice(0, 32)}`
           const created = yield* projects.createTask({
@@ -259,8 +277,11 @@ export class Coordinator extends Context.Service<
             title,
             ...(description === undefined ? {} : { description }),
             draft: true,
+            ...(issue === undefined ? {} : { issueKey: issue.key }),
           })
-          return `Drafted ${created.slug}. Now propose its plan with propose_plan.`
+          if (issue !== undefined && from !== undefined)
+            yield* issues.attach({ projectId: access.projectId as ProjectId, taskId: created.taskId, issue: from })
+          return `Drafted ${created.slug}${issue === undefined ? '' : `, from ${issue.key}`}. Now propose its plan with propose_plan.`
         })
 
       const propose = (access: ToolAccess, input: unknown) =>
@@ -285,6 +306,7 @@ export class Coordinator extends Context.Service<
             steps,
             reason: proposed.lead.reason ?? null,
             actorId: instance.coordinatorId,
+            end: yield* changes.endFor(access.projectId),
           })
           return `Planned ${task.slug}. It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again.`
         })
@@ -311,6 +333,26 @@ export class Coordinator extends Context.Service<
           return Option.isSome(lead)
             ? `Passed on to ${task.slug}'s lead.`
             : `No lead is running on ${task.slug}, so nobody reads this yet; its lead will when one starts. Tell the person.`
+        })
+
+      const readIssue = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const { issue: wanted } = yield* read(Asked, input)
+          const issue = yield* issues
+            .read(wanted, access.projectId)
+            .pipe(Effect.mapError(() => new ToolRefused({ message: `Charrette can't read ${wanted}: no connected tracker has it.` })))
+          return [
+            `${issue.key}: ${issue.title}`,
+            `${issue.status.name}${issue.priority === null || issue.priority.level === 'none' ? '' : `, ${issue.priority.name} priority`}${issue.container === null ? '' : `, in ${issue.container}`}. ${issue.url}`,
+            issue.body === '' ? 'No description.' : issue.body,
+          ].join('\n\n')
+        })
+
+      const findIssues = (access: ToolAccess) =>
+        Effect.gen(function* () {
+          const found = yield* issues.mine(access.projectId)
+          if (found.length === 0) return 'The person has no open issues on the connected trackers.'
+          return found.map((issue) => `- ${issue.key}: ${issue.title} (${issue.status.name}) ${issue.url}`).join('\n')
         })
 
       const tool = (
@@ -352,9 +394,29 @@ export class Coordinator extends Context.Service<
         tool('read_thread', "A task's thread as text: what the person, the lead and Charrette said, oldest first.", named, readThread),
         tool(
           'draft_task',
-          'Drafts a task for a change: its title, saying what should change, in a line, and a description with what the lead needs: the context, where to look, constraints, and what done looks like. Then propose its plan.',
-          { type: 'object', properties: { title: { type: 'string' }, description: { type: 'string' } }, required: ['title'] },
+          "Drafts a task for a change: its title, saying what should change, in a line, and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue. Then propose its plan.",
+          {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              description: { type: 'string' },
+              issue: { type: 'string', description: 'The issue it comes from: its link, or its key (MER-231, #12).' },
+            },
+            required: ['title'],
+          },
           draft,
+        ),
+        tool(
+          'read_issue',
+          'An issue on a connected tracker, or in the project’s repository: its title, status and description. Takes its link or its key.',
+          { type: 'object', properties: { issue: { type: 'string' } }, required: ['issue'] },
+          readIssue,
+        ),
+        tool(
+          'find_issues',
+          'The person’s open issues on the connected trackers, and in the project’s repository, newest change first.',
+          nothing,
+          (access) => findIssues(access),
         ),
         tool(
           'propose_plan',

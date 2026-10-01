@@ -1,0 +1,168 @@
+.list {
+  container-type: inline-size;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.service {
+  display: flex;
+  flex-direction: column;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+}
+.service:first-child {
+  border-top: 0;
+}
+.row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 30px;
+}
+/* A service: its mark, its name over how it stands, and what connects it. */
+.head {
+  grid-template-areas:
+    'mark name actions'
+    'mark status actions';
+  row-gap: 0;
+}
+.head > .mark {
+  grid-area: mark;
+}
+.head > .name {
+  grid-area: name;
+}
+.head > .status {
+  grid-area: status;
+  margin-top: 2px;
+}
+.head > .actions {
+  grid-area: actions;
+}
+.account {
+  min-height: 28px;
+}
+.mark {
+  display: flex;
+  justify-content: center;
+  color: var(--t-1);
+}
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.calls {
+  color: var(--signal-bright);
+}
+.instance {
+  color: var(--t-3);
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 0 4px 34px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--sunk);
+}
+.prompt {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.code {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.codeText {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--t-1);
+  user-select: all;
+}
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.spacer {
+  flex: 1 1 auto;
+}
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--t-1);
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 2px;
+}
+.waiting {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--t-2);
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+
+/* Narrow, as in a side panel: the name and what connects it share a line, and how it stands runs under both. */
+@container (max-width: 440px) {
+  .head {
+    grid-template-areas:
+      'mark name actions'
+      '. status status';
+  }
+  .account .line {
+    white-space: normal;
+  }
+  .panel {
+    margin-left: 0;
+  }
+}
