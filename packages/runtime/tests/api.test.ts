@@ -539,6 +539,9 @@ describe('code hosts and trackers, through the API', () => {
         const thread = yield* eventually(client.GetThread({ threadId: started.threadId }), (snapshot) => snapshot.task.changes.length === 1)
         assert.strictEqual(thread.task.issue?.key, 'MER-231')
         assert.deepInclude(thread.task.changes[0], { number: 1, draft: true, state: 'open', short: 'PR', prefix: '#' })
+        // What its branch changed, as the accept view lists it.
+        assert.deepStrictEqual(thread.task.files, [{ path: 'change.txt', add: 1, del: 0 }])
+        assert.strictEqual(thread.task.commits, 1)
         yield* client.MarkReady({ commandId: commandId(), taskId: started.id })
         assert.isFalse((yield* client.GetThread({ threadId: started.threadId })).task.changes[0]?.draft)
         yield* client.RefreshTask({ commandId: commandId(), taskId: started.id })

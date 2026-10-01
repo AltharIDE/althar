@@ -181,6 +181,14 @@ export const ChecksSummary = Schema.Struct({
   running: Schema.Number,
   total: Schema.Number,
   failing: Schema.Array(Schema.String),
+  /** Each check, by name, as it stands, with what it said of itself. */
+  list: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      state: Schema.Literals(['queued', 'running', 'passed', 'failed', 'skipped', 'cancelled', 'neutral']),
+      summary: Schema.NullOr(Schema.String),
+    }),
+  ),
 })
 export type ChecksSummary = typeof ChecksSummary.Type
 
@@ -489,6 +497,9 @@ export const ThreadSnapshot = Schema.Struct({
     issue: Schema.NullOr(IssueSummary),
     /** Its pull requests, as last seen. */
     changes: Schema.Array(ChangeSummary),
+    /** What its branch changed since it started, file by file, and in how many commits; empty without a worktree here. */
+    files: Schema.Array(Schema.Struct({ path: Schema.String, add: Schema.Number, del: Schema.Number })),
+    commits: Schema.Number,
   }),
   session: Schema.NullOr(SessionSummary),
   attention: Schema.Array(AttentionRequest),

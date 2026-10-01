@@ -16,6 +16,8 @@ export interface ChecksSum {
   readonly running: number
   readonly total: number
   readonly failing: ReadonlyArray<string>
+  /** Each check, by name, as it stands. */
+  readonly list: ReadonlyArray<{ readonly name: string; readonly state: Check['state']; readonly summary: string | null }>
 }
 
 /** Sums up a head's checks: passed, failed, still running, and how they stand overall. */
@@ -31,6 +33,7 @@ export const checksOf = (sha: string, checks: ReadonlyArray<Check>): ChecksSum =
     running,
     total: checks.length,
     failing: failed.map((check) => check.name),
+    list: checks.map((check) => ({ name: check.name, state: check.state, summary: check.summary })),
   }
 }
 

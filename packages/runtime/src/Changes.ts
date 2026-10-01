@@ -73,6 +73,15 @@ const Snapshot = Schema.Struct({
       running: Schema.Number,
       total: Schema.Number,
       failing: Schema.Array(Schema.String),
+      list: Schema.optional(
+        Schema.Array(
+          Schema.Struct({
+            name: Schema.String,
+            state: Schema.Literals(['queued', 'running', 'passed', 'failed', 'skipped', 'cancelled', 'neutral']),
+            summary: Schema.NullOr(Schema.String),
+          }),
+        ),
+      ),
     }),
   ),
 })
@@ -99,7 +108,7 @@ const snapshotOf = (
   change: ChangeRequest,
   repository: ReadonlyArray<string>,
   words: Snapshot['words'],
-  checks: ChecksSum | null,
+  checks: Snapshot['checks'],
 ): Snapshot => ({
   number: change.number,
   title: change.title,

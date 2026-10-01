@@ -1,5 +1,8 @@
+import { existsSync } from 'node:fs'
+
 import {
   type ChangeSummary,
+  ChecksSummary,
   type CoordinatorSnapshot,
   type IssueSummary,
   PAGE,
@@ -19,6 +22,7 @@ import { Agents } from './Config'
 import { Coordinator } from './Coordinator'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
+import { git } from './git'
 import { commandIn } from './rules'
 import { Sessions } from './Sessions'
 
@@ -132,12 +136,14 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
             running: number(checks, 'running') ?? 0,
             total: number(checks, 'total') ?? 0,
             failing: Array.isArray(failing) ? failing.filter((name) => typeof name === 'string') : [],
+            list: Option.getOrElse(decodeChecks(field(checks, 'list') ?? []), () => []),
           },
     listening,
   }
 }
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
+const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
 const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
 
@@ -388,6 +394,26 @@ export class Queries extends Context.Service<
           }
         })
 
+      /** What a task's branch changed since it started, file by file, read from git in its worktree; nothing without one. */
+      const changedOf = (worktree: string | null, base: string | null) =>
+        worktree === null || base === null || !existsSync(worktree)
+          ? Effect.succeed({ files: [], commits: 0 })
+          : Effect.gen(function* () {
+              const numstat = yield* git(worktree, 'diff', '--numstat', base, 'HEAD')
+              const commits = yield* git(worktree, 'rev-list', '--count', `${base}..HEAD`)
+              return {
+                files: numstat
+                  .split('\n')
+                  .filter((line) => line !== '')
+                  .map((line) => {
+                    const [add = '0', del = '0', ...path] = line.split('\t')
+                    // A binary file counts no lines.
+                    return { path: path.join('\t'), add: Number(add) || 0, del: Number(del) || 0 }
+                  }),
+                commits: Number(commits) || 0,
+              }
+            }).pipe(Effect.orElseSucceed(() => ({ files: [], commits: 0 })))
+
       /** A task's issue and pull requests, as their external links last saw them. */
       const linksOf = (taskId: string) =>
         Effect.gen(function* () {
@@ -580,9 +606,10 @@ export class Queries extends Context.Service<
             branch: string | null
             worktree: string | null
             baseRef: string | null
+            baseCommit: string | null
           }>`
             SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.slug, k.state,
-              w.branch, w.path AS worktree, w.base_ref
+              w.branch, w.path AS worktree, w.base_ref, w.base_commit
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
             LEFT JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
             WHERE t.id = ${threadId} AND t.kind = 'task'`
@@ -605,6 +632,7 @@ export class Queries extends Context.Service<
               baseRef: head.baseRef,
               phase: (yield* cardFor(head.taskId))?.phase ?? null,
               ...(yield* linksOf(head.taskId)),
+              ...(yield* changedOf(head.worktree, head.baseCommit)),
             },
             session: yield* sessionOf(threadId),
             attention: attention.map((request) => {

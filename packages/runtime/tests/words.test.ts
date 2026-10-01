@@ -57,6 +57,11 @@ describe('what Charrette writes about a pull request', () => {
       running: 0,
       total: 3,
       failing: ['test'],
+      list: [
+        { name: 'test', state: 'failed', summary: null },
+        { name: 'lint', state: 'passed', summary: null },
+        { name: 'docs', state: 'skipped', summary: null },
+      ],
     })
     assert.strictEqual(checksOf('a', [check('lint', 'passed')]).outcome, 'passed')
     assert.strictEqual(checksLine(checksOf('a', [])), 'No checks have run.')
@@ -126,7 +131,7 @@ describe('what Charrette writes about a pull request', () => {
     assert.strictEqual(commentForLead(comment(), 'PR #1'), 'dana commented on PR #1:\n> Seconds or a date?\n> Partners care.')
     assert.strictEqual(reviewForLead(review(), 'PR #1'), 'dana reviewed PR #1: changes requested.\n> Name it better.')
     assert.strictEqual(reviewForLead(review({ verdict: 'commented', body: '' }), 'PR #1'), 'dana reviewed PR #1: commented.')
-    const failed = { sha: 'a', outcome: 'failed' as const, passed: 0, failed: 1, running: 0, total: 1, failing: ['test'] }
+    const failed = { sha: 'a', outcome: 'failed' as const, passed: 0, failed: 1, running: 0, total: 1, failing: ['test'], list: [] }
     assert.match(checksForLead(failed, 'PR #1', ['log']), /^Checks failed on PR #1: test\.\n\nlog\n\nFix what broke/)
     assert.include(answerHint, 'reply_on_pull_request')
   })
@@ -145,7 +150,19 @@ describe('what screens read of a pull request and what arrived', () => {
     changedFiles: 3,
     repository: ['meridian', 'api'],
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    checks: { sha: 'abc', outcome: 'failed', passed: 1, failed: 1, running: 0, total: 2, failing: ['test', 7] },
+    checks: {
+      sha: 'abc',
+      outcome: 'failed',
+      passed: 1,
+      failed: 1,
+      running: 0,
+      total: 2,
+      failing: ['test', 7],
+      list: [
+        { name: 'test', state: 'failed', summary: '2 failed' },
+        { name: 'lint', state: 'passed', summary: null },
+      ],
+    },
   }
 
   it('reads a pull request as last seen, and makes do with less', () => {
@@ -163,12 +180,23 @@ describe('what screens read of a pull request and what arrived', () => {
       additions: 10,
       deletions: 2,
       changedFiles: 3,
-      checks: { outcome: 'failed', passed: 1, failed: 1, running: 0, total: 2, failing: ['test'] },
+      checks: {
+        outcome: 'failed',
+        passed: 1,
+        failed: 1,
+        running: 0,
+        total: 2,
+        failing: ['test'],
+        list: [
+          { name: 'test', state: 'failed', summary: '2 failed' },
+          { name: 'lint', state: 'passed', summary: null },
+        ],
+      },
       listening: true,
     })
     const bare = changeOf({ number: 1, state: 'merged', checks: { outcome: 'odd', failing: 'x' } }, 'gitlab', false)
     assert.deepInclude(bare, { noun: 'pull request', short: 'PR', prefix: '#', repository: '', additions: null, draft: false })
-    assert.deepStrictEqual(bare?.checks, { outcome: 'none', passed: 0, failed: 0, running: 0, total: 0, failing: [] })
+    assert.deepStrictEqual(bare?.checks, { outcome: 'none', passed: 0, failed: 0, running: 0, total: 0, failing: [], list: [] })
     assert.isNull(changeOf({ ...snapshot, state: 'gone' }, 'github', false))
     assert.isNull(changeOf({ ...snapshot, number: 'x' }, 'github', false))
     assert.isNull(changeOf(snapshot, 'gitea', false))
