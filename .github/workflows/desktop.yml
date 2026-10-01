@@ -3,9 +3,9 @@ name: desktop
 on:
   push:
     branches: [main]
-    paths: ['apps/desktop/**', 'packages/contracts/**', 'packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/desktop.yml']
+    paths: ['apps/desktop/**', 'packages/connectors/**', 'packages/contracts/**', 'packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/desktop.yml']
   pull_request:
-    paths: ['apps/desktop/**', 'packages/contracts/**', 'packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/desktop.yml']
+    paths: ['apps/desktop/**', 'packages/connectors/**', 'packages/contracts/**', 'packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/desktop.yml']
 
 permissions:
   contents: read
