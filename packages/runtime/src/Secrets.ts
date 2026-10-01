@@ -1,22 +1,33 @@
-import { execFile, spawn } from 'node:child_process'
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { Context, Effect, Layer, Schema } from 'effect'
 
 /*
  * Where Charrette keeps a secret, such as a code host's token
- * (docs/architecture/06, "External auth boundaries"): the system keychain,
- * under the service "Charrette" and a name the store keeps, never the store,
- * the record or a log. On macOS that is the login keychain, through the
- * `security` tool; a value goes to it on standard input, so it never shows in
- * a process list. Tests and the end-to-end suite keep secrets in memory.
+ * (docs/architecture/06, "Signing in"): sealed, in a file of its own in the
+ * profile, never in the record or a log. Only Charrette can open one. In the
+ * app, Electron's safeStorage seals it in the main process, with a key the
+ * system keychain keeps for the signed app alone: another process asking for
+ * that key, an agent's shell among them, gets a prompt the person would
+ * notice. The runtime never holds the key; it asks main to seal and open.
+ *
+ * The command-line client has no such key, so it keeps no secrets: the
+ * connections it shares with the app stay the app's. Tests keep secrets in
+ * memory.
  */
 
-const SERVICE = 'Charrette'
-
-/** The keychain couldn't keep or give back a secret. */
+/** Secrets couldn't be kept or given back. */
 export class SecretsUnavailable extends Schema.TaggedError<SecretsUnavailable>()('SecretsUnavailable', {
   reason: Schema.String,
 }) {}
+
+/** What seals a secret so that only Charrette can open it, and opens it again: in the app, its main process. */
+export interface Sealer {
+  /** The secret, sealed, as base64. */
+  seal(value: string): Effect.Effect<string, SecretsUnavailable>
+  open(sealed: string): Effect.Effect<string, SecretsUnavailable>
+}
 
 export class Secrets extends Context.Service<
   Secrets,
@@ -38,78 +49,57 @@ export class Secrets extends Context.Service<
       })
     })
 
-  /** The macOS login keychain. Elsewhere, every call says there is no keychain yet. */
-  static readonly keychain: Layer.Layer<Secrets> = Layer.suspend(() => Secrets.keychainOn(process.platform))
-
-  /** The keychain as it is on a platform: for tests, which run macOS's `security` as a stand-in on any. */
-  static readonly keychainOn = (platform: NodeJS.Platform): Layer.Layer<Secrets> =>
+  /** No secrets: every one asked for isn't there, and keeping one says why. As in the command-line client. */
+  static readonly none = (reason: string): Layer.Layer<Secrets> =>
     Layer.succeed(
       Secrets,
-      platform === 'darwin'
-        ? Secrets.of({
-            // Base64 keeps the value one word for `security -i`, whatever it holds.
-            set: (name, value) =>
-              Effect.suspend(() =>
-                word(name)
-                  ? interactive(`add-generic-password -U -s ${SERVICE} -a ${name} -w ${Buffer.from(value).toString('base64')}\n`)
-                  : Effect.fail(new SecretsUnavailable({ reason: `Not a keychain name: ${name}` })),
-              ),
-            get: (name) =>
-              Effect.callback<string | null, SecretsUnavailable>((resume) => {
-                execFile(
-                  'security',
-                  ['find-generic-password', '-s', SERVICE, '-a', name, '-w'],
-                  { timeout: 15_000 },
-                  (error, stdout, stderr) => {
-                    // 44: no such item.
-                    if (error !== null && error.code === 44) return resume(Effect.succeed(null))
-                    if (error !== null) return resume(Effect.fail(new SecretsUnavailable({ reason: stderr.trim() || error.message })))
-                    resume(Effect.succeed(Buffer.from(stdout.trim(), 'base64').toString('utf8')))
-                  },
-                )
-              }),
-            remove: (name) =>
-              Effect.callback<void, SecretsUnavailable>((resume) => {
-                execFile(
-                  'security',
-                  ['delete-generic-password', '-s', SERVICE, '-a', name],
-                  { timeout: 15_000 },
-                  (error, _stdout, stderr) =>
-                    resume(
-                      error === null || error.code === 44
-                        ? Effect.void
-                        : Effect.fail(new SecretsUnavailable({ reason: stderr.trim() || error.message })),
-                    ),
-                )
-              }),
-          })
-        : Secrets.of({
-            set: () =>
-              Effect.fail(new SecretsUnavailable({ reason: 'Charrette keeps secrets in the macOS keychain, and this is not macOS.' })),
-            get: () => Effect.succeed(null),
-            remove: () => Effect.void,
+      Secrets.of({
+        set: () => Effect.fail(new SecretsUnavailable({ reason })),
+        get: () => Effect.fail(new SecretsUnavailable({ reason })),
+        remove: () => Effect.void,
+      }),
+    )
+
+  /**
+   * Secrets sealed by `sealer`, each in a file of its own in `folder`, which
+   * only this user can read; a file is replaced whole, so a secret is never
+   * half written.
+   */
+  static readonly sealed = (folder: string, sealer: Sealer): Layer.Layer<Secrets> =>
+    Layer.sync(Secrets, () => {
+      const pathOf = (name: string) =>
+        /^[\w.-]+$/.test(name) && !name.startsWith('.')
+          ? Effect.succeed(join(folder, name))
+          : Effect.fail(new SecretsUnavailable({ reason: `Not a secret's name: ${name}` }))
+      const attempt = <A>(what: string, run: () => A) =>
+        Effect.try({ try: run, catch: (error) => new SecretsUnavailable({ reason: `Couldn't ${what}: ${String(error)}` }) })
+      return Secrets.of({
+        set: (name, value) =>
+          Effect.gen(function* () {
+            const path = yield* pathOf(name)
+            const sealed = yield* sealer.seal(value)
+            yield* attempt('keep the secret', () => {
+              mkdirSync(folder, { recursive: true, mode: 0o700 })
+              chmodSync(folder, 0o700)
+              const next = `${path}.next`
+              writeFileSync(next, sealed, { mode: 0o600 })
+              renameSync(next, path)
+            })
           }),
-    )
-}
-
-/** Whether a name is one word for `security -i`: names are Charrette's own ids, so this only guards against a mistake. */
-const word = (name: string) => /^[\w.-]+$/.test(name)
-
-/** Runs `security` commands from standard input, so no secret is in its arguments. */
-const interactive = (commands: string): Effect.Effect<void, SecretsUnavailable> =>
-  Effect.callback<void, SecretsUnavailable>((resume) => {
-    const child = spawn('security', ['-i'], { stdio: ['pipe', 'ignore', 'pipe'] })
-    let stderr = ''
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString()
+        get: (name) =>
+          Effect.gen(function* () {
+            const path = yield* pathOf(name)
+            const sealed = yield* attempt('read the secret', () => {
+              try {
+                return readFileSync(path, 'utf8')
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+                throw error
+              }
+            })
+            return sealed === null ? null : yield* sealer.open(sealed)
+          }),
+        remove: (name) => Effect.flatMap(pathOf(name), (path) => attempt('remove the secret', () => rmSync(path, { force: true }))),
+      })
     })
-    child.on('error', (error) => resume(Effect.fail(new SecretsUnavailable({ reason: error.message }))))
-    child.on('close', (code) =>
-      resume(
-        code === 0 && stderr.trim() === ''
-          ? Effect.void
-          : Effect.fail(new SecretsUnavailable({ reason: stderr.trim() || `security exited ${code}` })),
-      ),
-    )
-    child.stdin.end(commands)
-  })
+}

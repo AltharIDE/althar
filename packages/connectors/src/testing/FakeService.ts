@@ -43,14 +43,18 @@ export interface FakeControls {
     readonly body?: string
     readonly assigned?: boolean
   }): Issue
-  /** Someone else comments on a change: in its conversation, or on a line. */
+  /**
+   * Someone comments on a change: in its conversation, or on a line. The
+   * account's own login is the account; anyone else can write to the
+   * repository unless `member` says not, as a passer-by on a public one.
+   */
   commentAs(
     number: number,
     author: string,
     body: string,
-    options?: { readonly path?: string; readonly line?: number; readonly bot?: boolean },
+    options?: { readonly path?: string; readonly line?: number; readonly bot?: boolean; readonly member?: boolean },
   ): Comment
-  reviewAs(number: number, author: string, verdict: Verdict, body?: string): Review
+  reviewAs(number: number, author: string, verdict: Verdict, body?: string, options?: { readonly member?: boolean }): Review
   setChecks(number: number, checks: ReadonlyArray<Pick<Check, 'name' | 'state'> & { readonly log?: string }>): void
   merge(number: number): void
   close(number: number): void
@@ -122,7 +126,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     if (change === undefined) return
     changes[index] = { ...change, ...set, updatedAt: now() }
   }
-  const person = (login: string, bot = false): Person => ({ id: `user-${login}`, login, name: login, bot })
+  const person = (login: string, bot = false): Person => (login === me.login ? me : { id: `user-${login}`, login, name: login, bot })
 
   const service: FakeService = {
     product,
@@ -204,6 +208,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         const comment: Comment = {
           id: nextId(),
           author: me,
+          member: true,
           body: reply.body,
           at: now(),
           url: null,
@@ -284,6 +289,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       const comment: Comment = {
         id,
         author: person(author, commentOptions.bot === true),
+        member: commentOptions.member ?? true,
         body,
         at: now(),
         url: `${changeNumbered(number).url}#comment-${id}`,
@@ -294,8 +300,16 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       comments.set(number, [...(comments.get(number) ?? []), comment])
       return comment
     },
-    reviewAs: (number, author, verdict, body = '') => {
-      const review: Review = { id: nextId(), author: person(author), verdict, body, at: now(), url: null }
+    reviewAs: (number, author, verdict, body = '', reviewOptions = {}) => {
+      const review: Review = {
+        id: nextId(),
+        author: person(author),
+        member: reviewOptions.member ?? true,
+        verdict,
+        body,
+        at: now(),
+        url: null,
+      }
       reviews.set(number, [...(reviews.get(number) ?? []), review])
       return review
     },

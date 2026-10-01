@@ -57,6 +57,14 @@ describe('a code host, reached only through Charrette', () => {
     ['cd sub && /opt/homebrew/bin/gh pr create', 'publish_changes'],
     ['GH_CONFIG_DIR=~/.config/gh gh pr create', 'publish_changes'],
     ['bash -lc "git commit -am x && gh pr create"', 'publish_changes'],
+    // Credentials are the person's: the keychain, and git's helpers, whichever way they're asked.
+    ['security find-generic-password -s Charrette -w', "don't read the person's credentials"],
+    ['/usr/bin/security dump-keychain', "don't read the person's credentials"],
+    ["printf 'host=github.com\\n' | git credential fill", "don't read the person's credentials"],
+    ['git -C /w -c x=y credential-osxkeychain get', "don't read the person's credentials"],
+    ['git-credential-osxkeychain get', "don't read the person's credentials"],
+    ['git config --get credential.helper', undefined],
+    ['git commit -m credential', undefined],
   ])('%s: %s', (command, refused) => {
     const verdict = run(command)
     if (refused === undefined) assert.notStrictEqual(verdict.verdict, 'deny')
@@ -394,5 +402,12 @@ describe('a role that only reads', () => {
     )
     assert.strictEqual(verdict({ kind: 'other', title: 'api.github.com' }), 'deny')
     assert.strictEqual(verdict({ kind: 'execute', title: '' }), 'deny')
+  })
+
+  it('never reads credentials either, and says so', () => {
+    for (const command of ['security find-generic-password -s Charrette -w', 'git credential fill', 'cat x | git-credential-store get']) {
+      const decided = decideReader(request({ kind: 'execute', title: command, rawInput: { command } }))
+      assert.include(decided.verdict === 'deny' ? decided.reason : '', "don't read the person's credentials", command)
+    }
   })
 })

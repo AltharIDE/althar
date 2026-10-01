@@ -264,6 +264,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           failed: number(content, 'failed'),
           failing: Array.isArray(failing) ? failing.filter((name) => typeof name === 'string') : [],
           url: text(content, 'url') || null,
+          outsider: field(content, 'outsider') === true,
         },
       }
     }

@@ -31,7 +31,7 @@ import { Connectors } from './Config'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
-import { Secrets, type SecretsUnavailable } from './Secrets'
+import { Secrets, SecretsUnavailable } from './Secrets'
 
 /*
  * Connections to code hosts and trackers (docs/architecture/06, ADR-011): a
@@ -333,7 +333,14 @@ export class Connections extends Context.Service<
             Effect.mapError((error) =>
               error instanceof ConnectorFailed
                 ? error
-                : new ConnectorFailed({ product: row.product, reason: 'unauthorized', message: String(error) }),
+                : // A sign-in Charrette can't open here isn't one that stopped working: the connection keeps its state.
+                  error instanceof SecretsUnavailable
+                  ? new ConnectorFailed({
+                      product: row.product,
+                      reason: 'unreachable',
+                      message: `Charrette couldn’t open its sign-in: ${error.reason}`,
+                    })
+                  : new ConnectorFailed({ product: row.product, reason: 'unauthorized', message: String(error) }),
             ),
           ),
         })

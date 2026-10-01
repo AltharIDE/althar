@@ -32,3 +32,12 @@
   line-height: 1.55;
   color: var(--t-2);
 }
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 6px 0 0 26px;
+  font-size: 12px;
+  color: var(--t-3);
+}

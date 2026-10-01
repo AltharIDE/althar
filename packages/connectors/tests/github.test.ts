@@ -296,8 +296,15 @@ describe('GitHub as a code host', () => {
           /\/issues\/12\/comments\?per_page=100/,
           {
             json: [
-              { id: 30, user: user('dana'), body: 'Seconds or a date?', updated_at: '2026-10-01T10:05:00Z', html_url: 'https://c/30' },
-              { id: 31, user: user('ci[bot]', 'Bot'), body: null, updated_at: '2026-10-01T10:01:00Z' },
+              {
+                id: 30,
+                user: user('dana'),
+                author_association: 'COLLABORATOR',
+                body: 'Seconds or a date?',
+                updated_at: '2026-10-01T10:05:00Z',
+                html_url: 'https://c/30',
+              },
+              { id: 31, user: user('ci[bot]', 'Bot'), author_association: 'NONE', body: null, updated_at: '2026-10-01T10:01:00Z' },
             ],
           },
         ],
@@ -306,7 +313,15 @@ describe('GitHub as a code host', () => {
           /\/pulls\/12\/comments\?per_page=100/,
           {
             json: [
-              { id: 40, user: user('dana'), body: 'Here', updated_at: '2026-10-01T10:02:00Z', path: 'src/limit.ts', line: 14 },
+              {
+                id: 40,
+                user: user('dana'),
+                author_association: 'MEMBER',
+                body: 'Here',
+                updated_at: '2026-10-01T10:02:00Z',
+                path: 'src/limit.ts',
+                line: 14,
+              },
               {
                 id: 41,
                 user: null,
@@ -324,11 +339,25 @@ describe('GitHub as a code host', () => {
           /\/pulls\/12\/reviews\?per_page=100$/,
           {
             json: [
-              { id: 50, user: user('dana'), body: 'Fix the header', state: 'CHANGES_REQUESTED', submitted_at: '2026-10-01T10:04:00Z' },
+              {
+                id: 50,
+                user: user('dana'),
+                author_association: 'OWNER',
+                body: 'Fix the header',
+                state: 'CHANGES_REQUESTED',
+                submitted_at: '2026-10-01T10:04:00Z',
+              },
               { id: 51, user: user('lee'), body: '', state: 'COMMENTED', submitted_at: '2026-10-01T10:06:00Z' },
               { id: 52, user: user('lee'), body: 'Old', state: 'APPROVED', submitted_at: '2026-10-01T09:00:00Z' },
               { id: 53, user: user('lee'), body: '', state: 'PENDING', submitted_at: null },
-              { id: 54, user: user('kim'), body: 'Nice', state: 'COMMENTED', submitted_at: '2026-10-01T10:07:00Z' },
+              {
+                id: 54,
+                user: user('kim'),
+                author_association: 'FIRST_TIME_CONTRIBUTOR',
+                body: 'Nice',
+                state: 'COMMENTED',
+                submitted_at: '2026-10-01T10:07:00Z',
+              },
             ],
           },
         ],
@@ -336,19 +365,26 @@ describe('GitHub as a code host', () => {
       const activity = yield* host.activity(repository, 12, '2026-10-01T10:00:00Z')
       assert.include(sent[0]?.url, 'since=2026-10-01T10%3A00%3A00Z')
       assert.deepStrictEqual(
-        activity.comments.map((comment) => [comment.id, comment.author.login, comment.author.bot, comment.threadId, comment.line]),
+        activity.comments.map((comment) => [
+          comment.id,
+          comment.author.login,
+          comment.author.bot,
+          comment.member,
+          comment.threadId,
+          comment.line,
+        ]),
         [
-          ['31', 'ci[bot]', true, null, null],
-          ['40', 'dana', false, '40', 14],
-          ['41', 'ghost', false, '40', 14],
-          ['30', 'dana', false, null, null],
+          ['31', 'ci[bot]', true, false, null, null],
+          ['40', 'dana', false, true, '40', 14],
+          ['41', 'ghost', false, false, '40', 14],
+          ['30', 'dana', false, true, null, null],
         ],
       )
       assert.deepStrictEqual(
-        activity.reviews.map((review) => [review.id, review.verdict]),
+        activity.reviews.map((review) => [review.id, review.verdict, review.member]),
         [
-          ['50', 'changes_requested'],
-          ['54', 'commented'],
+          ['50', 'changes_requested', true],
+          ['54', 'commented', false],
         ],
       )
       assert.strictEqual(activity.cursor, '2026-10-01T10:07:00Z')

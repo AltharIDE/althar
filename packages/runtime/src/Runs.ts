@@ -11,7 +11,8 @@ import { NotConnected } from './Connections'
 import { AttentionClosed, NotFound } from './errors'
 import { Instance } from './Instance'
 import { Live, type LiveEvent } from './Live'
-import { treeOf } from './git'
+import { treeOf, uncommittedFiles } from './git'
+import { filesLine } from './pullRequestWords'
 import { snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
@@ -358,17 +359,20 @@ export class Runs extends Context.Service<
 
       /** What a step that Charrette does itself reported, in a line. */
       const publishedSummary = (published: Published, end: TaskEnd) => {
-        switch (published.kind) {
-          case 'opened': {
-            const noun = published.change.words.noun
-            const name = `${noun} ${published.change.words.prefix}${published.change.number}`
-            return end === 'ready' || !published.change.draft ? `Opened ${name} for review.` : `Opened draft ${name}.`
+        const did = ((): string => {
+          switch (published.kind) {
+            case 'opened': {
+              const noun = published.change.words.noun
+              const name = `${noun} ${published.change.words.prefix}${published.change.number}`
+              return end === 'ready' || !published.change.draft ? `Opened ${name} for review.` : `Opened draft ${name}.`
+            }
+            case 'pushed':
+              return `Pushed ${published.branch}.`
+            case 'nothing':
+              return 'The branch has no commits to propose, so nothing was pushed.'
           }
-          case 'pushed':
-            return `Pushed ${published.branch}.`
-          case 'nothing':
-            return 'The branch has no commits to propose, so nothing was pushed.'
-        }
+        })()
+        return published.left.length === 0 ? did : `${did} Left out what the lead didn't commit: ${filesLine(published.left)}.`
       }
 
       /**
@@ -841,6 +845,16 @@ export class Runs extends Context.Service<
           if (current === undefined || attempt === undefined)
             return yield* new ToolRefused({ message: 'No step is waiting on you, so Charrette keeps no summary now.' })
           const step = attempt.nodeKey === 'settle' ? 'settle' : 'implement'
+          // A task that ends on its host pushes commits only: what isn't committed is the lead's to commit or clear away first.
+          if ((yield* stepsOf(current)).end !== null) {
+            const [workspace] = yield* sql<{ path: string }>`
+              SELECT path FROM workspaces WHERE task_id = ${current.taskId} AND device_id = ${instance.deviceId}`
+            const left = workspace === undefined ? [] : yield* uncommittedFiles(workspace.path)
+            if (left.length > 0)
+              return yield* new ToolRefused({
+                message: `These aren't committed: ${filesLine(left)}. Charrette pushes commits only, so commit what belongs to the task, delete the rest (scratch files, logs), and call finish_step again.`,
+              })
+          }
           yield* sql.withTransaction(
             Effect.gen(function* () {
               yield* ended(current, attempt, 'succeeded', { summary })

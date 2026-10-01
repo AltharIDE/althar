@@ -3,8 +3,8 @@
 The code host and tracker connectors of [docs/architecture/06](../../docs/architecture/06-integrations-and-skills.md). The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target.
 
 - **Owner:** Repository maintainers
-- **Consumers:** the runtime, which holds connections, keeps tokens in the keychain, records every outward action with its receipt, and listens.
-- **Dependency direction:** depends on `effect` alone. It records nothing and stores no secret; persistence and the keychain are the runtime's.
+- **Consumers:** the runtime, which holds connections, keeps tokens sealed by the app, records every outward action with its receipt, and listens.
+- **Dependency direction:** depends on `effect` alone. It records nothing and stores no secret; persistence and secrets are the runtime's.
 
 ## What it holds
 

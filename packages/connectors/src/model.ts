@@ -86,6 +86,8 @@ export type Verdict = typeof Verdict.Type
 export const Review = Schema.Struct({
   id: Schema.String,
   author: Person,
+  /** Its author can write to the repository: its owner, or one of its people. Anyone else can comment on a public one. */
+  member: Schema.Boolean,
   verdict: Verdict,
   body: Schema.String,
   at: Schema.String,
@@ -97,6 +99,8 @@ export type Review = typeof Review.Type
 export const Comment = Schema.Struct({
   id: Schema.String,
   author: Person,
+  /** Its author can write to the repository: its owner, or one of its people. Anyone else can comment on a public one. */
+  member: Schema.Boolean,
   body: Schema.String,
   at: Schema.String,
   url: Schema.NullOr(Schema.String),

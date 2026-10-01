@@ -28,8 +28,10 @@
       PKCE, and Trello through its authorize page.
     - Everywhere else, the person pastes a token: Jira and Bitbucket, and
       every self-hosted instance whose admin hasn't registered Charrette.
-    - Tokens live in the system keychain, never in the store, the record or
-      a log.
+    - Tokens are sealed by the app (Electron's `safeStorage`, whose key the
+      system keychain keeps for the signed app alone), never in the store,
+      the record or a log, and never where another process can open them
+      without the person noticing.
     - OAuth that needs the app's secret (Atlassian's) waits for Charrette's
       cloud.
   - Agents reach the hosts only through Charrette:
@@ -37,9 +39,15 @@
       are Charrette's, done as steps of the plan.
     - Agents read pull requests and issues, and reply on a pull request,
       through Charrette's tools, which only reach the task's own repository.
+    - Agents run without the person's ways into a host: `gh` and `glab`
+      signed out, git's credential helpers reset, no SSH agent. The
+      environment is the boundary.
     - The rules refuse `gh` and `glab` commands that change a host, with a
-      reason that names Charrette's tool.
-    - Agents run without the person's `gh` and `glab` sign-ins.
+      reason that names Charrette's tool, and any command that reads
+      credentials.
+    - What the lead hears from a pull request is what the person and the
+      repository's own people say, and failed checks. Anyone else, as on a
+      public repository, stays in the thread for the person to pass on.
     - A pull request opened some other way, on the task's branch, is
       adopted, not duplicated.
   - While the app is open, Charrette listens by polling, and only to what

@@ -123,7 +123,14 @@ describe('the coordinator loop', () => {
       const copy = join(dirname(workspace?.path ?? ''), '.review', basename(workspace?.path ?? ''))
       const head = (cwd: string) => execFileSync('git', ['rev-parse', 'HEAD'], { cwd }).toString().trim()
       assert.strictEqual(head(copy), snapshots.at(-1)?.commitSha)
-      assert.strictEqual(head(workspace?.path ?? ''), workspace?.baseCommit)
+      // Charrette commits nothing on the lead's branch: what is there, the lead committed.
+      assert.deepStrictEqual(
+        execFileSync('git', ['log', '--format=%an %s', `${workspace?.baseCommit}..HEAD`], { cwd: workspace?.path })
+          .toString()
+          .trim()
+          .split('\n'),
+        ['Fake Settle the review'],
+      )
       assert.isTrue(existsSync(join(copy, 'settled.txt')))
       // The task was drafted by the coordinator, as the record says.
       const [author] = yield* sql<{ kind: string; agentId: string }>`

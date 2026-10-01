@@ -375,6 +375,7 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
               now,
             )}
             agentName={agentName}
+            onPassOn={(words) => void model.send(words)}
           />
           {snapshot.attention.map((request) =>
             request.kind === 'stuck' && request.stuck !== null ? (

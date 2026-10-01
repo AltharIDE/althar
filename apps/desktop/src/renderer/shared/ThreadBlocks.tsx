@@ -6,6 +6,7 @@ import {
   CodeBlock,
   FindingState,
   Issue,
+  LinkButton,
   Markdown,
   Plan,
   Prose,
@@ -65,6 +66,15 @@ export const text = {
     ready: 'Ready for review:',
   },
   failing: (names: ReadonlyArray<string>) => `Failed: ${names.join(', ')}`,
+  outsider: (from: string) => `Not passed to the lead: ${from} can’t write to the repository.`,
+  passOn: 'Pass it on',
+  /** What passing it on says to the lead, in the person's name. */
+  passed: (said: string, text: string) =>
+    `${said}:\n\n${text
+      .trim()
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n')}`,
 }
 
 const SEVERITY: Readonly<Record<StepResult['findings'][number]['severity'], Severity>> = {
@@ -209,7 +219,12 @@ function LinkView({ link }: { link: Unfurl }) {
 }
 
 /** Something heard from outside, as a quoted note: who, what they did, where, and what they said. */
-function ArrivalView({ arrival, at }: { arrival: ArrivalContent; at: string }) {
+/**
+ * Something heard from outside. What someone who can't write to the
+ * repository said wasn't passed to the lead, as anyone can comment on a
+ * public one; the person reads it, and can pass it on.
+ */
+function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: string; onPassOn?: (words: string) => void }) {
   const where =
     arrival.path === null ? arrival.where : `${arrival.where} · ${arrival.path}${arrival.line === null ? '' : `:${arrival.line}`}`
   const verb = ((): string => {
@@ -231,6 +246,15 @@ function ArrivalView({ arrival, at }: { arrival: ArrivalContent; at: string }) {
     }
   })()
   const body = arrival.kind === 'checks' ? (arrival.failing.length > 0 ? text.failing(arrival.failing) : null) : arrival.text
+  const from = arrival.from ?? ''
+  const foot = arrival.outsider && (
+    <>
+      <span>{text.outsider(from)}</span>
+      {onPassOn !== undefined && body !== null && body !== '' && (
+        <LinkButton onClick={() => onPassOn(text.passed(`${from} ${verb} ${where}`, body))}>{text.passOn}</LinkButton>
+      )}
+    </>
+  )
   return (
     <Arrived
       {...(arrival.from === null ? {} : { from: arrival.from })}
@@ -238,6 +262,7 @@ function ArrivalView({ arrival, at }: { arrival: ArrivalContent; at: string }) {
       where={where}
       at={at}
       mark={productBrand(arrival.source)}
+      {...(foot === false ? {} : { foot })}
     >
       {body !== null && body !== '' && <Markdown source={body} />}
     </Arrived>
@@ -249,9 +274,12 @@ export function ThreadBlocks({
   agentName,
   card,
   queued,
+  onPassOn,
 }: {
   blocks: ReadonlyArray<Block>
   agentName: (id: string | null) => string
+  /** Sends what someone outside said to the lead, in the person's name. */
+  onPassOn?: (words: string) => void
   /** Draws a task's card, in the coordinator's thread. */
   card?: (card: TaskCardContent) => ReactNode
   /** What a message still waiting says: who reads it next. */
@@ -278,7 +306,7 @@ export function ThreadBlocks({
           </Fragment>
         )
       case 'arrival':
-        return <ArrivalView key={block.id} arrival={block.arrival} at={block.at} />
+        return <ArrivalView key={block.id} arrival={block.arrival} at={block.at} {...(onPassOn === undefined ? {} : { onPassOn })} />
       case 'divider':
         return (
           <ThreadDivider key={block.id} icon="agents">

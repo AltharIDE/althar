@@ -53,9 +53,12 @@ export class Agents extends Context.Service<
     })
 
   /**
-   * The registry's agents, each run as a process without the person's
-   * sign-ins to `gh` and `glab`: their config folders point at an empty one,
-   * so agents reach code hosts only through Charrette (ADR-011).
+   * The registry's agents, each run as a process without the person's ways
+   * into a code host, so they reach one only through Charrette (ADR-011):
+   * `gh` and `glab` signed out, their config folders an empty one; git's
+   * credential helpers reset, so neither git nor `curl` through it signs in
+   * as the person; and git never asks for a password. The person's SSH agent
+   * isn't passed on either (provider-adapters' process environment).
    */
   static readonly registry: Layer.Layer<Agents> = Layer.sync(Agents, () => {
     const signedOut = mkdtempSync(join(tmpdir(), 'charrette-no-sign-in-'))
@@ -64,16 +67,23 @@ export class Agents extends Context.Service<
         definition,
         transport: (cwd: string) => {
           const spec = definition.launch(process.execPath)
-          return {
-            _tag: 'Process' as const,
-            spec: { ...spec, env: { ...spec.env, GH_CONFIG_DIR: signedOut, GLAB_CONFIG_DIR: signedOut } },
-            cwd,
-          }
+          return { _tag: 'Process' as const, spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut) } }, cwd }
         },
       })),
     )
   })
 }
+
+/** What an agent's environment adds so it carries none of the person's sign-ins to code hosts. */
+export const withoutSignIns = (signedOut: string): Readonly<Record<string, string>> => ({
+  GH_CONFIG_DIR: signedOut,
+  GLAB_CONFIG_DIR: signedOut,
+  // An empty helper resets git's list of them: the person's keychain and stored credentials aren't asked.
+  GIT_CONFIG_COUNT: '1',
+  GIT_CONFIG_KEY_0: 'credential.helper',
+  GIT_CONFIG_VALUE_0: '',
+  GIT_TERMINAL_PROMPT: '0',
+})
 
 /** Crypto from the platform's Web Crypto, which Node and Electron both have. */
 export const WebCrypto: Layer.Layer<Crypto.Crypto> = Layer.succeed(

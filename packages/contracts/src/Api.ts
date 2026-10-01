@@ -362,6 +362,8 @@ export const ArrivalItem = Schema.Struct({
     failed: Schema.NullOr(Schema.Number),
     failing: Schema.Array(Schema.String),
     url: Schema.NullOr(Schema.String),
+    /** Said by someone who can't write to the repository, as anyone can on a public one: not passed to the lead, for the person to pass on. */
+    outsider: Schema.Boolean,
   }),
 })
 

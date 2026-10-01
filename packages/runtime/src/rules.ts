@@ -53,9 +53,32 @@ const ask = (reason: string): Verdict => ({ verdict: 'ask', reason })
  * Agents reach code hosts only through Charrette (ADR-011): Charrette pushes
  * and opens the task's pull request, and the lead reads and answers on it with
  * Charrette's tools. So `gh` and `glab` may only look; anything else is
- * refused with what to do instead. Agents run without the person's sign-ins
- * for either, so what slips past these words fails anyway.
+ * refused with what to do instead.
+ *
+ * The boundary is the agent's environment, not these words: agents run with
+ * `gh` and `glab` signed out, git's credential helpers reset, and no SSH agent
+ * (Config.ts), and Charrette's own sign-ins are sealed where only the app can
+ * open them. What is left within a shell's reach, the keychain through
+ * `security` and git's helpers called directly, is refused here, for every
+ * role. Files the person keeps credentials in, under their home folder, are
+ * still readable by an agent that goes looking; only a sandbox closes that
+ * (docs/open-questions.md).
  */
+
+const CREDENTIALS_REFUSED =
+  "Agents don't read the person's credentials or the keychain. Charrette reaches the code host for the task; tell the person what's needed."
+
+/** Why an agent may not run a command that reads credentials: the keychain's `security`, or git's credential helpers. */
+const credentialReason = (words: ReadonlyArray<string>): string | undefined => {
+  const program = (words[0] ?? '').split('/').at(-1) ?? ''
+  if (program === 'security' || program.startsWith('git-credential')) return CREDENTIALS_REFUSED
+  if (program !== 'git') return undefined
+  // Git's own options before its command, and their values: `git -C dir -c k=v credential fill`.
+  let index = 1
+  while ((words[index] ?? '').startsWith('-'))
+    index += ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path'].includes(words[index] ?? '') ? 2 : 1
+  return (words[index] ?? '').startsWith('credential') ? CREDENTIALS_REFUSED : undefined
+}
 
 /** What `gh` and `glab` may do: their read-only commands, by command and subcommand. */
 const HOST_LOOKS: Readonly<Record<string, ReadonlySet<string>>> = {
@@ -512,9 +535,9 @@ const commandReason = (text: string, context: RuleContext): string | undefined =
  */
 export const decide = (request: PermissionRequest, context: RuleContext): Verdict => {
   if (request.kind === 'execute' || request.kind === 'other') {
-    // A code host is reached through Charrette: `gh` and `glab` only look, wherever they are in the command.
+    // A code host is reached through Charrette: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
     const refused = parseCommandLine(commandOf(request))
-      .commands.map((words) => hostReason(unwrap(words)))
+      .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)))
       .find((reason) => reason !== undefined)
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
     const reason = commandReason(commandOf(request), context)
@@ -984,7 +1007,10 @@ export const decideReader = (request: PermissionRequest): ReaderVerdict => {
     default: {
       const command = commandIn(request.rawInput) ?? (request.kind === 'execute' ? request.title : undefined)
       if (command === undefined || command === '') return deny("Charrette can't tell what this does, and this role only reads.")
-      const reason = readerCommandReason(command)
+      const reason =
+        parseCommandLine(command)
+          .commands.map((words) => credentialReason(unwrap(words)))
+          .find((found) => found !== undefined) ?? readerCommandReason(command)
       return reason === undefined ? ALLOW : deny(reason)
     }
   }

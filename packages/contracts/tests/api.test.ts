@@ -72,6 +72,7 @@ describe('the API', () => {
         failed: null,
         failing: [],
         url: null,
+        outsider: false,
       },
     })
     assert.strictEqual(heard.kind === 'arrival' && heard.content.from, 'dana')

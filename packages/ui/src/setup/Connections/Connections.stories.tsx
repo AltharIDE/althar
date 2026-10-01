@@ -56,7 +56,7 @@ export const SignInEnded: Story = {
   },
 }
 
-/** A token is pasted once, hidden, and goes to the Keychain; Jira's goes with the account's email. */
+/** A token is pasted once, hidden, and kept encrypted; Jira's goes with the account's email. */
 export const PastingAToken: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)

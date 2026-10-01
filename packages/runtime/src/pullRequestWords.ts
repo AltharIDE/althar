@@ -105,9 +105,9 @@ export const checksLine = (sum: ChecksSum) =>
     ? 'No checks have run.'
     : `Checks: ${sum.passed} passed, ${sum.failed} failed, ${sum.running} running${sum.failing.length === 0 ? '' : ` (failed: ${sum.failing.join(', ')})`}.`
 
-/** A comment, as a reading of the pull request lists it: who, where, its thread, and what. */
-export const commentLine = (comment: Comment) =>
-  `- ${comment.author.login}${whereOf(comment)}${comment.threadId === null ? '' : ` (thread ${comment.threadId})`}${comment.author.bot ? ' [bot]' : ''}:\n${quoted(comment.body)}`
+/** A comment, as a reading of the pull request lists it: who (or, for Charrette's own, `who`), where, its thread, and what. */
+export const commentLine = (comment: Comment, who?: string) =>
+  `- ${who ?? comment.author.login}${whereOf(comment)}${comment.threadId === null ? '' : ` (thread ${comment.threadId})`}${comment.author.bot ? ' [bot]' : ''}:\n${quoted(unsigned(comment.body))}`
 
 const verdictWords = (verdict: Review['verdict']) =>
   verdict === 'approved' ? 'approved' : verdict === 'changes_requested' ? 'changes requested' : 'commented'
@@ -131,6 +131,31 @@ export const checksForLead = (sum: ChecksSum, name: string, logs: ReadonlyArray<
     ...logs,
     'Fix what broke, commit, and call publish_changes; or, if it isn’t the task’s to fix, say why.',
   ].join('\n\n')
+
+/** What the lead is told of what it can't read: people outside the repository, whom the person passes on. */
+export const outsidersLine = (count: number) =>
+  `${count === 1 ? 'One comment' : `${count} comments`} from people who can't write to the repository ${count === 1 ? 'is' : 'are'} left out. On a public repository anyone can comment; the person reads them and passes on what matters.`
+
+const SIGNATURE = '<sub>From Charrette'
+
+/**
+ * A reply as posted: the lead's words, then a line saying it came from
+ * Charrette and which agent wrote it. It goes up under the person's own
+ * account, so without the line colleagues would take it for theirs.
+ */
+export const signed = (body: string, by: string | null) => `${body.trimEnd()}\n\n${SIGNATURE}${by === null ? '' : `, by ${by}`}.</sub>`
+
+/** Whether a comment carries Charrette's signature. */
+export const fromCharrette = (body: string) => body.trimEnd().split('\n').at(-1)?.startsWith(SIGNATURE) === true
+
+/** A comment without Charrette's signature, for reading back. */
+export const unsigned = (body: string) => (fromCharrette(body) ? body.trimEnd().split('\n').slice(0, -1).join('\n').trimEnd() : body)
+
+/** Files, named in code, the first few of them and how many more. */
+export const filesLine = (paths: ReadonlyArray<string>, shown = 8) => {
+  const named = paths.slice(0, shown).map((path) => `\`${path}\``)
+  return `${named.join(', ')}${paths.length > shown ? ` and ${paths.length - shown} more` : ''}`
+}
 
 /** How the lead answers what people said. */
 export const answerHint =

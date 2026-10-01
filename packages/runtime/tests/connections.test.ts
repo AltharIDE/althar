@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,12 +9,12 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { Agents, Connectors } from '../src/Config'
+import { Agents, Connectors, withoutSignIns } from '../src/Config'
 import { Connections, NotConnected, SignInUnavailable } from '../src/Connections'
 import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import * as Runtime from '../src/Runtime'
-import { Secrets } from '../src/Secrets'
+import { type Sealer, Secrets, SecretsUnavailable } from '../src/Secrets'
 import { fakeAgents, fakeConnectors, until } from './support'
 
 /*
@@ -51,14 +52,21 @@ const stub = (routes: ReadonlyArray<Route>) => {
 }
 
 /** The runtime with GitHub's real adapter over `fetch`, and Linear answered by a fake. */
-const withGitHub = (fetch: Fetch, more: { readonly callbackPort?: number; readonly linear?: ReturnType<typeof makeFakeService> } = {}) =>
+const withGitHub = (
+  fetch: Fetch,
+  more: {
+    readonly callbackPort?: number
+    readonly linear?: ReturnType<typeof makeFakeService>
+    readonly secrets?: Layer.Layer<Secrets>
+  } = {},
+) =>
   Runtime.layer({
     database: ':memory:',
     worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
     agents: fakeAgents(),
-    secrets: Secrets.memory(),
+    secrets: more.secrets ?? Secrets.memory(),
     connectors: Layer.succeed(
       Connectors,
       Connectors.of({
@@ -228,6 +236,32 @@ describe('a connection', () => {
     }).pipe(Effect.provide(withGitHub(fetch)))
   })
 
+  it.live('keeps its state when Charrette can’t open its sign-in, rather than asking to sign in again', () => {
+    const { fetch } = stub([user])
+    // Secrets that are kept, until the app stops opening them.
+    let locked = false
+    const kept = new Map<string, string>()
+    const secrets = Layer.succeed(
+      Secrets,
+      Secrets.of({
+        set: (name, value) => Effect.sync(() => void kept.set(name, value)),
+        get: (name) =>
+          locked ? Effect.fail(new SecretsUnavailable({ reason: 'The app didn’t answer.' })) : Effect.succeed(kept.get(name) ?? null),
+        remove: (name) => Effect.sync(() => void kept.delete(name)),
+      }),
+    )
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const connection = yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId })
+      locked = true
+      const { host } = yield* connections.adapters(connection.id)
+      const error = yield* Effect.flip(host?.account ?? Effect.void)
+      assert.deepInclude(error, { reason: 'unreachable', message: 'Charrette couldn’t open its sign-in: The app didn’t answer.' })
+      assert.strictEqual((yield* connections.list)[0]?.state, 'ready')
+    }).pipe(Effect.provide(withGitHub(fetch, { secrets })))
+  })
+
   it.live('offers the browser sign-in only where Charrette’s app is registered', () => {
     const github = makeFakeService()
     return Effect.gen(function* () {
@@ -275,90 +309,100 @@ describe('a connection', () => {
   })
 })
 
-describe('the keychain', () => {
-  /** `security`, as a script that keeps items in a file, on a PATH of its own. */
-  const fakeSecurity = () => {
-    const bin = mkdtempSync(join(tmpdir(), 'charrette-security-'))
-    const store = join(bin, 'items')
-    writeFileSync(
-      join(bin, 'security'),
-      `#!/bin/sh
-store="${store}"
-touch "$store"
-case "$1" in
-  -i)
-    read -r line
-    echo "$line" >> "${join(bin, 'stdin')}"
-    set -- $line
-    shift; account=""; value=""
-    while [ $# -gt 0 ]; do case "$1" in -a) account="$2"; shift 2;; -w) value="$2"; shift 2;; *) shift;; esac; done
-    if [ "$account" = "locked" ]; then echo "The keychain is locked." >&2; exit 0; fi
-    if [ "$account" = "silent" ]; then exit 3; fi
-    grep -v "^$account " "$store" > "$store.new"; mv "$store.new" "$store"; echo "$account $value" >> "$store" ;;
-  find-generic-password)
-    if [ "$5" = "locked" ]; then echo "The keychain is locked." >&2; exit 51; fi
-    if [ "$5" = "silent" ]; then exit 2; fi
-    found=$(grep "^$5 " "$store" | cut -d' ' -f2)
-    if [ -z "$found" ]; then echo "not found" >&2; exit 44; fi
-    echo "$found" ;;
-  delete-generic-password)
-    if [ "$5" = "locked" ]; then echo "The keychain is locked." >&2; exit 51; fi
-    if [ "$5" = "silent" ]; then exit 2; fi
-    grep -q "^$5 " "$store" || exit 44
-    grep -v "^$5 " "$store" > "$store.new"; mv "$store.new" "$store" ;;
-esac
-`,
-    )
-    chmodSync(join(bin, 'security'), 0o755)
-    return bin
-  }
-
-  it.live('keeps a secret in macOS’s keychain through `security`, never in its arguments', () => {
-    const bin = fakeSecurity()
-    const path = process.env.PATH
-    process.env.PATH = `${bin}:${path ?? ''}`
-    return Effect.gen(function* () {
-      const secrets = yield* Secrets
-      yield* secrets.set('conn_1', '{"token":"ghp secret"}')
-      assert.strictEqual(yield* secrets.get('conn_1'), '{"token":"ghp secret"}')
-      assert.notInclude(readFileSync(join(bin, 'stdin'), 'utf8'), 'ghp secret', 'it goes base64, so it is one word')
-      assert.isNull(yield* secrets.get('conn_2'))
-      yield* secrets.remove('conn_1')
-      yield* secrets.remove('conn_1')
-      assert.isNull(yield* secrets.get('conn_1'))
-      assert.strictEqual((yield* Effect.flip(secrets.set('not a name', 'x'))).reason, 'Not a keychain name: not a name')
-      // A keychain that won't give or take says why.
-      assert.strictEqual((yield* Effect.flip(secrets.set('locked', 'x'))).reason, 'The keychain is locked.')
-      assert.strictEqual((yield* Effect.flip(secrets.get('locked'))).reason, 'The keychain is locked.')
-      assert.strictEqual((yield* Effect.flip(secrets.remove('locked'))).reason, 'The keychain is locked.')
-      // One that fails without a word still fails.
-      assert.strictEqual((yield* Effect.flip(secrets.set('silent', 'x'))).reason, 'security exited 3')
-      assert.match((yield* Effect.flip(secrets.get('silent'))).reason, /Command failed/)
-      assert.match((yield* Effect.flip(secrets.remove('silent'))).reason, /Command failed/)
-    }).pipe(Effect.provide(Secrets.keychainOn('darwin')), Effect.ensuring(Effect.sync(() => (process.env.PATH = path))))
+describe('where sign-ins are kept', () => {
+  /** A stand-in for the app's main process: it seals by reversing the bytes, and can be told to refuse. */
+  const sealer = (refuse = false): Sealer => ({
+    seal: (value) =>
+      refuse
+        ? Effect.fail(new SecretsUnavailable({ reason: 'The app didn’t answer.' }))
+        : Effect.succeed(Buffer.from(value).reverse().toString('base64')),
+    open: (sealed) =>
+      refuse
+        ? Effect.fail(new SecretsUnavailable({ reason: 'The app didn’t answer.' }))
+        : Effect.succeed(Buffer.from(sealed, 'base64').reverse().toString('utf8')),
   })
 
-  it.effect('elsewhere, says there is no keychain yet', () =>
+  it.effect('seals each in a file of its own that only this user can read, and opens it again', () => {
+    const folder = join(mkdtempSync(join(tmpdir(), 'charrette-secrets-')), 'secrets')
+    return Effect.gen(function* () {
+      const secrets = yield* Secrets
+      assert.isNull(yield* secrets.get('conn_1'))
+      yield* secrets.set('conn_1', '{"token":"ghp secret"}')
+      yield* secrets.set('conn_1', '{"token":"ghp newer"}')
+      assert.strictEqual(yield* secrets.get('conn_1'), '{"token":"ghp newer"}')
+      // What is on disk is sealed, and only this user may read it.
+      assert.notInclude(readFileSync(join(folder, 'conn_1'), 'utf8'), 'ghp')
+      assert.strictEqual(statSync(join(folder, 'conn_1')).mode & 0o777, 0o600)
+      assert.strictEqual(statSync(folder).mode & 0o777, 0o700)
+      assert.deepStrictEqual(readdirSync(folder), ['conn_1'])
+      yield* secrets.remove('conn_1')
+      yield* secrets.remove('conn_1')
+      assert.isNull(yield* secrets.get('conn_1'))
+      // A name is one of Charrette's ids, never a path.
+      assert.strictEqual((yield* Effect.flip(secrets.set('../conn_1', 'x'))).reason, "Not a secret's name: ../conn_1")
+      assert.strictEqual((yield* Effect.flip(secrets.get('.next'))).reason, "Not a secret's name: .next")
+    }).pipe(Effect.provide(Secrets.sealed(folder, sealer())))
+  })
+
+  const secretsOf = (layer: Layer.Layer<Secrets>) =>
+    Effect.provide(
+      Effect.gen(function* () {
+        return yield* Secrets
+      }),
+      layer,
+    )
+
+  it.effect('says why, when the app can’t seal or open one, or the folder can’t be written', () => {
+    const root = mkdtempSync(join(tmpdir(), 'charrette-secrets-'))
+    writeFileSync(join(root, 'conn_1'), 'sealed')
+    return Effect.gen(function* () {
+      const refusing = yield* secretsOf(Secrets.sealed(root, sealer(true)))
+      assert.strictEqual((yield* Effect.flip(refusing.set('conn_1', 'x'))).reason, 'The app didn’t answer.')
+      assert.strictEqual((yield* Effect.flip(refusing.get('conn_1'))).reason, 'The app didn’t answer.')
+      // A file where its folder should be.
+      const blocked = yield* secretsOf(Secrets.sealed(join(root, 'conn_1'), sealer()))
+      assert.match((yield* Effect.flip(blocked.set('conn_2', 'x'))).reason, /^Couldn't keep the secret/)
+      assert.match((yield* Effect.flip(blocked.get('conn_2'))).reason, /^Couldn't read the secret/)
+    })
+  })
+
+  it.effect('in the command-line client, keeps none, and says why', () =>
     Effect.gen(function* () {
       const secrets = yield* Secrets
-      assert.strictEqual(
-        (yield* Effect.flip(secrets.set('conn_1', 'x'))).reason,
-        'Charrette keeps secrets in the macOS keychain, and this is not macOS.',
-      )
-      assert.isNull(yield* secrets.get('conn_1'))
+      assert.strictEqual((yield* Effect.flip(secrets.set('conn_1', 'x'))).reason, 'Kept by the app.')
+      assert.strictEqual((yield* Effect.flip(secrets.get('conn_1'))).reason, 'Kept by the app.')
       yield* secrets.remove('conn_1')
-    }).pipe(Effect.provide(Secrets.keychainOn('linux'))),
+    }).pipe(Effect.provide(Secrets.none('Kept by the app.'))),
   )
 })
 
 describe('the agents', () => {
-  it.effect('run without the person’s sign-ins to gh and glab', () =>
+  it.effect('run without the person’s sign-ins to gh, glab, or git', () =>
     Effect.gen(function* () {
       const agents = yield* Agents
       const transport = agents.list[0]?.transport('/w')
       const env = transport?._tag === 'Process' ? (transport.spec.env ?? {}) : {}
       assert.isTrue(existsSync(env.GH_CONFIG_DIR ?? ''))
       assert.strictEqual(env.GLAB_CONFIG_DIR, env.GH_CONFIG_DIR)
+      assert.deepInclude(env, {
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'credential.helper',
+        GIT_CONFIG_VALUE_0: '',
+        GIT_TERMINAL_PROMPT: '0',
+      })
     }).pipe(Effect.provide(Agents.registry)),
   )
+
+  it('leave git with no credential helper to ask, whatever the person set', () => {
+    // The person's git hands out a password to whoever asks. The system's config is left out, so the real keychain isn't asked.
+    const home = mkdtempSync(join(tmpdir(), 'charrette-home-'))
+    writeFileSync(join(home, '.gitconfig'), '[credential]\n\thelper = "!f() { echo username=dana; echo password=leaked; }; f"\n')
+    const fill = (env: Readonly<Record<string, string>>) =>
+      spawnSync('git', ['credential', 'fill'], {
+        input: 'protocol=https\nhost=github.com\n\n',
+        env: { PATH: process.env.PATH ?? '', HOME: home, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', ...env },
+      }).stdout.toString()
+    assert.include(fill({}), 'password=leaked')
+    assert.notInclude(fill(withoutSignIns(home)), 'leaked')
+  })
 })

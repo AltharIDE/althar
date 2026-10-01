@@ -20,10 +20,12 @@ import type { LaunchSpec } from './registry'
  * The environment variables a child inherits from Charrette (docs/architecture
  * 07: an allowlist, never the whole environment). Provider API keys are not on
  * it: one could decide which account pays, over the plan the sign-in check
- * reported. An agent that needs one gets it through its launch spec.
+ * reported. An agent that needs one gets it through its launch spec. Nor is
+ * the person's SSH agent: Charrette pushes for agents, so their shells get
+ * none of the person's ways into a code host (ADR-011).
  */
 const INHERITED =
-  /^(PATH|HOME|USER|LOGNAME|SHELL|TMPDIR|TMP|TEMP|LANG|LANGUAGE|TERM|TZ|COLORTERM|SSH_AUTH_SOCK|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|LC_[A-Z_]+|XDG_[A-Z_]+|(HTTPS?|NO|ALL)_PROXY|(https?|no|all)_proxy)$/
+  /^(PATH|HOME|USER|LOGNAME|SHELL|TMPDIR|TMP|TEMP|LANG|LANGUAGE|TERM|TZ|COLORTERM|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|LC_[A-Z_]+|XDG_[A-Z_]+|(HTTPS?|NO|ALL)_PROXY|(https?|no|all)_proxy)$/
 
 export const childEnvironment = (
   spec: LaunchSpec,

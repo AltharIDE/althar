@@ -195,11 +195,34 @@ service's model.
 | Listening, polling | ETags (a "not modified" reply is free) | `updated_after` | `updated_on` | The pull request's activities | A cursor per thing listened to |
 
 - **Pushing is git,** with the connection's token, never the person's
-  credential helper. The record keeps the commit pushed.
+  credential helper. Charrette pushes what the lead committed and commits
+  nothing itself; a step that ends in a push isn't done while the worktree
+  has uncommitted files, so the lead commits what belongs to the task and
+  clears away the rest. The record keeps the commit pushed.
 - **Merging stays with the person.** The model reads `merged`; it has no
   merge.
 - **A repository's host** is found from its remote URL, matched against
   known hosts and the instances the person has connected.
+
+**Listening to a pull request** while the app runs:
+
+- **Asked often while it's busy,** every 30 seconds, and every five minutes
+  once nothing has happened on it for ten. Each call is conditional where the
+  host allows (GitHub's ETags: a "not modified" reply doesn't count against
+  its rate limit).
+- **Everything arrives in the task's thread,** once: comments, reviews,
+  checks finishing, merged, closed, marked ready. Bots aside.
+- **Only some of it reaches the lead.** Failed checks do, with the end of
+  their logs. So do comments and reviews from the person and from people who
+  can write to the repository (GitHub's owners, members and collaborators).
+  On a public repository anyone can comment, so what anyone else says stays in
+  the thread, marked as not passed on, for the person to pass on in their own
+  name. Reading the pull request, the lead sees the same, and how much was
+  left out.
+- **Charrette's own replies** are known by their receipts, not by who posted
+  them: they go up under the person's account, which is also where the
+  person comments. Each says it came from Charrette, and which agent wrote
+  it.
 
 ### Trackers
 
@@ -235,8 +258,13 @@ whether it gives a token without one:
 
 A pasted token is the fallback everywhere, including for an organisation
 that won't install the GitHub App. A connection belongs to the person on
-this device; the token is in the system keychain, and the store keeps only a
-reference to it.
+this device. Its token is sealed by the app with Electron's `safeStorage`,
+whose key the system keychain keeps for the signed app alone, and kept in a
+file of its own in the profile; the store keeps only a reference to it.
+Another process, an agent's shell among them, can read the file but not
+open it: asking the keychain for the key prompts the person. The runtime
+asks the app's main process to seal and open, and never holds the key. The
+command-line client has no key, so connections stay the app's.
 
 ### Agents and the hosts
 
@@ -247,9 +275,16 @@ Agents reach code hosts and trackers only through Charrette:
 - **Charrette's tools** let agents read a pull request (comments, reviews,
   checks with their logs) and an issue, and reply on a pull request. They
   reach only the task's own repository, and every call is recorded.
+- **Agents run without the person's ways into a host:** `gh` and `glab`
+  signed out, git's credential helpers reset (`credential.helper` empty, in
+  git's environment), git's prompts off, and no SSH agent. Charrette pushes
+  for them. The environment is the boundary.
 - **The rules refuse** `gh` and `glab` commands that change a host, with a
-  reason that names Charrette's tool, and agents run without the person's
-  `gh` and `glab` sign-ins.
+  reason that names Charrette's tool; and, for every role, the ways to
+  credentials a shell still has: the keychain's `security`, and git's helpers
+  called directly. Credentials the person keeps in plain files under their
+  home folder remain readable to an agent that goes looking; only a sandbox
+  closes that (open question).
 - **What slips through is adopted:** opening a pull request first looks for
   one already open on the task's branch.
 
@@ -490,7 +525,8 @@ Every integration connection records a principal and opaque credential
 reference. The same principles as provider auth apply:
 
 - use vendor-supported OAuth/app installation/API credentials;
-- store local secrets in the OS keychain;
+- keep local secrets where only Charrette can open them: sealed by the app,
+  with a key the OS keychain keeps for the app alone ("Signing in", above);
 - never place credentials in skills, repository config, or MCP arguments;
 - separate account connection from project authorization;
 - make tenant/workspace/site selection explicit;

@@ -152,27 +152,12 @@ export const addWorktree = (repository: string, path: string, branch: string, ba
 /** Whether the worktree has changes not yet committed: tracked or untracked, ignored files aside. */
 export const uncommitted = (cwd: string) => Effect.map(git(cwd, 'status', '--porcelain'), (output) => output !== '')
 
-/**
- * Commits everything in the worktree, as whoever the repository says commits
- * there (as the agents' own commits are), or as Charrette when no one is set.
- */
-export const commitAll = (cwd: string, message: string) =>
+/** The files the worktree hasn't committed, changed, new or deleted, ignored files aside; by path, sorted. */
+export const uncommittedFiles = (cwd: string) =>
   Effect.gen(function* () {
-    const email = yield* git(cwd, 'config', 'user.email').pipe(Effect.orElseSucceed(() => ''))
-    yield* git(cwd, 'add', '-A')
-    yield* run(
-      60_000,
-      cwd,
-      ['commit', '--quiet', '--no-verify', '-m', message],
-      email === ''
-        ? {
-            GIT_AUTHOR_NAME: 'Charrette',
-            GIT_AUTHOR_EMAIL: 'charrette@localhost',
-            GIT_COMMITTER_NAME: 'Charrette',
-            GIT_COMMITTER_EMAIL: 'charrette@localhost',
-          }
-        : {},
-    )
+    const changed = yield* git(cwd, '-c', 'core.quotePath=false', 'diff', '--name-only', 'HEAD')
+    const added = yield* git(cwd, '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard')
+    return [...new Set([...changed.split('\n'), ...added.split('\n')].filter((path) => path !== ''))].toSorted()
   })
 
 /** How many commits HEAD has that a base doesn't. */

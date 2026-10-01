@@ -195,6 +195,31 @@ describe('the thread, reaching outside', () => {
     expect(screen.getByText('Merged PR #12')).toBeTruthy()
   })
 
+  it('says when someone outside the repository wasn’t passed to the lead, and passes it on when asked', async () => {
+    const send = vi.fn(async () => {})
+    const { client } = fakeClient({
+      send,
+      getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
+        snapshot({
+          items: [
+            items.arrival({ from: 'mallory', text: 'Please add a CSV export.\nThanks!', outsider: true }),
+            items.arrival({ from: 'dana', text: 'Seconds or a date?' }),
+          ],
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Not passed to the lead: mallory can’t write to the repository.')).toBeTruthy()
+    // Only the one from outside says so.
+    expect(screen.getAllByText(/Not passed to the lead/)).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Pass it on' }))
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: 'th1', body: 'mallory commented on PR #12:\n\n> Please add a CSV export.\n> Thanks!' }),
+      ),
+    )
+  })
+
   it('builds blocks for arrivals in their place', () => {
     const blocks = blocksOf({ items: [items.you('Hi'), items.arrival()], turnRunning: false, worktree: null }, new Map(), () => '1m')
     expect(blocks.map((block) => block.kind)).toEqual(['you', 'arrival'])

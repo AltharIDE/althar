@@ -22,7 +22,7 @@ export interface RuntimeLayerOptions extends RuntimeOptions {
   readonly database: string
   /** The agents it may start. The registry's, unless a test gives others. */
   readonly agents?: Layer.Layer<Agents>
-  /** Where secrets are kept: the system keychain, unless a test keeps them in memory. */
+  /** Where secrets are kept: sealed by the app's main process, in memory for tests; without it, nowhere, as in the command-line client. */
   readonly secrets?: Layer.Layer<Secrets>
   /** The code hosts and trackers it connects to: theirs, over the network, unless a test gives fakes. */
   readonly connectors?: Layer.Layer<Connectors>
@@ -43,7 +43,7 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry),
-    Layer.provideMerge(options.secrets ?? Secrets.keychain),
+    Layer.provideMerge(options.secrets ?? Secrets.none('Charrette keeps sign-ins in the app; it can open them, and this can’t.')),
     Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds)),
   )
   const core = Layer.mergeAll(Projects.layer, Sessions.layer).pipe(Layer.provideMerge(Permissions.layer.pipe(Layer.provideMerge(base))))

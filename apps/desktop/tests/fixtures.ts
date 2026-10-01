@@ -135,6 +135,7 @@ export const items = {
       failed: null,
       failing: [],
       url: null,
+      outsider: false,
       ...content,
     },
   }),

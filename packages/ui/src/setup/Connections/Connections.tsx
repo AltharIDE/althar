@@ -17,8 +17,8 @@ import s from './Connections.module.css'
  * you are signed in as there, or the one thing that would connect it.
  * Signing in is the service's own: a code you type on its page, or a page
  * you approve in your browser. Where Charrette has neither for a service,
- * you paste a token, which goes to the Keychain and is never shown again. A
- * company's own server is connected by its address.
+ * you paste a token, which is kept encrypted for Charrette alone and never
+ * shown again. A company's own server is connected by its address.
  */
 
 export interface ServiceOption {
@@ -120,7 +120,7 @@ export const connectionsText: ConnectionsText = {
   user: 'Email',
   token: (service) => `${service} token`,
   makeToken: (service) => `Make one on ${service}`,
-  tokenNote: 'Kept in your Keychain. Charrette never shows it again.',
+  tokenNote: 'Kept encrypted on this Mac, for Charrette alone. It’s never shown again.',
   emptyToken: 'Paste the token first',
   emptyUser: 'Type the email the token belongs to',
   emptyInstance: 'Type the server’s address',

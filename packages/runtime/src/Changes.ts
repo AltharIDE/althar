@@ -1,17 +1,17 @@
 import { createHash } from 'node:crypto'
 
-import { ChangeRequest, Comment, ConnectorFailed, type Product, type Repository } from '@charrette/connectors'
+import { type Account, ChangeRequest, Comment, ConnectorFailed, type Person, type Product, type Repository } from '@charrette/connectors'
 import { Ids, newId, type ProjectId } from '@charrette/domain'
 import type { Ledger } from '@charrette/persistence-sqlite'
-import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema } from 'effect'
+import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
-import { RuntimeConfig } from './Config'
+import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import { envelope } from './envelope'
 import { NotFound } from './errors'
-import { commitAll, commitOf, commitsAhead, pushTo, uncommitted } from './git'
+import { commitOf, commitsAhead, pushTo, uncommitted, uncommittedFiles } from './git'
 import { Instance } from './Instance'
 import { outward, reconcileOutward } from './outward'
 import {
@@ -22,8 +22,11 @@ import {
   checksOf,
   commentForLead,
   commentLine,
+  fromCharrette,
   logOf,
   nameOf,
+  outsidersLine,
+  signed,
   reviewForLead,
   reviewLine,
   standing,
@@ -37,17 +40,22 @@ import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
  * A task's change on its code host (docs/architecture/06; docs/plans/
  * integrations.md): the pull request it ends with, and listening to it.
  *
- * Publishing commits what the lead left uncommitted, pushes the task's branch
- * with the connection's token, and opens a draft pull request, or adopts the
- * one already open from the branch. The issue's key leads its title; its
- * body is what the steps reported. Each outward action is recorded as intent
+ * Publishing pushes what the lead committed on the task's branch, with the
+ * connection's token, and opens a draft pull request, or adopts the one
+ * already open from the branch. What the lead left uncommitted stays in the
+ * worktree, and the step says so. The issue's key leads its title; its body
+ * is what the steps reported. Each outward action is recorded as intent
  * first, with its receipt after.
  *
  * Listening asks the code host, while the app runs, what changed: the pull
  * request's state, its checks once they finish, and what people said on it.
- * Each arrives in the task's thread once. People's comments and reviews, and
- * failed checks, also go to the lead, when one is running, to answer on the
- * pull request or fix. Bots and Charrette's own account aren't passed on.
+ * Each arrives in the task's thread once. Failed checks, and what the person
+ * and the repository's own people say, also go to the lead, when one is
+ * running, to answer on the pull request or fix. Anyone else on a public
+ * repository arrives in the thread only, for the person to pass on. Bots,
+ * and Charrette's own replies (known by their receipts), aren't passed on. A
+ * pull request is asked every 30 seconds while something is happening on
+ * it, and every few minutes once it has been quiet a while.
  */
 
 /** What Charrette last saw of a change, as its external link keeps it. */
@@ -93,11 +101,37 @@ export interface ChangeSummary extends Snapshot {
   readonly listening: boolean
 }
 
-/** What publishing did: opened (or adopted) a pull request, pushed the branch only, or found nothing to propose. */
-export type Published =
+/**
+ * What publishing did: opened (or adopted) a pull request, pushed the branch
+ * only, or found nothing to propose; and the files the lead left uncommitted,
+ * which weren't.
+ */
+export type Published = (
   | { readonly kind: 'opened'; readonly change: ChangeSummary }
   | { readonly kind: 'pushed'; readonly branch: string }
   | { readonly kind: 'nothing' }
+) & { readonly left: ReadonlyArray<string> }
+
+/** How long a pull request with nothing new counts as quiet, and how much less often a quiet one is asked. */
+const QUIET_AFTER = Duration.minutes(10)
+const QUIET_SLOWER = 10
+
+/**
+ * Whether a listened change is due to be asked again: every turn while
+ * something has happened on it lately, every few turns once it is quiet.
+ */
+export const listenDue = (input: {
+  readonly now: number
+  readonly polledAt: number | undefined
+  readonly newsAt: number
+  readonly every: Duration.Duration
+}) => {
+  if (input.polledAt === undefined) return true
+  const every = Duration.toMillis(input.every)
+  const quiet = input.now - input.newsAt >= Duration.toMillis(QUIET_AFTER)
+  // Half a turn's slack, so a change asked every turn isn't skipped for a few milliseconds.
+  return input.now - input.polledAt >= (quiet ? every * QUIET_SLOWER : every) - every / 2
+}
 
 /** How many failing checks' logs the lead gets, and how many comments a reading of the pull request shows. */
 const LOGS_TO_LEAD = 2
@@ -123,7 +157,7 @@ const snapshotOf = (
   checks,
 })
 
-type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections | Sessions | RuntimeConfig | ToolServer
+type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections | Sessions | RuntimeConfig | ToolServer | Agents
 
 interface LinkRow {
   readonly id: string
@@ -154,8 +188,11 @@ export class Changes extends Context.Service<
     pushChanges(taskId: string): Effect.Effect<{ readonly change: ChangeSummary }, unknown>
     /** Marks the task's draft pull request ready for review: the person's to do. */
     markReady(taskId: string): Effect.Effect<void, unknown>
-    /** Replies on the task's pull request: in a comment's thread, or its conversation. */
-    reply(taskId: string, reply: { readonly body: string; readonly threadId: string | null }): Effect.Effect<ChangeSummary, unknown>
+    /** Replies on the task's pull request, in a comment's thread or its conversation, signed as from Charrette and the agent that wrote it. */
+    reply(
+      taskId: string,
+      reply: { readonly body: string; readonly threadId: string | null; readonly by: string | null },
+    ): Effect.Effect<ChangeSummary, unknown>
     /** The pull request as it stands, in words for an agent: its state, checks (a failure's log), and what was said. */
     read(taskId: string): Effect.Effect<string, unknown>
     /** The task's changes, as last seen. */
@@ -174,7 +211,21 @@ export class Changes extends Context.Service<
       const connections = yield* Connections
       const sessions = yield* Sessions
       const toolServer = yield* ToolServer
+      const agents = yield* Agents
       const every = (yield* RuntimeConfig).listenEvery ?? Duration.seconds(30)
+      /* One thing at a time on a task's pull request: a reply's receipt is kept before listening reads the reply back. */
+      const locks = new Map<string, Semaphore.Semaphore>()
+      const locked = (taskId: string) => {
+        const known = locks.get(taskId)
+        if (known !== undefined) return known.withPermits(1)
+        const made = Semaphore.makeUnsafe(1)
+        locks.set(taskId, made)
+        return made.withPermits(1)
+      }
+      /* When each task's pull request last had news, and when each was last asked: quiet ones are asked less often. */
+      const newsAt = new Map<string, number>()
+      const polledAt = new Map<string, number>()
+      const news = (taskId: string) => Effect.map(Clock.currentTimeMillis, (now) => void newsAt.set(taskId, now))
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const decodeSnapshot = Schema.decodeUnknownEffect(Schema.fromJsonString(Snapshot))
 
@@ -272,13 +323,13 @@ export class Changes extends Context.Service<
           if (found === null) return yield* new NotConnected({ product: 'github', what: remotes[0] ?? 'the repository' })
           const { host } = found
           const repository = yield* host.repository(found.path)
-          // What the lead left uncommitted goes in, under the task's name.
-          if (yield* uncommitted(task.path)) yield* commitAll(task.path, task.title)
+          // Charrette pushes what the lead committed, never what it left lying in the worktree.
+          const left = yield* uncommittedFiles(task.path)
           const base = task.baseCommit ?? task.baseRef ?? repository.defaultBranch
-          if ((yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing' } as const
+          if ((yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing', left } as const
           const head = yield* commitOf(task.path, 'HEAD')
           yield* pushTo(task.path, yield* host.pushTarget(repository), task.branch)
-          if (input.end === 'none') return { kind: 'pushed', branch: task.branch } as const
+          if (input.end === 'none') return { kind: 'pushed', branch: task.branch, left } as const
           const draft = input.end === 'draft' && host.capabilities.drafts
           const [issueLink] = yield* sql<{
             id: string
@@ -406,9 +457,14 @@ export class Changes extends Context.Service<
               })
             }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not link the pull request to its issue', cause)))
           yield* touchCard(input.taskId)
+          yield* news(input.taskId)
           wakeNow(input.taskId)
           const [row] = yield* linksOf(input.taskId)
-          return { kind: 'opened', change: { ...snapshot, linkId, product: host.product, listening: row?.listening === 1 } } as const
+          return {
+            kind: 'opened',
+            change: { ...snapshot, linkId, product: host.product, listening: row?.listening === 1 },
+            left,
+          } as const
         })
 
       /** Saves what was seen of a change, and tells the card. */
@@ -447,6 +503,7 @@ export class Changes extends Context.Service<
           const head = yield* commitOf(workspace.path, 'HEAD')
           yield* sql`UPDATE repository_changes SET head_commit = ${head}, updated_at = ${yield* timestamp}, revision = revision + 1
             WHERE pull_request_url = ${snapshot.url} AND project_id = ${link.projectId}`
+          yield* news(taskId)
           wakeNow(taskId)
           return { change: yield* summaryOf(link) }
         })
@@ -471,7 +528,7 @@ export class Changes extends Context.Service<
           yield* saveSnapshot(link, { ...snapshot, draft: ready.draft, state: ready.state })
         })
 
-      const reply = (taskId: string, input: { readonly body: string; readonly threadId: string | null }) =>
+      const reply = (taskId: string, input: { readonly body: string; readonly threadId: string | null; readonly by: string | null }) =>
         Effect.gen(function* () {
           const { link, snapshot, host, repository } = yield* current(taskId)
           const digest = createHash('sha256')
@@ -486,16 +543,47 @@ export class Changes extends Context.Service<
             key: `reply:${link.id}:${digest}`,
             request: { number: snapshot.number, threadId: input.threadId },
             retryable: false,
-            perform: host.reply(repository, snapshot.number, input),
+            // Posted as the person's account, so it says who wrote it.
+            perform: host.reply(repository, snapshot.number, { body: signed(input.body, input.by), threadId: input.threadId }),
             encode: (answer) => answer,
             decode: (kept) => Option.getOrUndefined(Schema.decodeUnknownOption(Comment)(kept)),
           })
+          yield* news(taskId)
           return yield* summaryOf(link)
         })
 
+      /** The ids of the replies Charrette posted on a change, from their receipts. */
+      const repliesOf = (linkId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ id: string | number | null }>`
+            SELECT json_extract(m.response, '$.id') AS id FROM mutation_receipts m JOIN work_items w ON w.id = m.work_item_id
+            WHERE w.subject_type = 'external_link' AND w.subject_id = ${linkId} AND m.operation = 'reply' AND m.response IS NOT NULL`
+          return new Set(rows.flatMap((row) => (row.id === null ? [] : [String(row.id)])))
+        })
+
+      /**
+       * Who said something on a change, for who hears it: Charrette, in a
+       * reply it posted (by its receipt, or, when that was lost, its
+       * signature on the account's own comment); a bot; the person, whose
+       * account the connection is; one of the repository's people; or anyone
+       * else, as on a public repository.
+       */
+      const voiceOf = (
+        said: { readonly id: string; readonly author: Person; readonly member: boolean; readonly body: string },
+        account: Account,
+        replies: ReadonlySet<string>,
+      ): 'charrette' | 'bot' | 'person' | 'member' | 'outsider' => {
+        const mine = said.author.id === account.id
+        if (replies.has(said.id) || (mine && fromCharrette(said.body))) return 'charrette'
+        if (said.author.bot) return 'bot'
+        if (mine) return 'person'
+        return said.member ? 'member' : 'outsider'
+      }
+
       const read = (taskId: string) =>
         Effect.gen(function* () {
-          const { snapshot, host, repository, account } = yield* current(taskId)
+          const { link, snapshot, host, repository, account } = yield* current(taskId)
           const now = yield* host.change(repository, snapshot.number)
           const lines: Array<string> = [`${nameOf(snapshot)}, "${now.title}" (${standing(now)}): ${now.url}`]
           if (now.headSha !== null) {
@@ -508,12 +596,16 @@ export class Changes extends Context.Service<
             }
           }
           const activity = yield* host.activity(repository, snapshot.number, null)
-          const said = [
-            ...activity.reviews.map((review) => ({ at: review.at, text: reviewLine(review) })),
-            ...activity.comments
-              .filter((comment) => comment.author.id !== account.id)
-              .map((comment) => ({ at: comment.at, text: commentLine(comment) })),
-          ]
+          const replies = yield* repliesOf(link.id)
+          // What anyone else said isn't read to the lead: on a public repository, anyone can comment.
+          const reviews = activity.reviews.filter((review) => voiceOf(review, account, replies) !== 'outsider')
+          const comments = activity.comments.flatMap((comment) => {
+            const voice = voiceOf(comment, account, replies)
+            if (voice === 'outsider') return []
+            return [{ at: comment.at, text: commentLine(comment, voice === 'charrette' ? 'you, through Charrette' : undefined) }]
+          })
+          const outsiders = activity.reviews.length - reviews.length + activity.comments.length - comments.length
+          const said = [...reviews.map((review) => ({ at: review.at, text: reviewLine(review) })), ...comments]
             .toSorted((a, b) => (a.at < b.at ? -1 : 1))
             .slice(-COMMENTS_SHOWN)
           lines.push(
@@ -521,6 +613,7 @@ export class Changes extends Context.Service<
               ? 'Nobody has said anything on it.'
               : `What people said, oldest first:\n${said.map((entry) => entry.text).join('\n')}`,
           )
+          if (outsiders > 0) lines.push(outsidersLine(outsiders))
           return lines.join('\n\n')
         })
 
@@ -567,27 +660,36 @@ export class Changes extends Context.Service<
           })
         })
 
-      /** One turn of listening to a change: its state, its finished checks, and what was said since the cursor. */
+      /**
+       * One turn of listening to a change: its state, its finished checks, and
+       * what was said since the cursor. Whether anything happened on it, so
+       * a quiet one is asked less often.
+       */
       const poll = (link: LinkRow) =>
         Effect.gen(function* () {
-          if (link.connectionId === null) return
+          if (link.connectionId === null) return false
           const adapters = yield* connections.adapters(link.connectionId)
           const host = adapters.host
-          if (host === undefined) return
+          if (host === undefined) return false
+          const account = adapters.info.account
           const before = yield* decodeSnapshot(link.snapshot)
           const repository: Repository = yield* host.repository(before.repository)
           const now = yield* host.change(repository, before.number)
           const name = nameOf(before)
           const forLead: Array<string> = []
+          let happened = false
           let checks = before.checks
           if (now.headSha !== null) {
             const sum = checksOf(now.headSha, yield* host.checks(repository, now.headSha))
             const finished = sum.outcome === 'passed' || sum.outcome === 'failed'
+            // Checks still running keep the pull request worth asking about.
+            if (sum.outcome === 'running') happened = true
             if (
               finished &&
               (before.checks?.sha !== sum.sha || before.checks.outcome !== sum.outcome) &&
               (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}`, { ...sum }))
             ) {
+              happened = true
               yield* arrive(link, {
                 kind: 'checks',
                 from: null,
@@ -610,12 +712,11 @@ export class Changes extends Context.Service<
             checks = sum
           }
           const activity = yield* host.activity(repository, before.number, link.cursor)
+          const replies = activity.comments.length === 0 ? new Set<string>() : yield* repliesOf(link.id)
           for (const review of activity.reviews) {
-            if (
-              review.author.id === adapters.info.account.id ||
-              !(yield* heard(link, 'review', `review:${review.id}`, { author: review.author.login }))
-            )
-              continue
+            const voice = voiceOf(review, account, replies)
+            if (voice === 'charrette' || !(yield* heard(link, 'review', `review:${review.id}`, { author: review.author.login }))) continue
+            happened = true
             yield* arrive(link, {
               kind: 'review',
               from: review.author.login,
@@ -623,12 +724,15 @@ export class Changes extends Context.Service<
               where: name,
               text: review.body,
               url: review.url,
+              outsider: voice === 'outsider',
             })
-            if (!review.author.bot && review.verdict !== 'approved') forLead.push(reviewForLead(review, name))
+            if ((voice === 'person' || voice === 'member') && review.verdict !== 'approved') forLead.push(reviewForLead(review, name))
           }
           for (const comment of activity.comments) {
-            if (comment.author.id === adapters.info.account.id || comment.author.bot) continue
+            const voice = voiceOf(comment, account, replies)
+            if (voice === 'charrette' || voice === 'bot') continue
             if (!(yield* heard(link, 'comment', `comment:${comment.id}`, { author: comment.author.login }))) continue
+            happened = true
             yield* arrive(link, {
               kind: 'comment',
               from: comment.author.login,
@@ -637,15 +741,20 @@ export class Changes extends Context.Service<
               path: comment.path,
               line: comment.line,
               url: comment.url,
+              outsider: voice === 'outsider',
             })
-            forLead.push(commentForLead(comment, name))
+            if (voice === 'person' || voice === 'member') forLead.push(commentForLead(comment, name))
           }
           if (forLead.some((part) => !part.startsWith('Checks failed'))) forLead.push(answerHint)
           const after = snapshotOf(now, before.repository, before.words, checks)
           if (after.state !== before.state) {
+            happened = true
             if (after.state === 'merged') yield* arrive(link, { kind: 'merged', from: null, where: name, url: now.url })
             if (after.state === 'closed') yield* arrive(link, { kind: 'closed', from: null, where: name, url: now.url })
-          } else if (before.draft && !after.draft) yield* arrive(link, { kind: 'ready', from: null, where: name, url: now.url })
+          } else if (before.draft && !after.draft) {
+            happened = true
+            yield* arrive(link, { kind: 'ready', from: null, where: name, url: now.url })
+          }
           const settled = after.state !== 'open'
           yield* saveSnapshot(link, after, {
             cursor: activity.cursor === '' ? link.cursor : activity.cursor,
@@ -654,6 +763,7 @@ export class Changes extends Context.Service<
           })
           if (after.state === 'merged') yield* taskDone(link)
           yield* tellLead(link, forLead)
+          return happened
         })
 
       /** A merged change settles its task. */
@@ -698,8 +808,15 @@ export class Changes extends Context.Service<
             WHERE kind = 'change' AND listening = 1 ${only === null ? sql`` : sql`AND task_id = ${only}`}`
           const now = yield* Clock.currentTimeMillis
           for (const link of due) {
-            if (only === null && (waitUntil.get(link.id) ?? 0) > now) continue
-            yield* poll(link).pipe(
+            if (only === null) {
+              if ((waitUntil.get(link.id) ?? 0) > now) continue
+              // A pull request first seen this launch counts as busy until it has been quiet a while.
+              if (!newsAt.has(link.taskId)) newsAt.set(link.taskId, now)
+              if (!listenDue({ now, polledAt: polledAt.get(link.id), newsAt: newsAt.get(link.taskId) ?? now, every })) continue
+            }
+            polledAt.set(link.id, now)
+            yield* locked(link.taskId)(poll(link)).pipe(
+              Effect.flatMap((happened) => (happened ? news(link.taskId) : Effect.void)),
               Effect.catchCause((cause) =>
                 Effect.gen(function* () {
                   const error = Option.getOrUndefined(Cause.findErrorOption(cause))
@@ -734,7 +851,7 @@ export class Changes extends Context.Service<
         name: string,
         description: string,
         input: Readonly<Record<string, unknown>>,
-        call: (taskId: string, input: unknown) => Effect.Effect<string, unknown, Store>,
+        call: (taskId: string, input: unknown, access: ToolAccess) => Effect.Effect<string, unknown, Store>,
       ) => ({
         name,
         description,
@@ -742,7 +859,7 @@ export class Changes extends Context.Service<
         call: (value: unknown, access: ToolAccess) =>
           access.taskId === null
             ? Effect.fail(new ToolRefused({ message: 'This tool is for a task’s lead.' }))
-            : provide(call(access.taskId, value)).pipe(
+            : provide(call(access.taskId, value, access)).pipe(
                 Effect.catch((error) => {
                   if (error instanceof ToolRefused) return Effect.fail(error)
                   if (error instanceof NotFound && error.kind === 'pull request')
@@ -779,12 +896,20 @@ export class Changes extends Context.Service<
           'reply_on_pull_request',
           "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. For answering what people said; a change to the code is a commit and publish_changes.",
           { type: 'object', properties: { body: { type: 'string' }, thread_id: { type: 'string' } }, required: ['body'] },
-          (taskId, input) =>
+          (taskId, input, access) =>
             Effect.gen(function* () {
               const replied = yield* Schema.decodeUnknownEffect(Replied)(input).pipe(
                 Effect.mapError((error) => new ToolRefused({ message: `Charrette couldn't read that: ${error.message}` })),
               )
-              const change = yield* reply(taskId, { body: replied.body, threadId: replied.thread_id ?? null })
+              // The reply is signed with the lead's name, as the person's colleagues read it under the person's account.
+              const lead = yield* sessions.running(access.threadId)
+              const by = Option.isNone(lead)
+                ? null
+                : yield* agents.get(lead.value.agentId).pipe(
+                    Effect.map((entry) => entry.definition.name),
+                    Effect.orElseSucceed(() => null),
+                  )
+              const change = yield* locked(taskId)(reply(taskId, { body: replied.body, threadId: replied.thread_id ?? null, by }))
               return `Replied on ${nameOf(change)}.`
             }),
         ),
@@ -802,7 +927,7 @@ export class Changes extends Context.Service<
                 return yield* new ToolRefused({
                   message: 'The worktree has uncommitted changes. Commit them, then call publish_changes again.',
                 })
-              const { change } = yield* pushChanges(taskId)
+              const { change } = yield* locked(taskId)(pushChanges(taskId))
               return `Pushed to ${nameOf(change)}. Its checks run again; Charrette tells you how they end.`
             }),
         ),
@@ -810,12 +935,17 @@ export class Changes extends Context.Service<
 
       return Changes.of({
         publish: (input) => provide(publish(input)),
-        pushChanges: (taskId) => provide(pushChanges(taskId)),
-        markReady: (taskId) => provide(markReady(taskId)),
-        reply: (taskId, input) => provide(reply(taskId, input)),
+        pushChanges: (taskId) => provide(locked(taskId)(pushChanges(taskId))),
+        markReady: (taskId) => provide(locked(taskId)(markReady(taskId))),
+        reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),
-        refresh: (taskId) => Effect.sync(() => wakeNow(taskId)),
+        // The person looking at the task counts as something happening on it.
+        refresh: (taskId) =>
+          Effect.andThen(
+            news(taskId),
+            Effect.sync(() => wakeNow(taskId)),
+          ),
         endFor: (projectId) =>
           provide(
             Effect.gen(function* () {

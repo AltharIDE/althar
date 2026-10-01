@@ -1,5 +1,6 @@
 import type { Comment, Review } from '@charrette/connectors'
 import { assert, describe, it } from '@effect/vitest'
+import { Duration } from 'effect'
 
 import {
   answerHint,
@@ -9,17 +10,24 @@ import {
   checksOf,
   commentForLead,
   commentLine,
+  filesLine,
+  fromCharrette,
   nameOf,
+  outsidersLine,
   reviewForLead,
   reviewLine,
+  signed,
   standing,
+  unsigned,
 } from '../src/pullRequestWords'
+import { listenDue } from '../src/Changes'
 import { changeOf, itemOf, stuckOf } from '../src/Queries'
 
 const dana = { id: 'u2', login: 'dana', name: 'Dana', bot: false }
 const comment = (more: Partial<Comment> = {}): Comment => ({
   id: '1',
   author: dana,
+  member: true,
   body: 'Seconds or a date?\nPartners care.',
   at: '2026-10-01T10:00:00Z',
   url: null,
@@ -31,6 +39,7 @@ const comment = (more: Partial<Comment> = {}): Comment => ({
 const review = (more: Partial<Review> = {}): Review => ({
   id: '2',
   author: dana,
+  member: true,
   verdict: 'changes_requested',
   body: 'Name it better.',
   at: '2026-10-01T10:01:00Z',
@@ -121,6 +130,43 @@ describe('what Charrette writes about a pull request', () => {
     assert.strictEqual(reviewLine(review()), '- dana reviewed: changes requested\n> Name it better.')
     assert.strictEqual(reviewLine(review({ verdict: 'approved', body: '' })), '- dana reviewed: approved')
     assert.strictEqual(reviewLine(review({ verdict: 'commented' })), '- dana reviewed: commented\n> Name it better.')
+  })
+
+  it('signs a reply as from Charrette, knows its signature, and reads it back without', () => {
+    const reply = signed('Seconds.\n', 'Claude Code')
+    assert.strictEqual(reply, 'Seconds.\n\n<sub>From Charrette, by Claude Code.</sub>')
+    assert.strictEqual(signed('Seconds.', null), 'Seconds.\n\n<sub>From Charrette.</sub>')
+    assert.isTrue(fromCharrette(reply))
+    assert.isFalse(fromCharrette('Seconds. <sub>From Charrette</sub> said someone, mid-line\nand more'))
+    assert.strictEqual(unsigned(reply), 'Seconds.')
+    assert.strictEqual(unsigned('Seconds.'), 'Seconds.')
+    assert.strictEqual(
+      commentLine(comment({ body: reply, author: { ...dana, login: 'you' } }), 'you, through Charrette'),
+      '- you, through Charrette:\n> Seconds.',
+    )
+    assert.strictEqual(
+      outsidersLine(1),
+      "One comment from people who can't write to the repository is left out. On a public repository anyone can comment; the person reads them and passes on what matters.",
+    )
+    assert.match(outsidersLine(3), /^3 comments from people who can't write to the repository are left out\./)
+  })
+
+  it('names files, the first few of them and how many more', () => {
+    assert.strictEqual(filesLine(['a.ts']), '`a.ts`')
+    assert.strictEqual(filesLine(['a', 'b', 'c', 'd'], 2), '`a`, `b` and 2 more')
+  })
+
+  it('asks a busy pull request every turn, and a quiet one every few', () => {
+    const every = Duration.seconds(30)
+    const minute = 60_000
+    assert.isTrue(listenDue({ now: 0, polledAt: undefined, newsAt: 0, every }))
+    // Something happened in the last ten minutes: every turn.
+    assert.isTrue(listenDue({ now: 9 * minute, polledAt: 9 * minute - 30_000, newsAt: 0, every }))
+    assert.isTrue(listenDue({ now: 9 * minute, polledAt: 9 * minute - 20_000, newsAt: 0, every }))
+    assert.isFalse(listenDue({ now: 9 * minute, polledAt: 9 * minute - 10_000, newsAt: 0, every }))
+    // Quiet for ten minutes: every five.
+    assert.isFalse(listenDue({ now: 20 * minute, polledAt: 19 * minute, newsAt: 0, every }))
+    assert.isTrue(listenDue({ now: 20 * minute, polledAt: 15 * minute, newsAt: 0, every }))
   })
 
   it('tells the lead what was said and what failed, and how to answer', () => {
@@ -234,7 +280,12 @@ describe('what screens read of a pull request and what arrived', () => {
         failed: null,
         failing: [],
         url: 'u',
+        outsider: false,
       },
+    )
+    assert.deepInclude(
+      itemOf(row('arrival', { source: 'github', kind: 'comment', from: 'mallory', where: 'PR #12', text: 'Hi', outsider: true }))?.content,
+      { outsider: true },
     )
     const checks = itemOf(row('arrival', { source: 'gitlab', kind: 'checks', where: 'MR !4', passed: 2, failed: 1, failing: ['test', 1] }))
     assert.deepInclude(checks?.content, { from: null, text: null, passed: 2, failed: 1, failing: ['test'], url: null })

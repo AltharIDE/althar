@@ -1,16 +1,18 @@
+import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 
 import { emitterPort } from '@charrette/contracts'
-import { connection, Folders, Secrets, services } from '@charrette/runtime'
-import { Cause, Context, Effect, Exit, Fiber, Layer, Queue } from 'effect'
+import { connection, Folders, Secrets, SecretsUnavailable, services } from '@charrette/runtime'
+import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Queue } from 'effect'
 
 /*
  * The runtime, in Electron's utility process (ADR-003). It opens the profile,
  * reconciles what an earlier launch left, and serves the API to each window
  * over the port the main process hands it. Asked to shut down, it stops
- * every session, records it, and exits.
+ * every session, records it, and exits. Its secrets are kept sealed in the
+ * profile; the main process seals and opens them.
  */
 
 type Port = Parameters<typeof emitterPort>[0]
@@ -50,6 +52,34 @@ const clientIds = Object.fromEntries(
   ).flatMap(([product, id]) => (id === undefined || id === '' ? [] : [[product, id]])),
 )
 
+/* Secrets the main process is sealing or opening, by request. */
+const sealing = new Map<string, (answer: { readonly value?: string; readonly error?: string }) => void>()
+
+/** Asks the main process to seal a secret, or open one; it alone holds the key. */
+const askMain = (type: 'seal' | 'open', value: string) =>
+  Effect.callback<string, SecretsUnavailable>((resume) => {
+    const requestId = randomUUID()
+    sealing.set(requestId, (answer) =>
+      resume(
+        answer.value === undefined
+          ? Effect.fail(new SecretsUnavailable({ reason: answer.error ?? 'Charrette couldn’t open its keychain.' }))
+          : Effect.succeed(answer.value),
+      ),
+    )
+    parent.postMessage({ type, requestId, value })
+    return Effect.sync(() => void sealing.delete(requestId))
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: Duration.seconds(15),
+      orElse: () => Effect.fail(new SecretsUnavailable({ reason: 'Charrette’s keychain didn’t answer.' })),
+    }),
+  )
+
+const secrets = Secrets.sealed(join(profile, 'secrets'), {
+  seal: (value) => askMain('seal', value),
+  open: (sealed) => askMain('open', sealed),
+})
+
 const options = {
   database: join(profile, 'charrette.sqlite'),
   worktreeRoot: required('CHARRETTE_WORKTREES'),
@@ -75,7 +105,7 @@ const program = Effect.gen(function* () {
           secrets: Secrets.memory(),
         }
       : undefined
-  const context = yield* Layer.build(services(fake === undefined ? { ...options, clientIds } : { ...options, ...fake }))
+  const context = yield* Layer.build(services(fake === undefined ? { ...options, clientIds, secrets } : { ...options, ...fake }))
   isReady(context)
   const ports = yield* Queue.unbounded<Port>()
   accept = (port) => void Queue.offerUnsafe(ports, port)
@@ -106,8 +136,21 @@ const allowFolder = (requestId: string, path: string) =>
   )
 
 parent.on('message', (message) => {
-  const data = message.data as { readonly type?: string; readonly requestId?: string; readonly path?: string } | null
+  const data = message.data as {
+    readonly type?: string
+    readonly requestId?: string
+    readonly path?: string
+    readonly value?: string
+    readonly error?: string
+  } | null
   const port = message.ports[0]
+  if (data?.type === 'sealed' && data.requestId !== undefined) {
+    sealing.get(data.requestId)?.({
+      ...(data.value === undefined ? {} : { value: data.value }),
+      ...(data.error === undefined ? {} : { error: data.error }),
+    })
+    sealing.delete(data.requestId)
+  }
   if (data?.type === 'connect' && port !== undefined) accept(port)
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)
   // Interrupting the program closes its scope: every session is stopped and recorded first.

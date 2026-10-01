@@ -92,6 +92,7 @@ const CombinedStatus = Schema.Struct({
 const CommentAnswer = Schema.Struct({
   id: Schema.Number,
   user: Schema.NullOr(User),
+  author_association: Schema.optional(Schema.String),
   body: Schema.optional(Schema.NullOr(Schema.String)),
   updated_at: Schema.String,
   html_url: Schema.optional(Schema.NullOr(Schema.String)),
@@ -105,6 +106,7 @@ type CommentAnswer = typeof CommentAnswer.Type
 const ReviewAnswer = Schema.Struct({
   id: Schema.Number,
   user: Schema.NullOr(User),
+  author_association: Schema.optional(Schema.String),
   body: Schema.optional(Schema.NullOr(Schema.String)),
   state: Schema.String,
   submitted_at: Schema.optional(Schema.NullOr(Schema.String)),
@@ -128,6 +130,9 @@ const IssueAnswer = Schema.Struct({
   updated_at: Schema.String,
 })
 type IssueAnswer = typeof IssueAnswer.Type
+
+/** Whether GitHub says an author can write to the repository: its owner, a member of its organisation, or a collaborator. */
+const memberOf = (association: string | undefined) => association === 'OWNER' || association === 'MEMBER' || association === 'COLLABORATOR'
 
 const personOf = (user: User | null | undefined): Person =>
   user == null
@@ -219,6 +224,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const commentOf = (comment: CommentAnswer, review: boolean): Comment => ({
     id: String(comment.id),
     author: personOf(comment.user),
+    member: memberOf(comment.author_association),
     body: comment.body ?? '',
     at: comment.updated_at,
     url: comment.html_url ?? null,
@@ -337,17 +343,13 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     activity: (repository, number, cursor) =>
       Effect.gen(function* () {
         const since = cursor === null ? '' : `&since=${encodeURIComponent(cursor)}`
-        const conversation = yield* http.json(
+        // Asked by ETag: a quiet pull request answers 304, which GitHub doesn't count against the rate limit.
+        const conversation = yield* http.cached(
           Schema.Array(CommentAnswer),
-          'GET',
           `${repo(repository)}/issues/${number}/comments?per_page=100${since}`,
         )
-        const lines = yield* http.json(
-          Schema.Array(CommentAnswer),
-          'GET',
-          `${repo(repository)}/pulls/${number}/comments?per_page=100${since}`,
-        )
-        const reviews = yield* http.json(Schema.Array(ReviewAnswer), 'GET', `${repo(repository)}/pulls/${number}/reviews?per_page=100`)
+        const lines = yield* http.cached(Schema.Array(CommentAnswer), `${repo(repository)}/pulls/${number}/comments?per_page=100${since}`)
+        const reviews = yield* http.cached(Schema.Array(ReviewAnswer), `${repo(repository)}/pulls/${number}/reviews?per_page=100`)
         const comments = [...conversation.map((comment) => commentOf(comment, false)), ...lines.map((comment) => commentOf(comment, true))]
         const reviewed = reviews.flatMap((review): ReadonlyArray<Review> => {
           const verdict = verdictOf(review.state)
@@ -356,7 +358,15 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           // A "commented" review is its line comments, which come as comments; its own body only when it has one.
           if (verdict === 'commented' && (review.body ?? '') === '') return []
           return [
-            { id: String(review.id), author: personOf(review.user), verdict, body: review.body ?? '', at, url: review.html_url ?? null },
+            {
+              id: String(review.id),
+              author: personOf(review.user),
+              member: memberOf(review.author_association),
+              verdict,
+              body: review.body ?? '',
+              at,
+              url: review.html_url ?? null,
+            },
           ]
         })
         const all = [...comments.map((comment) => comment.at), ...reviewed.map((review) => review.at)]

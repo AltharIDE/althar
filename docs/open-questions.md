@@ -19,19 +19,38 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
   fight. A product question to try out before deciding. For now Charrette
   puts the key in the branch and the pull request's title and moves no
   status.
-- [ ] **What reaches the lead from a pull request.** Leaning, as in the
-  prototype: while the task is open, people's comments, change requests and
-  failed checks go to the lead, which answers on the pull request or changes
-  the code; bots' comments and Charrette's own don't. Open: whether the lead
-  should start for them when none is running, and how often a lead may be
-  woken before it needs the person.
+- [ ] **What reaches the lead from a pull request.** Settled on 1 October,
+  after review: failed checks, and what the person and the repository's own
+  people (those who can write to it) say. Anyone else, as on a public
+  repository, stays in the thread, marked, for the person to pass on; bots'
+  comments and Charrette's own replies (known by their receipts) don't
+  reach it. Still open: whether the lead should start for them when none is
+  running, how often a lead may be woken before it needs the person, and the
+  write-access check on GitLab, Bitbucket and Jira, whose comments don't
+  carry it as GitHub's do.
   *Prototype:* task 431, "Listening".
 - [x] **How agents reach the hosts.** Settled on 1 October 2026: only through
   Charrette. Charrette pushes and opens pull requests as steps of the plan;
   agents read and reply through Charrette's tools; the rules refuse `gh` and
   `glab` commands that change a host, and agents run without the person's
-  sign-ins for them.
+  sign-ins for them. After review, the environment is the boundary: git's
+  credential helpers reset, no SSH agent, Charrette's tokens sealed by the
+  app, and the rules refuse reading credentials.
   [ADR-011](decisions/011-own-connectors-for-hosts-and-trackers.md).
+- [ ] **A lead that needs the person's git sign-in.** A project with private
+  dependencies (a git URL in its lockfile, a private registry reached over
+  SSH) can't install them while agents run without the person's credential
+  helper and SSH agent. Leaning: a project setting that passes them to the
+  lead, never to readers, off unless turned on, and said where the plan is.
+  Until then such a project's setup command runs outside the agent.
+- [ ] **A sandbox for agents' shells.** The environment keeps the person's
+  ambient sign-ins from agents, and the rules refuse the keychain and git's
+  helpers, but a shell can still read what the person keeps in plain files
+  under their home folder (`~/.git-credentials`, an unencrypted SSH key, a
+  cloud CLI's config). Only running agents in a sandbox closes that:
+  macOS's sandbox profiles, a container, or a separate user. Also: agents'
+  own API keys (03, "API keys and OAuth") should be sealed the way code hosts' tokens
+  are, not kept where `security` reads them.
 
 ## The coordinator loop, 30 September
 

@@ -33,7 +33,7 @@ One pull request each:
 1. **GitHub and Linear, and GitHub's issues.**
    - The connectors package: both models, the GitHub and Linear adapters,
      the fakes, and the contract suites.
-   - Connections: device flow, PKCE and pasted tokens, kept in the keychain.
+   - Connections: device flow, PKCE and pasted tokens, sealed by the app.
    - The Draft PR step, and listening.
    - Agents' tools, and the rules for `gh` and `glab`.
    - Issues unfurled and tasks from issues.
