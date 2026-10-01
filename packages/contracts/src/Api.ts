@@ -526,6 +526,8 @@ export const CoordinatorSnapshot = Schema.Struct({
   ),
   items: Schema.Array(ThreadItem),
   earlier: Schema.Boolean,
+  /** Where the project's repository is hosted, when its remote says, and whether Charrette is connected to it there. */
+  host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
 })
 export type CoordinatorSnapshot = typeof CoordinatorSnapshot.Type
 

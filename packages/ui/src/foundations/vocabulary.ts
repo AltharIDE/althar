@@ -107,6 +107,8 @@ export enum StuckAnswer {
   Told = 'told',
   /** Handed the step to another agent. */
   Retried = 'retried',
+  /** Ran the step again as it was: one Charrette does itself, such as opening the pull request. */
+  Again = 'again',
   Abandoned = 'abandoned',
 }
 

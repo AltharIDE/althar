@@ -18,7 +18,10 @@ import {
 import { Context, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
+import { HOSTED, parseRemote } from '@charrette/connectors'
+
 import { Agents } from './Config'
+import { Connections } from './Connections'
 import { Coordinator } from './Coordinator'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
@@ -278,7 +281,7 @@ export interface ThreadChange {
   readonly threadId: string | null
 }
 
-type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator
+type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Connections
 
 export class Queries extends Context.Service<
   Queries,
@@ -652,6 +655,34 @@ export class Queries extends Context.Service<
           } satisfies ThreadSnapshot
         })
 
+      /**
+       * Where a project's repository is hosted, from its remotes: on a
+       * connected instance, or on a hosted service Charrette knows; null when
+       * its remotes name neither, as a local one doesn't.
+       */
+      const hostOf = (projectId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const connections = yield* Connections
+          const [binding] = yield* sql<{ remotes: string }>`
+            SELECT remote_fingerprints AS remotes FROM repository_bindings WHERE project_id = ${projectId} AND detached_at IS NULL ORDER BY created_at LIMIT 1`
+          const listed = binding === undefined ? [] : parse(binding.remotes)
+          const remotes = Array.isArray(listed) ? listed.filter((remote): remote is string => typeof remote === 'string') : []
+          const connected = yield* connections.hostOf(remotes)
+          if (connected !== null) {
+            const { info } = yield* connections.adapters(connected.connectionId)
+            return { product: info.product, name: info.name, webUrl: info.webUrl, connected: true }
+          }
+          for (const remote of remotes) {
+            const ref = parseRemote(remote)
+            const product = ref === null ? undefined : HOSTED.get(ref.host)
+            const info = product === undefined ? undefined : connections.products.find((candidate) => candidate.product === product)
+            if (info !== undefined && info.host && ref !== null)
+              return { product: info.product, name: info.name, webUrl: `https://${ref.host}`, connected: false }
+          }
+          return null
+        }).pipe(Effect.orElseSucceed(() => null))
+
       /** The project's coordinator thread: the agent on it, the one it would start on, and a page of its items. */
       const coordinator = (projectId: string, page: { readonly before?: number; readonly limit?: number } = {}) =>
         Effect.gen(function* () {
@@ -670,6 +701,7 @@ export class Queries extends Context.Service<
             suggested: yield* coordinators.suggested(projectId),
             items,
             earlier,
+            host: yield* hostOf(projectId),
           } satisfies CoordinatorSnapshot
         })
 

@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process'
+
 import { makeFakeService } from '@charrette/connectors/testing'
 import type { ProjectId } from '@charrette/domain'
 import { assert, describe, it } from '@effect/vitest'
@@ -224,5 +226,34 @@ describe('the issue tool', () => {
       const changes = yield* Changes
       assert.isNull(yield* changes.endFor('proj_00000000000000000000000000000000'))
     }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear }) })))
+  })
+})
+
+describe('a project’s host', () => {
+  it.live('is where its remote says, connected or not, and nothing for a local one', () => {
+    const github = makeFakeService()
+    return Effect.gen(function* () {
+      const projects = yield* Projects
+      const queries = yield* Queries
+      const hostOf = (path: string) =>
+        Effect.gen(function* () {
+          const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+          return (yield* queries.coordinator(project.projectId)).host
+        })
+      // On github.com, not yet connected: the project says so, and which service it is.
+      const onGitHub = hosted().working
+      execFileSync('git', ['remote', 'set-url', 'origin', 'git@github.com:meridian/api.git'], { cwd: onGitHub })
+      assert.deepStrictEqual(yield* hostOf(onGitHub), { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: false })
+      // On an instance the person connected.
+      yield* connect('github', HOST)
+      assert.deepStrictEqual(yield* hostOf(hosted().working), { product: 'github', name: 'GitHub', webUrl: HOST, connected: true })
+      // A repository with no remote, or one on a host no one knows, is on nothing Charrette reaches.
+      const local = hosted().working
+      execFileSync('git', ['remote', 'remove', 'origin'], { cwd: local })
+      assert.isNull(yield* hostOf(local))
+      const elsewhere = hosted().working
+      execFileSync('git', ['remote', 'set-url', 'origin', 'https://git.example.com/a/b.git'], { cwd: elsewhere })
+      assert.isNull(yield* hostOf(elsewhere))
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
   })
 })
