@@ -86,6 +86,12 @@
   font-size: 12px;
 }
 
+.side {
+  display: grid;
+  align-content: start;
+  gap: 36px;
+}
+
 .agents {
   display: grid;
   align-content: start;

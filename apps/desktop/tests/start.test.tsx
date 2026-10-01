@@ -8,11 +8,12 @@ import { RuntimeState } from '@charrette/ui'
 import { useServices } from '../src/renderer/data/services'
 import { runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { useStart } from '../src/renderer/features/start/useStart'
+import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { agents, changed, fakeClient, fakeHost, project, streamed } from './fixtures'
 import { withServices } from './render'
 
 function Start({ onProject }: { onProject: (id: string) => void }) {
-  return <StartView model={useStart()} onProject={onProject} />
+  return <StartView model={useStart()} connections={useConnections()} onProject={onProject} />
 }
 
 describe('the start', () => {
@@ -29,14 +30,14 @@ describe('the start', () => {
 
     // A change to a project reads the list again; a change to anything else doesn't.
     // It watches from the list's cursor, and asks each agent again, since this is where sign-in shows.
-    await waitFor(() => expect(watching).toEqual([3]))
+    await waitFor(() => expect(watching).toEqual(expect.arrayContaining([3, 2])))
     expect(client.status).toHaveBeenCalledWith({ recheck: true })
     emit(changed('task', 't1'))
     emit(changed('thread_item', 'i1'))
     emit(streamed('i1', 'Hi'))
     await waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(2))
-    // A later read doesn't start the watch again.
-    expect(watching).toEqual([3])
+    // A later read doesn't start the watch again: one for the projects, one for the connections.
+    expect(watching).toHaveLength(2)
   })
 
   it('opens a folder as a project: from the button, from ⌘N, and dropped on the window', async () => {

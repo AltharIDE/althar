@@ -6,11 +6,12 @@ import { ApiError, type CoordinatorSnapshot } from '@charrette/contracts'
 
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
+import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { agents, card, changed, coordinatorSnapshot, fakeClient, items, status, streamed } from './fixtures'
 import { withServices } from './render'
 
 function Project({ onBack = vi.fn(), onTask = vi.fn() }: { onBack?: () => void; onTask?: (threadId: string) => void }) {
-  return <ProjectView model={useProject('p1')} onBack={onBack} onTask={onTask} />
+  return <ProjectView model={useProject('p1')} connections={useConnections()} onBack={onBack} onTask={onTask} />
 }
 
 const session = { id: 'sc', agentId: 'claude-code', agentName: 'Claude Code', state: 'active', model: null, models: [], turnRunning: false }
@@ -48,8 +49,8 @@ describe('the Talk room', () => {
     expect(onTask).toHaveBeenCalledWith('th2')
     await userEvent.click(screen.getByRole('button', { name: /Projects/ }))
     expect(onBack).toHaveBeenCalled()
-    // It watches from the earlier of its two reads.
-    await waitFor(() => expect(watching).toEqual([3]))
+    // It watches from the earlier of its two reads; the connections, from theirs.
+    await waitFor(() => expect(watching).toEqual(expect.arrayContaining([3, 2])))
   })
 
   it('draws each task as it stands: ready with its summary, waiting on you, stopped, held, or started by hand', async () => {
@@ -84,17 +85,25 @@ describe('the Talk room', () => {
     await userEvent.click(await screen.findByRole('combobox', { name: 'Review' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Claude Code' }))
     await waitFor(() =>
-      expect(client.changePlan).toHaveBeenCalledWith('pln1', [
-        { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
-        { key: 'review', agentId: 'claude-code', model: null, skipped: false },
-      ]),
+      expect(client.changePlan).toHaveBeenCalledWith(
+        'pln1',
+        [
+          { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+          { key: 'review', agentId: 'claude-code', model: null, skipped: false },
+        ],
+        null,
+      ),
     )
     await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
     await waitFor(() =>
-      expect(client.changePlan).toHaveBeenLastCalledWith('pln1', [
-        { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
-        { key: 'review', agentId: 'claude-code', model: null, skipped: true },
-      ]),
+      expect(client.changePlan).toHaveBeenLastCalledWith(
+        'pln1',
+        [
+          { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+          { key: 'review', agentId: 'claude-code', model: null, skipped: true },
+        ],
+        null,
+      ),
     )
     await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
     expect(client.holdPlan).toHaveBeenCalledWith('pln1')
@@ -233,6 +242,8 @@ describe('a task the person plans', () => {
           { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
           { key: 'review', agentId: 'codex', model: null, skipped: false },
         ],
+        // The repository's host isn't connected here: the task ends on its branch.
+        end: null,
       }),
     )
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'New task' })).toBeNull())
@@ -256,6 +267,7 @@ describe('a task the person plans', () => {
       projectId: 'p1',
       title: 'Bump the version',
       steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+      end: null,
     })
     // It stays open, to try again; Close puts it away, and Dismiss the message.
     await userEvent.click(within(panel).getByRole('button', { name: 'Close the panel' }))

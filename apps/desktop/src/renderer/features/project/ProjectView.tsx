@@ -1,12 +1,16 @@
 import { useState } from 'react'
 
 import {
+  ActionButton,
   BackCrumb,
   Button,
   Composer,
   Heading,
   LinkButton,
   Select,
+  SidePanel,
+  SidePanelBody,
+  SidePanelTitle,
   Spinner,
   TaskFace,
   Thread,
@@ -18,6 +22,8 @@ import {
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
+import { ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
+import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
 import { NewTask } from './NewTask'
 import s from './Project.module.css'
@@ -45,12 +51,25 @@ export const text = {
   showEarlier: 'Show',
   loadingEarlier: 'Showing…',
   dismiss: 'Dismiss',
+  notConnected: (host: string) => `Charrette isn't connected to ${host}, so tasks here end on their branch.`,
+  connect: (host: string) => `Connect ${host}`,
 }
 
-export function ProjectView({ model, onBack, onTask }: { model: ProjectModel; onBack: () => void; onTask: (threadId: string) => void }) {
+export function ProjectView({
+  model,
+  connections,
+  onBack,
+  onTask,
+}: {
+  model: ProjectModel
+  connections: ConnectionsModel
+  onBack: () => void
+  onTask: (threadId: string) => void
+}) {
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState<string | null>(null)
-  const [planning, setPlanning] = useState(false)
+  // What opens beside the conversation: a task you plan, or the connections.
+  const [panel, setPanel] = useState<'task' | 'connections' | null>(null)
   // A running turn says how long it has worked so far.
   const now = useNow(model.coordinator?.session?.turnRunning ?? false)
   const coordinator = model.coordinator
@@ -69,7 +88,7 @@ export function ProjectView({ model, onBack, onTask }: { model: ProjectModel; on
     agentName,
     onStart: (planId) => void model.startPlan(planId),
     onHold: (planId) => void model.holdPlan(planId),
-    onChange: (planId, steps) => void model.changePlan(planId, steps),
+    onChange: (planId, steps, end) => void model.changePlan(planId, steps, end),
     onOpen: onTask,
   }
 
@@ -124,8 +143,14 @@ export function ProjectView({ model, onBack, onTask }: { model: ProjectModel; on
               <Heading level={1}>{name}</Heading>
               {model.project?.repository && <p className={s.repository}>{model.project.repository}</p>}
             </div>
-            <Button onClick={() => setPlanning(true)}>{text.newTask}</Button>
+            <Button onClick={() => setPanel('task')}>{text.newTask}</Button>
           </div>
+          {coordinator?.host != null && !coordinator.host.connected && (
+            <p className={s.host}>
+              {text.notConnected(coordinator.host.name)}{' '}
+              <ActionButton onClick={() => setPanel('connections')}>{text.connect(coordinator.host.name)}</ActionButton>
+            </p>
+          )}
         </ThreadMeasure>
       </div>
       {coordinator === null ? (
@@ -135,17 +160,29 @@ export function ProjectView({ model, onBack, onTask }: { model: ProjectModel; on
           className={s.face}
           composer={composer}
           panel={
-            planning ? (
+            panel === 'task' ? (
               <NewTask
                 agents={model.agents}
                 starting={model.starting}
-                onClose={() => setPlanning(false)}
+                connected={coordinator.host?.connected === true}
+                listIssues={model.listIssues}
+                onClose={() => setPanel(null)}
                 onStart={(task) =>
                   void model.startTask(task).then((started) => {
-                    if (started !== null) setPlanning(false)
+                    if (started !== null) setPanel(null)
                   })
                 }
               />
+            ) : panel === 'connections' ? (
+              <SidePanel
+                label={connectionsText.label}
+                head={<SidePanelTitle>{connectionsText.label}</SidePanelTitle>}
+                onClose={() => setPanel(null)}
+              >
+                <SidePanelBody>
+                  <ConnectionsView model={connections} />
+                </SidePanelBody>
+              </SidePanel>
             ) : undefined
           }
         >

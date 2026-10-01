@@ -1,6 +1,7 @@
 import { createRoute, useNavigate } from '@tanstack/react-router'
 
 import { rootRoute } from '../../root'
+import { useConnections } from '../connections/useConnections'
 import { ProjectView } from './ProjectView'
 import { useProject } from './useProject'
 
@@ -10,6 +11,7 @@ function Project() {
   return (
     <ProjectView
       model={useProject(projectId)}
+      connections={useConnections()}
       onBack={() => void navigate({ to: '/' })}
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
     />

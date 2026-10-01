@@ -1,4 +1,4 @@
-import type { ThreadItem } from '@charrette/contracts'
+import type { ThreadItem, Unfurl } from '@charrette/contracts'
 import { Delivery, PlanState, ToolKind, ToolState } from '@charrette/ui'
 
 import { took } from './time'
@@ -39,9 +39,18 @@ export type Part =
 
 export type StepResult = Extract<ThreadItem, { kind: 'step_result' }>['content']
 export type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
+export type ArrivalContent = Extract<ThreadItem, { kind: 'arrival' }>['content']
 
 export type Block =
-  | { readonly kind: 'you'; readonly id: string; readonly text: string; readonly at: string; readonly delivery: Delivery }
+  | {
+      readonly kind: 'you'
+      readonly id: string
+      readonly text: string
+      readonly at: string
+      readonly delivery: Delivery
+      /** The links in it Charrette could unfurl: issues and pull requests. */
+      readonly links: ReadonlyArray<Unfurl>
+    }
   | {
       readonly kind: 'turn'
       readonly id: string
@@ -63,6 +72,8 @@ export type Block =
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
   | { readonly kind: 'step'; readonly id: string; readonly at: string; readonly result: StepResult }
   | { readonly kind: 'card'; readonly id: string; readonly card: TaskCardContent }
+  /** Something heard from outside: a comment on the task's pull request, its checks, its merge. */
+  | { readonly kind: 'arrival'; readonly id: string; readonly at: string; readonly arrival: ArrivalContent }
 
 /** ACP's tool kinds, as the kit's. */
 export const toolKindOf = (kind: string): ToolKind => {
@@ -286,9 +297,12 @@ export const blocksOf = (
       case 'user_message': {
         const delivery =
           item.input?.state === 'queued' ? (item.input.interrupting ? Delivery.Interrupting : Delivery.Queued) : Delivery.Delivered
-        blocks.push({ kind: 'you', id: item.id, text: item.content.text, at: ago(item.createdAt), delivery })
+        blocks.push({ kind: 'you', id: item.id, text: item.content.text, at: ago(item.createdAt), delivery, links: item.content.links })
         continue
       }
+      case 'arrival':
+        blocks.push({ kind: 'arrival', id: item.id, at: ago(item.createdAt), arrival: item.content })
+        continue
       case 'step_result': {
         // The step ended with this: the turn that did the work ran until now.
         const last = blocks.at(-1)

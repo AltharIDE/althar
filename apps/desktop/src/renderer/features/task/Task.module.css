@@ -40,3 +40,26 @@
   color: var(--danger);
   font-size: 13px;
 }
+
+/* The issue a task came from, heading its thread. */
+.issue {
+  display: flex;
+}
+.quiet {
+  margin: 0;
+  font-size: 13px;
+  color: var(--t-3);
+}
+.changeActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+.external {
+  font-size: 12.5px;
+  color: var(--t-1);
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 2px;
+}

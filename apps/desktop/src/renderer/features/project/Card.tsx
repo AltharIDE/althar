@@ -1,9 +1,10 @@
 import { useState } from 'react'
 
-import type { AgentStatus, PlanStep } from '@charrette/contracts'
-import { type LaunchStep, Select, TaskCard, TaskLaunch, TaskStatus } from '@charrette/ui'
+import type { AgentStatus, PlanStep, TaskEnd as End } from '@charrette/contracts'
+import { type IssueRefProps, type LaunchStep, Select, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@charrette/ui'
 
 import { modelInfo } from '../../shared/agents'
+import { productBrand } from '../../shared/products'
 import { ago } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
 
@@ -27,7 +28,12 @@ export const text = {
     [TaskStatus.Paused]: 'Paused',
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
-  now: { implement: 'Implementing', review: 'Reviewing', settle: 'Settling the review' } as Readonly<Record<string, string>>,
+  now: {
+    implement: 'Implementing',
+    review: 'Reviewing',
+    settle: 'Settling the review',
+    publish: 'Opening the pull request',
+  } as Readonly<Record<string, string>>,
   task: (task: string, started: string) => (started === '' ? `Task ${task}` : `Task ${task} · ${started}`),
 }
 
@@ -47,11 +53,19 @@ export interface CardActions {
   readonly agentName: (id: string | null) => string
   readonly onStart: (planId: string) => void
   readonly onHold: (planId: string) => void
-  readonly onChange: (planId: string, steps: ReadonlyArray<PlanStep>) => void
+  readonly onChange: (planId: string, steps: ReadonlyArray<PlanStep>, end?: End | null) => void
   readonly onOpen: (threadId: string) => void
 }
 
 type Plan = NonNullable<TaskCardContent['plan']>
+
+/** The kit's ending, from the plan's. */
+const ENDS: Readonly<Record<End, TaskEnd>> = { draft: TaskEnd.DraftPr, ready: TaskEnd.ReadyPr, none: TaskEnd.PushOnly }
+const endOf = (end: TaskEnd): End => (end === TaskEnd.DraftPr ? 'draft' : end === TaskEnd.ReadyPr ? 'ready' : 'none')
+
+/** The issue a task came from, as the kit marks it. */
+const fromOf = (card: TaskCardContent): IssueRefProps | undefined =>
+  card.issue === null ? undefined : { mark: productBrand(card.issue.product), id: card.issue.key, linear: card.issue.product === 'linear' }
 
 /** The plan's steps as the kit shows them; the agent's id rides on the model's runtime. */
 const launchSteps = (plan: Plan, agentName: (id: string) => string): ReadonlyArray<LaunchStep> =>
@@ -66,17 +80,24 @@ const launchSteps = (plan: Plan, agentName: (id: string) => string): ReadonlyArr
 
 function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; actions: CardActions }) {
   // What the person changed shows at once; the runtime's copy replaces it when it comes back.
-  const [shown, setShown] = useState<{ readonly from: Plan; readonly steps: ReadonlyArray<PlanStep> }>({ from: plan, steps: plan.steps })
+  const [shown, setShown] = useState<{ readonly from: Plan; readonly steps: ReadonlyArray<PlanStep>; readonly end: End | null }>({
+    from: plan,
+    steps: plan.steps,
+    end: plan.end,
+  })
   const steps = shown.from === plan ? shown.steps : plan.steps
-  const change = (next: ReadonlyArray<PlanStep>) => {
-    setShown({ from: plan, steps: next })
-    actions.onChange(plan.id, next)
+  const end = shown.from === plan ? shown.end : plan.end
+  const change = (next: ReadonlyArray<PlanStep>, nextEnd: End | null = end) => {
+    setShown({ from: plan, steps: next, end: nextEnd })
+    actions.onChange(plan.id, next, nextEnd)
   }
+  const from = fromOf(card)
   const options = actions.agents.map((agent) => ({ value: agent.id, label: agent.name }))
   return (
     <TaskLaunch
       task={card.slug}
       title={card.title}
+      {...(from === undefined ? {} : { from })}
       project={actions.project}
       steps={launchSteps({ ...plan, steps }, (id) => actions.agentName(id))}
       onStepsChange={(next) =>
@@ -97,7 +118,8 @@ function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; 
       onHeldChange={(held) => {
         if (held) actions.onHold(plan.id)
       }}
-      hideEnd
+      // Where the repository's host isn't connected, the task ends on its branch, and there is no ending to pick.
+      {...(end === null ? { hideEnd: true } : { end: ENDS[end], onEndChange: (next: TaskEnd) => change(steps, endOf(next)) })}
       onStart={() => actions.onStart(plan.id)}
     />
   )
@@ -111,6 +133,7 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
   const at = card.step === null ? 0 : Math.max(0, steps.indexOf(text.label[card.step === 'implement' ? 'implement' : 'review']))
   const status = STATUS[card.phase]
   const now = status === TaskStatus.Done ? card.summary?.split('\n')[0] : card.step === null ? undefined : text.now[card.step]
+  const from = fromOf(card)
   return (
     <TaskCard
       task={card.slug}
@@ -122,6 +145,8 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
       started={card.startedAt === null ? '' : ago(card.startedAt)}
       lead={modelInfo({ id: card.lead ?? 'agent', name: actions.agentName(card.lead) }, null)}
       {...(card.branch === null ? {} : { branch: card.branch })}
+      {...(from === undefined ? {} : { from })}
+      {...(card.change === null ? {} : { pr: `${card.change.short} ${card.change.prefix}${card.change.number}` })}
       onOpen={() => actions.onOpen(card.threadId)}
       text={{ status: text.status, task: text.task }}
     />
