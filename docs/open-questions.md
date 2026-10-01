@@ -9,6 +9,30 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@charrette/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `charrette-designs` repository (`prototypes/shell`).
 
+## Code hosts and trackers, 1 October
+
+- [ ] **Who moves an issue's status.** When a task starts, opens its pull
+  request, or the pull request merges, the issue it came from could move
+  (started, in review, done). Charrette could move it; the tracker's own Git
+  integration may already move it, by the key in the branch (Linear does,
+  Jira's apps link it); or the person does. Two of them moving the same field
+  fight. A product question to try out before deciding. For now Charrette
+  puts the key in the branch and the pull request's title and moves no
+  status.
+- [ ] **What reaches the lead from a pull request.** Leaning, as in the
+  prototype: while the task is open, people's comments, change requests and
+  failed checks go to the lead, which answers on the pull request or changes
+  the code; bots' comments and Charrette's own don't. Open: whether the lead
+  should start for them when none is running, and how often a lead may be
+  woken before it needs the person.
+  *Prototype:* task 431, "Listening".
+- [x] **How agents reach the hosts.** Settled on 1 October 2026: only through
+  Charrette. Charrette pushes and opens pull requests as steps of the plan;
+  agents read and reply through Charrette's tools; the rules refuse `gh` and
+  `glab` commands that change a host, and agents run without the person's
+  sign-ins for them.
+  [ADR-011](decisions/011-own-connectors-for-hosts-and-trackers.md).
+
 ## The coordinator loop, 30 September
 
 - [x] **How read-only the coordinator and reviewers are.** Settled on 30
@@ -337,9 +361,11 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
   currently covers pushing to main too. Should items the rules keep for you
   be left out of Allow all?
   *Prototype:* Permissions → "Many at once".
-- [ ] **Pasted links.** Linear issues are shown inline when pasted. Which
-  other sources should be (GitHub issues and PRs, Sentry, Notion), and should
-  that go through MCP servers or built-in integrations?
+- [x] **Pasted links.** Settled on 1 October 2026: issues and pull requests
+  from the connected code hosts and trackers unfurl, through Charrette's own
+  connectors, not MCP servers
+  ([ADR-011](decisions/011-own-connectors-for-hosts-and-trackers.md)). Other
+  sources, such as Sentry and Notion, wait for the MCP broker.
 
 ## Steps, agents and the graph
 

@@ -144,8 +144,10 @@ The local MVP therefore uses:
 
 - explicit refresh;
 - refresh on project open;
-- incremental cursor-based pull while the application is active;
-- low-frequency bounded polling only when the user enables it;
+- incremental cursor-based pull while the application is running, of what
+  something listens to (a task's pull requests until it settles), with each
+  service's cheapest form of "anything new?" (GitHub's conditional requests,
+  an updated-since cursor elsewhere);
 - provider-native local callbacks solely for documented auth flows.
 
 It does not silently create a public tunnel.
@@ -161,52 +163,99 @@ A cloud deployment adds a public webhook ingress that:
 Webhook availability does not make the external system Charrette's command
 authority.
 
-## Linear and Jira
+## Code hosts and trackers
 
-Both should be first-class `DomainConnector` implementations, not generic MCP
-wrappers, if Charrette promises project/task synchronization.
+Code hosts and trackers are `DomainConnector`s of Charrette's own, on each
+service's API, never MCP wrappers
+([ADR-011](../decisions/011-own-connectors-for-hosts-and-trackers.md)). There
+are two models, a code host and a tracker. Each has one adapter per *product*,
+not per brand: Bitbucket Cloud and Bitbucket Data Center are different APIs,
+and so are Jira Cloud and Jira Data Center. Each adapter declares its
+capabilities; screens and agents' tools offer only what it has, in the
+service's own words ("merge request !12" on GitLab, "pull request #12"
+elsewhere). Each model has a fake, which tests and the desktop's end-to-end
+suite use, and a contract suite that runs against the fake in CI and against
+real accounts on demand, as the agents' does.
 
-### Linear
+Both models were laid against all six services before any adapter was
+written. A model whose terms only one service has is a sign it is that
+service's model.
 
-Use Linear OAuth for user-installed connections and signed webhooks when cloud
-ingress exists. The connector must handle workspace/team selection, actor
-mapping, pagination/cursors, webhook retries, and documented rate limits.
+### Code hosts
 
-### Jira
+| | GitHub (and Enterprise Server) | GitLab (and self-managed) | Bitbucket Cloud | Bitbucket Data Center | The model |
+|---|---|---|---|---|---|
+| Repository | `owner/name` | Nested groups, `a/b/c/project`, and a numeric id | `workspace/repo_slug` | `PROJECT/repo_slug` | A path of segments, plus the host's own id |
+| The change | Pull request #12 | Merge request !12 (`iid`, per project) | Pull request #12 | Pull request #12 | A number; the adapter gives the words |
+| Draft | Every repository. Marked ready over GraphQL only | `Draft:` in the title | A `draft` flag | 8.18 and later | Capability `drafts` |
+| State | open, closed, merged | opened, closed, merged, locked | open, merged, declined | open, merged, declined | open, merged, closed |
+| Verdict | Approved, changes requested, commented | Approved, requested changes | Approved, request changes | Approved, needs work | approved, changes requested, commented |
+| Threads | Review threads on lines, resolvable; conversation comments aren't | Discussions, resolvable | Top-level comments resolvable | Threads, resolvable; blocker comments | A thread: optional place in the diff, resolvable, resolved, comments |
+| Checks | Check runs and commit statuses; Actions logs | The head pipeline's jobs, with logs | Build statuses; Pipelines step logs | Build statuses; Code Insights reports | A check: name, state, link; logs as a capability |
+| Listening, polling | ETags (a "not modified" reply is free) | `updated_after` | `updated_on` | The pull request's activities | A cursor per thing listened to |
 
-Jira Cloud adds site, project, issue-type, workflow, field-schema, permission,
-and installation variability. The adapter must treat transition availability
-and custom field schemas as runtime capabilities, not assumptions. Webhook
-expiry/renewal, duplicates, retry identifiers, and Atlassian rate-limit
-responses belong in the connector contract.
+- **Pushing is git,** with the connection's token, never the person's
+  credential helper. The record keeps the commit pushed.
+- **Merging stays with the person.** The model reads `merged`; it has no
+  merge.
+- **A repository's host** is found from its remote URL, matched against
+  known hosts and the instances the person has connected.
 
-### Connector scope
+### Trackers
 
-The architecture does not require simultaneous Linear and Jira support. One
-complete connector—read, map, mutate, receipt, and reconciliation—is enough to
-establish the contract. The selected tracker should match the serious user
-cohort. A second connector is the test of the shared abstraction, not the reason
-to invent speculative commonality.
+| | Linear | Jira (Cloud, Data Center) | Trello | GitHub and GitLab issues | The model |
+|---|---|---|---|---|---|
+| Where issues live | Team (key `MER`), project, cycle | Project (key), board, sprint, epic | Board, list | Repository or project | A container, by the tracker's name for it |
+| Key | `MER-231` | `PROJ-123` | Card short link | `#123` | The tracker's key |
+| Text | Markdown | ADF (Cloud), wiki markup (Data Center) | Markdown | Markdown | Markdown; the Jira adapters convert |
+| Status | The team's states, typed: triage, backlog, unstarted, started, completed, canceled | Statuses in To Do, In Progress, Done; changed by a transition, which may need fields | The card's list | Open or closed with a reason; GitLab's statuses in five categories | The tracker's name, and a category: triage, backlog, to do, started, done, cancelled |
+| Linking a PR | An attachment; Linear's Git integration links branches named with the key | A remote link; the development panel needs Jira's own Git apps, by key | An attachment | A reference | A link, and the key in the branch and the PR's title |
 
-## Git hosting
+- **Status by category.** Charrette asks for a category, and the adapter
+  picks the tracker's state. A Jira transition that needs fields becomes a
+  call for the person. Trello's lists are mapped by the person, once per
+  board. Who moves an issue's status, and when, is an open question.
+- **The key goes in the branch and the PR's title,** so the trackers' own
+  Git integrations link them. Field ownership (above) decides whether
+  Charrette also moves a status those integrations move.
 
-Git itself remains the authority for objects and refs. A GitHub/GitLab
-connector owns hosting concepts:
+### Signing in
 
-- repository installation and identity;
-- pull/merge requests;
-- checks and review status;
-- remote branch publication;
-- webhook/cursor reconciliation;
-- external actor mapping.
+A desktop app can't keep a secret, so each service's way in depends on
+whether it gives a token without one:
 
-Local Git credentials are not automatically valid for hosting APIs. A
-repository binding and an integration connection remain separate even when
-they refer to the same remote.
+| Service | Hosted | Self-hosted |
+|---|---|---|
+| GitHub | Charrette's GitHub App, by device flow; no secret, refresh included | A pasted token (the app is registered per instance) |
+| GitLab | Device flow | Device flow if the instance has Charrette registered; else a pasted token |
+| Bitbucket | A pasted scoped API token | A pasted HTTP access token |
+| Linear | OAuth with PKCE, back to a loopback address | n/a |
+| Jira | A pasted scoped API token (Atlassian's OAuth needs a secret) | A pasted personal access token |
+| Trello | Charrette's Power-Up key, and a user token from Trello's authorize page | n/a |
 
-A multi-repository `ChangeSet` may link several PRs, but it never claims their
-merge is atomic. Publication and merge policy is evaluated per repository and
-then projected into a grouped outcome.
+A pasted token is the fallback everywhere, including for an organisation
+that won't install the GitHub App. A connection belongs to the person on
+this device; the token is in the system keychain, and the store keeps only a
+reference to it.
+
+### Agents and the hosts
+
+Agents reach code hosts and trackers only through Charrette:
+
+- **Charrette's own steps** push the task's branch, open its pull request and
+  mark it ready.
+- **Charrette's tools** let agents read a pull request (comments, reviews,
+  checks with their logs) and an issue, and reply on a pull request. They
+  reach only the task's own repository, and every call is recorded.
+- **The rules refuse** `gh` and `glab` commands that change a host, with a
+  reason that names Charrette's tool, and agents run without the person's
+  `gh` and `glab` sign-ins.
+- **What slips through is adopted:** opening a pull request first looks for
+  one already open on the task's branch.
+
+A change set may link several pull requests, one per repository, but it never
+claims their merge is atomic. Publication and merge policy is evaluated per
+repository and then projected into a grouped outcome.
 
 ## MCP architecture
 
