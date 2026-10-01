@@ -209,6 +209,8 @@ export const ChangeSummary = Schema.Struct({
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),
   checks: Schema.NullOr(ChecksSummary),
+  /** The commit at its head, as last seen: what accepting it merges, and nothing newer. */
+  head: Schema.NullOr(Schema.String),
   /** Charrette asks its host for news while the task is open. */
   listening: Schema.Boolean,
 })
@@ -381,6 +383,44 @@ export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting
 export type TaskPhase = typeof TaskPhase.Type
 
 /**
+ * A task as its card shows it, in the coordinator's thread and on the board:
+ * where it stands, its plan, the issue it came from, its pull request, the
+ * step it is on, what its lead last reported, who leads it.
+ */
+export const TaskCard = Schema.Struct({
+  taskId: Schema.String,
+  threadId: Schema.String,
+  title: Schema.String,
+  slug: Schema.String,
+  phase: TaskPhase,
+  plan: Schema.NullOr(
+    Schema.Struct({
+      id: Schema.String,
+      steps: Schema.Array(PlanStep),
+      /** When it starts on its own; null once held or started. */
+      startsAt: Schema.NullOr(Schema.String),
+      /** Why the coordinator chose the lead. */
+      reason: Schema.NullOr(Schema.String),
+      /** What happens when the work is done; null where nothing reaches the repository's host. */
+      end: Schema.NullOr(TaskEnd),
+    }),
+  ),
+  /** The issue it came from. */
+  issue: Schema.NullOr(Schema.Struct({ product: Product, key: Schema.String, title: Schema.String, url: Schema.String })),
+  /** Its pull request, once opened. */
+  change: Schema.NullOr(ChangeSummary),
+  /** The step it is on, by key, while it runs. */
+  step: Schema.NullOr(Schema.String),
+  /** The latest summary the lead reported. */
+  summary: Schema.NullOr(Schema.String),
+  /** The agent that leads it, or last did: the plan's lead until one starts. */
+  lead: Schema.NullOr(Schema.String),
+  branch: Schema.NullOr(Schema.String),
+  startedAt: Schema.NullOr(Schema.String),
+})
+export type TaskCard = typeof TaskCard.Type
+
+/**
  * A task in the coordinator's thread: its plan before it starts, with the
  * time it starts on its own, then its card as it runs. Charrette posts it and
  * keeps it current; no agent writes it.
@@ -388,37 +428,7 @@ export type TaskPhase = typeof TaskPhase.Type
 export const TaskItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('task'),
-  content: Schema.Struct({
-    taskId: Schema.String,
-    threadId: Schema.String,
-    title: Schema.String,
-    slug: Schema.String,
-    phase: TaskPhase,
-    plan: Schema.NullOr(
-      Schema.Struct({
-        id: Schema.String,
-        steps: Schema.Array(PlanStep),
-        /** When it starts on its own; null once held or started. */
-        startsAt: Schema.NullOr(Schema.String),
-        /** Why the coordinator chose the lead. */
-        reason: Schema.NullOr(Schema.String),
-        /** What happens when the work is done; null where nothing reaches the repository's host. */
-        end: Schema.NullOr(TaskEnd),
-      }),
-    ),
-    /** The issue it came from. */
-    issue: Schema.NullOr(Schema.Struct({ product: Product, key: Schema.String, title: Schema.String, url: Schema.String })),
-    /** Its pull request, once opened. */
-    change: Schema.NullOr(ChangeSummary),
-    /** The step it is on, by key, while it runs. */
-    step: Schema.NullOr(Schema.String),
-    /** The latest summary the lead reported. */
-    summary: Schema.NullOr(Schema.String),
-    /** The agent that leads it, or last did: the plan's lead until one starts. */
-    lead: Schema.NullOr(Schema.String),
-    branch: Schema.NullOr(Schema.String),
-    startedAt: Schema.NullOr(Schema.String),
-  }),
+  content: TaskCard,
 })
 
 export const ThreadItem = Schema.Union([
@@ -556,6 +566,39 @@ export const ThreadSnapshot = Schema.Struct({
 })
 export type ThreadSnapshot = typeof ThreadSnapshot.Type
 
+/** A task on the board: its card, how it ended, and, ready without a pull request, how big its change is. */
+export const BoardTask = Schema.Struct({
+  ...TaskCard.fields,
+  state: Schema.String,
+  createdAt: Schema.String,
+  settledAt: Schema.NullOr(Schema.String),
+  /** What a ready task changed, when it has no pull request to say so: its files, and lines added and removed. */
+  changed: Schema.NullOr(Schema.Struct({ files: Schema.Number, add: Schema.Number, del: Schema.Number })),
+})
+export type BoardTask = typeof BoardTask.Type
+
+/** A call that waits on the person, with the task it holds. */
+export const BoardCall = Schema.Struct({
+  ...AttentionRequest.fields,
+  taskId: Schema.String,
+  threadId: Schema.String,
+  taskTitle: Schema.String,
+  taskSlug: Schema.String,
+})
+export type BoardCall = typeof BoardCall.Type
+
+/**
+ * A project's board: every task it hasn't settled, and the most recently
+ * settled, each with its card; and every call that waits on the person.
+ * Which lane each goes in is the window's to say.
+ */
+export const BoardSnapshot = Schema.Struct({
+  cursor: Cursor,
+  tasks: Schema.Array(BoardTask),
+  calls: Schema.Array(BoardCall),
+})
+export type BoardSnapshot = typeof BoardSnapshot.Type
+
 /**
  * A project's coordinator thread: the agent working on it, if one is, the one
  * it would start on, and a page of its items. The coordinator starts when you
@@ -636,6 +679,8 @@ export const Api = RpcGroup.make(
   call('GetThread', { threadId: Schema.String, before: Schema.optional(Schema.Int), limit }, ThreadSnapshot),
   /** One file a task changed, as a diff from its base to its worktree. */
   call('GetFileDiff', { taskId: Schema.String, path: Schema.String }, FileDiff),
+  /** A project's board: its tasks, by card, and the calls that wait on the person. */
+  call('GetBoard', { projectId: Schema.String }, BoardSnapshot),
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
   /** The project's coordinator thread, made the first time it is asked for. */
   call('GetCoordinator', { projectId: Schema.String, before: Schema.optional(Schema.Int), limit }, CoordinatorSnapshot),
@@ -706,6 +751,12 @@ export const Api = RpcGroup.make(
   call('ListIssues', { projectId: Schema.String }, IssueList),
   /** Marks the task's draft pull request ready for review. */
   command('MarkReady', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Merges the task's pull request at the head the person saw, because they
+   * said to; a draft is marked ready first. A pull request that moved on
+   * since isn't merged. Agents never merge.
+   */
+  command('Merge', { taskId: Schema.String, head: Schema.String }, Schema.Void),
   /** Asks the task's pull request for news now. */
   command('RefreshTask', { taskId: Schema.String }, Schema.Void),
   /** What changes after `since`, or from now without it. */

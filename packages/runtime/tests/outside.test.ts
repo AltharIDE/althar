@@ -93,7 +93,7 @@ describe('links', () => {
       yield* connect('github', HOST)
       yield* github.openChange(repository, { title: 'Draft one', body: '', source: 'a', target: 'main', draft: true })
       yield* github.openChange(repository, { title: 'Merged one', body: '', source: 'b', target: 'main', draft: false })
-      github.merge(2)
+      github.mergeByHand(2)
       const projects = yield* Projects
       const coordinator = yield* Coordinator
       const issues = yield* Issues

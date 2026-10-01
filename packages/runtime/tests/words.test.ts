@@ -238,6 +238,7 @@ describe('what screens read of a pull request and what arrived', () => {
           { name: 'lint', state: 'passed', summary: null },
         ],
       },
+      head: 'abc',
       listening: true,
     })
     const bare = changeOf({ number: 1, state: 'merged', checks: { outcome: 'odd', failing: 'x' } }, 'gitlab', false)

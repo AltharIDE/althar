@@ -199,8 +199,11 @@ service's model.
   nothing itself; a step that ends in a push isn't done while the worktree
   has uncommitted files, so the lead commits what belongs to the task and
   clears away the rest. The record keeps the commit pushed.
-- **Merging stays with the person.** The model reads `merged`; it has no
-  merge.
+- **Merging is the person's.** The model has `merge`, and Charrette calls it
+  only when the person accepts the change (from the board, or the task),
+  never on an agent's word: the rules refuse agents' merges. A draft is
+  marked ready first, and only the head Charrette last read is merged, in the
+  first way the repository allows.
 - **A repository's host** is found from its remote URL, matched against
   known hosts and the instances the person has connected.
 

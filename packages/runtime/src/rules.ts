@@ -119,7 +119,8 @@ const hostReason = (words: ReadonlyArray<string>): string | undefined => {
     return "Agents don't change things on the code host themselves; Charrette does that for the task. Tell the person what's needed."
   }
   if (HOST_LOOKS[command]?.has(subcommand ?? '') === true) return undefined
-  if ((command === 'pr' || command === 'mr') && subcommand === 'merge') return "Merging is the person's to do; Charrette doesn't merge."
+  if ((command === 'pr' || command === 'mr') && subcommand === 'merge')
+    return "Merging is the person's to do: they accept the change in Charrette, or on the host."
   if ((command === 'pr' || command === 'mr') && (subcommand === 'comment' || subcommand === 'review' || subcommand === 'note'))
     return "Answer on the task's pull request with Charrette's reply_on_pull_request tool."
   if (command === 'pr' || command === 'mr')

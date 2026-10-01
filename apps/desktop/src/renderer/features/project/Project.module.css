@@ -5,6 +5,43 @@
   background: var(--n-2);
 }
 
+.rooms {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.talk {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Side by side, the conversation keeps a reading width and the board takes the rest. */
+.both .talk {
+  flex: 0 1 560px;
+  min-width: 380px;
+  border-right: 1px solid var(--line);
+}
+
+.board {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  padding: 16px 0 0 16px;
+}
+
+.dock {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: min(420px, 40vw);
+  border-left: 1px solid var(--line);
+}
+
 .head {
   flex: none;
   padding: 20px 24px 12px;

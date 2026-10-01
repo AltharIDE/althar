@@ -1,3 +1,4 @@
+import { products } from '@charrette/connectors'
 import { Cause, Option } from 'effect'
 
 /*
@@ -123,6 +124,14 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
         return 'That request was already used for something else. Try again.'
       case 'DatabaseInUse':
         return 'Another copy of Charrette is using this profile.'
+      case 'ChangedSinceSeen':
+        return 'The pull request changed since you looked at it. Have another look before you accept it.'
+      case 'NotConnected':
+        return `Charrette isn't connected to ${productOf(text(error, 'product'))}. Connect it, then try again.`
+      case 'OutwardUncertain':
+        return "Charrette can't tell whether that went through: its answer was lost. Look on the host before trying again."
+      case 'ConnectorFailed':
+        return hostSaid(productOf(text(error, 'product')), text(error, 'reason'), text(error, 'message'))
       default:
         return agentSaid(error) ?? "Charrette's runtime couldn't do that. Its log has the details."
     }
@@ -130,8 +139,34 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
   return { reason, message }
 }
 
+/** A product's name, by its id: GitHub, Linear. */
+const productOf = (product: string) => Object.values(products).find((info) => info.product === product)?.name ?? 'The service'
+
+/** What a code host or tracker said no to, or why it couldn't be asked, in the person's words. */
+const hostSaid = (host: string, reason: string, said: string) => {
+  const what = said === '' ? '' : `: ${lastLine(said)}`
+  switch (reason) {
+    case 'unauthorized':
+      return `${host} no longer takes Charrette's sign-in. Sign in to it again.`
+    case 'forbidden':
+      return sentence(`${host} won't let this account do that${what}`)
+    case 'not_found':
+      return `${host} can't find it any more.`
+    case 'rate_limited':
+      return `${host} is asking Charrette to slow down. Try again in a little while.`
+    case 'unreachable':
+      return `Charrette couldn't reach ${host}. Try again in a moment.`
+    case 'invalid_response':
+      return `${host} answered in a way Charrette didn't understand.`
+    default:
+      return sentence(`${host} said no${what}`)
+  }
+}
+
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
+  'ChangedSinceSeen',
+  'NotConnected',
   'NotARepository',
   'NotFound',
   'UnknownAgent',

@@ -35,6 +35,8 @@ export interface AcceptPeekText {
   cancel: string
   /** Said in place of Accept while any check has not passed. */
   checksFirst: string
+  /** Said where the checks would be, when none ran. */
+  noChecks: string
 }
 
 export const acceptPeekText: AcceptPeekText = {
@@ -49,6 +51,7 @@ export const acceptPeekText: AcceptPeekText = {
   sendBackPlaceholder: 'What should change?',
   cancel: 'Cancel',
   checksFirst: 'It can be accepted once its checks pass',
+  noChecks: 'No checks ran on it.',
 }
 
 export interface AcceptPeekProps {
@@ -141,9 +144,7 @@ export function AcceptPeek({
       >
         <FileChanges files={files} onOpen={onOpenFile} />
       </PeekSection>
-      <PeekSection label={t.checks}>
-        <Checks checks={checks} />
-      </PeekSection>
+      <PeekSection label={t.checks}>{checks.length > 0 ? <Checks checks={checks} /> : <p className={s.none}>{t.noChecks}</p>}</PeekSection>
       <PeekFoot>
         {sending ? (
           <NoteForm

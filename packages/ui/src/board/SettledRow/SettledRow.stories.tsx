@@ -20,6 +20,8 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Merged: Story = {}
+/** Finished without a merge: a conversation that ended, a change taken some other way. In ink, not green. */
+export const Done: Story = { args: of(Outcome.Done) }
 export const Answered: Story = { args: of(Outcome.Answered) }
 export const Artifact: Story = { args: of(Outcome.Artifact) }
 export const Knowledge: Story = { args: of(Outcome.Knowledge) }

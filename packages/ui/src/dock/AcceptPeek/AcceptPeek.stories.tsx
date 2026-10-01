@@ -18,6 +18,15 @@ type Story = StoryObj<typeof meta>
 export const Default: Story = {}
 /** No reviewer named, no link to the host, files not links. */
 export const Plain: Story = { args: { reviewers: [], url: undefined, onOpenFile: undefined } }
+/** A pull request no checks ran on: it says so, and can be accepted. */
+export const NoChecks: Story = {
+  args: { checks: [] },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('No checks ran on it.')).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: /Accept and merge/ })).toBeInTheDocument()
+  },
+}
 
 export const Accepting: Story = {
   play: async ({ args, canvasElement }) => {

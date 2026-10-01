@@ -7,11 +7,12 @@ import { ApiError, type CoordinatorSnapshot } from '@charrette/contracts'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
+import { useBoard } from '../src/renderer/features/board/useBoard'
 import { agents, card, changed, coordinatorSnapshot, fakeClient, items, status, streamed } from './fixtures'
 import { withServices } from './render'
 
 function Project({ onBack = vi.fn(), onTask = vi.fn() }: { onBack?: () => void; onTask?: (threadId: string) => void }) {
-  return <ProjectView model={useProject('p1')} connections={useConnections()} onBack={onBack} onTask={onTask} />
+  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onBack={onBack} onTask={onTask} />
 }
 
 const session = { id: 'sc', agentId: 'claude-code', agentName: 'Claude Code', state: 'active', model: null, models: [], turnRunning: false }

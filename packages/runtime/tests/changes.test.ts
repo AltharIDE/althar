@@ -10,6 +10,8 @@ import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
+import { ChangedSinceSeen } from '../src/errors'
+import { words } from '../src/words'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
@@ -17,6 +19,7 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
+import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
 import { fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
@@ -155,7 +158,7 @@ describe('a task that ends in a pull request', () => {
       )
 
       // Merged, the task is settled, and nothing listens any more.
-      github.merge(1)
+      github.mergeByHand(1)
       yield* until(cards(projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(10))
       const after = yield* arrivals(threadId)
       assert.deepStrictEqual(
@@ -216,6 +219,61 @@ describe('a task that ends in a pull request', () => {
       const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       assert.lengthOf(github.changes, 1)
       assert.strictEqual(ready?.change?.title, 'By hand')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('merges when the person says so, marking a draft ready first, and says why the host won’t', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const changes = yield* Changes
+      const taskId = ready?.taskId ?? ''
+      const head = ready?.change?.head ?? ''
+      assert.notStrictEqual(head, '')
+      // Sent back with a note, it isn't ready while its lead works on it, and is again once the lead is done.
+      const sessions = yield* Sessions
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId: ready?.threadId ?? '',
+        body: 'Name it better. [lead:wait]',
+      })
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'running', Duration.seconds(5))
+      yield* sessions.interrupt(ready?.threadId ?? '')
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(5))
+      // The host says no: its words come back, and nothing changed.
+      github.failNext('merge', 'rejected')
+      const refused = yield* Effect.flip(changes.merge(taskId, head))
+      assert.strictEqual(words(refused, String).message, 'GitHub said no: The fake merge failed (rejected).')
+      assert.strictEqual(github.changes[0]?.state, 'open')
+      // The head moved while GitHub merged: the person looks again.
+      github.failNext('merge', 'rejected', undefined, 409)
+      assert.instanceOf(yield* Effect.flip(changes.merge(taskId, head)), ChangedSinceSeen)
+      // Asked to merge a head that isn't the one there now, it doesn't try.
+      const tried = github.calls.filter((call) => call === 'merge').length
+      const stale = yield* Effect.flip(changes.merge(taskId, 'an-older-head'))
+      assert.strictEqual(
+        words(stale, String).message,
+        'The pull request changed since you looked at it. Have another look before you accept it.',
+      )
+      assert.lengthOf(
+        github.calls.filter((call) => call === 'merge'),
+        tried,
+      )
+      // At the head the person saw, it is merged, a draft marked ready first, and the task settles at once.
+      yield* changes.merge(taskId, head)
+      assert.deepInclude(github.changes[0], { state: 'merged', draft: false })
+      const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(5))
+      assert.strictEqual(settled?.change?.state, 'merged')
+      // Merged, there is nothing more to merge.
+      yield* changes.merge(taskId, head)
+      assert.lengthOf(
+        github.calls.filter((call) => call === 'merge'),
+        tried + 1,
+      )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

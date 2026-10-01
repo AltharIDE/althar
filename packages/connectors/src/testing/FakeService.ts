@@ -56,12 +56,13 @@ export interface FakeControls {
   ): Comment
   reviewAs(number: number, author: string, verdict: Verdict, body?: string, options?: { readonly member?: boolean }): Review
   setChecks(number: number, checks: ReadonlyArray<Pick<Check, 'name' | 'state'> & { readonly log?: string }>): void
-  merge(number: number): void
+  /** Someone merges a change on the host itself. */
+  mergeByHand(number: number): void
   close(number: number): void
   /** Someone marks a draft ready on the host itself. */
   readyByHand(number: number): void
-  /** The next call to `method` fails with this, and when to try again for a rate limit. */
-  failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string): void
+  /** The next call to `method` fails with this: when to try again for a rate limit, and the HTTP status a host would give. */
+  failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string, status?: number): void
   /** Every change opened, with every comment on it, Charrette's included. */
   readonly changes: ReadonlyArray<ChangeRequest>
   commentsOn(number: number): ReadonlyArray<Comment>
@@ -93,7 +94,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const assigned = new Set<string>()
   const issueComments = new Map<string, Array<string>>()
   const links = new Map<string, Array<{ readonly url: string; readonly title: string }>>()
-  const failures = new Map<string, { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string }>()
+  const failures = new Map<string, { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string; readonly status?: number }>()
   const calls: Array<string> = []
   let ids = 0
   const nextId = () => String((ids += 1))
@@ -111,6 +112,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           reason: failure.reason,
           message: `The fake ${method} failed (${failure.reason})`,
           ...(failure.retryAt === undefined ? {} : { retryAt: failure.retryAt }),
+          ...(failure.status === undefined ? {} : { status: failure.status }),
         }),
       )
     })
@@ -163,7 +165,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           draft: change.draft,
           source: change.source,
           target: change.target,
-          headSha: null,
+          headSha: `head-${number}`,
           author: me,
           additions: 12,
           deletions: 3,
@@ -182,6 +184,23 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     markReady: (_repository, change) =>
       Effect.andThen(called('markReady'), () => {
         update(change.number, { draft: false })
+        return Effect.succeed(changeNumbered(change.number))
+      }),
+    merge: (_repository, change) =>
+      Effect.andThen(called('merge'), () => {
+        const now = changeNumbered(change.number)
+        // As GitHub: a draft, or a change already merged or closed, isn't merged; nor one whose head moved on.
+        if (now.draft || now.state !== 'open')
+          return Effect.fail(
+            new ConnectorFailed({
+              product,
+              reason: 'rejected',
+              message: now.draft ? 'Pull request is in draft state' : 'Pull request is not mergeable',
+            }),
+          )
+        if (change.headSha !== now.headSha)
+          return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', status: 409, message: 'Head branch was modified' }))
+        update(change.number, { state: 'merged' })
         return Effect.succeed(changeNumbered(change.number))
       }),
     checks: (_repository, sha) =>
@@ -258,6 +277,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         defaultBranch,
         webUrl: `https://${product === 'gitlab' ? 'gitlab.com' : 'github.com'}/${path.join('/')}`,
         canPush: true,
+        merges: ['squash', 'merge'],
       }
       repositories.set(path.join('/'), repository)
       return repository
@@ -324,10 +344,15 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         }),
       )
     },
-    merge: (number) => update(number, { state: 'merged' }),
+    mergeByHand: (number) => update(number, { state: 'merged' }),
     close: (number) => update(number, { state: 'closed' }),
     readyByHand: (number) => update(number, { draft: false }),
-    failNext: (method, reason, retryAt) => void failures.set(method, { reason, ...(retryAt === undefined ? {} : { retryAt }) }),
+    failNext: (method, reason, retryAt, status) =>
+      void failures.set(method, {
+        reason,
+        ...(retryAt === undefined ? {} : { retryAt }),
+        ...(status === undefined ? {} : { status }),
+      }),
     get changes() {
       return [...changes]
     },

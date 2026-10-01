@@ -43,8 +43,9 @@ MVVM in feature folders ([ADR-010](../../docs/decisions/010-desktop-app-mvvm.md)
 | --- | --- |
 | `data/` | The client: Effect inside, plain promises and a subscription outside; the services view models reach through React |
 | `features/start` | The agents on this Mac and the projects; opening a folder by the button, ⌘N or a drop |
-| `features/project` | A project's Talk room: the coordinator's thread with each task's card (its plan before it starts, then where it stands), the agent the coordinator runs on, and a task you plan yourself, beside it |
-| `features/task` | A task's thread, the calls waiting on you, and the composer |
+| `features/project` | A project's window: the coordinator's thread with each task's card (its plan before it starts, then where it stands), the agent the coordinator runs on, and a task you plan yourself, beside it |
+| `features/board` | A project's board: its lanes, the dock beside them, and what you answer, accept or send back from it |
+| `features/task` | A task's thread, the calls waiting on you, the composer, and what it changed |
 | `shared/` | A thread's items as blocks, drawn with the kit (finished work folded, steps' results under it), and how agents and times are drawn |
 
 Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view (`*View.tsx`) and its styles. `router.tsx` puts the routes together, with the place in the hash, since the page loads from a file.
@@ -58,6 +59,7 @@ Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view
 - **Words on screen follow [the glossary](../../docs/glossary.md).**
 - **Work folds; results stand.** A turn's work (its tool calls, thoughts, plan, and what it said on the way) folds under how long it worked; only its last message stays open, and nothing when a step's result follows, since the step's summary is what the person reads. While a turn runs, the fold says how long it has worked so far and what it is doing now.
 - **A step that needs you is a call in the task.** It says what went wrong and what Charrette tried, with the kit's `Stuck`: tell the lead, hand the step to another agent, or abandon it; for a review, review again or go on without it.
+- **A project is a conversation, a board, or both** (⌘1–3). The board reads every task's card and every call in one go (`GetBoard`) and reads again when something it shows changes: a task, plan, run, step, session, turn, call, pull request or worktree, not what is said in a thread. What you open from it goes in the dock beside it: a call is answered there as in its task, work ready to accept is merged at the head the dock showed, or sent back to its lead, and a task's changes open over the window. The bar says how much runs and how much needs you, and opens the first of it.
 - **The runtime keeps a plan's clock.** A plan card counts down to the time the runtime starts it, seen or not, then says it is starting; the runtime starts it, not the window. Holding, changing and starting it now go to the runtime, and the card shows what comes back.
 
 ## Checks
@@ -68,7 +70,6 @@ Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view
 
 ## Gaps
 
-- **No board.** The Talk room is the project's only room; the kit's Board and the switch between them come later.
 - **Findings are shown, not answered.** A review's findings are left to the lead, which settles them; the kit's answers to them aren't wired up.
 - **Views are tested with Testing Library,** not with Storybook stories fed view-model output as ADR-010 says; the app has no Storybook of its own yet.
 - **Tasks have no numbers.** The kit's headers show a task's number; the app shows the title alone.

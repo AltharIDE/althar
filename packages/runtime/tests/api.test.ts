@@ -12,13 +12,14 @@ import { Cause, Context, Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
 import { connection, services } from '../src/Api'
-import { GitFailed, ModelUnchanged, NotARepository, NotFound, SessionFailed } from '../src/errors'
+import { ChangedSinceSeen, GitFailed, ModelUnchanged, NotARepository, NotFound, OutwardUncertain, SessionFailed } from '../src/errors'
+import { NotConnected } from '../src/Connections'
 import { Folders } from '../src/Folders'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
 import { Connectors } from '../src/Config'
 import { Secrets } from '../src/Secrets'
-import { products } from '@charrette/connectors'
+import { ConnectorFailed, products } from '@charrette/connectors'
 import { makeFakeService } from '@charrette/connectors/testing'
 
 import { fakeAgents, fakeConnectors, HOST, hosted, repository } from './support'
@@ -408,12 +409,24 @@ describe('the coordinator, through the API', () => {
           [call?.kind, call?.stuck?.step, call?.stuck?.why, call?.stuck?.agentId],
           ['stuck', 'implement', 'failed_to_start', 'missing'],
         )
+        // On the board, the call waits on the person, with the task it holds, and the task says it waits.
+        const board = yield* client.GetBoard({ projectId: project.id })
+        assert.deepStrictEqual(
+          board.calls.map((waits) => [waits.id, waits.kind, waits.taskTitle, waits.threadId]),
+          [[call?.id, 'stuck', 'Nobody home', task.threadId]],
+        )
+        assert.deepInclude(board.tasks[0], { taskId: task.id, phase: 'waiting', state: 'open', changed: null })
         const answering = { commandId: commandId(), attentionId: call?.id ?? '', answer: { kind: 'retry' as const, agentId: 'codex' } }
         yield* client.AnswerStuck(answering)
         // Sent again by a retry, it is answered once.
         yield* client.AnswerStuck(answering)
         const after = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 0)
         assert.strictEqual(after.session?.agentId, 'codex')
+        // Answered, it leaves the board.
+        assert.notInclude(
+          (yield* client.GetBoard({ projectId: project.id })).calls.map((waits) => waits.id),
+          call?.id,
+        )
         assert.strictEqual(
           (yield* Effect.flip(client.AnswerStuck({ ...answering, commandId: commandId() }))).message,
           'That call was already answered, or the agent took it back.',
@@ -554,6 +567,10 @@ describe('code hosts and trackers, through the API', () => {
         assert.strictEqual(refused._tag, 'ApiError')
         yield* client.MarkReady({ commandId: commandId(), taskId: started.id })
         assert.isFalse((yield* client.GetThread({ threadId: started.threadId })).task.changes[0]?.draft)
+        // On the board it is ready to accept, its pull request with it.
+        const ready = (yield* client.GetBoard({ projectId: project.id })).tasks.find((task) => task.taskId === started.id)
+        assert.deepInclude(ready, { phase: 'ready', changed: null })
+        assert.strictEqual(ready?.change?.number, 1)
         yield* client.RefreshTask({ commandId: commandId(), taskId: started.id })
 
         // A task created from #12 keeps it as its issue.
@@ -602,6 +619,29 @@ describe('words', () => {
     assert.strictEqual(said({ _tag: 'CommandIdReused' }), 'That request was already used for something else. Try again.')
     assert.strictEqual(said({ _tag: 'DatabaseInUse' }), 'Another copy of Charrette is using this profile.')
     assert.strictEqual(said(new TurnInProgress({ sessionId: 's' })), 'The lead is still on its last turn.')
+    // What a code host or tracker said, or why it couldn't be asked.
+    const host = (reason: ConnectorFailed['reason'], message = '') => said(new ConnectorFailed({ product: 'github', reason, message }))
+    assert.strictEqual(host('unauthorized'), "GitHub no longer takes Charrette's sign-in. Sign in to it again.")
+    assert.strictEqual(host('forbidden', 'Resource not accessible'), "GitHub won't let this account do that: Resource not accessible.")
+    assert.strictEqual(host('forbidden'), "GitHub won't let this account do that.")
+    assert.strictEqual(host('not_found'), "GitHub can't find it any more.")
+    assert.strictEqual(host('rate_limited'), 'GitHub is asking Charrette to slow down. Try again in a little while.')
+    assert.strictEqual(host('unreachable'), "Charrette couldn't reach GitHub. Try again in a moment.")
+    assert.strictEqual(host('invalid_response'), "GitHub answered in a way Charrette didn't understand.")
+    assert.strictEqual(host('rejected', 'Pull Request is not mergeable'), 'GitHub said no: Pull Request is not mergeable.')
+    assert.strictEqual(said(new ConnectorFailed({ product: 'gitea' as never, reason: 'rejected', message: '' })), 'The service said no.')
+    assert.strictEqual(
+      said(new NotConnected({ product: 'linear', what: 'MER-1' })),
+      "Charrette isn't connected to Linear. Connect it, then try again.",
+    )
+    assert.strictEqual(
+      said(new OutwardUncertain({ operation: 'merge' })),
+      "Charrette can't tell whether that went through: its answer was lost. Look on the host before trying again.",
+    )
+    assert.strictEqual(
+      said(new ChangedSinceSeen({ taskId: 't' })),
+      'The pull request changed since you looked at it. Have another look before you accept it.',
+    )
     assert.deepStrictEqual(words(new Error('boom'), name), {
       reason: 'Unknown',
       message: "Charrette's runtime couldn't do that. Its log has the details.",

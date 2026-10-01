@@ -19,6 +19,21 @@ export const OneRepository: Story = {}
 /** A change across two repositories: one pull request each, merged in order. */
 export const TwoRepositories: Story = { args: READY_TWO_REPOS }
 export const Current: Story = { args: { current: true } }
+/** Work with no pull request, as where no code host is connected: its branch, and no checks. */
+export const OnItsBranch: Story = {
+  args: { prs: [], branch: { name: 'charrette/add-a-retry', add: 48, del: 9 }, checks: undefined },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('charrette/add-a-retry')).toBeInTheDocument()
+    await expect(within(canvasElement).queryByText(/checks? passed/)).not.toBeInTheDocument()
+  },
+}
+/** A pull request no checks ran on. */
+export const NoChecks: Story = {
+  args: { checks: 0 },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('No checks ran')).toBeInTheDocument()
+  },
+}
 
 export const Opening: Story = {
   play: async ({ args, canvasElement }) => {

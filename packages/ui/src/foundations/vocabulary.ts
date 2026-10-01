@@ -329,6 +329,8 @@ export enum Wait {
 /** What a piece of settled work came to. */
 export enum Outcome {
   Merged = 'merged',
+  /** Finished, without a merge to show for it: a conversation that ended, a change taken some other way. */
+  Done = 'done',
   /** A question, answered; nothing built. */
   Answered = 'answered',
   /** A document, no code. */

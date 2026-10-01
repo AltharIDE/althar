@@ -6,6 +6,7 @@ import { ApiError, type IssueSummary, type Product, type ThreadSnapshot } from '
 import { Brand, IssuePriority, IssueStatus } from '@charrette/ui'
 
 import { useConnections } from '../src/renderer/features/connections/useConnections'
+import { useBoard } from '../src/renderer/features/board/useBoard'
 import { connectionsOf, ConnectionsView, servicesOf } from '../src/renderer/features/connections/ConnectionsView'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
@@ -393,7 +394,7 @@ describe('a task’s pull request', () => {
 })
 
 function Project() {
-  return <ProjectView model={useProject('p1')} connections={useConnections()} onBack={vi.fn()} onTask={vi.fn()} />
+  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onBack={vi.fn()} onTask={vi.fn()} />
 }
 
 const issue: IssueSummary = {
