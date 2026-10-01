@@ -154,6 +154,7 @@ describe('the API', () => {
               ListTasks: () => Effect.succeed({ cursor: 0, tasks: [] }),
               CreateTask: () => Effect.die('unused'),
               GetThread: () => Effect.die('unused'),
+              GetFileDiff: () => Effect.die('unused'),
               GetThreadItem: () => Effect.die('unused'),
               GetCoordinator: () => Effect.die('unused'),
               StartTask: () => Effect.die('unused'),

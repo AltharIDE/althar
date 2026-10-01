@@ -479,6 +479,50 @@ export const AttentionRequest = Schema.Struct({
 })
 export type AttentionRequest = typeof AttentionRequest.Type
 
+/**
+ * A file a task changed, from its base to its worktree as it stands: how,
+ * how much, and whether some of that isn't committed yet, so isn't in what
+ * Charrette pushes.
+ */
+export const ChangedFile = Schema.Struct({
+  path: Schema.String,
+  /** Where it was, for a file that moved. */
+  from: Schema.NullOr(Schema.String),
+  status: Schema.Literals(['added', 'modified', 'deleted', 'renamed']),
+  add: Schema.Number,
+  del: Schema.Number,
+  binary: Schema.Boolean,
+  uncommitted: Schema.Boolean,
+})
+export type ChangedFile = typeof ChangedFile.Type
+
+/** A line of a diff: a hunk's head, or a line of the file, with its numbers and, for a changed line, the stretch that differs. */
+export const DiffLine = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('hunk'), text: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('context'), old: Schema.Number, new: Schema.Number, text: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal('added'),
+    new: Schema.Number,
+    text: Schema.String,
+    changed: Schema.optional(Schema.Array(Schema.String)),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal('removed'),
+    old: Schema.Number,
+    text: Schema.String,
+    changed: Schema.optional(Schema.Array(Schema.String)),
+  }),
+])
+export type DiffLine = typeof DiffLine.Type
+
+/** One file's diff, read from git when asked for, never kept: its lines, cut short past a limit and saying so. */
+export const FileDiff = Schema.Struct({
+  file: ChangedFile,
+  lines: Schema.Array(DiffLine),
+  truncated: Schema.Boolean,
+})
+export type FileDiff = typeof FileDiff.Type
+
 /** A task's thread: its task and project, the agent working on it, the calls waiting on the person, and a page of its items. */
 export const ThreadSnapshot = Schema.Struct({
   threadId: Schema.String,
@@ -499,8 +543,8 @@ export const ThreadSnapshot = Schema.Struct({
     issue: Schema.NullOr(IssueSummary),
     /** Its pull requests, as last seen. */
     changes: Schema.Array(ChangeSummary),
-    /** What its branch changed since it started, file by file, and in how many commits; empty without a worktree here. */
-    files: Schema.Array(Schema.Struct({ path: Schema.String, add: Schema.Number, del: Schema.Number })),
+    /** What it changed since it started, committed or not, file by file, and in how many commits; empty without a worktree here. */
+    files: Schema.Array(ChangedFile),
     commits: Schema.Number,
   }),
   session: Schema.NullOr(SessionSummary),
@@ -590,6 +634,8 @@ export const Api = RpcGroup.make(
   ),
   /** The thread, with the newest `limit` items before `before` (a sequence), or none with `limit: 0`. */
   call('GetThread', { threadId: Schema.String, before: Schema.optional(Schema.Int), limit }, ThreadSnapshot),
+  /** One file a task changed, as a diff from its base to its worktree. */
+  call('GetFileDiff', { taskId: Schema.String, path: Schema.String }, FileDiff),
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
   /** The project's coordinator thread, made the first time it is asked for. */
   call('GetCoordinator', { projectId: Schema.String, before: Schema.optional(Schema.Int), limit }, CoordinatorSnapshot),

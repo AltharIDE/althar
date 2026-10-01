@@ -64,7 +64,7 @@ Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view
 
 - `bun run check`: format, type-aware lint and type checks.
 - `bun run test:coverage`: view models and views with Testing Library against a fake client; the client against the real runtime over a `MessageChannel`, with the fake agent. Gated at 90% of lines and branches; the entry and the routes are left to the end-to-end tests.
-- `bun run test:e2e`: the built app under Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; the coordinator planning a task that is implemented, reviewed, settled and ready; and connecting GitHub with a token, a planned task ending in a draft pull request that is pushed and opened, and marking it ready. `e2e/real.spec.ts` runs a real agent when asked.
+- `bun run test:e2e`: the built app under Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; the coordinator planning a task that is implemented, reviewed, settled and ready; and connecting GitHub with a token, a planned task ending in a draft pull request that is pushed and opened, marking it ready, and reading what it changed. `e2e/real.spec.ts` runs a real agent when asked.
 
 ## Gaps
 

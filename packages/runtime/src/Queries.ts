@@ -23,6 +23,7 @@ import { hostedOf, parseRemote } from '@charrette/connectors'
 import { Agents } from './Config'
 import { Connections } from './Connections'
 import { Coordinator } from './Coordinator'
+import { changedFiles, fileDiff, type FileDiff } from './diffs'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { git } from './git'
@@ -296,6 +297,8 @@ export class Queries extends Context.Service<
       page?: { readonly before?: number; readonly limit?: number },
     ): Effect.Effect<ThreadSnapshot, SqlError.SqlError | NotFound>
     item(threadId: string, itemId: string): Effect.Effect<ThreadItem, SqlError.SqlError | NotFound>
+    /** One file a task changed, as a diff from its base to its worktree; only a file it changed. */
+    fileDiff(taskId: string, path: string): Effect.Effect<FileDiff, unknown>
     /** The project's coordinator thread, with the newest `limit` items before `before`. */
     coordinator(
       projectId: string,
@@ -399,24 +402,26 @@ export class Queries extends Context.Service<
         })
 
       /** What a task's branch changed since it started, file by file, read from git in its worktree; nothing without one. */
+      /** What a task changed since it started, committed or not, and in how many commits; nothing without its worktree here. */
       const changedOf = (worktree: string | null, base: string | null) =>
         worktree === null || base === null || !existsSync(worktree)
           ? Effect.succeed({ files: [], commits: 0 })
           : Effect.gen(function* () {
-              const numstat = yield* git(worktree, 'diff', '--numstat', base, 'HEAD')
+              const files = yield* changedFiles(worktree, base)
               const commits = yield* git(worktree, 'rev-list', '--count', `${base}..HEAD`)
-              return {
-                files: numstat
-                  .split('\n')
-                  .filter((line) => line !== '')
-                  .map((line) => {
-                    const [add = '0', del = '0', ...path] = line.split('\t')
-                    // A binary file counts no lines.
-                    return { path: path.join('\t'), add: Number(add) || 0, del: Number(del) || 0 }
-                  }),
-                commits: Number(commits) || 0,
-              }
+              return { files, commits: Number(commits) || 0 }
             }).pipe(Effect.orElseSucceed(() => ({ files: [], commits: 0 })))
+
+      /** One file a task changed, as a diff from its base to its worktree on this device. */
+      const diffOf = (taskId: string, path: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [workspace] = yield* sql<{ path: string; baseCommit: string | null }>`
+            SELECT path, base_commit FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId}`
+          if (workspace === undefined || workspace.baseCommit === null || !existsSync(workspace.path))
+            return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
+          return yield* fileDiff(workspace.path, workspace.baseCommit, path)
+        })
 
       /** A task's issue and pull requests, as their external links last saw them. */
       const linksOf = (taskId: string) =>
@@ -754,6 +759,7 @@ export class Queries extends Context.Service<
             ),
           ),
         thread: (threadId, page) => run(thread(threadId, page)),
+        fileDiff: (taskId, path) => run(diffOf(taskId, path)),
         item: (threadId, itemId) => run(item(threadId, itemId)),
         coordinator: (projectId, page) => run(coordinator(projectId, page)),
         changesSince: (after, limit) => run(changesSince(after, limit)),

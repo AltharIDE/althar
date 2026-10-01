@@ -156,6 +156,7 @@ describe('the client', () => {
       Effect.succeed(
         Api.of({
           Status: () => Effect.die('unused'),
+          GetFileDiff: () => Effect.die('unused'),
           ListProjects: () => Effect.die('unused'),
           OpenProject: () => Effect.die('unused'),
           ListTasks: () => Effect.die('unused'),

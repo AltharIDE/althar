@@ -26,6 +26,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   /* an option in a list or a rail */
   'composer/ModelPick/ModelPick.tsx': 'the picker and its options',
   'composer/ModelBrowser/ModelBrowser.tsx': 'the rail and a model’s row',
+  'outputs/ChangeView/ChangeView.tsx': 'a file in the list of what changed',
   'screens/Start/Start.tsx': 'the ways to start, as large options',
   /* a shape of its own */
   'composer/ContextRing/ContextRing.tsx': 'the ring',
