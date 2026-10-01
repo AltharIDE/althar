@@ -4,7 +4,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 
-import { Api, ApiError, CommandId, PAGE, ThreadItem, WatchEvent } from '../src/Api'
+import { Api, ApiError, CommandId, PAGE, Product, ThreadItem, WatchEvent } from '../src/Api'
 import { clientProtocol, emitterPort, serverProtocol } from '../src/transport'
 
 const at = '2026-09-29T12:00:00.000Z'
@@ -15,7 +15,7 @@ describe('the API', () => {
     const decode = Schema.decodeUnknownSync(ThreadItem)
     const base = { id: 'i1', sequence: 1, agentId: 'codex', createdAt: at }
     assert.strictEqual(
-      decode({ ...base, kind: 'user_message', content: { text: 'Hi' }, input: { state: 'queued', interrupting: false } }).kind,
+      decode({ ...base, kind: 'user_message', content: { text: 'Hi', links: [] }, input: { state: 'queued', interrupting: false } }).kind,
       'user_message',
     )
     assert.strictEqual(decode({ ...base, kind: 'agent_thought', content: { text: 'Hmm' } }).kind, 'agent_thought')
@@ -51,9 +51,52 @@ describe('the API', () => {
         verdict: 'changes_requested',
         findings: [{ severity: 'major', file: 'src/a.ts', line: 3, claim: 'The retry never stops.' }],
         agentId: 'codex',
+        change: null,
       },
     })
     assert.strictEqual(review.kind === 'step_result' && review.content.findings.length, 1)
+    // Something heard from outside: a comment on the task's pull request, with where it is.
+    const heard = decode({
+      ...base,
+      kind: 'arrival',
+      content: {
+        source: 'github',
+        kind: 'comment',
+        from: 'dana',
+        where: 'PR #12',
+        text: 'Seconds or a date?',
+        verdict: null,
+        path: 'src/limit.ts',
+        line: 14,
+        passed: null,
+        failed: null,
+        failing: [],
+        url: null,
+      },
+    })
+    assert.strictEqual(heard.kind === 'arrival' && heard.content.from, 'dana')
+    // A pasted link, unfurled on the message that has it.
+    const linked = decode({
+      ...base,
+      kind: 'user_message',
+      content: {
+        text: 'Do https://linear.app/m/issue/MER-231/x',
+        links: [
+          {
+            kind: 'issue',
+            product: 'linear',
+            key: 'MER-231',
+            title: 'Rate-limit refunds',
+            url: 'https://linear.app/m/issue/MER-231/x',
+            status: { name: 'Todo', category: 'todo' },
+            priority: null,
+            container: 'Meridian',
+          },
+        ],
+      },
+      input: null,
+    })
+    assert.strictEqual(linked.kind === 'user_message' && linked.content.links[0]?.key, 'MER-231')
     // A task in the coordinator's thread: its plan, then its card.
     const task = decode({
       ...base,
@@ -72,7 +115,10 @@ describe('the API', () => {
           ],
           startsAt: at,
           reason: 'A small change in code Claude Code knows.',
+          end: 'draft',
         },
+        issue: { product: 'linear', key: 'MER-231', title: 'Rate-limit refunds', url: 'https://linear.app/m/issue/MER-231/x' },
+        change: null,
         step: null,
         summary: null,
         lead: null,
@@ -121,6 +167,25 @@ describe('the API', () => {
               StopSession: () => Effect.void,
               Send: () => Effect.void,
               Answer: () => Effect.void,
+              ListConnections: () => Effect.succeed({ cursor: 0, connections: [], products: [] }),
+              StartSignIn: ({ commandId: id }) =>
+                Effect.succeed({ flowId: id, kind: 'browser' as const, url: 'https://linear.app/oauth/authorize' }),
+              GetSignIn: () => Effect.succeed({ state: 'waiting' as const }),
+              CancelSignIn: () => Effect.void,
+              ConnectToken: ({ product, token }) =>
+                Effect.succeed({
+                  id: 'conn_1',
+                  product,
+                  name: 'GitHub',
+                  webUrl: 'https://github.com',
+                  account: { login: token === 't' ? 'you' : 'someone', name: null },
+                  auth: 'token' as const,
+                  state: 'ready' as const,
+                }),
+              Disconnect: () => Effect.void,
+              ListIssues: () => Effect.succeed({ issues: [] }),
+              MarkReady: () => Effect.void,
+              RefreshTask: () => Effect.void,
               Watch: ({ since }) =>
                 Stream.make({
                   _tag: 'Changed' as const,
@@ -143,6 +208,10 @@ describe('the API', () => {
 
         assert.strictEqual((yield* client.Status({ recheck: true })).appVersion, 'rechecked')
         assert.strictEqual(yield* client.StartSession({ commandId, threadId: 'th1', agentId: 'codex' }), commandId)
+        assert.strictEqual((yield* client.ConnectToken({ commandId, product: 'github', token: 't' })).account.login, 'you')
+        assert.strictEqual((yield* client.StartSignIn({ commandId, product: 'linear' })).kind, 'browser')
+        // A product Charrette doesn't know isn't one.
+        assert.throws(() => Schema.decodeUnknownSync(Product)('gitea'))
         const refused = yield* Effect.flip(client.OpenProject({ commandId, grant: 'g1' }))
         assert.strictEqual(refused.message, 'No folder was chosen as g1.')
         assert.deepStrictEqual(

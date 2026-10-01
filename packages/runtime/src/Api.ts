@@ -5,9 +5,12 @@ import { Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream 
 import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
+import { Changes } from './Changes'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
+import { type ConnectionInfo, Connections } from './Connections'
 import { Folders } from './Folders'
 import { Instance } from './Instance'
+import { Issues } from './Issues'
 import { Live } from './Live'
 import { Permissions } from './Permissions'
 import { Projects } from './Projects'
@@ -52,6 +55,9 @@ export const handlers = Api.toLayer(
     const ledger = yield* Ledger
     const agents = yield* Agents
     const config = yield* RuntimeConfig
+    const connections = yield* Connections
+    const issues = yield* Issues
+    const pullRequests = yield* Changes
     const envelope = (type: string, payload: unknown, commandId: string) =>
       Effect.provideContext(Runtime.envelope(type, payload, commandId), context)
     const agentName = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
@@ -88,6 +94,20 @@ export const handlers = Api.toLayer(
           Exit.hasInterrupts(exit) ? Effect.sync(() => recent.delete(commandId)) : Deferred.done(result, exit),
         )
       })
+
+    const connectionOf = (info: ConnectionInfo) => ({
+      id: info.id,
+      product: info.product,
+      name: info.name,
+      webUrl: info.webUrl,
+      account: { login: info.account.login, name: info.account.name },
+      auth: info.auth,
+      state: info.state,
+    })
+
+    /** The issue a task comes from, read before the task is made, so its key can go in the task's branch. */
+    const issueFor = (projectId: string, issue: string | undefined) =>
+      issue === undefined ? Effect.succeed(undefined) : issues.read(issue, projectId)
 
     /* Sign-in, checked at most once a minute: each check starts the agent's own status command. */
     const signIn = (entry: AgentEntry, recheck: boolean): Effect.Effect<AgentStatus> =>
@@ -177,15 +197,18 @@ export const handlers = Api.toLayer(
           }),
         ),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
-      CreateTask: ({ commandId, projectId, title, description }) =>
+      CreateTask: ({ commandId, projectId, title, description, issue }) =>
         api(
           Effect.gen(function* () {
+            const from = yield* issueFor(projectId, issue)
             const created = yield* projects.createTask({
-              envelope: yield* envelope('task.create', { projectId, title, description }, commandId),
+              envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
               projectId,
               title,
               ...(description === undefined ? {} : { description }),
+              ...(from === undefined ? {} : { issueKey: from.key }),
             })
+            if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
             return yield* queries.task(created.taskId)
           }),
         ),
@@ -212,22 +235,27 @@ export const handlers = Api.toLayer(
             const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${threadId}`
             if (thread?.kind === 'coordinator') yield* coordinator.say(message)
             else yield* sessions.send(message)
+            // Links in what the person said unfurl on their message, without holding up the reply.
+            yield* Effect.forkDetach(issues.unfurlInput(commandId))
           }),
         ),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
-      StartTask: ({ commandId, projectId, title, description, steps }) =>
+      StartTask: ({ commandId, projectId, title, description, steps, issue, end }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
+              const from = yield* issueFor(projectId, issue)
               const created = yield* projects.createTask({
-                envelope: yield* envelope('task.create', { projectId, title, description }, commandId),
+                envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
                 projectId,
                 title,
                 ...(description === undefined ? {} : { description }),
                 draft: true,
+                ...(from === undefined ? {} : { issueKey: from.key }),
               })
+              if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
               // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
               const planId = yield* plans.propose({
                 projectId: projectId as ProjectId,
@@ -236,6 +264,7 @@ export const handlers = Api.toLayer(
                 reason: null,
                 actorId: instance.personId,
                 startsIn: Duration.zero,
+                end: end === undefined ? yield* pullRequests.endFor(projectId) : end,
               })
               yield* plans.start(planId, instance.personId)
               return yield* queries.task(created.taskId)
@@ -244,7 +273,7 @@ export const handlers = Api.toLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(plans.start(planId, instance.personId))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
-      ChangePlan: ({ commandId, planId, steps }) => once(commandId, api(plans.change(planId, steps, instance.personId))),
+      ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
       AnswerStuck: ({ commandId, attentionId, answer }) =>
         once(
           commandId,
@@ -269,6 +298,54 @@ export const handlers = Api.toLayer(
             })
           }),
         ),
+      ListConnections: () =>
+        api(
+          Effect.gen(function* () {
+            const cursor = yield* queries.cursor
+            const list = yield* connections.list
+            return {
+              cursor,
+              connections: list.map(connectionOf),
+              products: connections.products
+                .filter((info) => info.make !== null)
+                .map((info) => ({
+                  product: info.product,
+                  name: info.name,
+                  host: info.host,
+                  tracker: info.tracker,
+                  hostedUrl: info.hosted?.webUrl ?? null,
+                  selfHosted: info.selfHosted,
+                  browserSignIn: info.browserSignIn,
+                  tokenNeedsUser: info.token.user,
+                  tokenHelp: info.token.help(info.hosted?.webUrl ?? ''),
+                })),
+            }
+          }),
+        ),
+      StartSignIn: ({ commandId, product, webUrl }) =>
+        once(commandId, api(connections.startSignIn({ product, actorId: instance.personId, ...(webUrl === undefined ? {} : { webUrl }) }))),
+      GetSignIn: ({ flowId }) => api(connections.signIn(flowId)),
+      CancelSignIn: ({ flowId }) => api(connections.cancelSignIn(flowId)),
+      ConnectToken: ({ commandId, product, webUrl, user, token }) =>
+        once(
+          commandId,
+          api(
+            Effect.map(
+              connections.connectToken({
+                product,
+                token,
+                actorId: instance.personId,
+                ...(webUrl === undefined ? {} : { webUrl }),
+                ...(user === undefined ? {} : { user }),
+              }),
+              connectionOf,
+            ),
+          ),
+        ),
+      Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
+      ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
+      MarkReady: ({ commandId, taskId }) => once(commandId, api(pullRequests.markReady(taskId))),
+      RefreshTask: ({ taskId }) => pullRequests.refresh(taskId),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
     })
   }),

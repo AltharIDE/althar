@@ -550,7 +550,7 @@ describe('thread items', () => {
       agentId: 'codex',
       createdAt: '2026-09-29T12:00:00.000Z',
       kind: 'user_message',
-      content: { text: 'Now' },
+      content: { text: 'Now', links: [] },
       input: { state: 'queued', interrupting: true },
     })
     const tool = itemOf(
@@ -608,6 +608,7 @@ describe('thread items', () => {
           { severity: 'nit', file: null, line: null, claim: 'z' },
         ],
         agentId: 'codex',
+        change: null,
       },
     )
     assert.deepStrictEqual(itemOf(row('step_result', { summary: 'Done.' }))?.content, {
@@ -617,6 +618,7 @@ describe('thread items', () => {
       verdict: null,
       findings: [],
       agentId: null,
+      change: null,
     })
   })
 })
