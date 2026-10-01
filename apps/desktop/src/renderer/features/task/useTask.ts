@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@charrette/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
-import { caughtUp, mergeItems, waiting } from '../../shared/items'
+import { caughtUp, mergeItems, newestReads, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 import { useServices, useWatch } from '../../data/services'
@@ -60,6 +60,7 @@ export const useTask = (threadId: string): TaskModel => {
   const [pending, setPending] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const [newest] = useState(newestReads)
   const changed = useRef({ head: false, items: new Set<string>() })
   const taskId = snapshot?.task.id ?? null
   const hasChange = (snapshot?.task.changes.length ?? 0) > 0
@@ -79,13 +80,13 @@ export const useTask = (threadId: string): TaskModel => {
   /** The thread's head again: its task, the agent working, the calls waiting. Its items stay as they are. */
   const readHead = useCallback(
     () =>
-      client
-        .getThread(threadId, { limit: 0 })
-        .then(
-          (head) => setSnapshot((current) => (current === null ? head : { ...head, items: current.items, earlier: current.earlier })),
-          fail,
-        ),
-    [client, threadId, fail],
+      newest(
+        'head',
+        client.getThread(threadId, { limit: 0 }),
+        (head) => setSnapshot((current) => (current === null ? head : { ...head, items: current.items, earlier: current.earlier })),
+        fail,
+      ),
+    [client, threadId, newest, fail],
   )
 
   useEffect(() => {
@@ -103,8 +104,8 @@ export const useTask = (threadId: string): TaskModel => {
     const { head, items } = changed.current
     changed.current = { head: false, items: new Set() }
     if (head) void readHead()
-    for (const itemId of items) void client.getThreadItem(threadId, itemId).then((item) => arrived([item]), fail)
-  }, [client, threadId, readHead, arrived, fail])
+    for (const itemId of items) void newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail)
+  }, [client, threadId, readHead, newest, arrived, fail])
 
   useWatch((event) => {
     if (event._tag === 'Streaming') {

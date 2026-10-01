@@ -26,6 +26,7 @@ import {
 import { Instance } from './Instance'
 import { Live } from './Live'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
+import { touchCard } from './cards'
 import { change, fact, timestamp } from './records'
 import { git } from './git'
 import { reviewCopyOf } from './reviewCopy'
@@ -375,6 +376,8 @@ export class Sessions extends Context.Service<
           )
           running.brief = undefined
           running.turnRunning = true
+          // A task's card says when its lead or reviewer is at work.
+          if (thread.role !== 'coordinator') yield* touchCard(thread.taskId)
           yield* live.publish({ _tag: 'TurnStarted', threadId: thread.threadId, turnId })
 
           const items = recorder({
@@ -479,6 +482,8 @@ export class Sessions extends Context.Service<
             // Tried again shortly, rather than straight away.
             yield* Effect.forkIn(Effect.delay(Queue.offer(running.wake, undefined), Duration.seconds(1)), running.scope)
           }
+          // A step can report mid-turn, so its task is ready only once the turn is over: its card is read again.
+          if (thread.role !== 'coordinator') yield* touchCard(thread.taskId)
           const resetsAt =
             Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed' ? failure.value.resetsAt : ended?.failure?.resetsAt
           if (errorClass === 'usage_limit') yield* accountLimited(running, resetsAt)

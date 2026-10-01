@@ -14,7 +14,7 @@ import {
 
 import { messageOf } from '../../data/client'
 import { useServices, useWatch } from '../../data/services'
-import { caughtUp, mergeItems, waiting } from '../../shared/items'
+import { caughtUp, mergeItems, newestReads, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 
@@ -91,6 +91,7 @@ export const useProject = (projectId: string): ProjectModel => {
   const [starting, setStarting] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const [newest] = useState(newestReads)
   const changed = useRef({ head: false, cards: false, items: new Set<string>() })
   const threadId = coordinator?.threadId ?? null
 
@@ -104,13 +105,13 @@ export const useProject = (projectId: string): ProjectModel => {
   /** The thread's head again: the agent working, the one it would start on. Its items stay as they are. */
   const readHead = useCallback(
     () =>
-      client
-        .getCoordinator(projectId, { limit: 0 })
-        .then(
-          (head) => setCoordinator((current) => (current === null ? head : { ...head, items: current.items, earlier: current.earlier })),
-          fail,
-        ),
-    [client, projectId, fail],
+      newest(
+        'head',
+        client.getCoordinator(projectId, { limit: 0 }),
+        (head) => setCoordinator((current) => (current === null ? head : { ...head, items: current.items, earlier: current.earlier })),
+        fail,
+      ),
+    [client, projectId, newest, fail],
   )
 
   useEffect(() => {
@@ -133,8 +134,8 @@ export const useProject = (projectId: string): ProjectModel => {
     if (head) void readHead()
     const read = new Set(items)
     if (cards) for (const item of coordinator?.items ?? []) if (item.kind === 'task') read.add(item.id)
-    for (const itemId of read) void client.getThreadItem(threadId, itemId).then((item) => arrived([item]), fail)
-  }, [client, threadId, coordinator, readHead, arrived, fail])
+    for (const itemId of read) void newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail)
+  }, [client, threadId, coordinator, readHead, newest, arrived, fail])
 
   useWatch((event) => {
     if (event._tag === 'Streaming') {

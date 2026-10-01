@@ -233,6 +233,36 @@ describe('the Talk room', () => {
     }
   })
 
+  it('keeps a card as it was read last, when an earlier read comes back after it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      let answerFirst: (item: ReturnType<typeof items.card>) => void = () => undefined
+      const getThreadItem = vi
+        .fn()
+        .mockImplementationOnce(() => new Promise((resolve) => (answerFirst = resolve)))
+        .mockImplementation(async () => items.card(card({ phase: 'ready', summary: 'Retried twice.' }), 'c1'))
+      const { client, emit } = fakeClient({
+        getCoordinator: vi.fn(async () =>
+          coordinatorSnapshot({ items: [items.card(card({ phase: 'running', step: 'implement' }), 'c1')] }),
+        ),
+        getThreadItem,
+      })
+      withServices(<Project />, client)
+      await screen.findByText('Implementing')
+      act(() => emit(changed('thread_item', 'c1', 'thc')))
+      await vi.advanceTimersByTimeAsync(50)
+      act(() => emit(changed('thread_item', 'c1', 'thc')))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(await screen.findByText('Retried twice.')).toBeTruthy()
+      // The first read answers last, with the card as it was then: it doesn't put it back.
+      await act(async () => answerFirst(items.card(card({ phase: 'running', step: 'implement' }), 'c1')))
+      expect(screen.getByText('Retried twice.')).toBeTruthy()
+      expect(screen.queryByText('Implementing')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('shows earlier items when asked', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async (_projectId: string, page?: { before?: number }) =>

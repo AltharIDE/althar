@@ -83,6 +83,25 @@ describe('the coordinator loop', () => {
       const [ready] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
       assert.deepStrictEqual([ready?.summary, ready?.lead, ready?.startedAt !== null], ['Fixed the heading.', 'claude-code', true])
 
+      // A turn of the lead's starts and ends the card's work under way, and says so both times: a step reports mid-turn.
+      const touches = Effect.map(
+        sql<{ revision: number }>`SELECT revision FROM thread_items WHERE kind = 'task' AND thread_id = ${threadId}`,
+        (rows) => rows[0]?.revision ?? 0,
+      )
+      const before = yield* touches
+      const sessions = yield* Sessions
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', { body: 'hello' }),
+        threadId: ready?.threadId ?? '',
+        body: 'hello',
+        disposition: 'after_current',
+      })
+      yield* until(
+        Effect.map(touches, (revision) => (revision >= before + 2 ? [revision] : [])),
+        (rows) => rows.length === 1,
+      )
+      assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'ready')
+
       // Implement, a review with a finding, the lead settling it, and a second review that passes.
       const steps = yield* results(ready?.threadId ?? '')
       assert.deepStrictEqual(
