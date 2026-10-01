@@ -13,7 +13,7 @@ import { currentBranch, defaultBranch, remoteUrls } from '../src/git'
 import { change } from '../src/records'
 import { Live } from '../src/Live'
 import { Sessions } from '../src/Sessions'
-import { recorder, transcript } from '../src/threads'
+import { addItem, recorder, transcript } from '../src/threads'
 import { items, repository, runtime, task, turns, until } from './support'
 
 /** A thread with a session on it, for the recorder to write into. */
@@ -119,6 +119,18 @@ describe('the thread recorder', () => {
       assert.isTrue(whole.text.endsWith('\n[codex] first\n[tool] Read README (completed)\n[note] Plain: with detail'))
       const tail = yield* transcript(where.threadId, 30)
       assert.deepStrictEqual(tail, { text: '[note] Plain: with detail', omitted: 3 })
+      // Steps' results and task cards are written in a line each; a card for a task that's gone, not at all.
+      const { projectId } = where
+      const [task] = yield* (yield* SqlClient.SqlClient)<{ id: string }>`SELECT task_id AS id FROM threads WHERE id = ${where.threadId}`
+      yield* addItem({ projectId, threadId: where.threadId }, 'step_result', { step: 'review', verdict: 'pass', summary: 'Holds.' })
+      yield* addItem({ projectId, threadId: where.threadId }, 'task', { taskId: task?.id })
+      yield* addItem({ projectId, threadId: where.threadId }, 'task', { taskId: 'tsk_gone' })
+      yield* addItem({ projectId, threadId: where.threadId }, 'agent_message', { text: 'from nobody' })
+      assert.isTrue(
+        (yield* transcript(where.threadId, 10_000)).text.endsWith(
+          '\n[review, pass] Holds.\n[task] retry-checkout: Retry checkout\n[agent] from nobody',
+        ),
+      )
     }).pipe(Effect.provide(runtime())),
   )
 })

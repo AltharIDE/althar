@@ -10,16 +10,24 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 
 | Module | What it does |
 | --- | --- |
-| `Runtime.ts` | Composes the store, this launch and the services; `envelope` makes a person's command |
+| `Runtime.ts` | Composes the store, this launch and the services |
+| `envelope.ts` | Makes a command's envelope: a person's, or the coordinator's |
 | `Instance.ts` | Records this launch, finds or creates the device and its actors, and reconciles before anything starts |
 | `reconcile.ts` | Settles what an earlier launch left: stops its processes if they are provably its own, and marks sessions, turns and requests |
 | `Projects.ts` | Opens folders as projects; creates tasks, their threads and their worktrees |
-| `Sessions.ts` | Starts, supervises and stops agent sessions; delivers the thread's input as turns and records them |
+| `Sessions.ts` | Starts, supervises and stops agent sessions on a task's, the coordinator's or a step's thread; delivers the thread's input as turns and records them; writes each role's brief |
+| `Coordinator.ts` | The project's coordinator: its thread, the agent it starts on, and its tools (read the project, draft a task, propose its plan, pass a message to a lead) |
+| `coordinatorFolder.ts` | The coordinator's read-only copies of the project's repositories, detached at the default branch and made fresh each turn |
+| `Plans.ts` | A task's plan: proposed, held, changed or started by the person, and started on its own when its countdown ends |
+| `Runs.ts` | Runs a started plan as the task workflow: Implement, then Review, which the lead settles, up to three rounds; the lead's and the reviewer's tools |
+| `cards.ts` | Each task's card in the coordinator's thread: posted once, touched when what it shows changes |
+| `ToolServer.ts` | Charrette's tools, served to sessions over MCP on this machine, each with a token that says who is calling |
+| `SignIns.ts` | Whether each agent is signed in, from its own status command, at most once a minute |
 | `Permissions.ts` | Records permission requests and decisions; asks the person what the rules keep for them |
-| `rules.ts` | The MVP's rules: everything allowed except the always-ask list. Commands are read as a shell would split them |
+| `rules.ts` | The MVP's rules: everything allowed except the always-ask list; for a role that only reads, only what reads. Commands are read as a shell would split them |
 | `threads.ts` | Turns agent events into thread items; writes the thread as text for a brief |
 | `Live.ts` | What is happening now, for clients that watch, with each message's text as far as it has come |
-| `Queries.ts` | What a client's screens show, read from the store: projects, tasks, and a task's thread with its live session and the calls waiting |
+| `Queries.ts` | What a client's screens show, read from the store: projects, tasks, a task's thread with its live session and the calls waiting, and the coordinator's thread with its task cards |
 | `Api.ts` | The API of `@charrette/contracts`, served over a port: handlers, and the change feed and streaming text as one `Watch` stream |
 | `Folders.ts` | Folders the person chose, by grant: the app's main process allows them, and the window opens them by grant |
 | `words.ts` | What went wrong, in the words the window shows |
@@ -42,6 +50,12 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 - **Errors reach a client in words.** A failure goes out as `ApiError`, with the runtime's error tag as its reason and a sentence from `words.ts`; anything the person can't put right also goes to the log with its whole cause.
 - **Sign-in is checked at most once a minute,** unless a client asks again: each check starts the agent's own status command.
 - **The thread says when an agent goes.** One that exits on its own, one that can't start, and one a restart stopped each leave a line in the thread saying so.
+- **The coordinator and reviewers only read** (ADR-004). They read throwaway copies: the coordinator, worktrees refreshed from the default branch each turn; a reviewer, a snapshot of the lead's worktree committed when its round begins (recorded in `workspace_snapshots`). Their agents' sandboxes are read-only where that still lets them call Charrette's tools (Codex's `read-only`; Claude Code with edits denied and every command asking). Charrette's reader rules are the backstop: reads, searches and fetches, and commands that only look, each with the flags it may take; anything else is refused with a reason, and nothing asks the person.
+- **Agents report through Charrette's tools.** The runtime serves an MCP server on 127.0.0.1 and gives each session a token for its role: the coordinator drafts and plans tasks, a lead says its step is done with `finish_step`, a reviewer reports with `report_review`. The token stops working when the session ends. What a step reports is a thread item the person reads instead of the whole turn.
+- **A step that doesn't report needs the person** (05). A step's agent that ends its turn without calling its tool is reminded once; after that, and at once when its agent goes, can't start, or a restart stopped the step, the attempt waits on the person with a `stuck` call. They tell the agent what to do, hand the step to another agent, or abandon it (a review is gone on without). A step that reports after all withdraws its call. Review that runs out of rounds with settled changes it hasn't seen needs the person too, rather than calling the task ready.
+- **Plans start on the runtime's clock.** A proposed plan starts after its countdown (25 seconds) whether or not a window is open, unless the person holds it. A plan that came due while Charrette was closed is held at launch, not started unannounced. Starting is idempotent: a plan runs once.
+- **A run is the task workflow, on the kernel's tables.** A started plan becomes a run with its attempt, execution and graph revision; each step is a node (the review and settling rounds by iteration) with its node attempts. The lead's session carries Implement and settling; a reviewer runs in a step thread of its own. Another round of review runs only if settling changed the worktree (its tree id, untracked files included) and rounds are left.
+- **Cards are read, not written.** A task's card in the coordinator's thread holds only the task's id; what it shows is read from the task, its plan, its run and its sessions. Touching the item tells watching clients to read it again. Every task gets one, whoever started it.
 - **Services capture what they need.** Each service's methods return effects with no requirements, so the adapter can call `Permissions.decide` from its own fibers.
 
 ## Checks
@@ -51,10 +65,14 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 
 ## Gaps
 
-- **No workflow graph yet.** Sessions run on a task's thread directly, not as node attempts of a run; controller generations are always 1 and not yet fenced.
+- **The workflow is fixed.** Every run is Implement then Review; a running plan doesn't change, and the graph is never patched. Controller generations are always 1 and not yet fenced; after a restart, a step that was running needs the person rather than picking up on its own.
+- **A review copy leaves out ignored files,** such as `node_modules`, since it is the worktree's tree; a reviewer can't run tests that need what the lead installed.
+- **Findings are settled by the lead alone.** The person sees them but doesn't answer them yet.
+- **The lead's own permission requests are answered by the rules,** not by the lead, and the coordinator doesn't answer a lead's questions yet.
+- **No timeout per step yet.** A step whose agent keeps working without end isn't stopped; the MVP plan's budget per node will bound it.
 - **Session commands have no receipts in the store.** A retry within a launch gets the first one's result; across a restart, the session is gone anyway.
 - **Rules read commands, not what they do.** A script that writes outside the worktree isn't caught by the rules; the agents' sandboxes are the boundary (Codex's and Claude's). OpenCode has no sandbox yet.
-- **Briefs are text in the first prompt,** not artifacts, and there are no Charrette MCP tools yet for the part that doesn't fit.
+- **Briefs are text in the first prompt,** not artifacts.
 - **Sessions are not loaded after a restart;** a lost session stays lost, and the person starts a new one.
 - **Raw protocol capture** is not written to its bounded file yet.
 - **Questions the agent asks** (ACP elicitation) are cancelled; they don't become attention requests yet.

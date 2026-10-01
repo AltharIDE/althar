@@ -1,11 +1,20 @@
-import type { ThreadItem, ThreadSnapshot } from '@charrette/contracts'
+import type { ThreadItem } from '@charrette/contracts'
 import { Delivery, PlanState, ToolKind, ToolState } from '@charrette/ui'
+
+import { took } from './time'
 
 /*
  * A thread's items as the blocks the kit draws, in order: what the person
  * said, each turn of the agent (its messages, thoughts, tool calls and plan,
- * grouped under one name), and the lines that mark a change of scene. Text
- * still streaming replaces the stored text of its item.
+ * grouped under one name), what a step reported when it ended, a task's card
+ * in the coordinator's thread, and the lines that mark a change of scene.
+ * Text still streaming replaces the stored text of its item.
+ *
+ * A turn's work folds (docs/plans/mvp.md, "Work is collapsed"): its tool
+ * calls, thoughts and plan, and what it said on the way, under how long it
+ * worked. Only its last message stays open, or nothing when a step's result
+ * follows, since the step's summary is what the person reads. While it runs,
+ * the fold says how long it has worked so far and what it is doing now.
  */
 
 export type Part =
@@ -28,6 +37,9 @@ export type Part =
     }
   | { readonly kind: 'notice'; readonly id: string; readonly text: string; readonly tone: 'info' | 'warning' | 'error' }
 
+export type StepResult = Extract<ThreadItem, { kind: 'step_result' }>['content']
+export type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
+
 export type Block =
   | { readonly kind: 'you'; readonly id: string; readonly text: string; readonly at: string; readonly delivery: Delivery }
   | {
@@ -35,9 +47,22 @@ export type Block =
       readonly id: string
       readonly agentId: string | null
       readonly at: string
+      /** Everything it did and said, in order. */
       readonly parts: ReadonlyArray<Part>
+      /** What folds: all but its last message. */
+      readonly work: ReadonlyArray<Part>
+      /** What stays open under the fold: its last message, unless a step's result follows. */
+      readonly said: ReadonlyArray<Part>
+      /** It is still running. */
+      readonly live: boolean
+      /** How long it worked, from its first item to its last, or until now while it runs. */
+      readonly took: string
+      /** While it runs, what it is doing now, in a few words. */
+      readonly doing: string | null
     }
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
+  | { readonly kind: 'step'; readonly id: string; readonly at: string; readonly result: StepResult }
+  | { readonly kind: 'card'; readonly id: string; readonly card: TaskCardContent }
 
 /** ACP's tool kinds, as the kit's. */
 export const toolKindOf = (kind: string): ToolKind => {
@@ -163,7 +188,7 @@ export interface Streamed {
 const noticeText = (content: NoticeContent) => (content.description === null ? content.title : `${content.title} ${content.description}`)
 
 const partOf = (
-  item: Exclude<ThreadItem, { kind: 'user_message' }>,
+  item: Extract<ThreadItem, { kind: 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'notice' }>,
   streaming: ReadonlyMap<string, Streamed>,
   turnRunning: boolean,
   worktree: string | null,
@@ -204,38 +229,119 @@ const partOf = (
   }
 }
 
+/** What blocks are made from: a thread's items, whether its agent is mid-turn, and the worktree its paths are under. */
+export interface ThreadSource {
+  readonly items: ReadonlyArray<ThreadItem>
+  readonly turnRunning: boolean
+  readonly worktree: string | null
+}
+
+/** A turn's work and what it said: all but its last message folds, and all of it before a step's result. */
+const splitOf = (parts: ReadonlyArray<Part>, beforeStep: boolean) => {
+  const last = beforeStep ? -1 : parts.findLastIndex((part) => part.kind === 'message')
+  return { work: parts.filter((_, index) => index !== last), said: last === -1 ? [] : parts.slice(last, last + 1) }
+}
+
+/** What a running turn is doing, from the last thing it did. */
+const doingOf = (work: ReadonlyArray<Part>): string | null => {
+  const last = work.at(-1)
+  switch (last?.kind) {
+    case 'tool':
+      return `${last.verb} ${last.target}`
+    case 'thought':
+      return text.thinking
+    case 'plan':
+      return text.planning
+    default:
+      return null
+  }
+}
+
+export const text = { thinking: 'Thinking', planning: 'Planning' }
+
 /** The blocks of a thread, oldest first, with what is still being written but not yet read at the end. */
 export const blocksOf = (
-  snapshot: ThreadSnapshot,
+  source: ThreadSource,
   streaming: ReadonlyMap<string, Streamed>,
   ago: (iso: string) => string,
+  now: string = new Date().toISOString(),
 ): ReadonlyArray<Block> => {
-  const turnRunning = snapshot.session?.turnRunning ?? false
+  const { turnRunning, worktree } = source
   const blocks: Array<Block> = []
+  /** When each turn began and last grew, by its id. */
+  const spans = new Map<string, { from: string; to: string }>()
   const add = (agentId: string | null, at: string, part: Part) => {
     const last = blocks.at(-1)
-    if (last?.kind === 'turn' && last.agentId === agentId) blocks[blocks.length - 1] = { ...last, parts: [...last.parts, part] }
-    else blocks.push({ kind: 'turn', id: part.id, agentId, at: ago(at), parts: [part] })
+    if (last?.kind === 'turn' && last.agentId === agentId) {
+      blocks[blocks.length - 1] = { ...last, parts: [...last.parts, part] }
+      const span = spans.get(last.id)
+      if (span !== undefined) spans.set(last.id, { ...span, to: at })
+      return
+    }
+    blocks.push({ kind: 'turn', id: part.id, agentId, at: ago(at), parts: [part], work: [], said: [], live: false, took: '', doing: null })
+    spans.set(part.id, { from: at, to: at })
   }
-  for (const item of snapshot.items) {
-    if (item.kind === 'user_message') {
-      const delivery =
-        item.input?.state === 'queued' ? (item.input.interrupting ? Delivery.Interrupting : Delivery.Queued) : Delivery.Delivered
-      blocks.push({ kind: 'you', id: item.id, text: item.content.text, at: ago(item.createdAt), delivery })
-      continue
+  for (const item of source.items) {
+    switch (item.kind) {
+      case 'user_message': {
+        const delivery =
+          item.input?.state === 'queued' ? (item.input.interrupting ? Delivery.Interrupting : Delivery.Queued) : Delivery.Delivered
+        blocks.push({ kind: 'you', id: item.id, text: item.content.text, at: ago(item.createdAt), delivery })
+        continue
+      }
+      case 'step_result': {
+        // The step ended with this: the turn that did the work ran until now.
+        const last = blocks.at(-1)
+        const span = last?.kind === 'turn' ? spans.get(last.id) : undefined
+        if (last?.kind === 'turn' && span !== undefined) spans.set(last.id, { ...span, to: item.createdAt })
+        blocks.push({ kind: 'step', id: item.id, at: ago(item.createdAt), result: item.content })
+        continue
+      }
+      case 'task':
+        blocks.push({ kind: 'card', id: item.id, card: item.content })
+        continue
+      case 'notice':
+        // What Charrette itself says, such as a change of agent or a restart, is a line across the thread.
+        if (item.content.source === 'runtime') {
+          blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
+          continue
+        }
     }
-    // What Charrette itself says, such as a change of agent or a restart, is a line across the thread.
-    if (item.kind === 'notice' && item.content.source === 'runtime') {
-      blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
-      continue
-    }
-    add(item.agentId, item.createdAt, partOf(item, streaming, turnRunning, snapshot.task.worktree))
+    add(item.agentId, item.createdAt, partOf(item, streaming, turnRunning, worktree))
   }
   // A message the store has placed but the window hasn't read yet shows from its first words.
-  const read = new Set(snapshot.items.map((item) => item.id))
+  const read = new Set(source.items.map((item) => item.id))
   for (const [id, streamed] of streaming) {
     if (read.has(id)) continue
     add(streamed.agentId, streamed.at, { kind: streamed.kind === 'agent_thought' ? 'thought' : 'message', id, text: streamed.text })
   }
-  return blocks
+  // What an agent says after its step's result, closing its turn, folds with the work that led to it.
+  const lastTurn = blocks.findLastIndex((block) => block.kind === 'turn')
+  const merged: Array<Block> = []
+  blocks.forEach((block, index) => {
+    const step = merged.at(-1)
+    const before = merged.at(-2)
+    const closing = block.kind === 'turn' && step?.kind === 'step' && before?.kind === 'turn' && before.agentId === block.agentId
+    if (!closing || (turnRunning && index === lastTurn)) return void merged.push(block)
+    const span = spans.get(before.id)
+    const after = spans.get(block.id)
+    if (span !== undefined && after !== undefined) spans.set(before.id, { ...span, to: after.to })
+    merged[merged.length - 2] = { ...before, parts: [...before.parts, ...block.parts] }
+  })
+  // Each turn folds its work; the one still running says what it is doing now.
+  const live = turnRunning ? merged.findLastIndex((block) => block.kind === 'turn') : -1
+  return merged.map((block, index) => {
+    if (block.kind !== 'turn') return block
+    const span = spans.get(block.id)
+    const running = index === live
+    const { work, said } = splitOf(block.parts, !running && merged[index + 1]?.kind === 'step')
+    return {
+      ...block,
+      work,
+      said,
+      live: running,
+      took: span === undefined ? '' : took(span.from, running ? now : span.to),
+      doing: running ? doingOf(work) : null,
+    }
+  })
 }

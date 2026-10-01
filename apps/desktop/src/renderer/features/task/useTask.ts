@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@charrette/contracts'
 
-import { messageOf } from '../../data/client'
-import type { Streamed } from './thread'
+import { messageOf, type StuckAnswer } from '../../data/client'
+import { caughtUp, mergeItems, waiting } from '../../shared/items'
+import type { Streamed } from '../../shared/thread'
 import { useServices, useWatch } from '../../data/services'
 
 /*
@@ -40,24 +41,9 @@ export interface TaskModel {
   readonly setModel: (model: string) => Promise<void>
   readonly stop: () => Promise<void>
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string) => Promise<void>
+  /** Answers a step that needs the person. */
+  readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
   readonly dismissError: () => void
-}
-
-/** Items by id, oldest first: what arrives replaces what was there. */
-export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: ReadonlyArray<ThreadItem>): ReadonlyArray<ThreadItem> => {
-  const byId = new Map(current.map((item) => [item.id, item]))
-  for (const item of incoming) byId.set(item.id, item)
-  return [...byId.values()].toSorted((a, b) => a.sequence - b.sequence)
-}
-
-/** Streamed text the store now holds in full needs no streamed copy. */
-const caughtUp = (streaming: ReadonlyMap<string, Streamed>, items: ReadonlyArray<ThreadItem>): ReadonlyMap<string, Streamed> => {
-  const kept = new Map(streaming)
-  for (const item of items) {
-    const live = kept.get(item.id)
-    if (live !== undefined && 'text' in item.content && item.content.text.length >= live.text.length) kept.delete(item.id)
-  }
-  return kept.size === streaming.size ? streaming : kept
 }
 
 export const useTask = (threadId: string): TaskModel => {
@@ -125,6 +111,8 @@ export const useTask = (threadId: string): TaskModel => {
     if (event.threadId !== threadId) return
     if (event.aggregateType === 'thread_item') changed.current.items.add(event.aggregateId)
     else changed.current.head = true
+    // A message delivered changes its input, not its item: read again what still shows as queued.
+    if (event.aggregateType === 'user_input') for (const id of waiting(snapshot?.items ?? [])) changed.current.items.add(id)
     timer.current ??= setTimeout(readChanged, GATHER)
   }, since)
 
@@ -178,6 +166,7 @@ export const useTask = (threadId: string): TaskModel => {
     stop: () => act(() => client.stopSession(threadId)),
     answer: (attentionId, decision, reason) =>
       act(() => client.answer({ attentionId, decision, ...(reason === undefined || reason === '' ? {} : { reason }) })),
+    answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
     dismissError: () => setError(null),
   }
 }

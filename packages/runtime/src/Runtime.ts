@@ -1,13 +1,17 @@
-import { CommandEnvelope, CommandId, Ids, newId, now } from '@charrette/domain'
 import { Commands, Database, Ledger } from '@charrette/persistence-sqlite'
-import { Effect, Layer, Schema } from 'effect'
+import { Layer } from 'effect'
 
 import { Agents, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
 import { Instance } from './Instance'
 import { Live } from './Live'
 import { Permissions } from './Permissions'
 import { Projects } from './Projects'
+import { Coordinator } from './Coordinator'
+import { Plans } from './Plans'
+import { Runs } from './Runs'
 import { Sessions } from './Sessions'
+import { SignIns } from './SignIns'
+import { ToolServer } from './ToolServer'
 
 export interface RuntimeLayerOptions extends RuntimeOptions {
   /** The profile's database file, or `:memory:` for tests. */
@@ -27,29 +31,15 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(Database.layer({ filename: options.database })),
     Layer.provideMerge(WebCrypto),
   )
-  const base = Layer.mergeAll(Instance.layer, Live.layer).pipe(
+  const base = Layer.mergeAll(Instance.layer, Live.layer, ToolServer.layer).pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry),
   )
-  return Layer.mergeAll(Projects.layer, Sessions.layer).pipe(Layer.provideMerge(Permissions.layer.pipe(Layer.provideMerge(base))))
+  const core = Layer.mergeAll(Projects.layer, Sessions.layer).pipe(Layer.provideMerge(Permissions.layer.pipe(Layer.provideMerge(base))))
+  // Runs drive a task's steps; plans start runs when their time comes; the coordinator plans tasks and passes messages on.
+  const work = Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(core))))
+  return Coordinator.layer.pipe(Layer.provideMerge(SignIns.layer.pipe(Layer.provideMerge(work))))
 }
 
-/**
- * A command from the person using this profile, ready to send. A client
- * gives its own id, so a retry is answered from the first one's receipt.
- */
-export const envelope = (commandType: string, payload: unknown, commandId?: string) =>
-  Effect.gen(function* () {
-    const instance = yield* Instance
-    return new CommandEnvelope({
-      commandId:
-        commandId === undefined ? yield* newId(Ids.command) : yield* Effect.orDie(Schema.decodeUnknownEffect(CommandId)(commandId)),
-      commandType,
-      schemaVersion: 1,
-      actorId: instance.personId,
-      deviceId: instance.deviceId,
-      issuedAt: yield* now,
-      payload,
-    })
-  })
+export { envelope } from './envelope'

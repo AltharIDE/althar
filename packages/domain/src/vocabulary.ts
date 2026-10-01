@@ -73,6 +73,8 @@ export const ThreadItemKind = Schema.Literals([
   'plan',
   'step_result',
   'notice',
+  /** A task in the coordinator's thread: its plan, then its card. Charrette posts it. */
+  'task',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 

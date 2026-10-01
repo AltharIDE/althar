@@ -106,6 +106,37 @@ describe('the client', () => {
     await client.close()
   })
 
+  it('asks the coordinator for a task, holds, changes and starts its plan, and starts one the person planned', async () => {
+    const { client, grant } = await connected()
+    const project = await client.openProject(await grant(repository()))
+    const coordinator = await client.getCoordinator(project.id)
+    expect(coordinator.suggested?.agentId).toBe('claude-code')
+    await client.send({ threadId: coordinator.threadId, body: 'Add a retry. [coordinator:plan]', disposition: 'after_current' })
+    const planned = await eventually(
+      () => client.getCoordinator(project.id, { limit: 50 }),
+      (snapshot) => snapshot.items.some((item) => item.kind === 'task'),
+    )
+    const card = planned.items.find((item) => item.kind === 'task')
+    const planId = card?.kind === 'task' ? (card.content.plan?.id ?? '') : ''
+    await client.holdPlan(planId)
+    await client.changePlan(planId, [{ key: 'implement', agentId: 'codex', model: null, skipped: false }])
+    const held = await client.getThreadItem(coordinator.threadId, card?.id ?? '')
+    expect(held.kind === 'task' && [held.content.phase, held.content.plan?.steps.map((step) => step.agentId)]).toEqual(['held', ['codex']])
+    await client.startPlan(planId)
+    await eventually(
+      () => client.getThreadItem(coordinator.threadId, card?.id ?? ''),
+      (item) => item.kind === 'task' && item.content.phase === 'running',
+    )
+
+    const task = await client.startTask({
+      projectId: project.id,
+      title: 'Tidy the README',
+      steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+    })
+    expect(task.title).toBe('Tidy the README')
+    await client.close()
+  })
+
   it('rejects with what went wrong, in words', async () => {
     const { client } = await connected()
     const failure = await client.openProject('grant_nobody_gave').catch((error: unknown) => error)
@@ -146,6 +177,12 @@ describe('the client', () => {
           StopSession: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
           Answer: () => Effect.die('unused'),
+          GetCoordinator: () => Effect.die('unused'),
+          StartTask: () => Effect.die('unused'),
+          StartPlan: () => Effect.die('unused'),
+          HoldPlan: () => Effect.die('unused'),
+          ChangePlan: () => Effect.die('unused'),
+          AnswerStuck: () => Effect.die('unused'),
           Watch: ({ since }) => {
             watches.push(since)
             return Stream.make({

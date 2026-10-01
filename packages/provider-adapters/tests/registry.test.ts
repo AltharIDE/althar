@@ -43,6 +43,19 @@ describe('the agent registry', () => {
     assert.includeMembers(meta.claudeCode.options.settings.permissions.ask, ['Bash', 'Edit', 'Write'])
   })
 
+  it('makes Claude Code a reader: its edits denied, and every command asking', () => {
+    const meta = agents['claude-code'].sessionMeta?.('reader') as {
+      claudeCode: {
+        options: {
+          settings: { permissions: { deny: Array<string>; ask: Array<string> }; sandbox: { autoAllowBashIfSandboxed: boolean } }
+        }
+      }
+    }
+    assert.includeMembers(meta.claudeCode.options.settings.permissions.deny, ['Edit', 'Write'])
+    assert.includeMembers(meta.claudeCode.options.settings.permissions.ask, ['Bash'])
+    assert.isFalse(meta.claudeCode.options.settings.sandbox.autoAllowBashIfSandboxed)
+  })
+
   it('never gives one option two meanings', () => {
     for (const agent of Object.values(agents)) {
       const { rejectAndContinue, rejectAndStop, allowScopes } = agent.permissions

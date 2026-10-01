@@ -1,8 +1,8 @@
 # @charrette/desktop
 
-Charrette's desktop app: Electron, with the runtime in a utility process and the interface in the window. It opens a folder as a project, starts tasks in worktrees of their own, and shows each task's thread as it happens: what the lead says and thinks, the tools it runs, its plan, and the calls the rules keep for you. You talk to the lead from the composer, interrupt it, change its model, hand the task to another agent, or stop it.
+Charrette's desktop app: Electron, with the runtime in a utility process and the interface in the window. It opens a folder as a project, where you talk to the project's coordinator: it answers questions about the code and turns what you want changed into tasks. Each task shows in the conversation as a card: first its plan (who implements it, who reviews it), which starts on its own after 25 seconds unless you change or hold it, then where it stands. A task's own thread shows what the lead did, folded once each turn is over, with what each step reported: the lead's summary, and the review's findings. You talk to the lead from the composer, interrupt it, change its model, hand the task to another agent, or stop it. You can also plan a task yourself.
 
-It is step 2 of the [MVP plan](../../docs/plans/mvp.md): the shell, showing a real thread. There is no coordinator or workflow graph yet; a task is its lead.
+It is step 3 of the [MVP plan](../../docs/plans/mvp.md): the coordinator loop.
 
 ## Use it
 

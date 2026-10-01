@@ -1,4 +1,13 @@
-import type { AgentStatus, ProjectSummary, Status, TaskSummary, ThreadItem, ThreadSnapshot, WatchEvent } from '@charrette/contracts'
+import type {
+  AgentStatus,
+  CoordinatorSnapshot,
+  ProjectSummary,
+  Status,
+  TaskSummary,
+  ThreadItem,
+  ThreadSnapshot,
+  WatchEvent,
+} from '@charrette/contracts'
 import { vi } from 'vitest'
 
 import type { Client } from '../src/renderer/data/client'
@@ -89,7 +98,58 @@ export const items = {
     content: Partial<Extract<ThreadItem, { kind: 'notice' }>['content']> & { title: string },
     agentId: string | null = 'claude-code',
   ): ThreadItem => ({ ...next(), agentId, kind: 'notice', content: { source: 'agent', severity: 'info', description: null, ...content } }),
+  step: (content: Partial<Extract<ThreadItem, { kind: 'step_result' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'step_result',
+    content: { step: 'implement', round: 0, summary: 'Added the retry.', verdict: null, findings: [], agentId: null, ...content },
+  }),
+  card: (content: TaskCardContent, id?: string): ThreadItem => ({
+    ...next(),
+    ...(id === undefined ? {} : { id }),
+    agentId: null,
+    kind: 'task',
+    content,
+  }),
 }
+
+type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
+
+/** A task's card as the coordinator's thread has it: planned by default, starting in 20 seconds. */
+export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent => ({
+  taskId: 't1',
+  threadId: 'th1',
+  title: 'Add a retry',
+  slug: 'add-a-retry',
+  phase: 'planned',
+  plan: {
+    id: 'pln1',
+    steps: [
+      { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+      { key: 'review', agentId: 'codex', model: null, skipped: false },
+    ],
+    startsAt: new Date(Date.now() + 20_000).toISOString(),
+    reason: 'It knows the code.',
+  },
+  step: null,
+  summary: null,
+  lead: 'claude-code',
+  branch: 'charrette/add-a-retry',
+  startedAt: null,
+  ...overrides,
+})
+
+/** The coordinator's thread, as GetCoordinator gives it: no one working, starting on Claude Code. */
+export const coordinatorSnapshot = (overrides: Partial<CoordinatorSnapshot> = {}): CoordinatorSnapshot => ({
+  threadId: 'thc',
+  cursor: 5,
+  project: { id: 'p1', name: 'meridian' },
+  session: null,
+  suggested: { agentId: 'claude-code', agentName: 'Claude Code', model: null, available: true },
+  items: [],
+  earlier: false,
+  ...overrides,
+})
 
 export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapshot => ({
   threadId: 'th1',
@@ -104,6 +164,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     branch: 'charrette/add-a-retry',
     worktree: '/w/meridian',
     baseRef: 'main',
+    phase: 'running',
   },
   session: {
     id: 's1',
@@ -139,6 +200,12 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     stopSession: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
     answer: vi.fn(async () => {}),
+    getCoordinator: vi.fn(async () => coordinatorSnapshot()),
+    startTask: vi.fn(async () => task),
+    startPlan: vi.fn(async () => {}),
+    holdPlan: vi.fn(async () => {}),
+    changePlan: vi.fn(async () => {}),
+    answerStuck: vi.fn(async () => {}),
     watch: (listener, since) => {
       watching.push(since)
       listeners.add(listener)

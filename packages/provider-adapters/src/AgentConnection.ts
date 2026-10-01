@@ -359,13 +359,46 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       )
     }
 
+    /*
+     * What each tool call said about itself, by session and call. Codex asks
+     * permission for an MCP tool with no title or input of its own; the call
+     * it asks about said both when it began, so the request takes them from it.
+     */
+    const calls = new Map<string, { title?: string; kind?: string; rawInput?: unknown }>()
+    const remember = (sessionId: string, update: acp.SessionUpdate) => {
+      if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return
+      const key = `${sessionId}\u0000${update.toolCallId}`
+      const known = calls.get(key) ?? {}
+      calls.set(key, {
+        ...known,
+        ...(update.title === undefined || update.title === null || update.title === '' ? {} : { title: update.title }),
+        ...(update.kind === undefined || update.kind === null ? {} : { kind: update.kind }),
+        ...(update.rawInput === undefined || update.rawInput === null ? {} : { rawInput: update.rawInput }),
+      })
+    }
+    const described = (params: acp.RequestPermissionRequest): acp.RequestPermissionRequest => {
+      const known = calls.get(`${params.sessionId}\u0000${params.toolCall.toolCallId}`)
+      if (known === undefined) return params
+      const { toolCall } = params
+      return {
+        ...params,
+        toolCall: {
+          ...toolCall,
+          ...(toolCall.title === undefined || toolCall.title === null || toolCall.title === '' ? { title: known.title } : {}),
+          ...(toolCall.kind === undefined || toolCall.kind === null ? { kind: known.kind as acp.ToolKind } : {}),
+          ...(toolCall.rawInput === undefined || toolCall.rawInput === null ? { rawInput: known.rawInput } : {}),
+        },
+      }
+    }
+
     // Updates are handled before anything else, so each is in its session's inbox before a later message is looked at.
     const app = acp
       .client({ name: 'charrette' })
-      .onNotification(acp.methods.client.session.update, ({ params }) =>
-        receive(params.sessionId, { _tag: 'Update', update: params.update }),
-      )
-      .onRequest(acp.methods.client.session.requestPermission, (request) => answerPermission(request.params, request.signal))
+      .onNotification(acp.methods.client.session.update, ({ params }) => {
+        remember(params.sessionId, params.update)
+        receive(params.sessionId, { _tag: 'Update', update: params.update })
+      })
+      .onRequest(acp.methods.client.session.requestPermission, (request) => answerPermission(described(request.params), request.signal))
       .onRequest(acp.methods.client.elicitation.create, (request) => askQuestion(request.params))
 
     let owned: OwnedProcess | undefined

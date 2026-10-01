@@ -1,5 +1,5 @@
 import { agents, type AgentDefinition, type Transport } from '@charrette/provider-adapters'
-import { Context, Crypto, Effect, Layer } from 'effect'
+import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import { UnknownAgent } from './errors'
 
@@ -9,6 +9,8 @@ export interface RuntimeOptions {
   readonly appVersion: string
   /** What this device is called, when the profile is new. */
   readonly deviceName: string
+  /** How long a proposed plan waits before it starts on its own: 25 seconds unless a test says otherwise. */
+  readonly countdown?: Duration.Duration
 }
 
 export class RuntimeConfig extends Context.Service<RuntimeConfig, RuntimeOptions>()('@charrette/runtime/RuntimeConfig') {}

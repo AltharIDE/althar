@@ -463,3 +463,462 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   }
   return ALLOW
 }
+
+// ---- Roles that only read ----------------------------------------------------
+
+/*
+ * A role that only reads, such as the coordinator (docs/architecture/04) or a
+ * reviewer, is never asked about and never asks: what it may do, it does, and
+ * the rest is refused with a reason it reads. It may read anything, search,
+ * fetch from the web, and run commands that only look. It may call
+ * Charrette's own tools, which are how it changes anything. Every write, and
+ * every command that could write, is refused. A change is a task.
+ */
+
+export type ReaderVerdict = { readonly verdict: 'allow' } | { readonly verdict: 'deny'; readonly reason: string }
+
+const deny = (reason: string): ReaderVerdict => ({ verdict: 'deny', reason })
+
+/** Charrette's own tools, as each agent names them: `mcp__charrette__…` (Claude Code), `mcp.charrette.…` (Codex), `charrette_…` (OpenCode). */
+export const CHARRETTE_TOOL = /^(mcp__charrette__|mcp\.charrette\.|charrette_)/
+
+/**
+ * The flags a program may take in a reader's command, when some of its flags
+ * write or run another program (`rg --pre`, `fd -x`, `sort -o`). A flag not
+ * listed refuses the command: a list of what may run stays right as programs
+ * grow flags, where a list of what may not keeps missing some.
+ */
+interface Flags {
+  /** Short flags, one letter each, which may be combined: `-la`. */
+  readonly short?: string
+  /** Short flags that take a value, joined or as the next word: `-g '*.ts'`, `-g*.ts`. */
+  readonly shortWithValue?: string
+  /** Long flags, with or without `=value`. */
+  readonly long?: ReadonlyArray<string>
+  /** Long flags whose value is the next word when it isn't joined with `=`. */
+  readonly longWithValue?: ReadonlyArray<string>
+  /** The most operands it may take: one more is where some programs write. */
+  readonly operands?: number
+}
+
+/**
+ * Programs a reader may run. `any` marks those with no flag that writes or
+ * runs another program, which may take any flag; the others list theirs. Git,
+ * `find` and `sed` are read more closely below.
+ */
+const READS: Readonly<Record<string, Flags | 'any' | 'git' | 'find' | 'sed' | 'env'>> = {
+  ls: 'any',
+  cat: 'any',
+  head: 'any',
+  tail: 'any',
+  wc: 'any',
+  grep: 'any',
+  egrep: 'any',
+  fgrep: 'any',
+  stat: 'any',
+  pwd: 'any',
+  echo: 'any',
+  printf: 'any',
+  which: 'any',
+  cut: 'any',
+  tr: 'any',
+  jq: 'any',
+  diff: 'any',
+  basename: 'any',
+  dirname: 'any',
+  realpath: 'any',
+  du: 'any',
+  nl: 'any',
+  true: 'any',
+  cd: 'any',
+  test: 'any',
+  '[': 'any',
+  rg: {
+    short: 'nNiSFwlcoLvHhuUaz0qsx',
+    shortWithValue: 'gtTCABmMe',
+    long: [
+      '--line-number',
+      '--no-line-number',
+      '--ignore-case',
+      '--smart-case',
+      '--case-sensitive',
+      '--fixed-strings',
+      '--word-regexp',
+      '--line-regexp',
+      '--files',
+      '--files-with-matches',
+      '--files-without-match',
+      '--count',
+      '--count-matches',
+      '--only-matching',
+      '--invert-match',
+      '--hidden',
+      '--no-ignore',
+      '--no-ignore-vcs',
+      '--follow',
+      '--text',
+      '--multiline',
+      '--multiline-dotall',
+      '--json',
+      '--heading',
+      '--no-heading',
+      '--with-filename',
+      '--no-filename',
+      '--column',
+      '--vimgrep',
+      '--null',
+      '--unrestricted',
+      '--pcre2',
+      '--trim',
+      '--stats',
+      '--quiet',
+      '--no-messages',
+      '--color',
+      '--sort',
+      '--sortr',
+      '--max-depth',
+      '--max-count',
+      '--max-columns',
+      '--context',
+      '--after-context',
+      '--before-context',
+      '--glob',
+      '--iglob',
+      '--type',
+      '--type-not',
+      '--type-list',
+      '--regexp',
+      '--replace',
+      '--passthru',
+    ],
+    longWithValue: [
+      '--sort',
+      '--sortr',
+      '--max-depth',
+      '--max-count',
+      '--max-columns',
+      '--context',
+      '--after-context',
+      '--before-context',
+      '--glob',
+      '--iglob',
+      '--type',
+      '--type-not',
+      '--regexp',
+      '--replace',
+      '--color',
+    ],
+  },
+  fd: {
+    short: 'HIiFsapLu0l1g',
+    shortWithValue: 'tedESc',
+    long: [
+      '--hidden',
+      '--no-ignore',
+      '--no-ignore-vcs',
+      '--ignore-case',
+      '--case-sensitive',
+      '--fixed-strings',
+      '--glob',
+      '--regex',
+      '--absolute-path',
+      '--full-path',
+      '--follow',
+      '--print0',
+      '--list-details',
+      '--type',
+      '--extension',
+      '--max-depth',
+      '--min-depth',
+      '--exact-depth',
+      '--exclude',
+      '--size',
+      '--changed-within',
+      '--changed-before',
+      '--color',
+      '--max-results',
+    ],
+    longWithValue: [
+      '--type',
+      '--extension',
+      '--max-depth',
+      '--min-depth',
+      '--exact-depth',
+      '--exclude',
+      '--size',
+      '--changed-within',
+      '--changed-before',
+      '--color',
+      '--max-results',
+    ],
+  },
+  sort: {
+    short: 'nrufhVbdgiMRcCsz',
+    shortWithValue: 'ktS',
+    long: [
+      '--numeric-sort',
+      '--reverse',
+      '--unique',
+      '--ignore-case',
+      '--human-numeric-sort',
+      '--version-sort',
+      '--general-numeric-sort',
+      '--month-sort',
+      '--random-sort',
+      '--ignore-leading-blanks',
+      '--dictionary-order',
+      '--check',
+      '--stable',
+      '--zero-terminated',
+      '--key',
+      '--field-separator',
+    ],
+    longWithValue: ['--key', '--field-separator'],
+  },
+  uniq: {
+    short: 'cdDuiz',
+    shortWithValue: 'fsw',
+    long: ['--count', '--repeated', '--unique', '--ignore-case', '--zero-terminated', '--skip-fields', '--skip-chars', '--check-chars'],
+    longWithValue: ['--skip-fields', '--skip-chars', '--check-chars'],
+    operands: 1,
+  },
+  tree: {
+    short: 'adfiplsughDFrtvCnQNJX',
+    shortWithValue: 'LIP',
+    long: ['--gitignore', '--noreport', '--dirsfirst', '--filelimit', '--prune', '--matchdirs', '--charset'],
+    longWithValue: ['--filelimit', '--charset'],
+  },
+  file: { short: 'bLhiknrsz0', long: ['--brief', '--mime', '--mime-type', '--mime-encoding', '--dereference', '--no-dereference'] },
+  date: {
+    short: 'uRj',
+    shortWithValue: 'rdfI',
+    long: ['--utc', '--iso-8601', '--rfc-3339', '--date', '--reference'],
+    longWithValue: ['--date', '--reference'],
+  },
+  git: 'git',
+  find: 'find',
+  sed: 'sed',
+  env: 'env',
+}
+
+/** Why a command's flags go beyond what a reader may use, or nothing when they don't. */
+const flagsReason = (program: string, flags: Flags, args: ReadonlyArray<string>): string | undefined => {
+  let operands = 0
+  for (let index = 0; index < args.length; index += 1) {
+    const word = args[index] ?? ''
+    if (word === '--') {
+      operands += args.length - index - 1
+      break
+    }
+    if (word.startsWith('--')) {
+      const name = word.split('=')[0] ?? word
+      if (!(flags.long ?? []).includes(name)) return `\`${program} ${name}\` isn't among the flags a reader may use.`
+      if ((flags.longWithValue ?? []).includes(name) && !word.includes('=')) index += 1
+      continue
+    }
+    if (word.startsWith('-') && word.length > 1 && !/^-\d/.test(word)) {
+      for (let at = 1; at < word.length; at += 1) {
+        const letter = word[at] ?? ''
+        if ((flags.shortWithValue ?? '').includes(letter)) {
+          if (at === word.length - 1) index += 1
+          break
+        }
+        if (!(flags.short ?? '').includes(letter)) return `\`${program} -${letter}\` isn't among the flags a reader may use.`
+      }
+      continue
+    }
+    operands += 1
+  }
+  if (flags.operands !== undefined && operands > flags.operands) return `\`${program}\` would write to its last operand.`
+  return undefined
+}
+
+/** `find`'s tests and options that only look; an action (`-exec`, `-delete`, `-fprint`) isn't one. */
+const FIND_LOOKS = new Set([
+  '-name',
+  '-iname',
+  '-path',
+  '-ipath',
+  '-wholename',
+  '-iwholename',
+  '-regex',
+  '-iregex',
+  '-type',
+  '-maxdepth',
+  '-mindepth',
+  '-newer',
+  '-mtime',
+  '-mmin',
+  '-atime',
+  '-amin',
+  '-ctime',
+  '-cmin',
+  '-size',
+  '-empty',
+  '-user',
+  '-group',
+  '-perm',
+  '-readable',
+  '-writable',
+  '-executable',
+  '-links',
+  '-inum',
+  '-samefile',
+  '-depth',
+  '-follow',
+  '-xdev',
+  '-mount',
+  '-prune',
+  '-print',
+  '-print0',
+  '-not',
+  '-and',
+  '-or',
+  '-a',
+  '-o',
+  '-true',
+  '-false',
+  '-L',
+  '-H',
+  '-P',
+  '-E',
+  '-x',
+  '-s',
+])
+
+/** A `sed` script that only prints lines: `1,40p`, `$p`, `/re/p`. Anything else (`w`, `e`, `r`) is refused. */
+const SED_PRINTS = /^((\d+|\$|\/[^/]*\/)(,(\d+|\$|\/[^/]*\/))?)?p$/
+
+/** Git's options before the subcommand a reader may use: none that set config or run a program. */
+const GIT_GLOBAL_LOOKS =
+  /^(-C|--no-pager|-P|--no-optional-locks|--literal-pathspecs|--glob-pathspecs|--noglob-pathspecs|--icase-pathspecs|--git-dir(=.*)?|--work-tree(=.*)?)$/
+
+/** Git's flags that write a file or run a program, in any subcommand. */
+const GIT_FLAG_WRITES =
+  /^(--output(=.*)?|--output-directory(=.*)?|-o|--ext-diff|--textconv|-O.*|--open-files-in-pager(=.*)?|--exec(=.*)?|--upload-pack(=.*)?)$/
+
+/** Git's subcommands that only look. */
+const GIT_LOOKS = new Set([
+  'log',
+  'diff',
+  'show',
+  'status',
+  'blame',
+  'grep',
+  'ls-files',
+  'ls-tree',
+  'rev-parse',
+  'rev-list',
+  'shortlog',
+  'describe',
+  'cat-file',
+  'show-ref',
+  'merge-base',
+  'whatchanged',
+  'name-rev',
+  'for-each-ref',
+  'count-objects',
+])
+/** Subcommands that only look when they only list: `git branch -a`, not `git branch -D old`. */
+const GIT_LISTS = new Set(['branch', 'tag', 'remote'])
+const GIT_LIST_FLAGS = new Set([
+  '-a',
+  '-r',
+  '-v',
+  '-vv',
+  '-l',
+  '--list',
+  '--all',
+  '--remotes',
+  '--show-current',
+  '--verbose',
+  '--contains',
+  '--merged',
+  '--no-merged',
+  'show',
+])
+
+/** Why a git command a reader wants to run would change something or run a program, or nothing when it only looks. */
+const gitReason = (words: ReadonlyArray<string>): string | undefined => {
+  const call = gitCall(words, '.')
+  if (call === undefined) return undefined
+  const before = words.slice(1, words.indexOf(call.subcommand, 1))
+  for (let index = 0; index < before.length; index += 1) {
+    const word = before[index] ?? ''
+    if (!GIT_GLOBAL_LOOKS.test(word)) return `\`git ${word}\` can set git's config or run a program, and this role only reads.`
+    if (word === '-C' || word === '--git-dir' || word === '--work-tree') index += 1
+  }
+  const flag = call.args.find((arg) => GIT_FLAG_WRITES.test(arg))
+  if (flag !== undefined) return `\`git ${call.subcommand} ${flag}\` writes a file or runs a program, and this role only reads.`
+  if (GIT_LOOKS.has(call.subcommand)) return undefined
+  if (GIT_LISTS.has(call.subcommand) && call.args.every((arg) => GIT_LIST_FLAGS.has(arg))) return undefined
+  // A stash or the reflog only looks when listed or shown: `git stash` alone stashes the lead's work.
+  if ((call.subcommand === 'stash' || call.subcommand === 'reflog') && ['list', 'show'].includes(call.args[0] ?? '')) return undefined
+  return `\`git ${call.subcommand}\` can change the repository, and this role only reads.`
+}
+
+/** Why a command a reader wants to run would change something, or nothing when it only looks. */
+const readerCommandReason = (text: string): string | undefined => {
+  const { commands, opaque } = parseCommandLine(text)
+  if (opaque) return "Charrette can't tell what this command does until it runs, and this role only reads."
+  for (const words of commands) {
+    const program = (words[0] ?? '').split('/').at(-1) ?? ''
+    const written = writes(words).filter((target) => target !== '/dev/null')
+    if (written.length > 0) return `It would write to ${written[0]}, and this role only reads.`
+    const reads = READS[program]
+    if (reads === undefined) return `\`${program}\` isn't on the list of commands that only look, and this role only reads.`
+    const args = words.slice(1)
+    const reason = ((): string | undefined => {
+      switch (reads) {
+        case 'any':
+          return undefined
+        case 'git':
+          return gitReason(words)
+        case 'env':
+          return args.length > 0 ? '`env` runs another command, and this role only reads.' : undefined
+        case 'find': {
+          const action = args.find((arg) => arg.startsWith('-') && !FIND_LOOKS.has(arg))
+          return action === undefined ? undefined : `\`find ${action}\` isn't a test that only looks, and this role only reads.`
+        }
+        case 'sed': {
+          const flags = args.filter((arg) => arg.startsWith('-'))
+          const [script] = args.filter((arg) => !arg.startsWith('-'))
+          if (flags.some((flag) => !['-n', '-E', '-r', '--quiet', '--silent'].includes(flag)))
+            return '`sed` with those flags can edit files or run commands, and this role only reads.'
+          return script !== undefined && SED_PRINTS.test(script.replaceAll(' ', ''))
+            ? undefined
+            : '`sed` may only print lines here, as in `sed -n 1,40p`, and this role only reads.'
+        }
+        default:
+          return flagsReason(program, reads, args)
+      }
+    })()
+    if (reason !== undefined) return reason.endsWith('only reads.') ? reason : `${reason.slice(0, -1)}, and this role only reads.`
+  }
+  return undefined
+}
+
+/**
+ * Decides a request from a role that only reads. Nothing here asks a person:
+ * a reader's request is allowed or refused.
+ */
+export const decideReader = (request: PermissionRequest): ReaderVerdict => {
+  if (CHARRETTE_TOOL.test(request.title)) return ALLOW
+  switch (request.kind) {
+    case 'read':
+    case 'search':
+    case 'think':
+    case 'fetch':
+      return ALLOW
+    case 'edit':
+    case 'delete':
+    case 'move':
+      return deny('This role only reads: a change is a task.')
+    default: {
+      const command = commandIn(request.rawInput) ?? (request.kind === 'execute' ? request.title : undefined)
+      if (command === undefined || command === '') return deny("Charrette can't tell what this does, and this role only reads.")
+      const reason = readerCommandReason(command)
+      return reason === undefined ? ALLOW : deny(reason)
+    }
+  }
+}

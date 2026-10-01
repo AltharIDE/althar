@@ -9,6 +9,21 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@charrette/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `charrette-designs` repository (`prototypes/shell`).
 
+## The coordinator loop, 30 September
+
+- [x] **How read-only the coordinator and reviewers are.** Settled on 30
+  September 2026 in the review of #15: every reader reads a throwaway copy,
+  its agent's sandbox is read-only where that still lets it call Charrette's
+  tools, and the reader rules, an allowlist of commands and flags, are the
+  backstop. Plan modes stay out while they refuse MCP tools.
+  [ADR-004](decisions/004-coordinator-is-an-agent-session.md),
+  [architecture 04](architecture/04-coordinator.md).
+- [x] **What an agent's closing words are for, once a step reports.**
+  Settled on 30 September 2026 in the review of #15: they fold with the work
+  that led to the step's result.
+- [x] **A ready task's header.** Settled on 30 September 2026 in the review of
+  #15: the header reads the run, as the card does, and says Ready.
+
 ## The desktop app, 29 September
 
 - [ ] **Running the bundled adapters once the app is signed.** They run on
@@ -114,9 +129,13 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
   for the network; Codex's has the network off. Ask for reads of known secret
   places (`~/.ssh`, `.env` outside the worktree), limit hosts per project, or
   accept it for now?
-- [ ] **The coordinator's defaults.** Its default model; whether task events
-  prompt it; whether it can skip the countdown when you asked for exactly that
-  task. See [architecture 04](architecture/04-coordinator.md).
+- [ ] **The coordinator's defaults.** Settled on 30 September 2026: it starts
+  on the agent and model you last used, and says so and offers the others
+  when that one isn't signed in; it answers questions itself, and only changes
+  become tasks; the countdown is 25 seconds and the runtime owns it
+  ([MVP plan](plans/mvp.md)). Still open: whether task events prompt it, and
+  whether it can skip the countdown when you asked for exactly that task. See
+  [architecture 04](architecture/04-coordinator.md).
 - [x] **Where worktrees live.** Settled: `~/Charrette/<project>/<task>/<repository>`,
   with a root that can be changed per project.
   [ADR-006](decisions/006-worktree-per-task.md).
@@ -126,9 +145,10 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
   reviewer is another provider's strongest model.
   [Architecture 05](architecture/05-workflow-engine.md). The demo runs them as
   one fixed graph ([MVP plan](plans/mvp.md)).
-- [ ] **Setup per worktree.** Where the setup command, the check command that
-  Verify runs, and the files to copy are declared: in the project rules, or
-  in a file in the repository?
+- [ ] **Setup per worktree.** Where the setup command and the files to copy
+  are declared: in the project rules, or in a file in the repository? On 30
+  September 2026 the user took Verify out of the plan, since it would rebuild
+  CI; checking the work becomes a manual QA step later.
 - [ ] **An acceptance-criteria checker.** A step type that checks the change
   against the task's acceptance criteria, beside Review. When, and what does
   it return?

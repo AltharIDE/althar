@@ -81,6 +81,7 @@ const kinds: Readonly<Record<string, string>> = {
   thread: 'task',
   'task thread with a ready worktree': 'task’s worktree',
   'thread item': 'message',
+  plan: 'plan',
   attention_request: 'call',
   provider_session: 'agent',
   folder: 'folder',
@@ -109,6 +110,8 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
         const summary = text(error, 'summary')
         return `${agentName(text(error, 'agentId'))} is still on its old model.${summary === '' ? '' : ` ${summary}`}`
       }
+      case 'CoordinatorUnavailable':
+        return `${text(error, 'agentName')} isn't signed in, so the coordinator can't start on it. Pick another agent for the coordinator, or sign in with its own tool.`
       case 'AttentionClosed':
         return 'That call was already answered, or the agent took it back.'
       case 'GitFailed': {

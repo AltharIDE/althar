@@ -45,9 +45,15 @@ export interface AgentDefinition {
   readonly launch: (node: string) => LaunchSpec
   /**
    * The modes Charrette starts sessions in (ADR-007): one where the agent asks
-   * before acting, never a bypass mode, and one that only reads.
+   * before acting, never a bypass mode; one that only reads; and the one a
+   * role that only reads (the coordinator, a reviewer) runs in. That is the
+   * read-only mode only where it is a sandbox that still lets the agent call
+   * Charrette's tools. Claude Code's plan mode and OpenCode's plan agent are
+   * instructions to the model, and it refuses Charrette's tools in them
+   * (scripts/probe-tools.ts in the runtime), so those roles run in the mode
+   * that asks, with Charrette's rules denying every write.
    */
-  readonly modes: { readonly ask: string; readonly readOnly: string }
+  readonly modes: { readonly ask: string; readonly readOnly: string; readonly reader: string }
   /** The ids of its session config options. */
   readonly options: { readonly mode: string; readonly model: string; readonly effort?: string }
   /**
@@ -64,9 +70,10 @@ export interface AgentDefinition {
   readonly permissions: PermissionMeanings
   /**
    * What goes in `_meta` on `session/new`, to keep the agent asking whatever
-   * its settings say (ADR-007).
+   * its settings say (ADR-007): for a lead, or for a role that only reads
+   * (the coordinator, a reviewer), whose writes are refused outright.
    */
-  readonly sessionMeta?: () => Readonly<Record<string, unknown>>
+  readonly sessionMeta?: (role?: 'lead' | 'reader') => Readonly<Record<string, unknown>>
   /** What it does differently, for the support matrix. */
   readonly knownGaps: ReadonlyArray<string>
 }
@@ -139,6 +146,25 @@ const claudeAsks = {
   },
 }
 
+/**
+ * Claude Code for a role that only reads: its edit tools denied, which also
+ * denies its sandbox's writes, and every shell command asking, so each one
+ * reaches Charrette's reader rules rather than running because the sandbox
+ * would contain it. What it reads is a throwaway copy all the same.
+ */
+const claudeReads = {
+  claudeCode: {
+    options: {
+      allowDangerouslySkipPermissions: false,
+      strictMcpConfig: true,
+      settings: {
+        permissions: { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'], ask: ['Bash', 'WebFetch'] },
+        sandbox: { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false, failIfUnavailable: false },
+      },
+    },
+  },
+}
+
 export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
   'claude-code': {
     id: 'claude-code',
@@ -149,7 +175,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       args: [bundled('@agentclientprotocol/claude-agent-acp', 'dist/index.js')],
       inheritEnv: ['CLAUDE_CONFIG_DIR'],
     }),
-    modes: { ask: 'default', readOnly: 'plan' },
+    modes: { ask: 'default', readOnly: 'plan', reader: 'default' },
     options: { mode: 'mode', model: 'model', effort: 'effort' },
     signIn: {
       status: () => ({ command: 'claude', args: ['auth', 'status'] }),
@@ -158,7 +184,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     },
     /* From claude-agent-acp's permissions/options/shared.js. Rejecting skips the action and Claude carries on. */
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
-    sessionMeta: () => claudeAsks,
+    sessionMeta: (role = 'lead') => (role === 'reader' ? claudeReads : claudeAsks),
     knownGaps: [
       'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Charrette always sets the mode.',
       "Hooks in the repository's or the user's settings run as code on the Mac whenever Claude uses a tool; they cannot approve past the ask rules.",
@@ -176,7 +202,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * beyond the sandbox to an automatic reviewer, so none reach Charrette.
      * In `workspace-write` the person, through Charrette, is the reviewer.
      */
-    modes: { ask: 'workspace-write', readOnly: 'read-only' },
+    modes: { ask: 'workspace-write', readOnly: 'read-only', reader: 'read-only' },
     options: { mode: 'mode', model: 'model', effort: 'reasoning_effort' },
     signIn: {
       status: (node) => ({ command: node, args: [bundledCodex(), 'login', 'status'] }),
@@ -209,7 +235,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       env: { OPENCODE_CONFIG_CONTENT: openCodeConfig },
       inheritEnv: ['OPENCODE_CONFIG_DIR'],
     }),
-    modes: { ask: 'build', readOnly: 'plan' },
+    modes: { ask: 'build', readOnly: 'plan', reader: 'build' },
     options: { mode: 'mode', model: 'model' },
     signIn: {
       status: () => ({ command: 'opencode', args: ['auth', 'list'] }),

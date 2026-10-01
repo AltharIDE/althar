@@ -33,14 +33,14 @@ export const repository = () => {
   return path
 }
 
-const definition = (id: string): AgentDefinition => ({
+const definition = (id: string, signedOut: ReadonlyArray<string> = []): AgentDefinition => ({
   id: id as AgentId,
   name: `Fake ${id}`,
   source: 'bundled',
   launch: () => ({ command: 'bun', args: [fakeAgentMain] }),
-  modes: { ask: 'ask', readOnly: 'read-only' },
+  modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
   options: { mode: 'mode', model: 'model' },
-  signIn: { status: () => ({ command: 'true', args: [] }), read: () => true, login: 'true' },
+  signIn: { status: () => ({ command: 'true', args: [] }), read: () => !signedOut.includes(id), login: 'true' },
   permissions: codexLikeMeanings,
   // One fake agent passes session options, as Claude Code's entry does.
   ...(id === 'claude-code' ? { sessionMeta: () => ({ fake: { asks: true } }) } : {}),
@@ -52,9 +52,9 @@ const definition = (id: string): AgentDefinition => ({
  * `process` runs it as a real process with Bun; `missing` names a command
  * that doesn't exist.
  */
-export const fakeAgents = (options: FakeAgentOptions = {}) => {
+export const fakeAgents = (options: FakeAgentOptions = {}, signedOut: ReadonlyArray<string> = []) => {
   const entry = (agentId: string): AgentEntry => ({
-    definition: definition(agentId),
+    definition: definition(agentId, signedOut),
     transport: (cwd) =>
       agentId === 'process'
         ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
@@ -68,14 +68,19 @@ export const fakeAgents = (options: FakeAgentOptions = {}) => {
   )
 }
 
-/** The runtime over a database, with worktrees in a temporary folder and fake agents. */
-export const runtime = (database = ':memory:', options: FakeAgentOptions = {}) =>
+/** The runtime over a database, with worktrees in a temporary folder and fake agents, and a plan's countdown of a moment. */
+export const runtime = (
+  database = ':memory:',
+  options: FakeAgentOptions = {},
+  more: { readonly signedOut?: ReadonlyArray<string>; readonly countdown?: Duration.Duration } = {},
+) =>
   Runtime.layer({
     database,
     worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
-    agents: fakeAgents(options),
+    agents: fakeAgents(options, more.signedOut),
+    countdown: more.countdown ?? Duration.millis(300),
   })
 
 /** Opens a new repository as a project and creates a task in it. */
@@ -92,8 +97,8 @@ export const task = (title = 'Retry checkout') =>
   })
 
 /** Waits until a query returns a row matching the check, reading the store every few milliseconds. */
-export const until = <A>(
-  query: Effect.Effect<ReadonlyArray<A>, unknown, SqlClient.SqlClient>,
+export const until = <A, R = SqlClient.SqlClient>(
+  query: Effect.Effect<ReadonlyArray<A>, unknown, R>,
   check: (rows: ReadonlyArray<A>) => boolean,
   limit = Duration.seconds(10),
 ) =>

@@ -41,6 +41,47 @@ describe('the API', () => {
     // A tool call's content is its own; a message's text is no tool call.
     assert.throws(() => decode({ ...base, kind: 'tool_call', content: { text: 'Hi' } }))
     assert.throws(() => decode({ ...base, kind: 'step_result', content: {} }))
+    const review = decode({
+      ...base,
+      kind: 'step_result',
+      content: {
+        step: 'review',
+        round: 0,
+        summary: 'One thing to fix.',
+        verdict: 'changes_requested',
+        findings: [{ severity: 'major', file: 'src/a.ts', line: 3, claim: 'The retry never stops.' }],
+        agentId: 'codex',
+      },
+    })
+    assert.strictEqual(review.kind === 'step_result' && review.content.findings.length, 1)
+    // A task in the coordinator's thread: its plan, then its card.
+    const task = decode({
+      ...base,
+      kind: 'task',
+      content: {
+        taskId: 't1',
+        threadId: 'th1',
+        title: 'Add a retry',
+        slug: 'add-a-retry',
+        phase: 'planned',
+        plan: {
+          id: 'plan_1',
+          steps: [
+            { key: 'implement', agentId: 'claude-code', model: 'opus', skipped: false },
+            { key: 'review', agentId: 'codex', model: null, skipped: false },
+          ],
+          startsAt: at,
+          reason: 'A small change in code Claude Code knows.',
+        },
+        step: null,
+        summary: null,
+        lead: null,
+        branch: null,
+        startedAt: null,
+      },
+    })
+    assert.strictEqual(task.kind === 'task' && task.content.plan?.steps.length, 2)
+    assert.throws(() => decode({ ...base, kind: 'task', content: { taskId: 't1' } }))
   })
 
   it('takes a command id only in its own shape, and a change with its cursor', () => {
@@ -67,6 +108,12 @@ describe('the API', () => {
               CreateTask: () => Effect.die('unused'),
               GetThread: () => Effect.die('unused'),
               GetThreadItem: () => Effect.die('unused'),
+              GetCoordinator: () => Effect.die('unused'),
+              StartTask: () => Effect.die('unused'),
+              StartPlan: () => Effect.void,
+              HoldPlan: () => Effect.void,
+              ChangePlan: () => Effect.void,
+              AnswerStuck: () => Effect.void,
               StartSession: ({ commandId: id }) => Effect.succeed(id),
               SwitchAgent: () => Effect.die('unused'),
               SetModel: () => Effect.void,

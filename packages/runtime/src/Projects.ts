@@ -6,6 +6,7 @@ import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type Row
 import { Context, Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
+import { postCard } from './cards'
 import { RuntimeConfig } from './Config'
 import { type GitFailed, NotARepository, NotFound } from './errors'
 import { addWorktree, branchExists, commitOf, defaultBranch, fetchBranch, remoteUrls, topLevel } from './git'
@@ -98,12 +99,17 @@ export class Projects extends Context.Service<
       readonly envelope: CommandEnvelope
       readonly path: string
     }): Effect.Effect<OpenedProject, NotARepository | GitFailed | Failure>
-    /** Creates a task, its thread, and its worktree. */
+    /**
+     * Creates a task, its thread, and its worktree. A draft is a task the
+     * coordinator planned, which starts when its plan does; its worktree is
+     * made now, so it is ready by then.
+     */
     createTask(input: {
       readonly envelope: CommandEnvelope
       readonly projectId: string
       readonly title: string
       readonly description?: string
+      readonly draft?: boolean
     }): Effect.Effect<CreatedTask, NotFound | GitFailed | Failure>
   }
 >()('@charrette/runtime/Projects') {
@@ -188,6 +194,7 @@ export class Projects extends Context.Service<
         readonly projectId: string
         readonly title: string
         readonly description?: string
+        readonly draft?: boolean
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -227,7 +234,7 @@ export class Projects extends Context.Service<
                 title: input.title,
                 description: input.description ?? '',
                 slug,
-                state: 'open',
+                state: input.draft === true ? 'draft' : 'open',
                 createdByActorId: envelope.actorId,
                 createdAt,
               })}`
@@ -259,6 +266,8 @@ export class Projects extends Context.Service<
                 actorId: envelope.actorId,
                 commandId: envelope.commandId,
               })
+              // A task started by hand shows in the coordinator's thread as its card; a draft's card comes with its plan.
+              if (input.draft !== true) yield* postCard(project.id, taskId)
               return { taskId, slug, threadId, workspaceId, worktree, branch }
             }),
           })

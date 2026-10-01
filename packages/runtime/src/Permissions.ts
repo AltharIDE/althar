@@ -20,7 +20,7 @@ import { currentBranch } from './git'
 import { Instance } from './Instance'
 import { Live } from './Live'
 import { change, fact, timestamp } from './records'
-import { commandOf, decide, essentials, pathsOf, type RuleContext } from './rules'
+import { commandOf, decide, decideReader, essentials, pathsOf, type RuleContext } from './rules'
 
 /*
  * Permission requests, answered from the project rules (ADR-007). Every
@@ -33,11 +33,13 @@ import { commandOf, decide, essentials, pathsOf, type RuleContext } from './rule
 export interface RequestContext {
   readonly projectId: ProjectId
   readonly threadId: string
-  readonly taskId: string
+  /** The task the session works on; none for the coordinator. */
+  readonly taskId: string | null
   /** The provider session's row id. */
   readonly sessionId: string
   readonly meanings: PermissionMeanings
-  readonly rules: RuleContext
+  /** A task's lead works under the project rules; a role that only reads, under the reader's rules, which never ask. */
+  readonly rules: { readonly role: 'task'; readonly context: RuleContext } | { readonly role: 'reader' }
 }
 
 interface Waiting {
@@ -214,10 +216,22 @@ export class Permissions extends Context.Service<
               })
             }),
           )
+          // A role that only reads is answered at once: allowed, or refused with a reason it reads.
+          if (requestContext.rules.role === 'reader') {
+            const read = decideReader(request)
+            const decision: PermissionDecision =
+              read.verdict === 'allow'
+                ? { decision: 'allow', reason: 'This role may do this.' }
+                : { decision: 'reject', reason: read.reason }
+            yield* sql.withTransaction(
+              recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
+            )
+            return decision
+          }
+          const rules = requestContext.rules.context
           // Where a push without a destination goes depends on the branch checked out now.
-          const current =
-            request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(requestContext.rules.worktree) : undefined
-          const verdict = decide(request, { ...requestContext.rules, ...(current === undefined ? {} : { currentBranch: current }) })
+          const current = request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(rules.worktree) : undefined
+          const verdict = decide(request, { ...rules, ...(current === undefined ? {} : { currentBranch: current }) })
           if (verdict.verdict === 'allow') {
             const decision: PermissionDecision = { decision: 'allow', reason: 'Allowed by the project rules.' }
             yield* sql.withTransaction(

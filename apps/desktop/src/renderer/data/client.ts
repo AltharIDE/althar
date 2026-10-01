@@ -2,10 +2,12 @@ import {
   Api,
   ApiError,
   clientProtocol,
+  type CoordinatorSnapshot,
   type DomMessagePort,
   domPort,
   type ProjectList,
   type ProjectSummary,
+  type PlanStep,
   type Status,
   type TaskList,
   type TaskSummary,
@@ -58,10 +60,30 @@ export interface Client {
     readonly decision: 'allow' | 'reject'
     readonly reason?: string
   }) => Promise<void>
+  /** The project's coordinator thread, with the newest `limit` items before `before`. */
+  readonly getCoordinator: (projectId: string, page?: { readonly before?: number; readonly limit?: number }) => Promise<CoordinatorSnapshot>
+  /** Starts a task the person planned: its card shows in the coordinator's thread. */
+  readonly startTask: (input: {
+    readonly projectId: string
+    readonly title: string
+    readonly description?: string
+    readonly steps: ReadonlyArray<PlanStep>
+  }) => Promise<TaskSummary>
+  readonly startPlan: (planId: string) => Promise<void>
+  readonly holdPlan: (planId: string) => Promise<void>
+  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>) => Promise<void>
+  /** The person's answer to a step that needs them. */
+  readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
   /** Calls `listener` with each change after `since` (or from now) until the returned function is called. */
   readonly watch: (listener: (event: WatchEvent) => void, since?: number) => () => void
   readonly close: () => Promise<void>
 }
+
+/** Tell a step's agent what to do, hand the step to an agent, or abandon it. */
+export type StuckAnswer =
+  | { readonly kind: 'tell'; readonly note: string }
+  | { readonly kind: 'retry'; readonly agentId: string }
+  | { readonly kind: 'abandon' }
 
 /** What went wrong with a call, in words a view can show. */
 export const messageOf = (error: unknown): string =>
@@ -118,6 +140,12 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     stopSession: (threadId) => command((commandId) => api.StopSession({ commandId, threadId })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),
+    getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
+    startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
+    startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
+    holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
+    changePlan: (planId, steps) => command((commandId) => api.ChangePlan({ commandId, planId, steps })),
+    answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     watch: (listener, since) => {
       let cursor = since
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.

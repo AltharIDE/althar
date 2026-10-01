@@ -1,4 +1,4 @@
-import { Ids, newId, type ProjectId } from '@charrette/domain'
+import { Ids, newId, type ProjectId, type ThreadItemKind } from '@charrette/domain'
 import { Ledger } from '@charrette/persistence-sqlite'
 import type { SessionEvent } from '@charrette/provider-adapters'
 import { Clock, Effect } from 'effect'
@@ -14,7 +14,7 @@ import { essentials } from './rules'
  * every few words. A tool call is one item, updated as it runs.
  */
 
-export type ItemKind = 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'step_result' | 'notice'
+export type ItemKind = ThreadItemKind
 
 export interface ItemPlace {
   readonly projectId: ProjectId
@@ -177,8 +177,10 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
 export const transcript = (threadId: string, budget: number) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const items = yield* sql<{ kind: ItemKind; content: string; agentId: string | null }>`
-      SELECT i.kind, i.content, s.agent_id FROM thread_items i
+    const items = yield* sql<{ kind: ItemKind; content: string; agentId: string | null; task: string | null }>`
+      SELECT i.kind, i.content, s.agent_id,
+        (SELECT k.slug || ': ' || k.title FROM tasks k WHERE k.id = json_extract(i.content, '$.taskId')) AS task
+      FROM thread_items i
       LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
       WHERE i.thread_id = ${threadId} ORDER BY i.sequence`
     const lines = items.flatMap((item) => {
@@ -193,6 +195,10 @@ export const transcript = (threadId: string, budget: number) =>
           return [`[tool] ${text('title')} (${text('status')})`]
         case 'notice':
           return [`[note] ${text('title')}${text('description') === '' ? '' : `: ${text('description')}`}`]
+        case 'step_result':
+          return [`[${text('step')}${text('verdict') === '' ? '' : `, ${text('verdict')}`}] ${text('summary')}`]
+        case 'task':
+          return item.task === null ? [] : [`[task] ${item.task}`]
         default:
           return []
       }

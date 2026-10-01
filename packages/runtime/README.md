@@ -1,6 +1,6 @@
 # @charrette/runtime
 
-Charrette's runtime: the one writer of the local store. It opens folders as projects, gives each task a worktree of its own, starts agent sessions on a task's thread, and delivers the thread's input to them one turn at a time. Everything that happens is recorded: the thread's items, every turn and how it ended, every permission request and its decision, every agent process and how it stopped. Written with [Effect](https://effect.website).
+Charrette's runtime: the one writer of the local store. It opens folders as projects, gives each task a worktree of its own, starts agent sessions on a task's thread, and delivers the thread's input to them one turn at a time. Each project has a coordinator that plans tasks, and a task's plan runs as Implement, then Review. Everything that happens is recorded: the thread's items, every turn and how it ended, every permission request and its decision, every agent process and how it stopped. Written with [Effect](https://effect.website).
 
 It runs under plain Node: in Electron's utility process in the desktop app (`apps/desktop`), and inside the command-line client (`apps/cli`).
 
@@ -25,6 +25,9 @@ Effect.runPromise(Effect.scoped(program).pipe(Effect.provide(Runtime.layer({ dat
 - **`Sessions`** starts an agent on a task's thread, in the task's worktree and in the mode that asks. It accepts input into the thread's queue, delivers it a turn at a time (an `interrupt_and_continue` input stops the turn and goes first), changes the model, hands the thread to another agent with a brief (ADR-005), and stops sessions.
 - **`Permissions`** answers every permission request from the rules. What the always-ask list keeps for the person becomes an attention request, answered with `answer`.
 - **`Live`** streams what is happening now: agent events, turns, sessions, and questions for the person.
+- **`Coordinator`** is the project's coordinator. `say` starts it, on the agent the person last used, with what they said; it answers questions and turns changes into tasks with Charrette's tools.
+- **`Plans`** proposes a task's plan (its steps and who does each), and holds, changes or starts it; left alone, it starts when its countdown ends.
+- **`Runs`** runs a started plan: the lead implements, another agent reviews, the lead settles what the review found, and the review looks again, up to three rounds.
 
 - **`Queries`** reads what a client's screens show: projects, tasks, and a task's thread a page at a time, each with the change-feed cursor it read at.
 - **`Folders`** holds the folders the person chose, by grant, so a client opens a project without naming a path.
@@ -51,7 +54,8 @@ From `packages/runtime`:
 | `bun run test` | The tests, against in-memory databases, temporary git repositories and the fake agent |
 | `bun run test:coverage` | The same, with the coverage gate: 90% of lines and branches |
 | `bun run verify` | Check and coverage, as CI runs them |
+| `bun run test:agents` | On the real agents signed in on this Mac: the coordinator loop (a small repository, one request, and the plan run until the task is ready), and a reader refused a write. It costs usage; set `CHARRETTE_ASK` to ask the loop something else |
 
-The process tests run the fake agent with Bun. To try the runtime with real agents, use the command-line client in `apps/cli`.
+The process tests run the fake agent with Bun. To try the runtime with real agents by hand, use the command-line client in `apps/cli`.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the rules this package follows.

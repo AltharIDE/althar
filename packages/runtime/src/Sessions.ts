@@ -11,14 +11,17 @@ import {
 import { Cause, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
-import { Agents, type AgentEntry } from './Config'
-import { ModelUnchanged, NoSession, NotFound, SessionFailed, SessionRunning, type UnknownAgent } from './errors'
+import { Agents, type AgentEntry, RuntimeConfig } from './Config'
+import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
+import { type GitFailed, ModelUnchanged, NoSession, NotFound, SessionFailed, SessionRunning, type UnknownAgent } from './errors'
 import { Instance } from './Instance'
 import { Live } from './Live'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { change, fact, timestamp } from './records'
 import { git } from './git'
+import { reviewCopyOf } from './reviewCopy'
 import { addItem, recorder, transcript } from './threads'
+import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
 
 /*
@@ -38,7 +41,9 @@ export type Disposition = 'after_current' | 'interrupt_and_continue'
 export const AcceptedInput = Schema.Struct({ inputId: Schema.String, sequence: Schema.Int })
 export type AcceptedInput = typeof AcceptedInput.Type
 
-interface ThreadContext {
+/** A task's thread: its lead works in the task's worktree, under the project rules. */
+interface TaskThread {
+  readonly role: 'task'
   readonly threadId: string
   readonly projectId: ProjectId
   readonly taskId: string
@@ -50,6 +55,43 @@ interface ThreadContext {
   readonly baseCommit: string | null
   readonly defaultBranch: string
 }
+
+/**
+ * The project's coordinator thread (docs/architecture/04): it reads the
+ * project's repositories, fresh from their default branch, under the rules of
+ * a role that only reads, and changes things only through Charrette's tools.
+ */
+interface CoordinatorThread {
+  readonly role: 'coordinator'
+  readonly threadId: string
+  readonly projectId: ProjectId
+  readonly projectName: string
+  readonly folder: CoordinatorFolder
+}
+
+/**
+ * A task's review step (docs/architecture/05): another agent reads the task's
+ * worktree under the rules of a role that only reads, and reports what it
+ * found through Charrette's tool. Its thread spans the review's rounds.
+ */
+interface ReviewThread {
+  readonly role: 'reviewer'
+  readonly threadId: string
+  readonly projectId: ProjectId
+  readonly taskId: string
+  readonly title: string
+  readonly description: string
+  readonly worktree: string
+  readonly baseCommit: string | null
+}
+
+type ThreadContext = TaskThread | CoordinatorThread | ReviewThread
+
+/** Where a thread's agent works. */
+const cwdOf = (thread: ThreadContext) => (thread.role === 'coordinator' ? thread.folder.folder : thread.worktree)
+
+/** A role's Charrette tools. */
+const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
 
 interface Running {
   readonly sessionId: string
@@ -65,13 +107,15 @@ interface Running {
   readonly ended: Deferred.Deferred<void>
   /** The brief the session's first turn starts with, and what it asks for when no input is waiting. */
   brief: { readonly text: string; readonly closing: string } | undefined
+  /** Takes back the session's Charrette tools. */
+  readonly revokeTools: Effect.Effect<void>
   turnRunning: boolean
   stopping: boolean
 }
 
 type StopRequest = { readonly state: 'completed' } | { readonly state: 'superseded'; readonly by: string }
 
-type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | Live | Agents | Permissions
+type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | Live | Agents | Permissions | ToolServer | RuntimeConfig
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
 
 const PROMPT_BUDGET = 60_000
@@ -125,13 +169,15 @@ export class Sessions extends Context.Service<
       readonly threadId: string
       readonly agentId: string
       readonly model?: string
-    }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | Failure>
+    }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | Failure>
     /** Accepts input into the thread's queue, and delivers it when the session can take it. */
     send(input: {
       readonly envelope: CommandEnvelope
       readonly threadId: string
       readonly body: string
       readonly disposition?: Disposition
+      /** Input Charrette writes, such as findings to settle: delivered, but shown in the thread by what it came from, not as the person's message. */
+      readonly quiet?: boolean
     }): Effect.Effect<AcceptedInput, NotFound | Failure>
     /** Changes the session's model; the session and its context carry on. */
     setModel(input: { readonly threadId: string; readonly model: string }): Effect.Effect<void, NoSession | ModelUnchanged | Failure>
@@ -140,7 +186,7 @@ export class Sessions extends Context.Service<
       readonly threadId: string
       readonly agentId: string
       readonly model?: string
-    }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | Failure>
+    }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
     interrupt(threadId: string): Effect.Effect<void, NoSession>
     /** Stops the thread's session, after ending its turn. */
@@ -158,6 +204,7 @@ export class Sessions extends Context.Service<
       const instance = yield* Instance
       const live = yield* Live
       const permissions = yield* Permissions
+      const toolServer = yield* ToolServer
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
@@ -166,7 +213,28 @@ export class Sessions extends Context.Service<
       const loadThread = (threadId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [row] = yield* sql<ThreadContext>`
+          const [kind] = yield* sql<{ kind: string; projectId: ProjectId; projectName: string }>`
+            SELECT t.kind, t.project_id, p.name AS project_name FROM threads t JOIN projects p ON p.id = t.project_id WHERE t.id = ${threadId}`
+          if (kind?.kind === 'coordinator')
+            return {
+              role: 'coordinator',
+              threadId,
+              projectId: kind.projectId,
+              projectName: kind.projectName,
+              folder: yield* coordinatorFolder(kind.projectId),
+            } satisfies ThreadContext as ThreadContext
+          if (kind?.kind === 'step') {
+            const [step] = yield* sql<Omit<ReviewThread, 'role'>>`
+              SELECT t.id AS thread_id, t.project_id, t.task_id, k.title, k.description, w.path AS worktree, w.base_commit
+              FROM threads t
+              JOIN tasks k ON k.id = t.task_id
+              JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
+              WHERE t.id = ${threadId}`
+            // A reviewer reads a throwaway copy of the lead's work, not the worktree itself.
+            if (step !== undefined)
+              return { role: 'reviewer', ...step, worktree: reviewCopyOf(step.worktree) } satisfies ThreadContext as ThreadContext
+          }
+          const [row] = yield* sql<Omit<TaskThread, 'role'>>`
             SELECT t.id AS thread_id, t.project_id, t.task_id, k.title, k.description, w.path AS worktree, w.branch,
               w.base_ref, w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch
             FROM threads t
@@ -174,7 +242,9 @@ export class Sessions extends Context.Service<
             JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
             JOIN repository_bindings b ON b.id = w.binding_id
             WHERE t.id = ${threadId}`
-          return row === undefined ? yield* new NotFound({ kind: 'task thread with a ready worktree', id: threadId }) : row
+          return row === undefined
+            ? yield* new NotFound({ kind: 'task thread with a ready worktree', id: threadId })
+            : ({ role: 'task', ...row } satisfies ThreadContext as ThreadContext)
         })
 
       const sessionFact = (thread: ThreadContext, sessionId: string, revision: number, type: string, payload: unknown = {}) =>
@@ -219,6 +289,13 @@ export class Sessions extends Context.Service<
             SELECT id, body, disposition FROM user_inputs WHERE thread_id = ${thread.threadId} AND state = 'queued'
             ORDER BY disposition = 'interrupt_and_continue' DESC, sequence`
           if (inputs.length === 0 && running.brief === undefined) return false
+          // The coordinator speaks when spoken to: its brief waits for the person's first message.
+          if (inputs.length === 0 && thread.role === 'coordinator') return false
+          // Its copies of the repositories are brought up to date for each turn; offline, it reads what it has.
+          if (thread.role === 'coordinator')
+            yield* coordinatorFolder(thread.projectId).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not refresh the coordinator folder', cause)),
+            )
           const brief = running.brief
           const prompt = promptFor(inputs, brief)
           const turnId = yield* newId(Ids.turnDelivery)
@@ -461,6 +538,7 @@ export class Sessions extends Context.Service<
           )
           running.stopping = true
           threads.delete(running.thread.threadId)
+          yield* running.revokeTools
           yield* permissions.withdrawAll(running.sessionId)
           yield* Scope.close(running.scope, Exit.void)
           const stop: StopReport | undefined =
@@ -520,7 +598,11 @@ export class Sessions extends Context.Service<
                 source: 'runtime',
                 severity: 'warning',
                 title: `${running.entry.definition.name} stopped on its own.`,
-                description: 'Start the lead again to carry on; it picks up from the thread.',
+                description: {
+                  task: 'Start the lead again to carry on; it picks up from the thread.',
+                  coordinator: 'Say something to start the coordinator again; it picks up from the thread.',
+                  reviewer: 'The review waits; Charrette starts the reviewer again when the task resumes.',
+                }[running.thread.role],
               },
             )
           yield* live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state })
@@ -536,7 +618,7 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { definition } = entry
-          const transport = entry.transport(thread.worktree)
+          const transport = entry.transport(cwdOf(thread))
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
           if (transport._tag === 'Process' && processId !== undefined) {
             // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
@@ -557,11 +639,22 @@ export class Sessions extends Context.Service<
           const requestContext: RequestContext = {
             projectId: thread.projectId,
             threadId: thread.threadId,
-            taskId: thread.taskId,
+            taskId: thread.role === 'coordinator' ? null : thread.taskId,
             sessionId,
             meanings: definition.permissions,
-            rules: { worktree: thread.worktree, defaultBranch: thread.defaultBranch, taskBranch: thread.branch },
+            rules:
+              thread.role === 'task'
+                ? { role: 'task', context: { worktree: thread.worktree, defaultBranch: thread.defaultBranch, taskBranch: thread.branch } }
+                : { role: 'reader' },
           }
+          // Charrette's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
+          const tools = yield* toolServer.grant({
+            role: toolRoleOf(thread),
+            projectId: thread.projectId,
+            threadId: thread.threadId,
+            sessionId,
+            taskId: thread.role === 'coordinator' ? null : thread.taskId,
+          })
           const scope = yield* Scope.fork(sessionsScope, 'sequential')
           const started = yield* Effect.exit(
             Effect.gen(function* () {
@@ -571,10 +664,14 @@ export class Sessions extends Context.Service<
                 permissions: definition.permissions,
               })
               const agent = yield* connection.newSession({
-                cwd: thread.worktree,
-                mode: definition.modes.ask,
+                cwd: cwdOf(thread),
+                // The coordinator and a reviewer only read: in the agent's read-only mode where that still lets it call Charrette's tools.
+                mode: thread.role === 'task' ? definition.modes.ask : definition.modes.reader,
                 modeOptionId: definition.options.mode,
-                ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta() }),
+                mcpServers: [tools.server],
+                ...(definition.sessionMeta === undefined
+                  ? {}
+                  : { meta: definition.sessionMeta(thread.role === 'task' ? 'lead' : 'reader') }),
               })
               if (model !== undefined) yield* agent.setOption(definition.options.model, model)
               return { connection, agent }
@@ -582,6 +679,7 @@ export class Sessions extends Context.Service<
           )
           if (Exit.isFailure(started)) {
             yield* Scope.close(scope, Exit.void)
+            yield* tools.revoke
             const reason = Cause.pretty(started.cause)
             const summary = summarize(started.cause)
             yield* sql.withTransaction(
@@ -610,7 +708,7 @@ export class Sessions extends Context.Service<
               state: 'running',
             })
           }
-          return { sessionId, entry, thread, connection, agent, scope }
+          return { sessionId, entry, thread, connection, agent, scope, revokeTools: tools.revoke }
         })
 
       /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
@@ -620,7 +718,7 @@ export class Sessions extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { sessionId, entry, thread, connection, agent, scope } = connected
+          const { sessionId, entry, thread, connection, agent, scope, revokeTools } = connected
           const { definition } = entry
           const options = yield* agent.options
           yield* sql.withTransaction(
@@ -649,6 +747,7 @@ export class Sessions extends Context.Service<
             stopRequest: yield* Deferred.make<StopRequest>(),
             ended: yield* Deferred.make<void>(),
             brief,
+            revokeTools,
             turnRunning: false,
             stopping: false,
           }
@@ -710,7 +809,10 @@ export class Sessions extends Context.Service<
             const sessionId = yield* createSession(thread, entry.definition.id)
             const connected = yield* connectSession(thread, sessionId, entry, input.model)
             // Every session starts from a brief (ADR-005), even the first on a task.
-            return yield* activate(connected, { text: yield* briefFor(thread, { kind: 'start' }), closing: 'Start on the task.' })
+            return yield* activate(connected, {
+              text: yield* briefFor(thread, { kind: 'start' }),
+              closing: thread.role === 'reviewer' ? 'Review the change.' : 'Start on the task.',
+            })
           }),
         )
 
@@ -719,6 +821,7 @@ export class Sessions extends Context.Service<
         readonly threadId: string
         readonly body: string
         readonly disposition?: Disposition
+        readonly quiet?: boolean
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -748,12 +851,13 @@ export class Sessions extends Context.Service<
                 state: 'queued',
                 acceptedAt: yield* timestamp,
               })}`
-              yield* addItem(
-                { projectId: thread.projectId, threadId: input.threadId },
-                'user_message',
-                { text: input.body },
-                { userInputId: inputId },
-              )
+              if (input.quiet !== true)
+                yield* addItem(
+                  { projectId: thread.projectId, threadId: input.threadId },
+                  'user_message',
+                  { text: input.body },
+                  { userInputId: inputId },
+                )
               yield* fact({
                 projectId: thread.projectId,
                 aggregateType: 'user_input',
@@ -806,17 +910,55 @@ export class Sessions extends Context.Service<
           })
         })
 
+      /** The thread so far, for a brief, oldest first, within the prompt's budget. */
+      const threadSoFar = (threadId: string) =>
+        Effect.map(transcript(threadId, PROMPT_BUDGET), (record) =>
+          record.text === ''
+            ? []
+            : [
+                record.omitted > 0
+                  ? `The thread so far, oldest first (the ${record.omitted} earliest items are left out):`
+                  : 'The thread so far, oldest first:',
+                record.text,
+              ],
+        )
+
       /**
-       * The brief a session starts from (ADR-005): the task, where its
-       * worktree stands (the plan, and the change so far), and the thread.
+       * The brief a session starts from (ADR-005): for a task, the task, where
+       * its worktree stands (the plan, and the change so far), and the thread;
+       * for the coordinator, its role, the project, and the thread.
        */
       const briefFor = (
         thread: ThreadContext,
         why: { readonly kind: 'start' } | { readonly kind: 'takeover'; readonly from: string | undefined },
+      ): Effect.Effect<string, SqlError.SqlError, Store> =>
+        thread.role === 'coordinator' ? coordinatorBrief(thread) : thread.role === 'reviewer' ? reviewBrief(thread) : taskBrief(thread, why)
+
+      /** A reviewer's brief: the task, how to see the change, what it may do, and how to report. */
+      const reviewBrief = (thread: ReviewThread) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [lead] = yield* sql<{ content: string }>`
+            SELECT i.content FROM thread_items i JOIN threads t ON t.id = i.thread_id
+            WHERE t.task_id = ${thread.taskId} AND t.kind = 'task' AND i.kind = 'step_result'
+            ORDER BY i.sequence DESC LIMIT 1`
+          const summary = lead === undefined ? '' : ((JSON.parse(lead.content) as { summary?: string }).summary ?? '')
+          return [
+            "You are reviewing another agent's change, in Charrette. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
+            `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
+            `The change is in ${thread.worktree}: a copy of the lead's work as it stood when this round began, which Charrette throws away after; nothing you do there reaches the lead. See the change with \`git diff ${thread.baseCommit ?? 'HEAD~1'}\` there; new files are in it.`,
+            ...(summary === '' ? [] : [`The lead says:\n${summary}`]),
+            "Look for what would make the change wrong or unsafe to merge: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Then call Charrette's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), where it is, and what is wrong. With no findings worth fixing, the verdict is pass.",
+            ...(yield* threadSoFar(thread.threadId)),
+          ].join('\n\n')
+        })
+
+      const taskBrief = (
+        thread: TaskThread,
+        why: { readonly kind: 'start' } | { readonly kind: 'takeover'; readonly from: string | undefined },
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const record = yield* transcript(thread.threadId, PROMPT_BUDGET)
           const [plan] = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${thread.threadId} AND kind = 'plan' ORDER BY sequence DESC LIMIT 1`
           const entries =
@@ -833,17 +975,35 @@ export class Sessions extends Context.Service<
               : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same worktree. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
             `The worktree is ${thread.worktree}, on the branch ${thread.branch}, which started from ${thread.baseRef}${thread.baseCommit === null ? '' : ` at ${thread.baseCommit.slice(0, 12)}`}.`,
+            // How the step ends: the lead says so, with what the person reads instead of the whole turn.
+            "When you have done the task, or can't go further without the person, call Charrette's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),
             ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
             ...(status === '' ? [] : [`Not yet committed:\n${cap(status)}`]),
-            ...(record.text === ''
-              ? []
-              : [
-                  record.omitted > 0
-                    ? `The thread so far, oldest first (the ${record.omitted} earliest items are left out):`
-                    : 'The thread so far, oldest first:',
-                  record.text,
-                ]),
+            ...(yield* threadSoFar(thread.threadId)),
+          ].join('\n\n')
+        })
+
+      /** The coordinator's brief: its role, the project and its repositories, the agents it can give work to, and the thread so far. */
+      const coordinatorBrief = (thread: CoordinatorThread) =>
+        Effect.gen(function* () {
+          const agents = yield* Agents
+          const repositories = thread.folder.repositories
+          return [
+            `You are the coordinator of the project ${thread.projectName}, in Charrette. You talk with the person about the project as a whole: you answer their questions about the code and the work, and you turn the changes they want into tasks. You never change anything yourself, not even a one-line fix: a change is always a task, which an agent, its lead, does in a worktree of its own.`,
+            repositories.length === 0
+              ? 'The project has no repositories yet.'
+              : `Your working folder holds read-only copies of the project's repositories, fresh from their default branches:\n${repositories.map((repository) => `- ${repository.name}: ${repository.path} (${repository.base})`).join('\n')}\nRead and search them to answer questions and to plan. Anything you write there is thrown away.`,
+            [
+              "To get a change made, use Charrette's tools:",
+              '- draft_task, with a title that says what should change, in a line, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.',
+              '- propose_plan, for the task you drafted: who implements it (its lead) and why, in a sentence, and who reviews it, or no review for something trivial. The reviewer only reads; the lead then settles what it finds. By default, review with an agent from a different provider. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
+              '- list_tasks, read_task and read_thread, to see what is under way and how it went.',
+              "- message_lead, to pass something to a task's lead.",
+            ].join('\n'),
+            `The agents you can give work to:\n${agents.list.map((entry) => `- ${entry.definition.id} (${entry.definition.name})`).join('\n')}`,
+            'Answer questions yourself; only changes become tasks. Keep your replies short: the person sees each task as a card, so say in a sentence what you planned, and not the plan itself again.',
+            ...(yield* threadSoFar(thread.threadId)),
           ].join('\n\n')
         })
 

@@ -23,7 +23,9 @@ import { Rhythm } from '../../lib/rhythm'
  * a short while to change who does each step or drop one, then it starts on
  * its own. Nothing here asks you to approve anything: leaving it alone is a
  * yes. The clock runs only while the plan is on screen, since a preview
- * nobody saw is not a preview.
+ * nobody saw is not a preview; unless something else keeps it, like a
+ * runtime that starts the plan at a set time whether or not a window is
+ * open, and then the card shows that time as it comes.
  */
 
 export interface LaunchStep {
@@ -70,6 +72,8 @@ export interface TaskLaunchText {
   alsoWaits: (steps: string, until: string) => string
   held: string
   startsIn: (seconds: number) => string
+  /** Its time has come, and what keeps its clock is starting it. */
+  starting: string
   startsAfterSeen: (seconds: number) => string
   /** Said once to a screen reader when the plan is first seen: that it starts on its own. */
   announce: (seconds: number) => string
@@ -98,6 +102,7 @@ export const taskLaunchText: TaskLaunchText = {
   alsoWaits: (steps, until) => `${steps} waits until ${until}`,
   held: 'Held. Starts when you say',
   startsIn: (n) => `Starts in ${n}s`,
+  starting: 'Starting…',
   startsAfterSeen: (n) => `Starts ${n}s after you’ve seen it`,
   announce: (n) => `The plan starts on its own in ${n} seconds. Hold it to take your time.`,
   hold: 'Hold',
@@ -148,11 +153,19 @@ export interface TaskLaunchProps {
   ruleEnd?: TaskEnd
   project: string
   /** Time and cost, in a line. */
-  estimate: string
+  estimate?: string
   /** A runtime that is out, and when it resets. Its steps wait. */
   limited?: { name: string; until: string }
-  /** Seconds before it starts on its own, once seen. */
+  /** Seconds before it starts on its own, once seen: the whole wait, when `startsAt` keeps the time. */
   wait?: number
+  /** When it starts, in milliseconds since the epoch, when something else keeps the clock and starts it: it counts down to then, seen or not, and then says it is starting. */
+  startsAt?: number
+  /** Held: the clock stops until you start it. */
+  held?: boolean
+  defaultHeld?: boolean
+  onHeldChange?: (held: boolean) => void
+  /** No row for what happens when the work is done, where tasks end on their branch. */
+  hideEnd?: boolean
   /** Start it: now, or when the time runs out. With what it will do when done. */
   onStart: (steps: readonly LaunchStep[], end: TaskEnd) => void
   text?: Partial<TaskLaunchText>
@@ -174,15 +187,22 @@ export function TaskLaunch({
   estimate,
   limited,
   wait = 30,
+  startsAt,
+  held: heldProp,
+  defaultHeld = false,
+  onHeldChange,
+  hideEnd = false,
   onStart,
   text,
 }: TaskLaunchProps) {
   const t = { ...taskLaunchText, ...text }
   const [steps, setSteps] = useControlled(stepsProp, defaultSteps, onStepsChange)
   const [end, setEnd] = useControlled(endProp, defaultEnd ?? ruleEnd, onEndChange)
-  const [left, setLeft] = useState(wait)
-  const [held, setHeld] = useState(false)
+  const [shownFor, setShownFor] = useState(wait)
+  const [held, setHeld] = useControlled(heldProp, defaultHeld, onHeldChange)
   const [started, setStarted] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
+  const left = startsAt === undefined ? shownFor : Math.max(0, Math.ceil((startsAt - now) / 1000))
   const ref = useRef<HTMLDivElement>(null)
   const start = () => {
     if (started) return
@@ -193,19 +213,28 @@ export function TaskLaunch({
 
   const seen = useOnScreen(ref, { threshold: 0.9, enabled: !started })
   useEffect(() => {
-    if (!seen || held || started) return
+    if (startsAt !== undefined || !seen || held || started) return
     /* the last second starts it, so the clock never shows zero */
-    const id = window.setTimeout(() => (left <= 1 ? startWhenDue() : setLeft(left - 1)), 1000)
+    const id = window.setTimeout(() => (left <= 1 ? startWhenDue() : setShownFor(left - 1)), 1000)
     return () => window.clearTimeout(id)
-  }, [seen, left, held, started])
+  }, [startsAt, seen, left, held, started])
+  useEffect(() => {
+    if (startsAt === undefined || held || started || now >= startsAt) return
+    /* the kept time: it ticks each second until then; whatever keeps it starts the plan */
+    const id = window.setTimeout(() => setNow(Date.now()), Math.max(0, Math.min(1000, startsAt - Date.now())))
+    return () => window.clearTimeout(id)
+  }, [startsAt, now, held, started])
+  const due = startsAt !== undefined && !held && now >= startsAt
 
   const [announced, setAnnounced] = useState(false)
   if (seen && !announced) setAnnounced(true)
   const when = (() => {
     if (held) return t.held
-    if (seen) return t.startsIn(left)
+    if (due) return t.starting
+    if (seen || startsAt !== undefined) return t.startsIn(left)
     return t.startsAfterSeen(left)
   })()
+  const share = Math.min(1, left / wait)
 
   const set = (id: string, patch: Partial<LaunchStep>) => setSteps(steps.map((st) => (st.id === id ? { ...st, ...patch } : st)))
   const waiting = steps.filter((st) => st.waits && !st.skipped)
@@ -253,34 +282,36 @@ export function TaskLaunch({
             </span>
           </li>
         ))}
-        <li className={cx(s.step, s.end)}>
-          <span className={s.n}>{steps.length + 1}</span>
-          <Menu
-            label={t.endLabel}
-            width={320}
-            trigger={
-              <ActionButton className={s.pick} trailingIcon="chevronD">
-                {t.end[end].title}
-              </ActionButton>
-            }
-          >
-            <MenuRadioGroup label={t.endLabel} value={end} onChange={(v) => setEnd(ENDS.find((x) => x === v) ?? end)}>
-              {ENDS.map((x) => (
-                <MenuRadioItem key={x} value={x} hint={x === ruleEnd ? t.ruleNote(project, t.end[x].note) : t.end[x].note}>
-                  {t.end[x].title}
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          </Menu>
-          <span className={s.why}>{end === ruleEnd ? t.endByRule(project) : t.endThisTask}</span>
-        </li>
+        {!hideEnd && (
+          <li className={cx(s.step, s.end)}>
+            <span className={s.n}>{steps.length + 1}</span>
+            <Menu
+              label={t.endLabel}
+              width={320}
+              trigger={
+                <ActionButton className={s.pick} trailingIcon="chevronD">
+                  {t.end[end].title}
+                </ActionButton>
+              }
+            >
+              <MenuRadioGroup label={t.endLabel} value={end} onChange={(v) => setEnd(ENDS.find((x) => x === v) ?? end)}>
+                {ENDS.map((x) => (
+                  <MenuRadioItem key={x} value={x} hint={x === ruleEnd ? t.ruleNote(project, t.end[x].note) : t.end[x].note}>
+                    {t.end[x].title}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </Menu>
+            <span className={s.why}>{end === ruleEnd ? t.endByRule(project) : t.endThisTask}</span>
+          </li>
+        )}
       </ol>
       <div className={s.foot}>
         <span className={s.estimate}>
           {estimate}
           {waiting.length > 0 && limited && <> · {t.alsoWaits(waiting.map((st) => st.label).join(', '), limited.until)}</>}
         </span>
-        {!held && <Ring left={left / wait} />}
+        {!held && <Ring left={share} />}
         {/* the countdown is not read out each second; that it starts on its own is said once, when it is first seen */}
         <span className={s.when}>{when}</span>
         <span aria-live="polite">{announced && !held && !started && <VisuallyHidden>{t.announce(wait)}</VisuallyHidden>}</span>
@@ -290,7 +321,7 @@ export function TaskLaunch({
           </Button>
         )}
         <Button onClick={start}>{held ? t.start : t.startNow}</Button>
-        {!held && <i className={s.bar} style={cssVars({ '--left': left / wait })} aria-hidden="true" />}
+        {!held && <i className={s.bar} style={cssVars({ '--left': share })} aria-hidden="true" />}
       </div>
     </div>
   )

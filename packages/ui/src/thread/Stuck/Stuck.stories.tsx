@@ -21,6 +21,15 @@ export const Default: Story = {}
 export const NoOtherAgent: Story = { args: { agents: [] } }
 /** Without the lead's read or the output: what it tried is always there. */
 export const Bare: Story = { args: { read: undefined, output: undefined } }
+/** It came straight to you, as when the agent couldn't start: nothing was tried, so the step alone heads it. */
+export const NothingTried: Story = {
+  args: { tried: [], read: undefined, output: undefined, what: "Codex couldn't start. It isn't signed in." },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.queryByText('What it tried')).toBeNull()
+    await expect(c.queryByText(/after 0 tries/)).toBeNull()
+  },
+}
 
 export const TellingTheLead: Story = {
   play: async ({ args, canvasElement }) => {
@@ -68,6 +77,7 @@ export const AllStates: Story = {
         { state: 'waiting on you', node: <Stuck {...args} /> },
         { state: 'no other agent', node: <Stuck {...args} agents={[]} /> },
         { state: 'bare', node: <Stuck {...args} read={undefined} output={undefined} /> },
+        { state: 'nothing tried', node: <Stuck {...args} tried={[]} read={undefined} output={undefined} /> },
         { state: 'tell, hover', force: 'hover', node: <Stuck {...args} read={undefined} output={undefined} /> },
         { state: 'tell, focus', force: 'focus', node: <Stuck {...args} read={undefined} output={undefined} /> },
       ]}

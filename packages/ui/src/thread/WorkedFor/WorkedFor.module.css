@@ -12,8 +12,12 @@
   font-weight: 550;
 }
 .summary {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .rule {
   flex: 1;

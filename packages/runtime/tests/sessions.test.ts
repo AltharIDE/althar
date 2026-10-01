@@ -322,9 +322,9 @@ describe('sessions', () => {
       Effect.gen(function* () {
         const sessions = yield* Sessions
         const permissions = yield* Permissions
-        const { project } = yield* task()
+        yield* task()
         assert.instanceOf(yield* Effect.flip(say('thr_missing', 'hello')), NotFound)
-        assert.instanceOf(yield* Effect.flip(sessions.start({ threadId: project.coordinatorThreadId, agentId: 'codex' })), NotFound)
+        assert.instanceOf(yield* Effect.flip(sessions.start({ threadId: 'thr_missing', agentId: 'codex' })), NotFound)
         const answer = permissions.answer({
           envelope: yield* Runtime.envelope('attention.answer', {}),
           attentionId: 'attn_missing',

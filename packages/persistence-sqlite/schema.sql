@@ -20,7 +20,7 @@
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
 -- hold_reason: usage_limit, agent_unavailable
 -- thread_kind: coordinator, task, step
--- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice
+-- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
 -- user_input_state: queued, delivered, superseded
 -- turn_delivery_state: pending, delivered, completed, interrupted, interruption_uncertain, failed
@@ -877,3 +877,5 @@ CREATE INDEX processes_by_session ON processes (provider_session_id);
 CREATE INDEX processes_live ON processes (runtime_instance_id) WHERE state IN ('launching', 'running');
 
 CREATE UNIQUE INDEX one_live_session_per_thread ON provider_sessions (thread_id) WHERE state IN ('active', 'waiting_approval', 'cancelling');
+
+CREATE UNIQUE INDEX runs_by_plan ON runs (plan_id) WHERE plan_id IS NOT NULL;

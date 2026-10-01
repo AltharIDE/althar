@@ -16,5 +16,5 @@ function Project() {
   )
 }
 
-/** A project: its tasks, and starting one. */
+/** A project: its Talk room, with the coordinator and each task's card. */
 export const projectRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects/$projectId', component: Project })

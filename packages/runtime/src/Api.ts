@@ -1,8 +1,9 @@
 import { API_VERSION, Api, ApiError, type AgentStatus, type PortLike, serverProtocol, type WatchEvent } from '@charrette/contracts'
+import type { ProjectId } from '@charrette/domain'
 import { Ledger } from '@charrette/persistence-sqlite'
-import { signInStatus, type SignInStatus } from '@charrette/provider-adapters'
 import { Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
+import { SqlClient } from 'effect/sql'
 
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { Folders } from './Folders'
@@ -12,7 +13,11 @@ import { Permissions } from './Permissions'
 import { Projects } from './Projects'
 import { Queries } from './Queries'
 import * as Runtime from './Runtime'
+import { Coordinator } from './Coordinator'
+import { Plans } from './Plans'
+import { Runs } from './Runs'
 import { Sessions } from './Sessions'
+import { SignIns } from './SignIns'
 import { expected, words } from './words'
 
 /*
@@ -26,9 +31,6 @@ import { expected, words } from './words'
 /** How often the change feed is read when nothing says it grew: a fallback, not the way changes arrive. */
 const FEED_FALLBACK = '1 second'
 
-/** How long an agent's sign-in is taken as it was last checked. */
-const SIGN_IN_TTL = Duration.minutes(1)
-
 /** How many session commands' results are kept for retries, per launch. */
 const RECENT_COMMANDS = 1_000
 
@@ -41,6 +43,12 @@ export const handlers = Api.toLayer(
     const queries = yield* Queries
     const folders = yield* Folders
     const live = yield* Live
+    const signIns = yield* SignIns
+    const plans = yield* Plans
+    const runs = yield* Runs
+    const coordinator = yield* Coordinator
+    const instance = yield* Instance
+    const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
     const agents = yield* Agents
     const config = yield* RuntimeConfig
@@ -82,15 +90,13 @@ export const handlers = Api.toLayer(
       })
 
     /* Sign-in, checked at most once a minute: each check starts the agent's own status command. */
-    const signIns = new Map<string, { readonly status: SignInStatus; readonly at: number }>()
     const signIn = (entry: AgentEntry, recheck: boolean): Effect.Effect<AgentStatus> =>
-      Effect.gen(function* () {
-        const known = signIns.get(entry.definition.id)
-        const fresh = known !== undefined && Date.now() - known.at < Duration.toMillis(SIGN_IN_TTL)
-        const status = !recheck && fresh ? known.status : yield* signInStatus(entry.definition)
-        if (recheck || !fresh) signIns.set(entry.definition.id, { status, at: Date.now() })
-        return { id: entry.definition.id, name: entry.definition.name, signIn: status, login: entry.definition.signIn.login }
-      })
+      Effect.map(signIns.of(entry.definition.id, recheck), (status) => ({
+        id: entry.definition.id,
+        name: entry.definition.name,
+        signIn: status,
+        login: entry.definition.signIn.login,
+      }))
 
     /*
      * Changes from the store's feed after `since`, or from now: the window
@@ -196,13 +202,61 @@ export const handlers = Api.toLayer(
       Send: ({ commandId, threadId, body, disposition }) =>
         api(
           Effect.gen(function* () {
-            yield* sessions.send({
+            const message = {
               envelope: yield* envelope('thread.send', { threadId, body, disposition }, commandId),
               threadId,
               body,
               disposition,
-            })
+            }
+            // What the person says to the coordinator starts it, if it isn't running.
+            const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${threadId}`
+            if (thread?.kind === 'coordinator') yield* coordinator.say(message)
+            else yield* sessions.send(message)
           }),
+        ),
+      GetCoordinator: ({ projectId, before, limit }) =>
+        api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
+      StartTask: ({ commandId, projectId, title, description, steps }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const created = yield* projects.createTask({
+                envelope: yield* envelope('task.create', { projectId, title, description }, commandId),
+                projectId,
+                title,
+                ...(description === undefined ? {} : { description }),
+                draft: true,
+              })
+              // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
+              const planId = yield* plans.propose({
+                projectId: projectId as ProjectId,
+                taskId: created.taskId,
+                steps,
+                reason: null,
+                actorId: instance.personId,
+                startsIn: Duration.zero,
+              })
+              yield* plans.start(planId, instance.personId)
+              return yield* queries.task(created.taskId)
+            }),
+          ),
+        ),
+      StartPlan: ({ commandId, planId }) => once(commandId, api(plans.start(planId, instance.personId))),
+      HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
+      ChangePlan: ({ commandId, planId, steps }) => once(commandId, api(plans.change(planId, steps, instance.personId))),
+      AnswerStuck: ({ commandId, attentionId, answer }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              yield* runs.answerStuck({
+                envelope: yield* envelope('attention.answer_stuck', { attentionId, answer }, commandId),
+                attentionId,
+                answer,
+              })
+            }),
+          ),
         ),
       Answer: ({ commandId, attentionId, decision, reason }) =>
         api(

@@ -4,16 +4,11 @@ import type { AttentionRequest, ThreadSnapshot } from '@charrette/contracts'
 import {
   BackCrumb,
   Button,
-  CodeBlock,
   Composer,
   Decision,
   LinkButton,
-  Markdown,
   type ModelInfo,
   Permission,
-  Plan,
-  Prose,
-  Reasoning,
   Select,
   Spinner,
   TaskFace,
@@ -24,14 +19,13 @@ import {
   ThreadDivider,
   ThreadMeasure,
   TitleBar,
-  Tool,
-  Turn,
-  You,
 } from '@charrette/ui'
 
 import { modelInfo } from '../../shared/agents'
-import { ago } from '../../shared/time'
-import { type Block, blocksOf, type Part } from './thread'
+import { ago, useNow } from '../../shared/time'
+import { blocksOf } from '../../shared/thread'
+import { ThreadBlocks } from '../../shared/ThreadBlocks'
+import { StuckCall } from './StuckCall'
 import s from './Task.module.css'
 import type { TaskModel } from './useTask'
 
@@ -40,9 +34,6 @@ import type { TaskModel } from './useTask'
  * What the rules keep for the person arrives as a call at the end of the
  * thread. Everything drawn here is the kit's; this view only arranges it.
  */
-
-/** How long a command can be before its row, at the thread's width, clips it. */
-const LONG_COMMAND = 72
 
 export const text = {
   thread: 'Thread',
@@ -57,12 +48,11 @@ export const text = {
   placeholderNone: 'Start a lead to talk to it',
   working: 'Working',
   needsYou: 'Needs you',
+  ready: 'Ready',
   idle: 'Idle',
   stopped: 'Stopped',
-  thought: 'Thought',
   dismiss: 'Dismiss',
   earlier: 'Earlier in this task',
-  shell: 'Shell',
   showEarlier: 'Show',
   loadingEarlier: 'Showing…',
 }
@@ -70,6 +60,9 @@ export const text = {
 /** Where a task stands, for its header. */
 export const statusOf = (snapshot: ThreadSnapshot): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
+  if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: text.working }
+  // A run that passed review is ready, whatever its lead is doing now.
+  if (snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled') return { status: TaskStatus.Done, state: text.ready }
   if (snapshot.session === null) return { status: TaskStatus.Stopped, state: text.stopped }
   return snapshot.session.turnRunning
     ? { status: TaskStatus.Running, state: text.working }
@@ -77,59 +70,6 @@ export const statusOf = (snapshot: ThreadSnapshot): { readonly status: TaskStatu
 }
 
 const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', context: 0, efforts: [] }
-
-function PartView({ part }: { part: Part }) {
-  switch (part.kind) {
-    case 'message':
-      return <Markdown source={part.text} />
-    case 'thought':
-      return (
-        <Reasoning took="" text={{ thought: () => text.thought }}>
-          <Prose dim>{part.text}</Prose>
-        </Reasoning>
-      )
-    case 'tool':
-      return (
-        <Tool
-          kind={part.toolKind}
-          verb={part.verb}
-          target={part.target}
-          state={part.state}
-          {...(part.command === null ? {} : { copy: part.command })}
-        >
-          {/* A command too long for its row, or over several lines, opens to show all of it. */}
-          {part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND) ? (
-            <CodeBlock code={part.command} lang={text.shell} />
-          ) : undefined}
-        </Tool>
-      )
-    case 'plan':
-      return <Plan steps={part.steps} />
-    case 'notice':
-      return <p className={s[part.tone]}>{part.text}</p>
-  }
-}
-
-function BlockView({ block, agentName }: { block: Block; agentName: (id: string | null) => string }) {
-  switch (block.kind) {
-    case 'you':
-      return (
-        <You at={block.at} delivery={block.delivery}>
-          {block.text}
-        </You>
-      )
-    case 'divider':
-      return <ThreadDivider icon="agents">{block.text}</ThreadDivider>
-    case 'turn':
-      return (
-        <Turn model={modelInfo({ id: block.agentId ?? 'agent', name: agentName(block.agentId) }, null)} at={block.at}>
-          {block.parts.map((part) => (
-            <PartView key={part.id} part={part} />
-          ))}
-        </Turn>
-      )
-  }
-}
 
 function Call({ request, project, onAnswer }: { request: AttentionRequest; project: string; onAnswer: TaskModel['answer'] }) {
   return (
@@ -154,6 +94,8 @@ function Call({ request, project, onAnswer }: { request: AttentionRequest; proje
 export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => void }) {
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState<string | null>(null)
+  // A running turn says how long it has worked so far.
+  const now = useNow(model.snapshot?.session?.turnRunning ?? false)
   const snapshot = model.snapshot
   if (snapshot === null) {
     return (
@@ -274,12 +216,29 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
               {text.earlier}
             </ThreadDivider>
           )}
-          {blocksOf(snapshot, model.streaming, (iso) => ago(iso)).map((block) => (
-            <BlockView key={block.id} block={block} agentName={agentName} />
-          ))}
-          {snapshot.attention.map((request) => (
-            <Call key={request.id} request={request} project={snapshot.project.name} onAnswer={model.answer} />
-          ))}
+          <ThreadBlocks
+            blocks={blocksOf(
+              { items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree },
+              model.streaming,
+              (iso) => ago(iso),
+              now,
+            )}
+            agentName={agentName}
+          />
+          {snapshot.attention.map((request) =>
+            request.kind === 'stuck' && request.stuck !== null ? (
+              <StuckCall
+                key={request.id}
+                request={request}
+                stuck={request.stuck}
+                agents={model.agents}
+                agentName={agentName}
+                onAnswer={(attentionId, answer) => void model.answerStuck(attentionId, answer)}
+              />
+            ) : (
+              <Call key={request.id} request={request} project={snapshot.project.name} onAnswer={model.answer} />
+            ),
+          )}
         </Thread>
       </TaskFace>
     </div>
