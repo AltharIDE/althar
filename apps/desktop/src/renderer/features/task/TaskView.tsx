@@ -58,6 +58,9 @@ export const text = {
   placeholderBusy: 'Add to the queue, or interrupt the lead',
   placeholder: (lead: string) => `Tell ${lead} something`,
   placeholderNone: 'Start a lead to talk to it',
+  handsOver: (agent: string) => `hands the task to ${agent}`,
+  takesOver: (to: string, from: string) => `${to} takes over from a brief; ${from}’s turn stops.`,
+  handOver: 'Hand it over',
   working: 'Working',
   needsYou: 'Needs you',
   ready: 'Ready',
@@ -283,6 +286,9 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
               agents={model.agents}
               value={choice}
               onChange={(next) => (session === null ? setPick(next) : void model.choose(next))}
+              // A lead that runs is handed over by another agent's model; one at work, only once the person says.
+              {...(session === null ? {} : { handover: { note: text.handsOver, ask: busy ? text.takesOver : null } })}
+              text={{ proceed: text.handOver }}
             />
           )
         }

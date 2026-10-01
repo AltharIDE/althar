@@ -188,7 +188,10 @@ describe('the Talk room', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
     await userEvent.click(await screen.findByRole('radio', { name: 'High' }))
     await waitFor(() => expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'thc', effort: 'high' }))
-    await userEvent.click(screen.getByRole('radio', { name: /gpt-5\.2-codex/ }))
+    // At work, another agent takes over only once the person says.
+    await userEvent.click(screen.getByRole('radio', { name: /gpt-5\.2-codexhands the conversation to Codex/ }))
+    expect(screen.getByText('Codex takes over from a brief; Claude Code’s turn stops.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Hand it over' }))
     await waitFor(() => expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'codex', model: 'gpt-5.2-codex' }))
   })
 

@@ -29,6 +29,7 @@ import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { change, fact, timestamp } from './records'
 import { git } from './git'
 import { reviewCopyOf } from './reviewCopy'
+import { defaultEffortOf } from './preferences'
 import { addItem, recorder, transcript } from './threads'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
@@ -694,9 +695,13 @@ export class Sessions extends Context.Service<
                   : { meta: definition.sessionMeta(thread.role === 'task' ? 'lead' : 'reader') }),
               })
               if (model !== undefined) yield* agent.setOption(definition.options.model, model)
-              // An effort the model doesn't offer leaves it at the agent's own: no reason not to start.
-              if (effort !== undefined && definition.options.effort !== undefined)
-                yield* agent.setOption(definition.options.effort, effort).pipe(Effect.ignore)
+              if (definition.options.effort !== undefined) {
+                // Without an effort of its own, the person's default for the model it is on, where they set one.
+                const on = model ?? optionValue(yield* agent.options, definition.options.model)
+                const wanted = effort ?? (on === null ? null : yield* defaultEffortOf(definition.id, on))
+                // An effort the model doesn't offer leaves it at the agent's own: no reason not to start.
+                if (wanted !== null) yield* agent.setOption(definition.options.effort, wanted).pipe(Effect.ignore)
+              }
               return { connection, agent }
             }).pipe(Scope.provide(scope)),
           )

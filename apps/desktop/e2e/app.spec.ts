@@ -108,6 +108,8 @@ test('opens a project, starts a task, and talks to its lead', async () => {
 
     await say(page, 'think')
     await expect(page.getByText('Done', { exact: true })).toBeVisible()
+    // Its fold says how long it worked once the turn has ended; until then it is still working.
+    await expect(page.getByRole('button', { name: /^Working for/ })).toHaveCount(0)
     await page
       .getByRole('button', { name: /^Worked for/ })
       .last()

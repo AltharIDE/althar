@@ -59,6 +59,9 @@ export const text = {
   coordinator: 'Coordinator',
   empty: 'Ask the coordinator about the project, or say what should change.',
   placeholder: 'Tell the coordinator something',
+  handsOver: (agent: string) => `hands the conversation to ${agent}`,
+  takesOver: (to: string, from: string) => `${to} takes over from a brief; ${from}’s turn stops.`,
+  handOver: 'Hand it over',
   queued: 'Queued · the coordinator reads it next',
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in, so the coordinator starts on ${instead}.`,
@@ -177,6 +180,8 @@ export function ProjectView({
               agents={model.agents}
               value={chosen}
               onChange={(next) => (session === null ? setPick(next) : void model.choose(next))}
+              {...(session === null ? {} : { handover: { note: text.handsOver, ask: busy ? text.takesOver : null } })}
+              text={{ proceed: text.handOver }}
             />
           )
         }

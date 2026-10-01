@@ -1,12 +1,14 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { Brand } from '@charrette/ui'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { AgentModels, AgentStatus } from '@charrette/contracts'
 
-import { useModels } from '../src/renderer/data/models'
+import { useModels, useSetDefaultEffort } from '../src/renderer/data/models'
 import {
   catalogOf,
+  defaultEffortOf,
   choiceOf,
   defaultPins,
   effortId,
@@ -16,7 +18,6 @@ import {
   makerOf,
   modelName,
   moveTo,
-  setDefaultEffort,
   togglePin,
   useModelPrefs,
 } from '../src/renderer/shared/models'
@@ -64,6 +65,7 @@ describe('the models every agent offers', () => {
       efforts: [{ id: 'xhigh', name: 'Xhigh' }],
       model: null,
       effort: null,
+      defaults: [],
       probing: false,
     }
     const both = catalogOf([...models, offered], [...signedIn, opencode])
@@ -125,6 +127,21 @@ describe('the models every agent offers', () => {
     expect([effortName(catalog, 'codex', 'extra-high'), effortName(catalog, 'codex', null)]).toEqual(['Extra high', null])
     expect([effortId(catalog, 'codex', 'Extra high'), effortId(catalog, 'opencode', 'Deep')]).toEqual(['extra-high', 'Deep'])
   })
+
+  it('carry the person’s default effort for each model, or else what its agent is on', () => {
+    const kept = catalogOf(
+      models.map((offered) =>
+        offered.agentId === 'codex' ? { ...offered, defaults: [{ model: 'gpt-5.2', effort: 'extra-high' }] } : offered,
+      ),
+      signedIn,
+    )
+    expect([...kept.defaults]).toEqual([['codex:gpt-5.2', 'extra-high']])
+    const info = (id: string) => kept.models.find((model) => model.id === id)!
+    expect([defaultEffortOf(kept, info('codex:gpt-5.2')), defaultEffortOf(kept, info('codex:gpt-5.2-codex'))]).toEqual([
+      'Extra high',
+      'Medium',
+    ])
+  })
 })
 
 describe('moving a running thread to a choice', () => {
@@ -147,34 +164,34 @@ function Prefs() {
   return <output>{JSON.stringify(prefs)}</output>
 }
 
-describe('the person’s pins and default efforts', () => {
+describe('the person’s pins', () => {
   it('start from the pins shown, and are kept in this window’s storage', () => {
     render(<Prefs />)
-    expect(screen.getByRole('status').textContent).toBe('{"pins":null,"efforts":{}}')
+    expect(screen.getByRole('status').textContent).toBe('{"pins":null}')
     act(() => togglePin('codex:gpt-5.2', ['claude-code:default']))
     act(() => togglePin('claude-code:default', ['ignored']))
-    act(() => setDefaultEffort('codex:gpt-5.2', 'high'))
-    expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({
-      pins: ['codex:gpt-5.2'],
-      efforts: { 'codex:gpt-5.2': 'high' },
-    })
+    expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({ pins: ['codex:gpt-5.2'] })
     expect(window.localStorage.getItem('charrette.models')).toBe(screen.getByRole('status').textContent)
   })
 
   it('are read again from storage, and what isn’t theirs is left out', () => {
-    window.localStorage.setItem('charrette.models', JSON.stringify({ pins: [1, 'a'], efforts: { 'codex:x': 'low', bad: 3 } }))
+    window.localStorage.setItem('charrette.models', JSON.stringify({ pins: ['a', 'b'], efforts: { 'codex:x': 'low' } }))
+    const view = render(<Prefs />)
+    expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({ pins: ['a', 'b'] })
+    view.unmount()
+    window.localStorage.setItem('charrette.models', JSON.stringify({ pins: [1, 'a'] }))
     render(<Prefs />)
-    expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({ pins: null, efforts: { 'codex:x': 'low' } })
+    expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({ pins: null })
   })
 
   it('are none where storage holds something else, or can’t be read or written', () => {
     window.localStorage.setItem('charrette.models', '{not json')
     const view = render(<Prefs />)
-    expect(screen.getByRole('status').textContent).toBe('{"pins":null,"efforts":{}}')
+    expect(screen.getByRole('status').textContent).toBe('{"pins":null}')
     view.unmount()
     window.localStorage.setItem('charrette.models', '"a string"')
     render(<Prefs />)
-    expect(screen.getByRole('status').textContent).toBe('{"pins":null,"efforts":{}}')
+    expect(screen.getByRole('status').textContent).toBe('{"pins":null}')
     const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('blocked')
     })
@@ -182,8 +199,8 @@ describe('the person’s pins and default efforts', () => {
       throw new Error('blocked')
     })
     // Kept for this window only.
-    act(() => setDefaultEffort('codex:x', 'low'))
-    expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({ pins: null, efforts: { 'codex:x': 'low' } })
+    act(() => togglePin('codex:x', []))
+    expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({ pins: ['codex:x'] })
     getItem.mockRestore()
     setItem.mockRestore()
   })
@@ -220,6 +237,47 @@ describe('reading the models', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('reads them again once the person sets a default effort, and keeps the one there was when it isn’t set', async () => {
+    let kept: ReadonlyArray<{ readonly model: string; readonly effort: string }> = []
+    let first: (known: ReadonlyArray<AgentModels>) => void = () => undefined
+    const now = () => models.map((offered) => (offered.agentId === 'codex' ? { ...offered, defaults: kept, probing: false } : offered))
+    const getModels = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise((resolve) => (first = resolve)))
+      .mockImplementation(async () => now())
+    const setDefaultEffort = vi
+      .fn()
+      .mockImplementationOnce(async (input: { model: string; effort: string }) => {
+        kept = [{ model: input.model, effort: input.effort }]
+      })
+      .mockRejectedValueOnce(new Error('The port closed'))
+    const { client } = fakeClient({ getModels, setDefaultEffort })
+    function Defaults() {
+      const known = useModels()
+      const setDefault = useSetDefaultEffort()
+      return (
+        <>
+          <output>{JSON.stringify(known?.find((offered) => offered.agentId === 'codex')?.defaults ?? null)}</output>
+          <button type="button" onClick={() => void setDefault({ agentId: 'codex', model: 'gpt-5.2', effort: 'high' })}>
+            Set
+          </button>
+        </>
+      )
+    }
+    withServices(<Defaults />, client)
+    // Set while the first read is on its way: read again once it is back.
+    await userEvent.click(screen.getByRole('button', { name: 'Set' }))
+    await waitFor(() => expect(setDefaultEffort).toHaveBeenCalledWith({ agentId: 'codex', model: 'gpt-5.2', effort: 'high' }))
+    act(() => first(now()))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('[{"model":"gpt-5.2","effort":"high"}]'))
+    expect(getModels).toHaveBeenCalledTimes(2)
+    // One that isn't set leaves what there was, and isn't read again for.
+    await userEvent.click(screen.getByRole('button', { name: 'Set' }))
+    await waitFor(() => expect(setDefaultEffort).toHaveBeenCalledTimes(2))
+    expect(getModels).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('status').textContent).toBe('[{"model":"gpt-5.2","effort":"high"}]')
   })
 
   it('offers each agent’s own default when they can’t be read', async () => {

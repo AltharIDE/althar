@@ -198,6 +198,9 @@ describe('the API', () => {
           offered.map((agent) => agent.agentId),
           ['claude-code', 'codex', 'opencode'],
         )
+        yield* client.SetDefaultEffort({ commandId: commandId(), agentId: 'codex', model: 'large', effort: 'high' })
+        const codex = (yield* client.GetModels({})).find((agent) => agent.agentId === 'codex')
+        assert.deepStrictEqual(codex?.defaults, [{ model: 'large', effort: 'high' }])
         yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
         yield* client.StopSession({ commandId: commandId(), threadId: task.threadId })
         assert.isNull((yield* client.GetThread({ threadId: task.threadId })).session)

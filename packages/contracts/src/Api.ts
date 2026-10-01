@@ -54,6 +54,8 @@ export const AgentModels = Schema.Struct({
   /** What it is on, as last seen: its own default, or what it was last set to. */
   model: Schema.NullOr(Schema.String),
   effort: Schema.NullOr(Schema.String),
+  /** The person's default effort for each model they set one for: a session on it starts there. */
+  defaults: Schema.Array(Schema.Struct({ model: Schema.String, effort: Schema.String })),
   /** Being asked now, for an agent not seen before: read again shortly. */
   probing: Schema.Boolean,
 })
@@ -751,6 +753,8 @@ export const Api = RpcGroup.make(
   command('SetEffort', { threadId: Schema.String, effort: Schema.String }, Schema.Void),
   /** Every agent's models and efforts, as far as Charrette knows them. */
   call('GetModels', {}, Schema.Array(AgentModels)),
+  /** The person's default effort for one of an agent's models, kept for the profile. */
+  command('SetDefaultEffort', { agentId: Schema.String, model: Schema.String, effort: Schema.String }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
   command('Send', { threadId: Schema.String, body: Schema.String, disposition: Disposition }, Schema.Void),

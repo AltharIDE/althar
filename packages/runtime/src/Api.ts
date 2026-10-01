@@ -241,6 +241,8 @@ export const handlers = Api.toLayer(
       SetModel: ({ commandId, threadId, model }) => once(commandId, api(sessions.setModel({ threadId, model }))),
       SetEffort: ({ commandId, threadId, effort }) => once(commandId, api(sessions.setEffort({ threadId, effort }))),
       GetModels: () => api(models.catalog),
+      SetDefaultEffort: ({ commandId, agentId, model, effort }) =>
+        once(commandId, api(models.setDefaultEffort({ agentId, model, effort }))),
       Interrupt: ({ commandId, threadId }) => once(commandId, api(sessions.interrupt(threadId))),
       StopSession: ({ commandId, threadId }) => once(commandId, api(sessions.stop(threadId))),
       Send: ({ commandId, threadId, body, disposition }) =>

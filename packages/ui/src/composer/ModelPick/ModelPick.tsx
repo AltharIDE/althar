@@ -1,9 +1,11 @@
 import { RadioGroup } from 'radix-ui'
+import { useEffect, useRef } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { Model, type ModelInfo } from '../../foundations/Model/Model'
 import { cx } from '../../lib/cx'
 import { useControlled } from '../../lib/controlled'
+import { Button } from '../../primitives/Button/Button'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Popover } from '../../primitives/Popover/Popover'
 import { Segmented } from '../../primitives/Segmented/Segmented'
@@ -25,6 +27,9 @@ export interface ModelPickText {
   all: string
   /** The row that takes this model off what it was picked for. */
   remove: string
+  /** Going ahead with a pick that asked first, and not. */
+  proceed: string
+  cancel: string
 }
 
 export const modelPickText: ModelPickText = {
@@ -38,6 +43,8 @@ export const modelPickText: ModelPickText = {
   makeDefault: 'Make this default',
   all: 'All models',
   remove: 'Remove from this step',
+  proceed: 'Switch',
+  cancel: 'Cancel',
 }
 
 export interface ModelPickProps {
@@ -65,6 +72,14 @@ export interface ModelPickProps {
   variant?: 'quiet' | 'field'
   /** Where the list opens: above in a composer, below in a plan. */
   placement?: 'above' | 'below'
+  /** A word beside a model in the list, such as that picking it hands the conversation to another agent. */
+  note?: (model: ModelInfo) => string | undefined
+  /** What picking a model would do that needs a yes first, in a sentence. Picking such a model asks, in the list, before `onChange`. */
+  confirm?: (model: ModelInfo) => string | undefined
+  /** The model waiting on that yes: one picked here, or elsewhere, like the consumer's browser. */
+  asking?: ModelInfo | null
+  defaultAsking?: ModelInfo | null
+  onAskingChange?: (model: ModelInfo | null) => void
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
@@ -90,13 +105,34 @@ export function ModelPick({
   owner,
   variant = 'quiet',
   placement = 'above',
+  note,
+  confirm,
+  asking: askingProp,
+  defaultAsking = null,
+  onAskingChange,
   open,
   defaultOpen = false,
   onOpenChange,
   text,
 }: ModelPickProps) {
   const t = { ...modelPickText, ...text }
-  const [isOpen, setOpen] = useControlled(open, defaultOpen, onOpenChange)
+  const [isOpen, setOpenState] = useControlled(open, defaultOpen, onOpenChange)
+  const [asking, setAsking] = useControlled(askingProp, defaultAsking, onAskingChange)
+  const question = asking === null ? undefined : confirm?.(asking)
+  const proceed = useRef<HTMLButtonElement>(null)
+  /* the question takes focus as it appears, so a keyboard answers it at once */
+  useEffect(() => {
+    if (isOpen && question !== undefined) proceed.current?.focus()
+  }, [isOpen, question])
+  /* closing the list puts the question away unanswered */
+  const setOpen = (next: boolean) => {
+    if (!next && asking !== null) setAsking(null)
+    setOpenState(next)
+  }
+  const pick = (x: ModelInfo) => {
+    if (confirm?.(x) === undefined) onChange(x.id)
+    else setAsking(x)
+  }
   const isPinned = (x: ModelInfo) => pinned.some((p) => p.id === x.id)
   const list = isPinned(model) ? pinned : [model, ...pinned]
   /* A model with no effort levels gets no control, whatever effort says. */
@@ -126,18 +162,45 @@ export function ModelPick({
         aria-label={t.pinned}
         value={model.id}
         onValueChange={(id) => {
-          if (id !== model.id) onChange(id)
+          const x = list.find((candidate) => candidate.id === id)
+          if (x !== undefined && id !== model.id) pick(x)
         }}
         loop
       >
-        {list.map((x) => (
-          <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
-            <Model model={x} />
-            {!isPinned(x) && <span className={s.unpinned}>{t.notPinned}</span>}
-            <Icon name="check" size={11} className={s.check} />
-          </RadioGroup.Item>
-        ))}
+        {list.map((x) => {
+          const said = note?.(x)
+          return (
+            <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
+              <Model model={x} />
+              {!isPinned(x) && <span className={s.unpinned}>{t.notPinned}</span>}
+              {said !== undefined && <span className={s.note}>{said}</span>}
+              <Icon name="check" size={11} className={s.check} />
+            </RadioGroup.Item>
+          )
+        })}
       </RadioGroup.Root>
+
+      {asking !== null && question !== undefined && (
+        <div className={s.ask} role="group" aria-label={question}>
+          <p className={s.question}>{question}</p>
+          <div className={s.answers}>
+            <Button
+              ref={proceed}
+              size="small"
+              variant="signal"
+              onClick={() => {
+                setAsking(null)
+                onChange(asking.id)
+              }}
+            >
+              {t.proceed}
+            </Button>
+            <Button size="small" variant="quiet" onClick={() => setAsking(null)}>
+              {t.cancel}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {level !== null && (
         <div className={s.section}>

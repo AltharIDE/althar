@@ -8,7 +8,7 @@ import { TaskStatus } from '@charrette/ui'
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
 import { statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
-import { changed, fakeClient, items, snapshot, streamed } from './fixtures'
+import { changed, fakeClient, items, models, snapshot, streamed } from './fixtures'
 import { withServices } from './render'
 
 function Task({ onBack = vi.fn() }: { onBack?: () => void }) {
@@ -106,8 +106,14 @@ describe('a task', () => {
     expect(client.stopSession).toHaveBeenCalledWith('th1')
   })
 
-  it('keeps the person’s pinned models and default efforts in this window', async () => {
-    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+  it('keeps the person’s pinned models in this window, and their default efforts in Charrette', async () => {
+    // The runtime keeps defaults: what is set is what the models say when read again.
+    const kept = new Map<string, Array<{ model: string; effort: string }>>()
+    const getModels = vi.fn(async () => models.map((offered) => ({ ...offered, defaults: kept.get(offered.agentId) ?? [] })))
+    const setDefaultEffort = vi.fn(async (input: { agentId: string; model: string; effort: string }) => {
+      kept.set(input.agentId, [...(kept.get(input.agentId) ?? []), { model: input.model, effort: input.effort }])
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()), getModels, setDefaultEffort })
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Lead: Opus High' }))
     // Until the person pins one, each agent's current model is pinned; the one in use shows first.
@@ -116,10 +122,11 @@ describe('a task', () => {
       within(pinned)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Opusnot pinned', 'Claude Code default', 'gpt-5.2-codex'])
+    ).toEqual(['Opusnot pinned', 'Claude Code default', 'gpt-5.2-codexhands the task to Codex'])
     // High is not what Claude Code is on; the person makes it Opus's.
     expect(screen.getByText(/default Medium/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Make this default' }))
+    expect(setDefaultEffort).toHaveBeenCalledWith({ agentId: 'claude-code', model: 'opus', effort: 'high' })
     expect(await screen.findByText('Opus default')).toBeTruthy()
 
     await userEvent.click(screen.getByRole('button', { name: /All models/ }))
@@ -127,11 +134,11 @@ describe('a task', () => {
     await userEvent.click(within(browser).getByRole('button', { name: 'Pin Opus' }))
     await userEvent.click(within(browser).getByRole('combobox', { name: 'Default effort for gpt-5.2' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Extra high' }))
+    await waitFor(() => expect(setDefaultEffort).toHaveBeenCalledWith({ agentId: 'codex', model: 'gpt-5.2', effort: 'extra-high' }))
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(JSON.parse(window.localStorage.getItem('charrette.models') ?? '{}')).toEqual({
       pins: ['claude-code:default', 'codex:gpt-5.2-codex', 'claude-code:opus'],
-      efforts: { 'claude-code:opus': 'high', 'codex:gpt-5.2': 'extra-high' },
     })
 
     // A model with the person's default effort starts on it.
@@ -141,6 +148,25 @@ describe('a task', () => {
     await waitFor(() =>
       expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2', effort: 'extra-high' }),
     )
+  })
+
+  it('asks before another agent takes over from a lead at work, from the list or from every model', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ session: { ...snapshot().session!, turnRunning: true } })) })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    expect(screen.getByText('Codex takes over from a brief; Claude Code’s turn stops.')).toBeTruthy()
+    expect(client.switchAgent).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByText(/takes over from a brief/)).toBeNull()
+    // From every model, the question waits in the picker.
+    await userEvent.click(screen.getByRole('button', { name: /All models/ }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Use gpt-5.2' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Hand it over' }))
+    await waitFor(() => expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2' }))
+    // Its own models change without asking.
+    await userEvent.click(await screen.findByRole('radio', { name: /Claude Code default/ }))
+    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'default' }))
   })
 
   it('answers what the rules keep for the person', async () => {

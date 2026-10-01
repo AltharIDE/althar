@@ -159,6 +159,7 @@ describe('the API', () => {
               Merge: () => Effect.die('unused'),
               SetEffort: () => Effect.die('unused'),
               GetModels: () => Effect.die('unused'),
+              SetDefaultEffort: () => Effect.die('unused'),
               GetThreadItem: () => Effect.die('unused'),
               GetCoordinator: () => Effect.die('unused'),
               StartTask: () => Effect.die('unused'),

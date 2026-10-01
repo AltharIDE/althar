@@ -44,6 +44,7 @@ export const models: ReadonlyArray<AgentModels> = [
     efforts: efforts('Low', 'Medium', 'High'),
     model: 'default',
     effort: 'medium',
+    defaults: [],
     probing: false,
   },
   {
@@ -55,9 +56,10 @@ export const models: ReadonlyArray<AgentModels> = [
     efforts: efforts('Low', 'Medium', 'High', 'Extra high'),
     model: 'gpt-5.2-codex',
     effort: 'medium',
+    defaults: [],
     probing: false,
   },
-  { agentId: 'opencode', models: [], efforts: [], model: null, effort: null, probing: true },
+  { agentId: 'opencode', models: [], efforts: [], model: null, effort: null, defaults: [], probing: true },
 ]
 
 export const project: ProjectSummary = {
@@ -356,6 +358,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setModel: vi.fn(async () => {}),
     setEffort: vi.fn(async () => {}),
     getModels: vi.fn(async () => models),
+    setDefaultEffort: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     stopSession: vi.fn(async () => {}),
     send: vi.fn(async () => {}),

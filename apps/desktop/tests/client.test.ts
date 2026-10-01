@@ -177,6 +177,7 @@ describe('the client', () => {
           SetModel: () => Effect.die('unused'),
           SetEffort: () => Effect.die('unused'),
           GetModels: () => Effect.die('unused'),
+          SetDefaultEffort: () => Effect.die('unused'),
           // A refusal is an answer: it isn't tried again.
           Interrupt: ({ commandId }) => {
             commands.push(commandId)

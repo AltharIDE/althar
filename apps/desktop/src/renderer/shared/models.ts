@@ -11,8 +11,10 @@ import type { Client, Start } from '../data/client'
  * together, since two agents may name theirs alike. It carries its maker's
  * mark, found from its name, or the agent's maker where the name says
  * nothing. An agent whose models aren't known yet is one entry: its own
- * default. The person's pins and default efforts stay in this window's
- * storage; until they pin one, each agent's current model is pinned.
+ * default. A model's default effort is the person's, kept by the runtime,
+ * which starts every session on it there. Pins are only how this window
+ * lists models, so they stay in its storage; until the person pins one, each
+ * agent's current model is pinned.
  */
 
 /** Who runs a conversation: an agent, its model, how hard it thinks. Null is the agent's own. */
@@ -75,6 +77,8 @@ export interface Catalog {
   readonly runtimes: ReadonlyArray<RuntimeInfo>
   /** What each agent offers, and what it is on, by agent id. */
   readonly agents: ReadonlyMap<string, AgentModels>
+  /** The person's default effort for a model, by its key, as the agent names the effort. */
+  readonly defaults: ReadonlyMap<string, string>
 }
 
 /** The family a name leaves out, from the model's id: `GPT-` for gpt-6-sol, which its agent calls "6 Sol". */
@@ -146,6 +150,9 @@ export const catalogOf = (known: ReadonlyArray<AgentModels>, agents: ReadonlyArr
       return { id: agent.id, name: agent.name, how: text.how[agent.signIn], ...(brand ? { brand } : {}) }
     }),
     agents: byId,
+    defaults: new Map(
+      known.flatMap((offered) => offered.defaults.map((chosen) => [keyOf(offered.agentId, chosen.model), chosen.effort] as const)),
+    ),
   }
 }
 
@@ -180,18 +187,21 @@ export const effortName = (catalog: Catalog, agentId: string, effort: string | n
 export const effortId = (catalog: Catalog, agentId: string, name: string): string =>
   catalog.agents.get(agentId)?.efforts.find((offered) => effortWord(offered.name) === name)?.id ?? name
 
+/** A model's default effort, in the words the picker shows: the person's, or else what its agent is on. */
+export const defaultEffortOf = (catalog: Catalog, info: ModelInfo): string | null =>
+  effortName(catalog, info.runtime, catalog.defaults.get(info.id) ?? catalog.agents.get(info.runtime)?.effort ?? null)
+
 /** Until the person pins a model: each agent's current one. */
 export const defaultPins = (catalog: Catalog): ReadonlyArray<string> =>
   catalog.runtimes.map((runtime) => infoOf(catalog, { agentId: runtime.id, model: null }).id)
 
-/** The person's pins, by key (null until they pin one), and their default effort for a model, by key. */
+/** The person's pins, by key; null until they pin one. */
 export interface ModelPrefs {
   readonly pins: ReadonlyArray<string> | null
-  readonly efforts: Readonly<Record<string, string>>
 }
 
 const STORED = 'charrette.models'
-const NONE: ModelPrefs = { pins: null, efforts: {} }
+const NONE: ModelPrefs = { pins: null }
 const listeners = new Set<() => void>()
 let last: { readonly raw: string | null; readonly prefs: ModelPrefs } = { raw: null, prefs: NONE }
 
@@ -211,12 +221,8 @@ const readPrefs = (): ModelPrefs => {
   try {
     const parsed: unknown = raw === null ? null : JSON.parse(raw)
     if (typeof parsed === 'object' && parsed !== null) {
-      const { pins, efforts } = parsed as { pins?: unknown; efforts?: unknown }
-      const kept =
-        typeof efforts === 'object' && efforts !== null
-          ? Object.fromEntries(Object.entries(efforts).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
-          : {}
-      prefs = { pins: isStrings(pins) ? pins : null, efforts: kept }
+      const { pins } = parsed as { pins?: unknown }
+      prefs = { pins: isStrings(pins) ? pins : null }
     }
   } catch {
     prefs = NONE
@@ -245,14 +251,8 @@ export const useModelPrefs = (): ModelPrefs => useSyncExternalStore(subscribe, r
 
 /** Pins a model, or unpins it; the first pin starts from the pins shown until then. */
 export const togglePin = (key: string, shown: ReadonlyArray<string>) => {
-  const prefs = readPrefs()
-  const pins = prefs.pins ?? shown
-  writePrefs({ ...prefs, pins: pins.includes(key) ? pins.filter((pin) => pin !== key) : [...pins, key] })
-}
-
-export const setDefaultEffort = (key: string, effort: string) => {
-  const prefs = readPrefs()
-  writePrefs({ ...prefs, efforts: { ...prefs.efforts, [key]: effort } })
+  const pins = readPrefs().pins ?? shown
+  writePrefs({ pins: pins.includes(key) ? pins.filter((pin) => pin !== key) : [...pins, key] })
 }
 
 /** What starts an agent on a thread as chosen; without a model or effort, the agent's own. */

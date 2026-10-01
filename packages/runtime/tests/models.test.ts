@@ -3,13 +3,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { AgentDefinition } from '@charrette/provider-adapters'
-import { fakeAgent } from '@charrette/provider-adapters/testing'
+import { fakeAgent, fakeAgentMain } from '@charrette/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { type AgentEntry, Agents } from '../src/Config'
-import { EffortUnchanged } from '../src/errors'
+import { EffortUnchanged, UnknownAgent } from '../src/errors'
 import { Models, modelsOf } from '../src/Models'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
@@ -42,7 +42,7 @@ const thread = Effect.gen(function* () {
   return created.threadId
 })
 
-/** A runtime with these agents: `missing` can't be started. */
+/** A runtime with these agents: `process` runs as a real process, and `missing` can't be started. */
 const withAgents = (ids: ReadonlyArray<string>, define: (agentId: string) => AgentDefinition) =>
   Runtime.layer({
     database: ':memory:',
@@ -55,9 +55,11 @@ const withAgents = (ids: ReadonlyArray<string>, define: (agentId: string) => Age
         ids.map((agentId): AgentEntry => ({
           definition: define(agentId),
           transport: (cwd) =>
-            agentId === 'missing'
-              ? { _tag: 'Process', spec: { command: 'charrette-no-such-agent', args: [] }, cwd }
-              : { _tag: 'InProcess', agent: fakeAgent() },
+            agentId === 'process'
+              ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
+              : agentId === 'missing'
+                ? { _tag: 'Process', spec: { command: 'charrette-no-such-agent', args: [] }, cwd }
+                : { _tag: 'InProcess', agent: fakeAgent() },
         })),
       ),
     ),
@@ -79,7 +81,14 @@ describe('the models each agent offers', () => {
         ],
       )
       const known = yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
-      assert.deepStrictEqual(known[0], { agentId: 'claude-code', ...OFFERED, model: 'small', effort: 'medium', probing: false })
+      assert.deepStrictEqual(known[0], {
+        agentId: 'claude-code',
+        ...OFFERED,
+        model: 'small',
+        effort: 'medium',
+        defaults: [],
+        probing: false,
+      })
       // Asking left nothing behind: no session was recorded for it.
       const sql = yield* SqlClient.SqlClient
       assert.lengthOf(yield* sql`SELECT id FROM provider_sessions`, 0)
@@ -93,7 +102,7 @@ describe('the models each agent offers', () => {
       const threadId = yield* thread
       yield* sessions.start({ threadId, agentId: 'codex', model: 'large', effort: 'high' })
       const codex = () => Effect.map(models.catalog, (all) => all.find((agent) => agent.agentId === 'codex'))
-      assert.deepStrictEqual(yield* codex(), { agentId: 'codex', ...OFFERED, model: 'large', effort: 'high', probing: false })
+      assert.deepStrictEqual(yield* codex(), { agentId: 'codex', ...OFFERED, model: 'large', effort: 'high', defaults: [], probing: false })
       // Changed while it runs, it says what it is on now.
       yield* sessions.setModel({ threadId, model: 'small' })
       yield* sessions.setEffort({ threadId, effort: 'low' })
@@ -121,7 +130,7 @@ describe('the models each agent offers', () => {
         Effect.map(models.catalog, (all) => all.filter((agent) => agent.agentId === 'codex')),
         (found) => found[0]?.probing === false,
       )
-      assert.deepStrictEqual(named, { agentId: 'codex', ...OFFERED, model: 'large', effort: 'high', probing: false })
+      assert.deepStrictEqual(named, { agentId: 'codex', ...OFFERED, model: 'large', effort: 'high', defaults: [], probing: false })
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -141,6 +150,33 @@ describe('the models each agent offers', () => {
       // Asked once a launch: the one that couldn't start isn't asked again.
       assert.isFalse((yield* models.catalog).some((agent) => agent.probing))
     }).pipe(Effect.provide(withAgents(['claude-code', 'codex', 'missing'], (agentId) => definition(agentId, ['codex'])))),
+  )
+
+  it.live('record the process asking starts, as any agent’s, ended once asked', () =>
+    Effect.gen(function* () {
+      const models = yield* Models
+      const sql = yield* SqlClient.SqlClient
+      yield* models.catalog
+      const [asked] = yield* until(models.catalog, (all) => all.every((agent) => !agent.probing), Duration.seconds(20))
+      assert.strictEqual(asked?.models.length, 2)
+      const processes = yield* sql<{
+        purpose: string
+        state: string
+        executable: string
+        pid: number | null
+        providerSessionId: string | null
+      }>`
+        SELECT purpose, state, executable, pid, provider_session_id FROM processes ORDER BY executable`
+      assert.deepStrictEqual(
+        processes.map((process) => [process.purpose, process.state, process.executable, process.pid !== null, process.providerSessionId]),
+        [
+          ['probe', 'exited', 'bun', true, null],
+          ['probe', 'unknown', 'charrette-no-such-agent', false, null],
+        ],
+      )
+      // A default is for an agent Charrette has.
+      assert.instanceOf(yield* Effect.flip(models.setDefaultEffort({ agentId: 'cursor', model: 'm', effort: 'high' })), UnknownAgent)
+    }).pipe(Effect.provide(withAgents(['process', 'missing'], (agentId) => definition(agentId)))),
   )
 
   it('read settings kept before they had names, by their values', () => {
@@ -170,6 +206,39 @@ describe('the models each agent offers', () => {
 })
 
 describe('how hard an agent thinks', () => {
+  it.live('starts at the person’s default for the model, unless the plan or the person picks another', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const models = yield* Models
+      const sql = yield* SqlClient.SqlClient
+      yield* models.setDefaultEffort({ agentId: 'codex', model: 'large', effort: 'high' })
+      yield* models.setDefaultEffort({ agentId: 'codex', model: 'large', effort: 'low' })
+      yield* models.setDefaultEffort({ agentId: 'codex', model: 'small', effort: 'high' })
+      const codex = (yield* models.catalog).find((agent) => agent.agentId === 'codex')
+      assert.deepStrictEqual(codex?.defaults, [
+        { model: 'large', effort: 'low' },
+        { model: 'small', effort: 'high' },
+      ])
+      const effortOf = (threadId: string) =>
+        Effect.map(
+          sql<{ effort: string | null }>`SELECT effort FROM provider_sessions WHERE thread_id = ${threadId}`,
+          (rows) => rows[0]?.effort,
+        )
+      // On the model it names, on the one the agent starts on, and with an effort of its own.
+      const named = yield* thread
+      yield* sessions.start({ threadId: named, agentId: 'codex', model: 'large' })
+      const own = yield* thread
+      yield* sessions.start({ threadId: own, agentId: 'codex' })
+      const picked = yield* thread
+      yield* sessions.start({ threadId: picked, agentId: 'codex', model: 'large', effort: 'medium' })
+      assert.deepStrictEqual([yield* effortOf(named), yield* effortOf(own), yield* effortOf(picked)], ['low', 'high', 'medium'])
+      // Another agent's models have defaults of their own.
+      const other = yield* thread
+      yield* sessions.start({ threadId: other, agentId: 'claude-code', model: 'large' })
+      assert.strictEqual(yield* effortOf(other), 'medium')
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('is set as a session starts, changed in it, and says so', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions

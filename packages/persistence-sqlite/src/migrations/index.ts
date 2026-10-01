@@ -8,6 +8,7 @@ import { statements as threadItems } from './0003_thread_items'
 import { statements as coordinator } from './0004_coordinator'
 import { statements as runPerPlan } from './0005_run_per_plan'
 import { statements as connectors } from './0006_connectors'
+import { statements as models } from './0007_models'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -27,6 +28,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0004_coordinator', statements: coordinator },
   { key: '0005_run_per_plan', statements: runPerPlan },
   { key: '0006_connectors', statements: connectors },
+  { key: '0007_models', statements: models },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>
