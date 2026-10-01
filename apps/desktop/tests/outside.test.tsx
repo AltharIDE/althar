@@ -251,7 +251,7 @@ describe('a task’s pull request', () => {
               container: null,
             },
             changes: [change()],
-            files: [{ path: 'src/limit.ts', add: 12, del: 3 }],
+            files: [{ path: 'src/limit.ts', from: null, status: 'modified', add: 12, del: 3, binary: false, uncommitted: false }],
             commits: 2,
           },
           items: [items.step({ step: 'review', verdict: 'pass', agentId: 'codex', summary: 'Holds.' })],
@@ -272,6 +272,73 @@ describe('a task’s pull request', () => {
     expect(ready).toHaveBeenCalledWith('t1')
     await userEvent.click(within(panel).getByRole('button', { name: 'Close the panel' }))
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Pull request' })).toBeNull())
+  })
+
+  it('shows what it changed, file by file, from its header, its pull request, or ⌘D', async () => {
+    const file = (path: string, more: Partial<ThreadSnapshot['task']['files'][number]> = {}) => ({
+      path,
+      from: null,
+      status: 'modified' as const,
+      add: 1,
+      del: 1,
+      binary: false,
+      uncommitted: false,
+      ...more,
+    })
+    const getFileDiff = vi.fn(async (_taskId: string, path: string) => {
+      if (path === 'notes.md') throw new ApiError({ reason: 'NotFound', message: 'It went away' })
+      return {
+        file: file(path),
+        lines: [
+          { kind: 'hunk' as const, text: '@@ -1 +1 @@' },
+          { kind: 'removed' as const, old: 1, text: 'const tries = 3', changed: ['3'] },
+          { kind: 'added' as const, new: 1, text: 'const tries = 5', changed: ['5'] },
+        ],
+        truncated: false,
+      }
+    })
+    const { client } = fakeClient({
+      getFileDiff,
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: {
+            ...snapshot().task,
+            branch: 'charrette/retry',
+            baseRef: 'origin/main',
+            changes: [change()],
+            files: [file('src/limit.ts'), file('notes.md', { status: 'added', del: 0, uncommitted: true })],
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: '2 files' }))
+    const view = await screen.findByRole('dialog', { name: 'Changes' })
+    expect(within(view).getByText('charrette/retry into main')).toBeTruthy()
+    // The first file, read from the runtime when you get to it.
+    const line = (words: string) => (_: string, element: Element | null) =>
+      element?.tagName === 'SPAN' && element.textContent === words && element.querySelector('mark') !== null
+    expect(await within(view).findByText(line('const tries = 5'))).toBeTruthy()
+    expect(getFileDiff).toHaveBeenLastCalledWith('t1', 'src/limit.ts')
+    // One that can't be read says why, and tries again.
+    await userEvent.click(within(view).getByRole('button', { name: /notes\.md/ }))
+    expect(await within(view).findByText('It went away')).toBeTruthy()
+    expect(within(view).getByText(/Not committed yet/)).toBeTruthy()
+    await userEvent.click(within(view).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(getFileDiff).toHaveBeenCalledTimes(3))
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Changes' })).toBeNull())
+    // From its pull request, on a file; and with ⌘D, not a bare D, which speech or typing could set off.
+    await userEvent.click(screen.getByRole('button', { name: 'PR #12' }))
+    const panel = await screen.findByRole('complementary', { name: 'Pull request' })
+    await userEvent.click(within(panel).getByRole('button', { name: 'Open the diff of src/limit.ts' }))
+    expect(await screen.findByRole('dialog', { name: 'Changes' })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Changes' })).toBeNull())
+    await userEvent.keyboard('d')
+    expect(screen.queryByRole('dialog', { name: 'Changes' })).toBeNull()
+    await userEvent.keyboard('{Meta>}d{/Meta}')
+    expect(await screen.findByRole('dialog', { name: 'Changes' })).toBeTruthy()
   })
 
   it('says it is ready to merge on its host, merged, or closed', async () => {

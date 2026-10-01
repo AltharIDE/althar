@@ -215,6 +215,7 @@ export const handlers = Api.toLayer(
       GetThread: ({ threadId, before, limit }) =>
         api(queries.thread(threadId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
       GetThreadItem: ({ threadId, itemId }) => api(queries.item(threadId, itemId)),
+      GetFileDiff: ({ taskId, path }) => api(queries.fileDiff(taskId, path)),
       StartSession: ({ commandId, threadId, agentId, model }) =>
         once(commandId, api(sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }) }))),
       SwitchAgent: ({ commandId, threadId, agentId, model }) =>

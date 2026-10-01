@@ -539,9 +539,19 @@ describe('code hosts and trackers, through the API', () => {
         const thread = yield* eventually(client.GetThread({ threadId: started.threadId }), (snapshot) => snapshot.task.changes.length === 1)
         assert.strictEqual(thread.task.issue?.key, 'MER-231')
         assert.deepInclude(thread.task.changes[0], { number: 1, draft: true, state: 'open', short: 'PR', prefix: '#' })
-        // What its branch changed, as the accept view lists it.
-        assert.deepStrictEqual(thread.task.files, [{ path: 'change.txt', add: 1, del: 0 }])
+        // What it changed, as the accept view lists it, and a file's diff, read from git when asked for.
+        assert.deepStrictEqual(thread.task.files, [
+          { path: 'change.txt', from: null, status: 'added', add: 1, del: 0, binary: false, uncommitted: false },
+        ])
         assert.strictEqual(thread.task.commits, 1)
+        const diff = yield* client.GetFileDiff({ taskId: started.id, path: 'change.txt' })
+        assert.deepStrictEqual(diff.lines, [
+          { kind: 'hunk', text: '@@ -0,0 +1 @@' },
+          { kind: 'added', new: 1, text: 'change' },
+        ])
+        // Only a file the task changed can be read this way.
+        const refused = yield* Effect.flip(client.GetFileDiff({ taskId: started.id, path: '../../../../etc/hosts' }))
+        assert.strictEqual(refused._tag, 'ApiError')
         yield* client.MarkReady({ commandId: commandId(), taskId: started.id })
         assert.isFalse((yield* client.GetThread({ threadId: started.threadId })).task.changes[0]?.draft)
         yield* client.RefreshTask({ commandId: commandId(), taskId: started.id })

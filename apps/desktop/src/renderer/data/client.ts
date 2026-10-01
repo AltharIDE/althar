@@ -7,6 +7,7 @@ import {
   type CoordinatorSnapshot,
   type DomMessagePort,
   domPort,
+  type FileDiff,
   type IssueList,
   type Product,
   type ProjectList,
@@ -53,6 +54,8 @@ export interface Client {
   /** The thread, with the newest `limit` items before `before`. */
   readonly getThread: (threadId: string, page?: { readonly before?: number; readonly limit?: number }) => Promise<ThreadSnapshot>
   readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem>
+  /** One file a task changed, as a diff from its base to its worktree. */
+  readonly getFileDiff: (taskId: string, path: string) => Promise<FileDiff>
   readonly startSession: (input: { readonly threadId: string; readonly agentId: string; readonly model?: string }) => Promise<string>
   readonly switchAgent: (input: { readonly threadId: string; readonly agentId: string; readonly model?: string }) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
@@ -164,6 +167,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
+    getFileDiff: (taskId, path) => settle(api.GetFileDiff({ taskId, path })),
     startSession: (input) => command((commandId) => api.StartSession({ commandId, ...input })),
     switchAgent: (input) => command((commandId) => api.SwitchAgent({ commandId, ...input })),
     setModel: (input) => command((commandId) => api.SetModel({ commandId, ...input })),

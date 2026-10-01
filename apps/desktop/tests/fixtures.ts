@@ -307,6 +307,15 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
+    getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
+      file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
+      lines: [
+        { kind: 'hunk' as const, text: '@@ -1 +1 @@' },
+        { kind: 'removed' as const, old: 1, text: 'const tries = 3', changed: ['3'] },
+        { kind: 'added' as const, new: 1, text: 'const tries = 5', changed: ['5'] },
+      ],
+      truncated: false,
+    })),
     startSession: vi.fn(async () => 's1'),
     switchAgent: vi.fn(async () => 's2'),
     setModel: vi.fn(async () => {}),

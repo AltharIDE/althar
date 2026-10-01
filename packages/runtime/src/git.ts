@@ -21,11 +21,16 @@ export const git = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<
 export const gitWithin = (timeout: number, cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(timeout, cwd, args)
 
+/** A git command's output exactly as it wrote it, for output whose spaces and last line matter, such as a diff. */
+export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
+  run(60_000, cwd, args, {}, false)
+
 const run = (
   timeout: number,
   cwd: string,
   args: ReadonlyArray<string>,
   env: Readonly<Record<string, string>> = {},
+  trim = true,
 ): Effect.Effect<string, GitFailed> =>
   Effect.callback<string, GitFailed>((resume) => {
     execFile(
@@ -35,7 +40,7 @@ const run = (
       (error, stdout, stderr) =>
         resume(
           error === null
-            ? Effect.succeed(stdout.trim())
+            ? Effect.succeed(trim ? stdout.trim() : stdout)
             : Effect.fail(new GitFailed({ args: [...args], cwd, stderr: stderr.trim() || error.message })),
         ),
     )

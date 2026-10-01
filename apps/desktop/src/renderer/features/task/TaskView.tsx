@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import type { AttentionRequest, ChangeSummary, ThreadSnapshot } from '@charrette/contracts'
 import {
@@ -7,6 +7,7 @@ import {
   type ChangeCheck,
   ChangeSet,
   ChangeState,
+  ChangeView,
   CheckState,
   ChromeButton,
   Composer,
@@ -37,12 +38,15 @@ import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { StuckCall } from './StuckCall'
 import s from './Task.module.css'
+import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
 
 /*
  * A task: its header, its thread, and the composer that talks to its lead.
  * What the rules keep for the person arrives as a call at the end of the
- * thread. Everything drawn here is the kit's; this view only arranges it.
+ * thread. What it changed opens over the whole window, file by file, from
+ * its header, its pull request, or ⌘D. Everything drawn here is the kit's;
+ * this view only arranges it.
  */
 
 export const text = {
@@ -72,6 +76,9 @@ export const text = {
   closed: (change: ChangeSummary, host: string) => `${text.change(change)} was closed on ${host}.`,
   markReady: 'Mark ready for review',
   openOn: (host: string) => `Open on ${host}`,
+  files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
+  reviewDiff: 'Review the changes',
+  diffKey: '⌘D',
 }
 
 /** A check as the kit lists it: one that was skipped or said nothing counts as passed, with what it said. */
@@ -134,6 +141,7 @@ function ChangePanel({
   agentName,
   onReady,
   onClose,
+  onOpenFile,
   pending,
 }: {
   snapshot: ThreadSnapshot
@@ -142,6 +150,8 @@ function ChangePanel({
   agentName: (id: string | null) => string
   onReady: () => void
   onClose: () => void
+  /** Opens what the task changed over the whole window, on a file or the first. */
+  onOpenFile: (path?: string) => void
   pending: boolean
 }) {
   const host = productName(change.product)
@@ -175,6 +185,9 @@ function ChangePanel({
             reviewers={reviewers}
             prs={[{ repo: change.repository, number: change.number, url: change.url, files: snapshot.task.files }]}
             checks={(change.checks?.list ?? []).map(checkOf)}
+            onOpenFile={onOpenFile}
+            onReviewDiff={() => onOpenFile()}
+            diffKey={text.diffKey}
             headingLevel={3}
             text={{
               number: (n) => `${change.prefix}${n}`,
@@ -202,6 +215,20 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState<string | null>(null)
   const [showChange, setShowChange] = useState(false)
+  const files = model.snapshot?.task.files ?? []
+  const changes = useChanges(model.snapshot?.task.id ?? null, files[0]?.path ?? null)
+  // ⌘D opens what the task changed, when it changed something. With its modifier, never set off by typing or by voice.
+  const { show } = changes
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'd' || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return
+      if (files.length === 0) return
+      event.preventDefault()
+      show()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [show, files.length])
   // A running turn says how long it has worked so far.
   const now = useNow(model.snapshot?.session?.turnRunning ?? false)
   const snapshot = model.snapshot
@@ -233,8 +260,15 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
   const change = snapshot.task.changes[0] ?? null
   const issue = snapshot.task.issue
   // Its pull request opens beside the thread.
-  const changeButton = change !== null && (
-    <ChromeButton icon="pr" label={text.change(change)} expanded={showChange} onClick={() => setShowChange((open) => !open)} />
+  const changeButton = (
+    <>
+      {files.length > 0 && (
+        <ChromeButton icon="file" label={text.files(files.length)} expanded={changes.open} onClick={() => changes.show()} />
+      )}
+      {change !== null && (
+        <ChromeButton icon="pr" label={text.change(change)} expanded={showChange} onClick={() => setShowChange((open) => !open)} />
+      )}
+    </>
   )
   const actions =
     session === null ? (
@@ -336,6 +370,7 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
               pending={model.pending}
               onReady={() => void model.markReady()}
               onClose={() => setShowChange(false)}
+              onOpenFile={changes.show}
             />
           ) : undefined
         }
@@ -393,6 +428,18 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
           )}
         </Thread>
       </TaskFace>
+      {changes.open && (
+        <ChangeView
+          branch={snapshot.task.branch ?? ''}
+          {...(snapshot.task.baseRef === null ? {} : { base: snapshot.task.baseRef.replace(/^origin\//, '') })}
+          files={files}
+          selected={changes.selected}
+          onSelect={changes.select}
+          view={changes.view}
+          onRetry={changes.retry}
+          onClose={changes.close}
+        />
+      )}
     </div>
   )
 }

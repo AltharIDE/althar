@@ -226,6 +226,15 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await page.getByRole('button', { name: 'Mark ready for review' }).click()
     await expect(page.getByText('Merge it on GitHub when you’re ready')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Mark ready for review' })).toHaveCount(0)
+
+    // What it changed, file by file, read from its worktree: ⌘D opens it.
+    await page.keyboard.press('Meta+d')
+    const changes = page.getByRole('dialog', { name: 'Changes' })
+    await expect(changes.getByText(/charrette\/add-a-retry-to-the-checkout-call into main/)).toBeVisible()
+    await expect(changes.getByRole('group', { name: 'change.txt' })).toContainText('change')
+    await page.screenshot({ path: 'test-results/changes.png', animations: 'disabled' })
+    await page.keyboard.press('Escape')
+    await expect(changes).toHaveCount(0)
   } finally {
     await electronApp.close()
   }
