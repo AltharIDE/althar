@@ -1,4 +1,5 @@
-import { open } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { lstat, open, readlink } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { Effect } from 'effect'
@@ -13,6 +14,14 @@ import { git, gitExactly } from './git'
  * much, and whether some of that isn't committed yet, so isn't in what
  * Charrette pushes. A file's diff is its lines in hunks, with the stretch of a
  * changed line that differs marked; only a file on the list can be asked for.
+ *
+ * The base is where the task's branch meets its default branch, so what the
+ * lead merged in from upstream isn't counted as the task's, as the pull
+ * request wouldn't. A new file nobody has added yet is read as git would add
+ * it: a link as its target, never what it points at, and anything that isn't
+ * a file or a link not at all. Only the first few dozen are read to count
+ * their lines, so an output folder `.gitignore` misses doesn't slow every
+ * read of the task.
  */
 
 /** A file a task changed: where it is, and was when it moved; how; how much; and whether it holds changes not committed yet. */
@@ -39,9 +48,10 @@ export interface FileDiff {
   readonly truncated: boolean
 }
 
-/** How many lines a file's diff shows before it is cut short, and how much of a new file is read. */
+/** How many lines a file's diff shows before it is cut short, how much of a new file is read, and how many new files are read to count their lines. */
 const LINES_SHOWN = 4_000
 const READ_AT_MOST = 2 * 1024 * 1024
+const NEW_FILES_COUNTED = 50
 
 /** Whether bytes look like a binary file: git's own test, a NUL early on. */
 const looksBinary = (bytes: Uint8Array) => bytes.subarray(0, 8_000).includes(0)
@@ -59,29 +69,49 @@ const reader = (output: string) => {
   }
 }
 
-/** A new file nobody has added yet: its lines, all added, or that it is binary. */
-const untrackedText = (worktree: string, path: string) =>
-  Effect.promise(async () => {
-    const handle = await open(join(worktree, path), 'r')
+/** What a new file nobody has added yet holds, as git would add it: a file's text, or that it is binary; a link's target; or nothing git adds. */
+type NewFile =
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'binary' }
+  | { readonly kind: 'link'; readonly target: string }
+  | { readonly kind: 'other' }
+
+/** Reads a new file as git would add it, without following a link, and without waiting on anything that isn't a file. */
+const newFile = (worktree: string, path: string, read: boolean): Effect.Effect<NewFile> =>
+  Effect.promise(async (): Promise<NewFile> => {
+    const at = join(worktree, path)
+    const stats = await lstat(at)
+    if (stats.isSymbolicLink()) return { kind: 'link', target: await readlink(at) }
+    if (!stats.isFile()) return { kind: 'other' }
+    if (!read) return { kind: 'text', text: '' }
+    // Not following a link, should the file become one between the look and the read.
+    const handle = await open(at, constants.O_RDONLY | constants.O_NOFOLLOW)
     try {
-      const buffer = Buffer.alloc(READ_AT_MOST)
-      const { bytesRead } = await handle.read(buffer, 0, READ_AT_MOST, 0)
+      const buffer = Buffer.alloc(Math.min(READ_AT_MOST, stats.size))
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
       const bytes = buffer.subarray(0, bytesRead)
-      return looksBinary(bytes) ? null : bytes.toString('utf8')
+      return looksBinary(bytes) ? { kind: 'binary' } : { kind: 'text', text: bytes.toString('utf8') }
     } finally {
       await handle.close()
     }
-  })
+  }).pipe(Effect.catchDefect(() => Effect.succeed({ kind: 'other' } as const)))
 
 const linesIn = (text: string) => (text === '' ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0))
 
-/** The files a task changed since `base`, committed or not, in path order. */
-export const changedFiles = (worktree: string, base: string): Effect.Effect<ReadonlyArray<ChangedFile>, unknown> =>
+/**
+ * Where a task's change starts: where its branch meets the default branch it
+ * goes into, so upstream work the lead merged in isn't counted as the task's;
+ * where its worktree started, when that can't be told, as offline.
+ */
+export const baseOf = (worktree: string, baseRef: string | null, started: string): Effect.Effect<string> =>
+  baseRef === null ? Effect.succeed(started) : git(worktree, 'merge-base', baseRef, 'HEAD').pipe(Effect.orElseSucceed(() => started))
+
+/** The files git tracks that a task changed since `base`, committed or not: without reading any of them. */
+const trackedFiles = (worktree: string, base: string) =>
   Effect.gen(function* () {
     const statuses = reader(yield* git(worktree, 'diff', '--name-status', '-z', '-M', base))
     const counts = reader(yield* git(worktree, 'diff', '--numstat', '-z', '-M', base))
     const dirty = new Set(split(yield* git(worktree, 'diff', '--name-only', '-z', 'HEAD')))
-    const untracked = split(yield* git(worktree, 'ls-files', '--others', '--exclude-standard', '-z'))
 
     // Sizes, by the path a file has now: `add del path`, or for a move `add del` then its old and new paths.
     const sizes = new Map<string, { readonly add: number; readonly del: number; readonly binary: boolean }>()
@@ -117,17 +147,39 @@ export const changedFiles = (worktree: string, base: string): Effect.Effect<Read
         uncommitted: dirty.has(path) || (from !== null && dirty.has(from)),
       })
     }
-    for (const path of untracked) {
-      const text = yield* untrackedText(worktree, path).pipe(Effect.orElseSucceed(() => null))
-      files.push({
+    return files
+  })
+
+/** The new files nobody has added yet, by path. */
+const untrackedPaths = (worktree: string, path?: string) =>
+  Effect.map(
+    git(worktree, '--literal-pathspecs', 'ls-files', '--others', '--exclude-standard', '-z', ...(path === undefined ? [] : ['--', path])),
+    split,
+  )
+
+/** A new file as the list shows it; nothing for what git wouldn't add. A link counts as its one line, its target. */
+const newEntry = (path: string, content: NewFile): ChangedFile | null =>
+  content.kind === 'other'
+    ? null
+    : {
         path,
         from: null,
         status: 'added',
-        add: text === null ? 0 : linesIn(text),
+        add: content.kind === 'text' ? linesIn(content.text) : content.kind === 'link' ? 1 : 0,
         del: 0,
-        binary: text === null,
+        binary: content.kind === 'binary',
         uncommitted: true,
-      })
+      }
+
+/** The files a task changed since `base`, committed or not, in path order. */
+export const changedFiles = (worktree: string, base: string): Effect.Effect<ReadonlyArray<ChangedFile>, unknown> =>
+  Effect.gen(function* () {
+    const files = [...(yield* trackedFiles(worktree, base))]
+    const untracked = yield* untrackedPaths(worktree)
+    for (const [index, path] of untracked.entries()) {
+      // Past the first few dozen, a new file is listed without its lines counted.
+      const entry = newEntry(path, yield* newFile(worktree, path, index < NEW_FILES_COUNTED))
+      if (entry !== null) files.push(entry)
     }
     // Paths are unique, so two are never equal.
     return files.toSorted((a, b) => (a.path < b.path ? -1 : 1))
@@ -216,19 +268,25 @@ export const parseDiff = (text: string, limit = LINES_SHOWN): { readonly lines: 
 /** One file's diff, from the task's base to its worktree: only a file the task changed. */
 export const fileDiff = (worktree: string, base: string, path: string): Effect.Effect<FileDiff, unknown> =>
   Effect.gen(function* () {
-    const file = (yield* changedFiles(worktree, base)).find((candidate) => candidate.path === path)
-    if (file === undefined) return yield* new NotFound({ kind: 'changed file', id: path })
-    if (file.binary) return { file, lines: [], truncated: false }
-    const untracked = (yield* git(worktree, 'ls-files', '--others', '--exclude-standard', '-z', '--', path)) !== ''
-    if (untracked) {
-      // Not added to git yet, so git has no diff for it: all of it is new.
-      // A binary file was answered above, so this one reads as text.
-      const content = (yield* untrackedText(worktree, path)) as string
-      const all = content.endsWith('\n') ? content.slice(0, -1).split('\n') : content.split('\n')
+    // A path inside the worktree, never one that climbs out of it or starts at the root.
+    if (path === '' || path.startsWith('/') || path.split('/').includes('..'))
+      return yield* new NotFound({ kind: 'changed file', id: path })
+    const known = (yield* trackedFiles(worktree, base)).find((candidate) => candidate.path === path)
+    if (known === undefined) {
+      // Not one git tracks: a new file nobody has added yet, read as git would add it, or nothing the task changed.
+      const listed = (yield* untrackedPaths(worktree, path)).includes(path)
+      const content = listed ? yield* newFile(worktree, path, true) : ({ kind: 'other' } as const)
+      const file = newEntry(path, content)
+      if (file === null) return yield* new NotFound({ kind: 'changed file', id: path })
+      if (content.kind !== 'text' && content.kind !== 'link') return { file, lines: [], truncated: false }
+      const text = content.kind === 'link' ? content.target : content.text
+      const all = text.endsWith('\n') ? text.slice(0, -1).split('\n') : text.split('\n')
       return { file, ...parseDiff(`@@ -0,0 +1,${all.length} @@\n${all.map((line) => `+${line}`).join('\n')}`) }
     }
+    if (known.binary) return { file: known, lines: [], truncated: false }
     const text = yield* gitExactly(
       worktree,
+      '--literal-pathspecs',
       'diff',
       '--no-color',
       '--no-ext-diff',
@@ -237,7 +295,7 @@ export const fileDiff = (worktree: string, base: string, path: string): Effect.E
       '-M',
       base,
       '--',
-      ...(file.from === null ? [path] : [file.from, path]),
+      ...(known.from === null ? [path] : [known.from, path]),
     )
-    return { file, ...parseDiff(text) }
+    return { file: known, ...parseDiff(text) }
   })

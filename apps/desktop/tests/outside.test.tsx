@@ -274,7 +274,7 @@ describe('a task’s pull request', () => {
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Pull request' })).toBeNull())
   })
 
-  it('shows what it changed, file by file, from its header, its pull request, or D', async () => {
+  it('shows what it changed, file by file, from its header, its pull request, or ⌘D', async () => {
     const file = (path: string, more: Partial<ThreadSnapshot['task']['files'][number]> = {}) => ({
       path,
       from: null,
@@ -328,7 +328,7 @@ describe('a task’s pull request', () => {
     await waitFor(() => expect(getFileDiff).toHaveBeenCalledTimes(3))
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Changes' })).toBeNull())
-    // From its pull request, on a file; and with D, anywhere you aren't typing.
+    // From its pull request, on a file; and with ⌘D, not a bare D, which speech or typing could set off.
     await userEvent.click(screen.getByRole('button', { name: 'PR #12' }))
     const panel = await screen.findByRole('complementary', { name: 'Pull request' })
     await userEvent.click(within(panel).getByRole('button', { name: 'Open the diff of src/limit.ts' }))
@@ -336,6 +336,8 @@ describe('a task’s pull request', () => {
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Changes' })).toBeNull())
     await userEvent.keyboard('d')
+    expect(screen.queryByRole('dialog', { name: 'Changes' })).toBeNull()
+    await userEvent.keyboard('{Meta>}d{/Meta}')
     expect(await screen.findByRole('dialog', { name: 'Changes' })).toBeTruthy()
   })
 

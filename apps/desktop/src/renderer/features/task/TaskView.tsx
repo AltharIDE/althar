@@ -45,7 +45,7 @@ import type { TaskModel } from './useTask'
  * A task: its header, its thread, and the composer that talks to its lead.
  * What the rules keep for the person arrives as a call at the end of the
  * thread. What it changed opens over the whole window, file by file, from
- * its header, its pull request, or D. Everything drawn here is the kit's;
+ * its header, its pull request, or ⌘D. Everything drawn here is the kit's;
  * this view only arranges it.
  */
 
@@ -78,7 +78,7 @@ export const text = {
   openOn: (host: string) => `Open on ${host}`,
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
-  diffKey: 'D',
+  diffKey: '⌘D',
 }
 
 /** A check as the kit lists it: one that was skipped or said nothing counts as passed, with what it said. */
@@ -217,13 +217,12 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
   const [showChange, setShowChange] = useState(false)
   const files = model.snapshot?.task.files ?? []
   const changes = useChanges(model.snapshot?.task.id ?? null, files[0]?.path ?? null)
-  // D opens what the task changed, when it changed something and you aren't typing.
+  // ⌘D opens what the task changed, when it changed something. With its modifier, never set off by typing or by voice.
   const { show } = changes
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      if (event.key.toLowerCase() !== 'd' || event.metaKey || event.ctrlKey || event.altKey || files.length === 0) return
-      if (target !== null && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
+      if (event.key.toLowerCase() !== 'd' || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return
+      if (files.length === 0) return
       event.preventDefault()
       show()
     }

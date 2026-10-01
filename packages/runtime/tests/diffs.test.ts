@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { changedFiles, changedStretch, fileDiff, parseDiff } from '../src/diffs'
+import { baseOf, changedFiles, changedStretch, fileDiff, parseDiff } from '../src/diffs'
 import { NotFound } from '../src/errors'
 
 /** A repository whose task changed a file, moved one, deleted one, added two (one not yet added to git), and a picture. */
@@ -121,6 +121,85 @@ describe('what a task changed', () => {
         const refused = yield* Effect.flip(fileDiff(root, base, path))
         assert.instanceOf(refused, NotFound)
       }
+    }),
+  )
+})
+
+/** A repository with one commit on main, and a git command for it. */
+const started = () => {
+  const root = mkdtempSync(join(tmpdir(), 'charrette-diffs-'))
+  const git = (...args: Array<string>) =>
+    execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd: root })
+      .toString()
+      .trim()
+  git('init', '-q', '-b', 'main')
+  writeFileSync(join(root, 'README.md'), '# Meridian\n')
+  git('add', '.')
+  git('commit', '-q', '-m', 'Start')
+  return { root, git, base: git('rev-parse', 'HEAD') }
+}
+
+describe('what a task changed, carefully', () => {
+  it.effect('shows a new link as git would add it, its target, never what it points at; and reads nothing that isn’t a file', () =>
+    Effect.gen(function* () {
+      const { root, base } = started()
+      const outside = join(mkdtempSync(join(tmpdir(), 'charrette-secret-')), 'secrets.env')
+      writeFileSync(outside, 'AWS_SECRET=abc123\n')
+      symlinkSync(outside, join(root, 'notes.txt'))
+      execFileSync('mkfifo', [join(root, 'pipe')])
+      const files = yield* changedFiles(root, base)
+      assert.deepStrictEqual(
+        files.map((file) => [file.path, file.add]),
+        [['notes.txt', 1]],
+      )
+      const link = yield* fileDiff(root, base, 'notes.txt')
+      assert.deepStrictEqual(link.lines.slice(1), [{ kind: 'added', new: 1, text: outside }])
+      assert.notInclude(JSON.stringify(link), 'abc123')
+      // Asked for anyway, the pipe is nothing the task changed, and isn't waited on.
+      assert.instanceOf(yield* Effect.flip(fileDiff(root, base, 'pipe')), NotFound)
+    }),
+  )
+
+  it.effect('counts from where the branch meets its default branch, so upstream work merged in isn’t the task’s', () =>
+    Effect.gen(function* () {
+      const { root, git, base } = started()
+      git('checkout', '-q', '-b', 'task')
+      writeFileSync(join(root, 'mine.ts'), 'export const mine = 1\n')
+      git('add', '.')
+      git('commit', '-q', '-m', 'Mine')
+      git('checkout', '-q', 'main')
+      writeFileSync(join(root, 'upstream.ts'), 'export const theirs = 1\n')
+      git('add', '.')
+      git('commit', '-q', '-m', 'Theirs')
+      git('checkout', '-q', 'task')
+      git('merge', '-q', '--no-edit', 'main')
+      const from = yield* baseOf(root, 'main', base)
+      assert.deepStrictEqual(
+        (yield* changedFiles(root, from)).map((file) => file.path),
+        ['mine.ts'],
+      )
+      // Where the worktree started counts upstream's too; without a default branch to meet, that's what there is.
+      assert.lengthOf(yield* changedFiles(root, base), 2)
+      assert.strictEqual(yield* baseOf(root, null, base), base)
+      assert.strictEqual(yield* baseOf(root, 'origin/gone', base), base)
+    }),
+  )
+
+  it.effect('counts the lines of the first few dozen new files only, and reads a path as itself, not a pattern', () =>
+    Effect.gen(function* () {
+      const { root, base } = started()
+      mkdirSync(join(root, 'out'))
+      for (let index = 0; index < 55; index += 1) writeFileSync(join(root, 'out', `${String(index).padStart(2, '0')}.js`), 'x\n')
+      writeFileSync(join(root, 'a[1].ts'), 'one\n')
+      writeFileSync(join(root, 'a1.ts'), 'other\n')
+      const files = yield* changedFiles(root, base)
+      assert.lengthOf(files, 57)
+      assert.lengthOf(
+        files.filter((file) => file.add === 0),
+        7,
+      )
+      const exact = yield* fileDiff(root, base, 'a[1].ts')
+      assert.deepStrictEqual(exact.lines.slice(1), [{ kind: 'added', new: 1, text: 'one' }])
     }),
   )
 })

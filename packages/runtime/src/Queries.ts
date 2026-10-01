@@ -23,7 +23,7 @@ import { hostedOf, parseRemote } from '@charrette/connectors'
 import { Agents } from './Config'
 import { Connections } from './Connections'
 import { Coordinator } from './Coordinator'
-import { changedFiles, fileDiff, type FileDiff } from './diffs'
+import { baseOf, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { git } from './git'
@@ -402,11 +402,12 @@ export class Queries extends Context.Service<
         })
 
       /** What a task's branch changed since it started, file by file, read from git in its worktree; nothing without one. */
-      /** What a task changed since it started, committed or not, and in how many commits; nothing without its worktree here. */
-      const changedOf = (worktree: string | null, base: string | null) =>
-        worktree === null || base === null || !existsSync(worktree)
+      /** What a task changed, committed or not, and in how many commits, from where it meets its default branch; nothing without its worktree here. */
+      const changedOf = (worktree: string | null, baseRef: string | null, started: string | null) =>
+        worktree === null || started === null || !existsSync(worktree)
           ? Effect.succeed({ files: [], commits: 0 })
           : Effect.gen(function* () {
+              const base = yield* baseOf(worktree, baseRef, started)
               const files = yield* changedFiles(worktree, base)
               const commits = yield* git(worktree, 'rev-list', '--count', `${base}..HEAD`)
               return { files, commits: Number(commits) || 0 }
@@ -416,11 +417,11 @@ export class Queries extends Context.Service<
       const diffOf = (taskId: string, path: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [workspace] = yield* sql<{ path: string; baseCommit: string | null }>`
-            SELECT path, base_commit FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId}`
+          const [workspace] = yield* sql<{ path: string; baseRef: string | null; baseCommit: string | null }>`
+            SELECT path, base_ref, base_commit FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId}`
           if (workspace === undefined || workspace.baseCommit === null || !existsSync(workspace.path))
             return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
-          return yield* fileDiff(workspace.path, workspace.baseCommit, path)
+          return yield* fileDiff(workspace.path, yield* baseOf(workspace.path, workspace.baseRef, workspace.baseCommit), path)
         })
 
       /** A task's issue and pull requests, as their external links last saw them. */
@@ -641,7 +642,7 @@ export class Queries extends Context.Service<
               baseRef: head.baseRef,
               phase: (yield* cardFor(head.taskId))?.phase ?? null,
               ...(yield* linksOf(head.taskId)),
-              ...(yield* changedOf(head.worktree, head.baseCommit)),
+              ...(yield* changedOf(head.worktree, head.baseRef, head.baseCommit)),
             },
             session: yield* sessionOf(threadId),
             attention: attention.map((request) => {
