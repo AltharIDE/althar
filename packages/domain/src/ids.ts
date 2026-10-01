@@ -52,6 +52,8 @@ export const Ids = {
   observation: kind('obs', 'ObservationId'),
   recordEvent: kind('evt', 'RecordEventId'),
   command: kind('cmd', 'CommandId'),
+  connection: kind('conn', 'ConnectionId'),
+  externalLink: kind('xlink', 'ExternalLinkId'),
 } as const
 
 export type IdKind = keyof typeof Ids
@@ -136,6 +138,10 @@ export const RecordEventId = Ids.recordEvent.schema
 export type RecordEventId = typeof RecordEventId.Type
 export const CommandId = Ids.command.schema
 export type CommandId = typeof CommandId.Type
+export const ConnectionId = Ids.connection.schema
+export type ConnectionId = typeof ConnectionId.Type
+export const ExternalLinkId = Ids.externalLink.schema
+export type ExternalLinkId = typeof ExternalLinkId.Type
 
 interface IdDefinition<S> {
   readonly prefix: string

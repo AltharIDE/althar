@@ -75,6 +75,8 @@ export const ThreadItemKind = Schema.Literals([
   'notice',
   /** A task in the coordinator's thread: its plan, then its card. Charrette posts it. */
   'task',
+  /** Something heard from outside, written by someone else: a comment on the task's pull request, its checks. */
+  'arrival',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -170,6 +172,31 @@ export type WorkItemState = typeof WorkItemState.Type
 export const MutationState = Schema.Literals(['intended', 'confirmed', 'failed', 'uncertain'])
 export type MutationState = typeof MutationState.Type
 
+/** The code hosts and trackers Charrette connects to (docs/architecture/06). Cloud and Data Center are separate products. */
+export const ConnectionProduct = Schema.Literals([
+  'github',
+  'gitlab',
+  'bitbucket_cloud',
+  'bitbucket_dc',
+  'linear',
+  'jira_cloud',
+  'jira_dc',
+  'trello',
+])
+export type ConnectionProduct = typeof ConnectionProduct.Type
+
+/** How a person signed in to a service: its device flow, its browser sign-in with PKCE, or a token they pasted. */
+export const ConnectionAuth = Schema.Literals(['device_flow', 'pkce', 'token'])
+export type ConnectionAuth = typeof ConnectionAuth.Type
+
+/** Whether a connection works: ready, needing its person to sign in again, or removed. */
+export const ConnectionState = Schema.Literals(['ready', 'reauth_required', 'removed'])
+export type ConnectionState = typeof ConnectionState.Type
+
+/** What a task's external link points at: the issue it came from, or a change it opened. */
+export const ExternalKind = Schema.Literals(['issue', 'change'])
+export type ExternalKind = typeof ExternalKind.Type
+
 export const ArtifactKind = Schema.Literals(['brief', 'message', 'transcript', 'patch', 'log', 'report', 'findings', 'summary', 'other'])
 export type ArtifactKind = typeof ArtifactKind.Type
 
@@ -200,5 +227,7 @@ export const AggregateType = Schema.Literals([
   'mutation_receipt',
   'agent_installation',
   'account_status',
+  'connection',
+  'external_link',
 ])
 export type AggregateType = typeof AggregateType.Type
