@@ -146,6 +146,7 @@ describe('the client', () => {
     expect(failure).toBeInstanceOf(ApiError)
     expect(messageOf(failure)).toBe("That folder isn't there any more.")
     await expect(client.answer({ attentionId: 'nothing', decision: 'allow' })).rejects.toBeInstanceOf(ApiError)
+    expect(messageOf(await client.openChange('task_none').catch((error: unknown) => error))).toBe("That task isn't there any more.")
     await client.close()
   })
 
@@ -200,6 +201,7 @@ describe('the client', () => {
           Disconnect: () => Effect.die('unused'),
           ListIssues: () => Effect.die('unused'),
           MarkReady: () => Effect.die('unused'),
+          OpenChange: () => Effect.die('unused'),
           RefreshTask: () => Effect.die('unused'),
           Watch: ({ since }) => {
             watches.push(since)

@@ -18,8 +18,8 @@ import type { BoardModel } from './useBoard'
  * The dock beside the board: what you opened from it, to answer or accept
  * without leaving. A call is answered here as in its task. Work ready to
  * accept shows its pull request, files and checks, and is merged, or sent
- * back to its lead with a note. Anything else shows its steps, and its task
- * is a click away.
+ * back to its lead with a note; work that ended on its branch can open its
+ * pull request. Anything else shows its steps, and its task is a click away.
  */
 
 export const text = {
@@ -35,6 +35,7 @@ export const text = {
   } satisfies Record<BoardTask['phase'], string>,
   openTask: 'Open the task',
   review: 'Review the changes',
+  openChange: 'Open a pull request',
   stepNote: { now: 'now', done: 'done' },
 }
 
@@ -186,10 +187,21 @@ export function DockView({
         steps={stepsOf(task)}
         lead={lead}
       />
+      {model.error !== null && (
+        <p className={s.failure} role="alert">
+          {model.error}
+        </p>
+      )}
       <div className={s.actions}>
         {task.phase === 'ready' && (
           <ActionButton icon="file" onClick={() => onChanges(task)}>
             {text.review}
+          </ActionButton>
+        )}
+        {/* Work that ended on its branch can still open its pull request, as the person says. */}
+        {task.phase === 'ready' && change === null && (
+          <ActionButton icon="pr" disabled={model.opening === task.taskId} onClick={() => void model.openChange(task.taskId)}>
+            {text.openChange}
           </ActionButton>
         )}
         <ActionButton icon="arrow" onClick={() => onTask(task.threadId)}>

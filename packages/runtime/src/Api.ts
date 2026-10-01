@@ -368,6 +368,7 @@ export const handlers = Api.toLayer(
       Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId }) => once(commandId, api(pullRequests.markReady(taskId))),
+      OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),
       Merge: ({ commandId, taskId, head }) => once(commandId, api(pullRequests.merge(taskId, head))),
       RefreshTask: ({ taskId }) => pullRequests.refresh(taskId),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),

@@ -43,10 +43,14 @@ export interface BoardModel {
   readonly merging: string | null
   /** The task a note is on its way back to. */
   readonly sending: string | null
+  /** The task whose pull request is being opened. */
+  readonly opening: string | null
   /** Merges a ready task's pull request at the head the person saw; whether it went through. */
   readonly merge: (taskId: string, head: string) => Promise<boolean>
   /** Sends a ready task back to its lead with a note, starting the lead again if it stopped; whether it went through. */
   readonly sendBack: (task: BoardTask, note: string) => Promise<boolean>
+  /** Opens the pull request of a task whose work ended on its branch. */
+  readonly openChange: (taskId: string) => Promise<boolean>
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string) => Promise<void>
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
   readonly dismissError: () => void
@@ -58,6 +62,7 @@ export const useBoard = (projectId: string): BoardModel => {
   const [error, setError] = useState<string | null>(null)
   const [merging, setMerging] = useState<string | null>(null)
   const [sending, setSending] = useState<string | null>(null)
+  const [opening, setOpening] = useState<string | null>(null)
   // Watched from the first read on; later reads don't start the watch again.
   const [since, setSince] = useState<number | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -92,6 +97,7 @@ export const useBoard = (projectId: string): BoardModel => {
     error,
     merging,
     sending,
+    opening,
     merge: useCallback(
       async (taskId, head) => {
         setMerging(taskId)
@@ -123,6 +129,22 @@ export const useBoard = (projectId: string): BoardModel => {
           return false
         } finally {
           setSending(null)
+        }
+      },
+      [client, fail],
+    ),
+    openChange: useCallback(
+      async (taskId) => {
+        setOpening(taskId)
+        setError(null)
+        try {
+          await client.openChange(taskId)
+          return true
+        } catch (failure) {
+          fail(failure)
+          return false
+        } finally {
+          setOpening(null)
         }
       },
       [client, fail],

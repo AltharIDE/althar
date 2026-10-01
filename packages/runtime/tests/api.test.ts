@@ -16,6 +16,7 @@ import {
   ChangedSinceSeen,
   EffortUnchanged,
   GitFailed,
+  NoChangeToOpen,
   ModelUnchanged,
   NotARepository,
   NotFound,
@@ -598,6 +599,9 @@ describe('code hosts and trackers, through the API', () => {
         assert.deepInclude(ready, { phase: 'ready', changed: null })
         assert.strictEqual(ready?.change?.number, 1)
         yield* client.RefreshTask({ commandId: commandId(), taskId: started.id })
+        // It has its pull request already: there is none to open.
+        const opened = yield* Effect.flip(client.OpenChange({ commandId: commandId(), taskId: started.id }))
+        assert.deepStrictEqual([opened.reason, opened.message], ['NoChangeToOpen', 'The task already has its pull request.'])
 
         // A task created from #12 keeps it as its issue.
         const created = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Fix the limit', issue: '#12' })
@@ -672,6 +676,18 @@ describe('words', () => {
     assert.strictEqual(
       said(new ChangedSinceSeen({ taskId: 't' })),
       'The pull request changed since you looked at it. Have another look before you accept it.',
+    )
+    assert.deepStrictEqual(
+      (['working', 'stopped', 'settled'] as const).map((why) => said(new NoChangeToOpen({ taskId: 't', why }))),
+      [
+        "The task's work isn't done yet. Its pull request opens when it is.",
+        'The task’s work stopped before it was done, so it has no pull request to open.',
+        'The task is settled, so its branch stays as it is.',
+      ],
+    )
+    assert.strictEqual(
+      said({ _tag: 'NoChangeToOpen', why: 'something new' }),
+      "The task's work isn't done yet. Its pull request opens when it is.",
     )
     assert.deepStrictEqual(words(new Error('boom'), name), {
       reason: 'Unknown',

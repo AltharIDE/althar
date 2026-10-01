@@ -4,3 +4,9 @@
   gap: 8px;
   margin-top: 16px;
 }
+
+.failure {
+  margin: 16px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}

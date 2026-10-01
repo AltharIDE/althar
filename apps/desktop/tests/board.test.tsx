@@ -241,6 +241,28 @@ describe('the board', () => {
     expect(onTask).toHaveBeenCalledWith('th5')
   })
 
+  it('opens the pull request of work that ended on its branch, and says when it can’t', async () => {
+    const openChange = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ApiError({ reason: 'NotConnected', message: "Charrette isn't connected to GitHub. Connect it, then try again." }),
+      )
+      .mockResolvedValue(undefined)
+    const { client } = fakeClient({ openChange, getBoard: vi.fn(async () => board()) })
+    withServices(<Project />, client)
+    await userEvent.keyboard('{Meta>}2{/Meta}')
+    await userEvent.click(await screen.findByRole('button', { name: 'Tidy the docs' }))
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Open a pull request' }))
+    expect(await within(dock).findByRole('alert')).toHaveProperty(
+      'textContent',
+      "Charrette isn't connected to GitHub. Connect it, then try again.",
+    )
+    await userEvent.click(within(dock).getByRole('button', { name: 'Open a pull request' }))
+    await waitFor(() => expect(within(dock).queryByRole('alert')).toBeNull())
+    expect(openChange).toHaveBeenLastCalledWith('t5')
+  })
+
   it('is read again when something it shows changes, not for what is said in a thread', async () => {
     const getBoard = vi.fn(async () => board())
     const { client, emit } = fakeClient({ getBoard })

@@ -1,6 +1,8 @@
 import { products } from '@charrette/connectors'
 import { Cause, Option } from 'effect'
 
+import type { NoChangeToOpen } from './errors'
+
 /*
  * What went wrong, in words a person reads in the window. The runtime's
  * errors carry what happened for the log; these say it the way the interface
@@ -128,6 +130,8 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
         return 'That request was already used for something else. Try again.'
       case 'DatabaseInUse':
         return 'Another copy of Charrette is using this profile.'
+      case 'NoChangeToOpen':
+        return noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working
       case 'ChangedSinceSeen':
         return 'The pull request changed since you looked at it. Have another look before you accept it.'
       case 'NotConnected':
@@ -167,9 +171,18 @@ const hostSaid = (host: string, reason: string, said: string) => {
   }
 }
 
+/** Why a task has no pull request to open, by reason. */
+const noChangeToOpen = {
+  working: "The task's work isn't done yet. Its pull request opens when it is.",
+  stopped: 'The task’s work stopped before it was done, so it has no pull request to open.',
+  settled: 'The task is settled, so its branch stays as it is.',
+  opened: 'The task already has its pull request.',
+} as const satisfies Record<NoChangeToOpen['why'], string>
+
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
   'ChangedSinceSeen',
+  'NoChangeToOpen',
   'NotConnected',
   'NotARepository',
   'NotFound',

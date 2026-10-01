@@ -19,10 +19,8 @@ import {
 import { Context, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
-import { hostedOf, parseRemote } from '@charrette/connectors'
-
 import { Agents } from './Config'
-import { Connections } from './Connections'
+import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import { baseOf, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { NotFound } from './errors'
@@ -299,7 +297,7 @@ export interface ThreadChange {
   readonly threadId: string | null
 }
 
-type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Connections
+type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes
 
 export class Queries extends Context.Service<
   Queries,
@@ -764,27 +762,9 @@ export class Queries extends Context.Service<
        */
       const hostOf = (projectId: string) =>
         Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const connections = yield* Connections
-          const [binding] = yield* sql<{ remotes: string }>`
-            SELECT remote_fingerprints AS remotes FROM repository_bindings WHERE project_id = ${projectId} AND detached_at IS NULL ORDER BY created_at LIMIT 1`
-          const listed = binding === undefined ? [] : parse(binding.remotes)
-          const remotes = Array.isArray(listed) ? listed.filter((remote): remote is string => typeof remote === 'string') : []
-          const connected = yield* connections.hostOf(remotes)
-          if (connected !== null) {
-            const { info } = yield* connections.adapters(connected.connectionId)
-            return { product: info.product, name: info.name, webUrl: info.webUrl, connected: true }
-          }
-          const hosted = hostedOf(connections.products)
-          for (const remote of remotes) {
-            const ref = parseRemote(remote)
-            const product = ref === null ? undefined : hosted.get(ref.host)
-            const info = product === undefined ? undefined : connections.products.find((candidate) => candidate.product === product)
-            if (info !== undefined && info.host && ref !== null)
-              return { product: info.product, name: info.name, webUrl: `https://${ref.host}`, connected: false }
-          }
-          return null
-        }).pipe(Effect.orElseSucceed(() => null))
+          const changes = yield* Changes
+          return yield* changes.hostFor(projectId)
+        })
 
       /** The project's coordinator thread: the agent on it, the one it would start on, and a page of its items. */
       const coordinator = (projectId: string, page: { readonly before?: number; readonly limit?: number } = {}) =>

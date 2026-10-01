@@ -114,6 +114,8 @@ export interface Client {
   readonly listIssues: (projectId: string) => Promise<IssueList>
   /** Marks a task's draft pull request ready for review. */
   readonly markReady: (taskId: string) => Promise<void>
+  /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */
+  readonly openChange: (taskId: string) => Promise<void>
   /** Merges the task's pull request at the head the person saw, as they said to; a draft is marked ready first. */
   readonly merge: (taskId: string, head: string) => Promise<void>
   /** Asks a task's pull request for news now. */
@@ -214,6 +216,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
     listIssues: (projectId) => settle(api.ListIssues({ projectId })),
     markReady: (taskId) => command((commandId) => api.MarkReady({ commandId, taskId })),
+    openChange: (taskId) => command((commandId) => api.OpenChange({ commandId, taskId })),
     merge: (taskId, head) => command((commandId) => api.Merge({ commandId, taskId, head })),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),

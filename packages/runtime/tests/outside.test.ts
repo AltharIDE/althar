@@ -3,25 +3,29 @@ import { execFileSync } from 'node:child_process'
 import { makeFakeService } from '@charrette/connectors/testing'
 import type { ProjectId } from '@charrette/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Cause, Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
 import { Connections, credentialFor, NotConnected } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
+import { NoChangeToOpen, NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { Issues } from '../src/Issues'
+import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
+import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
-import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, repository, runtime, until } from './support'
 
 /*
  * The rest of what reaching outside involves: a task from an issue in its
  * own repository (whose pull request mentions it plainly), a tracker that
  * has no links, links that unfurl to pull requests or to nothing, what a
- * card makes of an issue as last seen, and what a credential makes of a
- * kept secret.
+ * card makes of an issue as last seen, what a credential makes of a kept
+ * secret, and a task that ends on its branch because its host isn't
+ * connected.
  */
 
 const connect = (product: 'github' | 'linear', webUrl?: string) =>
@@ -256,4 +260,125 @@ describe('a project’s host', () => {
       assert.isNull(yield* hostOf(elsewhere))
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
   })
+})
+
+/** A task with a plan that ends on its branch, as one made while its host wasn't connected is; started once `before` is done. */
+const onItsBranch = (path: string, before: Effect.Effect<unknown, unknown, Connections | Instance> = Effect.void) =>
+  Effect.gen(function* () {
+    const projects = yield* Projects
+    const plans = yield* Plans
+    const queries = yield* Queries
+    const instance = yield* Instance
+    const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+    const task = yield* projects.createTask({
+      envelope: yield* Runtime.envelope('task.create', {}),
+      projectId: project.projectId,
+      title: 'Retry the checkout [lead:edit] [lead:finish]',
+      draft: true,
+    })
+    const planId = yield* plans.propose({
+      projectId: project.projectId as ProjectId,
+      taskId: task.taskId,
+      steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+      reason: null,
+      actorId: instance.personId,
+      end: null,
+    })
+    yield* before
+    yield* plans.start(planId, instance.personId)
+    const cards = Effect.map(queries.coordinator(project.projectId), (snapshot) =>
+      snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
+    )
+    yield* until(cards, (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+    return {
+      task,
+      projectId: project.projectId,
+      cards,
+      said: Effect.map(items(task.threadId), (all) => all.filter((item) => item.kind === 'notice' || item.kind === 'step_result')),
+    }
+  })
+
+describe('a task that ends on its branch', () => {
+  it.live('says why, and opens its pull request when the person connects its host and asks', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const runs = yield* Runs
+      execFileSync('git', ['remote', 'set-url', 'origin', 'git@github.com:meridian/api.git'], { cwd: working })
+      const { task, projectId, cards, said } = yield* onItsBranch(working)
+      const notice = (yield* said).find((item) => item.kind === 'notice')
+      assert.deepStrictEqual(notice?.content, {
+        source: 'runtime',
+        severity: 'info',
+        title: "The task ends on its branch: GitHub isn't connected.",
+        description: 'Nothing was pushed. Connect GitHub from the project, then open the pull request from here.',
+      })
+      assert.lengthOf(github.changes, 0)
+      assert.instanceOf(yield* Effect.flip(runs.publish(task.taskId)), NotConnected)
+
+      yield* connect('github')
+      // Two quick clicks are one action: one pull request, one line in the thread, and the second hears it has one.
+      const [first, second] = yield* Effect.all([Effect.exit(runs.publish(task.taskId)), Effect.exit(runs.publish(task.taskId))], {
+        concurrency: 2,
+      })
+      assert.deepStrictEqual(
+        [first, second].map((exit) => (Exit.isSuccess(exit) ? 'done' : (Cause.squash(exit.cause) as NoChangeToOpen).why)).sort(),
+        ['done', 'opened'],
+      )
+      assert.lengthOf(github.changes, 1)
+      assert.deepStrictEqual([github.changes[0]?.title, github.changes[0]?.draft], ['Retry the checkout [lead:edit] [lead:finish]', true])
+      const results = (yield* said).filter((item) => item.kind === 'step_result' && item.content.step === 'publish')
+      assert.deepStrictEqual(
+        results.map((item) => item.content.summary),
+        ['Opened draft pull request #1.'],
+      )
+      const [card] = yield* until(cards, (all) => all[0]?.change !== null)
+      assert.strictEqual(card?.change?.number, 1)
+      // Once is enough; and a task whose work isn't done has none to open yet.
+      const again = yield* Effect.flip(runs.publish(task.taskId))
+      assert.deepStrictEqual([again instanceof NoChangeToOpen, (again as NoChangeToOpen).why], [true, 'opened'])
+      const projects = yield* Projects
+      const fresh = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId,
+        title: 'Not started',
+      })
+      assert.strictEqual(((yield* Effect.flip(runs.publish(fresh.taskId))) as NoChangeToOpen).why, 'working')
+      // Work that stopped short has none; a settled task keeps its branch as it is.
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE runs SET state = 'failed' WHERE task_id = ${task.taskId}`
+      assert.strictEqual(((yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen).why, 'stopped')
+      yield* sql`UPDATE tasks SET state = 'done' WHERE id = ${task.taskId}`
+      assert.strictEqual(((yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen).why, 'settled')
+      assert.instanceOf(yield* Effect.flip(runs.publish('task_none')), NotFound)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
+  })
+
+  it.live('opens its pull request after all when its host is connected before the work is done', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { said } = yield* onItsBranch(working, connect('github', HOST))
+      assert.deepStrictEqual(
+        (yield* said).map((item) => [item.kind, item.content.summary ?? item.content.title]),
+        [
+          ['step_result', 'Did the task.'],
+          ['step_result', 'Opened draft pull request #1.'],
+        ],
+      )
+      assert.isTrue(github.changes[0]?.draft)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
+  })
+
+  it.live('says so where its repository is on no host Charrette knows', () =>
+    Effect.gen(function* () {
+      const { said } = yield* onItsBranch(repository())
+      assert.deepStrictEqual(
+        (yield* said).flatMap((item) => (item.kind === 'notice' ? [item.content.description] : [])),
+        ["Its repository isn't on a code host Charrette knows, so nothing was pushed."],
+      )
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
 })

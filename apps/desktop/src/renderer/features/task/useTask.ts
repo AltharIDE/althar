@@ -47,6 +47,8 @@ export interface TaskModel {
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
   /** Marks the task's draft pull request ready for review. */
   readonly markReady: () => Promise<void>
+  /** Opens the pull request of a task whose work ended on its branch. */
+  readonly openChange: () => Promise<void>
   readonly dismissError: () => void
 }
 
@@ -183,6 +185,7 @@ export const useTask = (threadId: string): TaskModel => {
       act(() => client.answer({ attentionId, decision, ...(reason === undefined || reason === '' ? {} : { reason }) })),
     answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
     markReady: () => act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id))),
+    openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id))),
     dismissError: () => setError(null),
   }
 }
