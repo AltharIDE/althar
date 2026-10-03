@@ -271,6 +271,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     worktree: '/w/meridian',
     baseRef: 'main',
     phase: 'running',
+    waits: null,
     issue: null,
     changes: [],
     files: [],

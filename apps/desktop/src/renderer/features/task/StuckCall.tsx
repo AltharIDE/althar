@@ -44,6 +44,11 @@ export const text = {
     abandonedNote: 'the task is ready on its branch',
   },
   reminded: { what: 'Reminded it to report', result: 'its turn ended again without a report' },
+  /** An agent out of usage: told nothing, since it would hit the same limit; handed on, or tried again once it is back. */
+  out: {
+    again: (agent: string) => `Try ${agent} again`,
+    tryingAgain: (agent: string) => `Trying ${agent} again`,
+  },
   review: {
     retry: 'Review again',
     retryLabel: 'Review with',
@@ -77,6 +82,7 @@ export function StuckCall({
   // A review can run again on the agent it had; a lead's step goes to another.
   const others = agents.filter((candidate) => review || candidate.id !== stuck.agentId)
   const lastRound = stuck.why === 'round_limit'
+  const out = stuck.why === 'usage_limit'
   // Opening the pull request is Charrette's own step: tried again as it was, or gone on without.
   if (stuck.step === 'publish')
     return (
@@ -94,23 +100,28 @@ export function StuckCall({
       step={text.step[stuck.step]}
       what={text.what(stuck, agent)}
       tried={tried}
-      agents={others.map((candidate) => ({ model: modelInfo({ id: candidate.id, name: candidate.name }, null) }))}
-      {...(review ? {} : { onTell: (note: string) => onAnswer(request.id, { kind: 'tell', note }) })}
+      agents={others
+        .filter((candidate) => !out || candidate.id !== stuck.agentId)
+        .map((candidate) => ({ model: modelInfo({ id: candidate.id, name: candidate.name }, null) }))}
+      {...(review || out ? {} : { onTell: (note: string) => onAnswer(request.id, { kind: 'tell', note }) })}
+      {...(out && stuck.agentId !== null ? { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId: stuck.agentId ?? '' }) } : {})}
       onRetry={(model) => onAnswer(request.id, { kind: 'retry', agentId: model.runtime })}
       onAbandon={() => onAnswer(request.id, { kind: 'abandon' })}
-      {...(review
-        ? {
-            text: {
-              retry: text.review.retry,
-              retryLabel: text.review.retryLabel,
-              retried: text.review.retried,
-              retriedNote: text.review.retriedNote,
-              abandon: lastRound ? text.review.accept : text.review.skip,
-              abandoned: lastRound ? text.review.accepted : text.review.skipped,
-              abandonedNote: lastRound ? text.review.acceptedNote : text.review.skippedNote,
-            },
-          }
-        : {})}
+      {...(out
+        ? { text: { again: text.out.again(agent), tryingAgain: text.out.tryingAgain(agent) } }
+        : review
+          ? {
+              text: {
+                retry: text.review.retry,
+                retryLabel: text.review.retryLabel,
+                retried: text.review.retried,
+                retriedNote: text.review.retriedNote,
+                abandon: lastRound ? text.review.accept : text.review.skip,
+                abandoned: lastRound ? text.review.accepted : text.review.skipped,
+                abandonedNote: lastRound ? text.review.acceptedNote : text.review.skippedNote,
+              },
+            }
+          : {})}
     />
   )
 }

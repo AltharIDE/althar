@@ -68,6 +68,9 @@ test('waits for the reset where no other agent is free, and says so on its card,
     await dock.getByRole('button', { name: 'Open the task' }).click()
     await expect(page.getByText(/^Claude Code reached its usage limit, until .+\. Codex takes over\.$/)).toBeVisible()
     await expect(page.getByText(/^Codex reached its usage limit, until .+\. The step waits until then\.$/)).toBeVisible()
+    // Its header says so too, rather than that it is idle.
+    await expect(page.getByText(/^Waits for Codex, back at /)).toBeVisible()
+    await expect(page.getByText('Idle', { exact: true })).toHaveCount(0)
     await page.screenshot({ path: 'test-results/limit-waits.png', animations: 'disabled' })
   } finally {
     await electronApp.close()
@@ -81,6 +84,10 @@ test('asks the person when the reset isn’t known and no other agent is free', 
     await openTask(page)
     await expect(page.getByText(/^Claude Code reached its usage limit\. Codex takes over\.$/)).toBeVisible()
     await expect(page.getByText("Codex reached its usage limit and didn't say when it resets.")).toBeVisible()
+    // Telling an agent that is out anything would hit the same limit: it is handed on, or tried again.
+    await expect(page.getByRole('button', { name: 'Tell the lead' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Try another agent' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Try Codex again' })).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-call.png', animations: 'disabled' })
   } finally {
     await electronApp.close()

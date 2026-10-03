@@ -576,6 +576,8 @@ export const ThreadSnapshot = Schema.Struct({
     baseRef: Schema.NullOr(Schema.String),
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
+    /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
+    waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
     /** The issue it came from. */
     issue: Schema.NullOr(IssueSummary),
     /** Its pull requests, as last seen. */

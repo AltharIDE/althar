@@ -764,7 +764,7 @@ export class Queries extends Context.Service<
               branch: head.branch,
               worktree: head.worktree,
               baseRef: head.baseRef,
-              phase: (yield* cardFor(head.taskId))?.phase ?? null,
+              ...(yield* Effect.map(cardFor(head.taskId), (card) => ({ phase: card?.phase ?? null, waits: card?.waits ?? null }))),
               ...(yield* linksOf(head.taskId)),
               ...(yield* changedOf(head.worktree, head.baseRef, head.baseCommit)),
             },

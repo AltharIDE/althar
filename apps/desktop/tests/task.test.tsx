@@ -9,6 +9,7 @@ import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
 import { statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { changed, fakeClient, items, models, snapshot, streamed } from './fixtures'
+import { clock } from '../src/renderer/shared/time'
 import { withServices } from './render'
 
 function Task({ onBack = vi.fn() }: { onBack?: () => void }) {
@@ -274,6 +275,30 @@ describe('a task', () => {
     ])
   })
 
+  it('hands a step whose agent is out of usage on, or tries it again, and never tells it anything', async () => {
+    const out = {
+      id: 'st9',
+      kind: 'stuck' as const,
+      title: 'Implement',
+      reason: '',
+      command: null,
+      createdAt: '2026-09-29T12:00:00.000Z',
+      stuck: { step: 'implement' as const, why: 'usage_limit' as const, detail: null, agentId: 'codex', round: 0, open: 0 },
+    }
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [out] })) })
+    withServices(<Task />, client)
+    await screen.findByText("Codex reached its usage limit and didn't say when it resets.")
+    expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
+    // Handing it on is offered only to the agents that aren't out.
+    await userEvent.click(screen.getByRole('button', { name: 'Try another agent' }))
+    expect(screen.queryByRole('menuitem', { name: /Codex/ })).toBeNull()
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('button', { name: 'Try Codex again' }))
+    await waitFor(() =>
+      expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st9', answer: { kind: 'retry', agentId: 'codex' } }),
+    )
+  })
+
   it('starts a lead when none is working, with the one that last led', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread({ session: null })) })
     withServices(<Task />, client)
@@ -449,6 +474,14 @@ describe('a task', () => {
   it('says where it stands', () => {
     const base = snapshot()
     expect(statusOf(base)).toEqual({ status: TaskStatus.Running, state: 'Idle' })
+    // A step held for a usage limit says whom it waits for, and until when.
+    const until = '2026-10-03T15:40:00.000Z'
+    expect(
+      statusOf({ ...base, task: { ...base.task, waits: { agentId: 'codex', until } } }, (id) => (id === 'codex' ? 'Codex' : id)),
+    ).toEqual({
+      status: TaskStatus.Paused,
+      state: `Waits for Codex, back at ${clock(until)}`,
+    })
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
     expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })
     expect(statusOf({ ...base, task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Done, state: 'Ready' })

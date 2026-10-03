@@ -252,7 +252,8 @@ export function Stuck({
                 label={t.retryLabel}
                 width={300}
                 trigger={
-                  <Button variant="default" icon="agents">
+                  // The first way on is the one to take, unless the lead can be told.
+                  <Button variant={onTell ? 'default' : 'signal'} icon="agents">
                     {t.retry}
                   </Button>
                 }
@@ -273,7 +274,7 @@ export function Stuck({
             )}
             {onAgain && (
               <Button
-                variant={onTell ? 'default' : 'signal'}
+                variant={onTell || retrying ? 'default' : 'signal'}
                 onClick={() => {
                   onAgain()
                   give({ kind: StuckAnswer.Again })
