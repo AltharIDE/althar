@@ -51,6 +51,7 @@ describe('a code host, reached only through Charrette', () => {
     ['gh api -X POST repos/meridian/api/issues', "Agents don't change things on the code host"],
     ['gh api repos/meridian/api/issues -f title=x', "Agents don't change things on the code host"],
     ['gh api --method=PATCH repos/x', "Agents don't change things on the code host"],
+    ['gh api -XPOST repos/meridian/api/issues', "Agents don't change things on the code host"],
     ['gh release delete v1', "Agents don't change things on the code host"],
     ['gh workflow run deploy.yml', "Agents don't change things on the code host"],
     ['gh -R meridian/api pr create', "Agents don't change things on the code host"],
@@ -216,6 +217,7 @@ describe('less usual commands', () => {
   it.each([
     ['git -c color.ui=never --no-pager push origin main', 'ask'],
     ['sudo -u me git push origin main', 'ask'],
+    ['sudo -E git push origin main', 'ask'],
     ['git --git-dir /elsewhere/.git status', 'ask'],
     ['git --work-tree=/elsewhere status', 'ask'],
     ['git push --repo origin -o ci.skip origin charrette/retry', 'allow'],
@@ -348,6 +350,7 @@ describe('a role that only reads', () => {
       'uniq -f 2 counts.txt',
       'sort -k2 counts.txt',
       'file -b --mime README.md',
+      '/usr/bin/env',
     ])
       assert.strictEqual(verdict({ kind: 'execute', title: command, rawInput: { command } }), 'allow', command)
   })
@@ -363,6 +366,7 @@ describe('a role that only reads', () => {
       'find . -delete',
       'sed -i s/a/b/ x',
       'env X=1 node build.js',
+      '/usr/bin/env node build.js',
       'echo $(rm -rf /)',
       // From the review of #15: flags of programs that only look which write, or run another program.
       'git stash',

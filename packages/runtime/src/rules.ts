@@ -329,7 +329,7 @@ export const programOf = (text: string): string | undefined => {
   for (const words of parseCommandLine(text).commands) {
     const [program, next] = unwrap(words)
     if (program === undefined || program === 'cd') continue
-    const name = program.split('/').at(-1) || program
+    const name = program.slice(program.lastIndexOf('/') + 1)
     return next !== undefined && /^[a-z][a-z-]{0,22}[a-z0-9]?$/.test(next) ? `${name} ${next}` : name
   }
   return undefined

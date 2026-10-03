@@ -4,7 +4,7 @@ import { Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'e
 import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
-import { stuckOf } from './Queries'
+import { parse, stuckOf, text } from './Queries'
 import { programOf } from './rules'
 import { Sessions } from './Sessions'
 
@@ -17,26 +17,8 @@ import { Sessions } from './Sessions'
  * waited when Charrette started isn't nudged again.
  */
 
-/** Changes are gathered for a moment, so a burst is read once. */
+/** How long changes are gathered, so a burst is read once. */
 const GATHER = Duration.millis(250)
-
-/** How many changes are read at a time to see whether any bears on what needs the person. */
-const PAGE = 500
-
-/**
- * What changes when something comes to need the person or stops doing so: a
- * call, a task, its plan or run, a step, a session starting, a turn ending. A
- * thread's items, most of what is recorded, never do.
- */
-const MOVES: ReadonlySet<string> = new Set([
-  'attention_request',
-  'task',
-  'task_plan',
-  'run',
-  'node_attempt',
-  'provider_session',
-  'turn_delivery',
-])
 
 export type NudgeEvent =
   /** Something came to need the person: a call, or a task ready to accept. */
@@ -52,30 +34,22 @@ const STEPS: Readonly<Record<StuckStep['step'], string>> = {
   publish: 'Opening the pull request',
 }
 
-const parse = (json: string | null): unknown => {
-  if (json === null) return null
-  try {
-    return JSON.parse(json)
-  } catch {
-    return null
-  }
-}
-
-const text = (value: unknown, key: string): string => {
-  const found = typeof value === 'object' && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined
-  return typeof found === 'string' ? found : ''
-}
-
 /**
  * A call, in the words a nudge says it: which step stopped, or what the agent
  * asks to do. A notification can show on a locked screen, so a command is
  * named only by what it runs (`vercel deploy`); its arguments, which may hold
  * a secret, stay in the window.
  */
-export const callWords = (call: { readonly kind: string; readonly payload: unknown }, agentName: (agentId: string) => string): string => {
+export const callWords = (
+  call: { readonly kind: string; readonly payload: unknown },
+  agents: ReadonlyArray<{ readonly definition: { readonly id: string; readonly name: string } }>,
+): string => {
   if (call.kind === 'stuck') {
     const stuck = stuckOf(call.payload)
-    if (stuck.why === 'usage_limit' && stuck.agentId !== null) return `Needs you: ${agentName(stuck.agentId)} reached its usage limit`
+    if (stuck.why === 'usage_limit' && stuck.agentId !== null) {
+      const agent = agents.find((entry) => entry.definition.id === stuck.agentId)?.definition.name ?? stuck.agentId
+      return `Needs you: ${agent} reached its usage limit`
+    }
     return `Needs you: ${STEPS[stuck.step]} is stuck`
   }
   const program = text(call.payload, 'kind') === 'execute' ? programOf(text(call.payload, 'command')) : undefined
@@ -85,9 +59,9 @@ export const callWords = (call: { readonly kind: string; readonly payload: unkno
 }
 
 /** A task ready to accept, in the words a nudge says it: what its lead last said it did. */
-export const readyWords = (summary: string | null): string => {
-  const said = summary?.split('\n')[0]?.trim()
-  return said === undefined || said === '' ? 'Ready to look at' : `Ready: ${said}`
+export const readyWords = (summary: string): string => {
+  const said = summary.trim().split('\n', 1).join('').trim()
+  return said === '' ? 'Ready to look at' : `Ready: ${said}`
 }
 
 export class Nudges extends Context.Service<
@@ -107,8 +81,6 @@ export class Nudges extends Context.Service<
       const published = yield* PubSub.unbounded<NudgeEvent>()
       const waiting = yield* Ref.make(0)
 
-      const agentName = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
-
       /** Everything that needs the person now, by a key that stays the same while it does. */
       const needs = Effect.gen(function* () {
         const found = new Map<string, Extract<NudgeEvent, { _tag: 'Nudge' }>>()
@@ -121,7 +93,7 @@ export class Nudges extends Context.Service<
             _tag: 'Nudge',
             key: `call:${call.id}`,
             title: call.title,
-            body: callWords({ kind: call.kind, payload: parse(call.payload) }, agentName),
+            body: callWords({ kind: call.kind, payload: parse(call.payload) }, agents.list),
             threadId: call.threadId,
           })
         // Ready as its card reads it (Queries): its last run succeeded, nothing it planned waits to start, no call waits,
@@ -156,54 +128,54 @@ export class Nudges extends Context.Service<
             _tag: 'Nudge',
             key: `ready:${task.taskId}`,
             title: task.title,
-            body: readyWords(text(parse(task.latest), 'summary') || null),
+            body: readyWords(text(parse(task.latest), 'summary')),
             threadId: task.threadId,
           })
         }
         return found
       })
 
-      const latest = Effect.map(
-        sql<{ cursor: number }>`SELECT coalesce(max(cursor), 0) AS cursor FROM change_log`,
-        ([row]) => row?.cursor ?? 0,
+      const latest = Effect.map(sql<{ cursor: number }>`SELECT coalesce(max(cursor), 0) AS cursor FROM change_log`, (rows) =>
+        Math.max(0, ...rows.map((row) => row.cursor)),
       )
 
-      /** Whether a change after `cursor` bears on what needs the person, and the cursor to read on from. */
+      /**
+       * Whether a change after `cursor` bears on what needs the person: a call,
+       * a task, its plan or run, a step, a session starting, a turn ending. A
+       * thread's items, most of what is recorded, never do.
+       */
       const movedSince = (cursor: number) =>
-        Effect.gen(function* () {
-          let at = cursor
-          for (;;) {
-            const changes = yield* ledger.changesSince(at, PAGE)
-            if (changes.some((change) => MOVES.has(change.aggregateType))) return { at: yield* latest, moved: true }
-            at = changes.at(-1)?.cursor ?? at
-            if (changes.length < PAGE) return { at, moved: false }
-          }
-        })
+        Effect.map(
+          sql<{ moved: number }>`
+            SELECT EXISTS (SELECT 1 FROM change_log WHERE cursor > ${cursor} AND aggregate_type IN ('attention_request', 'task',
+              'task_plan', 'run', 'node_attempt', 'provider_session', 'turn_delivery')) AS moved`,
+          (rows) => rows.some((row) => row.moved === 1),
+        )
 
       // What needs the person is read again whenever a change that bears on it is recorded, and what is new is said once.
       yield* Effect.forkScoped(
         Effect.gen(function* () {
           const grown = yield* ledger.listen
-          let cursor = yield* latest.pipe(Effect.orElseSucceed(() => 0))
           let seen: ReadonlyMap<string, unknown> | undefined
-          for (;;) {
-            const now = yield* needs.pipe(
-              Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read what needs the person', cause), undefined)),
-            )
-            if (now !== undefined) {
-              if (seen !== undefined) for (const [key, nudge] of now) if (!seen.has(key)) yield* PubSub.publish(published, nudge)
-              if ((yield* Ref.getAndSet(waiting, now.size)) !== now.size || seen === undefined)
-                yield* PubSub.publish(published, { _tag: 'Waiting', count: now.size })
-              seen = now
-            }
-            for (;;) {
+          const round = Effect.gen(function* () {
+            const cursor = yield* latest
+            const now = yield* needs
+            if (seen !== undefined) for (const [key, nudge] of now) if (!seen.has(key)) yield* PubSub.publish(published, nudge)
+            if ((yield* Ref.getAndSet(waiting, now.size)) !== now.size || seen === undefined)
+              yield* PubSub.publish(published, { _tag: 'Waiting', count: now.size })
+            seen = now
+            // Changes are gathered for a moment, so a burst is read once.
+            do {
               yield* grown
               yield* Effect.sleep(GATHER)
-              const read = yield* movedSince(cursor).pipe(Effect.orElseSucceed(() => ({ at: cursor, moved: true })))
-              cursor = read.at
-              if (read.moved) break
-            }
-          }
+            } while (!(yield* movedSince(cursor)))
+          })
+          // Read again once the record next grows, when it couldn't be read.
+          yield* Effect.forever(
+            round.pipe(
+              Effect.catchCause((cause) => Effect.andThen(Effect.logWarning('Could not read what needs the person', cause), grown)),
+            ),
+          )
         }),
       )
 

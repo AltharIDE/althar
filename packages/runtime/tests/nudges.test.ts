@@ -12,6 +12,7 @@ import { callWords, type NudgeEvent, Nudges, readyWords } from '../src/Nudges'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Runs } from '../src/Runs'
+import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
 import { repository, runtime, until } from './support'
 
@@ -101,6 +102,39 @@ describe('nudges', () => {
     }).pipe(Effect.provide(withNudges())),
   )
 
+  it.live('go quiet while the lead works on what the person said after, and say the task is ready again once it is done', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const task = yield* started('Retry the checkout [lead:finish]')
+      yield* until(
+        Effect.sync(() => counts(events)),
+        (seen) => seen.at(-1) === 1,
+        Duration.seconds(20),
+      )
+      const sessions = yield* Sessions
+      const body = 'And log each retry. [lead:wait]'
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }),
+        threadId: task.threadId,
+        body,
+        disposition: 'after_current',
+      })
+      // Mid-turn, the task isn't ready.
+      yield* until(
+        Effect.sync(() => counts(events)),
+        (seen) => seen.at(-1) === 0,
+        Duration.seconds(10),
+      )
+      yield* until(
+        Effect.sync(() => nudged(events)),
+        (said) => said.length === 2,
+        Duration.seconds(20),
+      )
+      assert.deepStrictEqual(nudged(events)[1], ['Retry the checkout [lead:finish]', 'Ready: Did the task.'])
+      yield* stop
+    }).pipe(Effect.provide(withNudges())),
+  )
+
   it.live('don’t say again what already waited when Charrette started, though they count it', () => {
     const database = join(mkdtempSync(join(tmpdir(), 'charrette-nudges-')), 'profile.sqlite')
     return Effect.gen(function* () {
@@ -129,7 +163,7 @@ describe('nudges', () => {
   })
 
   it('say a call as the person reads it, never with what a command was given', () => {
-    const named = (agentId: string) => (agentId === 'codex' ? 'Codex' : agentId)
+    const named = [{ definition: { id: 'codex', name: 'Codex' } }]
     const permission = (payload: object) => callWords({ kind: 'permission', payload }, named)
     assert.strictEqual(
       permission({
@@ -147,10 +181,15 @@ describe('nudges', () => {
       "Needs you: Writing outside the task's worktree always asks: /etc/hosts",
     )
     assert.strictEqual(permission({}), 'Needs you: An agent asks first')
+    assert.strictEqual(
+      permission({ kind: 'execute', command: 'cd ..', reason: 'Git in another folder always asks: /x' }),
+      'Needs you: Git in another folder always asks: /x',
+    )
     const stuck = (payload: object) => callWords({ kind: 'stuck', payload }, named)
     assert.strictEqual(stuck({ step: 'publish', why: 'failed_to_start' }), 'Needs you: Opening the pull request is stuck')
     assert.strictEqual(stuck({ step: 'review', why: 'usage_limit', agentId: 'codex' }), 'Needs you: Codex reached its usage limit')
-    assert.strictEqual(readyWords(null), 'Ready to look at')
+    assert.strictEqual(stuck({ step: 'review', why: 'usage_limit', agentId: 'aider' }), 'Needs you: aider reached its usage limit')
+    assert.strictEqual(readyWords(''), 'Ready to look at')
     assert.strictEqual(readyWords('Did it.\nAnd more.'), 'Ready: Did it.')
   })
 })
