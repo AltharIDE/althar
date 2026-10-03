@@ -26,3 +26,6 @@ export const modelInfo = (agent: { readonly id: string; readonly name: string },
     efforts: [],
   }
 }
+
+/** What a step held for a usage limit waits for: the agent, and when it is back. */
+export const waitsWords = (agent: string, at: string) => `Waits for ${agent}, back at ${at}`

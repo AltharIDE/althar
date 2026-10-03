@@ -27,12 +27,12 @@ import {
 } from '@charrette/ui'
 
 import { useModels } from '../../data/models'
-import { modelInfo } from '../../shared/agents'
+import { modelInfo, waitsWords } from '../../shared/agents'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { catalogOf, type Choice, modelName, runningOn } from '../../shared/models'
 import { checkOf } from '../../shared/checks'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
-import { ago, useNow } from '../../shared/time'
+import { ago, clock, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { PermissionCall } from './PermissionCall'
@@ -83,9 +83,14 @@ export const text = {
   diffKey: '⌘D',
 }
 
-/** Where a task stands, for its header. */
-export const statusOf = (snapshot: ThreadSnapshot): { readonly status: TaskStatus; readonly state: string } => {
+/** Where a task stands, for its header: a step held for a usage limit says whom it waits for, and until when. */
+export const statusOf = (
+  snapshot: ThreadSnapshot,
+  agentName: (id: string) => string = (id) => id,
+): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
+  const { waits } = snapshot.task
+  if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: text.working }
   // A run that passed review is ready, whatever its lead is doing now.
   if (snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled') return { status: TaskStatus.Done, state: text.ready }
@@ -214,7 +219,7 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
     session === null
       ? noLead
       : modelInfo({ id: session.agentId, name: session.agentName }, modelName(catalog, session.agentId, session.model))
-  const { status, state } = statusOf(snapshot)
+  const { status, state } = statusOf(snapshot, agentName)
   const busy = session?.turnRunning ?? false
   // A stopped task picks up with the agent that last led it, when it still can.
   const last = snapshot.items.findLast((item) => item.agentId !== null)?.agentId

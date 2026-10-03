@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
-import type { AgentModels, AgentStatus } from '@charrette/contracts'
+import { type AgentModels, type AgentStatus, agentDefaultName, modelName as namedAmongAgents } from '@charrette/contracts'
 import { Brand, Lab, labBrand, type ModelInfo, type RuntimeInfo } from '@charrette/ui'
 
 import type { Client, Start } from '../data/client'
@@ -62,8 +62,7 @@ export const makerOf = (agentId: string, words: string): Brand | undefined => {
 }
 
 export const text = {
-  /** An agent's own default, as it names it ("Default (recommended)"), or an agent whose models aren't known. */
-  agentDefault: (agent: string) => `${agent} default`,
+  agentDefault: agentDefaultName,
   /** A name two models share, told apart by the provider or the agent that offers each. */
   via: (model: string, by: string) => `${model} · ${by}`,
   /** Effort levels the agents write as one word. */
@@ -81,30 +80,8 @@ export interface Catalog {
   readonly defaults: ReadonlyMap<string, string>
 }
 
-/** The family a name leaves out, from the model's id: `GPT-` for gpt-6-sol, which its agent calls "6 Sol". */
-const familyOf = (id: string): string | undefined => {
-  const family = /^([a-z]+)-\d/i.exec(id.slice(id.lastIndexOf('/') + 1))?.[1]
-  if (family === undefined) return undefined
-  return family.length <= 3 ? `${family.toUpperCase()}-` : `${family.charAt(0).toUpperCase()}${family.slice(1)} `
-}
-
-/**
- * A model's name in a list of every agent's models: what an agent calls its
- * own default says whose it is, a provider before a slash ("OpenCode Zen/Big
- * Pickle") is kept apart, and a name that starts at the version has its
- * family back.
- */
-export const nameOf = (
-  agentName: string,
-  model: { readonly id: string; readonly name: string },
-): { readonly name: string; readonly provider: string | undefined } => {
-  if (/^default\b/i.test(model.name)) return { name: text.agentDefault(agentName), provider: undefined }
-  const slash = model.name.indexOf('/')
-  const provider = slash > 0 ? model.name.slice(0, slash).trim() : undefined
-  const name = model.name.slice(slash + 1).trim()
-  const family = /^\d/.test(name) ? familyOf(model.id) : undefined
-  return { name: family === undefined ? name : `${family}${name}`, provider }
-}
+/** A model's name in a list of every agent's models (see `@charrette/contracts`'s models). */
+export const nameOf = namedAmongAgents
 
 /** An effort level as the picker writes it: the agent's word, unless it runs two together. */
 const effortWord = (name: string): string => text.efforts[name.toLowerCase()] ?? name

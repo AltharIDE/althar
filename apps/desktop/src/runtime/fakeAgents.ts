@@ -8,23 +8,41 @@ import { Layer } from 'effect'
  * runtime's own process, for the end-to-end tests. What the person says
  * picks what it does: `hello`, `think`, `tool`, `updates`, and so on
  * (provider-adapters' FakeAgent). Loaded only when CHARRETTE_FAKE_AGENTS is
- * set.
+ * set, in a build with the test hooks.
  */
 
 const definition = (real: AgentDefinition): AgentDefinition => ({
   ...real,
   modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
   options: { mode: 'mode', model: 'model', effort: 'effort' },
-  signIn: { status: () => ({ command: 'true', args: [] }), read: () => true, login: real.signIn.login },
+  signIn: { status: () => ({ command: 'true', args: [] }), read: () => true, paidBy: () => 'plan', login: real.signIn.login },
   permissions: codexLikeMeanings,
 })
+
+/**
+ * Agents out of usage: CHARRETTE_FAKE_OUT lists them, each with the seconds
+ * from launch until it is back (`claude-code:3600`), or without, out for good
+ * and saying no reset time.
+ */
+const out = new Map(
+  (process.env.CHARRETTE_FAKE_OUT ?? '')
+    .split(',')
+    .filter((entry) => entry !== '')
+    .map((entry) => {
+      const [agentId = '', seconds] = entry.split(':')
+      return [agentId, seconds === undefined ? {} : { until: Date.now() + Number(seconds) * 1000 }] as const
+    }),
+)
 
 export const fakeAgents = Layer.succeed(
   Agents,
   Agents.from(
-    [agents['claude-code'], agents.codex].map((real) => ({
-      definition: definition(real),
-      transport: () => ({ _tag: 'InProcess' as const, agent: fakeAgent() }),
-    })),
+    [agents['claude-code'], agents.codex].map((real) => {
+      const limited = out.get(real.id)
+      return {
+        definition: definition(real),
+        transport: () => ({ _tag: 'InProcess' as const, agent: fakeAgent(limited === undefined ? {} : { outOfUsage: limited }) }),
+      }
+    }),
   ),
 )

@@ -18,3 +18,5 @@ export { type ConnectionInfo, Connections, NotConnected, SignInUnavailable } fro
 export { Issues, type IssueSummary, type Unfurl } from './Issues'
 export { Secrets, SecretsUnavailable } from './Secrets'
 export { type AgentModels, Models } from './Models'
+export { Limits, type Out } from './Limits'
+export { Policies, type ProjectRules, type UsageLimit } from './Policies'

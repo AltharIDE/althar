@@ -78,6 +78,8 @@ export const ProjectSummary = Schema.Struct({
   running: Schema.Number,
   /** Questions waiting on the person. */
   waiting: Schema.Number,
+  /** When an agent reaches its usage limit: its work moves on to the next free agent, or waits for the reset. */
+  usageLimit: Schema.Literals(['move', 'wait']),
 })
 export type ProjectSummary = typeof ProjectSummary.Type
 
@@ -438,6 +440,8 @@ export const TaskCard = Schema.Struct({
   lead: Schema.NullOr(Schema.String),
   branch: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.String),
+  /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
+  waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
 })
 export type TaskCard = typeof TaskCard.Type
 
@@ -485,7 +489,7 @@ export type SessionSummary = typeof SessionSummary.Type
  */
 export const StuckStep = Schema.Struct({
   step: Schema.Literals(['implement', 'review', 'settle', 'publish']),
-  why: Schema.Literals(['no_report', 'session_ended', 'failed_to_start', 'restarted', 'round_limit', 'not_connected']),
+  why: Schema.Literals(['no_report', 'session_ended', 'failed_to_start', 'restarted', 'round_limit', 'not_connected', 'usage_limit']),
   /** What went wrong, in the agent's or Charrette's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
   /** The agent on the step. */
@@ -572,6 +576,8 @@ export const ThreadSnapshot = Schema.Struct({
     baseRef: Schema.NullOr(Schema.String),
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
+    /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
+    waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
     /** The issue it came from. */
     issue: Schema.NullOr(IssueSummary),
     /** Its pull requests, as last seen. */
@@ -794,6 +800,8 @@ export const Api = RpcGroup.make(
   call('ListIssues', { projectId: Schema.String }, IssueList),
   /** Marks the task's draft pull request ready for review. */
   command('MarkReady', { taskId: Schema.String }, Schema.Void),
+  /** What the project does when an agent reaches its usage limit. */
+  command('SetUsageLimit', { projectId: Schema.String, policy: Schema.Literals(['move', 'wait']) }, Schema.Void),
   /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */
   command('OpenChange', { taskId: Schema.String }, Schema.Void),
   /**

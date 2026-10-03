@@ -65,6 +65,12 @@ export interface AgentDefinition {
     readonly status: (node: string) => LaunchSpec
     /** True when signed in, false when not, undefined when the output can't tell. */
     readonly read: (output: string, exitCode: number | null) => boolean | undefined
+    /**
+     * How the sign-in is paid for, from the same output: a plan, or per use, on
+     * a key; undefined when it can't tell. Charrette moves work on to an agent
+     * by itself only when its plan pays.
+     */
+    readonly paidBy?: (output: string) => PaidBy | undefined
     readonly login: string
   }
   readonly permissions: PermissionMeanings
@@ -85,6 +91,21 @@ const bundled = (packageName: string, entry: string) => join(dirname(require.res
 const bundledCodex = () => {
   const fromAdapter = createRequire(require.resolve('@agentclientprotocol/codex-acp/package.json'))
   return join(dirname(fromAdapter.resolve('@openai/codex/package.json')), 'bin/codex.js')
+}
+
+/** How an agent's sign-in is paid for: a plan (Claude's, ChatGPT's), or per use, on a key. */
+export type PaidBy = 'plan' | 'key'
+
+/** Claude Code's status says how it signed in: its claude.ai account, a plan; anything else is a key or a cloud's billing. */
+const claudePaidBy = (output: string): PaidBy | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(output)
+    const method = typeof parsed === 'object' && parsed !== null && 'authMethod' in parsed ? parsed.authMethod : undefined
+    if (typeof method !== 'string' || method === 'none') return undefined
+    return method === 'claude.ai' ? 'plan' : 'key'
+  } catch {
+    return undefined
+  }
 }
 
 const loggedInField = (output: string): boolean | undefined => {
@@ -180,6 +201,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     signIn: {
       status: () => ({ command: 'claude', args: ['auth', 'status'] }),
       read: loggedInField,
+      paidBy: claudePaidBy,
       login: 'claude auth login',
     },
     /* From claude-agent-acp's permissions/options/shared.js. Rejecting skips the action and Claude carries on. */
@@ -207,6 +229,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     signIn: {
       status: (node) => ({ command: node, args: [bundledCodex(), 'login', 'status'] }),
       read: (output, exitCode) => (/not logged in/i.test(output) ? false : /logged in/i.test(output) && exitCode === 0 ? true : undefined),
+      /* "Logged in using ChatGPT" is the person's plan; "using an API key" is paid per use. */
+      paidBy: (output) => (/using chatgpt/i.test(output) ? 'plan' : /api key/i.test(output) ? 'key' : undefined),
       login: 'codex login',
     },
     /*
@@ -244,6 +268,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
         const count = /(\d+)\s+credentials?/i.exec(output)?.[1]
         return count !== undefined && Number(count) > 0 ? true : undefined
       },
+      /* It runs on the providers' keys it was given, whichever model a session picks: paid per use, as far as Charrette can tell. */
+      paidBy: () => 'key',
       login: 'opencode auth login',
     },
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */

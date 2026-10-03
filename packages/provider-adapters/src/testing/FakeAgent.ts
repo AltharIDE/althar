@@ -111,6 +111,12 @@ export interface FakeAgentOptions {
   readonly closed?: (sessionId: string) => void
   /** Leave a permission request open when the turn is cancelled, for Charrette to answer. */
   readonly keepsRequests?: boolean
+  /**
+   * Out of usage: every prompt fails with Claude Code's usage-limit message,
+   * until `until` (in milliseconds, which the message gives as its reset), or
+   * for good, saying no reset time.
+   */
+  readonly outOfUsage?: { readonly until?: number }
 }
 
 interface SessionState {
@@ -135,7 +141,8 @@ interface SessionState {
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task,
  * passing on the `[lead:…]` and `[review:…]` markers it was given;
- * `[lead:finish]` finishes the step; `[review:pass]` and `[review:findings]`
+ * `[lead:finish]` finishes the step, and so does being told to carry on with
+ * it after; `[review:pass]` and `[review:findings]`
  * report a review. Settling findings, it writes a file and commits it, so
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
@@ -204,7 +211,8 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
         )
         return await call('finish_step', { summary: 'Fixed the heading.', findings })
       }
-      if (text.includes('[lead:finish]')) {
+      // Told to carry on, as a lead that took a step over is, it finishes as it was told to at first.
+      if (text.includes('[lead:finish]') || (text.startsWith('Carry on with the task') && session.markers.has('[lead:finish]'))) {
         if (session.markers.has('[lead:edit]')) commitIn(session.cwd, 'change.txt', 'Change it')
         if (!session.markers.has('[lead:scratch]')) return await call('finish_step', { summary: 'Did the task.' })
         appendFileSync(join(session.cwd, 'scratch.log'), 'trying things\n')
@@ -403,6 +411,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const session = sessionOf(params.sessionId)
       session.cancelled = false
       const text = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
+      const out = options.outOfUsage
+      if (out !== undefined && (out.until === undefined || Date.now() < out.until))
+        throw new acp.RequestError(
+          -32603,
+          out.until === undefined ? 'Claude AI usage limit reached' : `Claude AI usage limit reached|${Math.ceil(out.until / 1000)}`,
+        )
       const update = (value: acp.SessionUpdate) =>
         client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })

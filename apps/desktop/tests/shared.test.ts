@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import { brandOf, modelInfo } from '../src/renderer/shared/agents'
 import { newestReads } from '../src/renderer/shared/items'
-import { ago, took } from '../src/renderer/shared/time'
+import { ago, clock, took } from '../src/renderer/shared/time'
 
 describe('agents', () => {
   it('draws each agent with its maker’s mark, when it has one', () => {
@@ -79,5 +79,19 @@ describe('reads that come back out of order', () => {
       (e) => failed.push(e),
     )
     expect(failed).toHaveLength(1)
+  })
+})
+
+describe('a clock', () => {
+  it('says the time today, and the day as well otherwise', () => {
+    const now = new Date('2026-10-03T12:00:00')
+    const later = new Date('2026-10-03T15:40:00')
+    expect(clock(later.toISOString(), now)).toBe(later.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))
+    const monday = new Date('2026-10-05T09:00:00')
+    expect(clock(monday.toISOString(), now)).toBe(
+      `${monday.toLocaleDateString(undefined, { weekday: 'short' })} ${monday.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`,
+    )
+    const november = new Date('2026-11-20T09:00:00')
+    expect(clock(november.toISOString(), now)).toContain(november.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }))
   })
 })

@@ -9,6 +9,7 @@ import { useProject } from '../src/renderer/features/project/useProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
 import { agents, card, changed, coordinatorSnapshot, fakeClient, items, status, streamed } from './fixtures'
+import { clock } from '../src/renderer/shared/time'
 import { withServices } from './render'
 
 function Project({ onBack = vi.fn(), onTask = vi.fn() }: { onBack?: () => void; onTask?: (threadId: string) => void }) {
@@ -74,6 +75,16 @@ describe('the Talk room', () => {
             items.card(
               card({ taskId: 't5', slug: 'later', title: 'Later', phase: 'held', plan: { ...card().plan!, id: 'pln5', startsAt: null } }),
             ),
+            items.card(
+              card({
+                taskId: 't6',
+                slug: 'reset',
+                title: 'Reset',
+                phase: 'running',
+                step: 'implement',
+                waits: { agentId: 'claude-code', until: '2026-10-03T15:40:00.000Z' },
+              }),
+            ),
           ],
         }),
       ),
@@ -85,6 +96,7 @@ describe('the Talk room', () => {
     expect(screen.getByText('Implementing')).toBeTruthy()
     expect(screen.getByText('Stopped')).toBeTruthy()
     expect(screen.getByText('Held. Starts when you say')).toBeTruthy()
+    expect(screen.getByText(`Waits for Claude Code, back at ${clock('2026-10-03T15:40:00.000Z')}`)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Start' }))
     expect(client.startPlan).toHaveBeenCalledWith('pln5')
   })
