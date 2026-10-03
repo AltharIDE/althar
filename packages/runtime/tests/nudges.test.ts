@@ -11,7 +11,6 @@ import { Instance } from '../src/Instance'
 import { callWords, type NudgeEvent, Nudges, readyWords } from '../src/Nudges'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
-import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { repository, runtime, until } from './support'
@@ -21,7 +20,7 @@ import { repository, runtime, until } from './support'
  * need them, and how many things wait, never progress.
  */
 
-const withNudges = (database = ':memory:') => Nudges.layer.pipe(Layer.provideMerge(Queries.layer), Layer.provideMerge(runtime(database)))
+const withNudges = (database = ':memory:') => Nudges.layer.pipe(Layer.provideMerge(runtime(database)))
 
 /** Every event the nudges give, as they come. */
 const heard = Effect.gen(function* () {
@@ -129,29 +128,29 @@ describe('nudges', () => {
     })
   })
 
-  it('say a call as the person reads it', () => {
-    const call = {
-      id: 'att1',
-      kind: 'permission' as const,
-      title: 'Run git push',
-      reason: '',
-      command: 'git push',
-      stuck: null,
-      createdAt: '2026-10-03T12:00:00.000Z',
-      taskId: 't1',
-      threadId: 'th1',
-      taskTitle: 'Retry',
-      taskSlug: 'retry',
-    }
-    assert.strictEqual(callWords(call), 'Needs you: Run git push')
-    const stuck = {
-      ...call,
-      kind: 'stuck' as const,
-      stuck: { step: 'publish' as const, why: 'failed_to_start' as const, detail: null, agentId: null, round: 0, open: 0 },
-    }
-    assert.strictEqual(callWords(stuck), 'Needs you: Opening the pull request is stuck')
-    assert.strictEqual(callWords({ ...stuck, stuck: { ...stuck.stuck, step: 'unknown' as never } }), 'Needs you: A step is stuck')
-    assert.strictEqual(readyWords({ summary: null } as never), 'Ready to look at')
-    assert.strictEqual(readyWords({ summary: 'Did it.\nAnd more.' } as never), 'Ready: Did it.')
+  it('say a call as the person reads it, never with what a command was given', () => {
+    const named = (agentId: string) => (agentId === 'codex' ? 'Codex' : agentId)
+    const permission = (payload: object) => callWords({ kind: 'permission', payload }, named)
+    assert.strictEqual(
+      permission({
+        kind: 'execute',
+        command: 'VERCEL_TOKEN=s3cr3t-t0ken npx vercel deploy --token s3cr3t-t0ken',
+        reason: 'Deploying or publishing always asks.',
+      }),
+      'Needs you: npx vercel',
+    )
+    assert.strictEqual(permission({ kind: 'execute', command: 'cd web && vercel deploy --prod' }), 'Needs you: vercel deploy')
+    assert.strictEqual(permission({ kind: 'execute', command: 'deploy-tool 9f86d081884c7d659a2feaa0c55ad015' }), 'Needs you: deploy-tool')
+    assert.strictEqual(permission({ kind: 'execute', command: 'git push origin main' }), 'Needs you: git push')
+    assert.strictEqual(
+      permission({ kind: 'edit', command: 'Edit /etc/hosts', reason: "Writing outside the task's worktree always asks: /etc/hosts" }),
+      "Needs you: Writing outside the task's worktree always asks: /etc/hosts",
+    )
+    assert.strictEqual(permission({}), 'Needs you: An agent asks first')
+    const stuck = (payload: object) => callWords({ kind: 'stuck', payload }, named)
+    assert.strictEqual(stuck({ step: 'publish', why: 'failed_to_start' }), 'Needs you: Opening the pull request is stuck')
+    assert.strictEqual(stuck({ step: 'review', why: 'usage_limit', agentId: 'codex' }), 'Needs you: Codex reached its usage limit')
+    assert.strictEqual(readyWords(null), 'Ready to look at')
+    assert.strictEqual(readyWords('Did it.\nAnd more.'), 'Ready: Did it.')
   })
 })

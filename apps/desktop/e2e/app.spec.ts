@@ -249,6 +249,7 @@ declare global {
   // What the stubbed notifications caught, in the main process.
   var shown: Array<{ title: string; body: string }> | undefined
   var clickLast: (() => void) | undefined
+  var badge: number | undefined
 }
 
 test('notifies the person of a ready task while they look elsewhere, counts it on the Dock, and opens it on a click', async () => {
@@ -257,8 +258,14 @@ test('notifies the person of a ready task while they look elsewhere, counts it o
   const { electronApp, page } = await launch(home)
   try {
     await chooseFolder(electronApp, repo)
-    await electronApp.evaluate(({ BrowserWindow, Notification }) => {
+    await electronApp.evaluate(({ app, BrowserWindow, Notification }) => {
       globalThis.shown = []
+      // Wherever the tests run: not every desktop shows notifications or a count on its launcher.
+      Notification.isSupported = () => true
+      app.setBadgeCount = (count?: number) => {
+        globalThis.badge = count
+        return true
+      }
       Notification.prototype.show = function (this: Electron.Notification) {
         globalThis.shown?.push({ title: this.title, body: this.body })
         globalThis.clickLast = () => this.emit('click')
@@ -278,7 +285,7 @@ test('notifies the person of a ready task while they look elsewhere, counts it o
     await expect
       .poll(() => electronApp.evaluate(() => globalThis.shown))
       .toEqual([{ title: 'Add a retry to the checkout call', body: 'Ready: Did the task.' }])
-    await expect.poll(() => electronApp.evaluate(({ app }) => app.getBadgeCount())).toBe(1)
+    await expect.poll(() => electronApp.evaluate(() => globalThis.badge)).toBe(1)
 
     // Clicked, it opens the task.
     await electronApp.evaluate(() => globalThis.clickLast?.())
