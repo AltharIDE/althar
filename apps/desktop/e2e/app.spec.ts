@@ -265,3 +265,52 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await electronApp.close()
   }
 })
+
+/*
+ * What reaches the person outside the window: a notification when a task is
+ * ready or something needs them, while they look elsewhere, which opens it
+ * when they click it; and how many things wait, on the Dock. Notifications
+ * are caught rather than shown, so the test can read and click them.
+ */
+declare global {
+  // What the stubbed notifications caught, in the main process.
+  var shown: Array<{ title: string; body: string }> | undefined
+  var clickLast: (() => void) | undefined
+}
+
+test('notifies the person of a ready task while they look elsewhere, counts it on the Dock, and opens it on a click', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'charrette-e2e-'))
+  const repo = repository(home)
+  const { electronApp, page } = await launch(home)
+  try {
+    await chooseFolder(electronApp, repo)
+    await electronApp.evaluate(({ BrowserWindow, Notification }) => {
+      globalThis.shown = []
+      Notification.prototype.show = function (this: Electron.Notification) {
+        globalThis.shown?.push({ title: this.title, body: this.body })
+        globalThis.clickLast = () => this.emit('click')
+      }
+      // The person is in another app.
+      BrowserWindow.getFocusedWindow = () => null
+    })
+    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await page.getByRole('button', { name: 'New task' }).click()
+    await page.getByLabel('What should change').fill('Add a retry to the checkout call')
+    await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
+    await page.getByRole('button', { name: /^Review:/ }).click()
+    await page.getByRole('button', { name: 'No review' }).click()
+    await page.getByRole('button', { name: 'Start the task' }).click()
+    await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    await expect
+      .poll(() => electronApp.evaluate(() => globalThis.shown))
+      .toEqual([{ title: 'Add a retry to the checkout call', body: 'Ready: Did the task.' }])
+    await expect.poll(() => electronApp.evaluate(({ app }) => app.getBadgeCount())).toBe(1)
+
+    // Clicked, it opens the task.
+    await electronApp.evaluate(() => globalThis.clickLast?.())
+    await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
+  } finally {
+    await electronApp.close()
+  }
+})

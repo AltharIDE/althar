@@ -40,7 +40,8 @@ the runtime behind it and the app wiring it up.
      kit's ProjectRules screen sets.
    - **A step that stalls** becomes a call.
    - **macOS notifications** and a dock badge when something needs you or is
-     ready.
+     ready. A notification only while the person looks elsewhere, never for
+     progress; the badge counts calls and tasks ready, across projects.
 4. **One app for your conversations.**
    - **Talking without planning:** a session or a question, besides a task
      with a plan.

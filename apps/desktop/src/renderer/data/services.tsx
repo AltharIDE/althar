@@ -20,6 +20,8 @@ export interface Host {
   readonly pickFolder: () => Promise<string | null>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */
   readonly grantDropped: (file: File) => Promise<string | null>
+  /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
+  readonly onOpen: (listener: (threadId: string) => void) => () => void
 }
 
 export interface Services {

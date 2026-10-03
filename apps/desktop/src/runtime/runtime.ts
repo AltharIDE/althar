@@ -4,13 +4,14 @@ import { hostname } from 'node:os'
 import { join } from 'node:path'
 
 import { emitterPort } from '@charrette/contracts'
-import { connection, Folders, Secrets, SecretsUnavailable, services } from '@charrette/runtime'
-import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Queue } from 'effect'
+import { connection, Folders, Nudges, Secrets, SecretsUnavailable, services } from '@charrette/runtime'
+import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Queue, Stream } from 'effect'
 
 /*
  * The runtime, in Electron's utility process (ADR-003). It opens the profile,
  * reconciles what an earlier launch left, and serves the API to each window
- * over the port the main process hands it. Asked to shut down, it stops
+ * over the port the main process hands it. What comes to need the person, it
+ * tells the main process, which notifies them. Asked to shut down, it stops
  * every session, records it, and exits. Its secrets are kept sealed in the
  * profile; the main process seals and opens them.
  */
@@ -107,6 +108,10 @@ const program = Effect.gen(function* () {
       : undefined
   const context = yield* Layer.build(services(fake === undefined ? { ...options, clientIds, secrets } : { ...options, ...fake }))
   isReady(context)
+  // What needs the person goes to the main process, which notifies them and keeps the Dock's count.
+  yield* Effect.forkScoped(
+    Stream.runForEach(Context.get(context, Nudges).events, (event) => Effect.sync(() => parent.postMessage({ type: 'nudge', event }))),
+  )
   const ports = yield* Queue.unbounded<Port>()
   accept = (port) => void Queue.offerUnsafe(ports, port)
   for (const port of early.splice(0)) accept(port)

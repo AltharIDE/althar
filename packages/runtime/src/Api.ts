@@ -15,6 +15,7 @@ import { Live } from './Live'
 import { Models } from './Models'
 import { Permissions } from './Permissions'
 import { Projects } from './Projects'
+import { Nudges } from './Nudges'
 import { Queries } from './Queries'
 import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
@@ -378,7 +379,7 @@ export const handlers = Api.toLayer(
 
 /** The runtime's services: the store, this launch, and everything the API calls. Built once per launch. */
 export const services = (options: Runtime.RuntimeLayerOptions) =>
-  Layer.mergeAll(Queries.layer, Folders.layer).pipe(Layer.provideMerge(Runtime.layer(options)))
+  Layer.mergeAll(Nudges.layer, Folders.layer).pipe(Layer.provideMerge(Queries.layer), Layer.provideMerge(Runtime.layer(options)))
 
 /** One client's connection: the API served over its port, until the port closes. Each window gets one. */
 export const connection = (port: PortLike) => RpcServer.layer(Api).pipe(Layer.provide(handlers), Layer.provide(serverProtocol(port)))

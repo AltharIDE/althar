@@ -23,6 +23,7 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `cards.ts` | Each task's card in the coordinator's thread: posted once, touched when what it shows changes |
 | `ToolServer.ts` | Charrette's tools, served to sessions over MCP on this machine, each with a token that says who is calling |
 | `SignIns.ts` | Whether each agent is signed in, from its own status command, at most once a minute |
+| `Nudges.ts` | What reaches the person outside the window: each thing that comes to need them, a call or a task ready, and how many wait |
 | `Models.ts` | The models each agent offers and how hard each can think, from its latest session or asked once a launch |
 | `Permissions.ts` | Records permission requests and decisions; asks the person what the rules keep for them |
 | `rules.ts` | The MVP's rules: everything allowed except the always-ask list; for a role that only reads, only what reads. Commands are read as a shell would split them |
