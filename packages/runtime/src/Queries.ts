@@ -42,7 +42,7 @@ import { Sessions } from './Sessions'
 /** Session states in which a session is working on its thread. */
 const LIVE = ['starting', 'active', 'waiting_approval', 'cancelling']
 
-const parse = (json: string | null): unknown => {
+export const parse = (json: string | null): unknown => {
   if (json === null) return null
   try {
     return JSON.parse(json)
@@ -54,7 +54,7 @@ const parse = (json: string | null): unknown => {
 const field = (value: unknown, key: string): unknown =>
   typeof value === 'object' && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined
 
-const text = (value: unknown, key: string): string => {
+export const text = (value: unknown, key: string): string => {
   const found = field(value, key)
   return typeof found === 'string' ? found : ''
 }

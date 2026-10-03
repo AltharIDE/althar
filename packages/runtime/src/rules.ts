@@ -320,6 +320,21 @@ const unwrap = (command: ReadonlyArray<string>): ReadonlyArray<string> => {
   return command.slice(index)
 }
 
+/**
+ * What a command line runs, by name: its first program and, when the next
+ * word reads as one, its subcommand (`vercel deploy`). Never its arguments,
+ * which may hold a secret, so it can be said where the command can't.
+ */
+export const programOf = (text: string): string | undefined => {
+  for (const words of parseCommandLine(text).commands) {
+    const [program, next] = unwrap(words)
+    if (program === undefined || program === 'cd') continue
+    const name = program.slice(program.lastIndexOf('/') + 1)
+    return next !== undefined && /^[a-z][a-z-]{0,22}[a-z0-9]?$/.test(next) ? `${name} ${next}` : name
+  }
+  return undefined
+}
+
 // ---- Places ----------------------------------------------------------------
 
 interface Places {

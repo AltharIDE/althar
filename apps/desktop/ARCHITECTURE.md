@@ -18,9 +18,9 @@ flowchart LR
 
 | Where | What it holds | What it never holds |
 | --- | --- | --- |
-| `src/main` | Windows, the app's lifecycle, the runtime's process and its restarts, the folder picker and folder grants, external links | Projects, tasks, rules, sessions |
+| `src/main` | Windows, the app's lifecycle, the runtime's process and its restarts, the folder picker and folder grants, external links, notifications and the Dock's count | Projects, tasks, rules, sessions |
 | `src/preload` | The bridge: hands the page its port, and asks main for grants for picked and dropped folders | Node, the file system, a shell, paths |
-| `src/runtime` | The runtime (`@charrette/runtime`), serving the API over each window's port | Anything about windows |
+| `src/runtime` | The runtime (`@charrette/runtime`), serving the API over each window's port, and telling the main process what needs the person | Anything about windows |
 | `src/renderer` | The window: views, view models and the data layer (ADR-010) | Effect outside `data/`; Node |
 
 ## How they talk
@@ -58,6 +58,7 @@ Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view
 - **Test hooks stay out of packaged builds.** `CHARRETTE_FAKE_AGENTS` works only in a build made with `bun run build`; `bun run build:package` leaves the code out. It swaps in the fake agent, the connectors' fake GitHub, and secrets kept in memory, so the end-to-end tests never reach a network or the Keychain.
 - **Words on screen follow [the glossary](../../docs/glossary.md).**
 - **One model picker for every agent.** Every agent's models are one list, each known by its agent and its own id; picking another agent's model hands the conversation to that agent, which the picker says on those models, and asks before while a turn is under way. Default efforts are the runtime's, so every way a session starts uses them; pins are only how this window lists models, so they stay in its storage, as conveniences that may be lost. Until the person pins one, each agent's current model is pinned.
+- **What needs the person reaches them outside the window.** The runtime says when a task becomes ready or a call opens (its `Nudges`), and how many such things wait; the main process shows a notification unless the person is looking at the window, keeps that count on the Dock, and opens the task when they click. Never for progress.
 - **Work folds; results stand.** A turn's work (its tool calls, thoughts, plan, and what it said on the way) folds under how long it worked; only its last message stays open, and nothing when a step's result follows, since the step's summary is what the person reads. While a turn runs, the fold says how long it has worked so far and what it is doing now.
 - **A step that needs you is a call in the task.** It says what went wrong and what Charrette tried, with the kit's `Stuck`: tell the lead, hand the step to another agent, or abandon it; for a review, review again or go on without it.
 - **A project is a conversation, a board, or both** (⌘1–3). The board reads every task's card and every call in one go (`GetBoard`) and reads again when something it shows changes: a task, plan, run, step, session, turn, call, pull request or worktree, not what is said in a thread. What you open from it goes in the dock beside it: a call is answered there as in its task, work ready to accept is merged at the head the dock showed, or sent back to its lead, and a task's changes open over the window. The bar says how much runs and how much needs you, and opens the first of it.

@@ -25,6 +25,7 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `SignIns.ts` | Whether each agent is signed in, from its own status command, at most once a minute |
 | `Limits.ts` | Which agents are out of usage and until when, and the next free agent to move work on to |
 | `Policies.ts` | A project's rules by revision: what it always asks the person, and what a usage limit does |
+| `Nudges.ts` | What reaches the person outside the window: each thing that comes to need them, a call or a task ready, and how many wait |
 | `Models.ts` | The models each agent offers and how hard each can think, from its latest session or asked once a launch |
 | `Permissions.ts` | Records permission requests and decisions; asks the person what the rules keep for them |
 | `rules.ts` | The MVP's rules: everything allowed except the always-ask list; for a role that only reads, only what reads. Commands are read as a shell would split them |

@@ -9,11 +9,12 @@ import {
   dialog,
   ipcMain,
   MessageChannelMain,
+  Notification,
   safeStorage,
   session,
   shell,
-  utilityProcess,
   type UtilityProcess,
+  utilityProcess,
 } from 'electron'
 
 /*
@@ -57,6 +58,49 @@ interface RuntimeMessage {
   readonly requestId?: string
   readonly grant?: string
   readonly value?: unknown
+  readonly event?: {
+    readonly _tag?: string
+    readonly count?: unknown
+    readonly title?: unknown
+    readonly body?: unknown
+    readonly threadId?: unknown
+  }
+}
+
+/* Notifications the person may still click: kept, so they aren't collected before then. */
+const shown = new Set<Notification>()
+
+/** Opens the window on a thread, as a notification the person clicked asks: a window there is, or a new one. */
+const openThread = (threadId: string) => {
+  const existing = BrowserWindow.getAllWindows()[0]
+  const window = existing ?? openWindow()
+  const send = () => window.webContents.send('charrette:open', threadId)
+  if (existing === undefined || window.webContents.isLoading()) window.webContents.once('did-finish-load', send)
+  else send()
+  if (window.isMinimized()) window.restore()
+  window.show()
+  window.focus()
+}
+
+/**
+ * What the runtime says needs the person: a notification, unless they are
+ * looking at the window, where it shows already; and how many things wait, on
+ * the Dock. Never for progress.
+ */
+const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
+  if (event._tag === 'Waiting' && typeof event.count === 'number') return void app.setBadgeCount(event.count)
+  if (event._tag !== 'Nudge' || typeof event.title !== 'string' || typeof event.body !== 'string' || typeof event.threadId !== 'string')
+    return
+  if (BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) return
+  const { threadId } = event
+  const notification = new Notification({ title: event.title, body: event.body })
+  shown.add(notification)
+  notification.on('click', () => {
+    shown.delete(notification)
+    openThread(threadId)
+  })
+  notification.on('close', () => shown.delete(notification))
+  notification.show()
 }
 
 /** Seals a secret for the runtime, or opens one it kept, and answers with the result or why not. */
@@ -87,6 +131,7 @@ const startRuntime = () => {
   })
   child.on('message', (message: RuntimeMessage) => {
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
+    if (message.type === 'nudge' && message.event !== undefined) return nudged(message.event)
     if (message.type !== 'folder-allowed' || message.requestId === undefined) return
     granting.get(message.requestId)?.(message.grant ?? null)
     granting.delete(message.requestId)
@@ -189,6 +234,7 @@ ipcMain.handle('charrette:grant-dropped', async (_event, path: unknown) => {
 
 void app.whenReady().then(() => {
   // The window asks for nothing: no notifications, camera, microphone or anything else a page can ask for.
+  // Charrette's own notifications come from here, as the runtime says something needs the person.
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, done) => done(false))
   session.defaultSession.setPermissionCheckHandler(() => false)
   startRuntime()
