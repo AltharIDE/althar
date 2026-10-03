@@ -400,14 +400,20 @@ person ([03](03-agent-runtime-and-auth.md), Permission routing). The leaning:
 Open: whether the lead or a separate cheap judge model answers. In the MVP,
 the rules and the always-ask list answer, and the lead does not yet.
 
-**Usage limits pause a runtime, not an agent.** A limit belongs to a runtime's
-account, so it pauses every node on that runtime at once: the lead, any steps,
-and their sub-agents. How Charrette detects a limit is in
-[03](03-agent-runtime-and-auth.md), Usage limits. Under the default project
-rule, the paused work moves to the next free agent, which takes it over from a
-brief in the same workspace (03, Switching model or agent), and the thread
-shows one line per move. Otherwise a
-single attention request names everything paused and moves it together.
+**Usage limits pause an account, not an agent.** A limit belongs to one of an
+agent's accounts ([ADR-012](../decisions/012-several-accounts-per-agent.md)),
+so it pauses every node running on that account at once: the lead, any steps,
+and their sub-agents. The agent's other accounts carry on. How Charrette
+detects a limit is in [03](03-agent-runtime-and-auth.md), Usage limits.
+
+Under the default project rule, the paused work moves on, in this order:
+1. the same agent's next account that the project allows;
+2. the next free agent.
+
+Either way the new session takes the work over from a brief in the same
+workspace (03, Switching model or agent), and the thread shows one line per
+move. Otherwise a single attention request names everything paused and moves
+it together.
 
 **Typed step results.** Each step type declares its output schema, for example:
 

@@ -9,6 +9,52 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@charrette/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `charrette-designs` repository (`prototypes/shell`).
 
+## Several accounts, 3 October
+
+Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
+
+- [ ] **Providers' terms on moving between one person's plans.** Several
+  accounts that are each the person's own (work and personal, a client's
+  plan) are ordinary. Moving work to another personal plan because one ran
+  out is the part terms may object to. Re-check Anthropic's and OpenAI's
+  terms before launch.
+  - Leaning: it stays the person's choice, made by adding the account and
+    allowing it for the project, and it is worded as "your accounts", not as
+    a way round limits.
+  - If a provider objects, the move between that agent's accounts gets a
+    switch that is off by default.
+- [ ] **What a home Charrette makes shares with the person's usual folder.**
+  Linked: Claude Code's settings, `CLAUDE.md`, agents, commands and plugins,
+  and Codex's `config.toml`, `AGENTS.md` and skills. OpenCode's config stays
+  under the person's `XDG_CONFIG_HOME` anyway.
+  - Leaning: link settings and instructions, never anything that holds a
+    token. MCP servers' OAuth stores stay per home, so each account signs in
+    to them itself.
+- [ ] **Loading a session across accounts.** A move to another account of
+  the same agent starts a new session from a brief. With a shared history,
+  the new account might load the old session instead. But provider-held
+  state, such as encrypted reasoning and signed thinking, is tied to the
+  account.
+  - Leaning: a brief for now. Try loading where an agent allows it, behind
+    the contract suite.
+- [ ] **OpenCode without `XDG_DATA_HOME`.** That variable reaches every
+  program the session runs. Is there an OpenCode-only way, such as
+  `OPENCODE_DB` and an auth path?
+  - Leaning: `XDG_DATA_HOME` for now. The session's environment is
+    Charrette's anyway.
+- [ ] **Models per account.** Plans offer different models, Plus against Pro
+  for example.
+  - Leaning: models stay per agent until an account says otherwise. The
+    picker says when a model isn't on the account that would run it.
+- [ ] **Pinning a conversation to an account.**
+  - Leaning: later. For now the project's rules and the person's order
+    decide.
+- [ ] **Which switchers first.**
+  - Leaning: those that give each account a home, which are adopted as they
+    are: `codex-profiles`, `~/.claude-*` folders and JoRo-Code's
+    codex-account-switcher. The swapping and rotating kinds need nothing
+    from Charrette.
+
 ## Code hosts and trackers, 1 October
 
 - [ ] **Who moves an issue's status.** When a task starts, opens its pull
@@ -408,9 +454,10 @@ prototype in the `charrette-designs` repository (`prototypes/shell`).
 
 ## Usage limits
 
-- [ ] **Limits on steps, not just the lead.** A limit belongs to a runtime's
-  account, so it pauses every agent on that runtime at once: the lead, its
-  steps, and their sub-agents. Leaning: a project rule moves the work to the
+- [ ] **Limits on steps, not just the lead.** A limit belongs to one of an
+  agent's accounts ([ADR-012](decisions/012-several-accounts-per-agent.md)),
+  so it pauses every agent on that account at once: the lead, its steps, and
+  their sub-agents. Leaning: a project rule moves the work to the
   next free agent, which shows as a quiet line, and the card appears only when
   the rule says to ask. How a limit is detected is settled
   ([architecture 03](architecture/03-agent-runtime-and-auth.md), Usage limits).
