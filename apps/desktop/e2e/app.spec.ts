@@ -3,9 +3,10 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { _electron as electron, type ElectronApplication, expect, type Page, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
+import { chooseFolder, launch, say } from './support'
 
 /*
  * The app as someone uses it: open a folder as a project, start a task, and
@@ -16,34 +17,6 @@ import { repository } from '../tests/repository'
  * is a fake too, at https://github.test, connected with a pasted token; what
  * is pushed to it lands in a bare repository on disk.
  */
-
-const app = join(import.meta.dirname, '..')
-
-const launch = async (home: string, env: Record<string, string> = {}) => {
-  const electronApp = await electron.launch({
-    args: [app],
-    env: {
-      ...process.env,
-      CHARRETTE_PROFILE: join(home, 'profile'),
-      CHARRETTE_WORKTREES: join(home, 'worktrees'),
-      CHARRETTE_FAKE_AGENTS: '1',
-      ...env,
-    },
-  })
-  return { electronApp, page: await electronApp.firstWindow() }
-}
-
-/** Answers the folder picker with `path`, as if the person chose it. */
-const chooseFolder = (electronApp: ElectronApplication, path: string) =>
-  electronApp.evaluate(({ dialog }, chosen) => {
-    dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [chosen] })) as typeof dialog.showOpenDialog
-  }, path)
-
-const say = async (page: Page, words: string) => {
-  const box = page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })
-  await box.fill(words)
-  await box.press('Enter')
-}
 
 test('opens a project, starts a task, and talks to its lead', async () => {
   const home = mkdtempSync(join(tmpdir(), 'charrette-e2e-'))

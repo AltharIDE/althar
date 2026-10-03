@@ -103,6 +103,10 @@ describe('the API', () => {
         assert.strictEqual(project.tasks, 0)
         // The same command again is a retry: the first one's result, and no second project.
         assert.deepStrictEqual(yield* client.OpenProject(opening), project)
+        // What it does when an agent is out of usage: moves on, until the person says it waits.
+        assert.strictEqual(project.usageLimit, 'move')
+        yield* client.SetUsageLimit({ commandId: commandId(), projectId: project.id, policy: 'wait' })
+        assert.strictEqual((yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.usageLimit, 'wait')
         const creating = { commandId: commandId(), projectId: project.id, title: 'Say hello', description: 'Briefly.' }
         const task = yield* client.CreateTask(creating)
         assert.strictEqual((yield* client.CreateTask(creating)).id, task.id)

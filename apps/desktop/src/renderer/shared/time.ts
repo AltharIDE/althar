@@ -16,6 +16,15 @@ export const ago = (iso: string, now: Date = new Date()): string => {
   return then.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
 }
 
+/** When something comes back, as a clock says it: the time, and the day where it isn't today. */
+export const clock = (iso: string, now: Date = new Date()): string => {
+  const at = new Date(iso)
+  const time = at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  if (at.toDateString() === now.toDateString()) return time
+  const soon = at.getTime() - now.getTime() < 6 * 24 * 60 * 60 * 1000
+  return `${at.toLocaleDateString(undefined, soon ? { weekday: 'short' } : { day: 'numeric', month: 'short' })} ${time}`
+}
+
 /** How long something took, from two instants: "12s", "3m 5s", "1h 4m". */
 export const took = (from: string, to: string): string => {
   const seconds = Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 1000))

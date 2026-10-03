@@ -125,6 +125,7 @@ describe('the API', () => {
         lead: null,
         branch: null,
         startedAt: null,
+        waits: null,
       },
     })
     assert.strictEqual(task.kind === 'task' && task.content.plan?.steps.length, 2)
@@ -192,6 +193,7 @@ describe('the API', () => {
               Disconnect: () => Effect.void,
               ListIssues: () => Effect.succeed({ issues: [] }),
               MarkReady: () => Effect.void,
+              SetUsageLimit: () => Effect.void,
               OpenChange: () => Effect.void,
               RefreshTask: () => Effect.void,
               Watch: ({ since }) =>

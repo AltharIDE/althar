@@ -27,14 +27,13 @@ the runtime behind it and the app wiring it up.
 2. **The board.**
    - Conversation, Board, and both side by side.
    - Its columns:
-     - Up next, queued, with why each waits;
+     - Up next: plans not started yet;
      - Running, with where each is;
      - Needs you: calls, permission asks, changes ready to accept;
      - Settled.
    - Acting from a card in the dock.
    - "3 running · 2 need you" in the chrome.
 3. **Work that doesn't need you.**
-   - **A queue,** with how many tasks run at once.
    - **Usage limits handled:** move to the next agent free, or wait for the reset.
    - **The lead answers permission asks** within the project's rules, which the
      kit's ProjectRules screen sets.
@@ -85,14 +84,44 @@ Confirmed with the user on 1 October 2026:
   as marking it ready is.
 - **A task without a pull request** merges into its base locally, as the
   person's click.
-- **Three tasks at once** per project.
+- **No limit on tasks at once,** and no queue: a cap would be arbitrary, so
+  no flow is designed around one (changed on 3 October 2026; it was three
+  per project).
 - **Permission asks** are the lead's to answer within the project's rules;
   only the "always ask me" list reaches the person.
 - **A usage limit is handled as configured:** stop and wait for the reset, or
   move to the next agent automatically. Where it is set comes later; the
   setting exists from the start.
 
-## Open: which model the next agent runs
+## Usage limits
+
+Next, decided with the user on 3 October 2026, as designed in docs 03 and 05.
+
+- **When.** A turn fails with the agent's usage limit, which its error says,
+  with the reset time where it gives one: a lead's, a reviewer's or the
+  coordinator's. Also a step about to start on an agent known to be out.
+- **Who is out.** The agent's account on this Mac, until its reset. Without
+  a reset time, for an hour, then it is tried again.
+- **What happens** is one of the project's rules: move on (the default) or
+  wait, a new revision of its rules when the person changes it, which a run
+  cites. Where the person sets it comes later.
+  - **Move on.** The work goes to the next free agent: signed in on a plan,
+    not out, in the agents' order, and not the other step's agent unless
+    nothing else is free (the thread then says it reviews its own work). An
+    agent paid per use, on a key, is never moved to unasked: that spends the
+    person's money; the person can still hand work to it. Its model is chosen as below, at the person's
+    default effort for it. It takes over from a brief in the same worktree,
+    and a step runs again on it, as when the person hands a step over. The
+    thread says it in one line: who is out, when it resets, who took over
+    and on which model. With no agent free, it waits.
+  - **Wait.** A step is held until the reset, then runs again on the same
+    agent; its card says what it waits for and until when. Without a reset
+    time, the step needs the person, who hands it over or abandons it.
+- **Outside a step,** the coordinator or a lead the person is talking to
+  moves on the same way, and the person's message goes to the agent that
+  took over. Waiting, the message waits in the queue until the reset.
+
+## Which model the next agent runs
 
 When work moves to another agent, its model, in this order:
 

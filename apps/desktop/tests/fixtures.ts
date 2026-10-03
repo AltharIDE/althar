@@ -70,6 +70,7 @@ export const project: ProjectSummary = {
   tasks: 1,
   running: 1,
   waiting: 0,
+  usageLimit: 'move',
 }
 
 export const task: TaskSummary = {
@@ -207,6 +208,7 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   lead: 'claude-code',
   branch: 'charrette/add-a-retry',
   startedAt: null,
+  waits: null,
   ...overrides,
 })
 
@@ -269,6 +271,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     worktree: '/w/meridian',
     baseRef: 'main',
     phase: 'running',
+    waits: null,
     issue: null,
     changes: [],
     files: [],

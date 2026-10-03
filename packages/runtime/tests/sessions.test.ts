@@ -384,12 +384,13 @@ describe('sessions', () => {
     it.live('keeps one principal per agent sign-in across limits', () =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        const { task: created } = yield* task()
-        yield* begin(created.threadId, 'codex')
-        yield* say(created.threadId, scenarios.usageLimit)
-        yield* ended(created.threadId, 1)
-        yield* say(created.threadId, scenarios.quota)
-        yield* ended(created.threadId, 2)
+        // Two tasks' leads on the same agent each reach its limit.
+        for (const scenario of [scenarios.usageLimit, scenarios.quota]) {
+          const { task: created } = yield* task()
+          yield* begin(created.threadId, 'codex')
+          yield* say(created.threadId, scenario)
+          yield* ended(created.threadId, 1)
+        }
         const [counts] = yield* sql<{ principals: number; statuses: number }>`
           SELECT (SELECT count(*) FROM principals) AS principals, (SELECT count(*) FROM account_statuses) AS statuses`
         assert.deepStrictEqual(counts, { principals: 1, statuses: 2 })

@@ -41,14 +41,20 @@ export const repository = () => {
   return path
 }
 
-export const definition = (id: string, signedOut: ReadonlyArray<string> = []): AgentDefinition => ({
+export const definition = (id: string, signedOut: ReadonlyArray<string> = [], perUse: ReadonlyArray<string> = []): AgentDefinition => ({
   id: id as AgentId,
   name: `Fake ${id}`,
   source: 'bundled',
   launch: () => ({ command: 'bun', args: [fakeAgentMain] }),
   modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
   options: { mode: 'mode', model: 'model', effort: 'effort' },
-  signIn: { status: () => ({ command: 'true', args: [] }), read: () => !signedOut.includes(id), login: 'true' },
+  signIn: {
+    status: () => ({ command: 'true', args: [] }),
+    read: () => !signedOut.includes(id),
+    // On a plan, unless the test says it is paid per use.
+    paidBy: () => (perUse.includes(id) ? 'key' : 'plan'),
+    login: 'true',
+  },
   permissions: codexLikeMeanings,
   // One fake agent passes session options, as Claude Code's entry does.
   ...(id === 'claude-code' ? { sessionMeta: () => ({ fake: { asks: true } }) } : {}),
@@ -60,15 +66,21 @@ export const definition = (id: string, signedOut: ReadonlyArray<string> = []): A
  * `process` runs it as a real process with Bun; `missing` names a command
  * that doesn't exist.
  */
-export const fakeAgents = (options: FakeAgentOptions = {}, signedOut: ReadonlyArray<string> = []) => {
+export const fakeAgents = (
+  options: FakeAgentOptions = {},
+  signedOut: ReadonlyArray<string> = [],
+  /** Options for one agent, over the ones for all. */
+  each: Readonly<Record<string, FakeAgentOptions>> = {},
+  perUse: ReadonlyArray<string> = [],
+) => {
   const entry = (agentId: string): AgentEntry => ({
-    definition: definition(agentId, signedOut),
+    definition: definition(agentId, signedOut, perUse),
     transport: (cwd) =>
       agentId === 'process'
         ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
         : agentId === 'missing'
           ? { _tag: 'Process', spec: { command: 'charrette-no-such-agent', args: [] }, cwd }
-          : { _tag: 'InProcess', agent: fakeAgent(options) },
+          : { _tag: 'InProcess', agent: fakeAgent({ ...options, ...each[agentId] }) },
   })
   return Layer.succeed(
     Agents,
@@ -109,6 +121,9 @@ export const runtime = (
     readonly countdown?: Duration.Duration
     readonly connectors?: Layer.Layer<Connectors>
     readonly listenEvery?: Duration.Duration
+    readonly each?: Readonly<Record<string, FakeAgentOptions>>
+    /** Agents signed in on a key, paid per use, rather than a plan. */
+    readonly perUse?: ReadonlyArray<string>
   } = {},
 ) =>
   Runtime.layer({
@@ -116,7 +131,7 @@ export const runtime = (
     worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
-    agents: fakeAgents(options, more.signedOut),
+    agents: fakeAgents(options, more.signedOut, more.each, more.perUse),
     countdown: more.countdown ?? Duration.millis(300),
     secrets: Secrets.memory(),
     connectors: more.connectors ?? fakeConnectors({}),

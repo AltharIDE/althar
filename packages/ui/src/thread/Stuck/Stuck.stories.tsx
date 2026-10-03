@@ -91,6 +91,29 @@ export const OneCharretteDoes: Story = {
   },
 }
 
+/**
+ * An agent out of usage, which said no reset: telling it anything would hit
+ * the same limit, so handing the step on comes first, then trying it again
+ * once it is back.
+ */
+export const OutOfUsage: Story = {
+  args: {
+    tried: [],
+    read: undefined,
+    output: undefined,
+    onTell: undefined,
+    onAgain: fn(),
+    what: 'Codex reached its usage limit and didn’t say when it resets.',
+    text: { again: 'Try Codex again' },
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Try Codex again' }))
+    await expect(args.onAgain).toHaveBeenCalledOnce()
+  },
+}
+
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'button:first-of-type', focus: 'button:first-of-type', pressed: 'button:first-of-type' }),
   render: (args) => (

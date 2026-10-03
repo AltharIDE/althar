@@ -14,9 +14,9 @@ import {
   WorkCard,
 } from '@charrette/ui'
 
-import { modelInfo } from '../../shared/agents'
+import { modelInfo, waitsWords } from '../../shared/agents'
 import { productBrand, productName } from '../../shared/products'
-import { ago, running } from '../../shared/time'
+import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import { type Lanes } from './lanes'
 
@@ -129,7 +129,13 @@ export function BoardView({
               at={at}
               elapsed={work.startedAt === null ? '' : running(work.startedAt, now)}
               lead={lead(work)}
-              {...(status === TaskStatus.Stopped ? { note: text.stopped } : steps.length === 1 ? { note: '' } : {})}
+              {...(work.waits !== null
+                ? { note: waitsWords(name(work.waits.agentId), clock(work.waits.until)) }
+                : status === TaskStatus.Stopped
+                  ? { note: text.stopped }
+                  : steps.length === 1
+                    ? { note: '' }
+                    : {})}
               current={on(task(work.taskId))}
               onOpen={() => onOpen(task(work.taskId))}
               text={{ status: text.status, task: unnamed }}

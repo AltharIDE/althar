@@ -201,6 +201,7 @@ describe('the client', () => {
           Disconnect: () => Effect.die('unused'),
           ListIssues: () => Effect.die('unused'),
           MarkReady: () => Effect.die('unused'),
+          SetUsageLimit: () => Effect.die('unused'),
           OpenChange: () => Effect.die('unused'),
           RefreshTask: () => Effect.die('unused'),
           Watch: ({ since }) => {

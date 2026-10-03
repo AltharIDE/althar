@@ -83,7 +83,12 @@ export const stuckOf = (payload: unknown): StuckStep => {
   return {
     step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
     why:
-      why === 'no_report' || why === 'session_ended' || why === 'restarted' || why === 'round_limit' || why === 'not_connected'
+      why === 'no_report' ||
+      why === 'session_ended' ||
+      why === 'restarted' ||
+      why === 'round_limit' ||
+      why === 'not_connected' ||
+      why === 'usage_limit'
         ? why
         : 'failed_to_start',
     detail: typeof detail === 'string' ? detail : null,
@@ -349,7 +354,8 @@ export class Queries extends Context.Service<
               WHERE b.project_id = p.id AND l.device_id = ${instance.deviceId} ORDER BY b.created_at LIMIT 1) AS repository,
             (SELECT count(*) FROM tasks t WHERE t.project_id = p.id) AS tasks,
             (SELECT count(*) FROM provider_sessions s WHERE s.project_id = p.id AND s.state IN (${sql.unsafe(live)})) AS running,
-            (SELECT count(*) FROM attention_requests a WHERE a.project_id = p.id AND a.state = 'open') AS waiting
+            (SELECT count(*) FROM attention_requests a WHERE a.project_id = p.id AND a.state = 'open') AS waiting,
+            coalesce((SELECT json_extract(r.rules, '$.usageLimit') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 'move') AS usage_limit
           FROM projects p WHERE p.archived_at IS NULL ORDER BY p.created_at DESC, p.id DESC`
         return { cursor: at, projects: rows }
       })
@@ -537,12 +543,16 @@ export class Queries extends Context.Service<
             lead: string | null
             firstSession: string | null
             starting: number
+            held: string | null
           }>`
             SELECT t.id AS thread_id, k.title, k.slug, k.state, w.branch,
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
               r.state AS run_state, r.created_at AS run_at,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
-                WHERE e.run_id = r.id AND a.state IN ('admitted', 'running') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
+                WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
+              -- A step held until an agent's usage limit resets.
+              (SELECT a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+                WHERE e.run_id = r.id AND a.state = 'held' ORDER BY a.admitted_at DESC LIMIT 1) AS held,
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') AS waiting,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
@@ -578,7 +588,8 @@ export class Queries extends Context.Service<
             if (task.waiting > 0) return 'waiting'
             if (task.runState === 'succeeded') return busy ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
-            return working ? 'running' : 'stopped'
+            // Held for a reset, it carries on on its own: under way, not stopped.
+            return working || task.held !== null ? 'running' : 'stopped'
           })()
           const parameters = parse(task.parameters)
           const steps = field(parameters, 'steps')
@@ -616,8 +627,17 @@ export class Queries extends Context.Service<
             lead: task.lead ?? (planned.find((step) => step.key === 'implement')?.agentId || null),
             branch: task.branch,
             startedAt: task.runAt ?? task.firstSession,
+            waits: waitsOf(task.held),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
+
+      /** What a held step waits for: the agent out of usage, and when it is back. */
+      const waitsOf = (held: string | null) => {
+        const output = held === null ? undefined : parse(held)
+        const agentId = text(output, 'heldFor')
+        const until = text(output, 'until')
+        return agentId === '' || until === '' ? null : { agentId, until }
+      }
 
       /** How many settled tasks the board shows: the most recent. */
       const SETTLED_SHOWN = 30
@@ -744,7 +764,7 @@ export class Queries extends Context.Service<
               branch: head.branch,
               worktree: head.worktree,
               baseRef: head.baseRef,
-              phase: (yield* cardFor(head.taskId))?.phase ?? null,
+              ...(yield* Effect.map(cardFor(head.taskId), (card) => ({ phase: card?.phase ?? null, waits: card?.waits ?? null }))),
               ...(yield* linksOf(head.taskId)),
               ...(yield* changedOf(head.worktree, head.baseRef, head.baseCommit)),
             },

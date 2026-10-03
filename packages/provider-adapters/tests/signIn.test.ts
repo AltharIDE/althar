@@ -2,7 +2,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import { type AgentDefinition, agents } from '../src/registry'
-import { signInStatus } from '../src/signIn'
+import { signInCheck, signInStatus } from '../src/signIn'
 
 const withStatus = (script: string): AgentDefinition => ({
   ...agents.codex,
@@ -16,6 +16,26 @@ describe('reading sign-in status', () => {
     assert.isFalse(read('{"loggedIn": false, "authMethod": "none"}', 0))
     assert.isUndefined(read('not json', 0))
     assert.isUndefined(read('{"authMethod": "none"}', 0))
+  })
+
+  it('reads how each sign-in is paid for: a plan, or per use, on a key', () => {
+    const claude = agents['claude-code'].signIn.paidBy
+    assert.deepStrictEqual(
+      [
+        claude?.('{"loggedIn": true, "authMethod": "claude.ai", "subscriptionType": "max"}'),
+        claude?.('{"loggedIn": true, "authMethod": "api_key"}'),
+        claude?.('{"loggedIn": false, "authMethod": "none"}'),
+        claude?.('{"loggedIn": true}'),
+        claude?.('not json'),
+      ],
+      ['plan', 'key', undefined, undefined, undefined],
+    )
+    const codex = agents.codex.signIn.paidBy
+    assert.deepStrictEqual(
+      [codex?.('Logged in using ChatGPT'), codex?.('Logged in using an API key - sk-…'), codex?.('Not logged in')],
+      ['plan', 'key', undefined],
+    )
+    assert.strictEqual(agents.opencode.signIn.paidBy?.('2 credentials'), 'key')
   })
 
   it("reads Codex's sentence and exit code", () => {
@@ -47,6 +67,16 @@ describe('signInStatus', () => {
       assert.strictEqual(yield* signInStatus(withStatus("console.log('Logged in using ChatGPT')")), 'signed_in')
       assert.strictEqual(yield* signInStatus(withStatus("console.log('Not logged in'); process.exit(1)")), 'signed_out')
       assert.strictEqual(yield* signInStatus(withStatus("console.log('something else')")), 'unknown')
+      // With how it is paid for, where the agent says.
+      assert.deepStrictEqual(yield* signInCheck(withStatus("console.log('Logged in using ChatGPT')")), {
+        status: 'signed_in',
+        paidBy: 'plan',
+      })
+      assert.deepStrictEqual(yield* signInCheck(withStatus("console.log('something else')")), { status: 'unknown', paidBy: 'unknown' })
+      // An agent whose status doesn't say how it is paid for.
+      const { paidBy: _, ...without } = withStatus("console.log('Logged in using ChatGPT')").signIn
+      const unread: AgentDefinition = { ...agents.codex, signIn: without }
+      assert.strictEqual((yield* signInCheck(unread)).paidBy, 'unknown')
     }),
   )
 
@@ -57,6 +87,7 @@ describe('signInStatus', () => {
         signIn: { ...agents.codex.signIn, status: () => ({ command: 'charrette-no-such-cli', args: [] }) },
       }
       assert.strictEqual(yield* signInStatus(missing), 'unknown')
+      assert.deepStrictEqual(yield* signInCheck(missing), { status: 'unknown', paidBy: 'unknown' })
     }),
   )
 
