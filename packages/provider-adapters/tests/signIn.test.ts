@@ -61,12 +61,37 @@ describe('reading sign-in status', () => {
   })
 })
 
+describe('an agent’s homes', () => {
+  it('names the variable that points each agent at a home, and its usual folder', () => {
+    const usual = (env: Record<string, string>) =>
+      Object.values(agents).map((agent) => [agent.home.variable, agent.home.usual(env, '/Users/me')])
+    assert.deepStrictEqual(usual({}), [
+      ['CLAUDE_CONFIG_DIR', '/Users/me/.claude'],
+      ['CODEX_HOME', '/Users/me/.codex'],
+      ['XDG_DATA_HOME', '/Users/me/.local/share'],
+    ])
+    assert.deepStrictEqual(
+      usual({ CLAUDE_CONFIG_DIR: '/c', CODEX_HOME: '/x', XDG_DATA_HOME: '/d' }).map(([, folder]) => folder),
+      ['/c', '/x', '/d'],
+    )
+  })
+
+  it('shares only settings and instructions, never a sign-in', () => {
+    for (const agent of Object.values(agents))
+      for (const name of agent.home.shared) assert.notMatch(name, /auth|credential|token|\.claude\.json|keychain/i, agent.id)
+  })
+})
+
 describe('signInStatus', () => {
   it.live('runs the status command and reads it', () =>
     Effect.gen(function* () {
       assert.strictEqual(yield* signInStatus(withStatus("console.log('Logged in using ChatGPT')")), 'signed_in')
       assert.strictEqual(yield* signInStatus(withStatus("console.log('Not logged in'); process.exit(1)")), 'signed_out')
       assert.strictEqual(yield* signInStatus(withStatus("console.log('something else')")), 'unknown')
+      // In an account's home: the status command runs with it.
+      const home = withStatus("console.log(process.env.CODEX_HOME === '/homes/work' ? 'Logged in using ChatGPT' : 'Not logged in')")
+      assert.strictEqual((yield* signInCheck(home, process.execPath, { CODEX_HOME: '/homes/work' })).status, 'signed_in')
+      assert.strictEqual((yield* signInCheck(home)).status, 'signed_out')
       // With how it is paid for, where the agent says.
       assert.deepStrictEqual(yield* signInCheck(withStatus("console.log('Logged in using ChatGPT')")), {
         status: 'signed_in',

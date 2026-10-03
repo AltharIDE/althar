@@ -10,6 +10,7 @@ import { statements as runPerPlan } from './0005_run_per_plan'
 import { statements as connectors } from './0006_connectors'
 import { statements as models } from './0007_models'
 import { statements as usageLimits } from './0008_usage_limits'
+import { statements as accounts } from './0009_accounts'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -31,6 +32,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0006_connectors', statements: connectors },
   { key: '0007_models', statements: models },
   { key: '0008_usage_limits', statements: usageLimits },
+  { key: '0009_accounts', statements: accounts },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

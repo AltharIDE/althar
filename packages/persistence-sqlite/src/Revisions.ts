@@ -24,6 +24,7 @@ export const revisionedTables = [
   'user_inputs',
   'turn_deliveries',
   'thread_items',
+  'agent_accounts',
   'agent_installations',
   'provider_sessions',
   'processes',

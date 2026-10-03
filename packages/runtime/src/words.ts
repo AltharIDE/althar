@@ -1,6 +1,7 @@
 import { products } from '@charrette/connectors'
 import { Cause, Option } from 'effect'
 
+import type { AccountRefused } from './Accounts'
 import type { NoChangeToOpen } from './errors'
 
 /*
@@ -88,6 +89,7 @@ const kinds: Readonly<Record<string, string>> = {
   attention_request: 'call',
   provider_session: 'agent',
   folder: 'folder',
+  account: 'account',
 }
 
 /** What went wrong, for the window: the error's tag as its reason, and words for the person. */
@@ -132,6 +134,8 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
         return 'Another copy of Charrette is using this profile.'
       case 'NoChangeToOpen':
         return noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working
+      case 'AccountRefused':
+        return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Charrette can't add that account."
       case 'ChangedSinceSeen':
         return 'The pull request changed since you looked at it. Have another look before you accept it.'
       case 'NotConnected':
@@ -192,3 +196,12 @@ export const expected = new Set([
   'AttentionClosed',
   'CommandIdReused',
 ])
+
+/** Why an account can't be added, renamed or removed, by reason. */
+const accountRefused = {
+  no_room: "Charrette has nowhere to keep a new account's folder here. Choose a folder the agent signed in with instead.",
+  not_a_folder: "That isn't a folder. Choose the folder the agent keeps the account's sign-in in.",
+  usual: "That's the agent's usual sign-in, its first account: it stays.",
+  taken: 'That folder is an account already.',
+  no_name: 'Give the account a name.',
+} as const satisfies Record<AccountRefused['reason'], string>

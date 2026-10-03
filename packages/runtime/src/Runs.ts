@@ -618,12 +618,14 @@ export class Runs extends Context.Service<
           const on = yield* stepOn(event.threadId)
           if (event._tag === 'TurnEnded' && event.errorClass === 'usage_limit') {
             // Only the live session's turn speaks for the thread; one another agent took over from is history.
-            const [turn] = yield* sql<{ sessionId: string | null; agentId: string }>`
-              SELECT t.provider_session_id AS session_id, s.agent_id FROM turn_deliveries t
+            const [turn] = yield* sql<{ sessionId: string | null; agentId: string; accountId: string | null }>`
+              SELECT t.provider_session_id AS session_id, s.agent_id, s.account_id FROM turn_deliveries t
               JOIN provider_sessions s ON s.id = t.provider_session_id WHERE t.id = ${event.turnId}`
             const live = yield* sessions.running(event.threadId)
             if (turn === undefined || Option.isNone(live) || live.value.sessionId !== turn.sessionId) return
-            return yield* on === undefined ? outOfUsageElsewhere(event.threadId, turn.agentId) : outOfUsage(on, turn.agentId)
+            return yield* on === undefined
+              ? outOfUsageElsewhere(event.threadId, turn.agentId, turn.accountId)
+              : outOfUsage(on, turn.agentId, turn.accountId)
           }
           if (on === undefined) return
           const [agent] = yield* sql<{ agentId: string }>`
@@ -736,8 +738,10 @@ export class Runs extends Context.Service<
             })}`
           // Handed to another agent, the round starts that one afresh.
           const running = yield* sessions.running(threadId)
-          if (Option.isSome(running) && running.value.agentId !== step.agentId) yield* Effect.ignore(sessions.stop(threadId))
-          const live = Option.filter(running, (session) => session.agentId === step.agentId)
+          // Handed to another agent, or its account out of usage, the round starts afresh, on another account where it is.
+          const spent = Option.isSome(running) && Option.isSome(yield* limits.outAccount(running.value.accountId))
+          if (Option.isSome(running) && (spent || running.value.agentId !== step.agentId)) yield* Effect.ignore(sessions.stop(threadId))
+          const live = Option.filter(running, (session) => !spent && session.agentId === step.agentId)
           const sessionId = Option.isSome(live)
             ? live.value.sessionId
             : yield* sessions.start({
@@ -804,7 +808,9 @@ export class Runs extends Context.Service<
           const { implement } = yield* stepsOf(run)
           const wanted = agentId ?? implement?.agentId ?? 'claude-code'
           const live = yield* sessions.running(run.threadId)
-          if (Option.isSome(live) && (agentId === undefined || live.value.agentId === agentId)) return live.value.sessionId
+          // One on an account that is out of usage hands over, to the same agent's next account where it has one (ADR-012).
+          const spent = Option.isSome(live) && Option.isSome(yield* limits.outAccount(live.value.accountId))
+          if (Option.isSome(live) && !spent && (agentId === undefined || live.value.agentId === agentId)) return live.value.sessionId
           if (Option.isSome(live))
             return yield* sessions.switchAgent({
               threadId: run.threadId,
@@ -873,12 +879,12 @@ export class Runs extends Context.Service<
        * person hands it over; otherwise it is held until the reset, or, with no
        * reset known, it needs the person.
        */
-      const outOfUsage = (on: NonNullable<Effect.Success<ReturnType<typeof stepOn>>>, agentId: string) =>
+      const outOfUsage = (on: NonNullable<Effect.Success<ReturnType<typeof stepOn>>>, agentId: string, accountId: string | null) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const out = Option.getOrNull(yield* limits.out(agentId))
+          const out = Option.getOrNull(yield* accountId === null ? limits.out(agentId) : limits.outAccount(accountId))
           const resetsAt = out?.resetsAt ?? null
-          const from = (yield* limits.named(agentId, null)).agent
+          const from = (yield* limits.named(agentId, null, accountId)).agent
           const { implement, review: plannedReview } = yield* stepsOf(on.run)
           const planned = on.step === 'review' ? plannedReview : implement
           const info: StuckInfo = { step: on.step, why: 'usage_limit', detail: null, agentId, round: on.iteration, open: 0 }
@@ -905,14 +911,18 @@ export class Runs extends Context.Service<
           )
           if ((yield* usageLimitOfRun(on.run)) === 'move') {
             const other = yield* otherStepOf(on.run, on.step === 'review' ? 'review' : 'implement')
-            const next = yield* limits.free([agentId], other === undefined ? [] : [other])
+            // The same agent's next account first, on the same model; then the next free agent.
+            const next = Option.isNone(yield* limits.out(agentId))
+              ? agentId
+              : yield* limits.free([agentId], other === undefined ? [] : [other])
             if (next !== undefined) {
               const model = yield* limits.modelFor({
                 agentId: next,
                 projectId: on.run.projectId,
                 ...(planned === undefined ? {} : { planned }),
               })
-              const said = outWords({ from, resetsAt, to: { ...(yield* limits.named(next, model)), ownWork: next === other } })
+              const to = next === agentId ? (yield* limits.pick({ agentId: next })).id : null
+              const said = outWords({ from, resetsAt, to: { ...(yield* limits.named(next, model, to)), ownWork: next === other } })
               // Held while the next agent takes over, so nothing it says before it is told the step counts for the step.
               yield* hold
               const handing = yield* envelope('thread.send', { threadId: on.run.threadId, usageLimit: on.attemptId })
@@ -932,23 +942,25 @@ export class Runs extends Context.Service<
        * thread over, with what the person said waiting for it; otherwise what
        * they said waits for the reset.
        */
-      const outOfUsageElsewhere = (threadId: string, agentId: string) =>
+      const outOfUsageElsewhere = (threadId: string, agentId: string, accountId: string | null) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ projectId: ProjectId; kind: string }>`SELECT project_id, kind FROM threads WHERE id = ${threadId}`
           if (thread === undefined || (thread.kind !== 'coordinator' && thread.kind !== 'task')) return
-          const out = Option.getOrNull(yield* limits.out(agentId))
+          const out = Option.getOrNull(yield* accountId === null ? limits.out(agentId) : limits.outAccount(accountId))
           const resetsAt = out?.resetsAt ?? null
-          const from = (yield* limits.named(agentId, null)).agent
+          const from = (yield* limits.named(agentId, null, accountId)).agent
           if (usageLimitOf((yield* policies.current(thread.projectId)).rules) === 'move') {
-            const next = yield* limits.free([agentId])
+            // The same agent's next account first, then the next free agent.
+            const next = Option.isNone(yield* limits.out(agentId)) ? agentId : yield* limits.free([agentId])
             if (next !== undefined) {
               const model = yield* limits.modelFor({ agentId: next, projectId: thread.projectId })
+              const to = next === agentId ? (yield* limits.pick({ agentId: next })).id : null
               yield* sessions.switchAgent({
                 threadId,
                 agentId: next,
                 ...(model === null ? {} : { model }),
-                said: outWords({ from, resetsAt, to: yield* limits.named(next, model) }),
+                said: outWords({ from, resetsAt, to: yield* limits.named(next, model, to) }),
               })
               return
             }
@@ -1566,8 +1578,8 @@ export class Runs extends Context.Service<
             JOIN node_attempts a ON a.node_id = n.id
             WHERE r.state = 'running' AND a.state = 'held' AND a.hold_reason = 'usage_limit'`
           // A message waits where the thread's last turn reached the limit, outside a step, and the person's input is queued.
-          const messages = yield* sql<{ threadId: string; turnId: string; agentId: string }>`
-            SELECT t.id AS thread_id, d.id AS turn_id, s.agent_id FROM threads t
+          const messages = yield* sql<{ threadId: string; turnId: string; agentId: string; accountId: string | null }>`
+            SELECT t.id AS thread_id, d.id AS turn_id, s.agent_id, s.account_id FROM threads t
             JOIN turn_deliveries d ON d.id = (SELECT id FROM turn_deliveries WHERE thread_id = t.id ORDER BY requested_at DESC LIMIT 1)
             JOIN provider_sessions s ON s.id = d.provider_session_id
             WHERE t.kind IN ('coordinator', 'task') AND d.error_class = 'usage_limit'
@@ -1580,7 +1592,7 @@ export class Runs extends Context.Service<
           })
           for (const message of messages) {
             if (given.has(message.turnId)) continue
-            const out = yield* limits.out(message.agentId)
+            const out = yield* message.accountId === null ? limits.out(message.agentId) : limits.outAccount(message.accountId)
             due.push({
               at: Option.isSome(out) ? Date.parse(out.value.until) : 0,
               run: Effect.andThen(

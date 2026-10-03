@@ -11,6 +11,7 @@ import {
 import { Cause, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
+import { type Account, Accounts } from './Accounts'
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import {
@@ -24,6 +25,7 @@ import {
   type UnknownAgent,
 } from './errors'
 import { Instance } from './Instance'
+import { Limits } from './Limits'
 import { Live } from './Live'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { touchCard } from './cards'
@@ -108,6 +110,8 @@ interface Running {
   readonly sessionId: string
   readonly entry: AgentEntry
   readonly thread: ThreadContext
+  /** The account it runs on (ADR-012). */
+  readonly account: Account
   readonly agent: AgentSession
   readonly connection: AgentConnection
   readonly scope: Scope.Closeable
@@ -124,9 +128,24 @@ interface Running {
   stopping: boolean
 }
 
+/** The account asked for, where one was. */
+const accountOf = (input: { readonly accountId?: string }) => (input.accountId === undefined ? {} : { accountId: input.accountId })
+
 type StopRequest = { readonly state: 'completed' } | { readonly state: 'superseded'; readonly by: string }
 
-type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | Live | Agents | Permissions | ToolServer | RuntimeConfig
+type Store =
+  | SqlClient.SqlClient
+  | Ledger
+  | Commands
+  | Crypto.Crypto
+  | Instance
+  | Live
+  | Agents
+  | Permissions
+  | ToolServer
+  | RuntimeConfig
+  | Accounts
+  | Limits
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
 
 const PROMPT_BUDGET = 60_000
@@ -224,7 +243,9 @@ export class Sessions extends Context.Service<
     /** The session running on a thread, if there is one. */
     running(
       threadId: string,
-    ): Effect.Effect<Option.Option<{ readonly sessionId: string; readonly agentId: string; readonly turnRunning: boolean }>>
+    ): Effect.Effect<
+      Option.Option<{ readonly sessionId: string; readonly agentId: string; readonly accountId: string; readonly turnRunning: boolean }>
+    >
   }
 >()('@charrette/runtime/Sessions') {
   static readonly layer: Layer.Layer<Sessions, never, Store> = Layer.effect(
@@ -234,6 +255,8 @@ export class Sessions extends Context.Service<
       const instance = yield* Instance
       const live = yield* Live
       const permissions = yield* Permissions
+      const accounts = yield* Accounts
+      const limits = yield* Limits
       const toolServer = yield* ToolServer
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
@@ -288,8 +311,8 @@ export class Sessions extends Context.Service<
           actorId: instance.systemId,
         })
 
-      /** Records a new session, still starting. */
-      const createSession = (thread: ThreadContext, agentId: string) =>
+      /** Records a new session, still starting, on the account it runs on. */
+      const createSession = (thread: ThreadContext, agentId: string, account: Account) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessionId = yield* newId(Ids.providerSession)
@@ -300,11 +323,12 @@ export class Sessions extends Context.Service<
                 projectId: thread.projectId,
                 threadId: thread.threadId,
                 agentId,
+                accountId: account.id,
                 controllerGeneration: 1,
                 state: 'starting',
                 startedAt: yield* timestamp,
               })}`
-              yield* sessionFact(thread, sessionId, 1, 'provider_session.starting', { agentId })
+              yield* sessionFact(thread, sessionId, 1, 'provider_session.starting', { agentId, accountId: account.id })
             }),
           )
           return sessionId
@@ -526,19 +550,20 @@ export class Sessions extends Context.Service<
           return !refused && errorClass !== 'usage_limit'
         })
 
-      /** A usage limit belongs to the account the agent is signed in with (docs/architecture/03). */
+      /** A usage limit belongs to the account the session runs on (docs/architecture/03, ADR-012), not the agent. */
       const accountLimited = (running: Running, resetsAt: string | undefined) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const agentId = running.entry.definition.id
+          const accountId = running.account.id
           yield* sql.withTransaction(
             Effect.gen(function* () {
               const [known] = yield* sql<{
                 id: string
-              }>`SELECT id FROM principals WHERE agent_id = ${agentId} AND device_id = ${instance.deviceId} ORDER BY observed_at DESC LIMIT 1`
+              }>`SELECT id FROM principals WHERE account_id = ${accountId} ORDER BY observed_at DESC LIMIT 1`
               const principalId = known?.id ?? (yield* newId(Ids.principal))
               if (known === undefined) {
-                yield* sql`INSERT INTO principals ${sql.insert({ id: principalId, agentId, deviceId: instance.deviceId, subjectHint: `${running.entry.definition.name} sign-in`, authMode: 'vendor_cli', observedAt: yield* timestamp })}`
+                yield* sql`INSERT INTO principals ${sql.insert({ id: principalId, agentId, accountId, deviceId: instance.deviceId, subjectHint: `${running.entry.definition.name} sign-in`, authMode: 'vendor_cli', observedAt: yield* timestamp })}`
               }
               const id = yield* newId(Ids.accountStatus)
               yield* sql`INSERT INTO account_statuses ${sql.insert({
@@ -555,7 +580,7 @@ export class Sessions extends Context.Service<
                 aggregateId: id,
                 revision: 1,
                 type: 'account_status.limited',
-                payload: { agentId, resetsAt },
+                payload: { agentId, accountId, resetsAt },
                 actorId: instance.systemId,
               })
             }),
@@ -667,13 +692,15 @@ export class Sessions extends Context.Service<
         thread: ThreadContext,
         sessionId: string,
         entry: AgentEntry,
+        account: Account,
         model: string | undefined,
         effort: string | undefined,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { definition } = entry
-          const transport = entry.transport(cwdOf(thread))
+          // In the account's home: its sign-in, not the agent's usual one (ADR-012).
+          const transport = entry.transport(cwdOf(thread), accounts.env(account))
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
           if (transport._tag === 'Process' && processId !== undefined) {
             // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
@@ -770,7 +797,7 @@ export class Sessions extends Context.Service<
               state: 'running',
             })
           }
-          return { sessionId, entry, thread, connection, agent, scope, revokeTools: tools.revoke }
+          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke }
         })
 
       /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
@@ -780,7 +807,7 @@ export class Sessions extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { sessionId, entry, thread, connection, agent, scope, revokeTools } = connected
+          const { sessionId, entry, account, thread, connection, agent, scope, revokeTools } = connected
           const { definition } = entry
           const options = yield* agent.options
           yield* sql.withTransaction(
@@ -800,6 +827,7 @@ export class Sessions extends Context.Service<
           const running: Running = {
             sessionId,
             entry,
+            account,
             thread,
             agent,
             connection,
@@ -861,15 +889,22 @@ export class Sessions extends Context.Service<
           return lock.withPermits(1)(effect)
         })
 
-      const start = (input: { readonly threadId: string; readonly agentId: string; readonly model?: string; readonly effort?: string }) =>
+      const start = (input: {
+        readonly threadId: string
+        readonly agentId: string
+        readonly model?: string
+        readonly effort?: string
+        readonly accountId?: string
+      }) =>
         exclusive(
           input.threadId,
           Effect.gen(function* () {
             if (threads.has(input.threadId)) return yield* new SessionRunning({ threadId: input.threadId })
             const thread = yield* loadThread(input.threadId)
             const entry = yield* (yield* Agents).get(input.agentId)
-            const sessionId = yield* createSession(thread, entry.definition.id)
-            const connected = yield* connectSession(thread, sessionId, entry, input.model, input.effort)
+            const account = yield* limits.pick({ agentId: entry.definition.id, threadId: input.threadId, ...accountOf(input) })
+            const sessionId = yield* createSession(thread, entry.definition.id, account)
+            const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
             // Every session starts from a brief (ADR-005), even the first on a task.
             return yield* activate(connected, {
               text: yield* briefFor(thread, { kind: 'start' }),
@@ -1113,6 +1148,7 @@ export class Sessions extends Context.Service<
         readonly model?: string
         readonly effort?: string
         readonly said?: string
+        readonly accountId?: string
       }) =>
         exclusive(
           input.threadId,
@@ -1121,8 +1157,9 @@ export class Sessions extends Context.Service<
             const entry = yield* (yield* Agents).get(input.agentId)
             const previous = threads.get(input.threadId)
             const from = previous?.entry.definition.name
-            const sessionId = yield* createSession(thread, entry.definition.id)
-            const connected = yield* connectSession(thread, sessionId, entry, input.model, input.effort)
+            const account = yield* limits.pick({ agentId: entry.definition.id, threadId: input.threadId, ...accountOf(input) })
+            const sessionId = yield* createSession(thread, entry.definition.id, account)
+            const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
             if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
             yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
               source: 'runtime',
@@ -1177,7 +1214,12 @@ export class Sessions extends Context.Service<
             const running = threads.get(threadId)
             return running === undefined
               ? Option.none()
-              : Option.some({ sessionId: running.sessionId, agentId: running.entry.definition.id, turnRunning: running.turnRunning })
+              : Option.some({
+                  sessionId: running.sessionId,
+                  agentId: running.entry.definition.id,
+                  accountId: running.account.id,
+                  turnRunning: running.turnRunning,
+                })
           }),
       })
     }),

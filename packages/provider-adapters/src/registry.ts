@@ -73,6 +73,18 @@ export interface AgentDefinition {
     readonly paidBy?: (output: string) => PaidBy | undefined
     readonly login: string
   }
+  /**
+   * Where it keeps a sign-in (ADR-012): the environment variable that points
+   * it at a folder of its own, a home, and its usual folder when that isn't
+   * set. `shared` are the person's settings and instructions in that folder,
+   * linked into a home Charrette makes, so every account works the same;
+   * never anything that holds a sign-in.
+   */
+  readonly home: {
+    readonly variable: string
+    readonly usual: (env: Readonly<Record<string, string | undefined>>, homeDir: string) => string
+    readonly shared: ReadonlyArray<string>
+  }
   readonly permissions: PermissionMeanings
   /**
    * What goes in `_meta` on `session/new`, to keep the agent asking whatever
@@ -204,6 +216,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       paidBy: claudePaidBy,
       login: 'claude auth login',
     },
+    /* On macOS its sign-in is a Keychain item named after the folder's path, so a home never moves. */
+    home: {
+      variable: 'CLAUDE_CONFIG_DIR',
+      usual: (env, homeDir) => env.CLAUDE_CONFIG_DIR || join(homeDir, '.claude'),
+      shared: ['settings.json', 'CLAUDE.md', 'agents', 'commands', 'skills', 'plugins', 'output-styles'],
+    },
     /* From claude-agent-acp's permissions/options/shared.js. Rejecting skips the action and Claude carries on. */
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
     sessionMeta: (role = 'lead') => (role === 'reader' ? claudeReads : claudeAsks),
@@ -232,6 +250,11 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       /* "Logged in using ChatGPT" is the person's plan; "using an API key" is paid per use. */
       paidBy: (output) => (/using chatgpt/i.test(output) ? 'plan' : /api key/i.test(output) ? 'key' : undefined),
       login: 'codex login',
+    },
+    home: {
+      variable: 'CODEX_HOME',
+      usual: (env, homeDir) => env.CODEX_HOME || join(homeDir, '.codex'),
+      shared: ['config.toml', 'AGENTS.md', 'skills', 'prompts', 'rules'],
     },
     /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
@@ -271,6 +294,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       /* It runs on the providers' keys it was given, whichever model a session picks: paid per use, as far as Charrette can tell. */
       paidBy: () => 'key',
       login: 'opencode auth login',
+    },
+    /* Its sign-ins and its history are under the data folder's `opencode`; its config stays the person's, under XDG_CONFIG_HOME. */
+    home: {
+      variable: 'XDG_DATA_HOME',
+      usual: (env, homeDir) => env.XDG_DATA_HOME || join(homeDir, '.local', 'share'),
+      shared: [],
     },
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { once: 'once' } },

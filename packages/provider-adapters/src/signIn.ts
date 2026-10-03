@@ -19,13 +19,18 @@ export interface SignInCheck {
  * prints something unexpected gives `unknown`, never an error: the first
  * prompt will say.
  */
-export const signInCheck = (agent: AgentDefinition, node: string = process.execPath): Effect.Effect<SignInCheck> =>
+export const signInCheck = (
+  agent: AgentDefinition,
+  node: string = process.execPath,
+  /** An account's home, as the agent's environment points at it (ADR-012); none for its usual folder. */
+  home: Readonly<Record<string, string>> = {},
+): Effect.Effect<SignInCheck> =>
   Effect.callback<SignInCheck>((resume) => {
     const spec = agent.signIn.status(node)
     execFile(
       spec.command,
       [...spec.args],
-      { timeout: 15_000, env: { ...process.env, ...asNode(spec), ...spec.env } },
+      { timeout: 15_000, env: { ...process.env, ...asNode(spec), ...spec.env, ...home } },
       (error, stdout, stderr) => {
         if (error !== null && typeof error.code !== 'number') return resume(Effect.succeed({ status: 'unknown', paidBy: 'unknown' }))
         const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : null
