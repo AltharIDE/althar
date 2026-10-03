@@ -196,12 +196,16 @@ export class Sessions extends Context.Service<
     setModel(input: { readonly threadId: string; readonly model: string }): Effect.Effect<void, NoSession | ModelUnchanged | Failure>
     /** How hard the running session's agent thinks, from here on. */
     setEffort(input: { readonly threadId: string; readonly effort: string }): Effect.Effect<void, NoSession | EffortUnchanged | Failure>
+    /** Delivers what waits in the thread's queue now, if an agent is on it: after a usage limit resets, say. */
+    wake(threadId: string): Effect.Effect<void>
     /** Hands the thread to another agent: a new session, briefed with the thread so far (ADR-005). */
     switchAgent(input: {
       readonly threadId: string
       readonly agentId: string
       readonly model?: string
       readonly effort?: string
+      /** What the thread says of the switch, in place of who switched to whom: why it happened. */
+      readonly said?: string
     }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
     interrupt(threadId: string): Effect.Effect<void, NoSession>
@@ -301,9 +305,10 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { thread } = running
-          const inputs = yield* sql<{ id: string; body: string; disposition: string }>`
-            SELECT id, body, disposition FROM user_inputs WHERE thread_id = ${thread.threadId} AND state = 'queued'
-            ORDER BY disposition = 'interrupt_and_continue' DESC, sequence`
+          const inputs = yield* sql<{ id: string; body: string; disposition: string; author: string }>`
+            SELECT i.id, i.body, i.disposition, a.kind AS author FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
+            WHERE i.thread_id = ${thread.threadId} AND i.state = 'queued'
+            ORDER BY i.disposition = 'interrupt_and_continue' DESC, i.sequence`
           if (inputs.length === 0 && running.brief === undefined) return false
           // The coordinator speaks when spoken to: its brief waits for the person's first message.
           if (inputs.length === 0 && thread.role === 'coordinator') return false
@@ -463,8 +468,10 @@ export class Sessions extends Context.Service<
                 payload: { stopReason: ended?.stopReason, errorClass },
                 actorId: instance.systemId,
               })
-              if (!refused) return
-              for (const input of inputs) {
+              // Refused, nothing was delivered. Out of usage, what the person said waits for the agent that carries on;
+              // Charrette's own prompts are given again by what carries the work on.
+              const back = refused ? inputs : errorClass === 'usage_limit' ? inputs.filter((input) => input.author === 'person') : []
+              for (const input of back) {
                 const inputRevision = yield* change('user_inputs', input.id, { state: 'queued' })
                 yield* fact({
                   projectId: thread.projectId,
@@ -477,8 +484,9 @@ export class Sessions extends Context.Service<
               }
             }),
           )
+          // A brief the agent never read goes with the next turn: refused, or out of usage before it began.
+          if (refused || errorClass === 'usage_limit') running.brief = brief
           if (refused) {
-            running.brief = brief
             // Tried again shortly, rather than straight away.
             yield* Effect.forkIn(Effect.delay(Queue.offer(running.wake, undefined), Duration.seconds(1)), running.scope)
           }
@@ -494,7 +502,8 @@ export class Sessions extends Context.Service<
             state,
             ...(errorClass === undefined ? {} : { errorClass }),
           })
-          return !refused
+          // Out of usage, nothing more goes to it until what carries the work on says so.
+          return !refused && errorClass !== 'usage_limit'
         })
 
       /** A usage limit belongs to the account the agent is signed in with (docs/architecture/03). */
@@ -1083,6 +1092,7 @@ export class Sessions extends Context.Service<
         readonly agentId: string
         readonly model?: string
         readonly effort?: string
+        readonly said?: string
       }) =>
         exclusive(
           input.threadId,
@@ -1097,7 +1107,9 @@ export class Sessions extends Context.Service<
             yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
               source: 'runtime',
               severity: 'info',
-              title: from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`,
+              title:
+                input.said ??
+                (from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`),
             })
             const brief = yield* briefFor(thread, { kind: 'takeover', from })
             return yield* activate(connected, { text: brief, closing: 'Carry on with the task from where it stands.' })
@@ -1121,6 +1133,11 @@ export class Sessions extends Context.Service<
         send: (input) => run(send(input)),
         setModel: (input) => run(setModel(input)),
         setEffort: (input) => run(setEffort(input)),
+        wake: (threadId) =>
+          Effect.suspend(() => {
+            const running = threads.get(threadId)
+            return running === undefined ? Effect.void : Queue.offer(running.wake, undefined).pipe(Effect.asVoid)
+          }),
         switchAgent: (input) => run(switchAgent(input)),
         interrupt: (threadId) =>
           Effect.suspend(() => {

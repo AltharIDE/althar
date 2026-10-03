@@ -265,11 +265,12 @@ describe('a task', () => {
   it('says why each step needed the person', () => {
     const at = (why: StuckStep['why'], detail: string | null = null, open = 0) =>
       stuckWords.what({ step: 'implement', why, detail, agentId: null, round: 0, open }, 'Codex')
-    expect([at('session_ended'), at('restarted'), at('failed_to_start'), at('round_limit', null, 1)]).toEqual([
+    expect([at('session_ended'), at('restarted'), at('failed_to_start'), at('round_limit', null, 1), at('usage_limit')]).toEqual([
       'Codex stopped before the step was done.',
       'Charrette restarted while this step was running.',
       "Codex couldn't start.",
       "Three rounds of review are done, and the lead's last changes haven't been reviewed. One finding is still open.",
+      "Codex reached its usage limit and didn't say when it resets.",
     ])
   })
 

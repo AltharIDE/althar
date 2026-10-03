@@ -11,4 +11,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0005_run_per_plan': '545054f6f27da6e57b072120a2e2c28e69e41f6f699474c7662467f4edd959dc',
   '0006_connectors': '0dbeece0ec09e4ac1b4c344927f3e91392f2b2109e5fd3a06cefcb14c4e83ae0',
   '0007_models': '88b3d1b7753108776939ea905b070239acaa999b5550454d6b7ef6216a746f78',
+  '0008_usage_limits': '3468e4f7c3bfc0351628f33e20cf20079d0d63a0bcf26de74f14b8c14ba5bd68',
 }

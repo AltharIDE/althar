@@ -60,7 +60,12 @@ export const definition = (id: string, signedOut: ReadonlyArray<string> = []): A
  * `process` runs it as a real process with Bun; `missing` names a command
  * that doesn't exist.
  */
-export const fakeAgents = (options: FakeAgentOptions = {}, signedOut: ReadonlyArray<string> = []) => {
+export const fakeAgents = (
+  options: FakeAgentOptions = {},
+  signedOut: ReadonlyArray<string> = [],
+  /** Options for one agent, over the ones for all. */
+  each: Readonly<Record<string, FakeAgentOptions>> = {},
+) => {
   const entry = (agentId: string): AgentEntry => ({
     definition: definition(agentId, signedOut),
     transport: (cwd) =>
@@ -68,7 +73,7 @@ export const fakeAgents = (options: FakeAgentOptions = {}, signedOut: ReadonlyAr
         ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
         : agentId === 'missing'
           ? { _tag: 'Process', spec: { command: 'charrette-no-such-agent', args: [] }, cwd }
-          : { _tag: 'InProcess', agent: fakeAgent(options) },
+          : { _tag: 'InProcess', agent: fakeAgent({ ...options, ...each[agentId] }) },
   })
   return Layer.succeed(
     Agents,
@@ -109,6 +114,7 @@ export const runtime = (
     readonly countdown?: Duration.Duration
     readonly connectors?: Layer.Layer<Connectors>
     readonly listenEvery?: Duration.Duration
+    readonly each?: Readonly<Record<string, FakeAgentOptions>>
   } = {},
 ) =>
   Runtime.layer({
@@ -116,7 +122,7 @@ export const runtime = (
     worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
-    agents: fakeAgents(options, more.signedOut),
+    agents: fakeAgents(options, more.signedOut, more.each),
     countdown: more.countdown ?? Duration.millis(300),
     secrets: Secrets.memory(),
     connectors: more.connectors ?? fakeConnectors({}),

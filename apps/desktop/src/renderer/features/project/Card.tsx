@@ -3,10 +3,10 @@ import { useState } from 'react'
 import type { AgentStatus, PlanStep, TaskEnd as End } from '@charrette/contracts'
 import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@charrette/ui'
 
-import { modelInfo } from '../../shared/agents'
+import { modelInfo, waitsWords } from '../../shared/agents'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
-import { ago } from '../../shared/time'
+import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
 
 /*
@@ -140,7 +140,15 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
   // Settling a review's findings is part of the review.
   const at = card.step === null ? 0 : Math.max(0, steps.indexOf(text.label[card.step === 'implement' ? 'implement' : 'review']))
   const status = STATUS[card.phase]
-  const now = status === TaskStatus.Done ? card.summary?.split('\n')[0] : card.step === null ? undefined : text.now[card.step]
+  // A step held for a usage limit says what it waits for, rather than what it does.
+  const now =
+    status === TaskStatus.Done
+      ? card.summary?.split('\n')[0]
+      : card.waits !== null
+        ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until))
+        : card.step === null
+          ? undefined
+          : text.now[card.step]
   const from = fromOf(card)
   return (
     <TaskCard

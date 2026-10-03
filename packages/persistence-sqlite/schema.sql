@@ -48,6 +48,7 @@
 -- connection_auth: device_flow, pkce, token
 -- connection_state: ready, reauth_required, removed
 -- external_kind: issue, change
+-- usage_limit_policy: move, wait
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -107,7 +108,7 @@ CREATE TABLE project_settings (
   copy_files TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(copy_files)),
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
-) STRICT;
+, usage_limit TEXT REFERENCES vocab_usage_limit_policy (word)) STRICT;
 
 CREATE TABLE device_project_settings (
   project_id TEXT NOT NULL REFERENCES projects (id),

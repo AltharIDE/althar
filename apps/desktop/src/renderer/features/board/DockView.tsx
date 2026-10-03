@@ -4,10 +4,10 @@ import type { AgentStatus, BoardTask, ThreadSnapshot } from '@charrette/contract
 import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, WorkPeek } from '@charrette/ui'
 
 import { useServices } from '../../data/services'
-import { modelInfo } from '../../shared/agents'
+import { modelInfo, waitsWords } from '../../shared/agents'
 import { checkOf } from '../../shared/checks'
 import { productBrand, productName } from '../../shared/products'
-import { ago } from '../../shared/time'
+import { ago, clock } from '../../shared/time'
 import { PermissionCall } from '../task/PermissionCall'
 import { StuckCall, text as stuckText } from '../task/StuckCall'
 import { text as boardText, type DockTarget, trackOf } from './BoardView'
@@ -174,7 +174,13 @@ export function DockView({
     <Dock label={text.label} name={text.phase[task.phase]} sub={sub} onClose={onClose}>
       <WorkPeek
         title={task.title}
-        {...(waiting !== null ? { note: waiting } : task.summary === null ? {} : { note: task.summary.split('\n')[0] ?? '' })}
+        {...(waiting !== null
+          ? { note: waiting }
+          : task.waits !== null
+            ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until)) }
+            : task.summary === null
+              ? {}
+              : { note: task.summary.split('\n')[0] ?? '' })}
         status={
           task.phase === 'waiting'
             ? TaskStatus.Yours

@@ -6,7 +6,7 @@ import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@c
 
 import { BoardView, trackOf } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
-import { running } from '../src/renderer/shared/time'
+import { clock, running } from '../src/renderer/shared/time'
 import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
 import { useBoard } from '../src/renderer/features/board/useBoard'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
@@ -311,6 +311,13 @@ describe('every state the board shows', () => {
       task({ taskId: 'c', title: 'Counting down', phase: 'planned', plan: { ...card().plan!, startsAt: '2026-10-01T10:00:20.000Z' } }),
       task({ taskId: 'd', title: 'Stopped work', phase: 'stopped', startedAt: '2026-10-01T07:30:00.000Z' }),
       task({ taskId: 'e', title: 'A conversation', phase: 'running', plan: null, startedAt: '2026-10-01T09:59:30.000Z' }),
+      task({
+        taskId: 'w',
+        title: 'Waiting on a reset',
+        phase: 'running',
+        step: 'implement',
+        waits: { agentId: 'codex', until: '2026-10-01T13:40:00.000Z' },
+      }),
       task({ taskId: 'f', title: 'No branch yet', phase: 'ready', branch: null }),
       task({
         taskId: 'g',
@@ -342,6 +349,8 @@ describe('every state the board shows', () => {
     expect(screen.getByText('2h 30m')).toBeTruthy()
     expect(screen.getByText('Conversation')).toBeTruthy()
     expect(screen.getByText('Claude Code stopped before the step was done.')).toBeTruthy()
+    // A step held for a usage limit says whom it waits for, and when they're back.
+    expect(screen.getByText(`Waits for Codex, back at ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
     expect(screen.getByText("Charrette couldn't open the pull request.")).toBeTruthy()
     expect(screen.getByText(/isn't connected to this repository's host/)).toBeTruthy()
     expect(screen.getByText('PR #12 closed')).toBeTruthy()

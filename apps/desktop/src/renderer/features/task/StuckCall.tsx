@@ -29,6 +29,8 @@ export const text = {
         }`
       case 'not_connected':
         return "Charrette isn't connected to this repository's host, so it can't push the branch or open the pull request. Connect it, then try again."
+      case 'usage_limit':
+        return `${agent} reached its usage limit and didn't say when it resets.`
     }
   },
   /** For the pull request, which Charrette opens itself: what went wrong. */

@@ -12,6 +12,7 @@ import { Folders } from './Folders'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { Live } from './Live'
+import { Limits } from './Limits'
 import { Models } from './Models'
 import { Permissions } from './Permissions'
 import { Projects } from './Projects'
@@ -49,6 +50,7 @@ export const handlers = Api.toLayer(
     const live = yield* Live
     const signIns = yield* SignIns
     const models = yield* Models
+    const limits = yield* Limits
     const plans = yield* Plans
     const runs = yield* Runs
     const coordinator = yield* Coordinator
@@ -194,6 +196,7 @@ export const handlers = Api.toLayer(
                 tasks: 0,
                 running: 0,
                 waiting: 0,
+                usageLimit: 'move' as const,
               }
             )
           }),
@@ -368,6 +371,7 @@ export const handlers = Api.toLayer(
       Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId }) => once(commandId, api(pullRequests.markReady(taskId))),
+      SetUsageLimit: ({ commandId, projectId, policy }) => once(commandId, api(limits.setPolicy(projectId, policy))),
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),
       Merge: ({ commandId, taskId, head }) => once(commandId, api(pullRequests.merge(taskId, head))),
       RefreshTask: ({ taskId }) => pullRequests.refresh(taskId),

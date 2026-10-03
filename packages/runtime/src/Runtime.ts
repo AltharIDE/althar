@@ -14,6 +14,7 @@ import { Plans } from './Plans'
 import { Runs } from './Runs'
 import { Secrets } from './Secrets'
 import { Sessions } from './Sessions'
+import { Limits } from './Limits'
 import { Models } from './Models'
 import { SignIns } from './SignIns'
 import { ToolServer } from './ToolServer'
@@ -50,10 +51,12 @@ export const layer = (options: RuntimeLayerOptions) => {
   const core = Layer.mergeAll(Projects.layer, Sessions.layer).pipe(Layer.provideMerge(Permissions.layer.pipe(Layer.provideMerge(base))))
   // A task's pull request and issue, through the person's connections to code hosts and trackers.
   const linked = Layer.mergeAll(Changes.layer, Issues.layer).pipe(Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(core))))
+  // Which agents are signed in, and which are out of usage until their reset.
+  const able = Limits.layer.pipe(Layer.provideMerge(SignIns.layer.pipe(Layer.provideMerge(linked))))
   // Runs drive a task's steps; plans start runs when their time comes; the coordinator plans tasks and passes messages on.
-  const work = Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))
+  const work = Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(able))))
   // The models each agent offers, read from its sessions, or asked of it once.
-  const known = Models.layer.pipe(Layer.provideMerge(SignIns.layer.pipe(Layer.provideMerge(work))))
+  const known = Models.layer.pipe(Layer.provideMerge(work))
   return Coordinator.layer.pipe(Layer.provideMerge(known))
 }
 
