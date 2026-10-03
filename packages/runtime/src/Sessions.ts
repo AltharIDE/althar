@@ -142,14 +142,24 @@ const optionValue = (options: ReadonlyArray<ConfigOption>, id: string | undefine
  * told what to do by `closing`.
  */
 export const promptFor = (
-  inputs: ReadonlyArray<{ readonly body: string; readonly disposition: string }>,
+  inputs: ReadonlyArray<{
+    readonly body: string
+    readonly disposition: string
+    /** The agent whose turn it was given to reached its usage limit on it, and may have acted on it first. */
+    readonly cutShort?: string
+  }>,
   brief: { readonly text: string; readonly closing: string } | undefined,
 ) => {
-  const parts = inputs.map((input) =>
-    input.disposition === 'interrupt_and_continue'
-      ? `The person interrupted your last turn to say:\n\n${input.body}\n\nTake it into account, and carry on with the task.`
-      : input.body,
-  )
+  const parts = inputs.map((input) => {
+    const said =
+      input.disposition === 'interrupt_and_continue'
+        ? `The person interrupted your last turn to say:\n\n${input.body}\n\nTake it into account, and carry on with the task.`
+        : input.body
+    // A delivered turn may have acted: what it was given isn't new, and some of it may be done.
+    return input.cutShort === undefined
+      ? said
+      : `${input.cutShort} was working on this when it reached its usage limit, and may have done some of it already. Check what is done before you carry on.\n\n${said}`
+  })
   if (brief === undefined) return parts.join('\n\n')
   return [brief.text, ...(parts.length === 0 ? [brief.closing] : parts)].join('\n\n')
 }
@@ -305,10 +315,20 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { thread } = running
-          const inputs = yield* sql<{ id: string; body: string; disposition: string; author: string }>`
-            SELECT i.id, i.body, i.disposition, a.kind AS author FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
+          const queued = yield* sql<{ id: string; body: string; disposition: string; author: string; cutBy: string | null }>`
+            SELECT i.id, i.body, i.disposition, a.kind AS author,
+              (SELECT s.agent_id FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
+                JOIN provider_sessions s ON s.id = d.provider_session_id
+                WHERE di.user_input_id = i.id AND d.error_class = 'usage_limit' ORDER BY d.requested_at DESC LIMIT 1) AS cut_by
+            FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
             WHERE i.thread_id = ${thread.threadId} AND i.state = 'queued'
             ORDER BY i.disposition = 'interrupt_and_continue' DESC, i.sequence`
+          // What an agent out of usage was given goes on with word of that, by the name of the agent it went to.
+          const agents = yield* Agents
+          const inputs = queued.map(({ cutBy, ...input }) => {
+            const by = cutBy === null ? undefined : (agents.list.find((entry) => entry.definition.id === cutBy)?.definition.name ?? cutBy)
+            return by === undefined ? input : { ...input, cutShort: by }
+          })
           if (inputs.length === 0 && running.brief === undefined) return false
           // The coordinator speaks when spoken to: its brief waits for the person's first message.
           if (inputs.length === 0 && thread.role === 'coordinator') return false

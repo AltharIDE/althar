@@ -142,10 +142,6 @@ export type FindingState = typeof FindingState.Type
 export const SnapshotReason = Schema.Literals(['node_started', 'node_ended', 'switch', 'interrupt'])
 export type SnapshotReason = typeof SnapshotReason.Type
 
-/** What a project does when an agent's account reaches its usage limit: move the work on to the next free agent, or wait for the reset. */
-export const UsageLimitPolicy = Schema.Literals(['move', 'wait'])
-export type UsageLimitPolicy = typeof UsageLimitPolicy.Type
-
 /** Why a node attempt is held without needing a person. */
 export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable'])
 export type HoldReason = typeof HoldReason.Type
@@ -233,5 +229,6 @@ export const AggregateType = Schema.Literals([
   'account_status',
   'connection',
   'external_link',
+  'policy',
 ])
 export type AggregateType = typeof AggregateType.Type

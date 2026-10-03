@@ -12,6 +12,7 @@ import { Coordinator } from '../src/Coordinator'
 import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { Limits, outWords, whenWords } from '../src/Limits'
+import { Policies, usageLimitOf } from '../src/Policies'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -86,6 +87,14 @@ const replies = (threadId: string) =>
     return rows.map((row) => ({ agentId: row.agentId, text: (JSON.parse(row.content) as { text: string }).text }))
   })
 
+/** Sets the project to wait for the reset, as the person would. */
+const waits = (projectId: string) =>
+  Effect.gen(function* () {
+    const policies = yield* Policies
+    const instance = yield* Instance
+    yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
+  })
+
 const lead = (agentId: string, model: string | null = null): PlanStep => ({ key: 'implement', agentId, model, skipped: false })
 
 describe('an agent out of usage', () => {
@@ -123,9 +132,8 @@ describe('an agent out of usage', () => {
   it.live('holds a step until the reset where the project waits, and runs it again then, on the same agent', () => {
     const back = Date.now() + 2500
     return Effect.gen(function* () {
-      const limits = yield* Limits
       const { projectId, task, start } = yield* planned([lead('claude-code')])
-      yield* limits.setPolicy(projectId, 'wait')
+      yield* waits(projectId)
       yield* start
       const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(10))
       assert.deepStrictEqual([held?.phase, held?.step, held?.waits?.agentId], ['running', 'implement', 'claude-code'])
@@ -143,9 +151,8 @@ describe('an agent out of usage', () => {
       Queries.layer.pipe(Layer.provideMerge(runtime(database, {}, { each: agents })))
     return Effect.gen(function* () {
       const projectId = yield* Effect.gen(function* () {
-        const limits = yield* Limits
         const { projectId, start } = yield* planned([lead('claude-code')])
-        yield* limits.setPolicy(projectId, 'wait')
+        yield* waits(projectId)
         yield* start
         yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(10))
         return projectId
@@ -190,37 +197,70 @@ describe('an agent out of usage', () => {
     )
   })
 
-  it.live('starts a planned reviewer that is out on the next free agent instead, the lead’s own if it is free', () => {
+  /** A task planned on Claude Code with Codex reviewing, Codex already out from another task, and what its thread said once it is ready. */
+  const reviewerOut = Effect.gen(function* () {
+    const sessions = yield* Sessions
+    const projects = yield* Projects
+    const limits = yield* Limits
+    const { projectId, task, start } = yield* planned(
+      [lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }],
+      'Retry the checkout [lead:finish] [review:pass]',
+    )
+    const other = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Elsewhere' })
+    yield* sessions.start({ threadId: other.threadId, agentId: 'codex' })
+    yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: 'hello' })
+    yield* until(
+      Effect.map(limits.out('codex'), (out) => (Option.isSome(out) ? [out] : [])),
+      (outs) => outs.length === 1,
+    )
+    yield* start
+    yield* until(
+      cardOf(projectId),
+      (cards) => cards.some((card) => card.taskId === task.taskId && card.phase === 'ready'),
+      Duration.seconds(20),
+    )
+    return yield* said(task.threadId)
+  })
+
+  it.live('starts a planned reviewer that is out on the next free agent instead, other than the lead’s', () => {
     const back = Date.now() + HOUR
     return Effect.gen(function* () {
-      const sessions = yield* Sessions
-      const projects = yield* Projects
-      const { projectId, task, start } = yield* planned(
-        [lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }],
-        'Retry the checkout [lead:finish] [review:pass]',
-      )
-      // Codex is out already: it reached its limit on another task.
-      const other = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Elsewhere' })
-      yield* sessions.start({ threadId: other.threadId, agentId: 'codex' })
-      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: 'hello' })
-      const limits = yield* Limits
-      yield* until(
-        Effect.map(limits.out('codex'), (out) => (Option.isSome(out) ? [out] : [])),
-        (outs) => outs.length === 1,
-      )
-      yield* start
-      yield* until(
-        cardOf(projectId),
-        (cards) => cards.some((card) => card.taskId === task.taskId && card.phase === 'ready'),
-        Duration.seconds(20),
-      )
-      const lines = yield* said(task.threadId)
+      const lines = yield* reviewerOut
       assert.include(
         lines,
-        `Fake codex reached its usage limit, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake claude-code takes over, on Small.`,
+        `Fake codex reached its usage limit, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake opencode takes over.`,
       )
       assert.include(lines, 'review: The change holds.')
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } })))
+  })
+
+  it.live('gives a review to the lead’s own agent only when nothing else is free, and says so', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      const lines = yield* reviewerOut
+      assert.include(
+        lines,
+        `Fake codex reached its usage limit, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake claude-code takes over, on Small, and reviews its own work.`,
+      )
+    }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } }, ['opencode'])))
+  })
+
+  it.live('never moves work to an agent paid per use: it waits for the reset instead', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      const { projectId, task, start } = yield* planned([lead('claude-code')])
+      yield* start
+      yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(10))
+      assert.include((yield* said(task.threadId))[0], 'The step waits until then.')
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(':memory:', {}, { each: { 'claude-code': { outOfUsage: { until: back } } }, perUse: ['codex', 'opencode'] }),
+          ),
+        ),
+      ),
+    )
   })
 
   it.live('moves the coordinator on, with what the person said waiting for the agent that takes over', () => {
@@ -237,7 +277,10 @@ describe('an agent out of usage', () => {
         disposition: 'after_current',
       })
       const answered = yield* until(replies(threadId), (all) => all.some((reply) => reply.agentId === 'codex'), Duration.seconds(10))
-      assert.include(answered.find((reply) => reply.agentId === 'codex')?.text, 'Is the checkout slow?')
+      const reply = answered.find((answer) => answer.agentId === 'codex')?.text
+      assert.include(reply, 'Is the checkout slow?')
+      // It hears the message may have been acted on already.
+      assert.include(reply, 'Fake claude-code was working on this when it reached its usage limit, and may have done some of it already.')
       assert.include(
         yield* said(threadId),
         `Fake claude-code reached its usage limit, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake codex takes over.`,
@@ -250,9 +293,8 @@ describe('an agent out of usage', () => {
     return Effect.gen(function* () {
       const projects = yield* Projects
       const coordinator = yield* Coordinator
-      const limits = yield* Limits
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
-      yield* limits.setPolicy(project.projectId, 'wait')
+      yield* waits(project.projectId)
       const threadId = yield* coordinator.thread(project.projectId)
       yield* coordinator.say({
         envelope: yield* Runtime.envelope('thread.send', {}),
@@ -265,6 +307,35 @@ describe('an agent out of usage', () => {
       const [answer] = yield* until(replies(threadId), (all) => all.length > 0, Duration.seconds(10))
       assert.strictEqual(answer?.agentId, 'claude-code')
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
+  })
+})
+
+describe('a message waiting for a reset', () => {
+  it.live('is answered then after Charrette restarts, by the agent it waited for', () => {
+    const back = Date.now() + 3000
+    const database = join(mkdtempSync(join(tmpdir(), 'charrette-limits-')), 'profile.sqlite')
+    const layer = (agents: Readonly<Record<string, FakeAgentOptions>>) =>
+      Queries.layer.pipe(Layer.provideMerge(runtime(database, {}, { each: agents })))
+    return Effect.gen(function* () {
+      const threadId = yield* Effect.gen(function* () {
+        const projects = yield* Projects
+        const coordinator = yield* Coordinator
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+        yield* waits(project.projectId)
+        const thread = yield* coordinator.thread(project.projectId)
+        yield* coordinator.say({
+          envelope: yield* Runtime.envelope('thread.send', {}),
+          threadId: thread,
+          body: 'Is the checkout slow?',
+          disposition: 'after_current',
+        })
+        yield* until(said(thread), (lines) => lines.some((line) => line.endsWith('Your message waits until then.')), Duration.seconds(10))
+        return thread
+      }).pipe(Effect.provide(layer({ 'claude-code': { outOfUsage: { until: back } } })))
+      const [answer] = yield* until(replies(threadId), (all) => all.length > 0, Duration.seconds(15)).pipe(Effect.provide(layer({})))
+      assert.strictEqual(answer?.agentId, 'claude-code')
+      assert.include(answer?.text, 'Is the checkout slow?')
+    })
   })
 })
 
@@ -291,13 +362,30 @@ describe('limits', () => {
       assert.isTrue(Option.isNone(yield* limits.out('opencode')))
       assert.strictEqual(yield* limits.free(['claude-code']), 'opencode')
 
-      assert.strictEqual(yield* limits.policyOf(project.projectId), 'move')
-      yield* limits.setPolicy(project.projectId, 'wait')
-      yield* limits.setPolicy(project.projectId, 'wait')
-      assert.strictEqual(yield* limits.policyOf(project.projectId), 'wait')
+      // The rule is the project's: a revision of its rules each time the person changes it, recorded as theirs.
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
       const queries = yield* Queries
+      assert.strictEqual(usageLimitOf((yield* policies.current(project.projectId as ProjectId)).rules), 'move')
+      assert.strictEqual((yield* queries.projects).projects[0]?.usageLimit, 'move')
+      yield* policies.setUsageLimit(project.projectId, 'wait', instance.personId)
+      yield* policies.setUsageLimit(project.projectId, 'wait', instance.personId)
+      const revised = yield* policies.current(project.projectId as ProjectId)
+      assert.deepStrictEqual([usageLimitOf(revised.rules), revised.rules.alwaysAsk.length], ['wait', 5])
+      assert.deepStrictEqual(yield* policies.rulesOf(revised.id), revised.rules)
       assert.strictEqual((yield* queries.projects).projects[0]?.usageLimit, 'wait')
-      assert.instanceOf(yield* Effect.flip(limits.setPolicy('proj_none', 'move')), NotFound)
+      const facts = yield* sql<{ revision: number; actor: string }>`
+        SELECT json_extract(payload, '$.revision') AS revision, actor_id AS actor FROM record_events WHERE type = 'policy.revised' ORDER BY sequence`
+      assert.deepStrictEqual(
+        facts.map((recorded) => [recorded.revision, recorded.actor === instance.personId]),
+        [
+          [1, false],
+          [2, true],
+        ],
+      )
+      assert.instanceOf(yield* Effect.flip(policies.setUsageLimit('proj_none', 'move', instance.personId)), NotFound)
+      assert.instanceOf(yield* Effect.flip(policies.rulesOf('pol_none')), NotFound)
 
       // The plan's model for its own agent, else the last the agent ran in the project, else its own.
       assert.strictEqual(

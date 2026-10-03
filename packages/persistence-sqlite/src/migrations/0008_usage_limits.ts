@@ -1,13 +1,9 @@
-import { vocabulary } from './0001_initial/columns'
-
 /*
  * Usage limits (docs/architecture/03 and 05).
  *
- * What a project does when an agent's account reaches its usage limit is the
- * project's setting: move the work on to the next free agent, or wait for the
- * reset. Without one, it moves on.
+ * What a project does when an agent's account reaches its usage limit, move
+ * the work on or wait for the reset, is one of the project's rules: a new
+ * revision of its policy when the person changes it, which runs cite. A
+ * revision is recorded as a fact of its own.
  */
-export const statements: ReadonlyArray<string> = [
-  ...vocabulary('usage_limit_policy', ['move', 'wait']),
-  'ALTER TABLE project_settings ADD COLUMN usage_limit TEXT REFERENCES vocab_usage_limit_policy (word)',
-]
+export const statements: ReadonlyArray<string> = ["INSERT INTO vocab_aggregate_type (word) VALUES ('policy')"]

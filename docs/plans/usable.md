@@ -101,10 +101,14 @@ Next, decided with the user on 3 October 2026, as designed in docs 03 and 05.
   coordinator's. Also a step about to start on an agent known to be out.
 - **Who is out.** The agent's account on this Mac, until its reset. Without
   a reset time, for an hour, then it is tried again.
-- **What happens** is the project's setting: move on (the default) or wait.
-  The setting exists from the start; where the person sets it comes later.
-  - **Move on.** The work goes to the next free agent: signed in, not out,
-    in the agents' order. Its model is chosen as below, at the person's
+- **What happens** is one of the project's rules: move on (the default) or
+  wait, a new revision of its rules when the person changes it, which a run
+  cites. Where the person sets it comes later.
+  - **Move on.** The work goes to the next free agent: signed in on a plan,
+    not out, in the agents' order, and not the other step's agent unless
+    nothing else is free (the thread then says it reviews its own work). An
+    agent paid per use, on a key, is never moved to unasked: that spends the
+    person's money; the person can still hand work to it. Its model is chosen as below, at the person's
     default effort for it. It takes over from a brief in the same worktree,
     and a step runs again on it, as when the person hands a step over. The
     thread says it in one line: who is out, when it resets, who took over

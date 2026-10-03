@@ -12,6 +12,7 @@ import { AttentionClosed, NoChangeToOpen, NotFound } from './errors'
 import { Instance } from './Instance'
 import { Limits, outWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
+import { Policies, usageLimitOf } from './Policies'
 import { treeOf, uncommittedFiles } from './git'
 import { filesLine } from './pullRequestWords'
 import { snapshotForReview } from './reviewCopy'
@@ -115,7 +116,7 @@ interface RunRow {
   readonly parameters: string
 }
 
-type Store = SqlClient.SqlClient | Instance | Sessions | ToolServer | Crypto.Crypto | Ledger | Live | Changes | Limits
+type Store = SqlClient.SqlClient | Instance | Sessions | ToolServer | Crypto.Crypto | Ledger | Live | Changes | Limits | Policies
 
 /** Why a step needs the person (docs/architecture/05): its agent didn't report after a reminder, went, couldn't start, or a restart stopped it; or review ran out of rounds. */
 export type StuckWhy = 'no_report' | 'session_ended' | 'failed_to_start' | 'restarted' | 'round_limit' | 'not_connected' | 'usage_limit'
@@ -167,6 +168,7 @@ export class Runs extends Context.Service<
       const live = yield* Live
       const changes = yield* Changes
       const limits = yield* Limits
+      const policies = yield* Policies
       const scope = yield* Effect.scope
       // Asked when a step is held for a reset, so the wait for it starts again.
       const holdsChanged = yield* Queue.sliding<void>(1)
@@ -194,25 +196,17 @@ export class Runs extends Context.Service<
         return versionId
       })
 
-      /** The project's rules, as the run records them: the MVP's, for now. */
-      const policyOf = (projectId: ProjectId) =>
+      /** The project's rules, as the run records them: the revision it starts under. */
+      const policyOf = (projectId: ProjectId) => Effect.map(policies.current(projectId), (policy) => policy.id)
+
+      /** What a usage limit does to a run's steps: as the rules it ran under say. */
+      const usageLimitOfRun = (run: RunRow) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [known] = yield* sql<{ id: string }>`SELECT id FROM policies WHERE project_id = ${projectId} ORDER BY revision DESC LIMIT 1`
-          if (known !== undefined) return known.id
-          const id = yield* newId(Ids.policy)
-          yield* sql`INSERT INTO policies ${sql.insert({
-            id,
-            projectId,
-            revision: 1,
-            rules: JSON.stringify({
-              source: 'mvp',
-              alwaysAsk: ['push to the default branch', 'force push', 'merge', 'deploy', 'write outside the worktree'],
-            }),
-            createdByActorId: instance.systemId,
-            createdAt: yield* timestamp,
-          })}`
-          return id
+          const [cited] = yield* sql<{ policyId: string }>`SELECT policy_id FROM runs WHERE id = ${run.runId}`
+          return usageLimitOf(
+            cited === undefined ? (yield* policies.current(run.projectId)).rules : yield* policies.rulesOf(cited.policyId),
+          )
         })
 
       /** The run a task is on now. */
@@ -845,13 +839,32 @@ export class Runs extends Context.Service<
       const insteadOf = (run: RunRow, planned: PlanStep) =>
         Effect.gen(function* () {
           const out = yield* limits.out(planned.agentId)
-          if (Option.isNone(out) || (yield* limits.policyOf(run.projectId)) !== 'move') return undefined
-          const next = yield* limits.free([planned.agentId])
+          if (Option.isNone(out) || (yield* usageLimitOfRun(run)) !== 'move') return undefined
+          const other = yield* otherStepOf(run, planned.key)
+          const next = yield* limits.free([planned.agentId], other === undefined ? [] : [other])
           if (next === undefined) return undefined
           const model = yield* limits.modelFor({ agentId: next, projectId: run.projectId, planned })
           const [from, to] = [yield* limits.named(planned.agentId, null), yield* limits.named(next, model)]
-          yield* sayOut(run.threadId, run.projectId, outWords({ from: from.agent, resetsAt: out.value.resetsAt, to }))
+          yield* sayOut(
+            run.threadId,
+            run.projectId,
+            outWords({ from: from.agent, resetsAt: out.value.resetsAt, to: { ...to, ownWork: next === other } }),
+          )
           return { agentId: next, model }
+        })
+
+      /**
+       * The agent on the run's other step: the lead's, for a review (as it
+       * leads now); the planned reviewer's, for the lead's steps. Work moved on
+       * goes to it only when nothing else is free, so an agent rarely reviews
+       * what it wrote.
+       */
+      const otherStepOf = (run: RunRow, key: 'implement' | 'review') =>
+        Effect.gen(function* () {
+          const { implement, review: planned } = yield* stepsOf(run)
+          if (key !== 'review') return planned?.agentId
+          const lead = yield* sessions.running(run.threadId)
+          return Option.isSome(lead) ? lead.value.agentId : implement?.agentId
         })
 
       /**
@@ -890,15 +903,16 @@ export class Runs extends Context.Service<
               })
             }),
           )
-          if ((yield* limits.policyOf(on.run.projectId)) === 'move') {
-            const next = yield* limits.free([agentId])
+          if ((yield* usageLimitOfRun(on.run)) === 'move') {
+            const other = yield* otherStepOf(on.run, on.step === 'review' ? 'review' : 'implement')
+            const next = yield* limits.free([agentId], other === undefined ? [] : [other])
             if (next !== undefined) {
               const model = yield* limits.modelFor({
                 agentId: next,
                 projectId: on.run.projectId,
                 ...(planned === undefined ? {} : { planned }),
               })
-              const said = outWords({ from, resetsAt, to: yield* limits.named(next, model) })
+              const said = outWords({ from, resetsAt, to: { ...(yield* limits.named(next, model)), ownWork: next === other } })
               // Held while the next agent takes over, so nothing it says before it is told the step counts for the step.
               yield* hold
               const handing = yield* envelope('thread.send', { threadId: on.run.threadId, usageLimit: on.attemptId })
@@ -926,7 +940,7 @@ export class Runs extends Context.Service<
           const out = Option.getOrNull(yield* limits.out(agentId))
           const resetsAt = out?.resetsAt ?? null
           const from = (yield* limits.named(agentId, null)).agent
-          if ((yield* limits.policyOf(thread.projectId)) === 'move') {
+          if (usageLimitOf((yield* policies.current(thread.projectId)).rules) === 'move') {
             const next = yield* limits.free([agentId])
             if (next !== undefined) {
               const model = yield* limits.modelFor({ agentId: next, projectId: thread.projectId })
@@ -940,12 +954,8 @@ export class Runs extends Context.Service<
             }
           }
           yield* sayOut(threadId, thread.projectId, outWords({ from, resetsAt, waits: 'message' }))
-          // Back at its reset, it takes what waits; told nothing of when, the person starts it again or picks another.
-          if (out !== null)
-            yield* Effect.forkIn(
-              Effect.delay(sessions.wake(threadId), Duration.millis(Math.max(0, Date.parse(out.until) - Date.now()))),
-              scope,
-            )
+          // Back at its reset, it takes what waits: the same loop as a held step's, so after a restart too.
+          yield* Queue.offer(holdsChanged, undefined)
         })
 
       const run = (planId: string) =>
@@ -1529,29 +1539,67 @@ export class Runs extends Context.Service<
           yield* carryOn(current, held.attemptId, info, { kind: 'retry', agentId: held.agentId }, resuming)
         })
 
-      // The next step held for a usage limit runs again at its reset, or sooner if another is held; after a restart too.
+      /** A message that waited for an agent's reset goes to it then: to its session, or, after a restart, to one started for it. */
+      const deliverWaiting = (waiting: { readonly threadId: string; readonly agentId: string }) =>
+        Effect.gen(function* () {
+          const live = yield* sessions.running(waiting.threadId)
+          if (Option.isNone(live)) return void (yield* sessions.start({ threadId: waiting.threadId, agentId: waiting.agentId }))
+          // Another agent the person picked since has the message already.
+          if (live.value.agentId === waiting.agentId) yield* sessions.wake(waiting.threadId)
+        })
+
+      /* The turns whose waiting message was given back this launch, so one that fails again waits for its own reset. */
+      const given = new Set<string>()
+
+      /*
+       * What waits for a usage limit to reset runs again then, the soonest
+       * first, or sooner if something new waits; after a restart too. A step
+       * held for it, and what the person said to the coordinator or a lead
+       * outside a step.
+       */
       const holds = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         for (;;) {
-          const [next] = yield* sql<{ taskId: string; attemptId: string; nodeKey: string; iteration: number; output: string }>`
+          const held = yield* sql<{ taskId: string; attemptId: string; nodeKey: string; iteration: number; output: string }>`
             SELECT r.task_id, a.id AS attempt_id, n.node_key, n.iteration, a.output
             FROM runs r JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
             JOIN node_attempts a ON a.node_id = n.id
-            WHERE r.state = 'running' AND a.state = 'held' AND a.hold_reason = 'usage_limit'
-            ORDER BY json_extract(a.output, '$.until') LIMIT 1`
+            WHERE r.state = 'running' AND a.state = 'held' AND a.hold_reason = 'usage_limit'`
+          // A message waits where the thread's last turn reached the limit, outside a step, and the person's input is queued.
+          const messages = yield* sql<{ threadId: string; turnId: string; agentId: string }>`
+            SELECT t.id AS thread_id, d.id AS turn_id, s.agent_id FROM threads t
+            JOIN turn_deliveries d ON d.id = (SELECT id FROM turn_deliveries WHERE thread_id = t.id ORDER BY requested_at DESC LIMIT 1)
+            JOIN provider_sessions s ON s.id = d.provider_session_id
+            WHERE t.kind IN ('coordinator', 'task') AND d.error_class = 'usage_limit'
+              AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.state = 'running')
+              AND EXISTS (SELECT 1 FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
+                WHERE i.thread_id = t.id AND i.state = 'queued' AND a.kind = 'person')`
+          const due: Array<{ readonly at: number; readonly run: Effect.Effect<void, unknown, Store> }> = held.map((step) => {
+            const { heldFor, until } = JSON.parse(step.output) as { heldFor: string; until: string }
+            return { at: Date.parse(until), run: resumeHeld({ ...step, agentId: heldFor }) }
+          })
+          for (const message of messages) {
+            if (given.has(message.turnId)) continue
+            const out = yield* limits.out(message.agentId)
+            due.push({
+              at: Option.isSome(out) ? Date.parse(out.value.until) : 0,
+              run: Effect.andThen(
+                Effect.sync(() => given.add(message.turnId)),
+                deliverWaiting(message),
+              ),
+            })
+          }
+          const next = due.toSorted((a, b) => a.at - b.at)[0]
           if (next === undefined) {
             yield* Queue.take(holdsChanged)
             continue
           }
-          const { heldFor, until } = JSON.parse(next.output) as { heldFor: string; until: string }
-          const wait = Date.parse(until) - Date.now()
+          const wait = next.at - Date.now()
           if (wait > 0) {
             yield* Effect.raceFirst(Queue.take(holdsChanged), Effect.sleep(Duration.millis(wait)))
             continue
           }
-          yield* resumeHeld({ ...next, agentId: heldFor }).pipe(
-            Effect.catchCause((cause) => Effect.logWarning('A held step could not run again', cause)),
-          )
+          yield* next.run.pipe(Effect.catchCause((cause) => Effect.logWarning('What waited for a usage limit could not go on', cause)))
         }
       })
       yield* Effect.forkScoped(provide(holds))

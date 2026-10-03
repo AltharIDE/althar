@@ -1,11 +1,9 @@
 import { modelName } from '@charrette/contracts'
-import type { UsageLimitPolicy } from '@charrette/domain'
 import type { ConfigOption } from '@charrette/provider-adapters'
 import { Context, Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Agents } from './Config'
-import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { timestamp } from './records'
 import { SignIns } from './SignIns'
@@ -15,8 +13,8 @@ import { SignIns } from './SignIns'
  * when, and what a project does about it. An agent's account is out from the
  * turn that reached its limit until the reset its error gave, or, without
  * one, for an hour, when it is tried again. What the work does meanwhile is
- * the project's setting: move on to the next free agent (the default), or
- * wait for the reset.
+ * one of the project's rules (Policies): move on to the next free agent (the
+ * default), or wait for the reset.
  */
 
 /** How long an agent whose limit gave no reset time counts as out. */
@@ -45,11 +43,15 @@ export const whenWords = (iso: string, now: Date = new Date()): string => {
 export const outWords = (input: {
   readonly from: string
   readonly resetsAt: string | null
-  readonly to?: { readonly agent: string; readonly model: string | null }
+  /** Who takes over, on which model; `ownWork` where it is the other step's agent, so it reviews what it wrote. */
+  readonly to?: { readonly agent: string; readonly model: string | null; readonly ownWork?: boolean }
   readonly waits?: 'step' | 'message'
 }): string => {
   const out = `${input.from} reached its usage limit${input.resetsAt === null ? '' : `, until ${whenWords(input.resetsAt)}`}.`
-  if (input.to !== undefined) return `${out} ${input.to.agent} takes over${input.to.model === null ? '' : `, on ${input.to.model}`}.`
+  if (input.to !== undefined)
+    return `${out} ${input.to.agent} takes over${input.to.model === null ? '' : `, on ${input.to.model}`}${
+      input.to.ownWork === true ? ', and reviews its own work' : ''
+    }.`
   if (input.waits === undefined) return out
   return `${out} ${input.waits === 'step' ? 'The step' : 'Your message'} waits until ${input.resetsAt === null ? 'it is back' : 'then'}.`
 }
@@ -59,11 +61,13 @@ export class Limits extends Context.Service<
   {
     /** Whether the agent's account is out now, and until when. */
     out(agentId: string): Effect.Effect<Option.Option<Out>, SqlError.SqlError>
-    /** The first agent free to take work over, besides those given: signed in, not out, in the agents' order. */
-    free(besides: ReadonlyArray<string>): Effect.Effect<string | undefined, SqlError.SqlError>
-    /** What the project does when an agent is out. */
-    policyOf(projectId: string): Effect.Effect<UsageLimitPolicy, SqlError.SqlError>
-    setPolicy(projectId: string, policy: UsageLimitPolicy): Effect.Effect<void, SqlError.SqlError | NotFound>
+    /**
+     * The first agent free to take work over, besides those given: signed in
+     * on a plan, not out, in the agents' order; one the work would rather not
+     * go to (the other step's) only if none else is free. An agent paid per
+     * use, on a key, is never moved to unasked: that spends the person's money.
+     */
+    free(besides: ReadonlyArray<string>, rather?: ReadonlyArray<string>): Effect.Effect<string | undefined, SqlError.SqlError>
     /**
      * The model an agent takes work over on: the one the plan named for it on
      * the step, else the last it ran in the project, else its own default.
@@ -103,29 +107,15 @@ export class Limits extends Context.Service<
 
       return Limits.of({
         out,
-        free: (besides) =>
+        free: (besides, rather = []) =>
           Effect.gen(function* () {
-            for (const entry of agents.list) {
-              const agentId = entry.definition.id
-              if (besides.includes(agentId)) continue
-              if ((yield* signIns.of(agentId)) === 'signed_out') continue
+            const candidates = agents.list.map((entry) => entry.definition.id).filter((agentId) => !besides.includes(agentId))
+            // Those the work would rather not go to come last.
+            for (const agentId of [...candidates.filter((id) => !rather.includes(id)), ...candidates.filter((id) => rather.includes(id))]) {
+              if ((yield* signIns.of(agentId)) === 'signed_out' || (yield* signIns.paidBy(agentId)) !== 'plan') continue
               if (Option.isNone(yield* out(agentId))) return agentId
             }
             return undefined
-          }),
-        policyOf: (projectId) =>
-          Effect.map(
-            sql<{ usageLimit: string | null }>`SELECT usage_limit FROM project_settings WHERE project_id = ${projectId}`,
-            ([settings]) => (settings?.usageLimit === 'wait' ? 'wait' : 'move'),
-          ),
-        setPolicy: (projectId, policy) =>
-          Effect.gen(function* () {
-            const [project] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${projectId}`
-            if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
-            const at = yield* timestamp
-            yield* sql`
-              INSERT INTO project_settings ${sql.insert({ projectId, usageLimit: policy, updatedAt: at })}
-              ON CONFLICT (project_id) DO UPDATE SET usage_limit = excluded.usage_limit, updated_at = excluded.updated_at, revision = revision + 1`
           }),
         modelFor: (input) =>
           Effect.gen(function* () {

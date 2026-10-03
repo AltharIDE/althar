@@ -15,7 +15,7 @@ const definition = (real: AgentDefinition): AgentDefinition => ({
   ...real,
   modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
   options: { mode: 'mode', model: 'model', effort: 'effort' },
-  signIn: { status: () => ({ command: 'true', args: [] }), read: () => true, login: real.signIn.login },
+  signIn: { status: () => ({ command: 'true', args: [] }), read: () => true, paidBy: () => 'plan', login: real.signIn.login },
   permissions: codexLikeMeanings,
 })
 
