@@ -54,6 +54,10 @@
   line-height: 1.5;
   color: var(--t-3);
 }
+.detail {
+  display: block;
+  margin-top: 6px;
+}
 .actions {
   display: flex;
   align-items: center;

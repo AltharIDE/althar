@@ -1,3 +1,6 @@
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
+
 import { agents, type AgentDefinition } from '@charrette/provider-adapters'
 import { codexLikeMeanings, fakeAgent } from '@charrette/provider-adapters/testing'
 import { Agents } from '@charrette/runtime'
@@ -16,13 +19,20 @@ const definition = (real: AgentDefinition): AgentDefinition => ({
   modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
   options: { mode: 'mode', model: 'model', effort: 'effort' },
   signIn: { status: () => ({ command: 'true', args: [] }), read: () => true, paidBy: () => 'plan', login: real.signIn.login },
+  // Its usual folder is the test's, so nothing of the person's is read or linked.
+  home: {
+    variable: 'CHARRETTE_FAKE_HOME',
+    usual: () => join(process.env.CHARRETTE_PROFILE ?? tmpdir(), 'fake-homes', real.id),
+    shared: [],
+  },
   permissions: codexLikeMeanings,
 })
 
 /**
  * Agents out of usage: CHARRETTE_FAKE_OUT lists them, each with the seconds
  * from launch until it is back (`claude-code:3600`), or without, out for good
- * and saying no reset time.
+ * and saying no reset time. One account alone is named by its folder's name,
+ * or `usual` for the agent's usual folder: `codex@usual:3600`.
  */
 const out = new Map(
   (process.env.CHARRETTE_FAKE_OUT ?? '')
@@ -41,7 +51,11 @@ export const fakeAgents = Layer.succeed(
       const limited = out.get(real.id)
       return {
         definition: definition(real),
-        transport: () => ({ _tag: 'InProcess' as const, agent: fakeAgent(limited === undefined ? {} : { outOfUsage: limited }) }),
+        transport: (_cwd: string, env: Readonly<Record<string, string>> = {}) => {
+          const home = env.CHARRETTE_FAKE_HOME
+          const own = out.get(`${real.id}@${home === undefined ? 'usual' : basename(home)}`) ?? limited
+          return { _tag: 'InProcess' as const, agent: fakeAgent(own === undefined ? {} : { outOfUsage: own }) }
+        },
       }
     }),
   ),

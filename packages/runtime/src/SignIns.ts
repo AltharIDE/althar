@@ -27,8 +27,6 @@ export class SignIns extends Context.Service<
   {
     /** The agent's sign-in, over its accounts; checked again if older than a minute, or when `recheck`. */
     of(agentId: string, recheck?: boolean): Effect.Effect<SignInStatus>
-    /** How the agent's first account signed in is paid for: its plan, per use on a key, or unknown. */
-    paidBy(agentId: string): Effect.Effect<SignInCheck['paidBy']>
     /** An account's sign-in, and how it is paid for. */
     account(account: Account, recheck?: boolean): Effect.Effect<SignInCheck>
   }
@@ -57,7 +55,6 @@ export class SignIns extends Context.Service<
         )
       return SignIns.of({
         of: (agentId, recheck = false) => Effect.map(checks(agentId, recheck), (all) => anyOf(all.map((check) => check.status))),
-        paidBy: (agentId) => Effect.map(checks(agentId), (all) => all.find((check) => check.status !== 'signed_out')?.paidBy ?? 'unknown'),
         account,
       })
     }),

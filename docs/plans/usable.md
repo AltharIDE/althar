@@ -134,8 +134,8 @@ Next, decided with the user on 3 October 2026, as designed in docs 03 and 05.
   wait, a new revision of its rules when the person changes it, which a run
   cites. Where the person sets it comes later.
   - **Move on.** With accounts, the work first goes to the same agent's next
-    account that the project allows, on a plan and not out, on the same
-    model. Then it goes to the next free agent: signed in on a plan,
+    account that the project allows, signed in and not out, on the same
+    model; the person added it, so a key pays as well as a plan. Then it goes to the next free agent: signed in on a plan,
     not out, in the agents' order, and not the other step's agent unless
     nothing else is free (the thread then says it reviews its own work). An
     agent paid per use, on a key, is never moved to unasked: that spends the

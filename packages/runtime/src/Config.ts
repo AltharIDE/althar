@@ -13,6 +13,8 @@ export interface RuntimeOptions {
   readonly worktreeRoot: string
   /** Where the homes of accounts Charrette makes go (ADR-012): `<root>/<account>`. Without it, it makes none. */
   readonly accountsRoot?: string
+  /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
+  readonly openTerminal?: (line: string) => Effect.Effect<boolean>
   readonly appVersion: string
   /** What this device is called, when the profile is new. */
   readonly deviceName: string

@@ -1,5 +1,7 @@
 import {
+  type AccountStatus,
   type AgentModels,
+  type FoundAccount,
   Api,
   ApiError,
   type BoardSnapshot,
@@ -110,6 +112,15 @@ export interface Client {
     readonly token: string
   }) => Promise<ConnectionSummary>
   readonly disconnect: (connectionId: string) => Promise<void>
+  /** Adds an account to an agent: in the folder a grant names, or one Charrette makes. */
+  readonly addAccount: (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => Promise<AccountStatus>
+  readonly renameAccount: (accountId: string, name: string) => Promise<void>
+  readonly removeAccount: (accountId: string) => Promise<void>
+  readonly orderAccounts: (agentId: string, accountIds: ReadonlyArray<string>) => Promise<void>
+  /** Folders account switchers keep the agent's accounts in, not added yet. */
+  readonly findAccounts: (agentId: string) => Promise<ReadonlyArray<FoundAccount>>
+  /** Opens the agent's own sign-in for the account in Terminal: the line it runs, and whether it could. */
+  readonly signInAccount: (accountId: string) => Promise<{ readonly line: string; readonly opened: boolean }>
   /** The person's open issues, for a project. */
   readonly listIssues: (projectId: string) => Promise<IssueList>
   /** Marks a task's draft pull request ready for review. */
@@ -214,6 +225,12 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     cancelSignIn: (flowId) => command((commandId) => api.CancelSignIn({ commandId, flowId })),
     connectToken: (input) => command((commandId) => api.ConnectToken({ commandId, ...input })),
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
+    addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),
+    renameAccount: (accountId, name) => command((commandId) => api.RenameAccount({ commandId, accountId, name })),
+    removeAccount: (accountId) => command((commandId) => api.RemoveAccount({ commandId, accountId })),
+    orderAccounts: (agentId, accountIds) => command((commandId) => api.OrderAccounts({ commandId, agentId, accountIds })),
+    findAccounts: (agentId) => settle(api.FindAccounts({ agentId })).then((list) => list.found),
+    signInAccount: (accountId) => command((commandId) => api.SignInAccount({ commandId, accountId })),
     listIssues: (projectId) => settle(api.ListIssues({ projectId })),
     markReady: (taskId) => command((commandId) => api.MarkReady({ commandId, taskId })),
     openChange: (taskId) => command((commandId) => api.OpenChange({ commandId, taskId })),

@@ -21,7 +21,7 @@ ipcRenderer.on('charrette:open', (_event, threadId: unknown) => {
 })
 
 contextBridge.exposeInMainWorld('charrette', {
-  pickFolder: (): Promise<string | null> => ipcRenderer.invoke('charrette:pick-folder'),
+  pickFolder: (purpose: 'project' | 'account' = 'project'): Promise<string | null> => ipcRenderer.invoke('charrette:pick-folder', purpose),
   // Only a file the person dropped has a path; one the page made has none.
   grantDropped: (file: File): Promise<string | null> => {
     const path = webUtils.getPathForFile(file)

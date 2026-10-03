@@ -1,16 +1,27 @@
-import { API_VERSION, Api, ApiError, type AgentStatus, type PortLike, serverProtocol, type WatchEvent } from '@charrette/contracts'
+import {
+  type AccountStatus,
+  API_VERSION,
+  Api,
+  ApiError,
+  type AgentStatus,
+  type PortLike,
+  serverProtocol,
+  type WatchEvent,
+} from '@charrette/contracts'
 import type { ProjectId } from '@charrette/domain'
 import { Ledger } from '@charrette/persistence-sqlite'
 import { Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
+import { type Account, Accounts } from './Accounts'
 import { Changes } from './Changes'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { Folders } from './Folders'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
+import { Limits } from './Limits'
 import { Live } from './Live'
 import { Policies } from './Policies'
 import { Models } from './Models'
@@ -23,7 +34,7 @@ import { Coordinator } from './Coordinator'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
 import { Sessions } from './Sessions'
-import { SignIns } from './SignIns'
+import { anyOf, SignIns } from './SignIns'
 import { expected, words } from './words'
 
 /*
@@ -50,6 +61,8 @@ export const handlers = Api.toLayer(
     const folders = yield* Folders
     const live = yield* Live
     const signIns = yield* SignIns
+    const accounts = yield* Accounts
+    const limits = yield* Limits
     const models = yield* Models
     const policies = yield* Policies
     const plans = yield* Plans
@@ -114,14 +127,36 @@ export const handlers = Api.toLayer(
     const issueFor = (projectId: string, issue: string | undefined) =>
       issue === undefined ? Effect.succeed(undefined) : issues.read(issue, projectId)
 
-    /* Sign-in, checked at most once a minute: each check starts the agent's own status command. */
-    const signIn = (entry: AgentEntry, recheck: boolean): Effect.Effect<AgentStatus> =>
-      Effect.map(signIns.of(entry.definition.id, recheck), (status) => ({
-        id: entry.definition.id,
-        name: entry.definition.name,
-        signIn: status,
-        login: entry.definition.signIn.login,
-      }))
+    /* An account as the window shows it: signed in, checked at most once a minute, paid for how, and out until when. */
+    const accountStatus = (account: Account, recheck: boolean) =>
+      Effect.gen(function* () {
+        const check = yield* signIns.account(account, recheck)
+        const out = yield* limits.outAccount(account.id)
+        return {
+          id: account.id,
+          name: account.name,
+          home: account.home,
+          signIn: check.status,
+          paidBy: check.paidBy,
+          outUntil: Option.getOrNull(Option.map(out, (each) => each.until)),
+          adoptedFrom: account.adoptedFrom,
+        } satisfies AccountStatus
+      })
+
+    /* An agent, with its accounts: each check starts the agent's own status command, in the account's home. */
+    const signIn = (entry: AgentEntry, recheck: boolean) =>
+      Effect.gen(function* () {
+        const statuses = yield* Effect.forEach(yield* accounts.of(entry.definition.id), (account) => accountStatus(account, recheck), {
+          concurrency: 'unbounded',
+        })
+        return {
+          id: entry.definition.id,
+          name: entry.definition.name,
+          signIn: anyOf(statuses.map((account) => account.signIn)),
+          login: entry.definition.signIn.login,
+          accounts: statuses,
+        } satisfies AgentStatus
+      })
 
     /*
      * Changes from the store's feed after `since`, or from now: the window
@@ -173,7 +208,7 @@ export const handlers = Api.toLayer(
     return Api.of({
       Status: ({ recheck }) =>
         Effect.map(
-          Effect.forEach(agents.list, (entry) => signIn(entry, recheck === true), { concurrency: 'unbounded' }),
+          api(Effect.forEach(agents.list, (entry) => signIn(entry, recheck === true), { concurrency: 'unbounded' })),
           (statuses) => ({
             apiVersion: API_VERSION,
             appVersion: config.appVersion,
@@ -372,6 +407,42 @@ export const handlers = Api.toLayer(
       Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId }) => once(commandId, api(pullRequests.markReady(taskId))),
+      AddAccount: ({ commandId, agentId, name, grant }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const folder = grant === undefined ? undefined : yield* folders.path(grant)
+              const account = yield* accounts.add({ agentId, name, ...(folder === undefined ? {} : { folder }) })
+              return yield* accountStatus(account, true)
+            }),
+          ),
+        ),
+      RenameAccount: ({ commandId, accountId, name }) => once(commandId, api(accounts.rename(accountId, name))),
+      RemoveAccount: ({ commandId, accountId }) => once(commandId, api(accounts.remove(accountId))),
+      OrderAccounts: ({ commandId, agentId, accountIds }) => once(commandId, api(accounts.order(agentId, accountIds))),
+      FindAccounts: ({ agentId }) =>
+        api(
+          Effect.gen(function* () {
+            const found = yield* accounts.found(agentId)
+            return {
+              found: yield* Effect.forEach(found, (place) =>
+                Effect.map(folders.allow(place.path), (grant) => ({ grant, name: place.name, path: place.path, tool: place.tool })),
+              ),
+            }
+          }),
+        ),
+      SignInAccount: ({ commandId, accountId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const line = yield* accounts.login(accountId)
+              // Opened where the app can, in Terminal; elsewhere the person runs it.
+              return { line, opened: config.openTerminal === undefined ? false : yield* config.openTerminal(line) }
+            }),
+          ),
+        ),
       SetUsageLimit: ({ commandId, projectId, policy }) =>
         once(commandId, api(policies.setUsageLimit(projectId, policy, instance.personId))),
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),

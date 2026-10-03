@@ -36,12 +36,17 @@ import { fakeAgents, fakeConnectors, HOST, hosted, repository } from './support'
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
 
+/** Lines the runtime would have opened in Terminal. */
+const opened: Array<string> = []
+
 /** The runtime serving the API on one end of a channel, and a client on the other, as the app's window has it. */
 const connected = (
   options: {
     readonly countdown?: Duration.Duration
     readonly signedOut?: ReadonlyArray<string>
     readonly connectors?: Layer.Layer<Connectors>
+    /** Where the app can't open Terminal, as the command-line client. */
+    readonly noTerminal?: boolean
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -56,6 +61,10 @@ const connected = (
         agents: fakeAgents({}, options.signedOut),
         secrets: Secrets.memory(),
         connectors: options.connectors ?? fakeConnectors({}),
+        accountsRoot: mkdtempSync(join(tmpdir(), 'charrette-accounts-')),
+        ...(options.noTerminal === true
+          ? {}
+          : { openTerminal: (line: string) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(true)) }),
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
       }),
     )
@@ -315,6 +324,57 @@ describe('the API', () => {
         )
       }),
     ),
+  )
+})
+
+describe('accounts, through the API', () => {
+  it.live(
+    'lists each agent’s accounts, adds one in a folder of its own or one a person chose, signs it in, and orders, renames and removes them',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client, grant } = yield* connected()
+          const codex = (yield* client.Status({})).agents.find((agent) => agent.id === 'codex')
+          assert.deepStrictEqual(
+            codex?.accounts.map((account) => [account.name, account.home, account.signIn, account.paidBy, account.outUntil]),
+            [['main', null, 'signed_in', 'plan', null]],
+          )
+          const work = yield* client.AddAccount({ commandId: commandId(), agentId: 'codex', name: 'work' })
+          assert.isNotNull(work.home)
+          assert.strictEqual(work.adoptedFrom, null)
+          const chosen = mkdtempSync(join(tmpdir(), 'charrette-chosen-'))
+          const client2 = yield* client.AddAccount({
+            commandId: commandId(),
+            agentId: 'codex',
+            name: 'Client',
+            grant: yield* grant(chosen),
+          })
+          assert.deepStrictEqual([client2.home, client2.adoptedFrom], [chosen, 'a folder you chose'])
+          const signIn = yield* client.SignInAccount({ commandId: commandId(), accountId: work.id })
+          assert.deepStrictEqual(signIn, { line: `FAKE_HOME='${work.home}' fake-login codex`, opened: true })
+          assert.include(opened, signIn.line)
+          yield* client.OrderAccounts({ commandId: commandId(), agentId: 'codex', accountIds: [client2.id] })
+          yield* client.RenameAccount({ commandId: commandId(), accountId: work.id, name: 'Work plan' })
+          yield* client.RemoveAccount({ commandId: commandId(), accountId: client2.id })
+          assert.deepStrictEqual(
+            (yield* client.Status({})).agents.find((agent) => agent.id === 'codex')?.accounts.map((account) => account.name),
+            ['main', 'Work plan'],
+          )
+          assert.deepStrictEqual(yield* client.FindAccounts({ agentId: 'opencode' }), { found: [] })
+          const refused = yield* Effect.flip(client.RemoveAccount({ commandId: commandId(), accountId: codex?.accounts[0]?.id ?? '' }))
+          assert.deepStrictEqual(
+            [refused.reason, refused.message],
+            ['AccountRefused', "That's the agent's usual sign-in, its first account: it stays."],
+          )
+          // Where nothing can open Terminal, the person is given the line to run.
+          const { client: plain } = yield* connected({ noTerminal: true })
+          const [main] = (yield* plain.Status({})).agents.find((agent) => agent.id === 'codex')?.accounts ?? []
+          assert.deepStrictEqual(yield* plain.SignInAccount({ commandId: commandId(), accountId: main?.id ?? '' }), {
+            line: 'fake-login codex',
+            opened: false,
+          })
+        }),
+      ),
   )
 })
 

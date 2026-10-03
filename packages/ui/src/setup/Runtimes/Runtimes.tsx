@@ -25,6 +25,8 @@ interface RuntimeBase {
   /** Its mark. Without one, a plug. */
   brand?: Brand
   version?: string
+  /** What goes under its row: its accounts, where it has them. */
+  detail?: ReactNode
 }
 
 /** A runtime on this machine, and where it stands. What a row can say depends on its state, so each state carries only what it needs. */
@@ -162,6 +164,7 @@ function Row({ r, t, onSignIn, onCancel, onCheck, onHelp }: RowProps) {
         <span className={s.name}>{r.name}</span>
         <span className={cx(s.line, calls && s.calls)}>{line}</span>
         {note && <span className={s.note}>{note}</span>}
+        {r.detail && <span className={s.detail}>{r.detail}</span>}
       </span>
       {actions && <span className={s.actions}>{actions}</span>}
     </li>

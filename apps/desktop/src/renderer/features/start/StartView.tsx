@@ -1,10 +1,11 @@
 import { type DragEvent, useEffect } from 'react'
 
-import type { AgentStatus, ProjectSummary } from '@charrette/contracts'
-import { Button, Heading, type RuntimeEntry, Runtimes, RuntimeState, Spinner, TitleBar } from '@charrette/ui'
+import type { AccountStatus, AgentStatus, ProjectSummary } from '@charrette/contracts'
+import { type AccountEntry, Accounts, Button, Heading, type RuntimeEntry, Runtimes, RuntimeState, Spinner, TitleBar } from '@charrette/ui'
 import { Start } from '@charrette/ui/screens'
 
 import { brandOf } from '../../shared/agents'
+import { clock } from '../../shared/time'
 import { ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
 import type { ConnectionsModel } from '../connections/useConnections'
 import s from './Start.module.css'
@@ -31,10 +32,31 @@ export const text = {
   },
 }
 
-/** An agent's sign-in, as a row of the kit's list of agents. */
-export const runtimeEntry = (agent: AgentStatus): RuntimeEntry => {
+/** A folder as the person would recognise it: under their home, from ~. */
+export const shortFolder = (path: string) => path.replace(/^\/Users\/[^/]+(?=\/)/, '~')
+
+/** An account, as a row of the kit's list of an agent's accounts. */
+export const accountEntry = (account: AccountStatus, now: Date = new Date()): AccountEntry => ({
+  id: account.id,
+  name: account.name,
+  place:
+    account.home === null
+      ? { kind: 'usual' }
+      : account.adoptedFrom === null
+        ? { kind: 'own' }
+        : { kind: 'adopted', folder: shortFolder(account.home), from: account.adoptedFrom },
+  state:
+    account.outUntil !== null
+      ? { kind: 'out', back: clock(account.outUntil, now) }
+      : account.signIn === 'signed_out'
+        ? { kind: 'signedOut' }
+        : { kind: 'ready', ...(account.paidBy === 'unknown' ? {} : { paid: account.paidBy }) },
+})
+
+/** An agent's sign-in, as a row of the kit's list of agents, with what goes under it: its accounts. */
+export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']): RuntimeEntry => {
   const brand = brandOf(agent.id)
-  const base = { id: agent.id, name: agent.name, ...(brand === undefined ? {} : { brand }) }
+  const base = { id: agent.id, name: agent.name, ...(brand === undefined ? {} : { brand }), ...(detail === undefined ? {} : { detail }) }
   switch (agent.signIn) {
     case 'signed_in':
       return { ...base, state: RuntimeState.Ready }
@@ -96,7 +118,28 @@ export function StartView({
       if (file !== undefined) void model.openDropped(file).then(opened)
     },
   }
-  const runtimes = model.status?.agents.map(runtimeEntry) ?? []
+  const runtimes =
+    model.status?.agents.map((agent) =>
+      runtimeEntry(
+        agent,
+        <Accounts
+          agent={agent.name}
+          accounts={agent.accounts.map((account) => accountEntry(account))}
+          found={(model.found[agent.id] ?? []).map((place) => ({
+            id: place.grant,
+            name: place.name,
+            folder: shortFolder(place.path),
+            from: place.tool,
+          }))}
+          onAdding={() => model.lookForAccounts(agent.id)}
+          onAdd={({ name, where }) => model.addAccount(agent.id, name, where.kind === 'found' ? { kind: 'found', grant: where.id } : where)}
+          onSignIn={(accountId) => void model.signInAccount(accountId)}
+          onRename={(accountId, name) => void model.renameAccount(accountId, name)}
+          onMove={(accountId, to) => void model.moveAccount(agent.id, accountId, to)}
+          onRemove={(accountId) => void model.removeAccount(accountId)}
+        />,
+      ),
+    ) ?? []
   const error =
     model.error === null ? null : (
       <p className={s.error} role="alert">

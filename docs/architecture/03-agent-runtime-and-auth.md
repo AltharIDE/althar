@@ -614,8 +614,10 @@ support is built, and checked again by the contract suite.
   next allowed account, on the same model. A home is separate, so the new
   account starts a session from a brief, as at any switch (Switching model
   or agent).
-- Only then does the work go to the next agent. Only accounts on a plan take
-  work over unasked.
+- Only then does the work go to the next agent, and only on an account a plan
+  pays for: another agent never spends the person's money unasked. The
+  agent's own accounts take work over whatever pays for them, since the
+  person added each one.
 - The thread names the accounts, for example "Codex (personal) is out until
   14:00; Codex (work) took over".
 

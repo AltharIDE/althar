@@ -54,8 +54,14 @@
     work goes first to the same agent's next allowed account. It runs the
     same model, in a new session from a brief, as at any switch
     ([ADR-005](005-charrette-briefs-every-agent.md)). Only then does it go
-    to the next agent. Only accounts on a plan take work over unasked. The
-    thread names the account, on both sides of the move.
+    to the next agent.
+  - **Paid by:**
+    - Another agent takes work over unasked only on an account a plan pays
+      for, as before.
+    - The agent's own accounts take it over whatever pays for them, since the
+      person added each one. Some agents can't tell a plan from a key at all:
+      OpenCode always says a key.
+  - The thread names the account on both sides of the move.
 - **Alternatives considered:**
   - **Swapping the agent's usual sign-in, as most switchers do.**
     - It needs no homes, but it is one account per Mac at a time.

@@ -33,14 +33,44 @@ export const Cursor = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 export const SignIn = Schema.Literals(['signed_in', 'signed_out', 'unknown'])
 export type SignIn = typeof SignIn.Type
 
+/** One sign-in of an agent, in a folder of its own (ADR-012): the agent's usual folder first. */
+export const AccountStatus = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  /** Its folder, to recognise it by; null for the agent's usual one. */
+  home: Schema.NullOr(Schema.String),
+  signIn: SignIn,
+  paidBy: Schema.Literals(['plan', 'key', 'unknown']),
+  /** Out of usage until then, where it is. */
+  outUntil: Schema.NullOr(Schema.String),
+  /** What made its folder, when Charrette didn't. */
+  adoptedFrom: Schema.NullOr(Schema.String),
+})
+export type AccountStatus = typeof AccountStatus.Type
+
 export const AgentStatus = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
+  /** Signed in where any of its accounts is. */
   signIn: SignIn,
   /** The agent's own command for signing in, when it isn't. */
   login: Schema.String,
+  /** Its accounts, in the person's order. */
+  accounts: Schema.Array(AccountStatus),
 })
 export type AgentStatus = typeof AgentStatus.Type
+
+/** A folder an account switcher keeps one of the agent's accounts in, by a grant for it. */
+export const FoundAccount = Schema.Struct({
+  grant: Schema.String,
+  /** Its name there, as the account's. */
+  name: Schema.String,
+  /** The folder, shown, never sent back. */
+  path: Schema.String,
+  /** The switcher that keeps such folders. */
+  tool: Schema.String,
+})
+export type FoundAccount = typeof FoundAccount.Type
 
 /**
  * The models an agent offers, and how hard each can be asked to think, in
@@ -800,6 +830,23 @@ export const Api = RpcGroup.make(
   call('ListIssues', { projectId: Schema.String }, IssueList),
   /** Marks the task's draft pull request ready for review. */
   command('MarkReady', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Adds an account to an agent: the folder a grant names, as another tool
+   * made it, or, without one, a folder Charrette makes, to sign in to.
+   */
+  command('AddAccount', { agentId: Schema.String, name: Schema.String, grant: Schema.optional(Schema.String) }, AccountStatus),
+  command('RenameAccount', { accountId: Schema.String, name: Schema.String }, Schema.Void),
+  /** Stops using an account; its folder, with its sign-in, stays. Not the agent's usual one. */
+  command('RemoveAccount', { accountId: Schema.String }, Schema.Void),
+  /** Puts an agent's accounts in the person's order: the first that can runs work first. */
+  command('OrderAccounts', { agentId: Schema.String, accountIds: Schema.Array(Schema.String) }, Schema.Void),
+  /** Folders account switchers keep the agent's accounts in, not added yet. */
+  call('FindAccounts', { agentId: Schema.String }, Schema.Struct({ found: Schema.Array(FoundAccount) })),
+  /**
+   * Opens the agent's own sign-in for the account, in Terminal, where the
+   * person signs in: the line it runs, and whether it could open it.
+   */
+  command('SignInAccount', { accountId: Schema.String }, Schema.Struct({ line: Schema.String, opened: Schema.Boolean })),
   /** What the project does when an agent reaches its usage limit. */
   command('SetUsageLimit', { projectId: Schema.String, policy: Schema.Literals(['move', 'wait']) }, Schema.Void),
   /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */

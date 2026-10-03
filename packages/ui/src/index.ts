@@ -117,6 +117,7 @@ export * from './coordinator/TaskHeld/TaskHeld'
 export * from './coordinator/TaskLaunch/TaskLaunch'
 export { useStickToBottom } from './lib/stick'
 
+export * from './setup/Accounts/Accounts'
 export * from './setup/Runtimes/Runtimes'
 export * from './setup/SourceMap/SourceMap'
 export * from './setup/ConnectAgent/ConnectAgent'

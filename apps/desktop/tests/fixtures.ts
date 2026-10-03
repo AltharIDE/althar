@@ -22,10 +22,21 @@ import type { Host } from '../src/renderer/data/services'
 
 export const NOW = '2026-09-29T12:00:00.000Z'
 
+/** An agent's usual sign-in, its first account. */
+export const usual = (id: string, signIn: AgentStatus['signIn']): AgentStatus['accounts'][number] => ({
+  id,
+  name: 'main',
+  home: null,
+  signIn,
+  paidBy: signIn === 'signed_in' ? 'plan' : 'unknown',
+  outUntil: null,
+  adoptedFrom: null,
+})
+
 export const agents: ReadonlyArray<AgentStatus> = [
-  { id: 'claude-code', name: 'Claude Code', signIn: 'signed_in', login: 'claude auth login' },
-  { id: 'codex', name: 'Codex', signIn: 'unknown', login: 'codex login' },
-  { id: 'opencode', name: 'OpenCode', signIn: 'signed_out', login: 'opencode auth login' },
+  { id: 'claude-code', name: 'Claude Code', signIn: 'signed_in', login: 'claude auth login', accounts: [usual('acc_claude', 'signed_in')] },
+  { id: 'codex', name: 'Codex', signIn: 'unknown', login: 'codex login', accounts: [usual('acc_codex', 'unknown')] },
+  { id: 'opencode', name: 'OpenCode', signIn: 'signed_out', login: 'opencode auth login', accounts: [usual('acc_opencode', 'signed_out')] },
 ]
 
 export const status: Status = { apiVersion: 1, appVersion: '0.0.0', agents }
@@ -384,6 +395,16 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     cancelSignIn: vi.fn(async () => {}),
     connectToken: vi.fn(async () => connectionList.connections[0] ?? githubConnection),
     disconnect: vi.fn(async () => {}),
+    addAccount: vi.fn(async (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => ({
+      ...usual('acc_added', 'signed_out'),
+      name: input.name,
+      home: '/Users/me/Library/Application Support/Charrette/accounts/acc_added',
+    })),
+    renameAccount: vi.fn(async () => {}),
+    removeAccount: vi.fn(async () => {}),
+    orderAccounts: vi.fn(async () => {}),
+    findAccounts: vi.fn(async () => [{ grant: 'grant_work', name: 'work', path: '/Users/me/.codex-work', tool: 'codex-profiles' }]),
+    signInAccount: vi.fn(async () => ({ line: 'codex login', opened: true })),
     listIssues: vi.fn(async () => ({ issues: [] })),
     markReady: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),

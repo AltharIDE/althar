@@ -155,6 +155,7 @@ mkdirSync(options.profile, { recursive: true })
 const layer = Runtime.layer({
   database: join(options.profile, 'charrette.sqlite'),
   worktreeRoot: options.worktrees,
+  accountsRoot: join(options.profile, 'accounts'),
   appVersion: '0.0.0',
   deviceName: hostname(),
 })

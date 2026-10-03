@@ -44,6 +44,9 @@ export const repository = () => {
 /** Where the fake agents' usual folders are: each agent's own, under one made for the test run. */
 const fakeHomes = mkdtempSync(join(tmpdir(), 'charrette-fake-homes-'))
 
+/** Lines the runtime would have opened in a terminal, such as an account's sign-in. */
+export const opened: Array<string> = []
+
 /** Every fake agent started, with the environment its account gave it: its home, or nothing for its usual folder. */
 export const launches: Array<{ readonly agentId: string; readonly env: Readonly<Record<string, string>> }> = []
 
@@ -148,6 +151,8 @@ export const runtime = (
     database,
     worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
     accountsRoot: mkdtempSync(join(tmpdir(), 'charrette-accounts-')),
+    // Nothing opens on the Mac running the tests: what would have is kept.
+    openTerminal: (line) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(false)),
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
     agents: fakeAgents(options, more.signedOut, more.each, more.perUse),

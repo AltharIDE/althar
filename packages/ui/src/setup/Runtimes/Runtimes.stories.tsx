@@ -2,7 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { EVERY_STATE, FIRST_RUN } from '../../fixtures/setup'
+import { ACCOUNTS, EVERY_STATE, FIRST_RUN } from '../../fixtures/setup'
+import { Accounts } from '../Accounts/Accounts'
 import { RuntimeState } from '../../foundations/vocabulary'
 import { States, statesOn } from '../../storybook/States'
 import { Runtimes, type RuntimeEntry, type RuntimesProps } from './Runtimes'
@@ -27,6 +28,18 @@ type Story = StoryObj<typeof meta>
 
 /** A first run: one signed in, one signed out, one not installed. Each says what it needs, and nothing more. */
 export const FirstRun: Story = {}
+
+/** An agent with several accounts lists them under its row (Setup/Accounts). */
+export const WithAccounts: Story = {
+  args: {
+    runtimes: FIRST_RUN.map((r, index) =>
+      index === 0 ? { ...r, detail: <Accounts agent={r.name} accounts={ACCOUNTS} onSignIn={fn()} onAdd={fn()} /> } : r,
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('list', { name: /accounts$/ })).toBeInTheDocument()
+  },
+}
 
 /** Once work runs on them: out of usage with the work moved, signed out with tasks waiting (a call of yours), too old, being checked. */
 export const EveryState: Story = { args: { runtimes: EVERY_STATE } }

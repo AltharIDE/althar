@@ -1,6 +1,5 @@
-import { execFile } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readdirSync, realpathSync, statSync, symlinkSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { Ids, newId } from '@charrette/domain'
@@ -235,17 +234,18 @@ export class Accounts extends Context.Service<
           if (definition === undefined) return yield* new UnknownAgent({ agentId: input.agentId })
           const name = yield* named(input.name)
           const accounts = yield* of(input.agentId)
-          if (input.folder !== undefined) {
-            if (!isFolder(input.folder)) return yield* new AccountRefused({ reason: 'not_a_folder' })
-            if (real(input.folder) === real(usualOf(definition))) return yield* new AccountRefused({ reason: 'usual' })
-            if (accounts.some((account) => account.home !== null && real(account.home) === real(input.folder ?? '')))
+          const folder = input.folder
+          if (folder !== undefined) {
+            if (!isFolder(folder)) return yield* new AccountRefused({ reason: 'not_a_folder' })
+            if (real(folder) === real(usualOf(definition))) return yield* new AccountRefused({ reason: 'usual' })
+            if (accounts.some((account) => account.home !== null && real(account.home) === real(folder)))
               return yield* new AccountRefused({ reason: 'taken' })
-            const tool =
-              (yield* found(input.agentId)).find((place) => real(place.path) === real(input.folder ?? ''))?.tool ?? 'a folder you chose'
+            const known = (yield* found(input.agentId)).find((place) => real(place.path) === real(folder))
+            const tool = known === undefined ? 'a folder you chose' : known.tool
             return yield* sql.withTransaction(
               Effect.gen(function* () {
-                const account = yield* insert({ agentId: input.agentId, name, home: input.folder ?? '', adoptedFrom: tool })
-                yield* record(account, 'agent_account.adopted', 1, { agentId: account.agentId, name, home: account.home, tool })
+                const account = yield* insert({ agentId: input.agentId, name, home: folder, adoptedFrom: tool })
+                yield* record(account, 'agent_account.adopted', 1, { agentId: account.agentId, name, home: folder, tool })
                 return account
               }),
             )
@@ -358,18 +358,3 @@ const isFolder = (path: string) => {
     return false
   }
 }
-
-/**
- * Opens a line in a new Terminal window on macOS, for the person to run: an
- * agent's own sign-in, which asks for a browser or a key there. Elsewhere it
- * isn't opened, and the person runs the line themselves.
- */
-export const openInTerminal = (line: string): Effect.Effect<boolean> =>
-  process.platform !== 'darwin'
-    ? Effect.succeed(false)
-    : Effect.callback<boolean>((resume) => {
-        const script = join(tmpdir(), `charrette-sign-in-${process.pid}-${Date.now()}.command`)
-        writeFileSync(script, `#!/bin/sh\n${line}\n`)
-        chmodSync(script, 0o700)
-        execFile('open', ['-a', 'Terminal', script], (error) => resume(Effect.succeed(error === null)))
-      })

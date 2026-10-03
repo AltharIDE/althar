@@ -16,8 +16,9 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
-import { SignIns } from '../src/SignIns'
-import { items, launches, repository, runtime, until } from './support'
+import { Secrets } from '../src/Secrets'
+import { anyOf, SignIns } from '../src/SignIns'
+import { fakeAgents, fakeConnectors, items, launches, repository, runtime, until } from './support'
 
 /*
  * Several accounts per agent (ADR-012): the agent's usual folder first, then
@@ -78,6 +79,8 @@ describe('accounts', () => {
 
         yield* accounts.rename(work.id, 'Work plan')
         yield* accounts.rename(work.id, 'Work plan')
+        // The order they are in already moves nothing.
+        yield* accounts.order('codex', [usual?.id ?? '', work.id, client.id])
         yield* accounts.order('codex', [client.id, usual?.id ?? ''])
         assert.deepStrictEqual(
           (yield* accounts.of('codex')).map((account) => [account.name, account.position]),
@@ -94,6 +97,11 @@ describe('accounts', () => {
         )
         assert.strictEqual(yield* accounts.login(work.id), `FAKE_HOME='${work.home}' fake-login codex`)
         assert.strictEqual(yield* accounts.login(usual?.id ?? ''), 'fake-login codex')
+        // An agent the registry doesn't know, as a test's `process` agent, runs in its usual folder, and has no sign-in to open.
+        const [elsewhere] = yield* accounts.of('process')
+        assert.deepStrictEqual(accounts.env(elsewhere ?? work), {})
+        assert.strictEqual(yield* refusal(accounts.login(elsewhere?.id ?? '')), 'UnknownAgent')
+        assert.deepStrictEqual(yield* accounts.found('process'), [])
         // Who did what is recorded, as the person's.
         const sql = yield* SqlClient.SqlClient
         const facts = yield* sql<{ type: string }>`
@@ -112,6 +120,34 @@ describe('accounts', () => {
         )
       }).pipe(Effect.provide(withAccounts())),
   )
+
+  it.effect('make no folder of their own where the runtime has nowhere to keep one', () =>
+    Effect.gen(function* () {
+      const accounts = yield* Accounts
+      assert.strictEqual(yield* refusal(accounts.add({ agentId: 'codex', name: 'work' })), 'no_room')
+      // A folder that exists is still added.
+      assert.strictEqual((yield* accounts.add({ agentId: 'codex', name: 'work', folder: folder('work') })).name, 'work')
+    }).pipe(
+      Effect.provide(
+        Runtime.layer({
+          database: ':memory:',
+          worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
+          appVersion: '0.0.0-test',
+          deviceName: 'Test Mac',
+          agents: fakeAgents(),
+          secrets: Secrets.memory(),
+          connectors: fakeConnectors({}),
+        }),
+      ),
+    ),
+  )
+
+  it('say an agent is signed in where any account is, else unknown where any can’t tell, else signed out', () => {
+    assert.strictEqual(anyOf(['signed_out', 'signed_in']), 'signed_in')
+    assert.strictEqual(anyOf(['signed_out', 'unknown']), 'unknown')
+    assert.strictEqual(anyOf([]), 'unknown')
+    assert.strictEqual(anyOf(['signed_out', 'signed_out']), 'signed_out')
+  })
 
   it.effect('finds the folders account switchers keep, by name, and not ones already added', () =>
     Effect.gen(function* () {
@@ -169,6 +205,8 @@ describe('accounts', () => {
       assert.strictEqual((yield* limits.pick({ agentId: 'codex', accountId: usual?.id ?? '' })).id, usual?.id)
       assert.strictEqual((yield* limits.named('codex', null, work.id)).agent, 'Fake codex (Work)')
       assert.strictEqual((yield* limits.named('opencode', null, null)).agent, 'Fake opencode')
+      // The account signed out doesn't count: the agent isn't out while another can run.
+      assert.isTrue((yield* limits.out('codex'))._tag === 'None')
     }).pipe(Effect.provide(withAccounts({}, [away])))
   })
 
