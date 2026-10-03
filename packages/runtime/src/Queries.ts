@@ -83,7 +83,12 @@ export const stuckOf = (payload: unknown): StuckStep => {
   return {
     step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
     why:
-      why === 'no_report' || why === 'session_ended' || why === 'restarted' || why === 'round_limit' || why === 'not_connected'
+      why === 'no_report' ||
+      why === 'session_ended' ||
+      why === 'restarted' ||
+      why === 'round_limit' ||
+      why === 'not_connected' ||
+      why === 'usage_limit'
         ? why
         : 'failed_to_start',
     detail: typeof detail === 'string' ? detail : null,

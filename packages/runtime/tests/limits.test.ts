@@ -169,6 +169,11 @@ describe('an agent out of usage', () => {
         Duration.seconds(10),
       )
       assert.deepInclude(JSON.parse(call?.payload ?? '{}'), { step: 'implement', why: 'usage_limit', agentId: 'claude-code' })
+      // The window reads it as such.
+      const queries = yield* Queries
+      const [card] = yield* cardOf(projectId)
+      const snapshot = yield* Effect.orDie(queries.thread(card?.threadId ?? ''))
+      assert.strictEqual(snapshot.attention[0]?.stuck?.why, 'usage_limit')
       assert.strictEqual((yield* cardOf(projectId))[0]?.phase, 'waiting')
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: {} } }, ['codex', 'opencode']))),
   )
