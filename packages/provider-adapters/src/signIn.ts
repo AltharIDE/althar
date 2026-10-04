@@ -63,7 +63,7 @@ export const signOut = (
   const logout = agent.signIn.logout
   if (logout === undefined) return Effect.succeed(true)
   return Effect.callback<boolean>((resume) => {
-    const spec = logout(node)
+    const spec = logout.run(node)
     execFile(spec.command, [...spec.args], { timeout: 15_000, env: { ...process.env, ...asNode(spec), ...spec.env, ...home } }, (error) =>
       resume(Effect.succeed(error === null)),
     )

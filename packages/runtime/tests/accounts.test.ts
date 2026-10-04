@@ -8,8 +8,8 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { Accounts } from '../src/Accounts'
-import { Agents } from '../src/Config'
+import { Accounts, SignOutFailed } from '../src/Accounts'
+import { Agents, RuntimeConfig } from '../src/Config'
 import { Instance } from '../src/Instance'
 import { Limits } from '../src/Limits'
 import { Plans } from '../src/Plans'
@@ -152,6 +152,25 @@ describe('accounts', () => {
         }
         assert.isFalse(existsSync(spare.home ?? ''))
         assert.strictEqual(readFileSync(signedOut, 'utf8'), `${spare.home}\n`)
+        // Where the agent doesn't sign it out, it and its folder stay, and the person is given the line to run.
+        const kept = yield* accounts.add({ agentId: 'codex', name: 'kept' })
+        process.env.FAKE_SIGN_OUT_FAILS = '1'
+        try {
+          const failed = yield* Effect.flip(accounts.remove(kept.id))
+          assert.deepStrictEqual(failed, new SignOutFailed({ line: `FAKE_HOME='${kept.home}' fake-logout` }))
+        } finally {
+          delete process.env.FAKE_SIGN_OUT_FAILS
+        }
+        assert.isTrue(existsSync(kept.home ?? ''))
+        assert.include(
+          (yield* accounts.of('codex')).map((account) => account.name),
+          'kept',
+        )
+        // A record whose home were the accounts folder itself never has it deleted.
+        const root = (yield* RuntimeConfig).accountsRoot ?? ''
+        yield* (yield* SqlClient.SqlClient)`UPDATE agent_accounts SET home = ${root} WHERE id = ${kept.id}`
+        yield* accounts.remove(kept.id)
+        assert.isTrue(existsSync(root))
         assert.strictEqual(yield* accounts.login(work.id), `FAKE_HOME='${work.home}' fake-login codex`)
         assert.strictEqual(yield* accounts.login(usual?.id ?? ''), 'fake-login codex')
         // An agent the registry doesn't know, as a test's `process` agent, runs in its usual folder, and has no sign-in to open.
@@ -172,6 +191,8 @@ describe('accounts', () => {
             'agent_account.moved',
             'agent_account.moved',
             'agent_account.moved',
+            'agent_account.removed',
+            'agent_account.added',
             'agent_account.removed',
             'agent_account.added',
             'agent_account.removed',
@@ -306,9 +327,12 @@ describe('accounts', () => {
         ['codex', 'claude-code'],
       )
       assert.isFalse(yield* limits.rotates(ran.projectId))
-      // A new session there still starts on the account that can run.
-      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId: ran.projectId })).name, 'work')
+      // Without rotation, work there stays on the agent's first account: Codex is out while it is, and new work doesn't slip to the next.
+      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId: ran.projectId })).name, 'main')
+      assert.isTrue((yield* limits.out('codex', ran.projectId))._tag === 'Some')
       assert.isTrue((yield* limits.outAccount(usual?.id ?? ''))._tag === 'Some')
+      // Nor is Codex free there to take other work over.
+      assert.strictEqual(yield* limits.free(['claude-code', 'opencode'], [], ran.projectId), undefined)
     }).pipe(Effect.provide(withAccounts({ 'codex@usual': { outOfUsage: { until: back } } })))
   })
 

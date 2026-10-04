@@ -1,6 +1,6 @@
 import { mkdirSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, relative } from 'node:path'
+import { isAbsolute, join, relative, sep } from 'node:path'
 
 import { Ids, newId } from '@charrette/domain'
 import type { Ledger, RevisionConflict, RowNotFound } from '@charrette/persistence-sqlite'
@@ -45,6 +45,9 @@ export interface Found {
 
 /** What the usual folder's account is called until the person names it. */
 export const USUAL = 'main'
+
+/** The agent didn't sign an account out, so it and its folder stay: the line that signs it out by hand. */
+export class SignOutFailed extends Schema.TaggedError<SignOutFailed>()('SignOutFailed', { line: Schema.String }) {}
 
 export class AccountRefused extends Schema.TaggedError<AccountRefused>()('AccountRefused', {
   reason: Schema.Literals(['no_room', 'not_a_folder', 'usual', 'taken', 'no_name']),
@@ -110,7 +113,7 @@ export class Accounts extends Context.Service<
      * with the agent's own tool and its folder deleted; one another tool made
      * stays as it is, signed in, that tool's.
      */
-    remove(accountId: string): Effect.Effect<void, AccountRefused | NotFound | Failure>
+    remove(accountId: string): Effect.Effect<void, AccountRefused | SignOutFailed | NotFound | Failure>
     /** Puts an agent's accounts in the order given; any left out keep theirs, after. */
     order(agentId: string, accountIds: ReadonlyArray<string>): Effect.Effect<void, Failure>
     /** Folders known switchers keep the agent's accounts in that aren't accounts here yet. */
@@ -202,16 +205,26 @@ export class Accounts extends Context.Service<
       const madeHere = (account: Account): string | undefined => {
         const root = config.accountsRoot
         if (account.home === null || account.adoptedFrom !== null || root === undefined) return undefined
-        return relative(root, account.home).startsWith('..') ? undefined : account.home
+        // One folder right under the root, named by the account: never the root itself, nor anything above or deeper.
+        const inside = relative(root, account.home)
+        return inside === '' || isAbsolute(inside) || inside.startsWith('..') || inside.includes(sep) ? undefined : account.home
       }
 
-      /** Signs the account out with its agent's own tool, in its home, then deletes the folder: whether the agent said it signed out. */
+      /**
+       * Signs the account out with its agent's own tool, in its home, then
+       * deletes the folder. Where the agent didn't sign it out, the folder
+       * stays, so no sign-in is left with nothing pointing at it: Claude
+       * Code's Keychain item is named after the folder's path.
+       */
       const forget = (account: Account, folder: string) =>
         Effect.gen(function* () {
           const definition = definitionOf(account.agentId)
-          const signedOut = definition === undefined ? false : yield* signOut(definition, process.execPath, env(account))
+          const logout = definition?.signIn.logout
+          if (definition !== undefined && logout !== undefined && !(yield* signOut(definition, process.execPath, env(account))))
+            return yield* new SignOutFailed({
+              line: `${definition.home.variable}=${quoted(folder)} ${logout.line}`,
+            })
           yield* Effect.sync(() => rmSync(folder, { recursive: true, force: true }))
-          return signedOut
         })
 
       const env = (account: Account): Readonly<Record<string, string>> => {
@@ -321,11 +334,11 @@ export class Accounts extends Context.Service<
               if (account.home === null) return yield* new AccountRefused({ reason: 'usual' })
               // A folder Charrette made is signed out with the agent's own tool, then goes; one another tool made stays its.
               const made = madeHere(account)
-              const signedOut = made === undefined ? false : yield* forget(account, made)
+              if (made !== undefined) yield* forget(account, made)
               yield* sql.withTransaction(
                 Effect.gen(function* () {
                   const revision = yield* change('agent_accounts', account.id, { removedAt: yield* timestamp })
-                  yield* record(account, 'agent_account.removed', revision, { deleted: made !== undefined, signedOut })
+                  yield* record(account, 'agent_account.removed', revision, { signedOutAndDeleted: made !== undefined })
                 }),
               )
             }),
