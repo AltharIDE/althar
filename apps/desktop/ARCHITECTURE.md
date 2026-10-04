@@ -42,9 +42,10 @@ MVVM in feature folders ([ADR-010](../../docs/decisions/010-desktop-app-mvvm.md)
 | Folder | What it holds |
 | --- | --- |
 | `data/` | The client: Effect inside, plain promises and a subscription outside; the services view models reach through React; the models each agent offers, read once for the window |
-| `features/start` | The agents on this Mac and the projects; opening a folder by the button, ⌘N or a drop |
+| `features/start` | The agents on this Mac with their accounts, and the projects; opening a folder by the button, ⌘N or a drop |
 | `features/project` | A project's window: the coordinator's thread with each task's card (its plan before it starts, then where it stands), the agent the coordinator runs on, and a task you plan yourself, beside it |
 | `features/board` | A project's board: its lanes, the dock beside them, and what you answer, accept or send back from it |
+| `features/rules` | A project's rules (ADR-013): who answers, what always asks and what is never allowed, how a task ends, usage limits and accounts; each change saved at once |
 | `features/task` | A task's thread, the calls waiting on you, the composer, and what it changed |
 | `shared/` | A thread's items as blocks, drawn with the kit (finished work folded, steps' results under it); the model picker every conversation and plan step uses; how agents and times are drawn |
 

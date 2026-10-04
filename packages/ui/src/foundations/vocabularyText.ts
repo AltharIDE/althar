@@ -13,6 +13,10 @@ export interface ChoiceWords {
 }
 
 export const permissionPolicyText: Record<PermissionPolicy, ChoiceWords> = {
+  [PermissionPolicy.Rules]: {
+    title: 'Allow, except what you keep',
+    note: 'Agents carry on without stopping. What “Always ask me” lists waits for you; what “Never” lists is refused.',
+  },
   [PermissionPolicy.Lead]: {
     title: 'The agent in charge decides',
     note: 'Each task has one agent in charge of it, its lead. It allows what the task needs and passes the rest to you.',

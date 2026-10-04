@@ -52,6 +52,7 @@ import type { ProjectModel } from './useProject'
  */
 
 export const text = {
+  rules: 'Project rules',
   back: 'Projects',
   project: 'Project',
   conversation: 'Conversation',
@@ -84,12 +85,15 @@ export function ProjectView({
   connections,
   onBack,
   onTask,
+  onRules,
 }: {
   model: ProjectModel
   board: BoardModel
   connections: ConnectionsModel
   onBack: () => void
   onTask: (threadId: string) => void
+  /** Opens the project's rules; without it, no way there. */
+  onRules?: () => void
 }) {
   const [room, setRoom] = useState<Room>(Room.Talk)
   const [dock, setDock] = useState<DockTarget | null>(null)
@@ -210,6 +214,7 @@ export function ProjectView({
         end={
           <>
             <WorkStatus running={working} yours={yours} onYours={openYours} />
+            {onRules && <ChromeButton icon="gear" label={text.rules} compact onClick={onRules} />}
             <ChromeButton
               icon="plus"
               label={text.newTask}
