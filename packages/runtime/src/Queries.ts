@@ -80,6 +80,7 @@ export const stuckOf = (payload: unknown): StuckStep => {
   const agentId = field(payload, 'agentId')
   const round = field(payload, 'round')
   const open = field(payload, 'open')
+  const tried = field(payload, 'tried')
   return {
     step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
     why:
@@ -88,13 +89,25 @@ export const stuckOf = (payload: unknown): StuckStep => {
       why === 'restarted' ||
       why === 'round_limit' ||
       why === 'not_connected' ||
-      why === 'usage_limit'
+      why === 'usage_limit' ||
+      why === 'stalled' ||
+      why === 'looping' ||
+      why === 'over_budget' ||
+      why === 'refused'
         ? why
         : 'failed_to_start',
     detail: typeof detail === 'string' ? detail : null,
     agentId: typeof agentId === 'string' ? agentId : null,
     round: typeof round === 'number' ? round : 0,
     open: typeof open === 'number' ? open : 0,
+    ...(Array.isArray(tried)
+      ? {
+          tried: tried.filter(
+            (each): each is 'carried_on' | 'restarted' | 'redirected' =>
+              each === 'carried_on' || each === 'restarted' || each === 'redirected',
+          ),
+        }
+      : {}),
   }
 }
 

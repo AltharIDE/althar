@@ -14,7 +14,7 @@ import type { FakeService } from '@althar/connectors/testing'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
-import { Agents, type AgentEntry, Connectors } from '../src/Config'
+import { Agents, type AgentEntry, Connectors, type StallOptions } from '../src/Config'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
@@ -155,6 +155,8 @@ export const runtime = (
     readonly each?: Readonly<Record<string, FakeAgentOptions>>
     /** Agents signed in on a key, paid per use, rather than a plan. */
     readonly perUse?: ReadonlyArray<string>
+    readonly stalls?: StallOptions
+    readonly stopGrace?: Duration.Duration
   } = {},
 ) =>
   Runtime.layer({
@@ -170,6 +172,8 @@ export const runtime = (
     secrets: Secrets.memory(),
     connectors: more.connectors ?? fakeConnectors({}),
     ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),
+    ...(more.stalls === undefined ? {} : { stalls: more.stalls }),
+    ...(more.stopGrace === undefined ? {} : { stopGrace: more.stopGrace }),
   })
 
 /** A GitHub instance that never answers: `.test` names nothing, so git's fetches fail at once, and the fake service stands in for its API. */

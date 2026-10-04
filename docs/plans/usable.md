@@ -74,12 +74,14 @@ One pull request each:
    - notifications and the Dock badge;
    - accounts in the runtime, and the agent's accounts on the start
      (Accounts, below);
-   - the project rules screen (Project rules, below).
+   - the project rules screen (Project rules, below);
+   - stalls: a running turn is watched for signs of life, carried on, started
+     afresh, then asked about; loops and a budget of time and turns besides
+     ([05](../architecture/05-workflow-engine.md)).
 
    Next:
-   1. A step that stalls becomes a call.
-   2. Local merging, and sending work back as a step.
-   3. The lead answers permission requests: the "lead decides" mode.
+   1. Local merging, and sending work back as a step.
+   2. The lead answers permission requests: the "lead decides" mode.
 4. **Conversations.**
 
 Brought forward from step 4, after the board: **the model picker.** Every

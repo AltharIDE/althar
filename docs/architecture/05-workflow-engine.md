@@ -244,6 +244,44 @@ Use this repair ladder:
 Repair has its own attempt count, elapsed time, and cost budget. Failure of a
 repair node does not recursively create unbounded repair agents.
 
+### A turn that stalls or goes round in circles
+
+A turn that never ends gives no event to react to, so the runtime looks at
+every running turn instead, every 30 seconds.
+
+- **Signs of life.** A turn is alive while its agent says anything, and, while
+  one of its tools runs, while its processes use CPU, so a long build or test
+  run isn't taken for a stall. With no tool running, CPU doesn't count: the
+  agent is waiting on its model, which says so as it goes, and what it left
+  running in the background, such as a dev server, isn't the turn at work.
+  A turn waiting on the person is neither stalled nor at work. A look that
+  comes long after the last one means the machine slept, and the silence
+  doesn't count.
+- **The ladder.** After 10 minutes with no sign of life (20 while a tool such
+  as a command runs), the turn is stopped and the agent told to carry on,
+  naming the command that held it up. Stalled again, or not stopping when
+  asked, the agent is started afresh on the thread, briefed from it. Stalled
+  once more, the person is asked. Each rung says so in the thread.
+- **Going round in circles.** The same tool call to the same end, three times
+  failing or four however it went, or two calls taking turns, gets the agent
+  told to try another way; doing it again, the person is asked. A call is the
+  same as another by its command or its whole input, never by its title: an
+  agent titles every edit to a file alike.
+- **A budget.** A step's agents may work 6 hours, or take 40 turns, since the
+  person last said anything on the thread or the step began. Past that, the
+  person is asked whether it carries on.
+- **The agent's own limits.** A turn cut off at the agent's output or step
+  limit carries on where it was, a few times, before the step is reminded to
+  report. A refusal goes to the person at once.
+
+On a step, asking the person is a call with what Althar tried; elsewhere, such
+as the coordinator's thread, the thread says why. An agent that stalled even
+after a fresh start is stopped. One that went round in circles or ran past its
+budget only has its turn stopped, and keeps what it knows for whatever the
+person says, or for carrying on.
+Stopping an agent never waits on it for ever: one that doesn't end its turn
+when asked is stopped with its process.
+
 ### Unknown external effect
 
 The hardest case is not a known failure; it is a lost response after an

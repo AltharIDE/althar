@@ -6,6 +6,7 @@ import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Sc
 import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
+import { Agents, RuntimeConfig } from './Config'
 import { Changes, type Published } from './Changes'
 import { NotConnected } from './Connections'
 import { AttentionClosed, NoChangeToOpen, NotFound } from './errors'
@@ -19,6 +20,8 @@ import { snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
 import { Sessions } from './Sessions'
+import { type GiveUp, watchStalls } from './Stalls'
+import type { Tried } from './stallWatch'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { summarize } from './words'
@@ -38,6 +41,12 @@ import { summarize } from './words'
 
 /** Review rounds before a task is left ready with findings still open. */
 export const ROUNDS = 3
+
+/** How often a step's agent cut off by its own limit on a turn carries on before it is reminded to report. */
+const CONTINUES = 3
+
+/** What it is told when it was cut off so. */
+const CONTINUING = "Your last turn stopped at the agent's own limit on a turn's output or steps. Carry on from where you were."
 
 export const PlanStep = Schema.Struct({
   key: Schema.Literals(['implement', 'review']),
@@ -116,10 +125,38 @@ interface RunRow {
   readonly parameters: string
 }
 
-type Store = SqlClient.SqlClient | Instance | Sessions | ToolServer | Crypto.Crypto | Ledger | Live | Changes | Limits | Policies
+type Store =
+  | SqlClient.SqlClient
+  | Instance
+  | Sessions
+  | ToolServer
+  | Crypto.Crypto
+  | Ledger
+  | Live
+  | Changes
+  | Limits
+  | Policies
+  | Agents
+  | RuntimeConfig
 
-/** Why a step needs the person (docs/architecture/05): its agent didn't report after a reminder, went, couldn't start, or a restart stopped it; or review ran out of rounds. */
-export type StuckWhy = 'no_report' | 'session_ended' | 'failed_to_start' | 'restarted' | 'round_limit' | 'not_connected' | 'usage_limit'
+/**
+ * Why a step needs the person (docs/architecture/05): its agent didn't report
+ * after a reminder, went, couldn't start, a restart stopped it, it stalled,
+ * went round in circles, ran past its budget, or refused; or review ran out
+ * of rounds.
+ */
+export type StuckWhy =
+  | 'no_report'
+  | 'session_ended'
+  | 'failed_to_start'
+  | 'restarted'
+  | 'round_limit'
+  | 'not_connected'
+  | 'usage_limit'
+  | 'stalled'
+  | 'looping'
+  | 'over_budget'
+  | 'refused'
 
 /** What a stuck step's call says: the step, why, what went wrong in words, who was on it, the round, and the findings still open. */
 export interface StuckInfo {
@@ -129,6 +166,8 @@ export interface StuckInfo {
   readonly agentId: string | null
   readonly round: number
   readonly open: number
+  /** What Althar did about it before asking, where it did something. */
+  readonly tried?: ReadonlyArray<Tried>
 }
 
 /** The person's answer: tell the step's agent what to do, hand the step to an agent, or abandon it (a review is gone on without). */
@@ -173,6 +212,8 @@ export class Runs extends Context.Service<
       // Asked when a step is held for a reset, so the wait for it starts again.
       const holdsChanged = yield* Queue.sliding<void>(1)
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
+      // Starts a thread's budget again, as a step that starts does: the stall watch's, once it is running below.
+      let freshen: (threadId: string) => Effect.Effect<void> = () => Effect.void
 
       /** The workflow every task runs, for now: made once per profile. */
       const workflowVersion = Effect.gen(function* () {
@@ -302,6 +343,9 @@ export class Runs extends Context.Service<
             type: 'node_attempt.running',
             actorId: instance.systemId,
           })
+          const sql = yield* SqlClient.SqlClient
+          const [session] = yield* sql<{ threadId: string }>`SELECT thread_id FROM provider_sessions WHERE id = ${sessionId}`
+          if (session !== undefined) yield* freshen(session.threadId)
         })
 
       /** Ends an attempt and its node, with what it reported. */
@@ -653,9 +697,31 @@ export class Runs extends Context.Service<
           const [queued] = yield* sql<{ id: string }>`
             SELECT id FROM user_inputs WHERE thread_id = ${event.threadId} AND state = 'queued' LIMIT 1`
           if (queued !== undefined) return
-          const reminded = (JSON.parse(on.output ?? '{}') as { reminded?: boolean }).reminded === true
-          if (reminded) return yield* stuck(on.run, { id: on.attemptId }, info('no_report', event.errorClass ?? null))
-          yield* change('node_attempts', on.attemptId, { output: JSON.stringify({ reminded: true }) })
+          const output = JSON.parse(on.output ?? '{}') as { reminded?: boolean; continued?: number }
+          // Refused, it won't go on however it's reminded.
+          if (event.stopReason === 'refusal') return yield* stuck(on.run, { id: on.attemptId }, info('refused', null))
+          // Cut off by the agent's own limit on a turn, it carries on where it was, a few times, before it is reminded.
+          const continued = output.continued ?? 0
+          if (
+            (event.stopReason === 'max_tokens' || event.stopReason === 'max_turn_requests') &&
+            event.errorClass === undefined &&
+            continued < CONTINUES
+          ) {
+            yield* change('node_attempts', on.attemptId, { output: JSON.stringify({ ...output, continued: continued + 1 }) })
+            return yield* sessions
+              .send({
+                envelope: yield* envelope('thread.send', { threadId: event.threadId, continued: on.attemptId }),
+                threadId: event.threadId,
+                body: CONTINUING,
+                quiet: true,
+              })
+              .pipe(
+                Effect.asVoid,
+                Effect.catchCause((cause) => stuck(on.run, { id: on.attemptId }, info('no_report', summarize(cause) || null))),
+              )
+          }
+          if (output.reminded === true) return yield* stuck(on.run, { id: on.attemptId }, info('no_report', event.errorClass ?? null))
+          yield* change('node_attempts', on.attemptId, { output: JSON.stringify({ ...output, reminded: true }) })
           yield* sessions
             .send({
               envelope: yield* envelope('thread.send', { threadId: event.threadId, reminder: on.attemptId }),
@@ -1639,6 +1705,32 @@ export class Runs extends Context.Service<
           ),
         ),
       )
+
+      /** A step's agent stalled, went round in circles or ran past its budget, beyond what Althar could do: the step needs the person. */
+      const stalledStep = (giveUp: GiveUp) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const on = yield* stepOn(giveUp.threadId)
+          if (on === undefined) return false
+          const [agent] = yield* sql<{ agentId: string }>`
+            SELECT agent_id FROM provider_sessions WHERE thread_id = ${giveUp.threadId} ORDER BY started_at DESC LIMIT 1`
+          yield* stuck(
+            on.run,
+            { id: on.attemptId },
+            {
+              step: on.step,
+              why: giveUp.why,
+              detail: giveUp.detail,
+              agentId: agent?.agentId ?? null,
+              round: on.iteration,
+              open: 0,
+              ...(giveUp.tried.length === 0 ? {} : { tried: giveUp.tried }),
+            },
+          )
+          return true
+        }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not ask the person about a stalled step', cause), false)))
+      const stalls = yield* watchStalls((giveUp) => provide(stalledStep(giveUp)))
+      freshen = (threadId) => stalls.fresh(threadId)
 
       return Runs.of({
         run: (planId) => provide(run(planId)),
