@@ -1,6 +1,3 @@
-import { homedir } from 'node:os'
-import { join } from 'node:path'
-
 /*
  * The command line: which folder to open, the task to start, the agent to
  * start it on, and where the profile and worktrees live.
@@ -15,22 +12,13 @@ export interface Options {
   readonly worktrees: string
 }
 
-export const USAGE = `Usage: charrette <folder> --task "<title>" [--agent claude-code|codex|opencode] [--model <id>]
+export const USAGE = `Usage: althar <folder> --task "<title>" [--agent claude-code|codex|opencode] [--model <id>]
                  [--profile <dir>] [--worktrees <dir>]
 
 Opens <folder> as a project, starts the task in a worktree of its own, and
 starts its agent. Then type to talk to the agent; /help lists the commands.`
 
-/** Where Charrette keeps its profile on this platform, unless told otherwise. */
-export const defaultProfile = (env: NodeJS.ProcessEnv, platform: NodeJS.Platform, home = homedir()) => {
-  if (env.CHARRETTE_PROFILE !== undefined && env.CHARRETTE_PROFILE !== '') return env.CHARRETTE_PROFILE
-  if (platform === 'darwin') return join(home, 'Library', 'Application Support', 'Charrette')
-  return join(env.XDG_DATA_HOME !== undefined && env.XDG_DATA_HOME !== '' ? env.XDG_DATA_HOME : join(home, '.local', 'share'), 'charrette')
-}
-
-/** Where task worktrees go (ADR-006), unless told otherwise. */
-export const defaultWorktrees = (env: NodeJS.ProcessEnv, home = homedir()) =>
-  env.CHARRETTE_WORKTREES !== undefined && env.CHARRETTE_WORKTREES !== '' ? env.CHARRETTE_WORKTREES : join(home, 'Charrette')
+export { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
 
 /** Reads the arguments, or says what is wrong with them. */
 export const parseOptions = (

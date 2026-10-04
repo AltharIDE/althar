@@ -3,7 +3,7 @@ import { Slide } from '../Slide'
 import ui from '../ui.module.css'
 import s from './Business.module.css'
 
-/** How a customer moves through Charrette: one developer, then their team, then their organisation. */
+/** How a customer moves through Althar: one developer, then their team, then their organisation. */
 const TIERS = [
   {
     k: 'Open source',
@@ -14,7 +14,7 @@ const TIERS = [
     next: 'Moves up when a second person joins the project',
   },
   {
-    k: 'Charrette Cloud',
+    k: 'Althar Cloud',
     price: 'Per seat',
     per: 'monthly',
     who: 'Teams, small and large, on one project record',
@@ -44,7 +44,7 @@ export function Business() {
           </p>
           <p className={s.ours}>
             <span>Coordination</span>
-            <b>Paid to Charrette</b> for what no single agent gives you: one project record, sync, governance and support.
+            <b>Paid to Althar</b> for what no single agent gives you: one project record, sync, governance and support.
           </p>
         </div>
         <ol className={s.tiers}>

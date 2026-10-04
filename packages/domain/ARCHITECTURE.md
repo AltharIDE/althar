@@ -1,9 +1,9 @@
-# @charrette/domain — Architecture
+# @althar/domain — Architecture
 
-The shared vocabulary of the runtime side: what Charrette's identities, states and commands are, written once as Effect schemas and used at every boundary. The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target; the product architecture is in [docs/architecture](../../docs/architecture/README.md).
+The shared vocabulary of the runtime side: what Althar's identities, states and commands are, written once as Effect schemas and used at every boundary. The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target; the product architecture is in [docs/architecture](../../docs/architecture/README.md).
 
 - **Owner:** Repository maintainers
-- **Consumers:** `@charrette/persistence-sqlite`, and the runtime, adapters and app–runtime contract to come. Never `@charrette/ui`.
+- **Consumers:** `@althar/persistence-sqlite`, and the runtime, adapters and app–runtime contract to come. Never `@althar/ui`.
 - **Dependency direction:** depends on `effect` alone. Nothing it imports reads files, starts processes or opens a database.
 
 ## What it holds
@@ -21,7 +21,7 @@ The shared vocabulary of the runtime side: what Charrette's identities, states a
 - **Schemas are the source of truth.** Types come from schemas (`typeof X.Type`), and the same schema validates untrusted data wherever it enters: from the app, from an agent, or from the database.
 - **Every identity has its own kind of id.** An id is a prefix, an underscore and a UUIDv7 as 32 hex digits (`task_0192f0b3…`). Ids sort by creation time, say what they identify, and cannot be passed where another kind is expected. The store checks the prefix too.
 - **The words are the architecture's.** `suspended`, `cancelled`, `attention_request`: the interface uses other words for some of them, listed in [the glossary](../../docs/glossary.md).
-- **Every vocabulary has one list.** The store keeps each vocabulary in a lookup table with the same words, and a test in `@charrette/persistence-sqlite` fails if the two differ. Adding a word means a new migration that inserts it.
+- **Every vocabulary has one list.** The store keeps each vocabulary in a lookup table with the same words, and a test in `@althar/persistence-sqlite` fails if the two differ. Adding a word means a new migration that inserts it.
 - **Lifecycles are data.** A state moves only along a listed edge; a state with no edges is terminal. Tests check that every state is reachable and that nothing leaves a terminal state. The diagrams in docs/architecture 03 and 05 draw the same edges.
 - **Time and randomness are services.** `now` reads the Effect clock and `newId` uses the `Crypto` service, so tests can fix both.
 

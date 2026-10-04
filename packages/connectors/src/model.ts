@@ -5,14 +5,14 @@ import type { ConnectorFailed } from './errors'
 
 /*
  * The two models (docs/architecture/06, "Code hosts and trackers"): what
- * Charrette knows of a code host and of a tracker, whichever product it is.
+ * Althar knows of a code host and of a tracker, whichever product it is.
  * Each was laid against GitHub, GitLab, Bitbucket, Linear, Jira and Trello
  * before an adapter was written. What only some products have is a
  * capability, not a field everyone fills in. Text is Markdown; an adapter
  * converts where its product uses something else.
  */
 
-/** Every product Charrette has, or will have, an adapter for. Cloud and Data Center are separate products. */
+/** Every product Althar has, or will have, an adapter for. Cloud and Data Center are separate products. */
 export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
 export type Product = typeof Product.Type
 
@@ -42,7 +42,7 @@ export const Repository = Schema.Struct({
   defaultBranch: Schema.String,
   webUrl: Schema.String,
   canPush: Schema.Boolean,
-  /** How the repository lets changes be merged, as its settings say, in the order Charrette prefers them. */
+  /** How the repository lets changes be merged, as its settings say, in the order Althar prefers them. */
   merges: Schema.Array(MergeMethod),
 })
 export type Repository = typeof Repository.Type
@@ -148,7 +148,7 @@ export interface PushTarget {
   readonly header: string | null
 }
 
-/** What a code host offers Charrette (docs/architecture/06). */
+/** What a code host offers Althar (docs/architecture/06). */
 export interface CodeHost {
   readonly product: Product
   readonly words: ChangeWords
@@ -171,7 +171,7 @@ export interface CodeHost {
    */
   merge(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
   checks(repository: Repository, sha: string): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
-  /** The end of a check's log, when the host keeps one Charrette can read. */
+  /** The end of a check's log, when the host keeps one Althar can read. */
   checkLog(repository: Repository, check: Check): Effect.Effect<string | null, ConnectorFailed>
   /** Comments and reviews since a cursor (from the start without one). */
   activity(repository: Repository, number: number, cursor: string | null): Effect.Effect<Activity, ConnectorFailed>
@@ -219,7 +219,7 @@ export interface TrackerCapabilities {
   readonly links: boolean
 }
 
-/** What a tracker offers Charrette (docs/architecture/06). */
+/** What a tracker offers Althar (docs/architecture/06). */
 export interface Tracker {
   readonly product: Product
   readonly capabilities: TrackerCapabilities

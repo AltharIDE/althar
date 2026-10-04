@@ -4,13 +4,13 @@
 - **Date:** 2026-09-28
 - **Owner:** Repository maintainers
 - **Context:** The desktop app's renderer shows the runtime's state and sends
-  it commands. Its components come from `@charrette/ui`, which is
+  it commands. Its components come from `@althar/ui`, which is
   presentational by rule. The logic between the components and the runtime
   needs a place that is easy to find and to test.
 - **Decision:**
   - The renderer is layered: **views**, then **view models**, then the **data
     layer**. Each layer depends only on the one below it.
-    - **Views** are React components. They compose `@charrette/ui`, render
+    - **Views** are React components. They compose `@althar/ui`, render
       what their view model returns, and call its intents. They hold no app
       logic.
     - **View models are hooks** (`useTaskThread`, `useBoard`). A view model

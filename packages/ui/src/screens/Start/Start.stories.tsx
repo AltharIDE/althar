@@ -22,7 +22,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The first run: the agents Charrette found, what a project is, and making one. */
+/** The first run: the agents Althar found, what a project is, and making one. */
 export const FirstRun: Story = {}
 
 /** No agent ready: a project can still be made, and says so. */

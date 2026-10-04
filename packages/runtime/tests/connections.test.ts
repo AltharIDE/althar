@@ -3,8 +3,8 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFile
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { type Fetch, products } from '@charrette/connectors'
-import { makeFakeService } from '@charrette/connectors/testing'
+import { type Fetch, products } from '@althar/connectors'
+import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -62,7 +62,7 @@ const withGitHub = (
 ) =>
   Runtime.layer({
     database: ':memory:',
-    worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
+    worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
     agents: fakeAgents(),
@@ -72,7 +72,7 @@ const withGitHub = (
       Connectors.of({
         products: [products.github, { ...products.linear, make: () => (more.linear === undefined ? {} : { tracker: more.linear }) }],
         fetch,
-        clientIds: { github: 'Iv1.charrette', linear: 'lin-charrette' },
+        clientIds: { github: 'Iv1.althar', linear: 'lin-althar' },
         callbackPort: more.callbackPort ?? 0,
       }),
     ),
@@ -128,7 +128,7 @@ describe('a connection', () => {
       yield* host?.account ?? Effect.void
       assert.strictEqual(sent.at(-1)?.authorization, 'Bearer ghu_renewed')
       assert.deepInclude(sent.find((request) => request.body.grant_type === 'refresh_token')?.body, {
-        client_id: 'Iv1.charrette',
+        client_id: 'Iv1.althar',
         refresh_token: 'ghr_1',
       })
       const renewed = JSON.parse((yield* secrets.get(connection?.id ?? '')) ?? '{}') as { accessToken?: string; refreshToken?: string }
@@ -186,7 +186,7 @@ describe('a connection', () => {
       assert.include(yield* Effect.promise(() => back.text()), 'Signed in to Linear')
       const [done] = yield* until(flowEnded(started.flowId), (states) => states[0]?.state !== 'waiting')
       assert.strictEqual(done?.state, 'done')
-      assert.deepInclude(sent[0]?.body, { code: 'the-code', grant_type: 'authorization_code', client_id: 'lin-charrette' })
+      assert.deepInclude(sent[0]?.body, { code: 'the-code', grant_type: 'authorization_code', client_id: 'lin-althar' })
       assert.strictEqual((yield* connections.list)[0]?.auth, 'pkce')
     }).pipe(Effect.provide(withGitHub(fetch, { callbackPort: port, linear: tracker })))
   })
@@ -236,7 +236,7 @@ describe('a connection', () => {
     }).pipe(Effect.provide(withGitHub(fetch)))
   })
 
-  it.live('keeps its state when Charrette can’t open its sign-in, rather than asking to sign in again', () => {
+  it.live('keeps its state when Althar can’t open its sign-in, rather than asking to sign in again', () => {
     const { fetch } = stub([user])
     // Secrets that are kept, until the app stops opening them.
     let locked = false
@@ -257,12 +257,12 @@ describe('a connection', () => {
       locked = true
       const { host } = yield* connections.adapters(connection.id)
       const error = yield* Effect.flip(host?.account ?? Effect.void)
-      assert.deepInclude(error, { reason: 'unreachable', message: 'Charrette couldn’t open its sign-in: The app didn’t answer.' })
+      assert.deepInclude(error, { reason: 'unreachable', message: 'Althar couldn’t open its sign-in: The app didn’t answer.' })
       assert.strictEqual((yield* connections.list)[0]?.state, 'ready')
     }).pipe(Effect.provide(withGitHub(fetch, { secrets })))
   })
 
-  it.live('offers the browser sign-in only where Charrette’s app is registered', () => {
+  it.live('offers the browser sign-in only where Althar’s app is registered', () => {
     const github = makeFakeService()
     return Effect.gen(function* () {
       const connections = yield* Connections
@@ -297,7 +297,7 @@ describe('a connection', () => {
       Effect.provide(
         Runtime.layer({
           database: ':memory:',
-          worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
+          worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
           appVersion: '0.0.0-test',
           deviceName: 'Test Mac',
           agents: fakeAgents(),
@@ -323,7 +323,7 @@ describe('where sign-ins are kept', () => {
   })
 
   it.effect('seals each in a file of its own that only this user can read, and opens it again', () => {
-    const folder = join(mkdtempSync(join(tmpdir(), 'charrette-secrets-')), 'secrets')
+    const folder = join(mkdtempSync(join(tmpdir(), 'althar-secrets-')), 'secrets')
     return Effect.gen(function* () {
       const secrets = yield* Secrets
       assert.isNull(yield* secrets.get('conn_1'))
@@ -338,7 +338,7 @@ describe('where sign-ins are kept', () => {
       yield* secrets.remove('conn_1')
       yield* secrets.remove('conn_1')
       assert.isNull(yield* secrets.get('conn_1'))
-      // A name is one of Charrette's ids, never a path.
+      // A name is one of Althar's ids, never a path.
       assert.strictEqual((yield* Effect.flip(secrets.set('../conn_1', 'x'))).reason, "Not a secret's name: ../conn_1")
       assert.strictEqual((yield* Effect.flip(secrets.get('.next'))).reason, "Not a secret's name: .next")
     }).pipe(Effect.provide(Secrets.sealed(folder, sealer())))
@@ -353,7 +353,7 @@ describe('where sign-ins are kept', () => {
     )
 
   it.effect('says why, when the app can’t seal or open one, or the folder can’t be written', () => {
-    const root = mkdtempSync(join(tmpdir(), 'charrette-secrets-'))
+    const root = mkdtempSync(join(tmpdir(), 'althar-secrets-'))
     writeFileSync(join(root, 'conn_1'), 'sealed')
     return Effect.gen(function* () {
       const refusing = yield* secretsOf(Secrets.sealed(root, sealer(true)))
@@ -395,7 +395,7 @@ describe('the agents', () => {
 
   it('leave git with no credential helper to ask, whatever the person set', () => {
     // The person's git hands out a password to whoever asks. The system's config is left out, so the real keychain isn't asked.
-    const home = mkdtempSync(join(tmpdir(), 'charrette-home-'))
+    const home = mkdtempSync(join(tmpdir(), 'althar-home-'))
     writeFileSync(join(home, '.gitconfig'), '[credential]\n\thelper = "!f() { echo username=dana; echo password=leaked; }; f"\n')
     const fill = (env: Readonly<Record<string, string>>) =>
       spawnSync('git', ['credential', 'fill'], {

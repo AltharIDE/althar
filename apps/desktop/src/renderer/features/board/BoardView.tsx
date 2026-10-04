@@ -1,4 +1,4 @@
-import type { AgentStatus, BoardCall, BoardTask, PlanStep } from '@charrette/contracts'
+import type { AgentStatus, BoardCall, BoardTask, PlanStep } from '@althar/contracts'
 import {
   AcceptCard,
   Board,
@@ -12,7 +12,7 @@ import {
   TaskStatus,
   Wait,
   WorkCard,
-} from '@charrette/ui'
+} from '@althar/ui'
 
 import { modelInfo, waitsWords } from '../../shared/agents'
 import { productBrand, productName } from '../../shared/products'

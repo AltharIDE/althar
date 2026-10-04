@@ -16,8 +16,8 @@ import { Rhythm } from '../../lib/rhythm'
 
 /*
  * ACP permission requests carry options of four kinds: allow once, allow
- * always, reject once, reject always. The agent asks; Charrette answers. So a
- * rule saved here is Charrette's, and it answers for every agent in the
+ * always, reject once, reject always. The agent asks; Althar answers. So a
+ * rule saved here is Althar's, and it answers for every agent in the
  * project, whichever runtime it is. Most requests never get here: the
  * project's rules and the lead answer them, and only what the rules keep for
  * you arrives as a card.

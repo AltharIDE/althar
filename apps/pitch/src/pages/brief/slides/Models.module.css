@@ -27,7 +27,7 @@
 .face { display: flex; align-items: center; gap: 7px; height: 100%; padding: 0 9px; overflow: hidden; font-size: 13px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
 .face svg, .face > span:first-child { flex: none; fill: currentColor; font-size: 15px; }
 .carried { background: var(--stone); color: var(--ink); }
-/* the model on top today: the one Charrette would route to */
+/* the model on top today: the one Althar would route to */
 .top { background: var(--cobalt); color: #fff; }
 .nm { overflow: hidden; text-overflow: ellipsis; }
 @container (max-width: 84px) { .nm { display: none; } }

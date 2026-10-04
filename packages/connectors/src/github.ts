@@ -321,7 +321,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       http
         .json(Schema.Unknown, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
           merge_method: repository.merges[0] ?? 'merge',
-          // Only the head Charrette last saw: a push since then isn't merged unseen.
+          // Only the head Althar last saw: a push since then isn't merged unseen.
           ...(change.headSha === null ? {} : { sha: change.headSha }),
         })
         .pipe(Effect.andThen(Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`), changeOf))),
@@ -346,7 +346,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         return [...fromRuns, ...fromStatuses]
       }),
     checkLog: (repository, check) => {
-      // Only GitHub Actions keeps logs Charrette can read: a check run's id is its job's.
+      // Only GitHub Actions keeps logs Althar can read: a check run's id is its job's.
       const match = /^run:(\d+):github-actions$/.exec(check.id)
       if (match === null) return Effect.succeed(null)
       return http.text(`${repo(repository)}/actions/jobs/${match[1]}/logs`).pipe(

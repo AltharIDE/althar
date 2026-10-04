@@ -30,7 +30,7 @@ describe('a call to a service', () => {
         ['Bearer t1', 'Bearer t2'],
       )
       assert.strictEqual(sent[0]?.headers['x-api'], '1')
-      assert.strictEqual(sent[0]?.headers['user-agent'], 'Charrette')
+      assert.strictEqual(sent[0]?.headers['user-agent'], 'Althar')
     }),
   )
 

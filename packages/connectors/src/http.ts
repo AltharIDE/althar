@@ -135,7 +135,7 @@ export const makeHttp = (options: HttpOptions): Http => {
     Effect.gen(function* () {
       const authorization = yield* options.authorization
       const headers: Record<string, string> = {
-        'user-agent': 'Charrette',
+        'user-agent': 'Althar',
         accept: init.accept ?? 'application/json',
         ...options.headers,
         authorization,

@@ -30,7 +30,7 @@ const BEATS = [
 const TREE = [
   ['payments-service/', 0],
   ['src/', 1],
-  ['.charrette/', 1],
+  ['.althar/', 1],
   ['memory/', 2],
   ['token-rotation.md', 3],
   ['refresh-window.md', 3],
@@ -49,13 +49,13 @@ function Desktop() {
           <i />
           <i />
           <i />
-          <span>payments-service · Charrette</span>
+          <span>payments-service · Althar</span>
           <em>on this Mac</em>
         </div>
         <div className={s.pane}>
           <ul className={s.tree}>
             {TREE.map(([name, depth]) => (
-              <li key={name} className={cx(name === 'token-rotation.md' && s.sel, name === '.charrette/' && s.ours)} data-d={depth}>
+              <li key={name} className={cx(name === 'token-rotation.md' && s.sel, name === '.althar/' && s.ours)} data-d={depth}>
                 {name}
               </li>
             ))}
@@ -89,13 +89,13 @@ const LAYERS = [
     cls: 'ent',
   },
   {
-    k: 'Charrette Cloud',
+    k: 'Althar Cloud',
     h: 'For teams, small and large',
     t: 'Shared memory, hosted runs, approvals from your phone',
     who: 'Teams · per seat',
     cls: 'cloud',
   },
-  { k: 'Open source', h: 'Charrette', t: 'The complete product, on your own machine', who: 'Anyone · free', cls: 'base' },
+  { k: 'Open source', h: 'Althar', t: 'The complete product, on your own machine', who: 'Anyone · free', cls: 'base' },
 ] as const
 
 /** Beat two: what's sold, stacked on the same open core. */
@@ -142,7 +142,7 @@ function Loop() {
 /** A platform team's vendor review: each question, the answer, and where to check it. */
 const REVIEW = [
   ['Can we read what it does?', 'All of it: memory, coordinator and every adapter.', 'source, every line'],
-  ['Where does project knowledge live?', 'In our repository, as Markdown, reviewed in pull requests like code.', '.charrette/memory/*.md'],
+  ['Where does project knowledge live?', 'In our repository, as Markdown, reviewed in pull requests like code.', '.althar/memory/*.md'],
   [
     'Does our code leave our network?',
     'Only to the model providers we already use. It can run entirely on our own infrastructure.',
@@ -158,7 +158,7 @@ function Review() {
     <div className={cx(s.scene, s.review)}>
       <div className={s.rvH}>
         <span>
-          <b>Vendor review</b> Charrette
+          <b>Vendor review</b> Althar
         </span>
         <span>
           Platform team · {REVIEW.length} of {REVIEW.length} answered
@@ -205,7 +205,7 @@ export function Open() {
           </div>
           <figure
             className={s.fig}
-            aria-label="Charrette on your desktop, the cloud and enterprise offerings built on it, how that grows, and a lead's review of it"
+            aria-label="Althar on your desktop, the cloud and enterprise offerings built on it, how that grows, and a lead's review of it"
           >
             <Desktop />
             <Stack />

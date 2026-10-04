@@ -2,9 +2,9 @@ import { cx } from '../../lib/cx'
 import s from './Logo.module.css'
 
 /*
- * Charrette's own mark: the section through an architect's triangular scale
+ * Althar's own mark: the section through an architect's triangular scale
  * ruler, bored through the middle, with a point of cobalt in the bore. Drawn
- * in the ink around it; the point is --live, Charrette's colour. Decoration,
+ * in the ink around it; the point is --live, Althar's colour. Decoration,
  * like the other marks: the name beside it is what reads.
  *
  * On a 24 grid: an equilateral triangle about the centroid (12, 14.4), faces

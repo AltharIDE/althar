@@ -1,5 +1,5 @@
-import type { ProjectId } from '@charrette/domain'
-import { Ledger } from '@charrette/persistence-sqlite'
+import type { ProjectId } from '@althar/domain'
+import { Ledger } from '@althar/persistence-sqlite'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -9,7 +9,7 @@ import { addItem } from './threads'
 /*
  * Each task has one card in its project's coordinator thread
  * (docs/architecture/04, task events): its plan before it starts, then where
- * it stands. Charrette posts it, never an agent. The card's item holds only
+ * it stands. Althar posts it, never an agent. The card's item holds only
  * the task's id; what it shows is read from the task, its plan and its run,
  * so touching the item tells watching clients to read it again.
  */

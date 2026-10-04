@@ -16,7 +16,7 @@ export interface IconProps {
    hairline, so the stroke is set to land near 1.25px at any size. */
 const stroke = (size: number) => Math.min(2.4, Math.max(1.5, (1.25 * 24) / size))
 
-/** An icon by what it means in Charrette; foundations/Icon/icons.ts decides the drawing. Decoration only. */
+/** An icon by what it means in Althar; foundations/Icon/icons.ts decides the drawing. Decoration only. */
 export function Icon({ name, size = 14, style, className }: IconProps) {
   const Drawing = ICONS[name]
   return (

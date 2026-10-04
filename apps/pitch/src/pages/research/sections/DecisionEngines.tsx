@@ -15,9 +15,8 @@ export function DecisionEngines() {
             relevant here.
           </p>
           <p>
-            The hypothesis is not that Jev should become Charrette’s coordinator. It’s that a fast, probabilistic decision model could
-            become a supervision primitive used throughout the product, while the coordinator’s rules, state and history remain open and
-            inspectable.
+            The hypothesis is not that Jev should become Althar’s coordinator. It’s that a fast, probabilistic decision model could become a
+            supervision primitive used throughout the product, while the coordinator’s rules, state and history remain open and inspectable.
           </p>
         </div>
         <figure className={s.ex}>
@@ -89,8 +88,8 @@ export function DecisionEngines() {
           </p>
           <p>
             <strong>Open interface, closed model.</strong> Jev is not open source; access is through TypeSafe’s hosted API, while its SDKs
-            and a compatibility adapter built on ordinary LLM APIs are MIT-licensed. So the abstraction boundary matters. Charrette should
-            own an open decision-engine contract and treat Jev as one optional provider, alongside constrained frontier models, smaller
+            and a compatibility adapter built on ordinary LLM APIs are MIT-licensed. So the abstraction boundary matters. Althar should own
+            an open decision-engine contract and treat Jev as one optional provider, alongside constrained frontier models, smaller
             open-weight models and deterministic implementations. Project policy must never depend on an uncalibrated, provider-specific
             confidence scale.
           </p>

@@ -1,18 +1,18 @@
-# @charrette/desktop — Architecture
+# @althar/desktop — Architecture
 
 The desktop shell of [docs/architecture/02](../../docs/architecture/02-desktop-runtime.md). The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target.
 
 - **Owner:** Repository maintainers
-- **Consumers:** people using Charrette.
-- **Dependency direction:** the window depends on `@charrette/ui` and `@charrette/contracts`; the runtime's process on `@charrette/runtime`. The window never imports the runtime, and the kit never imports Effect.
+- **Consumers:** people using Althar.
+- **Dependency direction:** the window depends on `@althar/ui` and `@althar/contracts`; the runtime's process on `@althar/runtime`. The window never imports the runtime, and the kit never imports Effect.
 
 ## Processes
 
 ```mermaid
 flowchart LR
-    Window["Window<br/>React, @charrette/ui"] -->|"preload: the port, the folder picker"| Main["Main process<br/>windows, lifecycle"]
+    Window["Window<br/>React, @althar/ui"] -->|"preload: the port, the folder picker"| Main["Main process<br/>windows, lifecycle"]
     Main -->|"utilityProcess.fork"| Runtime["Runtime<br/>utility process"]
-    Window <-->|"MessagePort: @charrette/contracts"| Runtime
+    Window <-->|"MessagePort: @althar/contracts"| Runtime
     Runtime -->|"agents over ACP"| Agents["Claude Code, Codex, OpenCode"]
 ```
 
@@ -20,14 +20,14 @@ flowchart LR
 | --- | --- | --- |
 | `src/main` | Windows, the app's lifecycle, the runtime's process and its restarts, the folder picker and folder grants, external links, notifications and the Dock's count | Projects, tasks, rules, sessions |
 | `src/preload` | The bridge: hands the page its port, and asks main for grants for picked and dropped folders | Node, the file system, a shell, paths |
-| `src/runtime` | The runtime (`@charrette/runtime`), serving the API over each window's port, and telling the main process what needs the person | Anything about windows |
+| `src/runtime` | The runtime (`@althar/runtime`), serving the API over each window's port, and telling the main process what needs the person | Anything about windows |
 | `src/renderer` | The window: views, view models and the data layer (ADR-010) | Effect outside `data/`; Node |
 
 ## How they talk
 
-- **Main starts the runtime** in a utility process, with the profile and worktree folders in its environment. The runtime opens the store, reconciles what an earlier launch left, and waits for ports. If it crashes, main starts it again and reloads each window, which reconnects; reconciliation makes that safe, and each task it touched says "Charrette restarted." More than three crashes in a minute end the app instead.
+- **Main starts the runtime** in a utility process, with the profile and worktree folders in its environment. The runtime opens the store, reconciles what an earlier launch left, and waits for ports. If it crashes, main starts it again and reloads each window, which reconnects; reconciliation makes that safe, and each task it touched says "Althar restarted." More than three crashes in a minute end the app instead.
 - **Each page load gets a fresh port.** On `did-finish-load`, main makes a `MessageChannelMain`, sends one end to the runtime and the other to the page through the preload. The runtime serves the API over it on a fiber of its own, until the window closes its client or the port goes.
-- **The API is Effect RPC** (`@charrette/contracts`): typed calls, typed errors (`ApiError`, in words), and one stream, `Watch`. Every message is checked against its schema on both sides.
+- **The API is Effect RPC** (`@althar/contracts`): typed calls, typed errors (`ApiError`, in words), and one stream, `Watch`. Every message is checked against its schema on both sides.
 - **Commands carry the window's own ids.** The client makes one per command and, when the runtime gave no answer (rather than said no), tries once more under the same id; the runtime answers the retry from the first one's receipt.
 - **Reads say where the feed stood.** Each list and thread read returns the change-feed cursor it read at, and a view model watches from there, so nothing between the read and the watch is missed. A watch that breaks picks up from the last change it heard.
 - **What changes reaches the window two ways.** `Changed` comes from the store's change feed, with the thread it belongs to: a task's screen reads a changed item alone, and anything else about the thread reads the thread's head without its items. `Streaming` carries an agent's message or thought as far as it has come, at most every 50 ms, with its kind and agent: the thread shows it from its first words, before it has read the item, and in place of the stored text until the store catches up.
@@ -53,15 +53,15 @@ Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view
 
 ## Principles
 
-- **The kit draws; the app arranges.** Views compose `@charrette/ui` and add layout and page margins, nothing that looks like a component of its own. When a view needs something the kit lacks, it goes into the kit, with its stories.
+- **The kit draws; the app arranges.** Views compose `@althar/ui` and add layout and page margins, nothing that looks like a component of its own. When a view needs something the kit lacks, it goes into the kit, with its stories.
 - **The runtime owns the state.** View models hold what the runtime last said and what is streaming; they read again rather than patch.
 - **The page is locked down** (07's renderer list). Sandboxed, context-isolated, no Node, a strict Content Security Policy, no new windows and no navigation away, no web permissions granted, and no paths. Links open in the person's browser, for `https:` and local `http:` only.
-- **Test hooks stay out of packaged builds.** `CHARRETTE_FAKE_AGENTS` works only in a build made with `bun run build`; `bun run build:package` leaves the code out. It swaps in the fake agent, the connectors' fake GitHub, and secrets kept in memory, so the end-to-end tests never reach a network or the Keychain.
+- **Test hooks stay out of packaged builds.** `ALTHAR_FAKE_AGENTS` works only in a build made with `bun run build`; `bun run build:package` leaves the code out. It swaps in the fake agent, the connectors' fake GitHub, and secrets kept in memory, so the end-to-end tests never reach a network or the Keychain.
 - **Words on screen follow [the glossary](../../docs/glossary.md).**
 - **One model picker for every agent.** Every agent's models are one list, each known by its agent and its own id; picking another agent's model hands the conversation to that agent, which the picker says on those models, and asks before while a turn is under way. Default efforts are the runtime's, so every way a session starts uses them; pins are only how this window lists models, so they stay in its storage, as conveniences that may be lost. Until the person pins one, each agent's current model is pinned.
 - **What needs the person reaches them outside the window.** The runtime says when a task becomes ready or a call opens (its `Nudges`), and how many such things wait; the main process shows a notification unless the person is looking at the window, keeps that count on the Dock, and opens the task when they click. Never for progress.
 - **Work folds; results stand.** A turn's work (its tool calls, thoughts, plan, and what it said on the way) folds under how long it worked; only its last message stays open, and nothing when a step's result follows, since the step's summary is what the person reads. While a turn runs, the fold says how long it has worked so far and what it is doing now.
-- **A step that needs you is a call in the task.** It says what went wrong and what Charrette tried, with the kit's `Stuck`: tell the lead, hand the step to another agent, or abandon it; for a review, review again or go on without it.
+- **A step that needs you is a call in the task.** It says what went wrong and what Althar tried, with the kit's `Stuck`: tell the lead, hand the step to another agent, or abandon it; for a review, review again or go on without it.
 - **A project is a conversation, a board, or both** (⌘1–3). The board reads every task's card and every call in one go (`GetBoard`) and reads again when something it shows changes: a task, plan, run, step, session, turn, call, pull request or worktree, not what is said in a thread. What you open from it goes in the dock beside it: a call is answered there as in its task, work ready to accept is merged at the head the dock showed, or sent back to its lead, and a task's changes open over the window. The bar says how much runs and how much needs you, and opens the first of it.
 - **The runtime keeps a plan's clock.** A plan card counts down to the time the runtime starts it, seen or not, then says it is starting; the runtime starts it, not the window. Holding, changing and starting it now go to the runtime, and the card shows what comes back.
 

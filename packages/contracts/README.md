@@ -1,14 +1,14 @@
-# @charrette/contracts
+# @althar/contracts
 
-The contract between Charrette's runtime and its clients: the API, as Effect RPC schemas, and the transport it runs over a message port. The runtime serves it (`@charrette/runtime`'s `connection`); the desktop app's window calls it.
+The contract between Althar's runtime and its clients: the API, as Effect RPC schemas, and the transport it runs over a message port. The runtime serves it (`@althar/runtime`'s `connection`); the desktop app's window calls it.
 
 ## Use it
 
 On the runtime's side, over an Electron `MessagePortMain` or a Node port:
 
 ```ts
-import { emitterPort } from '@charrette/contracts'
-import { connection } from '@charrette/runtime'
+import { emitterPort } from '@althar/contracts'
+import { connection } from '@althar/runtime'
 
 Layer.launch(connection(emitterPort(port)))
 ```
@@ -16,7 +16,7 @@ Layer.launch(connection(emitterPort(port)))
 On a client's side, over a DOM `MessagePort`:
 
 ```ts
-import { Api, clientProtocol, domPort } from '@charrette/contracts'
+import { Api, clientProtocol, domPort } from '@althar/contracts'
 import { RpcClient } from 'effect/rpc'
 
 const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(yield* Layer.build(clientProtocol(domPort(port)))))

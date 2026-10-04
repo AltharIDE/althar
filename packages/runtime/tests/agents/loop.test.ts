@@ -17,14 +17,13 @@ import * as Runtime from '../../src/Runtime'
  * machine (docs/plans/mvp.md): a small repository, one request to the
  * coordinator, and what follows, printed as it happens: the coordinator's
  * plan, the lead's steps, the review and its findings, and every permission
- * request and what Charrette decided. The plan starts on its own; the
+ * request and what Althar decided. The plan starts on its own; the
  * coordinator picks the lead and the reviewer. It costs a few turns of usage
  * on each agent it picks, and never runs in CI: `bun run test:agents`, with
- * CHARRETTE_ASK to ask something else.
+ * ALTHAR_ASK to ask something else.
  */
 
-const ask =
-  process.env.CHARRETTE_ASK ?? 'index.js has addDays. Add subtractDays beside it, and a test for both that runs with `node --test`.'
+const ask = process.env.ALTHAR_ASK ?? 'index.js has addDays. Add subtractDays beside it, and a test for both that runs with `node --test`.'
 
 const say = (line: string) => process.stdout.write(`${line}\n`)
 const clip = (text: string, length = 300) => (text.length > length ? `${text.slice(0, length)}…` : text).replaceAll('\n', ' ⏎ ')
@@ -33,11 +32,11 @@ describe('the coordinator loop, on real agents', () => {
   it.live(
     'plans what it is asked, and the plan runs until the task is ready',
     () => {
-      const home = mkdtempSync(join(tmpdir(), 'charrette-loop-'))
+      const home = mkdtempSync(join(tmpdir(), 'althar-loop-'))
       const repository = join(home, 'meridian')
       mkdirSync(repository)
       const git = (...args: Array<string>) =>
-        execFileSync('git', ['-c', 'user.name=Try', '-c', 'user.email=try@charrette.test', ...args], { cwd: repository })
+        execFileSync('git', ['-c', 'user.name=Try', '-c', 'user.email=try@althar.test', ...args], { cwd: repository })
       git('init', '-q', '-b', 'main')
       writeFileSync(join(repository, 'README.md'), '# Meridian\n\nA small library for dates.\n\nRun the tests with `node --test`.\n')
       writeFileSync(join(repository, 'index.js'), 'export const addDays = (date, days) => new Date(date.getTime() + days * 86_400_000)\n')
@@ -46,7 +45,7 @@ describe('the coordinator loop, on real agents', () => {
       const layer = Queries.layer.pipe(
         Layer.provideMerge(
           Runtime.layer({
-            database: join(home, 'charrette.sqlite'),
+            database: join(home, 'althar.sqlite'),
             worktreeRoot: join(home, 'worktrees'),
             appVersion: '0.0.0-agents',
             deviceName: 'Agents',

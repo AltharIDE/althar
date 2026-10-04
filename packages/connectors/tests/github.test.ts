@@ -34,7 +34,7 @@ const pull = (overrides: Record<string, unknown> = {}) => ({
   state: 'open',
   draft: true,
   merged_at: null,
-  head: { ref: 'charrette/mer-231', sha: 'abc' },
+  head: { ref: 'althar/mer-231', sha: 'abc' },
   base: { ref: 'main' },
   user: { id: 5, login: 'you', type: 'User' },
   additions: 10,
@@ -114,10 +114,10 @@ describe('GitHub as a code host', () => {
   it.effect('finds the open pull request from a branch', () =>
     Effect.gen(function* () {
       const { host, sent } = github([
-        ['GET', /\/pulls\?state=open&head=meridian%3Acharrette%2Fmer-231$/, { json: [pull()] }],
+        ['GET', /\/pulls\?state=open&head=meridian%3Aalthar%2Fmer-231$/, { json: [pull()] }],
         ['GET', /\/pulls\?state=open&head=meridian%3Aother$/, { json: [] }],
       ])
-      const found = yield* host.findChange(repository, 'charrette/mer-231')
+      const found = yield* host.findChange(repository, 'althar/mer-231')
       assert.deepStrictEqual(found, {
         id: 'PR_1',
         number: 12,
@@ -126,7 +126,7 @@ describe('GitHub as a code host', () => {
         url: 'https://github.com/meridian/api/pull/12',
         state: 'open',
         draft: true,
-        source: 'charrette/mer-231',
+        source: 'althar/mer-231',
         target: 'main',
         headSha: 'abc',
         author: { id: '5', login: 'you', name: null, bot: false },
@@ -154,18 +154,18 @@ describe('GitHub as a code host', () => {
                   status: 422,
                   json: {
                     message: 'Validation Failed',
-                    errors: [{ message: 'A pull request already exists for meridian:charrette/mer-231.' }],
+                    errors: [{ message: 'A pull request already exists for meridian:althar/mer-231.' }],
                   },
                 },
         ],
         ['GET', /\/pulls\?state=open&head=/, { json: [pull({ draft: false })] }],
       ])
-      const change = { title: 'MER-231: Rate-limit refunds', body: 'Body', source: 'charrette/mer-231', target: 'main', draft: true }
+      const change = { title: 'MER-231: Rate-limit refunds', body: 'Body', source: 'althar/mer-231', target: 'main', draft: true }
       assert.strictEqual((yield* host.openChange(repository, change)).number, 12)
       assert.deepStrictEqual(sent[0]?.body, {
         title: 'MER-231: Rate-limit refunds',
         body: 'Body',
-        head: 'charrette/mer-231',
+        head: 'althar/mer-231',
         base: 'main',
         draft: true,
       })
@@ -542,8 +542,8 @@ describe('GitHub as a tracker', () => {
         container: 'meridian/api',
         updatedAt: '2026-10-01T08:00:00Z',
       }
-      yield* host.comment(found, 'Picked up by Charrette')
-      assert.deepStrictEqual(sent[0]?.body, { body: 'Picked up by Charrette' })
+      yield* host.comment(found, 'Picked up by Althar')
+      assert.deepStrictEqual(sent[0]?.body, { body: 'Picked up by Althar' })
       yield* host.link(found, { url: 'https://x', title: 'x' })
       assert.lengthOf(sent, 1)
       assert.isFalse(host.capabilities.links)

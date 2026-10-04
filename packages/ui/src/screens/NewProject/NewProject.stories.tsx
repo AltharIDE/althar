@@ -105,7 +105,7 @@ export const AllStates: Story = {
         { state: 'creating', node: <NewProject {...args} creating /> },
         {
           state: 'create failed',
-          node: <NewProject {...args} error="Couldn’t write the project to ~/Charrette. Check that the folder is writable." />,
+          node: <NewProject {...args} error="Couldn’t write the project to ~/Althar. Check that the folder is writable." />,
         },
         { state: 'still reading', node: <NewProject {...args} sources={READING_MAP} /> },
         {

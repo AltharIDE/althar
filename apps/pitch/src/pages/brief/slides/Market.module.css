@@ -23,7 +23,7 @@
 .lock::before, .k-lock { background: #b8b5ad; }
 .part::before, .k-part { background: transparent; box-shadow: inset 0 0 0 1.5px var(--cobalt); }
 .free::before, .k-free { background: var(--cobalt); }
-/* Charrette's row, washed in Charrette's colour */
+/* Althar's row, washed in Althar's colour */
 .tbl tr.us th, .tbl tr.us td { background: rgba(43, 59, 255, .08); color: var(--ink); border-bottom: 0; font-weight: 500; box-shadow: inset 0 1.5px 0 var(--cobalt); }
 .tbl tr.us th { font-size: 17px; font-weight: var(--title); color: var(--cobalt); }
 

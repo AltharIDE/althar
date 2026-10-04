@@ -1,5 +1,5 @@
 import * as acp from '@agentclientprotocol/sdk'
-import type { ToolKind } from '@charrette/domain'
+import type { ToolKind } from '@althar/domain'
 import { Cause, Data, DateTime, Deferred, Duration, Effect, Exit, Option, PubSub, Queue, Ref, Scope, Stream } from 'effect'
 
 import { AgentExited, AgentRequestFailed, type AgentStartFailed, OptionUnavailable, TurnInProgress } from './errors'
@@ -17,14 +17,14 @@ import type { LaunchSpec, PermissionMeanings } from './registry'
  * adapter for one agent (ADR-002) can stand in without callers changing.
  */
 
-/** An agent that runs in this process, for tests: the fake agent in `@charrette/provider-adapters/testing`. */
+/** An agent that runs in this process, for tests: the fake agent in `@althar/provider-adapters/testing`. */
 export interface InProcessAgent {
   readonly _tag: 'InProcessAgent'
   readonly app: acp.AgentApp
 }
 
 export type Transport =
-  /** The agent runs as a process Charrette owns. `capture` receives the raw protocol, numbered, in both directions. */
+  /** The agent runs as a process Althar owns. `capture` receives the raw protocol, numbered, in both directions. */
   | { readonly _tag: 'Process'; readonly spec: LaunchSpec; readonly cwd: string; readonly capture?: (frame: CapturedFrame) => void }
   | { readonly _tag: 'InProcess'; readonly agent: InProcessAgent }
 
@@ -47,7 +47,7 @@ export interface PermissionRequest {
   readonly options: ReadonlyArray<PermissionOption>
 }
 
-/** Charrette's decision on a permission request, from the project's rules. `reason` is told to the agent when a rejection stops its turn. */
+/** Althar's decision on a permission request, from the project's rules. `reason` is told to the agent when a rejection stops its turn. */
 export interface PermissionDecision {
   readonly decision: 'allow' | 'reject'
   readonly reason?: string
@@ -64,9 +64,9 @@ export interface PermissionAnswer {
 const NO_MEANINGS: PermissionMeanings = { rejectAndContinue: [], rejectAndStop: [], allowScopes: {} }
 
 /**
- * The option Charrette sends for a decision (ADR-007). Never an "always"
+ * The option Althar sends for a decision (ADR-007). Never an "always"
  * option: the agent could remember it, and later requests would stop reaching
- * Charrette.
+ * Althar.
  * - Allow: an option for this action; failing that, one for the rest of the
  *   turn; failing that, the request is cancelled.
  * - Reject: an option that skips the action and carries on; failing that, one
@@ -123,7 +123,7 @@ export interface AgentInfo {
   readonly authMethods: ReadonlyArray<string>
 }
 
-/** An MCP server a session may use. Charrette gives every session its own tools this way. */
+/** An MCP server a session may use. Althar gives every session its own tools this way. */
 export type McpServer =
   | {
       readonly type: 'stdio'
@@ -291,7 +291,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
     /**
      * Decides a permission request through the caller. The request is dropped,
      * answered `cancelled` and recorded as withdrawn, when the agent withdraws
-     * it or when Charrette cancels the turn (ACP: a client that cancels a turn
+     * it or when Althar cancels the turn (ACP: a client that cancels a turn
      * answers its pending requests itself).
      */
     const answerPermission = (params: acp.RequestPermissionRequest, fromAgent: AbortSignal): Promise<acp.RequestPermissionResponse> => {
@@ -326,10 +326,10 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         })
         return chosen.optionId === null ? CANCELLED : { outcome: { outcome: 'selected', optionId: chosen.optionId } }
       }
-      // A decision that fails is a rejection: nothing runs that Charrette did not allow.
+      // A decision that fails is a rejection: nothing runs that Althar did not allow.
       return Effect.runPromiseWith(context)(options.onPermission(request), { signal: dropped.signal })
         .then(answer, () =>
-          dropped.signal.aborted ? (withdraw(), CANCELLED) : answer({ decision: 'reject', reason: 'Charrette could not decide' }),
+          dropped.signal.aborted ? (withdraw(), CANCELLED) : answer({ decision: 'reject', reason: 'Althar could not decide' }),
         )
         .finally(() => {
           pending.delete(drop)
@@ -393,7 +393,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
 
     // Updates are handled before anything else, so each is in its session's inbox before a later message is looked at.
     const app = acp
-      .client({ name: 'charrette' })
+      .client({ name: 'althar' })
       .onNotification(acp.methods.client.session.update, ({ params }) => {
         remember(params.sessionId, params.update)
         receive(params.sessionId, { _tag: 'Update', update: params.update })

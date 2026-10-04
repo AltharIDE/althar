@@ -1,10 +1,10 @@
 import type * as acp from '@agentclientprotocol/sdk'
-import type { ToolKind } from '@charrette/domain'
+import type { ToolKind } from '@althar/domain'
 
 import type { Classified } from './failures'
 
 /*
- * What an agent's updates become inside Charrette. The runtime turns these
+ * What an agent's updates become inside Althar. The runtime turns these
  * into thread items. An update this version doesn't know is kept as `Other`
  * with its raw payload, never dropped and never fatal (docs/architecture/03).
  */
@@ -75,11 +75,11 @@ export type SessionEvent =
       readonly cost?: { readonly amount: number; readonly currency: string }
     }
   | { readonly _tag: 'OptionsChanged'; readonly options: ReadonlyArray<ConfigOption> }
-  /** The mode changed. `byAgent` when Charrette didn't ask for it, such as a plan session leaving plan mode. */
+  /** The mode changed. `byAgent` when Althar didn't ask for it, such as a plan session leaving plan mode. */
   | { readonly _tag: 'ModeChanged'; readonly modeId: string; readonly byAgent: boolean }
   | { readonly _tag: 'Notice'; readonly severity: string; readonly title: string; readonly description?: string }
   /**
-   * Charrette answered a permission request. `optionId` is what was sent to
+   * Althar answered a permission request. `optionId` is what was sent to
    * the agent (null when the request was cancelled), and `stopsTurn` says the
    * agent stops the turn on it; the adapter then resumes the turn itself.
    */
@@ -91,7 +91,7 @@ export type SessionEvent =
       readonly scope: PermissionScope | null
       readonly stopsTurn: boolean
     }
-  /** A permission request was dropped before Charrette decided it: the turn was cancelled, by Charrette or the agent. */
+  /** A permission request was dropped before Althar decided it: the turn was cancelled, by Althar or the agent. */
   | { readonly _tag: 'PermissionWithdrawn'; readonly toolCallId: string }
   /** The adapter resumed a turn the agent stopped on a rejection, telling it why. */
   | { readonly _tag: 'Resumed'; readonly reason: string }

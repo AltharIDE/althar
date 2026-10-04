@@ -79,7 +79,7 @@ export function Research() {
       <header className={s.mast}>
         <a className={s.brand} href={homeHref}>
           <Logo />
-          Charrette
+          Althar
         </a>
         <nav className={s.pages} aria-label="Pages">
           <a href={homeHref}>Brief</a>

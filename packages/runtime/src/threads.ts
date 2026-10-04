@@ -1,6 +1,6 @@
-import { Ids, newId, type ProjectId, type ThreadItemKind } from '@charrette/domain'
-import { Ledger } from '@charrette/persistence-sqlite'
-import type { SessionEvent } from '@charrette/provider-adapters'
+import { Ids, newId, type ProjectId, type ThreadItemKind } from '@althar/domain'
+import { Ledger } from '@althar/persistence-sqlite'
+import type { SessionEvent } from '@althar/provider-adapters'
 import { Clock, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 

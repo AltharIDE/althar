@@ -1,4 +1,4 @@
-import { Ids, newId, now } from '@charrette/domain'
+import { Ids, newId, now } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'

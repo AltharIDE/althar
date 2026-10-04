@@ -9,7 +9,7 @@ export function Opening() {
         <h1>The missing project layer.</h1>
         <p className={s.dek}>
           Why software engineering with AI agents needs an open, provider-independent home for project memory and coordination, and how
-          Charrette proposes to build it.
+          Althar proposes to build it.
         </p>
       </div>
       <section className={cx(s.s, s.abstract)}>
@@ -21,8 +21,8 @@ export function Opening() {
           </p>
           <p>
             Project context is fragmented, continuity belongs to individual products, and developers spend their attention carrying
-            information between specialist agents. Charrette proposes an open, provider-independent project layer. It holds durable intent
-            and evidence, while a coordinator composes execution graphs around replaceable workers. The purpose is not to remove developer
+            information between specialist agents. Althar proposes an open, provider-independent project layer. It holds durable intent and
+            evidence, while a coordinator composes execution graphs around replaceable workers. The purpose is not to remove developer
             judgment. It is to stop spending that judgment on clerical coordination.
           </p>
         </div>

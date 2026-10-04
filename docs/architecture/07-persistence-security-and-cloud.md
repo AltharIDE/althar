@@ -2,7 +2,7 @@
 
 ## Local persistence
 
-Use one SQLite database per local Charrette profile and one
+Use one SQLite database per local Althar profile and one
 content-addressed artifact store.
 
 The runtime is the sole database writer. The renderer, Electron main process,
@@ -77,11 +77,11 @@ lifetimes when those capabilities exist.
 
 Use globally unique sortable IDs, integer aggregate revisions, UTC timestamps,
 and explicit terminal/tombstone facts. Store external provider IDs as data,
-never as Charrette primary keys.
+never as Althar primary keys.
 
 ### Schema rules
 
-The local schema follows these rules; `@charrette/persistence-sqlite` tests the
+The local schema follows these rules; `@althar/persistence-sqlite` tests the
 ones that can be tested.
 
 - **Vocabularies are lookup tables** (`vocab_<name>`), so a new word is an
@@ -232,11 +232,11 @@ Repository content is hostile input. It may contain:
 - workspace configuration that tries to broaden tools;
 - build steps that exfiltrate environment or credentials.
 
-The MVP is trusted-host execution under the user's OS account. Charrette must
+The MVP is trusted-host execution under the user's OS account. Althar must
 say so. It constrains its own operations but cannot honestly claim to sandbox a
 provider or arbitrary build process without an OS/container isolation layer.
 
-Git hooks are disabled for Charrette-owned automated operations unless a
+Git hooks are disabled for Althar-owned automated operations unless a
 specific workflow grants them. Repository-local binaries and configuration are
 not trusted as runtime dependencies.
 
@@ -467,7 +467,7 @@ material and future capability disappear.
 - Active backup restores with every referenced blob or a precise missing report.
 - Secret canaries are absent from DB records, renderer errors, logs, bundles,
   and process arguments.
-- Symlink/path traversal cannot escape registered roots in Charrette-owned
+- Symlink/path traversal cannot escape registered roots in Althar-owned
   operations.
 - Sixteen-run soak tests keep queues bounded and UI responsive.
 - Stale controller and lease tokens cannot advance state.

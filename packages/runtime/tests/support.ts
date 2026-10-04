@@ -3,13 +3,13 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
-import type { AgentDefinition, AgentId } from '@charrette/provider-adapters'
-import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, fakeAgentMain } from '@charrette/provider-adapters/testing'
+import type { AgentDefinition, AgentId } from '@althar/provider-adapters'
+import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, fakeAgentMain } from '@althar/provider-adapters/testing'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { type Fetch, products } from '@charrette/connectors'
-import type { FakeService } from '@charrette/connectors/testing'
+import { type Fetch, products } from '@althar/connectors'
+import type { FakeService } from '@althar/connectors/testing'
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -22,16 +22,16 @@ import { Secrets } from '../src/Secrets'
 
 /** A git repository with one commit on `main`. */
 export const repository = () => {
-  const path = mkdtempSync(join(tmpdir(), 'charrette-repo-'))
+  const path = mkdtempSync(join(tmpdir(), 'althar-repo-'))
   const run = (...args: Array<string>) =>
     execFileSync('git', args, {
       cwd: path,
       env: {
         ...process.env,
         GIT_AUTHOR_NAME: 'Test',
-        GIT_AUTHOR_EMAIL: 'test@charrette.test',
+        GIT_AUTHOR_EMAIL: 'test@althar.test',
         GIT_COMMITTER_NAME: 'Test',
-        GIT_COMMITTER_EMAIL: 'test@charrette.test',
+        GIT_COMMITTER_EMAIL: 'test@althar.test',
       },
     })
   run('init', '-q', '-b', 'main')
@@ -42,7 +42,7 @@ export const repository = () => {
 }
 
 /** Where the fake agents' usual folders are: each agent's own, under one made for the test run. */
-const fakeHomes = mkdtempSync(join(tmpdir(), 'charrette-fake-homes-'))
+const fakeHomes = mkdtempSync(join(tmpdir(), 'althar-fake-homes-'))
 
 /** Lines the runtime would have opened in a terminal, such as an account's sign-in. */
 export const opened: Array<string> = []
@@ -101,7 +101,7 @@ export const fakeAgents = (
       return agentId === 'process'
         ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
         : agentId === 'missing'
-          ? { _tag: 'Process', spec: { command: 'charrette-no-such-agent', args: [] }, cwd }
+          ? { _tag: 'Process', spec: { command: 'althar-no-such-agent', args: [] }, cwd }
           : // An account's own options, by its home's folder name (`codex@work`), or `@usual` for the agent's usual folder.
             {
               _tag: 'InProcess',
@@ -159,8 +159,8 @@ export const runtime = (
 ) =>
   Runtime.layer({
     database,
-    worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
-    accountsRoot: mkdtempSync(join(tmpdir(), 'charrette-accounts-')),
+    worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
+    accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
     // Nothing opens on the Mac running the tests: what would have is kept.
     openTerminal: (line) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(false)),
     appVersion: '0.0.0-test',
@@ -182,7 +182,7 @@ export const HOST = 'https://github.test'
 export const hosted = (path: ReadonlyArray<string> = ['meridian', 'api']) => {
   const working = repository()
   execFileSync('git', ['remote', 'add', 'origin', `${HOST}/${path.join('/')}.git`], { cwd: working })
-  const bare = mkdtempSync(join(tmpdir(), 'charrette-remote-'))
+  const bare = mkdtempSync(join(tmpdir(), 'althar-remote-'))
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bare })
   execFileSync('git', ['push', '-q', bare, 'main'], { cwd: working })
   return { working, bare }
@@ -258,7 +258,7 @@ export const notices = (threadId: string) =>
     return rows.map((row) => JSON.parse(row.content) as Readonly<Record<string, string>>)
   })
 
-/** Calls one of Charrette's tools as an agent with this access would: over MCP, with the session's token. */
+/** Calls one of Althar's tools as an agent with this access would: over MCP, with the session's token. */
 export const callTool = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>
   Effect.gen(function* () {
     const toolServer = yield* ToolServer

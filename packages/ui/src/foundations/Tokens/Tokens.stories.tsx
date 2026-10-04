@@ -38,7 +38,7 @@ const GROUPS: { title: string; swatches: Swatch[] }[] = [
   {
     title: 'Meaning',
     swatches: [
-      { name: '--live', note: 'cobalt: Charrette, and work in motion' },
+      { name: '--live', note: 'cobalt: Althar, and work in motion' },
       { name: '--signal', note: 'violet: a decision that waits on a person' },
       { name: '--ok', note: 'additions and merges, nothing else' },
       { name: '--danger', note: 'deletions and failures, nothing else' },

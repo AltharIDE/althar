@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import type { BoardTask } from '@charrette/contracts'
+import type { BoardTask } from '@althar/contracts'
 
 import {
   ActionButton,
@@ -22,7 +22,7 @@ import {
   ThreadMeasure,
   TitleBar,
   WorkStatus,
-} from '@charrette/ui'
+} from '@althar/ui'
 
 import { ModelChoice } from '../../shared/ModelChoice'
 import { type Choice, runningOn } from '../../shared/models'
@@ -71,8 +71,8 @@ export const text = {
   showEarlier: 'Show',
   loadingEarlier: 'Showing…',
   dismiss: 'Dismiss',
-  boardFailed: 'Charrette couldn’t read the board.',
-  notConnected: (host: string) => `Charrette isn't connected to ${host}, so tasks here end on their branch.`,
+  boardFailed: 'Althar couldn’t read the board.',
+  notConnected: (host: string) => `Althar isn't connected to ${host}, so tasks here end on their branch.`,
   connect: (host: string) => `Connect ${host}`,
 }
 

@@ -4,7 +4,7 @@
  * screen are the glossary's (lead, call, notes), never worker or session.
  */
 
-const REPO = 'https://github.com/thetastemakers/charrette'
+const REPO = 'https://github.com/thetastemakers/althar'
 
 export const LINKS = {
   repo: REPO,
@@ -22,7 +22,7 @@ export const LINE = {
 
 /** One sentence on what it is, for under a headline. */
 export const WHAT =
-  'Charrette is an open-source desktop app for running a software project with AI coding agents. The project keeps its rules, notes, decisions and history. The agents you already use do the work, on your own plans.'
+  'Althar is an open-source desktop app for running a software project with AI coding agents. The project keeps its rules, notes, decisions and history. The agents you already use do the work, on your own plans.'
 
 /** The agents it is built to run. Adapters are planned, not shipped: say so wherever these are listed. */
 export const AGENTS = ['Claude Code', 'Codex', 'Gemini CLI', 'Cursor', 'GitHub Copilot', 'Ollama', 'OpenRouter'] as const
@@ -48,7 +48,7 @@ export interface Milestone {
   detail: string
 }
 
-/** Where it stands. Honest: there is no runnable Charrette yet. */
+/** Where it stands. Honest: there is no runnable Althar yet. */
 export const STATUS: readonly Milestone[] = [
   {
     id: 'thesis',
@@ -61,7 +61,7 @@ export const STATUS: readonly Milestone[] = [
     id: 'ui',
     stage: Stage.Done,
     what: 'The interface primitives',
-    detail: 'Board, conversation, calls and steps, in @charrette/ui with a Storybook.',
+    detail: 'Board, conversation, calls and steps, in @althar/ui with a Storybook.',
   },
   {
     id: 'proto',
@@ -80,7 +80,7 @@ export const STATUS: readonly Milestone[] = [
 
 export const EARLY = {
   title: 'Very early. Come and shape it.',
-  body: 'There is no runnable Charrette yet. The repository holds the thesis, the architecture, the interface primitives and the brief. The model, and the words for it, will change as we prototype, which makes now the time to have a say.',
+  body: 'There is no runnable Althar yet. The repository holds the thesis, the architecture, the interface primitives and the brief. The model, and the words for it, will change as we prototype, which makes now the time to have a say.',
   licence: 'Meant to be open source. The licence is still to be chosen.',
 } as const
 

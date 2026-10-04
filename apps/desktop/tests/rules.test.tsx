@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError } from '@charrette/contracts'
+import { ApiError } from '@althar/contracts'
 
 import { RulesView } from '../src/renderer/features/rules/RulesView'
 import { useRules } from '../src/renderer/features/rules/useRules'
@@ -50,7 +50,7 @@ describe('a project’s rules', () => {
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', end: 'none' }))
     await userEvent.click(screen.getByRole('radio', { name: /Wait for the reset/ }))
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', usageLimit: 'wait' }))
-    // What Charrette doesn't do isn't offered.
+    // What Althar doesn't do isn't offered.
     expect(screen.queryByRole('radiogroup', { name: 'Review findings' })).toBeNull()
     expect(screen.queryByText(/A card in the thread/)).toBeNull()
     // No agent has more than one account here: no accounts row.

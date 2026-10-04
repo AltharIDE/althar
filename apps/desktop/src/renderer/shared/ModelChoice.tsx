@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 
-import type { AgentStatus } from '@charrette/contracts'
-import { type ModelInfo, ModelBrowser, ModelPick, type ModelPickText } from '@charrette/ui'
+import type { AgentStatus } from '@althar/contracts'
+import { type ModelInfo, ModelBrowser, ModelPick, type ModelPickText } from '@althar/ui'
 
 import { useModels, useSetDefaultEffort } from '../data/models'
 import {

@@ -3,23 +3,23 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "charrette",
+      "name": "althar",
       "devDependencies": {
         "vite-plus": "1.0.0-rc.0",
       },
     },
     "apps/cli": {
-      "name": "@charrette/cli",
+      "name": "@althar/cli",
       "version": "0.0.0",
       "bin": {
-        "charrette": "./dist/charrette.js",
+        "althar": "./dist/althar.js",
       },
       "dependencies": {
         "@agentclientprotocol/claude-agent-acp": "0.84.0",
         "@agentclientprotocol/codex-acp": "2.0.0",
-        "@charrette/domain": "workspace:*",
-        "@charrette/provider-adapters": "workspace:*",
-        "@charrette/runtime": "workspace:*",
+        "@althar/domain": "workspace:*",
+        "@althar/provider-adapters": "workspace:*",
+        "@althar/runtime": "workspace:*",
         "effect": "4.0.0-rc.118",
       },
       "devDependencies": {
@@ -33,16 +33,16 @@
       },
     },
     "apps/desktop": {
-      "name": "@charrette/desktop",
+      "name": "@althar/desktop",
       "version": "0.0.0",
       "dependencies": {
         "@agentclientprotocol/claude-agent-acp": "0.84.0",
         "@agentclientprotocol/codex-acp": "2.0.0",
-        "@charrette/connectors": "workspace:*",
-        "@charrette/contracts": "workspace:*",
-        "@charrette/provider-adapters": "workspace:*",
-        "@charrette/runtime": "workspace:*",
-        "@charrette/ui": "workspace:*",
+        "@althar/connectors": "workspace:*",
+        "@althar/contracts": "workspace:*",
+        "@althar/provider-adapters": "workspace:*",
+        "@althar/runtime": "workspace:*",
+        "@althar/ui": "workspace:*",
         "@fontsource-variable/inter": "^5.3.0",
         "@fontsource-variable/jetbrains-mono": "^5.3.0",
         "@tanstack/react-router": "^1.170.40",
@@ -69,7 +69,7 @@
       },
     },
     "apps/pitch": {
-      "name": "@charrette/pitch",
+      "name": "@althar/pitch",
       "version": "1.0.0",
       "dependencies": {
         "@fontsource-variable/inter": "^5.3.0",
@@ -96,10 +96,10 @@
       },
     },
     "apps/site": {
-      "name": "@charrette/site",
+      "name": "@althar/site",
       "version": "0.0.0",
       "dependencies": {
-        "@charrette/ui": "workspace:*",
+        "@althar/ui": "workspace:*",
         "@fontsource-variable/inter": "^5.3.0",
         "@fontsource-variable/jetbrains-mono": "^5.3.0",
         "marked": "^18.0.14",
@@ -118,7 +118,7 @@
       },
     },
     "packages/connectors": {
-      "name": "@charrette/connectors",
+      "name": "@althar/connectors",
       "version": "0.0.0",
       "dependencies": {
         "effect": "4.0.0-rc.118",
@@ -134,7 +134,7 @@
       },
     },
     "packages/contracts": {
-      "name": "@charrette/contracts",
+      "name": "@althar/contracts",
       "version": "0.0.0",
       "dependencies": {
         "effect": "4.0.0-rc.118",
@@ -150,7 +150,7 @@
       },
     },
     "packages/domain": {
-      "name": "@charrette/domain",
+      "name": "@althar/domain",
       "version": "0.0.0",
       "dependencies": {
         "effect": "4.0.0-rc.118",
@@ -166,10 +166,10 @@
       },
     },
     "packages/persistence-sqlite": {
-      "name": "@charrette/persistence-sqlite",
+      "name": "@althar/persistence-sqlite",
       "version": "0.0.0",
       "dependencies": {
-        "@charrette/domain": "workspace:*",
+        "@althar/domain": "workspace:*",
         "@effect/sql-sqlite-node": "4.0.0-rc.118",
         "effect": "4.0.0-rc.118",
       },
@@ -184,13 +184,13 @@
       },
     },
     "packages/provider-adapters": {
-      "name": "@charrette/provider-adapters",
+      "name": "@althar/provider-adapters",
       "version": "0.0.0",
       "dependencies": {
         "@agentclientprotocol/claude-agent-acp": "0.84.0",
         "@agentclientprotocol/codex-acp": "2.0.0",
         "@agentclientprotocol/sdk": "1.5.1",
-        "@charrette/domain": "workspace:*",
+        "@althar/domain": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.31.0",
         "effect": "4.0.0-rc.118",
         "zod": "^4.0.0",
@@ -206,14 +206,14 @@
       },
     },
     "packages/runtime": {
-      "name": "@charrette/runtime",
+      "name": "@althar/runtime",
       "version": "0.0.0",
       "dependencies": {
-        "@charrette/connectors": "workspace:*",
-        "@charrette/contracts": "workspace:*",
-        "@charrette/domain": "workspace:*",
-        "@charrette/persistence-sqlite": "workspace:*",
-        "@charrette/provider-adapters": "workspace:*",
+        "@althar/connectors": "workspace:*",
+        "@althar/contracts": "workspace:*",
+        "@althar/domain": "workspace:*",
+        "@althar/persistence-sqlite": "workspace:*",
+        "@althar/provider-adapters": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.31.0",
         "effect": "4.0.0-rc.118",
       },
@@ -228,7 +228,7 @@
       },
     },
     "packages/ui": {
-      "name": "@charrette/ui",
+      "name": "@althar/ui",
       "version": "0.0.0",
       "dependencies": {
         "iconoir-react": "^7.12.1",
@@ -347,27 +347,27 @@
 
     "@bramus/specificity": ["@bramus/specificity@2.4.2", "", { "dependencies": { "css-tree": "^3.0.0" }, "bin": { "specificity": "bin/cli.js" } }, "sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw=="],
 
-    "@charrette/cli": ["@charrette/cli@workspace:apps/cli"],
+    "@althar/cli": ["@althar/cli@workspace:apps/cli"],
 
-    "@charrette/connectors": ["@charrette/connectors@workspace:packages/connectors"],
+    "@althar/connectors": ["@althar/connectors@workspace:packages/connectors"],
 
-    "@charrette/contracts": ["@charrette/contracts@workspace:packages/contracts"],
+    "@althar/contracts": ["@althar/contracts@workspace:packages/contracts"],
 
-    "@charrette/desktop": ["@charrette/desktop@workspace:apps/desktop"],
+    "@althar/desktop": ["@althar/desktop@workspace:apps/desktop"],
 
-    "@charrette/domain": ["@charrette/domain@workspace:packages/domain"],
+    "@althar/domain": ["@althar/domain@workspace:packages/domain"],
 
-    "@charrette/persistence-sqlite": ["@charrette/persistence-sqlite@workspace:packages/persistence-sqlite"],
+    "@althar/persistence-sqlite": ["@althar/persistence-sqlite@workspace:packages/persistence-sqlite"],
 
-    "@charrette/pitch": ["@charrette/pitch@workspace:apps/pitch"],
+    "@althar/pitch": ["@althar/pitch@workspace:apps/pitch"],
 
-    "@charrette/provider-adapters": ["@charrette/provider-adapters@workspace:packages/provider-adapters"],
+    "@althar/provider-adapters": ["@althar/provider-adapters@workspace:packages/provider-adapters"],
 
-    "@charrette/runtime": ["@charrette/runtime@workspace:packages/runtime"],
+    "@althar/runtime": ["@althar/runtime@workspace:packages/runtime"],
 
-    "@charrette/site": ["@charrette/site@workspace:apps/site"],
+    "@althar/site": ["@althar/site@workspace:apps/site"],
 
-    "@charrette/ui": ["@charrette/ui@workspace:packages/ui"],
+    "@althar/ui": ["@althar/ui@workspace:packages/ui"],
 
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.5.0", "", {}, "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg=="],
 

@@ -4,7 +4,7 @@ import { vocabulary } from './columns'
  * Every vocabulary as a lookup table (vocab_<name>), so a new word is an
  * INSERT in a later migration rather than a table rebuild. The words are
  * written out here, not imported, so this migration never changes; a test
- * keeps them equal to @charrette/domain's lists.
+ * keeps them equal to @althar/domain's lists.
  */
 export const vocabularies: ReadonlyArray<string> = [
   ...vocabulary('actor_kind', ['person', 'agent', 'system']),

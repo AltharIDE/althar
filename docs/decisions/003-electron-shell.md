@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-09-28
 - **Owner:** Repository maintainers
-- **Context:** Charrette is a native desktop app from day one. The candidates
+- **Context:** Althar is a native desktop app from day one. The candidates
   were Electron, Tauri, and Flutter. All code is TypeScript, and the runtime
   needs Node to run ACP adapters.
 - **Decision:**
@@ -18,13 +18,13 @@
   - Tauri: a Rust core plus a bundled Node or Bun for the runtime means two
     runtimes, and each platform's web view means testing the UI on three
     engines.
-  - Flutter: slower UI work, and no reuse of `@charrette/ui`.
+  - Flutter: slower UI work, and no reuse of `@althar/ui`.
   - A native Swift app: macOS only, and no reuse of the UI kit.
   - Electrobun: too young to build a product on today.
   - A separate runtime executable: a utility process already gives a separate,
     supervised process; keeping the runtime free of Electron keeps the option.
 - **Trade-off:** a larger download and more memory than Tauri; Electron
-  hardening is Charrette's job; Chromium updates arrive with Electron
+  hardening is Althar's job; Chromium updates arrive with Electron
   releases.
 - **Revisit when:** size or memory becomes a real complaint, or work must
   outlive the app and a daemon is needed.

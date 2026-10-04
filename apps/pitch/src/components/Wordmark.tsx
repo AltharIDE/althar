@@ -6,7 +6,7 @@ export function Wordmark() {
   return (
     <p className={s.mark} aria-hidden="true">
       <Logo className={s.logo} />
-      Charrette
+      Althar
     </p>
   )
 }

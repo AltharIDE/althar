@@ -9,11 +9,11 @@ import type { Product } from './model'
 /*
  * Signing in to a service without a secret (docs/architecture/06, "Signing
  * in"). The device flow (RFC 8628, GitHub and GitLab): the person types a
- * short code on the service's own page while Charrette waits. And OAuth with
+ * short code on the service's own page while Althar waits. And OAuth with
  * PKCE (RFC 7636, Linear): the person approves in their browser, which comes
  * back to a loopback address with a code only this process can redeem.
  * Either way the service hands over a token, and maybe a refresh token; no
- * secret of Charrette's is involved.
+ * secret of Althar's is involved.
  */
 
 /** What a service hands over: a token, and when it expires and how to renew it, where it does. */
@@ -63,7 +63,7 @@ const post = <A>(product: Product, fetch: Fetch, url: string, form: Readonly<Rec
       try: (signal) =>
         fetch(url, {
           method: 'POST',
-          headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'Charrette' },
+          headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'Althar' },
           body: new URLSearchParams(form).toString(),
           signal,
         }),

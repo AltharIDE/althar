@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from 'react'
 
-import type { Unfurl } from '@charrette/contracts'
+import type { Unfurl } from '@althar/contracts'
 import {
   Arrived,
   CodeBlock,
@@ -22,7 +22,7 @@ import {
   Verdict,
   WorkedFor,
   You,
-} from '@charrette/ui'
+} from '@althar/ui'
 
 import { modelInfo } from './agents'
 import { issuePriority, issueStatus, productBrand, productName } from './products'

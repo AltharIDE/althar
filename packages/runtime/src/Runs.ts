@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
-import { type CommandEnvelope, Ids, newId, type ProjectId } from '@charrette/domain'
-import type { Ledger } from '@charrette/persistence-sqlite'
+import { type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
+import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -31,7 +31,7 @@ import { summarize } from './words'
  * and Review loops with the lead settling what it found, for up to three
  * rounds.
  *
- * A step ends when its agent says so through Charrette's tools: the lead's
+ * A step ends when its agent says so through Althar's tools: the lead's
  * finish_step, the reviewer's report_review. What each reported goes into the
  * task's thread as a step result, which the person reads instead of the work.
  */
@@ -92,7 +92,7 @@ const Reviewed = Schema.Struct({
 /** Reads a tool's input, or refuses it with what was wrong, for the agent to try again. */
 const read = <A>(schema: Schema.Codec<A, unknown>, input: unknown) =>
   Schema.decodeUnknownEffect(schema)(input).pipe(
-    Effect.mapError((error) => new ToolRefused({ message: `Charrette couldn't read that: ${error.message}` })),
+    Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
   )
 
 /** What the worktree holds now: whether settling changed anything. */
@@ -157,7 +157,7 @@ export class Runs extends Context.Service<
       readonly answer: StuckAnswer
     }): Effect.Effect<void, unknown>
   }
->()('@charrette/runtime/Runs') {
+>()('@althar/runtime/Runs') {
   static readonly layer: Layer.Layer<Runs, never, Store> = Layer.effect(
     Runs,
     Effect.gen(function* () {
@@ -252,7 +252,7 @@ export class Runs extends Context.Service<
               executionId: run.executionId,
               nodeKey: key,
               iteration,
-              // What Charrette does itself, outside, is an integration node; the rest is an agent's.
+              // What Althar does itself, outside, is an integration node; the rest is an agent's.
               type: key === 'publish' ? 'integration' : 'agent',
               addedInRevision: 1,
               config: JSON.stringify(config),
@@ -365,7 +365,7 @@ export class Runs extends Context.Service<
           yield* touchCard(run.taskId)
         })
 
-      /** What a step that Charrette does itself reported, in a line. */
+      /** What a step that Althar does itself reported, in a line. */
       const publishedSummary = (published: Published, end: TaskEnd) => {
         const did = ((): string => {
           switch (published.kind) {
@@ -393,7 +393,7 @@ export class Runs extends Context.Service<
             ...(host === null
               ? {
                   title: 'The task ends on its branch.',
-                  description: "Its repository isn't on a code host Charrette knows, so nothing was pushed.",
+                  description: "Its repository isn't on a code host Althar knows, so nothing was pushed.",
                 }
               : {
                   title: `The task ends on its branch: ${host.name} isn't connected.`,
@@ -437,7 +437,7 @@ export class Runs extends Context.Service<
       /**
        * The work is done: the task's ending, if its plan has one, then the
        * run is over and the task ready. Pushing and opening its pull request
-       * is Charrette's own step; if it can't, the person decides.
+       * is Althar's own step; if it can't, the person decides.
        */
       const conclude = (run: RunRow) =>
         Effect.gen(function* () {
@@ -600,9 +600,9 @@ export class Runs extends Context.Service<
 
       /** Told once when its turn ends without the report its step needs. */
       const reminders = {
-        lead: "Your step isn't done until you call Charrette's finish_step tool. If you have done it, call finish_step now with your summary. If you can't go on without the person, call it saying what you need from them.",
+        lead: "Your step isn't done until you call Althar's finish_step tool. If you have done it, call finish_step now with your summary. If you can't go on without the person, call it saying what you need from them.",
         reviewer:
-          "Your review isn't done until you call Charrette's report_review tool. Call it now with your verdict, a summary and your findings.",
+          "Your review isn't done until you call Althar's report_review tool. Call it now with your verdict, a summary and your findings.",
       }
 
       /**
@@ -1097,11 +1097,11 @@ export class Runs extends Context.Service<
               step: 'implement',
               summary,
             })
-            return 'Charrette has your summary.'
+            return 'Althar has your summary.'
           }
           const attempt = current === undefined ? undefined : yield* running(current, ['implement', 'settle'])
           if (current === undefined || attempt === undefined)
-            return yield* new ToolRefused({ message: 'No step is waiting on you, so Charrette keeps no summary now.' })
+            return yield* new ToolRefused({ message: 'No step is waiting on you, so Althar keeps no summary now.' })
           const step = attempt.nodeKey === 'settle' ? 'settle' : 'implement'
           // A task that ends on its host pushes commits only: what isn't committed is the lead's to commit or clear away first.
           if (((yield* stepsOf(current)).end ?? (yield* changes.endFor(current.projectId))) !== null) {
@@ -1110,7 +1110,7 @@ export class Runs extends Context.Service<
             const left = workspace === undefined ? [] : yield* uncommittedFiles(workspace.path)
             if (left.length > 0)
               return yield* new ToolRefused({
-                message: `These aren't committed: ${filesLine(left)}. Charrette pushes commits only, so commit what belongs to the task, delete the rest (scratch files, logs), and call finish_step again.`,
+                message: `These aren't committed: ${filesLine(left)}. Althar pushes commits only, so commit what belongs to the task, delete the rest (scratch files, logs), and call finish_step again.`,
               })
           }
           yield* sql.withTransaction(
@@ -1126,8 +1126,8 @@ export class Runs extends Context.Service<
           if (step === 'implement') {
             const next = yield* review(current, 0)
             return next === undefined
-              ? 'Charrette has your summary. The task is ready for the person.'
-              : 'Charrette has your summary. A review starts now; wait for its findings.'
+              ? 'Althar has your summary. The task is ready for the person.'
+              : 'Althar has your summary. A review starts now; wait for its findings.'
           }
           // Another round only if settling changed the code, and rounds are left.
           const [workspace] = yield* sql<{ path: string }>`
@@ -1136,7 +1136,7 @@ export class Runs extends Context.Service<
           const after = workspace === undefined ? before : yield* digestOf(workspace.path)
           if (after !== before && attempt.iteration + 1 < ROUNDS) {
             yield* review(current, attempt.iteration + 1, summary)
-            return 'Charrette has your summary. The review looks again.'
+            return 'Althar has your summary. The review looks again.'
           }
           // Out of rounds, with changes no review has seen: that isn't ready, it's the person's call (05: Stuck, findings open).
           if (after !== before) {
@@ -1149,10 +1149,10 @@ export class Runs extends Context.Service<
               round: attempt.iteration + 1,
               open: (yield* openFindings(current)).length,
             })
-            return 'Charrette has your summary. That was the last round of review, so the person decides what comes next.'
+            return 'Althar has your summary. That was the last round of review, so the person decides what comes next.'
           }
           yield* conclude(current)
-          return 'Charrette has your summary. The task is ready for the person.'
+          return 'Althar has your summary. The task is ready for the person.'
         })
 
       /** Records what the lead did about each of the run's open findings it names: fixed, or set aside with its reason. */
@@ -1233,10 +1233,10 @@ export class Runs extends Context.Service<
           )
           if (reviewed.verdict === 'pass' || findings.length === 0) {
             yield* conclude(current)
-            return 'Charrette has your review. The change passes.'
+            return 'Althar has your review. The change passes.'
           }
           yield* settle(current, attempt.iteration, recorded)
-          return 'Charrette has your review. The lead settles your findings; you may be asked to look again.'
+          return 'Althar has your review. The lead settles your findings; you may be asked to look again.'
         })
 
       const tool = (
@@ -1255,7 +1255,7 @@ export class Runs extends Context.Service<
                 ? Effect.fail(error)
                 : Effect.andThen(
                     Effect.logWarning('A step tool did not succeed', error),
-                    Effect.fail(new ToolRefused({ message: 'Charrette could not record that. Try again.' })),
+                    Effect.fail(new ToolRefused({ message: 'Althar could not record that. Try again.' })),
                   ),
             ),
           ),
@@ -1264,14 +1264,14 @@ export class Runs extends Context.Service<
       yield* toolServer.serve('lead', [
         tool(
           'finish_step',
-          "Tells Charrette you have done your step: the task, or settling a review's findings. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open.",
+          "Tells Althar you have done your step: the task, or settling a review's findings. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open.",
           {
             type: 'object',
             properties: {
               summary: { type: 'string' },
               findings: {
                 type: 'array',
-                description: 'When settling a review: what became of each finding, by the id Charrette gave it.',
+                description: 'When settling a review: what became of each finding, by the id Althar gave it.',
                 items: {
                   type: 'object',
                   properties: {
@@ -1379,7 +1379,7 @@ export class Runs extends Context.Service<
       /**
        * Carries a step on that stopped: told what to do, handed to another
        * agent (on a model, where one is chosen), or abandoned; as the person
-       * answered its call, or as Charrette does when an agent is out of usage.
+       * answered its call, or as Althar does when an agent is out of usage.
        */
       const carryOn = (
         current: RunRow,
@@ -1388,7 +1388,7 @@ export class Runs extends Context.Service<
         answer: StuckAnswer,
         envelope: CommandEnvelope,
         model?: string | null,
-        /** Why it carries on so, where Charrette says: in place of the thread's own line for a switch. */
+        /** Why it carries on so, where Althar says: in place of the thread's own line for a switch. */
         said?: string,
       ) =>
         Effect.gen(function* () {
@@ -1428,7 +1428,7 @@ export class Runs extends Context.Service<
                   }),
                 )
           if (info.step === 'publish') {
-            // Gone on without its ending, the task is ready on its branch; otherwise Charrette tries again.
+            // Gone on without its ending, the task is ready on its branch; otherwise Althar tries again.
             if (answer.kind === 'abandon') {
               yield* endAttempt('cancelled', { skipped: true })
               return yield* finish(current, 'succeeded')
@@ -1491,13 +1491,13 @@ export class Runs extends Context.Service<
                         }
                       }),
                     )
-                  : "Carry on with the task from where it stands. When it's done, call Charrette's finish_step tool with your summary.",
+                  : "Carry on with the task from where it stands. When it's done, call Althar's finish_step tool with your summary.",
               quiet: true,
             })
           yield* touchCard(current.taskId)
         })
 
-      // A step running when Charrette stopped can't be trusted to carry on on its own: each needs the person.
+      // A step running when Althar stopped can't be trusted to carry on on its own: each needs the person.
       yield* provide(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient

@@ -1,6 +1,6 @@
 import { CODEX, GEMINI_PRO, OPUS, QWEN } from './models'
 
-/* Task 419's Verify, stuck on one assertion after Charrette tried three ways round it. */
+/* Task 419's Verify, stuck on one assertion after Althar tried three ways round it. */
 export const STUCK = {
   step: 'Verify',
   what: 'A reused idempotency key returns 200, not 409, on refunds created before PR 1184.',

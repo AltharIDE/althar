@@ -3,8 +3,8 @@ import { mkdirSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 
-import { emitterPort } from '@charrette/contracts'
-import { connection, Folders, Nudges, Secrets, SecretsUnavailable, services } from '@charrette/runtime'
+import { emitterPort } from '@althar/contracts'
+import { connection, databaseIn, Folders, Nudges, Secrets, SecretsUnavailable, services } from '@althar/runtime'
 import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Queue, Stream } from 'effect'
 import { openInTerminal } from './terminal'
 
@@ -36,20 +36,20 @@ const required = (name: string) => {
   return value
 }
 
-const profile = required('CHARRETTE_PROFILE')
+const profile = required('ALTHAR_PROFILE')
 mkdirSync(profile, { recursive: true })
 
 /**
- * The public ids of Charrette's own apps registered with code hosts and
+ * The public ids of Althar's own apps registered with code hosts and
  * trackers, for their browser sign-in, as the build or the environment gives
  * them. A service without one takes a pasted token.
  */
 const clientIds = Object.fromEntries(
   (
     [
-      ['github', process.env.CHARRETTE_GITHUB_CLIENT_ID],
-      ['gitlab', process.env.CHARRETTE_GITLAB_CLIENT_ID],
-      ['linear', process.env.CHARRETTE_LINEAR_CLIENT_ID],
+      ['github', process.env.ALTHAR_GITHUB_CLIENT_ID],
+      ['gitlab', process.env.ALTHAR_GITLAB_CLIENT_ID],
+      ['linear', process.env.ALTHAR_LINEAR_CLIENT_ID],
     ] as const
   ).flatMap(([product, id]) => (id === undefined || id === '' ? [] : [[product, id]])),
 )
@@ -64,7 +64,7 @@ const askMain = (type: 'seal' | 'open', value: string) =>
     sealing.set(requestId, (answer) =>
       resume(
         answer.value === undefined
-          ? Effect.fail(new SecretsUnavailable({ reason: answer.error ?? 'Charrette couldn’t open its keychain.' }))
+          ? Effect.fail(new SecretsUnavailable({ reason: answer.error ?? 'Althar couldn’t open its keychain.' }))
           : Effect.succeed(answer.value),
       ),
     )
@@ -73,7 +73,7 @@ const askMain = (type: 'seal' | 'open', value: string) =>
   }).pipe(
     Effect.timeoutOrElse({
       duration: Duration.seconds(15),
-      orElse: () => Effect.fail(new SecretsUnavailable({ reason: 'Charrette’s keychain didn’t answer.' })),
+      orElse: () => Effect.fail(new SecretsUnavailable({ reason: 'Althar’s keychain didn’t answer.' })),
     }),
   )
 
@@ -83,11 +83,11 @@ const secrets = Secrets.sealed(join(profile, 'secrets'), {
 })
 
 const options = {
-  database: join(profile, 'charrette.sqlite'),
-  worktreeRoot: required('CHARRETTE_WORKTREES'),
+  database: databaseIn(profile),
+  worktreeRoot: required('ALTHAR_WORKTREES'),
   accountsRoot: join(profile, 'accounts'),
   openTerminal: openInTerminal,
-  appVersion: process.env.CHARRETTE_APP_VERSION ?? '0.0.0',
+  appVersion: process.env.ALTHAR_APP_VERSION ?? '0.0.0',
   deviceName: hostname(),
 }
 
@@ -102,7 +102,7 @@ const ready = new Promise<Context.Context<Folders>>((resolve) => {
 const program = Effect.gen(function* () {
   // The end-to-end tests drive the app against a scripted agent and a fake code host, keeping tokens in memory. Packaged builds leave this out.
   const fake =
-    __CHARRETTE_TEST_HOOKS__ && process.env.CHARRETTE_FAKE_AGENTS === '1'
+    __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_AGENTS === '1'
       ? {
           agents: (yield* Effect.promise(() => import('./fakeAgents'))).fakeAgents,
           connectors: (yield* Effect.promise(() => import('./fakeConnectors'))).fakeConnectors,

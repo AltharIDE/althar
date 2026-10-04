@@ -1,5 +1,5 @@
 {
-  "name": "charrette",
+  "name": "althar",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -7,8 +7,8 @@
   ],
   "type": "module",
   "scripts": {
-    "dev": "bun --filter @charrette/pitch dev",
-    "site": "bun --filter @charrette/site dev",
+    "dev": "bun --filter @althar/pitch dev",
+    "site": "bun --filter @althar/site dev",
     "build": "bun --filter '*' build",
     "check": "bun --filter '*' check",
     "test": "bun --filter '*' test",

@@ -1,5 +1,5 @@
-import { type ActorId, Ids, newId, type ProjectId } from '@charrette/domain'
-import type { Ledger } from '@charrette/persistence-sqlite'
+import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
+import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Duration, Effect, Layer, Queue } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -15,7 +15,7 @@ import { type PlanStep, Runs, type TaskEnd } from './Runs'
  * them, and when it starts. The coordinator proposes it; its card shows in
  * the coordinator's thread with the time left; leaving it alone starts it.
  * The runtime keeps the countdown, so a plan starts with the window closed.
- * A plan whose time came while Charrette wasn't running is held, not started
+ * A plan whose time came while Althar wasn't running is held, not started
  * unannounced at the next launch.
  */
 
@@ -45,7 +45,7 @@ export class Plans extends Context.Service<
     /** Changes a proposed plan's steps (who does them, or which are skipped), and what happens when the work is done. */
     change(planId: string, steps: ReadonlyArray<PlanStep>, actorId: ActorId, end?: TaskEnd | null): Effect.Effect<void, unknown>
   }
->()('@charrette/runtime/Plans') {
+>()('@althar/runtime/Plans') {
   static readonly layer: Layer.Layer<Plans, never, Store> = Layer.effect(
     Plans,
     Effect.gen(function* () {
@@ -185,16 +185,14 @@ export class Plans extends Context.Service<
         }
       })
 
-      // What came due while Charrette was closed waits for the person, rather than starting unannounced.
+      // What came due while Althar was closed waits for the person, rather than starting unannounced.
       yield* provide(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const overdue = yield* sql<{ id: string }>`
             SELECT id FROM task_plans WHERE state = 'proposed' AND starts_at IS NOT NULL AND starts_at < ${yield* timestamp}`
           for (const plan of overdue) yield* transition(plan.id, counting, () => ({ startsAt: null }), 'task_plan.held', instance.systemId)
-        }).pipe(
-          Effect.catchCause((cause) => Effect.logWarning('Could not hold the plans that came due while Charrette was closed', cause)),
-        ),
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not hold the plans that came due while Althar was closed', cause))),
       )
       yield* Effect.forkScoped(provide(countdown))
 

@@ -1,5 +1,5 @@
-import type { ChangeSummary } from '@charrette/contracts'
-import { type ChangeCheck, CheckState } from '@charrette/ui'
+import type { ChangeSummary } from '@althar/contracts'
+import { type ChangeCheck, CheckState } from '@althar/ui'
 
 /** A check as the kit lists it: one that was skipped or said nothing counts as passed, with what it said. */
 export const checkOf = (check: NonNullable<ChangeSummary['checks']>['list'][number], index: number): ChangeCheck => {

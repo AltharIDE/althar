@@ -1,4 +1,4 @@
-import { CommandEnvelope, type CommandId, Ids, newId, now } from '@charrette/domain'
+import { CommandEnvelope, type CommandId, Ids, newId, now } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Exit, Layer, Ref, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'

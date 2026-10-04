@@ -42,7 +42,7 @@ describe('projects', () => {
   it.live('refuses a folder outside any repository', () =>
     Effect.gen(function* () {
       const projects = yield* Projects
-      const path = mkdtempSync(join(tmpdir(), 'charrette-plain-'))
+      const path = mkdtempSync(join(tmpdir(), 'althar-plain-'))
       const error = yield* Effect.flip(projects.open({ envelope: yield* Runtime.envelope('project.open', { path }), path }))
       assert.instanceOf(error, NotARepository)
     }).pipe(Effect.provide(runtime())),
@@ -69,10 +69,10 @@ describe('projects', () => {
         )
       const created = yield* create('Retry the checkout!')
       assert.strictEqual(created.slug, 'retry-the-checkout')
-      assert.strictEqual(created.branch, 'charrette/retry-the-checkout')
+      assert.strictEqual(created.branch, 'althar/retry-the-checkout')
       assert.isTrue(created.worktree.endsWith(join(project.slug, 'retry-the-checkout', slugify(project.name, 'repository'))))
       assert.isTrue(existsSync(join(created.worktree, 'README.md')))
-      assert.strictEqual(git(created.worktree, 'branch', '--show-current'), 'charrette/retry-the-checkout')
+      assert.strictEqual(git(created.worktree, 'branch', '--show-current'), 'althar/retry-the-checkout')
       const [workspace] = yield* sql<{
         state: string
         baseCommit: string
@@ -140,7 +140,7 @@ describe('projects', () => {
         const projects = yield* Projects
         const sql = yield* SqlClient.SqlClient
         const upstream = repository()
-        const clone = mkdtempSync(join(tmpdir(), 'charrette-clone-'))
+        const clone = mkdtempSync(join(tmpdir(), 'althar-clone-'))
         execFileSync('git', ['clone', '-q', upstream, clone])
         // Someone else moves main on after the clone.
         writeFileSync(join(upstream, 'later.md'), 'later\n')
@@ -158,12 +158,12 @@ describe('projects', () => {
       Effect.gen(function* () {
         const projects = yield* Projects
         const path = repository()
-        git(path, 'branch', 'charrette/tidy-up')
+        git(path, 'branch', 'althar/tidy-up')
         const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
         const created = yield* create(project.projectId, 'Tidy up')
-        assert.strictEqual(created.branch, 'charrette/tidy-up-2')
+        assert.strictEqual(created.branch, 'althar/tidy-up-2')
         assert.isTrue(created.worktree.endsWith('-2'))
-        assert.strictEqual(git(created.worktree, 'branch', '--show-current'), 'charrette/tidy-up-2')
+        assert.strictEqual(git(created.worktree, 'branch', '--show-current'), 'althar/tidy-up-2')
       }).pipe(Effect.provide(runtime())),
     )
 
@@ -171,7 +171,7 @@ describe('projects', () => {
       Effect.gen(function* () {
         const projects = yield* Projects
         const path = repository()
-        const marker = join(mkdtempSync(join(tmpdir(), 'charrette-hook-')), 'ran')
+        const marker = join(mkdtempSync(join(tmpdir(), 'althar-hook-')), 'ran')
         writeFileSync(join(path, '.git', 'hooks', 'post-checkout'), `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 })
         const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
         yield* create(project.projectId, 'No hooks')

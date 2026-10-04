@@ -6,7 +6,7 @@ export class AgentStartFailed extends Schema.TaggedError<AgentStartFailed>()('Ag
   reason: Schema.String,
 }) {}
 
-/** The agent's process exited, or its connection closed, while Charrette still needed it. */
+/** The agent's process exited, or its connection closed, while Althar still needed it. */
 export class AgentExited extends Schema.TaggedError<AgentExited>()('AgentExited', {
   code: Schema.NullOr(Schema.Number),
   signal: Schema.NullOr(Schema.String),
@@ -21,7 +21,7 @@ export class AgentRequestFailed extends Schema.TaggedError<AgentRequestFailed>()
   resetsAt: Schema.optional(Schema.String),
 }) {}
 
-/** The agent does not offer a mode or option value Charrette asked for. */
+/** The agent does not offer a mode or option value Althar asked for. */
 export class OptionUnavailable extends Schema.TaggedError<OptionUnavailable>()('OptionUnavailable', {
   configId: Schema.String,
   value: Schema.String,

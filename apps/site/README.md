@@ -1,8 +1,8 @@
-# @charrette/site
+# @althar/site
 
-Charrette's landing page, and the thesis. A Vite+ React app, styled with CSS Modules, using `@charrette/ui` for the product's own marks, logo and tokens.
+Althar's landing page, and the thesis. A Vite+ React app, styled with CSS Modules, using `@althar/ui` for the product's own marks, logo and tokens.
 
-The page's idea: agents come and go, the project stays. The first screen is a building site in 3D, drawn on a canvas as a two-point perspective. A tower crane sets a floor per task, a different agent's name on its plate each time, and each floor is a note the project keeps. Below it: what Charrette is, the agents it runs, task 418 as its graph with the review loop, what the project knows, and where it stands. `/thesis` is `THESIS.md`, set for reading.
+The page's idea: agents come and go, the project stays. The first screen is a building site in 3D, drawn on a canvas as a two-point perspective. A tower crane sets a floor per task, a different agent's name on its plate each time, and each floor is a note the project keeps. Below it: what Althar is, the agents it runs, task 418 as its graph with the review loop, what the project knows, and where it stands. `/thesis` is `THESIS.md`, set for reading.
 
 It is a prototype. Nothing is prerendered yet, there are no tests, and the copy will change.
 
@@ -45,7 +45,7 @@ From a machine logged in with `bunx wrangler login`, `bun run deploy` builds and
 - `src/content/`: what the site says. `facts.ts` holds every claim, link and status line; `meridian.ts` the made-up project and task 418; `site.ts` the six tasks the crane builds and their notes; `sheet.ts` the revisions and the definition. Change the facts here, not in a component.
 - `src/lib/`: `motion.ts` (the timeline player and easing), `useCurrent.ts` (which part is on screen), `cx.ts`.
 
-The earlier concepts (Set, Cover, Markup, Faces, Stays, Front sheet, Dimensions, Scaffold, Lift, Plan, Axonometric) and the concept browser are archived in `charrette-designs/prototypes/_archive/landing-concepts-2026-09-29/`, with the kits they import.
+The earlier concepts (Set, Cover, Markup, Faces, Stays, Front sheet, Dimensions, Scaffold, Lift, Plan, Axonometric) and the concept browser are archived in `althar-designs/prototypes/_archive/landing-concepts-2026-09-29/`, with the kits they import.
 
 ## Before this ships
 

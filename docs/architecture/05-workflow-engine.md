@@ -2,10 +2,10 @@
 
 ## Decision
 
-Charrette needs workflow semantics, but it does not need a general-purpose
+Althar needs workflow semantics, but it does not need a general-purpose
 workflow product in the MVP.
 
-Build a small durable graph kernel around the workflows Charrette actually
+Build a small durable graph kernel around the workflows Althar actually
 ships. Borrow determinism, retries, checkpointing, compensation, and versioning
 ideas from mature systems. Do not begin with a visual builder, arbitrary agent
 code, or unrestricted self-modifying graphs.
@@ -13,7 +13,7 @@ code, or unrestricted self-modifying graphs.
 The core rule is:
 
 > A workflow definition is immutable. A run materializes a revisioned execution
-> graph. Agents may propose bounded graph patches, but only Charrette validates
+> graph. Agents may propose bounded graph patches, but only Althar validates
 > and commits a new graph revision.
 
 This permits dynamic work without allowing a model to rewrite history or evade
@@ -39,7 +39,7 @@ active execution or historical run.
 
 Keep the executable vocabulary small:
 
-1. **Deterministic action** — Charrette-owned pure or idempotent control-plane
+1. **Deterministic action** — Althar-owned pure or idempotent control-plane
    work.
 2. **Agent** — provider session/turn with an instruction, skill snapshot,
    capability grant, budget, and output schema.
@@ -160,7 +160,7 @@ stateDiagram-v2
     superseded --> [*]
 ```
 
-The same lifecycle is data in `@charrette/domain` (`lifecycles.ts`). An
+The same lifecycle is data in `@althar/domain` (`lifecycles.ts`). An
 attempt ends as `superseded` when a switch hands the node to another agent;
 a new attempt of the same node takes over. An attempt is `held`, with a reason,
 when it waits without needing a person, such as for a usage limit to reset;
@@ -332,7 +332,7 @@ implements in its own agent nodes. There is no separate manager agent between
 the coordinator and the work.
 
 **Other agents run as steps.** Review, security audit, and similar nodes run
-other agents, which may be other models. A step is Charrette's, not the lead's:
+other agents, which may be other models. A step is Althar's, not the lead's:
 it is a node in the execution graph. An agent's own sub-agents (ACP child
 sessions) stay inside that agent's node and are not graph nodes.
 
@@ -384,7 +384,7 @@ on the finding or by telling the lead. A dismissal is a `Decision` that the lead
 receives. With a reason, it is also a candidate `KnowledgeClaim`, so later
 reviewers get the context.
 
-**Permissions are answered below the user where possible.** Charrette is the
+**Permissions are answered below the user where possible.** Althar is the
 ACP client that answers `session/request_permission`, and every session starts
 in a mode that asks, so it can answer from policy before anything reaches a
 person ([03](03-agent-runtime-and-auth.md), Permission routing). The leaning:
@@ -408,7 +408,7 @@ The lead does not answer yet.
 **Usage limits pause an account, not an agent.** A limit belongs to one of an
 agent's accounts ([ADR-012](../decisions/012-several-accounts-per-agent.md)),
 so it pauses every node running on that account at once: the lead, any steps,
-and their sub-agents. The agent's other accounts carry on. How Charrette
+and their sub-agents. The agent's other accounts carry on. How Althar
 detects a limit is in [03](03-agent-runtime-and-auth.md), Usage limits.
 
 Under the default project rule, the paused work moves on, in this order:
@@ -429,11 +429,11 @@ it together.
 The thread's collapsed step line, graph routing, the lead's input, and
 per-finding dismissal all read the same typed result, not prose.
 
-**Built-in step types and review instructions.** Charrette ships a small set of
+**Built-in step types and review instructions.** Althar ships a small set of
 default step types with fixed output schemas. Review is the first, and may be
 the only one in v1. Users do not change a built-in type's output shape. They
 steer how it works with per-project instructions: a Markdown file in the repo
-(for review, `.charrette/review.md`) that every reviewer receives with its
+(for review, `.althar/review.md`) that every reviewer receives with its
 prompt. Accepted dismissals are appended to that file under a heading for
 context reviewers miss, each with its source task. That way the correction is
 reviewable in a diff and travels with the repo, not only in the knowledge
@@ -589,7 +589,7 @@ complete execution semantics.
 
 LangGraph is the closest match for dynamic agent graphs, checkpointing,
 interrupts, retries, and command-based routing. It could later implement
-agent-owned subgraphs. It does not supply Charrette's project/repository
+agent-owned subgraphs. It does not supply Althar's project/repository
 authority, integration reconciliation, skill policy, multi-repository
 workspaces, or product record.
 
@@ -621,13 +621,13 @@ can look convincing before version migration, unknown external effects,
 fencing, and deterministic repair are solved.
 
 Recommendation: learn from its authoring surface and failure reports; do not
-adopt its YAML or visual builder as Charrette's substrate.
+adopt its YAML or visual builder as Althar's substrate.
 
 ### Restate and similar durable execution systems
 
 These may be valuable cloud implementations when the product has real
 long-running service workflows. As with Temporal, hide them behind a workflow
-execution port rather than leaking their object model into Charrette's domain.
+execution port rather than leaking their object model into Althar's domain.
 
 ## Verification gates
 

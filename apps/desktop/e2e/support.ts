@@ -11,9 +11,9 @@ export const launch = async (home: string, env: Record<string, string> = {}) => 
     args: [app],
     env: {
       ...process.env,
-      CHARRETTE_PROFILE: join(home, 'profile'),
-      CHARRETTE_WORKTREES: join(home, 'worktrees'),
-      CHARRETTE_FAKE_AGENTS: '1',
+      ALTHAR_PROFILE: join(home, 'profile'),
+      ALTHAR_WORKTREES: join(home, 'worktrees'),
+      ALTHAR_FAKE_AGENTS: '1',
       ...env,
     },
   })

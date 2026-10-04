@@ -4,11 +4,11 @@
 
 # The Fourth Age of Software Engineering
 
-Charrette begins with a hypothesis:
+Althar begins with a hypothesis:
 
 > **Software engineering may be entering a new phase in which the primary locus of context and coordination shifts from code artifacts and individual agent conversations toward persistent engineering contexts capable of coordinating transient intelligent workers.**
 
-The software project is Charrette's initial candidate for that persistent context.
+The software project is Althar's initial candidate for that persistent context.
 
 It is not yet clear that the project is the highest, or even always the correct, primitive. Useful knowledge may belong to a task, repository, project, product, team, programme, portfolio, organisation, or some federation spanning several of them. Determining those boundaries is part of the research rather than a decision made in advance.
 
@@ -39,7 +39,7 @@ Not merely a collection of agent conversations.
 
 A persistent, potentially collaborative system capable of retaining appropriately scoped context, coordinating work, and surviving the replacement of the individual agents, models, interfaces, and developers operating within it.
 
-Charrette is an attempt to explore that hypothesis.
+Althar is an attempt to explore that hypothesis.
 
 ---
 
@@ -54,7 +54,7 @@ Charrette is an attempt to explore that hypothesis.
 7. [The human-attention boundary](#7-the-human-attention-boundary)
 8. [Execution as a graph](#8-execution-as-a-graph)
 9. [Provider independence and open infrastructure](#9-provider-independence-and-open-infrastructure)
-10. [What Charrette is](#10-what-charrette-is)
+10. [What Althar is](#10-what-althar-is)
 11. [What this thesis does not assume](#11-what-this-thesis-does-not-assume)
 12. [Questions this project must answer](#12-questions-this-project-must-answer)
 13. [Evidence to collect during prototyping](#13-evidence-to-collect-during-prototyping)
@@ -126,7 +126,7 @@ Outcomes
 
 The engineer increasingly manages intent, constraints, judgement, and priorities while a persistent engineering context coordinates execution.
 
-Charrette begins by implementing that context at project level. The research must determine whether this is the durable root of the system or merely one useful scope within a larger structure.
+Althar begins by implementing that context at project level. The research must determine whether this is the durable root of the system or merely one useful scope within a larger structure.
 
 Individual agents become workers rather than the place where project state lives.
 
@@ -206,7 +206,7 @@ Source control solved collaborative ownership of source code remarkably well.
 
 It has not yet solved collaborative ownership of the accumulated intelligence used by agents to understand that source code.
 
-Charrette therefore starts from a stronger working hypothesis at project scope:
+Althar therefore starts from a stronger working hypothesis at project scope:
 
 > **Durable project intelligence should belong to the project rather than to an individual worker, conversation, developer, or model provider.**
 
@@ -391,7 +391,7 @@ The relevant context for a task could then be assembled from several scopes rath
 
 The answer may also differ by concern. A project could remain the useful unit of execution while knowledge spans products, policy belongs to an organisation, identity belongs to people and teams, and a programme coordinates work across all of them. Searching for one universal highest primitive may itself be a category error.
 
-Several structural models are plausible: a hierarchy, a federated graph of contexts, linked but autonomous projects, or no new abstraction beyond existing repositories and organisational systems. Charrette should not select among them before evidence exists.
+Several structural models are plausible: a hierarchy, a federated graph of contexts, linked but autonomous projects, or no new abstraction beyond existing repositories and organisational systems. Althar should not select among them before evidence exists.
 
 The working proposition is therefore narrower than “the project is the root”:
 
@@ -405,7 +405,7 @@ Whether a more general primitive such as **scope**, **context**, or **domain** i
 
 If multiple agents can operate simultaneously, asking the developer to independently manage every agent may not scale.
 
-Charrette therefore tests a second hypothesis:
+Althar therefore tests a second hypothesis:
 
 > **A continuous project-level coordinator may be a better human interface to parallel agentic work than direct management of multiple isolated workers.**
 
@@ -460,7 +460,7 @@ A task may contain:
 
 Tasks are bounded.
 
-Their containing context persists. In Charrette's initial model, that context is the project.
+Their containing context persists. In Althar's initial model, that context is the project.
 
 This boundary may make agent workers replaceable.
 
@@ -489,7 +489,7 @@ A significant amount of useful engineering work consists of understanding rather
 
 Greater agent autonomy is only valuable if it reduces useful human effort rather than moving problems elsewhere.
 
-Charrette therefore treats human attention as a scarce resource.
+Althar therefore treats human attention as a scarce resource.
 
 One possible design goal is:
 
@@ -710,7 +710,7 @@ The lock-in would no longer primarily concern the model.
 
 It would concern the accumulated **operating system of the engineering organisation**, whether represented as one project or many linked contexts.
 
-Charrette therefore tests the idea that:
+Althar therefore tests the idea that:
 
 > **The persistent context layer should remain independent from the transient execution providers beneath it.**
 
@@ -741,9 +741,9 @@ Whether an open provider-independent layer delivers enough additional value to j
 
 ---
 
-# 10. What Charrette is
+# 10. What Althar is
 
-Charrette is an experimental open-source implementation of these ideas.
+Althar is an experimental open-source implementation of these ideas.
 
 Its current conceptual model contains four core primitives:
 
@@ -767,7 +767,7 @@ A useful output of work that does not necessarily belong in the repository's dur
 
 Execution graphs may eventually become another first-class primitive, or they may remain an implementation detail beneath tasks.
 
-Likewise, a higher-order scope may eventually become a first-class primitive. Candidate forms include organisation, workspace, product, programme, portfolio, domain, or a generic context that can link and contain projects. Charrette should earn that abstraction through cross-project use rather than introduce it only for conceptual symmetry.
+Likewise, a higher-order scope may eventually become a first-class primitive. Candidate forms include organisation, workspace, product, programme, portfolio, domain, or a generic context that can link and contain projects. Althar should earn that abstraction through cross-project use rather than introduce it only for conceptual symmetry.
 
 This model is provisional.
 
@@ -817,7 +817,7 @@ Not conclusions.
 
 # 12. Questions this project must answer
 
-The purpose of Charrette is not only to build software.
+The purpose of Althar is not only to build software.
 
 It is to investigate the operating model emerging around agentic software development.
 
@@ -962,15 +962,15 @@ The following questions should guide both product development and the eventual w
 * What does vendor lock-in mean when accumulated project intelligence becomes valuable?
 * Is a new project-level or multi-scope control-plane layer required between developers and execution agents?
 
-## 12.12 What should Charrette not own?
+## 12.12 What should Althar not own?
 
 * Which state should remain in Git?
 * Which state should remain in Linear, Jira, or GitHub?
-* Which information should Charrette reference rather than duplicate?
+* Which information should Althar reference rather than duplicate?
 * Which cross-project and organisation-wide state should remain in existing knowledge, policy, identity, and portfolio systems?
 * When should external systems be mutated?
 * How should bidirectional sync be handled?
-* What is the minimum persistent state Charrette needs in order to remain useful?
+* What is the minimum persistent state Althar needs in order to remain useful?
 
 ---
 
@@ -1073,7 +1073,7 @@ Evidence against it would include findings such as:
 * model providers converge on genuinely open interoperable project state, removing the need for an independent persistence layer
 * existing IDE and issue-tracker abstractions prove sufficient without a new project-level layer
 
-If repeated evidence supports these conclusions, Charrette should change direction.
+If repeated evidence supports these conclusions, Althar should change direction.
 
 The thesis is a hypothesis to test, not a doctrine to protect.
 
@@ -1081,9 +1081,9 @@ The thesis is a hypothesis to test, not a doctrine to protect.
 
 # 15. Toward a whitepaper
 
-The eventual whitepaper should not primarily be a whitepaper about Charrette.
+The eventual whitepaper should not primarily be a whitepaper about Althar.
 
-It should be a paper about the broader transition Charrette was built to investigate.
+It should be a paper about the broader transition Althar was built to investigate.
 
 A working title is:
 
@@ -1093,7 +1093,7 @@ Possible subtitle:
 
 > **From Coding Agents to Persistent Engineering Intelligence**
 
-Charrette should appear as the experimental system through which the ideas were explored.
+Althar should appear as the experimental system through which the ideas were explored.
 
 The relationship should be:
 
@@ -1104,7 +1104,7 @@ Thesis
     ↓
 Research questions
     ↓
-Charrette prototype
+Althar prototype
     ↓
 Experiments and real-world use
     ↓
@@ -1139,7 +1139,7 @@ The whitepaper should answer, with evidence where possible:
 20. What forms of vendor lock-in emerge around engineering intelligence and workflows?
 21. Does provider independence produce meaningful practical value?
 22. What role should open-source infrastructure play in the persistent context layer?
-23. What did building and using Charrette reveal that was not obvious beforehand?
+23. What did building and using Althar reveal that was not obvious beforehand?
 24. Which parts of the original thesis were wrong?
 
 A good final paper should contain findings that changed the system.
@@ -1150,11 +1150,11 @@ If the whitepaper merely confirms everything written in this file, the research 
 
 # 16. Current working proposition
 
-The current proposition behind Charrette is:
+The current proposition behind Althar is:
 
 > **The project persists. The coordinator understands. Agents come and go.**
 
-This is Charrette's starting architecture, not a claim that the project is the final or highest boundary.
+This is Althar's starting architecture, not a claim that the project is the final or highest boundary.
 
 A second, increasingly important proposition is:
 

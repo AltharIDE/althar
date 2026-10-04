@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { ProjectId } from '@charrette/domain'
+import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -135,8 +135,8 @@ describe('nudges', () => {
     }).pipe(Effect.provide(withNudges())),
   )
 
-  it.live('don’t say again what already waited when Charrette started, though they count it', () => {
-    const database = join(mkdtempSync(join(tmpdir(), 'charrette-nudges-')), 'profile.sqlite')
+  it.live('don’t say again what already waited when Althar started, though they count it', () => {
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-nudges-')), 'profile.sqlite')
     return Effect.gen(function* () {
       yield* Effect.gen(function* () {
         const { events, stop } = yield* heard

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import type { AgentStatus, ProjectRulesView } from '@charrette/contracts'
+import type { AgentStatus, ProjectRulesView } from '@althar/contracts'
 
 import { messageOf, type ProjectRulesChange } from '../../data/client'
 import { useServices } from '../../data/services'

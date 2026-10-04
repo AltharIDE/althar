@@ -11,8 +11,8 @@ export function Tacit() {
           <p>
             Dave Snowden, extending Michael Polanyi’s observation about tacit knowledge, puts it simply: we know more than we can say, and
             we can say more than we can write down. His paper “Complex Acts of Knowing” rejects the idea that organisational knowledge
-            reduces to a complete repository of documents. For Charrette that is a design constraint. Project memory shouldn’t claim to
-            capture everything. It should make the limits of its knowledge visible.
+            reduces to a complete repository of documents. For Althar that is a design constraint. Project memory shouldn’t claim to capture
+            everything. It should make the limits of its knowledge visible.
           </p>
         </div>
         <ul className={cx(s.ticksList, s.proseList)}>

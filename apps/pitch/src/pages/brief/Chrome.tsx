@@ -44,7 +44,7 @@ export function Chrome({ deck, total, first }: { deck: RefObject<HTMLElement | n
       <header className={s.mast} data-tone={at.tone}>
         <a className={s.brand} href={homeHref}>
           <Logo />
-          Charrette
+          Althar
         </a>
         <nav className={s.pages} aria-label="Pages">
           <a href={homeHref} aria-current="page">

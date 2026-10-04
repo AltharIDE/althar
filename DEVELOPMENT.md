@@ -1,6 +1,6 @@
-# Developing Charrette
+# Developing Althar
 
-How to work in this repository. For what Charrette is, see the [README](README.md).
+How to work in this repository. For what Althar is, see the [README](README.md).
 
 ## Set up
 
@@ -19,8 +19,8 @@ From the repository root:
 | Command | What it does |
 | --- | --- |
 | `bun run dev` | The pitch site, at `http://localhost:5290` |
-| `bun --filter @charrette/desktop dev` | Builds the desktop app and opens it |
-| `bun --filter @charrette/ui storybook` | The UI package's Storybook, at `http://localhost:6006` |
+| `bun --filter @althar/desktop dev` | Builds the desktop app and opens it |
+| `bun --filter @althar/ui storybook` | The UI package's Storybook, at `http://localhost:6006` |
 | `bun run check` | Format, type-aware lint and type checks, in every package |
 | `bun run fix` | The same, fixing what can be fixed |
 | `bun run test` | Unit and component tests, in every package |
@@ -33,21 +33,21 @@ Each app and package has its own README with its own commands.
 | Path | What's there |
 | --- | --- |
 | [`apps/pitch`](apps/pitch) | The brief and research note, as a static site |
-| [`packages/ui`](packages/ui) | `@charrette/ui`, the interface components, with a Storybook |
-| [`packages/domain`](packages/domain) | `@charrette/domain`: identifiers, vocabularies, lifecycles and commands, as Effect schemas |
-| [`packages/persistence-sqlite`](packages/persistence-sqlite) | `@charrette/persistence-sqlite`: the local store, its schema ([schema.sql](packages/persistence-sqlite/schema.sql)) and migrations |
-| [`packages/provider-adapters`](packages/provider-adapters) | `@charrette/provider-adapters`: how Charrette talks to agents over ACP, and the agent registry |
-| [`packages/runtime`](packages/runtime) | `@charrette/runtime`: the store's one writer, which owns projects, tasks, agent sessions, turns and permissions |
-| [`packages/contracts`](packages/contracts) | `@charrette/contracts`: the API between the runtime and its clients, and the transport it runs over |
-| [`apps/desktop`](apps/desktop) | `@charrette/desktop`: the desktop app, Electron with the runtime in a utility process |
-| [`apps/cli`](apps/cli) | `@charrette/cli`: a command-line client for the runtime, which runs a task with a real agent in a terminal |
+| [`packages/ui`](packages/ui) | `@althar/ui`, the interface components, with a Storybook |
+| [`packages/domain`](packages/domain) | `@althar/domain`: identifiers, vocabularies, lifecycles and commands, as Effect schemas |
+| [`packages/persistence-sqlite`](packages/persistence-sqlite) | `@althar/persistence-sqlite`: the local store, its schema ([schema.sql](packages/persistence-sqlite/schema.sql)) and migrations |
+| [`packages/provider-adapters`](packages/provider-adapters) | `@althar/provider-adapters`: how Althar talks to agents over ACP, and the agent registry |
+| [`packages/runtime`](packages/runtime) | `@althar/runtime`: the store's one writer, which owns projects, tasks, agent sessions, turns and permissions |
+| [`packages/contracts`](packages/contracts) | `@althar/contracts`: the API between the runtime and its clients, and the transport it runs over |
+| [`apps/desktop`](apps/desktop) | `@althar/desktop`: the desktop app, Electron with the runtime in a utility process |
+| [`apps/cli`](apps/cli) | `@althar/cli`: a command-line client for the runtime, which runs a task with a real agent in a terminal |
 | [`docs/architecture`](docs/architecture) | The working architecture: a local-first desktop app, with seams for a later cloud |
 | [`docs/decisions`](docs/decisions) | Architecture decisions, one per file |
 | [`docs/glossary.md`](docs/glossary.md) | The words the interface uses, beside the words the architecture uses |
 | [`docs/open-questions.md`](docs/open-questions.md) | What is not decided yet |
 | [`docs/plans`](docs/plans) | Temporary plans, such as the current demo's. Not architecture |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | The engineering standards every app and package follows |
-| [`THESIS.md`](THESIS.md) | The research hypothesis Charrette comes out of |
+| [`THESIS.md`](THESIS.md) | The research hypothesis Althar comes out of |
 
 ## Standards
 

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 
-import type { ProjectId } from '@charrette/domain'
-import type { SessionEvent } from '@charrette/provider-adapters'
+import type { ProjectId } from '@althar/domain'
+import type { SessionEvent } from '@althar/provider-adapters'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Exit, Stream } from 'effect'

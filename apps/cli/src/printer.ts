@@ -1,4 +1,4 @@
-import type { LiveEvent } from '@charrette/runtime'
+import type { LiveEvent } from '@althar/runtime'
 
 /*
  * What happens on the thread, as terminal output. The agent's message streams

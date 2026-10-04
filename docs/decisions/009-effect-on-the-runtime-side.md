@@ -22,7 +22,7 @@
     `node:sqlite`), `runtime`, `provider-adapters`, the workflow kernel, the
     contract between the desktop app and the runtime (Effect RPC over
     `MessagePort`), and the CLI.
-  - Where not: nowhere in `@charrette/ui`, whose components take props and
+  - Where not: nowhere in `@althar/ui`, whose components take props and
     report through callbacks. In the desktop app, only in its data layer
     ([ADR-010](010-desktop-app-mvvm.md)). Not in the pitch or landing sites.
   - Promise-based APIs (the ACP SDK, Electron, `gh`) are wrapped at the edge.

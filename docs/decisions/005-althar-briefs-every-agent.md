@@ -1,4 +1,4 @@
-# ADR-005: Charrette briefs every agent, and a switch hands over everything
+# ADR-005: Althar briefs every agent, and a switch hands over everything
 
 - **Status:** Accepted
 - **Date:** 2026-09-28
@@ -7,17 +7,17 @@
   mid-task is intended. Repositories carry different instruction files for
   different agents. Steps and the coordinator need starting context too.
 - **Decision:**
-  - Every session starts from a brief Charrette assembles and records: the
+  - Every session starts from a brief Althar assembles and records: the
     lead, every step, the coordinator's rebuilt session, retries, and
     switches.
-  - Charrette does not edit a repository's own instruction files.
+  - Althar does not edit a repository's own instruction files.
   - Changing model within an agent keeps the session, through ACP's model
     config option.
   - Changing agent starts a new session on the new agent, in the same
     workspace, as a new attempt of the same node.
   - In the MVP the new agent takes over everything: the whole record goes into
     the first prompt as far as it fits, and the rest is readable through
-    Charrette's tools. No model call is needed to switch.
+    Althar's tools. No model call is needed to switch.
   - Details: [03](../architecture/03-agent-runtime-and-auth.md).
 - **Alternatives considered:**
   - Converting session files between agents' formats: private formats that

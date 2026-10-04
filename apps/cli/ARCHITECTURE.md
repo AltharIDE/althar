@@ -1,9 +1,9 @@
-# @charrette/cli — Architecture
+# @althar/cli — Architecture
 
-A thin client over `@charrette/runtime`. The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target.
+A thin client over `@althar/runtime`. The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target.
 
 - **Owner:** Repository maintainers
-- **Dependency direction:** depends on `@charrette/runtime`, `@charrette/provider-adapters` for the agents' sign-in checks, and the two bundled agent adapters, which it ships.
+- **Dependency direction:** depends on `@althar/runtime`, `@althar/provider-adapters` for the agents' sign-in checks, and the two bundled agent adapters, which it ships.
 
 ## What it holds
 
@@ -18,7 +18,7 @@ A thin client over `@charrette/runtime`. The repository's [ARCHITECTURE.md](../.
 
 - **Decisions live in the runtime.** The CLI turns lines into runtime calls and live events into text; it keeps no state of its own beyond the question waiting for an answer.
 - **Pure modules, tested; one entry point, not.** `options`, `input` and `printer` are pure and fully tested. `main.ts` only wires them together and is left out of coverage.
-- **Built into one file.** Node can't run the workspace's TypeScript as it is, and Bun lacks `node:sqlite`, so Vite+ builds `dist/charrette.js` with everything but Node's own modules inlined. The agent adapters stay as packages, since they run as processes of their own.
+- **Built into one file.** Node can't run the workspace's TypeScript as it is, and Bun lacks `node:sqlite`, so Vite+ builds `dist/althar.js` with everything but Node's own modules inlined. The agent adapters stay as packages, since they run as processes of their own.
 
 ## Gaps
 

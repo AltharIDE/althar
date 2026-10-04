@@ -1,4 +1,4 @@
-import { Brand, type ModelInfo } from '@charrette/ui'
+import { Brand, type ModelInfo } from '@althar/ui'
 
 /*
  * How an agent is drawn: its mark, and a ModelInfo for the kit's components,

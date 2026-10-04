@@ -1,6 +1,6 @@
 import { at, gitObject, id, index, json, project, ref, referencedInProject, revision, sameProject, scoped, table, word } from './columns'
 
-/** What a task changed, the work queued to change things outside Charrette, and what was observed. */
+/** What a task changed, the work queued to change things outside Althar, and what was observed. */
 export const effects: ReadonlyArray<string> = [
   table(
     'change_sets',

@@ -1,11 +1,11 @@
-# @charrette/domain
+# @althar/domain
 
-Charrette's domain, as [Effect](https://effect.website) schemas: the identifiers, the vocabularies, the lifecycles and the command envelope that the runtime, the store and the app–runtime contract share. It is pure: nothing here reads files, talks to processes, or knows about SQLite or Electron.
+Althar's domain, as [Effect](https://effect.website) schemas: the identifiers, the vocabularies, the lifecycles and the command envelope that the runtime, the store and the app–runtime contract share. It is pure: nothing here reads files, talks to processes, or knows about SQLite or Electron.
 
 ## Use it
 
 ```ts
-import { Ids, newId, now, nodeAttemptLifecycle, transition } from '@charrette/domain'
+import { Ids, newId, now, nodeAttemptLifecycle, transition } from '@althar/domain'
 
 const program = Effect.gen(function* () {
   const taskId = yield* newId(Ids.task) // task_0192f0b3c4d57e8f9a0b1c2d3e4f5a6b

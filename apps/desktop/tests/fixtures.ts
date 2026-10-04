@@ -13,7 +13,7 @@ import type {
   ThreadSnapshot,
   Unfurl,
   WatchEvent,
-} from '@charrette/contracts'
+} from '@althar/contracts'
 import { vi } from 'vitest'
 
 import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
@@ -107,7 +107,7 @@ export const task: TaskSummary = {
   slug: 'add-a-retry',
   threadId: 'th1',
   state: 'active',
-  branch: 'charrette/add-a-retry',
+  branch: 'althar/add-a-retry',
   agentId: 'claude-code',
   waiting: 0,
   createdAt: NOW,
@@ -233,7 +233,7 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   step: null,
   summary: null,
   lead: 'claude-code',
-  branch: 'charrette/add-a-retry',
+  branch: 'althar/add-a-retry',
   startedAt: null,
   waits: null,
   ...overrides,
@@ -294,7 +294,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     description: '',
     slug: 'add-a-retry',
     state: 'active',
-    branch: 'charrette/add-a-retry',
+    branch: 'althar/add-a-retry',
     worktree: '/w/meridian',
     baseRef: 'main',
     phase: 'running',
@@ -416,7 +416,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     addAccount: vi.fn(async (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => ({
       ...usual('acc_added', 'signed_out'),
       name: input.name,
-      home: '/Users/me/Library/Application Support/Charrette/accounts/acc_added',
+      home: '/Users/me/Library/Application Support/Althar/accounts/acc_added',
     })),
     renameAccount: vi.fn(async () => {}),
     removeAccount: vi.fn(async () => {}),

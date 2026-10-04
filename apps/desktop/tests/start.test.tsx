@@ -2,8 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError } from '@charrette/contracts'
-import { RuntimeState } from '@charrette/ui'
+import { ApiError } from '@althar/contracts'
+import { RuntimeState } from '@althar/ui'
 
 import { useServices } from '../src/renderer/data/services'
 import { accountEntry, runtimeEntry, shortFolder, StartView } from '../src/renderer/features/start/StartView'
@@ -82,7 +82,7 @@ describe('accounts on the start', () => {
   it('offers to remove an account anyway when its sign-out didn’t work', async () => {
     const { client } = fakeClient({
       removeAccount: vi.fn(async (_accountId: string, anyway?: boolean) => {
-        if (anyway !== true) throw new ApiError({ reason: 'SignOutFailed', message: 'Charrette couldn’t sign this account out.' })
+        if (anyway !== true) throw new ApiError({ reason: 'SignOutFailed', message: 'Althar couldn’t sign this account out.' })
       }),
       status: vi.fn(async () => ({
         apiVersion: 1,
@@ -202,7 +202,7 @@ describe('the start', () => {
     })
     const host = fakeHost({ pickFolder: vi.fn(async () => null) })
     withServices(<Start onProject={vi.fn()} />, client, host)
-    await screen.findAllByText("Charrette's runtime didn't answer. If it keeps happening, restart Charrette.")
+    await screen.findAllByText("Althar's runtime didn't answer. If it keeps happening, restart Althar.")
     expect(screen.getByText('Looking at the agents on this Mac…')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Open a folder' }))
     expect(client.openProject).not.toHaveBeenCalled()

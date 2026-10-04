@@ -18,7 +18,7 @@ export interface Revision {
 export const REVISIONS: readonly Revision[] = [
   { rev: 'A', date: '2026-09-18', what: 'The thesis', stage: Stage.Done },
   { rev: 'B', date: '2026-09-22', what: 'The brief and the research note', stage: Stage.Done },
-  { rev: 'C', date: '2026-09-27', what: 'The architecture, and the interface primitives in @charrette/ui', stage: Stage.Done },
+  { rev: 'C', date: '2026-09-27', what: 'The architecture, and the interface primitives in @althar/ui', stage: Stage.Done },
   ...STATUS.filter((m) => m.stage !== Stage.Done).map((m, i) => ({
     rev: String.fromCharCode(68 + i),
     date: '—',
@@ -28,8 +28,9 @@ export const REVISIONS: readonly Revision[] = [
 ]
 
 export const DEFINITION = {
-  word: 'charrette',
-  say: '/ʃəˈrɛt/',
+  word: 'althar',
+  // Said like "altar".
+  say: '/ˈɔːltə/',
   kind: 'noun',
-  sense: 'A short, intense push on a design, worked on together by everyone with a stake in it.',
+  sense: 'An open-source desktop app for running a software project with AI coding agents.',
 } as const

@@ -1,8 +1,8 @@
 {
-  "name": "@charrette/site",
+  "name": "@althar/site",
   "version": "0.0.0",
   "private": true,
-  "description": "Charrette's landing page and the thesis, built with Vite+ and @charrette/ui.",
+  "description": "Althar's landing page and the thesis, built with Vite+ and @althar/ui.",
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
@@ -14,7 +14,7 @@
     "fix": "vp check --fix"
   },
   "dependencies": {
-    "@charrette/ui": "workspace:*",
+    "@althar/ui": "workspace:*",
     "@fontsource-variable/inter": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "marked": "^18.0.14",

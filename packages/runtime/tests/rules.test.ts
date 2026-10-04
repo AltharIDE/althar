@@ -2,11 +2,11 @@ import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { PermissionRequest } from '@charrette/provider-adapters'
+import type { PermissionRequest } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 
 import {
-  CHARRETTE_TOOL,
+  ALTHAR_TOOL,
   commandOf,
   decide,
   decideReader,
@@ -21,7 +21,7 @@ import {
 } from '../src/rules'
 
 const worktree = '/work/meridian/retry/app'
-const context: RuleContext = { worktree, defaultBranch: 'main', taskBranch: 'charrette/retry', currentBranch: 'charrette/retry' }
+const context: RuleContext = { worktree, defaultBranch: 'main', taskBranch: 'althar/retry', currentBranch: 'althar/retry' }
 
 const request = (fields: Partial<PermissionRequest>): PermissionRequest => ({
   sessionId: 's',
@@ -35,7 +35,7 @@ const request = (fields: Partial<PermissionRequest>): PermissionRequest => ({
 
 const run = (command: string, overrides: Partial<RuleContext> = {}) => decide(request({ title: command }), { ...context, ...overrides })
 
-describe('a code host, reached only through Charrette', () => {
+describe('a code host, reached only through Althar', () => {
   it.each([
     ['gh pr view 12', undefined],
     ['gh pr list --state open', undefined],
@@ -72,7 +72,7 @@ describe('a code host, reached only through Charrette', () => {
     ['GH_CONFIG_DIR=~/.config/gh gh pr create', 'publish_changes'],
     ['bash -lc "git commit -am x && gh pr create"', 'publish_changes'],
     // Credentials are the person's: the keychain, and git's helpers, whichever way they're asked.
-    ['security find-generic-password -s Charrette -w', "don't read the person's credentials"],
+    ['security find-generic-password -s Althar -w', "don't read the person's credentials"],
     ['/usr/bin/security dump-keychain', "don't read the person's credentials"],
     ["printf 'host=github.com\\n' | git credential fill", "don't read the person's credentials"],
     ['git -C /w -c x=y credential-osxkeychain get', "don't read the person's credentials"],
@@ -143,16 +143,16 @@ describe('the always-ask list', () => {
     "git commit -m 'Add notes'",
     'git push',
     'git push -u origin HEAD',
-    'git push origin charrette/retry',
-    'git push origin HEAD:refs/heads/charrette/retry',
-    'git push origin charrette/main-fix',
-    'git push origin --delete charrette/retry',
-    `git -C ${worktree} push origin charrette/retry`,
+    'git push origin althar/retry',
+    'git push origin HEAD:refs/heads/althar/retry',
+    'git push origin althar/main-fix',
+    'git push origin --delete althar/retry',
+    `git -C ${worktree} push origin althar/retry`,
     'git merge main',
     'npm run build 2>&1 | tee build.log',
     'rm -rf node_modules dist',
     'mkdir -p src/lib && cp README.md src/lib/',
-    'echo done > /tmp/charrette-note',
+    'echo done > /tmp/althar-note',
     'npm test 2>/dev/null',
     "sed -i '' 's/a/b/' src/app.ts",
     'git clone https://github.com/meridian/lib vendor/lib',
@@ -173,17 +173,17 @@ describe('the always-ask list', () => {
     ['git push origin --delete main', 'Deleting main always asks.'],
     ['git push origin --delete someone/feature', "Deleting someone/feature, which isn't this task's branch, always asks."],
     ['git push --force', 'A force push always asks.'],
-    ['git push -uf origin charrette/retry', 'A force push always asks.'],
+    ['git push -uf origin althar/retry', 'A force push always asks.'],
     ['git push --force-with-lease', 'A force push always asks.'],
-    ['git push origin +charrette/retry', 'A force push always asks.'],
+    ['git push origin +althar/retry', 'A force push always asks.'],
     ['git push --tags', 'Pushing tags always asks; they often start a release.'],
     ['git push origin v1.2.0:refs/tags/v1.2.0', 'Pushing tags always asks; they often start a release.'],
     ['git push --prune origin', 'A push that deletes remote branches always asks.'],
     ['git push origin "refs/heads/*"', 'A push to a pattern of branches always asks.'],
     ['git push origin :', 'A push of matching branches always asks.'],
-    ['git push origin HEAD:refs/notes/x', "Charrette can't tell what `refs/notes/x` is, so it asks."],
-    ['git push --weird origin', "Charrette can't tell what `--weird` does to a push, so it asks."],
-    ['git push origin $(git branch --show-current)', "Charrette can't tell what this command does until it runs, so it asks."],
+    ['git push origin HEAD:refs/notes/x', "Althar can't tell what `refs/notes/x` is, so it asks."],
+    ['git push --weird origin', "Althar can't tell what `--weird` does to a push, so it asks."],
+    ['git push origin $(git branch --show-current)', "Althar can't tell what this command does until it runs, so it asks."],
     ['make deploy', 'Deploying or publishing always asks.'],
     ['npx wrangler deploy', 'Deploying or publishing always asks.'],
     ['vercel --prod', 'Deploying or publishing always asks.'],
@@ -194,7 +194,7 @@ describe('the always-ask list', () => {
     ['git --git-dir=/elsewhere/.git log', 'Git in another folder always asks: /elsewhere/.git'],
     ['cd ~/other && git commit -m x', 'Git in another folder always asks:'],
     ['echo x >> ~/.zshrc', "Writing outside the task's worktree always asks:"],
-    ['touch ~/charrette-probe.txt', "Writing outside the task's worktree always asks:"],
+    ['touch ~/althar-probe.txt', "Writing outside the task's worktree always asks:"],
     ['cp .env /Users/someone/leak.env', "Writing outside the task's worktree always asks: /Users/someone/leak.env"],
     ['dd if=/dev/zero of=/etc/x', "Writing outside the task's worktree always asks: /etc/x"],
     ['git worktree add ../elsewhere', "Writing outside the task's worktree always asks: ../elsewhere"],
@@ -233,8 +233,8 @@ describe('less usual commands', () => {
     ['sudo -E git push origin main', 'ask'],
     ['git --git-dir /elsewhere/.git status', 'ask'],
     ['git --work-tree=/elsewhere status', 'ask'],
-    ['git push --repo origin -o ci.skip origin charrette/retry', 'allow'],
-    ['git push --push-option=ci.skip origin charrette/retry', 'allow'],
+    ['git push --repo origin -o ci.skip origin althar/retry', 'allow'],
+    ['git push --push-option=ci.skip origin althar/retry', 'allow'],
     ['ln -s /usr/local/bin/node node', 'allow'],
     ['ln -s node /usr/local/bin/node', 'ask'],
     ['install -m 755 build/tool ~/bin/tool', 'ask'],
@@ -273,13 +273,13 @@ describe('edits', () => {
   it('asks when it can’t tell where an edit writes', () => {
     assert.deepStrictEqual(edit({ rawInput: { somewhere: '/etc/hosts' } }), {
       verdict: 'ask',
-      reason: "Charrette can't tell where this edit writes, so it asks.",
+      reason: "Althar can't tell where this edit writes, so it asks.",
     })
     assert.strictEqual(decide(request({ kind: 'delete' }), context).verdict, 'ask')
   })
 
   it('follows symlinks out of the worktree', () => {
-    const root = mkdtempSync(join(tmpdir(), 'charrette-rules-'))
+    const root = mkdtempSync(join(tmpdir(), 'althar-rules-'))
     const tree = join(root, 'tree')
     const away = join(root, 'away')
     mkdirSync(tree)
@@ -326,10 +326,10 @@ describe('what the record keeps', () => {
 describe('a role that only reads', () => {
   const verdict = (fields: Partial<PermissionRequest>) => decideReader(request(fields)).verdict
 
-  it("calls Charrette's own tools, as each agent names them", () => {
-    for (const title of ['mcp__charrette__draft_task', 'mcp.charrette.propose_plan', 'charrette_list_tasks'])
+  it("calls Althar's own tools, as each agent names them", () => {
+    for (const title of ['mcp__althar__draft_task', 'mcp.althar.propose_plan', 'althar_list_tasks'])
       assert.strictEqual(verdict({ kind: 'other', title }), 'allow', title)
-    assert.isFalse(CHARRETTE_TOOL.test('mcp__github__create_issue'))
+    assert.isFalse(ALTHAR_TOOL.test('mcp__github__create_issue'))
     assert.strictEqual(verdict({ kind: 'other', title: 'mcp__github__create_issue' }), 'deny')
   })
 
@@ -422,7 +422,7 @@ describe('a role that only reads', () => {
   })
 
   it('never reads credentials either, and says so', () => {
-    for (const command of ['security find-generic-password -s Charrette -w', 'git credential fill', 'cat x | git-credential-store get']) {
+    for (const command of ['security find-generic-password -s Althar -w', 'git credential fill', 'cat x | git-credential-store get']) {
       const decided = decideReader(request({ kind: 'execute', title: command, rawInput: { command } }))
       assert.include(decided.verdict === 'deny' ? decided.reason : '', "don't read the person's credentials", command)
     }
@@ -434,9 +434,9 @@ describe('a project’s rules (ADR-013)', () => {
   const verdictOf = (command: string, project: Partial<ProjectRuleSet>) => run(command, rules(project))
 
   it('ask about the kinds on the always-ask list, let the rest through, and refuse what is never allowed', () => {
-    assert.strictEqual(verdictOf('git push --force origin charrette/retry', {}).verdict, 'ask')
-    assert.strictEqual(verdictOf('git push --force origin charrette/retry', { ask: ['deploy'] }).verdict, 'allow')
-    assert.deepStrictEqual(verdictOf('git push --force origin charrette/retry', { never: ['force-push'] }), {
+    assert.strictEqual(verdictOf('git push --force origin althar/retry', {}).verdict, 'ask')
+    assert.strictEqual(verdictOf('git push --force origin althar/retry', { ask: ['deploy'] }).verdict, 'allow')
+    assert.deepStrictEqual(verdictOf('git push --force origin althar/retry', { never: ['force-push'] }), {
       verdict: 'deny',
       reason: "The project's rules never allow force pushes.",
     })
@@ -457,7 +457,7 @@ describe('a project’s rules (ADR-013)', () => {
     assert.strictEqual(verdictOf('vercel deploy', allow).verdict, 'deny')
     assert.strictEqual(verdictOf('rm -rf / --no-preserve-root', allow).verdict, 'deny')
     assert.strictEqual(verdictOf('gh pr create', allow).verdict, 'deny')
-    assert.strictEqual(verdictOf('security find-generic-password -s Charrette -w', allow).verdict, 'deny')
+    assert.strictEqual(verdictOf('security find-generic-password -s Althar -w', allow).verdict, 'deny')
   })
 
   it('ask about everything beyond the sandbox where the project says so, short of reads', () => {
@@ -514,7 +514,7 @@ describe('a project’s rules, after review of #24', () => {
     for (const command of [
       'git push --force origin main',
       'git push origin +HEAD:main',
-      'git push --force origin charrette/retry && git push origin main',
+      'git push --force origin althar/retry && git push origin main',
     ])
       assert.strictEqual(verdictOf(command, neverMain), 'deny', command)
     for (const command of ['git push -f origin main', 'npm publish && git push origin main'])

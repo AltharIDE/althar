@@ -12,19 +12,18 @@ import { Station } from './Station'
 import s from './Welcome.module.css'
 
 /*
- * The first thing Charrette shows after it is installed, once.
+ * The first thing Althar shows after it is installed, once.
  *
- * A charrette is the architects' push to finish a design, so the welcome is
- * a drafting table seen through a camera. It opens close on the mark as it
- * is drawn, and the camera pulls back. The opening is drawn on the same
- * table as the rest: Begin moves the camera off it, low across the paper, to
- * the first of five plots, and from each straight on to the next, the pencil
- * route drawn beside it as it goes. At each plot the real components are
- * sketched in pencil from their own layout, uncovered, and set working: a
- * task visits a project, a lead takes a task, work moves across the board
- * while one card waits on you, checks pass and a change is accepted, agents
- * sign in. A pointer shows what a person would do. At the end the camera
- * pulls back over the whole table, built.
+ * The welcome is a drafting table seen through a camera. It opens close on
+ * the mark as it is drawn, and the camera pulls back. The opening is drawn
+ * on the same table as the rest: Begin moves the camera off it, low across
+ * the paper, to the first of five plots, and from each straight on to the
+ * next, the pencil route drawn beside it as it goes. At each plot the real
+ * components are sketched in pencil from their own layout, uncovered, and
+ * set working: a task visits a project, a lead takes a task, work moves
+ * across the board while one card waits on you, checks pass and a change is
+ * accepted, agents sign in. A pointer shows what a person would do. At the
+ * end the camera pulls back over the whole table, built.
  *
  * Enter, the arrows or Continue move on; Back goes back; Skip leaves.
  * Nothing loops: each scene plays once and holds its last frame, and only
@@ -53,7 +52,7 @@ export interface WelcomeText {
 }
 
 export const welcomeText: WelcomeText = {
-  name: 'Charrette',
+  name: 'Althar',
   line: 'Agents come and go. Your project stays.',
   begin: 'Begin',
   next: 'Continue',
@@ -85,10 +84,10 @@ export const welcomeText: WelcomeText = {
     {
       label: 'Agents',
       title: 'Your agents, signed in as you',
-      body: 'Charrette runs the agents you already use, like Claude Code and Codex, on your own plans. Each keeps its own sign-in; Charrette never sees a password or a key. One task can use several labs, so one checks another.',
+      body: 'Althar runs the agents you already use, like Claude Code and Codex, on your own plans. Each keeps its own sign-in; Althar never sees a password or a key. One task can use several labs, so one checks another.',
     },
   ],
-  end: { title: 'Ready when you are', body: 'Next, Charrette looks for the agents on this Mac. Then you make your first project.' },
+  end: { title: 'Ready when you are', body: 'Next, Althar looks for the agents on this Mac. Then you make your first project.' },
 }
 
 /*

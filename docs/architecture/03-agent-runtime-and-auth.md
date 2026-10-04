@@ -2,13 +2,13 @@
 
 ## Architectural decision
 
-Charrette is an agent harness in the same sense that a workflow scheduler is a
+Althar is an agent harness in the same sense that a workflow scheduler is a
 job harness: it supplies durable intent, policy, lifecycle, recovery, and
 evidence around execution. It is not a new foundation-model runtime.
 
 The boundary is:
 
-| Charrette owns | Provider runtime owns |
+| Althar owns | Provider runtime owns |
 |---|---|
 | Project, task, run, graph, attempts | Model request loop |
 | Scheduling and host placement | Context window and provider compaction |
@@ -19,11 +19,11 @@ The boundary is:
 | Restart reconciliation and repair | Provider-specific retry within one call/session |
 | Cross-provider and cross-run record | Provider-native usage/accounting detail |
 
-If Charrette implements both columns, it inherits the hardest and fastest-moving
+If Althar implements both columns, it inherits the hardest and fastest-moving
 parts of Codex, Claude Code, and every future provider while weakening the
 durable project layer that differentiates it.
 
-Charrette reaches every agent through one protocol, the Agent Client Protocol
+Althar reaches every agent through one protocol, the Agent Client Protocol
 (ACP), and adds native channels per agent only where ACP falls short
 ([ADR-002](../decisions/002-acp-for-every-agent.md)).
 
@@ -33,21 +33,21 @@ Claude Code, Codex and OpenCode are interchangeable from the first version. A
 task's lead, any step and the coordinator can run on any of them, and a task
 can move between them.
 
-| Agent | How Charrette runs it | Sign-in, held by the agent | Notes |
+| Agent | How Althar runs it | Sign-in, held by the agent | Notes |
 |---|---|---|---|
-| Claude Code | `claude-agent-acp`, the ACP project's adapter on the Claude Agent SDK. Claude Code has no native ACP | Claude plan or Anthropic API key; status from `claude auth status` | Starts in the user's own default mode, which can be `bypassPermissions`, so Charrette turns bypass off and adds ask rules for every session. The Agent SDK reports usage limits, but the adapter doesn't forward them |
-| Codex | `codex-acp`, the ACP project's adapter, driving its own bundled Codex | ChatGPT plan or OpenAI API key; status from `codex login status` | Charrette uses its `workspace-write` mode, not the default `agent` mode, whose automatic reviewer answers requests itself. Usage limits reach the adapter but are only rendered as `/status` text |
-| OpenCode | `opencode acp`, native | API keys for any provider; local model servers; status from `opencode auth list` | The bring-your-own-key route. It cannot use a Claude plan. It allows most actions without asking unless configured, so Charrette starts it with inline config that makes it ask |
+| Claude Code | `claude-agent-acp`, the ACP project's adapter on the Claude Agent SDK. Claude Code has no native ACP | Claude plan or Anthropic API key; status from `claude auth status` | Starts in the user's own default mode, which can be `bypassPermissions`, so Althar turns bypass off and adds ask rules for every session. The Agent SDK reports usage limits, but the adapter doesn't forward them |
+| Codex | `codex-acp`, the ACP project's adapter, driving its own bundled Codex | ChatGPT plan or OpenAI API key; status from `codex login status` | Althar uses its `workspace-write` mode, not the default `agent` mode, whose automatic reviewer answers requests itself. Usage limits reach the adapter but are only rendered as `/status` text |
+| OpenCode | `opencode acp`, native | API keys for any provider; local model servers; status from `opencode auth list` | The bring-your-own-key route. It cannot use a Claude plan. It allows most actions without asking unless configured, so Althar starts it with inline config that makes it ask |
 
 What each agent reports was read from the agents themselves on 28 September
-2026, with `scripts/probe.ts` in `@charrette/provider-adapters`: claude-agent-acp
+2026, with `scripts/probe.ts` in `@althar/provider-adapters`: claude-agent-acp
 0.84.0, codex-acp 2.0.0 and OpenCode 1.18.31. All three expose their mode and
 model as session config options and can change both within a session; all
 three can load and resume sessions. Claude Code and Codex also advertise
 steering a turn in progress, as an extension in `_meta`. Probe again after
 upgrading any of them.
 
-Charrette checks sign-in with each agent's documented status command, never by
+Althar checks sign-in with each agent's documented status command, never by
 reading a credential store, and tells the user the agent's own login command
 when it is signed out. The Claude Code desktop app and the `claude` command
 line sign in separately; the adapter uses the command line's sign-in.
@@ -63,14 +63,14 @@ contract suite, not new code.
 ## Adapter contract
 
 The domain depends on the adapter's own interface, in
-`@charrette/provider-adapters`, not directly on a vendor SDK, CLI schema, or
+`@althar/provider-adapters`, not directly on a vendor SDK, CLI schema, or
 ACP revision. No ACP type appears in it, so a native adapter for one agent
 (Tier B below) can stand in without callers changing. It is written with Effect
 ([ADR-009](../decisions/009-effect-on-the-runtime-side.md)).
 
 ```ts
 connect(options: {
-  transport: Transport // a process Charrette owns, or an in-process agent in tests
+  transport: Transport // a process Althar owns, or an in-process agent in tests
   onPermission: (request: PermissionRequest) => Effect<PermissionDecision> // from the project's rules
   permissions?: PermissionMeanings // what the agent's option ids mean: the registry's
   onQuestion?: (question: Question) => Effect<QuestionAnswer> // for the person
@@ -160,7 +160,7 @@ native adapter can replace ACP for one agent without the domain changing.
 | C | Documented headless CLI with structured JSON/events | Supported with stricter lifecycle and compatibility tests |
 | D | PTY/TUI scraping, undocumented local protocols, or another agent's private session files | Experimental only; never the default correctness path |
 
-Charrette must never parse ANSI terminal presentation as its canonical event
+Althar must never parse ANSI terminal presentation as its canonical event
 stream. A terminal may be exposed as a user surface, but execution truth comes
 from a documented structured channel or remains explicitly uncertain.
 
@@ -175,7 +175,7 @@ September 2026 it covers:
 - creating and cancelling sessions, and loading them where the agent supports
   it;
 - prompts and streamed updates: messages, tool calls, plans;
-- permission requests, which Charrette answers (see Permission routing);
+- permission requests, which Althar answers (see Permission routing);
 - session modes and config options, including the model selector
   (`session/set_config_option`);
 - the MCP servers a session may use, given at `session/new`;
@@ -189,17 +189,17 @@ It does not cover:
 - moving history between agents: a session can only be loaded by the agent
   that created it.
 
-ACP is still not Charrette's domain model:
+ACP is still not Althar's domain model:
 
 - ACP is a client-agent transport, not a project, workflow, integration, or
   persistence model.
 - Protocol drafts and capability growth must be quarantined inside an adapter.
   The protocol moves quickly; the model selector, for example, moved from an
   unstable method to session config options during 2026.
-- Charrette needs durable graph and authority semantics even if every provider
+- Althar needs durable graph and authority semantics even if every provider
   eventually speaks ACP.
 
-The adapter converts ACP sessions and notifications into Charrette
+The adapter converts ACP sessions and notifications into Althar
 `ProviderSession` and `Observation` records while retaining the raw protocol
 version for diagnostics. ACP session identifiers are never promoted into
 `Task` or `Run` IDs.
@@ -253,7 +253,7 @@ type AgentDefinition = {
 }
 ```
 
-- Adapters Charrette ships, `claude-agent-acp` and `codex-acp`, are bundled at
+- Adapters Althar ships, `claude-agent-acp` and `codex-acp`, are bundled at
   pinned versions. Nothing is fetched with `npx` or a similar tool at run
   time. Adapters written for Node run on Electron's own Node
   ([02](02-desktop-runtime.md)).
@@ -264,7 +264,7 @@ type AgentDefinition = {
 ## Where agent frameworks fit
 
 The OpenAI Agents SDK, LangGraph, or another agent framework may later execute a
-Charrette-authored agent node when Charrette itself owns that node's model/tool
+Althar-authored agent node when Althar itself owns that node's model/tool
 loop.
 
 They do not replace:
@@ -281,13 +281,13 @@ durable, observable nodes.
 
 ## Briefing agents
 
-Charrette assembles every session's starting context. A new session learns
+Althar assembles every session's starting context. A new session learns
 about the task only from its brief. No session depends on what another agent
-remembered ([ADR-005](../decisions/005-charrette-briefs-every-agent.md)).
+remembered ([ADR-005](../decisions/005-althar-briefs-every-agent.md)).
 
 A brief contains, as the role needs:
 
-- project rules and Charrette's instructions for the role: lead, step, or
+- project rules and Althar's instructions for the role: lead, step, or
   coordinator;
 - the task, its plan, and where the graph stands;
 - the workspace: base, branch, and the diff so far;
@@ -297,7 +297,7 @@ A brief contains, as the role needs:
 - for a later review round, the earlier rounds' findings and how each was
   settled, with the lead's response and any person's decision
   ([05](05-workflow-engine.md));
-- per-project instructions for a step type, such as `.charrette/review.md`.
+- per-project instructions for a step type, such as `.althar/review.md`.
 
 The same brief starts:
 
@@ -309,13 +309,13 @@ The same brief starts:
 
 Rules:
 
-- Charrette does not edit a repository's own instruction files (`CLAUDE.md`,
+- Althar does not edit a repository's own instruction files (`CLAUDE.md`,
   `AGENTS.md`). Each agent still reads its own. The brief makes sure every
   agent also starts with the same project context. Since September 2026 Claude
   Code falls back to `AGENTS.md` only when no `CLAUDE.md` exists, so a
   repository with both still gives different agents different instructions.
 - What fits goes in the first prompt. The rest stays readable through
-  Charrette's tools (an MCP server given to every session at `session/new`), so
+  Althar's tools (an MCP server given to every session at `session/new`), so
   the agent reads it when it needs it.
 - The brief sent is recorded as an artifact on the attempt, so what an agent
   was told is always inspectable.
@@ -335,7 +335,7 @@ agents needs this today. Effort is the same: a config option (`thought_level`)
 set as a session starts and changed within it.
 
 What each agent offers comes from the agent, in its own ids and names: the
-choices of its session's model and effort options. Charrette keeps no table of
+choices of its session's model and effort options. Althar keeps no table of
 models; it reads them from the agent's latest session, and asks an agent it has
 never run by starting it once in an empty folder, read-only, and stopping it.
 
@@ -347,7 +347,7 @@ its controller is fenced.
 In the MVP the new agent takes over everything: the whole conversation record,
 the plan, the open items, and the code as it stands. The record goes into the
 first prompt as far as it fits, most recent first, and the rest is readable
-through Charrette's tools. No model is needed to switch, so a switch is
+through Althar's tools. No model is needed to switch, so a switch is
 immediate and works when the outgoing agent is out of usage.
 
 This will be tuned. Candidates include a fresh take that leaves out the
@@ -365,7 +365,7 @@ release (Tier D), and provider-signed reasoning is lost either way.
 A usage limit belongs to an account (`ProviderPrincipal`), so it pauses every
 session on that account at once ([05](05-workflow-engine.md)). The agent's
 other accounts are not out, and moving on tries them first (Several
-accounts, below). ACP does not report limits. Charrette detects them in two
+accounts, below). ACP does not report limits. Althar detects them in two
 layers:
 
 1. **From errors, on every agent.** Each adapter classifies a failed turn as
@@ -381,7 +381,7 @@ layers:
    reports use per window and reset times before the limit is reached:
    - Claude Code: the Agent SDK's `rate_limit_event` gives status, use per
      window (five-hour, seven-day, per model) and reset times.
-     `claude-agent-acp` doesn't forward it, so Charrette ships the adapter
+     `claude-agent-acp` doesn't forward it, so Althar ships the adapter
      with a patch that forwards it as an ACP extension notification, and
      offers the patch upstream.
    - Codex: app-server's `account/rateLimits/read` and
@@ -437,7 +437,7 @@ stateDiagram-v2
     failed --> [*]
 ```
 
-The same lifecycle is data in `@charrette/domain` (`lifecycles.ts`), whose tests
+The same lifecycle is data in `@althar/domain` (`lifecycles.ts`), whose tests
 keep it whole: every state reachable, and none left after a terminal one.
 
 A provider session state does not directly set the run outcome. The workflow
@@ -505,9 +505,9 @@ type ExecutionGrant = {
 }
 ```
 
-`ProviderPrincipal` records who Charrette believes the provider session
+`ProviderPrincipal` records who Althar believes the provider session
 represents. `CredentialRef` points to the supported custodian; it is not a copy
-of the credential. `ExecutionGrant` is Charrette policy authorizing use of that
+of the credential. `ExecutionGrant` is Althar policy authorizing use of that
 principal for a bounded purpose.
 
 ### Vendor CLI and subscription login policy
@@ -519,27 +519,27 @@ capability, not permission to extract or relay its session.
 Rules:
 
 1. The official CLI owns login, refresh, logout, and credential storage.
-2. Charrette may invoke documented status/login commands or react to a
+2. Althar may invoke documented status/login commands or react to a
    structured `auth_required` response.
-3. Charrette never reads, scrapes, copies, decrypts, exports, uploads, or
+3. Althar never reads, scrapes, copies, decrypts, exports, uploads, or
    synchronizes the CLI's credential cache.
 4. It never asks for a provider password or browser session cookie.
 5. Subscription-backed execution runs on the user's device and only where the
    provider's current documentation and terms permit that use.
-6. Charrette cloud stores the fact that a device reports a capability, not the
+6. Althar cloud stores the fact that a device reports a capability, not the
    underlying subscription token.
 7. Remote or hosted execution requires a provider-approved API key, OAuth
    grant, workload identity, service credential, or enterprise access token.
 8. If no supported remote credential exists, the correct architecture is a
    local runner—not credential emulation.
 9. Account switching is explicit and recorded. A run snapshots the observed
-   principal and aborts or seeks approval if it changes. Charrette's own
+   principal and aborts or seeks approval if it changes. Althar's own
    moves between accounts are recorded as switches. A swap made by another
    tool shows up in the next sign-in check, and is recorded then.
 10. Logging redacts tokens, authorization headers, cookies, device codes, and
     provider-defined secret fields before persistence.
 
-This is both safer and more durable than coupling Charrette to the current shape
+This is both safer and more durable than coupling Althar to the current shape
 of a vendor's private auth cache.
 
 ### Several accounts
@@ -548,7 +548,7 @@ An agent can have several sign-ins on one Mac: a work and a personal plan,
 a plan per client, several OpenCode logins
 ([ADR-012](../decisions/012-several-accounts-per-agent.md)). Each is an
 **account**: one sign-in, kept by the agent in a folder of its own, its
-**home**. Charrette only points the agent at the folder, and the rules above
+**home**. Althar only points the agent at the folder, and the rules above
 still hold: it never reads, copies or moves what the agent keeps there.
 
 ```ts
@@ -561,7 +561,7 @@ type AgentAccount = {
   order: number              // the person's order; the first allowed one is used first
   principalId?: string       // who the agent last said it is signed in as
   paidBy?: "plan" | "key"    // from the agent's status command
-  adoptedFrom?: string       // the tool that made the home, when Charrette didn't
+  adoptedFrom?: string       // the tool that made the home, when Althar didn't
 }
 ```
 
@@ -574,7 +574,7 @@ What makes a home, per agent:
 | OpenCode | `XDG_DATA_HOME`, with OpenCode's data under `opencode/` | `auth.json`, one entry per provider | Its database and history. Its config is under `XDG_CONFIG_HOME`, which stays the person's |
 
 **Adding an account.**
-- Charrette makes a home under its own data folder, named by the account's
+- Althar makes a home under its own data folder, named by the account's
   id, so it never moves.
 - It opens the agent's own sign-in there, in a terminal, for the person:
   `claude auth login`, `codex login`, `opencode auth login`, each with the
@@ -592,15 +592,15 @@ What makes a home, per agent:
 - The status command, run with the home, says who the account is and
   whether a plan or a key pays for it.
 
-**Adopting a home another tool made.** Charrette offers the folders of
+**Adopting a home another tool made.** Althar offers the folders of
 known switchers, and the person can add any folder by hand. It reads the
 folders' names, never what is inside, and leaves them as the tool made them.
 
-| Kind of switcher | Examples | What Charrette does |
+| Kind of switcher | Examples | What Althar does |
 |---|---|---|
 | A home per account | `codex-profiles`; codex-account-switcher (JoRo-Code); codex-accounts (omarhoumz), isolated homes; ccam's and the other `~/.claude-*` profile folders; claude-multi-account | Adopts each folder as an account |
 | One live sign-in, swapped by copying a saved one over it | opencode-swap; opcode-switch; the OpenCode profile switcher script; opencode-openai-sub-switcher; opencode-switcher (Copilot); cx-switch; codex-accounts (marivaldojr); ccam's `claude-switch` | Runs whichever account is active, as the agent's first account. It never swaps, because a swap changes the account under every running session, and a login kept in two places breaks when one copy refreshes. Each saved account the person wants in parallel is added once, with a sign-in of its own |
-| Rotation inside the agent or in front of it | oc-codex-multi-auth and opencode-antigravity-multi-auth (OpenCode plugins); codex-multi-auth; codex-account-gateway; claude-code-multi-account | Works unchanged. Charrette sees one account, and its usage limit means the whole pool is out |
+| Rotation inside the agent or in front of it | oc-codex-multi-auth and opencode-antigravity-multi-auth (OpenCode plugins); codex-multi-auth; codex-account-gateway; claude-code-multi-account | Works unchanged. Althar sees one account, and its usage limit means the whole pool is out |
 
 The switchers' folders and commands are read from each one when its
 support is built, and checked again by the contract suite.
@@ -644,7 +644,7 @@ credit was then announced for 15 June, and paused on 15 June. As of 28
 September 2026, Agent SDK and third-party app usage draws on the plan's normal
 limits, and Anthropic says it will give notice before changing that.
 
-Charrette running Claude Code through `claude-agent-acp` counts as third-party
+Althar running Claude Code through `claude-agent-acp` counts as third-party
 use. Check the policy again before relying on a Claude plan beyond the proof of
 concept; an Anthropic API key, through Claude Code or OpenCode, is the fallback.
 Plan sign-in works only in Claude Code and claude.ai, so OpenCode cannot use a
@@ -663,7 +663,7 @@ When a provider supports programmatic credentials:
 - require cloud-side secret storage for cloud runners;
 - show which principal, billing context, and host will be used before execution.
 
-Keys the user gives Charrette for OpenCode follow these rules: they are kept in
+Keys the user gives Althar for OpenCode follow these rules: they are kept in
 the Keychain and injected only into that OpenCode child's environment. Keys
 OpenCode already holds stay with OpenCode.
 
@@ -698,19 +698,19 @@ to the adapter/protocol version with which they began.
 
 ## Permission routing
 
-Charrette must see every permission request to apply the project's rules,
+Althar must see every permission request to apply the project's rules,
 including the always-ask list
-([ADR-007](../decisions/007-permission-requests-reach-charrette.md)).
+([ADR-007](../decisions/007-permission-requests-reach-althar.md)).
 
 - Every session starts in a mode where the agent asks rather than acts. No
   session starts in a bypass mode. Requests arrive as ACP
   `session/request_permission`. The session records how it was started: the
   mode, and the MCP servers and tools its role was given.
-- Charrette decides allow or reject, and the adapter sends the narrowest
+- Althar decides allow or reject, and the adapter sends the narrowest
   option that carries the decision out. It never sends an "always" option: the
   agent could remember the rule itself, and later requests would stop reaching
-  Charrette. A standing allow is Charrette's own rule, recorded with the
-  decision, and applied by Charrette.
+  Althar. A standing allow is Althar's own rule, recorded with the
+  decision, and applied by Althar.
   - Allow: the option for this action; where the agent offers nothing
     narrower, the one for the rest of the turn (Codex's permission profiles),
     recorded with scope `turn`.
@@ -724,11 +724,11 @@ including the always-ask list
   - A decision that fails to be made is a rejection.
 - Cancelling a turn answers the requests still waiting with `cancelled`, as
   ACP asks of the client, whether or not the agent withdraws them.
-- Charrette answers from the project rules
+- Althar answers from the project rules
   ([ADR-013](../decisions/013-project-rules.md)). With the default mode,
   nearly everything is allowed without the user; only what the rules keep for
   the user becomes an attention request. The rules see what reaches
-  Charrette, which is what agents ask to do beyond their sandbox. Every answer is recorded on the task, and the thread shows allowed
+  Althar, which is what agents ask to do beyond their sandbox. Every answer is recorded on the task, and the thread shows allowed
   requests as one quiet line.
 - A session with a read-only role, such as the coordinator or a review step,
   starts in the agent's read-only mode where it has one (for example Claude
@@ -739,7 +739,7 @@ What keeps each agent asking, whatever its own settings say:
 
 | Agent | How | Checked against |
 |---|---|---|
-| Claude Code | Every session gets ask rules for Bash, Edit, Write, MultiEdit, NotebookEdit and WebFetch, has bypass mode turned off for its whole life, loads only the MCP servers Charrette gives it (`strictMcpConfig`), and runs its shell in Claude's sandbox, all through the adapter's `_meta.claudeCode.options`. Ask rules win over allow rules from any settings file, and over a hook that approves | A repository whose `.claude/settings.json` allows those tools, defaults to `bypassPermissions`, and has a hook that approves every tool call |
+| Claude Code | Every session gets ask rules for Bash, Edit, Write, MultiEdit, NotebookEdit and WebFetch, has bypass mode turned off for its whole life, loads only the MCP servers Althar gives it (`strictMcpConfig`), and runs its shell in Claude's sandbox, all through the adapter's `_meta.claudeCode.options`. Ask rules win over allow rules from any settings file, and over a hook that approves | A repository whose `.claude/settings.json` allows those tools, defaults to `bypassPermissions`, and has a hook that approves every tool call |
 | Codex | Mode `workspace-write`, whose reviewer is the person. The default `agent` mode sends requests to an automatic reviewer instead, and was seen to write outside the workspace without asking | Writing outside the workspace, which it asks for |
 | OpenCode | Inline config (`OPENCODE_CONFIG_CONTENT`) that sets edits, commands and fetches to ask, for its built-in agents too, and lets it carry on after a rejection (`experimental.continue_loop_on_deny`) | A repository whose `opencode.json` allows everything |
 
@@ -755,7 +755,7 @@ So where an agent has a sandbox, it keeps commands inside the worktree:
 - OpenCode has none yet. Wrapping it in the same sandbox-runtime Claude uses
   is next.
 
-A command that has to leave its sandbox reaches Charrette as a request, and
+A command that has to leave its sandbox reaches Althar as a request, and
 the rules read it as a shell would, into commands and words. They ask about:
 
 - pushes to the default branch, force pushes, pushes of every branch or of
@@ -789,7 +789,7 @@ Known gaps:
 
 ## Approval boundary
 
-Provider-native permission prompts are inputs to Charrette policy, not a
+Provider-native permission prompts are inputs to Althar policy, not a
 replacement for it.
 
 An `ApprovalRequest` records:
@@ -805,7 +805,7 @@ An `ApprovalRequest` records:
 The `Decision` records actor, outcome, reasoning, time, and consumption. If an
 input or action changes, the digest changes and the decision no longer applies.
 
-Examples requiring Charrette-level handling include:
+Examples requiring Althar-level handling include:
 
 - destructive Git operations;
 - external messages, issue transitions, deployments, or merges;
@@ -825,7 +825,7 @@ Controls:
 - do not let repository content alter the runtime's adapter configuration
   without a reviewed project policy path;
 - delimit source-derived instructions and record their origin;
-- constrain Charrette-owned filesystem operations to registered roots;
+- constrain Althar-owned filesystem operations to registered roots;
 - allowlist child environment variables;
 - require explicit grants for MCP tools and external mutations;
 - record the exact brief, skills, and instructions sent to the agent;
@@ -860,8 +860,8 @@ single generic “agent failed” label.
 - Logging and diagnostic export contain no seeded secret canary.
 - Supported CLI versions pass the same contract suite.
 - Unknown event fields do not crash the adapter; impossible transitions do.
-- Provider restart and Charrette restart are tested at every lifecycle boundary.
-- Provider-native steering, where present, preserves Charrette's durable input
+- Provider restart and Althar restart are tested at every lifecycle boundary.
+- Provider-native steering, where present, preserves Althar's durable input
   order; where absent, cancellation plus resume/new turn preserves the same
   interrupt-and-continue semantics.
 - A stale controller cannot advance state after replacement.
@@ -871,7 +871,7 @@ single generic “agent failed” label.
 - Host-native execution is never labeled sandboxed.
 - Claude Code, Codex, and OpenCode pass the same contract suite.
 - No session starts in a bypass mode; every permission request reaches
-  Charrette.
+  Althar.
 - Switching to another agent keeps the workspace and hands over the whole
   record, and the superseded session cannot write afterwards.
 - A usage limit is recognised on every agent from its error, and before it is

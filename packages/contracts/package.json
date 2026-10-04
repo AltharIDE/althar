@@ -1,8 +1,8 @@
 {
-  "name": "@charrette/contracts",
+  "name": "@althar/contracts",
   "version": "0.0.0",
   "private": true,
-  "description": "The contract between Charrette's runtime and its clients: the typed API, and the transport it runs over.",
+  "description": "The contract between Althar's runtime and its clients: the typed API, and the transport it runs over.",
   "license": "UNLICENSED",
   "type": "module",
   "exports": {

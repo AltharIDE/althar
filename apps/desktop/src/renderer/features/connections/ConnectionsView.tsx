@@ -1,12 +1,12 @@
-import type { ConnectionList, Product } from '@charrette/contracts'
-import { Connections, type ServiceConnection, type ServiceOption, Spinner } from '@charrette/ui'
+import type { ConnectionList, Product } from '@althar/contracts'
+import { Connections, type ServiceConnection, type ServiceOption, Spinner } from '@althar/ui'
 
 import { productBrand } from '../../shared/products'
 import s from './Connections.module.css'
 import type { ConnectionsModel } from './useConnections'
 
 /*
- * The code hosts and trackers Charrette reaches for the person, drawn by the
+ * The code hosts and trackers Althar reaches for the person, drawn by the
  * kit: each service, who they are signed in as there, or how to connect it.
  */
 

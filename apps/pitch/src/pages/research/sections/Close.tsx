@@ -25,8 +25,8 @@ export function Close() {
         </a>
       </div>
       <p className={s.foot}>
-        <span>Charrette · open source</span>
-        <span>github.com/thetastemakers/charrette</span>
+        <span>Althar · open source</span>
+        <span>github.com/thetastemakers/althar</span>
       </p>
     </>
   )

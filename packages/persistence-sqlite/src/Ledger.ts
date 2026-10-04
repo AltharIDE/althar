@@ -1,4 +1,4 @@
-import { ActorId, AggregateType, CommandId, Ids, newId, now, ProjectId, RecordEventId, Timestamp } from '@charrette/domain'
+import { ActorId, AggregateType, CommandId, Ids, newId, now, ProjectId, RecordEventId, Timestamp } from '@althar/domain'
 import { Context, Crypto, Effect, Layer, PubSub, Schema, type Scope } from 'effect'
 import { SqlClient, type SqlError, SqlSchema } from 'effect/sql'
 
@@ -71,7 +71,7 @@ export class Ledger extends Context.Service<
      */
     readonly listen: Effect.Effect<Effect.Effect<void>, never, Scope.Scope>
   }
->()('@charrette/persistence-sqlite/Ledger') {
+>()('@althar/persistence-sqlite/Ledger') {
   static readonly layer: Layer.Layer<Ledger, never, SqlClient.SqlClient | Crypto.Crypto> = Layer.effect(
     Ledger,
     Effect.gen(function* () {

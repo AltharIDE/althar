@@ -1,6 +1,6 @@
 # Glossary
 
-The words Charrette's interface uses, with the word the architecture docs use
+The words Althar's interface uses, with the word the architecture docs use
 for the same thing. The interface says the left column. Code, docs and ADRs may
 say the right. When something new needs a name on screen, add it here first.
 
@@ -11,10 +11,10 @@ say the right. When something new needs a name on screen, add it here first.
 | Project | `Project` | A body of work with its own rules, knowledge and history. It may have no repositories. |
 | Repository | `RepositoryBinding` | A repository that the project's tasks may change, with its role. It is shared by everyone on the project. |
 | On this Mac, Map it later | `RepositoryLocation`, or none | Where this device keeps that repository. "Map it later" is a binding with no location here. On the Sources view that state is "needs mapping". |
-| Reading it | read-only inspection | What Charrette does to a folder before a project exists. It changes nothing. |
+| Reading it | read-only inspection | What Althar does to a folder before a project exists. It changes nothing. |
 | Agent | runtime, adapter | Claude Code, Codex, OpenCode and the like, as installed on this machine. |
 | Account | `AgentAccount`, its home | One sign-in of an agent, kept in a folder of its own. The agent's usual sign-in is its first account; the person can add more, or bring in folders a switcher made. Named by the person ("work"), it shows after the agent's name: "Codex (work)". |
-| Signed in as | `ProviderPrincipal` | Who the agent says you are, for an account. The agent keeps its own sign-in; Charrette never holds the credential. |
+| Signed in as | `ProviderPrincipal` | Who the agent says you are, for an account. The agent keeps its own sign-in; Althar never holds the credential. |
 | Sign in | vendor login, `auth_required` | Opens the agent's own sign-in, for an account. |
 | Out of usage | usage limit, `transient_provider` | The account has used its allowance until a reset. Depending on the project rules, the task is Paused, or moves to another of the agent's accounts, then to another agent. |
 
@@ -27,7 +27,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Lead | the task's primary agent (the docs sometimes say worker) | The agent that owns a task: it implements, runs the steps and answers them. Never "worker" on screen. |
 | Step | workflow node | One stage of a task: Implement, Review, Verify. Steps report back to the lead. |
 | Steps, the plan | workflow graph | A task's steps before it starts (the plan) and while it runs. |
-| Tried three ways | run attempts, the repair ladder | What Charrette already did before asking you: a retry, a repair, another agent. |
+| Tried three ways | run attempts, the repair ladder | What Althar already did before asking you: a retry, a repair, another agent. |
 
 ## You and the work
 
@@ -42,7 +42,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Stop the task | run suspended | From the task menu. Nothing runs until you resume it. Status: Stopped. |
 | Abandon | `cancel_run` | Ends the task without its change. It moves to Settled. |
 | Reopen | a new run on a finished task | Only for a task that is done. |
-| Charrette restarted | reconciliation after process loss | The thread line shown while Charrette checks what the lead had done, so nothing runs twice. |
+| Althar restarted | reconciliation after process loss | The thread line shown while Althar checks what the lead had done, so nothing runs twice. |
 
 ## What comes back
 

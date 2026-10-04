@@ -15,7 +15,7 @@ From the desktop app:
 1. Connect GitHub and Linear (later GitLab, Jira, Bitbucket and Trello).
 2. Paste an issue's link to the coordinator: it unfurls, and the task the
    coordinator drafts comes from it. Or start a task from one of your issues.
-3. The plan ends with a draft pull request. Charrette pushes the branch and
+3. The plan ends with a draft pull request. Althar pushes the branch and
    opens it, with the issue's key in its title.
 4. The task listens to its pull request. Comments, reviews and checks arrive
    in its thread. People's comments and failed checks reach the lead, which
@@ -39,7 +39,7 @@ One pull request each:
    - Issues unfurled and tasks from issues.
    - The Connections panel and the accept card.
    - Built on the `integrations` branch. Not yet run against real
-     accounts: Charrette's GitHub App and Linear app aren't registered, so
+     accounts: Althar's GitHub App and Linear app aren't registered, so
      both take pasted tokens until they are.
 2. **GitLab,** hosted and self-managed, with its issues.
 3. **Jira,** Cloud and Data Center.
@@ -52,7 +52,7 @@ One pull request each:
 - **Polling** every 30 seconds while a task listens, and on demand; no
   webhooks.
 - **Marking ready and merging** are the person's.
-- **The apps Charrette signs in with** (its GitHub App, its Linear OAuth app,
+- **The apps Althar signs in with** (its GitHub App, its Linear OAuth app,
   its GitLab application and its Trello Power-Up) are registered by the
   maintainers. Their public ids are build configuration. Until one is
   registered, its service takes a pasted token.

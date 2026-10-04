@@ -21,11 +21,11 @@ import {
   startDeviceFlow,
   type TokenSet,
   type Tracker,
-} from '@charrette/connectors'
-import { type ActorId, Ids, newId } from '@charrette/domain'
+} from '@althar/connectors'
+import { type ActorId, Ids, newId } from '@althar/domain'
 import { Cause, Clock, Context, type Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Semaphore } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
-import type { Ledger } from '@charrette/persistence-sqlite'
+import type { Ledger } from '@althar/persistence-sqlite'
 
 import { Connectors } from './Config'
 import { NotFound } from './errors'
@@ -53,7 +53,7 @@ export class NotConnected extends Schema.TaggedError<NotConnected>()('NotConnect
   what: Schema.String,
 }) {}
 
-/** The product has no browser sign-in here: Charrette's app isn't registered with it, so it takes a pasted token. */
+/** The product has no browser sign-in here: Althar's app isn't registered with it, so it takes a pasted token. */
 export class SignInUnavailable extends Schema.TaggedError<SignInUnavailable>()('SignInUnavailable', {
   product: Schema.String,
 }) {}
@@ -167,7 +167,7 @@ export class Connections extends Context.Service<
       unknown
     >
   }
->()('@charrette/runtime/Connections') {
+>()('@althar/runtime/Connections') {
   static readonly layer: Layer.Layer<Connections, never, Store> = Layer.effect(
     Connections,
     Effect.gen(function* () {
@@ -333,12 +333,12 @@ export class Connections extends Context.Service<
             Effect.mapError((error) =>
               error instanceof ConnectorFailed
                 ? error
-                : // A sign-in Charrette can't open here isn't one that stopped working: the connection keeps its state.
+                : // A sign-in Althar can't open here isn't one that stopped working: the connection keeps its state.
                   error instanceof SecretsUnavailable
                   ? new ConnectorFailed({
                       product: row.product,
                       reason: 'unreachable',
-                      message: `Charrette couldn’t open its sign-in: ${error.reason}`,
+                      message: `Althar couldn’t open its sign-in: ${error.reason}`,
                     })
                   : new ConnectorFailed({ product: row.product, reason: 'unauthorized', message: String(error) }),
             ),
@@ -364,7 +364,7 @@ export class Connections extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const info = infoOf(input.product)
           if (info?.make == null)
-            return yield* new NotConnected({ product: input.product, what: 'a product Charrette has no adapter for yet' })
+            return yield* new NotConnected({ product: input.product, what: 'a product Althar has no adapter for yet' })
           const webUrl = trimmed(input.webUrl)
           const apiUrl = info.apiFor(webUrl)
           const credential: Credential =
@@ -482,10 +482,8 @@ export class Connections extends Context.Service<
             const ok = given !== null && url.searchParams.get('state') === state
             res.writeHead(ok ? 200 : 400, { 'content-type': 'text/html; charset=utf-8' })
             res.end(
-              `<!doctype html><meta charset="utf-8"><title>Charrette</title><body style="font:15px system-ui;margin:3rem">${
-                ok
-                  ? `Signed in to ${productName}. You can close this tab and go back to Charrette.`
-                  : 'That sign-in didn’t come from Charrette.'
+              `<!doctype html><meta charset="utf-8"><title>Althar</title><body style="font:15px system-ui;margin:3rem">${
+                ok ? `Signed in to ${productName}. You can close this tab and go back to Althar.` : 'That sign-in didn’t come from Althar.'
               }</body>`,
             )
             if (ok) Deferred.doneUnsafe(code, Exit.succeed(given))

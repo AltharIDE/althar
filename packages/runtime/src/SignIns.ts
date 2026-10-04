@@ -1,4 +1,4 @@
-import { type SignInCheck, signInCheck, type SignInStatus } from '@charrette/provider-adapters'
+import { type SignInCheck, signInCheck, type SignInStatus } from '@althar/provider-adapters'
 import { Context, Duration, Effect, Layer } from 'effect'
 import type { SqlError } from 'effect/sql'
 
@@ -30,7 +30,7 @@ export class SignIns extends Context.Service<
     /** An account's sign-in, and how it is paid for. */
     account(account: Account, recheck?: boolean): Effect.Effect<SignInCheck>
   }
->()('@charrette/runtime/SignIns') {
+>()('@althar/runtime/SignIns') {
   static readonly layer: Layer.Layer<SignIns, never, Agents | Accounts> = Layer.effect(
     SignIns,
     Effect.gen(function* () {

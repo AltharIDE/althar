@@ -1,13 +1,13 @@
-# @charrette/persistence-sqlite
+# @althar/persistence-sqlite
 
-Charrette's local store: one SQLite database per profile, written only by the runtime. It holds the schema and its migrations, the operational record and the client change feed, command receipts that make retries safe, and revision checks. It is built on Effect's SQL client, on Node's built-in `node:sqlite`.
+Althar's local store: one SQLite database per profile, written only by the runtime. It holds the schema and its migrations, the operational record and the client change feed, command receipts that make retries safe, and revision checks. It is built on Effect's SQL client, on Node's built-in `node:sqlite`.
 
 **[schema.sql](schema.sql)** is the whole schema as plain SQL, generated from the migrations by a test. Read that rather than the migration code.
 
 ## Use it
 
 ```ts
-import { Commands, Database, Ledger } from '@charrette/persistence-sqlite'
+import { Commands, Database, Ledger } from '@althar/persistence-sqlite'
 
 const Store = Layer.mergeAll(Ledger.layer, Commands.layer).pipe(Layer.provideMerge(Database.layer({ filename })))
 ```

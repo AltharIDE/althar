@@ -1,32 +1,32 @@
-# Charrette Architecture
+# Althar Architecture
 
 > **Status:** Working architecture baseline
 > **Date:** 2026-09-20, harness decisions added 2026-09-28
 > **Scope:** Local-first MVP with explicit seams for later cloud authority
 > **Audience:** Product engineers familiar with web or mobile development
 
-## What Charrette is
+## What Althar is
 
-Charrette is a durable coordination layer for engineering work.
+Althar is a durable coordination layer for engineering work.
 
 It lets a person define work at the level of a project, connect the repositories
 and external systems that work needs, delegate parts of it to coding agents, and
 retain the resulting evidence, decisions, and useful knowledge after any
 particular agent conversation has ended.
 
-Charrette is therefore an **agent harness**, but not a new agent runtime:
+Althar is therefore an **agent harness**, but not a new agent runtime:
 
-- Charrette owns projects, tasks, workflow state, policy, approvals,
+- Althar owns projects, tasks, workflow state, policy, approvals,
   integrations, skills, evidence, and recovery.
 - Claude Code, Codex, OpenCode, or another agent owns its model calls, context
   window, native tool loop, provider conversation, and provider
-  authentication. Charrette reaches every agent through the Agent Client
+  authentication. Althar reaches every agent through the Agent Client
   Protocol (ACP).
-- Charrette supervises and interprets provider work without trying to reproduce
+- Althar supervises and interprets provider work without trying to reproduce
   the provider internally.
 
 This distinction is the architectural centre of the product. Existing coding
-agents already solve model/tool interaction. Charrette's reason to exist is the
+agents already solve model/tool interaction. Althar's reason to exist is the
 durable layer above them.
 
 ## The product model
@@ -57,7 +57,7 @@ In plain terms:
 6. The run materializes a durable **workflow**: the task's **lead**, the agent
    that implements it, and **steps** such as review, run by other agents.
 7. Workflow nodes ask an agent, tool, integration, or person to do something.
-8. Charrette records attempts, approvals, outputs, verification, and
+8. Althar records attempts, approvals, outputs, verification, and
    uncertainty.
 9. Useful results become project evidence, decisions, or scoped knowledge.
 
@@ -91,19 +91,19 @@ need task, repository, product, team, organization, or federated scope.
 Consider a task that changes a web application and its API:
 
 1. The user creates a project and selects two existing repositories.
-2. Charrette records two shared repository bindings and this computer's local
+2. Althar records two shared repository bindings and this computer's local
    paths separately.
 3. The user creates a task that may write the frontend and read/write the API.
-4. Charrette prepares managed workspaces without changing either selected
+4. Althar prepares managed workspaces without changing either selected
    working copy.
 5. A workflow invokes one coding-agent runtime with the required repositories,
    skills, tools, and policy.
 6. The user interrupts the current turn with a new constraint.
-7. Charrette acknowledges the interruption, safely stops the active turn, and
+7. Althar acknowledges the interruption, safely stops the active turn, and
    continues the unfinished task with the new message at the front of the
    queue.
 8. The workflow verifies the resulting changes independently.
-9. Charrette retains repository-specific changes, verification evidence,
+9. Althar retains repository-specific changes, verification evidence,
    decisions, and any promoted knowledge claim.
 
 The provider session helped perform the work. It did not become the identity or
@@ -117,10 +117,10 @@ The MVP is one installed product with a UI and a local backend:
 flowchart TB
     UI["Electron renderer<br/>web UI"]
     Main["Electron main<br/>native application shell"]
-    Runtime["Charrette runtime<br/>utility process, local control plane"]
+    Runtime["Althar runtime<br/>utility process, local control plane"]
     Store[("SQLite + artifact store")]
     Provider["Agents over ACP<br/>Claude Code · Codex · OpenCode"]
-    Tools["Charrette tools<br/>MCP"]
+    Tools["Althar tools<br/>MCP"]
     Connector["Git host / Linear / Jira connector"]
     MCP["MCP tools and resources"]
     Skills["Resolved skill snapshot"]
@@ -137,7 +137,7 @@ flowchart TB
     Skills --> Runtime
 ```
 
-For a web/mobile developer, the renderer is the frontend and the Charrette
+For a web/mobile developer, the renderer is the frontend and the Althar
 runtime is a backend service that happens to run on the same computer. Electron
 main is the thin native shell between them.
 
@@ -168,7 +168,7 @@ semantics.
 
 Workflow execution is another boundary. A workflow definition is immutable; a
 run receives a revisioned execution graph. An agent may propose a bounded graph
-change, but Charrette validates and commits it. Agents do not rewrite completed
+change, but Althar validates and commits it. Agents do not rewrite completed
 history or silently expand their authority.
 
 ## Reading order
@@ -185,13 +185,13 @@ the concepts:
    child processes, shutdown, crashes, and code/package boundaries.
 
 3. [Agent runtime and authentication](03-agent-runtime-and-auth.md)
-   explains what Charrette delegates to agents, ACP and its gaps, the agent
+   explains what Althar delegates to agents, ACP and its gaps, the agent
    registry, briefing agents, switching model or agent, usage limits,
    permission routing, process ownership, and authentication.
 
 4. [Coordinator](04-coordinator.md)
-   explains the project's coordinator: an agent session with Charrette's tools
-   and read-only access, whose conversation Charrette keeps.
+   explains the project's coordinator: an agent session with Althar's tools
+   and read-only access, whose conversation Althar keeps.
 
 5. [Workflow engine](05-workflow-engine.md)
    explains durable graphs, node attempts, retries, dynamic changes,
@@ -242,9 +242,9 @@ These rules matter more than the eventual class or folder names:
 15. Every retry, loop, fan-out, repair, and background poll has a bound.
 16. Interrupting a chat turn acknowledges and stops that turn, then continues
     the unfinished objective with the new input. It is not task cancellation.
-17. Every session starts from a brief Charrette assembled and recorded. No
+17. Every session starts from a brief Althar assembled and recorded. No
     agent's own memory is the only record of a task.
-18. Every permission request reaches Charrette. No session starts in a bypass
+18. Every permission request reaches Althar. No session starts in a bypass
     mode.
 19. Switching model or agent never loses the task's workspace or record.
 
@@ -260,7 +260,7 @@ The local MVP includes:
 - one ACP adapter serving Claude Code, Codex, and OpenCode, with native side
   channels where ACP falls short;
 - switching model or agent mid-task;
-- a coordinator per project: a read-only agent session with Charrette's tools;
+- a coordinator per project: a read-only agent session with Althar's tools;
 - one immutable, code-owned workflow with attention and verification;
 - durable chat input with interrupt-and-continue behavior;
 - persisted attempts, observations, approvals, artifacts, changes, and claims;
@@ -302,13 +302,13 @@ Decided:
 
 | Choice | Decision | Record |
 |---|---|---|
-| Agent protocol | ACP for every agent, behind Charrette's adapter port, with native side channels and replacement adapters where ACP falls short | [ADR-002](../decisions/002-acp-for-every-agent.md) |
+| Agent protocol | ACP for every agent, behind Althar's adapter port, with native side channels and replacement adapters where ACP falls short | [ADR-002](../decisions/002-acp-for-every-agent.md) |
 | Agents in the MVP | Claude Code, Codex, and OpenCode, interchangeable | [ADR-002](../decisions/002-acp-for-every-agent.md) |
 | Shell | Electron, with the runtime in a utility process | [ADR-003](../decisions/003-electron-shell.md) |
-| Coordinator | An ordinary agent session with Charrette's tools and read-only access | [ADR-004](../decisions/004-coordinator-is-an-agent-session.md) |
-| Starting context | Charrette briefs every agent; switching agent hands over everything in the MVP | [ADR-005](../decisions/005-charrette-briefs-every-agent.md) |
-| Workspaces | A git worktree per task, in `~/Charrette/<project>/<task>/<repository>`; plain branches maybe later | [ADR-006](../decisions/006-worktree-per-task.md) |
-| Permissions | Every request reaches Charrette and is answered from the project rules | [ADR-007](../decisions/007-permission-requests-reach-charrette.md) |
+| Coordinator | An ordinary agent session with Althar's tools and read-only access | [ADR-004](../decisions/004-coordinator-is-an-agent-session.md) |
+| Starting context | Althar briefs every agent; switching agent hands over everything in the MVP | [ADR-005](../decisions/005-althar-briefs-every-agent.md) |
+| Workspaces | A git worktree per task, in `~/Althar/<project>/<task>/<repository>`; plain branches maybe later | [ADR-006](../decisions/006-worktree-per-task.md) |
+| Permissions | Every request reaches Althar and is answered from the project rules | [ADR-007](../decisions/007-permission-requests-reach-althar.md) |
 | Build standard | Shortcuts in behaviour, never in recorded facts or data shapes | [ADR-008](../decisions/008-shortcuts-in-behaviour-not-in-records.md) |
 | Runtime-side code | Effect 4, pinned; never in the UI kit | [ADR-009](../decisions/009-effect-on-the-runtime-side.md) |
 | Desktop app | MVVM: views, hooks as view models, an Effect data layer; feature folders; TanStack Router | [ADR-010](../decisions/010-desktop-app-mvvm.md) |
@@ -319,10 +319,10 @@ Still requiring sign-off. The architecture uses these recommended defaults:
 |---|---|---|
 | Subscription-backed CLI auth | Local execution through the official CLI only | Cloud must not extract or relay consumer subscription credentials |
 | First issue tracker | Choose Linear or Jira from the first serious cohort | Building both obscures field ownership and reconciliation lessons |
-| MCP posture | Charrette broker with explicit grants and audit | Provider-native pass-through is less consistently observable |
+| MCP posture | Althar broker with explicit grants and audit | Provider-native pass-through is less consistently observable |
 | Workflow authoring | Inspectable code-owned definitions; declarative/visual authoring is not assumed | Prevents an editor from preceding trustworthy execution semantics |
 | Dynamic repair | Bounded graph-patch proposals plus human escalation | Unrestricted replanning is not replayable or safely resumable |
-| Skill format | Agent Skills-compatible `SKILL.md` packages | Avoids a Charrette-only ecosystem |
+| Skill format | Agent Skills-compatible `SKILL.md` packages | Avoids an Althar-only ecosystem |
 | Critical skill activation | Explicit version pins in the run snapshot | Silent latest-version resolution makes runs irreproducible |
 | Repository-free projects | Allowed | Supports research while keeping project independent of source topology |
 | Multi-host run | Excluded from the local architecture | Requires distributed leases, transfer, cancellation, and partial-failure rules |

@@ -52,7 +52,7 @@ export const work: ReadonlyArray<string> = [
     ['UNIQUE (task_id, binding_id)', sameProject('task_id', 'tasks'), sameProject('binding_id', 'repository_bindings')],
   ),
 
-  /* Workflow definitions ship with Charrette and belong to no project. */
+  /* Workflow definitions ship with Althar and belong to no project. */
   table('workflow_definitions', [id('wdef'), 'name TEXT NOT NULL UNIQUE', at('created_at'), at('retired_at', { nullable: true })]),
 
   table(

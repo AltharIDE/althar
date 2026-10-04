@@ -5,8 +5,8 @@
 Each project has a coordinator: the agent you talk to about the project as a
 whole. It plans work and hands it out. It never writes code.
 
-> The coordinator is an ordinary agent session with Charrette's tools and
-> read-only access to the repositories. Charrette keeps its conversation. The
+> The coordinator is an ordinary agent session with Althar's tools and
+> read-only access to the repositories. Althar keeps its conversation. The
 > provider session is disposable.
 
 See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
@@ -31,10 +31,10 @@ one-line change. A change is always a task with a lead.
 
 ```mermaid
 flowchart LR
-    You["You"] <--> Thread["Coordinator thread<br/>Charrette's record"]
+    You["You"] <--> Thread["Coordinator thread<br/>Althar's record"]
     Thread --> Brief["Brief"]
     Brief --> Session["Coordinator session<br/>any agent, over ACP"]
-    Session <-->|"MCP"| Tools["Charrette tools"]
+    Session <-->|"MCP"| Tools["Althar tools"]
     Tools --> Runtime["Runtime commands and queries"]
     Session -.->|"reads"| Repos["Read-only worktrees"]
     Runtime --> Tasks["Tasks, leads, and steps"]
@@ -50,7 +50,7 @@ Read-only is enforced by what the coordinator can reach, not by its prompt,
 in three layers ([ADR-004](../decisions/004-coordinator-is-an-agent-session.md)).
 A reviewer, the other role that only reads, gets the same.
 
-- It reads throwaway copies. Its working directory is a Charrette-owned
+- It reads throwaway copies. Its working directory is an Althar-owned
   folder holding one worktree per bound repository, detached at the default
   branch. They are refreshed from the remote's default branch when you start
   a turn, so nothing written there survives or reaches a task. A project with
@@ -58,12 +58,12 @@ A reviewer, the other role that only reads, gets the same.
   worktree, snapshotted when its round begins, so it reads what the round is
   about even if the lead moves on, and the record keeps which code it was.
 - The agent's own sandbox is read-only where it has one that still lets it
-  call Charrette's tools: Codex's `read-only` sandbox, and Claude Code with its
+  call Althar's tools: Codex's `read-only` sandbox, and Claude Code with its
   edit tools denied (which also denies its sandbox's writes) and every shell
   command asking. Claude Code's plan mode and OpenCode's plan agent would be
   simpler, but both refuse MCP tools. OpenCode has no sandbox yet, so for it
   the copy is the boundary.
-- Charrette's reader rules are the backstop. They allow reads, searches and
+- Althar's reader rules are the backstop. They allow reads, searches and
   fetches, and commands that only look, each with the flags it may take (no
   `rg --pre`, `git -c`, `sort -o`). They refuse everything else with a reason,
   and never ask you.
@@ -71,9 +71,9 @@ A reviewer, the other role that only reads, gets the same.
   the interface does: validated, recorded, idempotent, and never beyond your
   own authority.
 
-## Charrette tools
+## Althar tools
 
-Charrette gives the coordinator an MCP server at `session/new`. Names are
+Althar gives the coordinator an MCP server at `session/new`. Names are
 provisional.
 
 | Tool | What it does | Kind |
@@ -95,7 +95,7 @@ tools are granted per role; a lead gets none of the coordinator's.
 
 ## Conversation and context
 
-The conversation with you is Charrette's record, kept in full with the
+The conversation with you is Althar's record, kept in full with the
 project. The provider session is a working copy of it.
 
 The session is rebuilt from a brief ([03](03-agent-runtime-and-auth.md)) when:
@@ -112,7 +112,7 @@ turns are read through its tools, not pasted in.
 ### The compaction seam
 
 In the MVP, the agent's own compaction manages a long session, and a rebuild
-uses recent turns plus the tools. Charrette writes no summaries yet.
+uses recent turns plus the tools. Althar writes no summaries yet.
 
 Continuous compaction will write summaries as records:
 
@@ -134,7 +134,7 @@ same records. Nothing else needs to change for this to arrive.
 
 ## Task events
 
-Task status changes reach the coordinator thread as task cards that Charrette
+Task status changes reach the coordinator thread as task cards that Althar
 posts, a projection of task facts. The coordinator agent doesn't write them.
 
 In the MVP the coordinator agent is prompted only by your messages. It reads

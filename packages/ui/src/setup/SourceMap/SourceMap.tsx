@@ -13,12 +13,12 @@ import { Spinner } from '../../primitives/Spinner/Spinner'
 import s from './SourceMap.module.css'
 
 /*
- * The repositories a project will work in, as Charrette read them before
+ * The repositories a project will work in, as Althar read them before
  * anything is made: where each one is, its branch and remote, the role it
  * plays, and anything found that is worth a word. Reading changes nothing
  * in the folder. A finding that needs a decision comes with one already
  * made, so the map can be confirmed as it stands. Sources are added one by
- * one; Charrette never goes looking for more.
+ * one; Althar never goes looking for more.
  */
 
 export interface SourceFinding {
@@ -41,7 +41,7 @@ export interface SourceEntry {
   branch?: string
   /** Its remote. Without one, it exists only here. */
   remote?: string
-  /** For one not on this device: where cloning would put it, as the consumer decides it: ~/Charrette/meridian-web. */
+  /** For one not on this device: where cloning would put it, as the consumer decides it: ~/Althar/meridian-web. */
   cloneTo?: string
   /** What it is to this project: frontend, service. Suggested from what was read. */
   role: string

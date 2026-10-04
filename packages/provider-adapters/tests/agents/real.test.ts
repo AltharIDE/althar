@@ -13,11 +13,11 @@ import { contract, sessionIn, withConnection, type ContractSubject } from '../co
 /*
  * The adapter contract against the real agents, as installed and signed in on
  * this machine: `bun run test:agents`. It costs a little usage. Pick agents
- * with CHARRETTE_AGENTS=codex,opencode.
+ * with ALTHAR_AGENTS=codex,opencode.
  *
  * Every check runs in a repository whose own settings allow everything
  * without asking, as a repository an agent works in may, so the checks that
- * need a permission request also show Charrette's ask rules win over it.
+ * need a permission request also show Althar's ask rules win over it.
  */
 
 const git = (cwd: string, ...args: Array<string>) =>
@@ -25,15 +25,15 @@ const git = (cwd: string, ...args: Array<string>) =>
     cwd,
     env: {
       ...process.env,
-      GIT_AUTHOR_NAME: 'Charrette',
-      GIT_AUTHOR_EMAIL: 'test@charrette.test',
-      GIT_COMMITTER_NAME: 'Charrette',
-      GIT_COMMITTER_EMAIL: 'test@charrette.test',
+      GIT_AUTHOR_NAME: 'Althar',
+      GIT_AUTHOR_EMAIL: 'test@althar.test',
+      GIT_COMMITTER_NAME: 'Althar',
+      GIT_COMMITTER_EMAIL: 'test@althar.test',
     },
   }).toString()
 
 const repository = () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'charrette-agents-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'althar-agents-'))
   git(cwd, 'init', '-q', '-b', 'main')
   mkdirSync(join(cwd, '.claude'))
   writeFileSync(
@@ -77,11 +77,11 @@ const otherModel: Record<AgentId, string> = {
 const command: Record<AgentId, string> = {
   'claude-code': 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
   codex:
-    'Run the shell command `touch ~/charrette-sandbox-probe.txt`, asking for the permission it needs, then tell me in one line whether it worked.',
+    'Run the shell command `touch ~/althar-sandbox-probe.txt`, asking for the permission it needs, then tell me in one line whether it worked.',
   opencode: 'Run the shell command `git log --oneline` here, then tell me in one line what it printed.',
 }
 
-const only = process.env.CHARRETTE_AGENTS?.split(',')
+const only = process.env.ALTHAR_AGENTS?.split(',')
 
 for (const agent of Object.values(agents)) {
   if (only !== undefined && !only.includes(agent.id)) continue
@@ -108,9 +108,9 @@ for (const agent of Object.values(agents)) {
   contract(subject)
 
   if (agent.id === 'codex') {
-    it.live('Codex commits in a worktree once Charrette allows it', () => {
+    it.live('Codex commits in a worktree once Althar allows it', () => {
       const main = repository()
-      const worktree = join(mkdtempSync(join(tmpdir(), 'charrette-worktree-')), 'repo')
+      const worktree = join(mkdtempSync(join(tmpdir(), 'althar-worktree-')), 'repo')
       git(main, 'worktree', 'add', '-q', '-b', 'task', worktree)
       return withConnection(
         { ...subject, cwd: worktree },

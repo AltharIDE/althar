@@ -1,4 +1,4 @@
-import type { ProjectId } from '@charrette/domain'
+import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'

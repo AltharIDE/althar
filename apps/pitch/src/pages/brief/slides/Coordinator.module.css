@@ -63,7 +63,7 @@
 .fresh circle { fill: var(--cobalt-soft); stroke: none; }
 .fresh .fk { fill: var(--cobalt-soft); }
 .fresh.proposed circle { fill: var(--ink); stroke: var(--cobalt-soft); }
-/* the project itself: Charrette's colour, ringed so it holds on the dark */
+/* the project itself: Althar's colour, ringed so it holds on the dark */
 .hub circle { fill: var(--cobalt); stroke: var(--cobalt-soft); stroke-width: 2; }
 .hub text { font: 500 15px var(--mono); fill: var(--on-ink-2); }
 .person { animation: fade 500ms both, float 7s ease-in-out var(--d, 0s) infinite; }

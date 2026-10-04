@@ -91,7 +91,7 @@ export function Orchestration() {
                   sensitive path adds a specialist.
                 </p>
               </div>{' '}
-              <span className={s.rungWho}>Charrette</span>{' '}
+              <span className={s.rungWho}>Althar</span>{' '}
             </li>
             <li className={cx(s.rung, s.isUs)}>
               {' '}
@@ -112,7 +112,7 @@ export function Orchestration() {
                   the next task inherits.
                 </p>
               </div>{' '}
-              <span className={s.rungWho}>Charrette</span>{' '}
+              <span className={s.rungWho}>Althar</span>{' '}
             </li>
           </ol>
         </figure>
@@ -139,7 +139,7 @@ export function Orchestration() {
               <thead>
                 <tr>
                   <th style={{ width: '15%' }}>Decision</th>
-                  <th>What Charrette decides</th>
+                  <th>What Althar decides</th>
                   <th style={{ width: '32%' }}>What delegation does instead</th>
                 </tr>
               </thead>
@@ -424,8 +424,8 @@ export function Orchestration() {
           <p>
             The two halves depend on each other. A graph with no memory has to rediscover policy on every run: which paths are sensitive,
             what counts as done, what was decided last time. A memory with no orchestration is a wiki: nothing supplies it, nothing tests it
-            against the running system, and nothing notices when it contradicts itself. In Charrette, each run starts by reading project
-            memory and ends by writing to it.
+            against the running system, and nothing notices when it contradicts itself. In Althar, each run starts by reading project memory
+            and ends by writing to it.
           </p>
         </div>
       </section>

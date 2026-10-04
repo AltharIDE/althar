@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } from 'react'
 
-import type { WatchEvent } from '@charrette/contracts'
+import type { WatchEvent } from '@althar/contracts'
 
 import type { Client } from './client'
 

@@ -98,11 +98,11 @@ export const AddingARule: Story = {
 }
 
 /**
- * As Charrette has it now: the rules allow, ask or allow everything; no
+ * As Althar has it now: the rules allow, ask or allow everything; no
  * review findings row; usage limits move or wait; the accounts of agents
  * with more than one, rotating only where the person says.
  */
-export const AsCharretteHasIt: Story = {
+export const AsAltharHasIt: Story = {
   args: {
     permissionOptions: [PermissionPolicy.Rules, PermissionPolicy.Ask, PermissionPolicy.AllowAll],
     defaultPermissions: PermissionPolicy.Rules,

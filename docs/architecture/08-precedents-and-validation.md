@@ -26,13 +26,13 @@ experience:
 - worktrees and remote hosts;
 - CLI/SDK/MCP-facing capabilities.
 
-It validates Charrette's separate host/runtime process and its need for bounded
+It validates Althar's separate host/runtime process and its need for bounded
 watchers, child-process ownership, and host-aware workspaces.
 
-Charrette should not chase Superset's surface breadth in the MVP. A workspace
+Althar should not chase Superset's surface breadth in the MVP. A workspace
 or terminal session is not enough to represent a multi-repository project,
 durable decision, workflow revision, external-system mapping, or knowledge
-claim. Charrette's defensible layer is the persistent record and authority
+claim. Althar's defensible layer is the persistent record and authority
 model above those sessions.
 
 ### Agent Orchestrator
@@ -49,7 +49,7 @@ Agent Orchestrator is strong prior art for:
 Its most valuable lesson is to observe and persist facts rather than letting UI
 components write a shared status label.
 
-Charrette goes further only where its thesis demands it: projects may bind
+Althar goes further only where its thesis demands it: projects may bind
 several repositories; workflows, decisions, skills, external mappings, and
 knowledge survive a particular agent or worktree. It should not compete on raw
 adapter count or Kanban completeness.
@@ -60,7 +60,7 @@ OpenHands demonstrates a useful distinction between agent/controller state and
 the runtime that performs actions. Its local/container/remote runtime posture is
 a better precedent than pretending host-native execution is sandboxed.
 
-Charrette should keep an `ExecutionHostAdapter` seam, while avoiding the trap of
+Althar should keep an `ExecutionHostAdapter` seam, while avoiding the trap of
 using an agent event stream as the complete project data model.
 
 ### Agent Client Protocol
@@ -71,7 +71,7 @@ config options, and per-session MCP servers. Zed and JetBrains clients use it,
 Claude Code and Codex reach it through adapters the ACP project maintains, and
 OpenCode and Gemini CLI speak it natively.
 
-Charrette uses it for every agent in the MVP
+Althar uses it for every agent in the MVP
 ([ADR-002](../decisions/002-acp-for-every-agent.md)). The domain is still not
 frozen to it: protocol drafts evolve, it has no usage limits or cross-agent
 history, and it does not solve the control-plane product model.
@@ -79,7 +79,7 @@ history, and it does not solve the control-plane product model.
 ### Codex app-server and SDK
 
 Codex app-server serves clients that need authentication, history, approvals,
-streamed events, and account usage limits. Charrette uses it as a side channel
+streamed events, and account usage limits. Althar uses it as a side channel
 for Codex's usage limits, and could make it Codex's full adapter if ACP falls
 short.
 
@@ -95,20 +95,20 @@ These show three answers to changing model or agent mid-work:
 - Conductor and Superset run several agents on shared worktrees, and hand
   context over through the files, not the conversation.
 
-Charrette can't hold the loop for Claude Code or Codex, so switching agent is
+Althar can't hold the loop for Claude Code or Codex, so switching agent is
 a new session with a brief ([03](03-agent-runtime-and-auth.md)). Amp's handoff
 is a candidate for tuning it.
 
 ### MCP
 
 MCP is the standard boundary for tools/resources. It belongs beneath policy and
-audit in Charrette. It does not replace first-class synchronization connectors
+audit in Althar. It does not replace first-class synchronization connectors
 for Linear, Jira, or Git hosting.
 
 ### OpenAI Agents SDK
 
 The Agents SDK's manager-as-tools and handoff patterns are useful inside
-Charrette-authored agent nodes. They do not provide durable project state,
+Althar-authored agent nodes. They do not provide durable project state,
 long-running workflow recovery, or external synchronization.
 
 ### LangGraph
@@ -117,7 +117,7 @@ LangGraph is the closest reusable framework for checkpointed agent graphs,
 interrupts, retries, and dynamic command routing.
 
 It may become an implementation of an advanced agent/subworkflow port. The MVP
-should first prove that Charrette's fixed graph and domain semantics are stable;
+should first prove that Althar's fixed graph and domain semantics are stable;
 otherwise framework concepts will leak into the product before the product is
 known.
 
@@ -146,12 +146,12 @@ It is not evidence that a graph definition format solves:
 - deterministic repair;
 - webhook reconciliation.
 
-Charrette should learn from Archon's product surface and shortcomings without
+Althar should learn from Archon's product surface and shortcomings without
 adopting its builder or workflow files as a correctness substrate.
 
 ## Comparison
 
-| Concern | Superset | Agent Orchestrator | OpenHands | Archon | Charrette |
+| Concern | Superset | Agent Orchestrator | OpenHands | Archon | Althar |
 |---|---|---|---|---|---|
 | Primary durable object | Workspace/host surface | Project/session/worker | Agent session | Workflow/project | Project context and work across systems |
 | Agent runtime | Several agent surfaces | Adapter-managed workers | Own agent/controller | Harness over coding agents | Reused provider runtime through adapter |
@@ -162,7 +162,7 @@ adopting its builder or workflow files as a correctness substrate.
 | Collaboration | Remote/org product | Daemon and clients | Hosted/server options | Server/product workflows | Cloud-authoritative shared aggregates later |
 | Differentiator | Parallel agent workspaces | Supervision through publication | Agent/runtime isolation | Workflow authoring | Durable evidence, decisions, knowledge, and authority |
 
-No reference system eliminates the need for Charrette's domain. Several can
+No reference system eliminates the need for Althar's domain. Several can
 eliminate the need to implement its underlying agent loop, tool protocol, or
 future workflow machinery from first principles.
 
@@ -228,9 +228,9 @@ implementation-specific decisions from becoming undocumented assumptions:
 ADRs record decisions and evidence; they do not duplicate these documents.
 They live in [`docs/decisions/`](../decisions/). Beyond this list, the
 coordinator ([ADR-004](../decisions/004-coordinator-is-an-agent-session.md)),
-briefing agents ([ADR-005](../decisions/005-charrette-briefs-every-agent.md)),
+briefing agents ([ADR-005](../decisions/005-althar-briefs-every-agent.md)),
 workspaces ([ADR-006](../decisions/006-worktree-per-task.md)), permission
-routing ([ADR-007](../decisions/007-permission-requests-reach-charrette.md)),
+routing ([ADR-007](../decisions/007-permission-requests-reach-althar.md)),
 and the build standard
 ([ADR-008](../decisions/008-shortcuts-in-behaviour-not-in-records.md)) are
 decided.
@@ -305,7 +305,7 @@ The design should be revisited if evidence shows that:
   what an existing agent workspace already provides.
 
 The last condition is the strategic one. If the durable project record is not
-useful, Charrette is merely a thinner agent supervisor in a mature market.
+useful, Althar is merely a thinner agent supervisor in a mature market.
 
 ## Primary references
 

@@ -25,17 +25,17 @@ describe('a reader, on real agents', () => {
     it.live(
       `can't write a file on ${agentId}`,
       () => {
-        const home = mkdtempSync(join(tmpdir(), 'charrette-reader-'))
+        const home = mkdtempSync(join(tmpdir(), 'althar-reader-'))
         const repository = join(home, 'meridian')
         mkdirSync(repository)
         const git = (...args: Array<string>) =>
-          execFileSync('git', ['-c', 'user.name=Try', '-c', 'user.email=try@charrette.test', ...args], { cwd: repository })
+          execFileSync('git', ['-c', 'user.name=Try', '-c', 'user.email=try@althar.test', ...args], { cwd: repository })
         git('init', '-q', '-b', 'main')
         writeFileSync(join(repository, 'README.md'), '# Meridian\n')
         git('add', '.')
         git('commit', '-q', '-m', 'Start')
         const layer = Runtime.layer({
-          database: join(home, 'charrette.sqlite'),
+          database: join(home, 'althar.sqlite'),
           worktreeRoot: join(home, 'worktrees'),
           appVersion: '0.0.0-agents',
           deviceName: 'Agents',
@@ -49,7 +49,7 @@ describe('a reader, on real agents', () => {
           const threadId = yield* coordinator.thread(project.projectId)
           yield* sessions.start({ threadId, agentId })
           const body =
-            'Run exactly this shell command in your working folder: `touch charrette-probe.txt`. Then tell me whether the file now exists.'
+            'Run exactly this shell command in your working folder: `touch althar-probe.txt`. Then tell me whether the file now exists.'
           yield* coordinator.say({
             envelope: yield* Runtime.envelope('thread.send', { body }),
             threadId,
@@ -71,7 +71,7 @@ describe('a reader, on real agents', () => {
             SELECT json_extract(content, '$.text') AS text FROM thread_items WHERE thread_id = ${threadId} AND kind = 'agent_message' ORDER BY sequence DESC LIMIT 1`
           say(`${agentId} said: ${said?.text ?? ''}`)
           const folder = join(home, 'worktrees', project.slug, '.coordinator', 'meridian')
-          assert.isFalse(existsSync(join(folder, 'charrette-probe.txt')), 'the reader wrote the file')
+          assert.isFalse(existsSync(join(folder, 'althar-probe.txt')), 'the reader wrote the file')
         }).pipe(Effect.scoped, Effect.provide(layer))
       },
       5 * 60_000,

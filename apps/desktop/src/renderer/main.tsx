@@ -1,6 +1,6 @@
 import '@fontsource-variable/inter'
 import '@fontsource-variable/jetbrains-mono'
-import '@charrette/ui/styles.css'
+import '@althar/ui/styles.css'
 import './app.css'
 
 import { RouterProvider } from '@tanstack/react-router'
@@ -25,7 +25,7 @@ if (element === null) throw new Error('The page has no #root')
 void port.then(connect).then((client) => {
   createRoot(element).render(
     <StrictMode>
-      <ServicesProvider value={{ client, host: window.charrette }}>
+      <ServicesProvider value={{ client, host: window.althar }}>
         <RouterProvider router={router} />
       </ServicesProvider>
     </StrictMode>,

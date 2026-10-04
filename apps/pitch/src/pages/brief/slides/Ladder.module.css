@@ -19,7 +19,7 @@
 .gad { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .gh { fill: none; stroke: var(--ink); stroke-width: 1.5; }
 .gm { fill: var(--ink); }
-/* Charrette's step: the same drawing language, in Charrette's colour, on project memory's paper */
+/* Althar's step: the same drawing language, in Althar's colour, on project memory's paper */
 .stairs li.us .tread { background: var(--cobalt); border-bottom-color: var(--cobalt); }
 .stairs li.us .tread svg { max-width: none; }
 .gt { font: 500 11px var(--mono); letter-spacing: .06em; fill: var(--ink); }

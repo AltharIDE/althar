@@ -1,12 +1,13 @@
 {
-  "name": "@charrette/runtime",
+  "name": "@althar/runtime",
   "version": "0.0.0",
   "private": true,
-  "description": "Charrette's runtime: the one writer of the local store, which owns agent sessions, turns, permissions and processes.",
+  "description": "Althar's runtime: the one writer of the local store, which owns agent sessions, turns, permissions and processes.",
   "license": "UNLICENSED",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./locations": "./src/locations.ts"
   },
   "scripts": {
     "check": "vp check",
@@ -18,11 +19,11 @@
     "test:agents": "vp test run --config vite.agents.config.ts"
   },
   "dependencies": {
-    "@charrette/connectors": "workspace:*",
-    "@charrette/contracts": "workspace:*",
-    "@charrette/domain": "workspace:*",
-    "@charrette/persistence-sqlite": "workspace:*",
-    "@charrette/provider-adapters": "workspace:*",
+    "@althar/connectors": "workspace:*",
+    "@althar/contracts": "workspace:*",
+    "@althar/domain": "workspace:*",
+    "@althar/persistence-sqlite": "workspace:*",
+    "@althar/provider-adapters": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.31.0",
     "effect": "4.0.0-rc.118"
   },

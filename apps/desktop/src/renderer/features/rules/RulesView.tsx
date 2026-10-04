@@ -1,6 +1,6 @@
-import type { AgentStatus, CommandRule, ProjectRulesView, RuleKind } from '@charrette/contracts'
-import { BackCrumb, LimitPolicy, PermissionPolicy, Spinner, TaskEnd, TitleBar } from '@charrette/ui'
-import { ProjectRules, projectRulesText } from '@charrette/ui/screens'
+import type { AgentStatus, CommandRule, ProjectRulesView, RuleKind } from '@althar/contracts'
+import { BackCrumb, LimitPolicy, PermissionPolicy, Spinner, TaskEnd, TitleBar } from '@althar/ui'
+import { ProjectRules, projectRulesText } from '@althar/ui/screens'
 
 import s from './Rules.module.css'
 import type { RulesModel } from './useRules'
@@ -9,7 +9,7 @@ import type { RulesModel } from './useRules'
  * A project's rules (ADR-013): what happens to what agents ask to do beyond
  * their sandbox, what always waits for the person and what is never
  * allowed, how a task ends, what a usage limit does, and which accounts
- * work runs on. The kit's screen, with only what Charrette does today.
+ * work runs on. The kit's screen, with only what Althar does today.
  */
 
 export const text = {
@@ -24,7 +24,7 @@ export const text = {
     outside: 'Writing outside the task’s worktree',
   } satisfies Record<RuleKind, string>,
   command: (pattern: string) => `Running ${pattern}`,
-  /** The kit's words where Charrette does less, or says it more exactly. */
+  /** The kit's words where Althar does less, or says it more exactly. */
   screen: {
     lede: 'For every task in this project, from the next request on.',
     permissions: { label: 'Permissions', note: 'What agents ask to do beyond their sandbox: the network, or writing outside the task' },
@@ -36,7 +36,7 @@ export const text = {
       },
       [PermissionPolicy.AllowAll]: {
         title: 'Allow everything',
-        note: 'Nothing waits for you. What “Never” lists is still refused, and, while it lists anything, a command Charrette can’t read.',
+        note: 'Nothing waits for you. What “Never” lists is still refused, and, while it lists anything, a command Althar can’t read.',
       },
     },
     foot: '',

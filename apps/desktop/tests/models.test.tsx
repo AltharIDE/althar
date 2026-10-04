@@ -1,9 +1,9 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Brand } from '@charrette/ui'
+import { Brand } from '@althar/ui'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { AgentModels, AgentStatus } from '@charrette/contracts'
+import type { AgentModels, AgentStatus } from '@althar/contracts'
 
 import { useModels, useSetDefaultEffort } from '../src/renderer/data/models'
 import {
@@ -171,25 +171,25 @@ describe('the person’s pins', () => {
     act(() => togglePin('codex:gpt-5.2', ['claude-code:default']))
     act(() => togglePin('claude-code:default', ['ignored']))
     expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({ pins: ['codex:gpt-5.2'] })
-    expect(window.localStorage.getItem('charrette.models')).toBe(screen.getByRole('status').textContent)
+    expect(window.localStorage.getItem('althar.models')).toBe(screen.getByRole('status').textContent)
   })
 
   it('are read again from storage, and what isn’t theirs is left out', () => {
-    window.localStorage.setItem('charrette.models', JSON.stringify({ pins: ['a', 'b'], efforts: { 'codex:x': 'low' } }))
+    window.localStorage.setItem('althar.models', JSON.stringify({ pins: ['a', 'b'], efforts: { 'codex:x': 'low' } }))
     const view = render(<Prefs />)
     expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({ pins: ['a', 'b'] })
     view.unmount()
-    window.localStorage.setItem('charrette.models', JSON.stringify({ pins: [1, 'a'] }))
+    window.localStorage.setItem('althar.models', JSON.stringify({ pins: [1, 'a'] }))
     render(<Prefs />)
     expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({ pins: null })
   })
 
   it('are none where storage holds something else, or can’t be read or written', () => {
-    window.localStorage.setItem('charrette.models', '{not json')
+    window.localStorage.setItem('althar.models', '{not json')
     const view = render(<Prefs />)
     expect(screen.getByRole('status').textContent).toBe('{"pins":null}')
     view.unmount()
-    window.localStorage.setItem('charrette.models', '"a string"')
+    window.localStorage.setItem('althar.models', '"a string"')
     render(<Prefs />)
     expect(screen.getByRole('status').textContent).toBe('{"pins":null}')
     const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {

@@ -13,11 +13,11 @@ import { Spinner } from '../../primitives/Spinner/Spinner'
 import s from './Connections.module.css'
 
 /*
- * The code hosts and trackers Charrette reaches for you: each service, who
+ * The code hosts and trackers Althar reaches for you: each service, who
  * you are signed in as there, or the one thing that would connect it.
  * Signing in is the service's own: a code you type on its page, or a page
- * you approve in your browser. Where Charrette has neither for a service,
- * you paste a token, which is kept encrypted for Charrette alone and never
+ * you approve in your browser. Where Althar has neither for a service,
+ * you paste a token, which is kept encrypted for Althar alone and never
  * shown again. A company's own server is connected by its address.
  */
 
@@ -26,7 +26,7 @@ export interface ServiceOption {
   id: string
   name: string
   brand?: Brand
-  /** What Charrette does with it, in a few words: Pull requests and issues. */
+  /** What Althar does with it, in a few words: Pull requests and issues. */
   what?: string
   /** The hosted service's address; null for a service only on a company's own server. */
   hostedUrl: string | null
@@ -110,7 +110,7 @@ export const connectionsText: ConnectionsText = {
   typeCode: (service) => `Type this code on ${service}`,
   openPage: (host) => `Open ${host}`,
   waiting: 'Waiting for you',
-  approve: (service) => `Approve Charrette on ${service}, in your browser.`,
+  approve: (service) => `Approve Althar on ${service}, in your browser.`,
   openAgain: 'Open it again',
   tryAgain: 'Try again',
   cancel: 'Cancel',
@@ -120,7 +120,7 @@ export const connectionsText: ConnectionsText = {
   user: 'Email',
   token: (service) => `${service} token`,
   makeToken: (service) => `Make one on ${service}`,
-  tokenNote: 'Kept encrypted on this Mac, for Charrette alone. It’s never shown again.',
+  tokenNote: 'Kept encrypted on this Mac, for Althar alone. It’s never shown again.',
   emptyToken: 'Paste the token first',
   emptyUser: 'Type the email the token belongs to',
   emptyInstance: 'Type the server’s address',
@@ -155,7 +155,7 @@ const hostOf = (url: string) => {
   }
 }
 
-/** The services Charrette can reach for you, each with who you are there, or how to connect it. */
+/** The services Althar can reach for you, each with who you are there, or how to connect it. */
 export function Connections({
   label,
   services,

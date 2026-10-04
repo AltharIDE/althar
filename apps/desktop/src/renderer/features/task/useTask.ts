@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@charrette/contracts'
+import { type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { caughtUp, mergeItems, newestReads, waiting } from '../../shared/items'

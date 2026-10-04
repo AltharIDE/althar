@@ -1,4 +1,4 @@
-import type { Comment, Review } from '@charrette/connectors'
+import type { Comment, Review } from '@althar/connectors'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration } from 'effect'
 
@@ -11,7 +11,7 @@ import {
   commentForLead,
   commentLine,
   filesLine,
-  fromCharrette,
+  fromAlthar,
   nameOf,
   outsidersLine,
   reviewForLead,
@@ -47,7 +47,7 @@ const review = (more: Partial<Review> = {}): Review => ({
   ...more,
 })
 
-describe('what Charrette writes about a pull request', () => {
+describe('what Althar writes about a pull request', () => {
   it('sums up its checks', () => {
     const check = (name: string, state: 'queued' | 'running' | 'passed' | 'failed' | 'skipped') => ({
       id: name,
@@ -89,10 +89,10 @@ describe('what Charrette writes about a pull request', () => {
   })
 
   it('describes it from what the steps reported', () => {
-    assert.strictEqual(bodyOf({ lead: null, review: null, findings: [], issue: null }), '<sub>Opened by Charrette.</sub>')
+    assert.strictEqual(bodyOf({ lead: null, review: null, findings: [], issue: null }), '<sub>Opened by Althar.</sub>')
     assert.strictEqual(
       bodyOf({ lead: '', review: { rounds: 0, verdict: null }, findings: [], issue: { key: '#12', url: 'u', sameHost: true } }),
-      'Issue: #12\n\n<sub>Opened by Charrette.</sub>',
+      'Issue: #12\n\n<sub>Opened by Althar.</sub>',
     )
     assert.strictEqual(
       bodyOf({
@@ -111,7 +111,7 @@ describe('what Charrette writes about a pull request', () => {
         '### Review\n\nReviewed in 2 rounds.',
         '- Fixed: major `src/a.ts:3`: Never stops.\n- Set aside: nit `README.md`: Typo. (Intended.)\n- Open: minor: Name.\n- Set aside: minor: Odd.',
         'Issue: [MER-231](https://linear.app/m/issue/MER-231)',
-        '<sub>Opened by Charrette.</sub>',
+        '<sub>Opened by Althar.</sub>',
       ].join('\n\n'),
     )
     assert.include(
@@ -132,17 +132,20 @@ describe('what Charrette writes about a pull request', () => {
     assert.strictEqual(reviewLine(review({ verdict: 'commented' })), '- dana reviewed: commented\n> Name it better.')
   })
 
-  it('signs a reply as from Charrette, knows its signature, and reads it back without', () => {
+  it('signs a reply as from Althar, knows its signature, and reads it back without', () => {
     const reply = signed('Seconds.\n', 'Claude Code')
-    assert.strictEqual(reply, 'Seconds.\n\n<sub>From Charrette, by Claude Code.</sub>')
-    assert.strictEqual(signed('Seconds.', null), 'Seconds.\n\n<sub>From Charrette.</sub>')
-    assert.isTrue(fromCharrette(reply))
-    assert.isFalse(fromCharrette('Seconds. <sub>From Charrette</sub> said someone, mid-line\nand more'))
+    assert.strictEqual(reply, 'Seconds.\n\n<sub>From Althar, by Claude Code.</sub>')
+    assert.strictEqual(signed('Seconds.', null), 'Seconds.\n\n<sub>From Althar.</sub>')
+    assert.isTrue(fromAlthar(reply))
+    // A reply posted while Althar was called Charrette is still its own.
+    assert.isTrue(fromAlthar('Seconds.\n\n<sub>From Charrette, by Claude Code.</sub>'))
+    assert.strictEqual(unsigned('Seconds.\n\n<sub>From Charrette, by Claude Code.</sub>'), 'Seconds.')
+    assert.isFalse(fromAlthar('Seconds. <sub>From Althar</sub> said someone, mid-line\nand more'))
     assert.strictEqual(unsigned(reply), 'Seconds.')
     assert.strictEqual(unsigned('Seconds.'), 'Seconds.')
     assert.strictEqual(
-      commentLine(comment({ body: reply, author: { ...dana, login: 'you' } }), 'you, through Charrette'),
-      '- you, through Charrette:\n> Seconds.',
+      commentLine(comment({ body: reply, author: { ...dana, login: 'you' } }), 'you, through Althar'),
+      '- you, through Althar:\n> Seconds.',
     )
     assert.strictEqual(
       outsidersLine(1),

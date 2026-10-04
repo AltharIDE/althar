@@ -10,9 +10,9 @@ import {
   type Person,
   type Product,
   type Repository,
-} from '@charrette/connectors'
-import { Ids, newId, type ProjectId } from '@charrette/domain'
-import type { Ledger } from '@charrette/persistence-sqlite'
+} from '@althar/connectors'
+import { Ids, newId, type ProjectId } from '@althar/domain'
+import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -32,7 +32,7 @@ import {
   checksOf,
   commentForLead,
   commentLine,
-  fromCharrette,
+  fromAlthar,
   logOf,
   nameOf,
   outsidersLine,
@@ -64,12 +64,12 @@ import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
  * and the repository's own people say, also go to the lead, when one is
  * running, to answer on the pull request or fix. Anyone else on a public
  * repository arrives in the thread only, for the person to pass on. Bots,
- * and Charrette's own replies (known by their receipts), aren't passed on. A
+ * and Althar's own replies (known by their receipts), aren't passed on. A
  * pull request is asked every 30 seconds while something is happening on
  * it, and every few minutes once it has been quiet a while.
  */
 
-/** What Charrette last saw of a change, as its external link keeps it. */
+/** What Althar last saw of a change, as its external link keeps it. */
 const Snapshot = Schema.Struct({
   number: Schema.Number,
   title: Schema.String,
@@ -112,7 +112,7 @@ export interface ChangeSummary extends Snapshot {
   readonly listening: boolean
 }
 
-/** The code host a project's repository is on, as its remotes say, and whether Charrette is connected to it there. */
+/** The code host a project's repository is on, as its remotes say, and whether Althar is connected to it there. */
 export interface Host {
   readonly product: Product
   readonly name: string
@@ -223,7 +223,7 @@ export class Changes extends Context.Service<
      * isn't merged. Agents never merge.
      */
     merge(taskId: string, head: string): Effect.Effect<void, unknown>
-    /** Replies on the task's pull request, in a comment's thread or its conversation, signed as from Charrette and the agent that wrote it. */
+    /** Replies on the task's pull request, in a comment's thread or its conversation, signed as from Althar and the agent that wrote it. */
     reply(
       taskId: string,
       reply: { readonly body: string; readonly threadId: string | null; readonly by: string | null },
@@ -240,14 +240,14 @@ export class Changes extends Context.Service<
      * How a task of the project ends when its plan doesn't say, worked out
      * once, when the plan is made: as the project's rules say, else a draft
      * pull request where its repository's host is connected, else on its
-     * branch. A project that wants a pull request where no host Charrette
+     * branch. A project that wants a pull request where no host Althar
      * knows is named ends on its branch, as it always has.
      */
     endFor(projectId: string): Effect.Effect<'draft' | 'ready' | 'none' | null, unknown>
-    /** The code host the project's repository is on, and whether Charrette is connected to it; null where its remotes name none Charrette knows. */
+    /** The code host the project's repository is on, and whether Althar is connected to it; null where its remotes name none Althar knows. */
     hostFor(projectId: string): Effect.Effect<Host | null>
   }
->()('@charrette/runtime/Changes') {
+>()('@althar/runtime/Changes') {
   static readonly layer: Layer.Layer<Changes, never, Store> = Layer.effect(
     Changes,
     Effect.gen(function* () {
@@ -393,7 +393,7 @@ export class Changes extends Context.Service<
           if (found === null) return yield* new NotConnected({ product: 'github', what: remotes[0] ?? 'the repository' })
           const { host } = found
           const repository = yield* host.repository(found.path)
-          // Charrette pushes what the lead committed, never what it left lying in the worktree.
+          // Althar pushes what the lead committed, never what it left lying in the worktree.
           const left = yield* uncommittedFiles(task.path)
           const base = task.baseCommit ?? task.baseRef ?? repository.defaultBranch
           if ((yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing', left } as const
@@ -660,7 +660,7 @@ export class Changes extends Context.Service<
           return yield* summaryOf(link)
         })
 
-      /** The ids of the replies Charrette posted on a change, from their receipts. */
+      /** The ids of the replies Althar posted on a change, from their receipts. */
       const repliesOf = (linkId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -671,7 +671,7 @@ export class Changes extends Context.Service<
         })
 
       /**
-       * Who said something on a change, for who hears it: Charrette, in a
+       * Who said something on a change, for who hears it: Althar, in a
        * reply it posted (by its receipt, or, when that was lost, its
        * signature on the account's own comment); a bot; the person, whose
        * account the connection is; one of the repository's people; or anyone
@@ -681,9 +681,9 @@ export class Changes extends Context.Service<
         said: { readonly id: string; readonly author: Person; readonly member: boolean; readonly body: string },
         account: Account,
         replies: ReadonlySet<string>,
-      ): 'charrette' | 'bot' | 'person' | 'member' | 'outsider' => {
+      ): 'althar' | 'bot' | 'person' | 'member' | 'outsider' => {
         const mine = said.author.id === account.id
-        if (replies.has(said.id) || (mine && fromCharrette(said.body))) return 'charrette'
+        if (replies.has(said.id) || (mine && fromAlthar(said.body))) return 'althar'
         if (said.author.bot) return 'bot'
         if (mine) return 'person'
         return said.member ? 'member' : 'outsider'
@@ -710,7 +710,7 @@ export class Changes extends Context.Service<
           const comments = activity.comments.flatMap((comment) => {
             const voice = voiceOf(comment, account, replies)
             if (voice === 'outsider') return []
-            return [{ at: comment.at, text: commentLine(comment, voice === 'charrette' ? 'you, through Charrette' : undefined) }]
+            return [{ at: comment.at, text: commentLine(comment, voice === 'althar' ? 'you, through Althar' : undefined) }]
           })
           const outsiders = activity.reviews.length - reviews.length + activity.comments.length - comments.length
           const said = [...reviews.map((review) => ({ at: review.at, text: reviewLine(review) })), ...comments]
@@ -823,7 +823,7 @@ export class Changes extends Context.Service<
           const replies = activity.comments.length === 0 ? new Set<string>() : yield* repliesOf(link.id)
           for (const review of activity.reviews) {
             const voice = voiceOf(review, account, replies)
-            if (voice === 'charrette' || !(yield* heard(link, 'review', `review:${review.id}`, { author: review.author.login }))) continue
+            if (voice === 'althar' || !(yield* heard(link, 'review', `review:${review.id}`, { author: review.author.login }))) continue
             happened = true
             yield* arrive(link, {
               kind: 'review',
@@ -838,7 +838,7 @@ export class Changes extends Context.Service<
           }
           for (const comment of activity.comments) {
             const voice = voiceOf(comment, account, replies)
-            if (voice === 'charrette' || voice === 'bot') continue
+            if (voice === 'althar' || voice === 'bot') continue
             if (!(yield* heard(link, 'comment', `comment:${comment.id}`, { author: comment.author.login }))) continue
             happened = true
             yield* arrive(link, {
@@ -973,21 +973,20 @@ export class Changes extends Context.Service<
                   if (error instanceof NotFound && error.kind === 'pull request')
                     return Effect.fail(
                       new ToolRefused({
-                        message: 'This task has no pull request yet. Charrette opens one when the plan’s steps are done.',
+                        message: 'This task has no pull request yet. Althar opens one when the plan’s steps are done.',
                       }),
                     )
                   if (error instanceof NotConnected || (error instanceof NotFound && error.kind === 'connection'))
                     return Effect.fail(
                       new ToolRefused({
-                        message:
-                          'Charrette isn’t connected to this repository’s host, so it can’t reach the pull request. Tell the person.',
+                        message: 'Althar isn’t connected to this repository’s host, so it can’t reach the pull request. Tell the person.',
                       }),
                     )
                   if (error instanceof ConnectorFailed)
                     return Effect.fail(new ToolRefused({ message: `The code host said: ${error.message}` }))
                   return Effect.andThen(
                     Effect.logWarning('A pull request tool did not succeed', error),
-                    Effect.fail(new ToolRefused({ message: 'Charrette could not do that. Try again, or tell the person.' })),
+                    Effect.fail(new ToolRefused({ message: 'Althar could not do that. Try again, or tell the person.' })),
                   )
                 }),
               ),
@@ -1007,7 +1006,7 @@ export class Changes extends Context.Service<
           (taskId, input, access) =>
             Effect.gen(function* () {
               const replied = yield* Schema.decodeUnknownEffect(Replied)(input).pipe(
-                Effect.mapError((error) => new ToolRefused({ message: `Charrette couldn't read that: ${error.message}` })),
+                Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
               )
               // The reply is signed with the lead's name, as the person's colleagues read it under the person's account.
               const lead = yield* sessions.running(access.threadId)
@@ -1023,7 +1022,7 @@ export class Changes extends Context.Service<
         ),
         leadTool(
           'publish_changes',
-          "Pushes what you have committed on the task's branch to its pull request, so its checks run again and reviewers see it. Commit first: Charrette pushes commits, never uncommitted changes.",
+          "Pushes what you have committed on the task's branch to its pull request, so its checks run again and reviewers see it. Commit first: Althar pushes commits, never uncommitted changes.",
           { type: 'object', properties: {} },
           (taskId) =>
             Effect.gen(function* () {
@@ -1036,7 +1035,7 @@ export class Changes extends Context.Service<
                   message: 'The worktree has uncommitted changes. Commit them, then call publish_changes again.',
                 })
               const { change } = yield* locked(taskId)(pushChanges(taskId))
-              return `Pushed to ${nameOf(change)}. Its checks run again; Charrette tells you how they end.`
+              return `Pushed to ${nameOf(change)}. Its checks run again; Althar tells you how they end.`
             }),
         ),
       ])

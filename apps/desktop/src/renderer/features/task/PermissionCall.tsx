@@ -1,5 +1,5 @@
-import type { AttentionRequest } from '@charrette/contracts'
-import { Decision, Permission } from '@charrette/ui'
+import type { AttentionRequest } from '@althar/contracts'
+import { Decision, Permission } from '@althar/ui'
 
 /*
  * What the rules keep for the person: an agent's action that waits for them

@@ -1,8 +1,8 @@
 {
-  "name": "@charrette/domain",
+  "name": "@althar/domain",
   "version": "0.0.0",
   "private": true,
-  "description": "Charrette's domain: identifiers, entities, lifecycles and commands, as Effect schemas. Pure; no I/O.",
+  "description": "Althar's domain: identifiers, entities, lifecycles and commands, as Effect schemas. Pure; no I/O.",
   "license": "UNLICENSED",
   "type": "module",
   "exports": {

@@ -1,8 +1,8 @@
 import { type DragEvent, useEffect } from 'react'
 
-import type { AccountStatus, AgentStatus, ProjectSummary } from '@charrette/contracts'
-import { type AccountEntry, Accounts, Button, Heading, type RuntimeEntry, Runtimes, RuntimeState, Spinner, TitleBar } from '@charrette/ui'
-import { Start } from '@charrette/ui/screens'
+import type { AccountStatus, AgentStatus, ProjectSummary } from '@althar/contracts'
+import { type AccountEntry, Accounts, Button, Heading, type RuntimeEntry, Runtimes, RuntimeState, Spinner, TitleBar } from '@althar/ui'
+import { Start } from '@althar/ui/screens'
 
 import { brandOf } from '../../shared/agents'
 import { clock } from '../../shared/time'

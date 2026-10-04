@@ -1,10 +1,10 @@
-# @charrette/persistence-sqlite — Architecture
+# @althar/persistence-sqlite — Architecture
 
 The profile's SQLite store, as described in [docs/architecture/07](../../docs/architecture/07-persistence-security-and-cloud.md). The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target.
 
 - **Owner:** Repository maintainers
 - **Consumers:** the runtime, which is the database's only writer. The renderer, Electron main, agents and MCP servers never open it.
-- **Dependency direction:** depends on `@charrette/domain`, `effect` and `@effect/sql-sqlite-node`. Nothing depends on it except the runtime.
+- **Dependency direction:** depends on `@althar/domain`, `effect` and `@effect/sql-sqlite-node`. Nothing depends on it except the runtime.
 
 ## The schema
 
@@ -12,7 +12,7 @@ The profile's SQLite store, as described in [docs/architecture/07](../../docs/ar
 - **Migrations are append-only.** Each one is a list of SQL statements. `src/migrations/checksums.ts` records every released migration's SHA-256, and a test fails if one changes. A change to the schema is a new migration.
 - **Migrations run with foreign keys off,** then `PRAGMA foreign_key_check`, and only then are foreign keys turned on; the database refuses to open with rows pointing at nothing. This is SQLite's procedure for rebuilding a table others reference, which a test performs.
 - **Every table is `STRICT`,** so SQLite enforces column types.
-- **Vocabularies are lookup tables,** `vocab_<name> (word)`, and columns reference them. A new word is an `INSERT` in a later migration. A test compares every lookup table with `@charrette/domain`'s lists, both ways.
+- **Vocabularies are lookup tables,** `vocab_<name> (word)`, and columns reference them. A new word is an `INSERT` in a later migration. A test compares every lookup table with `@althar/domain`'s lists, both ways.
 - **Every project-scoped row carries `project_id`,** and references between project rows are composite, `(id, project_id)`, so no row can point into another project. The record, the feed and artifacts carry it too, for the cloud.
 - **Device-only data stays in device-keyed tables,** such as `device_project_settings`, never in shared ones.
 - **Ids are checked:** a primary key must be its kind's prefix, an underscore and 32 lowercase hex digits.
@@ -22,7 +22,7 @@ The profile's SQLite store, as described in [docs/architecture/07](../../docs/ar
 - **"One active" rules are partial unique indexes:** one active attempt per run, one unfinished attempt per node, one active turn per thread, one thread per task and per step.
 - **Distinct identities stay distinct,** as docs/architecture/01 requires. A task's workspace is shared by its runs and attempts on a device; `workspace_snapshots` records which code each attempt saw. A step's thread spans its review rounds.
 - **Restarts can be reconciled:** each app launch is a `runtime_instances` row; run attempts name the instance holding their controller generation; processes are recorded as `launching` before they are spawned, with the OS start time; work-item claims name their holder and a lease.
-- **Permission decisions** record Charrette's outcome and scope apart from the option sent to the agent, which is never an "always" option.
+- **Permission decisions** record Althar's outcome and scope apart from the option sent to the agent, which is never an "always" option.
 - **Columns are snake_case** in SQL and camelCase in TypeScript; the client translates.
 
 ## Writes

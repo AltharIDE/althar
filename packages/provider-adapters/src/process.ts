@@ -8,7 +8,7 @@ import { AgentStartFailed } from './errors'
 import type { LaunchSpec } from './registry'
 
 /*
- * An agent process Charrette owns (docs/architecture/02). It runs in its own
+ * An agent process Althar owns (docs/architecture/02). It runs in its own
  * process group, so stopping it reaches every process it started, even after
  * the agent itself has exited. Stopping is staged: TERM to the group, a grace
  * period, then KILL, and anything still alive after that is reported. It is
@@ -17,11 +17,11 @@ import type { LaunchSpec } from './registry'
  */
 
 /**
- * The environment variables a child inherits from Charrette (docs/architecture
+ * The environment variables a child inherits from Althar (docs/architecture
  * 07: an allowlist, never the whole environment). Provider API keys are not on
  * it: one could decide which account pays, over the plan the sign-in check
  * reported. An agent that needs one gets it through its launch spec. Nor is
- * the person's SSH agent: Charrette pushes for agents, so their shells get
+ * the person's SSH agent: Althar pushes for agents, so their shells get
  * none of the person's ways into a code host (ADR-011).
  */
 const INHERITED =
@@ -196,7 +196,7 @@ export const spawnOwned = (
   )
 
 /**
- * Stops a process group Charrette owns: TERM, a grace period, then KILL, and
+ * Stops a process group Althar owns: TERM, a grace period, then KILL, and
  * says whether anything outlived it. A group that has already gone is left
  * alone. The runtime also uses it for a group an earlier launch left behind,
  * once it has checked the group's leader is the process it recorded.

@@ -14,7 +14,7 @@ import { chooseFolder, launch } from './support'
  */
 
 test('changes a project’s rules from its title bar, and keeps them', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'charrette-e2e-'))
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   const { electronApp, page } = await launch(home)
   try {

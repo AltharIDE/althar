@@ -5,13 +5,13 @@ import type { AddressInfo } from 'node:net'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import type { McpServer } from '@charrette/provider-adapters'
+import type { McpServer } from '@althar/provider-adapters'
 import { Context, Effect, Exit, Layer, Schema } from 'effect'
 
 /*
- * Charrette's tools, served to agents over MCP (docs/architecture/04): how the
+ * Althar's tools, served to agents over MCP (docs/architecture/04): how the
  * coordinator drafts and plans tasks, and how a lead or a reviewer reports a
- * step's result. Every agent Charrette supports takes an MCP server over HTTP
+ * step's result. Every agent Althar supports takes an MCP server over HTTP
  * (scripts/probe-tools.ts), so the runtime serves them itself, on this
  * machine only, with a token for each session that says who is calling. A
  * session sees only its role's tools, and its token stops working when the
@@ -51,7 +51,7 @@ export class ToolServer extends Context.Service<
     /** Adds tools to a role, replacing any of the same name. Each service that owns tools adds them once it is built. */
     serve(role: ToolRole, tools: ReadonlyArray<Tool>): Effect.Effect<void>
   }
->()('@charrette/runtime/ToolServer') {
+>()('@althar/runtime/ToolServer') {
   static readonly layer: Layer.Layer<ToolServer> = Layer.effect(
     ToolServer,
     Effect.gen(function* () {
@@ -66,21 +66,21 @@ export class ToolServer extends Context.Service<
           return
         }
         const tools = roles.get(access.role) ?? []
-        const server = new Server({ name: 'charrette', version: '1.0.0' }, { capabilities: { tools: {} } })
+        const server = new Server({ name: 'althar', version: '1.0.0' }, { capabilities: { tools: {} } })
         server.setRequestHandler(ListToolsRequestSchema, async () => ({
           tools: tools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.input as { type: 'object' } })),
         }))
         server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const tool = tools.find((candidate) => candidate.name === request.params.name)
           if (tool === undefined)
-            return { isError: true, content: [{ type: 'text' as const, text: `Charrette has no tool called ${request.params.name}.` }] }
+            return { isError: true, content: [{ type: 'text' as const, text: `Althar has no tool called ${request.params.name}.` }] }
           const exit = await Effect.runPromiseExit(tool.call(request.params.arguments ?? {}, access))
           if (Exit.isSuccess(exit)) return { content: [{ type: 'text' as const, text: exit.value }] }
           const refused = exit.cause.reasons.find((reason) => reason._tag === 'Fail')
           const text =
             refused !== undefined && refused._tag === 'Fail' && refused.error instanceof ToolRefused
               ? refused.error.message
-              : 'Charrette could not do that. Try again, or tell the person.'
+              : 'Althar could not do that. Try again, or tell the person.'
           return { isError: true, content: [{ type: 'text' as const, text }] }
         })
         // Without a session id generator, each request stands alone: the token says who is calling.
@@ -108,7 +108,7 @@ export class ToolServer extends Context.Service<
             const token = randomBytes(24).toString('hex')
             grants.set(token, access)
             return {
-              server: { type: 'http', name: 'charrette', url, headers: { Authorization: `Bearer ${token}` } },
+              server: { type: 'http', name: 'althar', url, headers: { Authorization: `Bearer ${token}` } },
               revoke: Effect.sync(() => void grants.delete(token)),
             }
           }),

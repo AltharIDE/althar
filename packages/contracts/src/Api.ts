@@ -43,7 +43,7 @@ export const AccountStatus = Schema.Struct({
   paidBy: Schema.Literals(['plan', 'key', 'unknown']),
   /** Out of usage until then, where it is. */
   outUntil: Schema.NullOr(Schema.String),
-  /** What made its folder, when Charrette didn't. */
+  /** What made its folder, when Althar didn't. */
   adoptedFrom: Schema.NullOr(Schema.String),
 })
 export type AccountStatus = typeof AccountStatus.Type
@@ -135,7 +135,7 @@ export const ProjectRulesView = Schema.Struct({
   alwaysAsk: Schema.Array(RuleKind),
   never: Schema.Array(RuleKind),
   commands: Schema.Array(CommandRule),
-  /** How a task ends when its plan doesn't say; null: a draft pull request where Charrette is connected to the host, else its branch. */
+  /** How a task ends when its plan doesn't say; null: a draft pull request where Althar is connected to the host, else its branch. */
   end: Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
   usageLimit: Schema.Literals(['move', 'wait']),
   rotateAccounts: Schema.Boolean,
@@ -164,7 +164,7 @@ export type TaskList = typeof TaskList.Type
 
 /* ---- Code hosts and trackers (docs/architecture/06) ---- */
 
-/** A code host or tracker Charrette connects to. Cloud and Data Center are separate products. */
+/** A code host or tracker Althar connects to. Cloud and Data Center are separate products. */
 export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
 export type Product = typeof Product.Type
 
@@ -290,7 +290,7 @@ export const ChangeSummary = Schema.Struct({
   checks: Schema.NullOr(ChecksSummary),
   /** The commit at its head, as last seen: what accepting it merges, and nothing newer. */
   head: Schema.NullOr(Schema.String),
-  /** Charrette asks its host for news while the task is open. */
+  /** Althar asks its host for news while the task is open. */
   listening: Schema.Boolean,
 })
 export type ChangeSummary = typeof ChangeSummary.Type
@@ -340,7 +340,7 @@ const itemFields = {
 export const UserMessageItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('user_message'),
-  /** What they said, and the links in it Charrette could unfurl. */
+  /** What they said, and the links in it Althar could unfurl. */
   content: Schema.Struct({ text: Schema.String, links: Schema.Array(Unfurl) }),
   input: Schema.NullOr(Schema.Struct({ state: Schema.Literals(['queued', 'delivered', 'superseded']), interrupting: Schema.Boolean })),
 })
@@ -376,7 +376,7 @@ export const PlanItem = Schema.Struct({
   content: Schema.Struct({ entries: Schema.Array(Schema.Struct({ content: Schema.String, status: Schema.String })) }),
 })
 
-/** Something the agent or Charrette notes: a warning from the agent, or a change of scene, such as another agent taking over. */
+/** Something the agent or Althar notes: a warning from the agent, or a change of scene, such as another agent taking over. */
 export const NoticeItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('notice'),
@@ -505,7 +505,7 @@ export type TaskCard = typeof TaskCard.Type
 
 /**
  * A task in the coordinator's thread: its plan before it starts, with the
- * time it starts on its own, then its card as it runs. Charrette posts it and
+ * time it starts on its own, then its card as it runs. Althar posts it and
  * keeps it current; no agent writes it.
  */
 export const TaskItem = Schema.Struct({
@@ -548,7 +548,7 @@ export type SessionSummary = typeof SessionSummary.Type
 export const StuckStep = Schema.Struct({
   step: Schema.Literals(['implement', 'review', 'settle', 'publish']),
   why: Schema.Literals(['no_report', 'session_ended', 'failed_to_start', 'restarted', 'round_limit', 'not_connected', 'usage_limit']),
-  /** What went wrong, in the agent's or Charrette's words; for the last round, the lead's summary. */
+  /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
   /** The agent on the step. */
   agentId: Schema.NullOr(Schema.String),
@@ -577,7 +577,7 @@ export type AttentionRequest = typeof AttentionRequest.Type
 /**
  * A file a task changed, from its base to its worktree as it stands: how,
  * how much, and whether some of that isn't committed yet, so isn't in what
- * Charrette pushes.
+ * Althar pushes.
  */
 export const ChangedFile = Schema.Struct({
   path: Schema.String,
@@ -708,7 +708,7 @@ export const CoordinatorSnapshot = Schema.Struct({
   ),
   items: Schema.Array(ThreadItem),
   earlier: Schema.Boolean,
-  /** Where the project's repository is hosted, when its remote says, and whether Charrette is connected to it there. */
+  /** Where the project's repository is hosted, when its remote says, and whether Althar is connected to it there. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
 })
 export type CoordinatorSnapshot = typeof CoordinatorSnapshot.Type
@@ -815,7 +815,7 @@ export const Api = RpcGroup.make(
   command('SetModel', { threadId: Schema.String, model: Schema.String }, Schema.Void),
   /** How hard the thread's agent thinks, from here on. */
   command('SetEffort', { threadId: Schema.String, effort: Schema.String }, Schema.Void),
-  /** Every agent's models and efforts, as far as Charrette knows them. */
+  /** Every agent's models and efforts, as far as Althar knows them. */
   call('GetModels', {}, Schema.Array(AgentModels)),
   /** The person's default effort for one of an agent's models, kept for the profile. */
   command('SetDefaultEffort', { agentId: Schema.String, model: Schema.String, effort: Schema.String }, Schema.Void),
@@ -860,7 +860,7 @@ export const Api = RpcGroup.make(
   command('MarkReady', { taskId: Schema.String }, Schema.Void),
   /**
    * Adds an account to an agent: the folder a grant names, as another tool
-   * made it, or, without one, a folder Charrette makes, to sign in to.
+   * made it, or, without one, a folder Althar makes, to sign in to.
    */
   command('AddAccount', { agentId: Schema.String, name: Schema.String, grant: Schema.optional(Schema.String) }, AccountStatus),
   command('RenameAccount', { accountId: Schema.String, name: Schema.String }, Schema.Void),

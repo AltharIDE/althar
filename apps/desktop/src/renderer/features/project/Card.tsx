@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
-import type { AgentStatus, PlanStep, TaskEnd as End } from '@charrette/contracts'
-import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@charrette/ui'
+import type { AgentStatus, PlanStep, TaskEnd as End } from '@althar/contracts'
+import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@althar/ui'
 
 import { modelInfo, waitsWords } from '../../shared/agents'
 import { ModelChoice } from '../../shared/ModelChoice'

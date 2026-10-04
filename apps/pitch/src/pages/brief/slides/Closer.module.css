@@ -1,4 +1,4 @@
-/* 14 · close: Charrette's own ground, as on its icon, with the mark and the name standing on the floor of the page */
+/* 14 · close: Althar's own ground, as on its icon, with the mark and the name standing on the floor of the page */
 
 .closer { background: var(--cobalt); color: var(--cream); overflow: hidden; align-items: flex-start; padding-bottom: 0; --logo-point: var(--cobalt); }
 .closer :focus-visible { outline-color: #fff; }

@@ -4,9 +4,9 @@ import { join } from 'node:path'
 import { Context, Effect, Layer, Schema } from 'effect'
 
 /*
- * Where Charrette keeps a secret, such as a code host's token
+ * Where Althar keeps a secret, such as a code host's token
  * (docs/architecture/06, "Signing in"): sealed, in a file of its own in the
- * profile, never in the record or a log. Only Charrette can open one. In the
+ * profile, never in the record or a log. Only Althar can open one. In the
  * app, Electron's safeStorage seals it in the main process, with a key the
  * system keychain keeps for the signed app alone: another process asking for
  * that key, an agent's shell among them, gets a prompt the person would
@@ -22,7 +22,7 @@ export class SecretsUnavailable extends Schema.TaggedError<SecretsUnavailable>()
   reason: Schema.String,
 }) {}
 
-/** What seals a secret so that only Charrette can open it, and opens it again: in the app, its main process. */
+/** What seals a secret so that only Althar can open it, and opens it again: in the app, its main process. */
 export interface Sealer {
   /** The secret, sealed, as base64. */
   seal(value: string): Effect.Effect<string, SecretsUnavailable>
@@ -37,7 +37,7 @@ export class Secrets extends Context.Service<
     get(name: string): Effect.Effect<string | null, SecretsUnavailable>
     remove(name: string): Effect.Effect<void, SecretsUnavailable>
   }
->()('@charrette/runtime/Secrets') {
+>()('@althar/runtime/Secrets') {
   /** Secrets in memory, for tests. */
   static readonly memory = (): Layer.Layer<Secrets> =>
     Layer.sync(Secrets, () => {

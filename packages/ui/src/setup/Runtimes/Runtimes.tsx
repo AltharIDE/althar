@@ -12,8 +12,8 @@ import { Spinner } from '../../primitives/Spinner/Spinner'
 import s from './Runtimes.module.css'
 
 /*
- * The agents on this machine that Charrette can run, and where each stands.
- * Each runtime signs in its own way and keeps its own login: Charrette asks
+ * The agents on this machine that Althar can run, and where each stands.
+ * Each runtime signs in its own way and keeps its own login: Althar asks
  * it who it is signed in as, opens its sign-in when you ask, and never
  * sees a password or a token. A row says what is true and offers the one
  * thing that would change it. Ready rows say who, and nothing else.
@@ -55,7 +55,7 @@ export type RuntimeEntry = RuntimeBase &
     | {
         state: RuntimeState.Outdated
         version: string
-        /** The oldest version Charrette works with. */
+        /** The oldest version Althar works with. */
         needs: string
       }
   )
@@ -83,13 +83,13 @@ export const runtimesText: RuntimesText = {
   checking: 'Checking who it is signed in as',
   signingIn: (name) => `Finish signing in to ${name} in your browser`,
   signedOut: 'Signed out',
-  signInNote: (name) => `Sign in opens ${name}’s own sign-in. Charrette never sees your password.`,
+  signInNote: (name) => `Sign in opens ${name}’s own sign-in. Althar never sees your password.`,
   waiting: (n) => (n === 1 ? '1 task waits for it' : `${n} tasks wait for it`),
   outOfUsage: (resets) => `Out of usage until ${resets}`,
   movesTo: (to) => `its work moves to ${to}`,
   waits: 'its work waits for the reset',
   missing: 'Not installed on this Mac',
-  outdated: (version, needs) => `Version ${version} · Charrette needs ${needs} or later`,
+  outdated: (version, needs) => `Version ${version} · Althar needs ${needs} or later`,
   signIn: 'Sign in',
   cancel: 'Cancel',
   check: 'Check again',

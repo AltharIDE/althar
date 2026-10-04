@@ -1,4 +1,4 @@
-import { Brand, BrandMark, Logo } from '@charrette/ui'
+import { Brand, BrandMark, Logo } from '@althar/ui'
 import { useEffect, useRef } from 'react'
 
 import { LINKS } from '../content/facts'
@@ -51,7 +51,7 @@ export function Masthead({ current, base = '' }: { current: string; base?: strin
     <header ref={bar} className={s.bar}>
       <a className={s.brand} href={`${base}#${parts[0]?.id ?? 'main'}`}>
         <Logo size={30} />
-        <span>Charrette</span>
+        <span>Althar</span>
       </a>
       <nav className={s.nav} aria-label="On this page">
         {parts.map((p) => (

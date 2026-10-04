@@ -1,4 +1,4 @@
-import { BrandMark, LiveDot } from '@charrette/ui'
+import { BrandMark, LiveDot } from '@althar/ui'
 import { useEffect, useRef } from 'react'
 
 import { LINE } from '../content/facts'

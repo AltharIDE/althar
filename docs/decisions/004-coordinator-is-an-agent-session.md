@@ -1,4 +1,4 @@
-# ADR-004: The coordinator is an agent session with Charrette's tools
+# ADR-004: The coordinator is an agent session with Althar's tools
 
 - **Status:** Accepted
 - **Date:** 2026-09-28
@@ -11,7 +11,7 @@
   switched, and continuous compaction may come later.
 - **Decision:**
   - The coordinator is an ordinary agent session, over ACP, on any agent.
-  - It gets Charrette's tools as an MCP server: read tools for the project and
+  - It gets Althar's tools as an MCP server: read tools for the project and
     its tasks, and commands to draft, plan, start, and order tasks and to
     message leads.
   - It is read-only by construction, as every role that only reads is (a
@@ -20,17 +20,17 @@
       the default branch each turn; a reviewer, a snapshot of the lead's
       work taken when its round begins.
     - The agent's own sandbox is read-only where it has one that still lets
-      it call Charrette's tools: Codex's read-only sandbox, and Claude Code
+      it call Althar's tools: Codex's read-only sandbox, and Claude Code
       with its edits denied and every command asking.
-    - Charrette's reader rules are the backstop: they allow only commands,
+    - Althar's reader rules are the backstop: they allow only commands,
       and flags, that look, refuse the rest, and never ask you.
     - OpenCode has no sandbox yet, so for it the copy is the boundary.
-  - Charrette keeps the thread. The provider session is disposable and is
+  - Althar keeps the thread. The provider session is disposable and is
     rebuilt from a brief. Summaries, when they arrive, are records that say
     which turns they cover.
   - Details: [04](../architecture/04-coordinator.md).
 - **Alternatives considered:**
-  - A coordinator on a Charrette-owned model loop: contradicts the harness
+  - A coordinator on an Althar-owned model loop: contradicts the harness
     boundary, and could not run on plans.
   - Read-only by prompt: not enforceable.
   - Letting the coordinator make small changes itself: rejected; a change is

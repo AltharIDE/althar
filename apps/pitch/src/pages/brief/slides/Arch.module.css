@@ -1,4 +1,4 @@
-/* 08 · where Charrette sits: inside the line around what's yours, next to your
+/* 08 · where Althar sits: inside the line around what's yours, next to your
    repository, your plans and your machines. Agents are outside, and plug in. */
 
 .arch { background: var(--ink); color: var(--on-ink); }
@@ -8,7 +8,7 @@
 
 .agents { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; align-items: center; padding: 20px 24px; border-radius: 12px; background: var(--night); }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-/* the agent running now is lit in Charrette's colour: the work it is running */
+/* the agent running now is lit in Althar's colour: the work it is running */
 .chips span { padding: 9px 14px; border-radius: 999px; border: 1px solid var(--night-rule); font-size: 15px; font-weight: 500; color: var(--on-ink-2); transition: background 300ms, color 300ms, border-color 300ms; }
 .chips span.on { background: var(--cobalt); border-color: var(--cobalt); color: #fff; }
 .chips .next { border-style: dashed; color: var(--on-ink-4); }
@@ -18,7 +18,7 @@
 .plug i { height: 0; border-top: 1.5px dashed rgba(255, 255, 255, .24); }
 .plug b { color: var(--cobalt-soft); font-weight: 500; }
 
-/* one line around everything the team owns: Charrette on top, on the things it runs on */
+/* one line around everything the team owns: Althar on top, on the things it runs on */
 .yours { position: relative; border: 1.5px solid var(--cobalt-soft); border-radius: 18px; padding: 30px 14px 14px; }
 .yours-k { position: absolute; top: -11px; left: 20px; margin: 0; padding: 0 10px; background: var(--ink); font: 500 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--cobalt-soft); line-height: 20px; }
 .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }

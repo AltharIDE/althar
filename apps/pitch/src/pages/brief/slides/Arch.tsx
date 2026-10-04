@@ -41,7 +41,7 @@ export function Arch() {
   return (
     <Slide tone="dark" name="Where it sits" className={s.arch}>
       <div className={ui.wrap}>
-        <p className={cx(ui.kicker, s.kicker)}>Where Charrette sits</p>
+        <p className={cx(ui.kicker, s.kicker)}>Where Althar sits</p>
         <h2>A persistent layer between your team and whichever agents you use.</h2>
         <div className={s.agents}>
           <p className={s.lK}>
@@ -71,7 +71,7 @@ export function Arch() {
             <div className={cx(s.tile, s.core)}>
               <div>
                 <small>Your project layer</small>
-                <b>Charrette</b>
+                <b>Althar</b>
               </div>
               <span>
                 Project memory, the coordinator, tasks and everything they produced. Open source, in an open format, on top of everything

@@ -3,14 +3,14 @@
 ## Architectural decision
 
 “Integration” currently hides four different architectural relationships.
-Charrette must model them separately:
+Althar must model them separately:
 
 | Plane | Purpose | Examples | Authority |
 |---|---|---|---|
-| `AgentConnection` | Execute agent work | Claude Code, Codex, OpenCode over ACP | Provider owns its session; Charrette owns the run |
-| `DomainConnector` | Synchronize durable business/domain state | GitHub/GitLab, Linear, Jira | External system owns its resources; Charrette owns mappings and workflow state |
-| `MCPConnection` | Expose callable tools and resources to an agent | Search, databases, SaaS actions | Tool server owns operation; Charrette owns grant and audit |
-| `SkillPackage` | Supply procedural knowledge and supporting resources | Review workflow, migration playbook | Package author owns content; Charrette owns resolution and permission policy |
+| `AgentConnection` | Execute agent work | Claude Code, Codex, OpenCode over ACP | Provider owns its session; Althar owns the run |
+| `DomainConnector` | Synchronize durable business/domain state | GitHub/GitLab, Linear, Jira | External system owns its resources; Althar owns mappings and workflow state |
+| `MCPConnection` | Expose callable tools and resources to an agent | Search, databases, SaaS actions | Tool server owns operation; Althar owns grant and audit |
+| `SkillPackage` | Supply procedural knowledge and supporting resources | Review workflow, migration playbook | Package author owns content; Althar owns resolution and permission policy |
 
 Combining these behind a generic “plugin” interface would erase their different
 lifecycles, authentication, retry semantics, security boundaries, and UX.
@@ -18,7 +18,7 @@ lifecycles, authentication, retry semantics, security boundaries, and UX.
 ## Domain connector model
 
 A `DomainConnector` handles durable reconciliation with a known external
-system. It is appropriate when Charrette needs:
+system. It is appropriate when Althar needs:
 
 - background or resumable synchronization;
 - stable mappings between external and internal resources;
@@ -86,9 +86,9 @@ Example:
 | Field | Authority | Inbound behavior | Outbound behavior |
 |---|---|---|---|
 | Issue title | External tracker by default | Update projection and record source revision | Only explicit user/workflow mutation |
-| Charrette run status | Charrette | Never overwritten by tracker | Optionally summarized into a dedicated external field/comment |
+| Althar run status | Althar | Never overwritten by tracker | Optionally summarized into a dedicated external field/comment |
 | Assignee | Configured per project | Import and map external identity | Require mapping and permission |
-| Workflow evidence | Charrette artifacts | External links become observations | Publish a link/summary, not canonical bytes |
+| Workflow evidence | Althar artifacts | External links become observations | Publish a link/summary, not canonical bytes |
 | External issue state | Tracker | Cursor/webhook observation | Idempotent requested transition |
 
 “Bidirectional sync” without field ownership is a loop generator, not a
@@ -107,7 +107,7 @@ feature.
 
 ### Outbound path
 
-1. Create a Charrette command and durable mutation intent.
+1. Create an Althar command and durable mutation intent.
 2. Evaluate actor, connection, project, and field-level policy.
 3. Attach a provider-supported idempotency key where available.
 4. Perform the network operation outside the database transaction.
@@ -160,12 +160,12 @@ A cloud deployment adds a public webhook ingress that:
 - fans into canonical cloud commands;
 - notifies or leases work to local runners where needed.
 
-Webhook availability does not make the external system Charrette's command
+Webhook availability does not make the external system Althar's command
 authority.
 
 ## Code hosts and trackers
 
-Code hosts and trackers are `DomainConnector`s of Charrette's own, on each
+Code hosts and trackers are `DomainConnector`s of Althar's own, on each
 service's API, never MCP wrappers
 ([ADR-011](../decisions/011-own-connectors-for-hosts-and-trackers.md)). There
 are two models, a code host and a tracker. Each has one adapter per *product*,
@@ -195,14 +195,14 @@ service's model.
 | Listening, polling | ETags (a "not modified" reply is free) | `updated_after` | `updated_on` | The pull request's activities | A cursor per thing listened to |
 
 - **Pushing is git,** with the connection's token, never the person's
-  credential helper. Charrette pushes what the lead committed and commits
+  credential helper. Althar pushes what the lead committed and commits
   nothing itself; a step that ends in a push isn't done while the worktree
   has uncommitted files, so the lead commits what belongs to the task and
   clears away the rest. The record keeps the commit pushed.
-- **Merging is the person's.** The model has `merge`, and Charrette calls it
+- **Merging is the person's.** The model has `merge`, and Althar calls it
   only when the person accepts the change (from the board, or the task),
   never on an agent's word: the rules refuse agents' merges. A draft is
-  marked ready first, and only the head Charrette last read is merged, in the
+  marked ready first, and only the head Althar last read is merged, in the
   first way the repository allows.
 - **A repository's host** is found from its remote URL, matched against
   known hosts and the instances the person has connected.
@@ -222,9 +222,9 @@ service's model.
   the thread, marked as not passed on, for the person to pass on in their own
   name. Reading the pull request, the lead sees the same, and how much was
   left out.
-- **Charrette's own replies** are known by their receipts, not by who posted
+- **Althar's own replies** are known by their receipts, not by who posted
   them: they go up under the person's account, which is also where the
-  person comments. Each says it came from Charrette, and which agent wrote
+  person comments. Each says it came from Althar, and which agent wrote
   it.
 
 ### Trackers
@@ -237,13 +237,13 @@ service's model.
 | Status | The team's states, typed: triage, backlog, unstarted, started, completed, canceled | Statuses in To Do, In Progress, Done; changed by a transition, which may need fields | The card's list | Open or closed with a reason; GitLab's statuses in five categories | The tracker's name, and a category: triage, backlog, to do, started, done, cancelled |
 | Linking a PR | An attachment; Linear's Git integration links branches named with the key | A remote link; the development panel needs Jira's own Git apps, by key | An attachment | A reference | A link, and the key in the branch and the PR's title |
 
-- **Status by category.** Charrette asks for a category, and the adapter
+- **Status by category.** Althar asks for a category, and the adapter
   picks the tracker's state. A Jira transition that needs fields becomes a
   call for the person. Trello's lists are mapped by the person, once per
   board. Who moves an issue's status, and when, is an open question.
 - **The key goes in the branch and the PR's title,** so the trackers' own
   Git integrations link them. Field ownership (above) decides whether
-  Charrette also moves a status those integrations move.
+  Althar also moves a status those integrations move.
 
 ### Signing in
 
@@ -252,12 +252,12 @@ whether it gives a token without one:
 
 | Service | Hosted | Self-hosted |
 |---|---|---|
-| GitHub | Charrette's GitHub App, by device flow; no secret, refresh included | A pasted token (the app is registered per instance) |
-| GitLab | Device flow | Device flow if the instance has Charrette registered; else a pasted token |
+| GitHub | Althar's GitHub App, by device flow; no secret, refresh included | A pasted token (the app is registered per instance) |
+| GitLab | Device flow | Device flow if the instance has Althar registered; else a pasted token |
 | Bitbucket | A pasted scoped API token | A pasted HTTP access token |
 | Linear | OAuth with PKCE, back to a loopback address | n/a |
 | Jira | A pasted scoped API token (Atlassian's OAuth needs a secret) | A pasted personal access token |
-| Trello | Charrette's Power-Up key, and a user token from Trello's authorize page | n/a |
+| Trello | Althar's Power-Up key, and a user token from Trello's authorize page | n/a |
 
 A pasted token is the fallback everywhere, including for an organisation
 that won't install the GitHub App. A connection belongs to the person on
@@ -271,19 +271,19 @@ command-line client has no key, so connections stay the app's.
 
 ### Agents and the hosts
 
-Agents reach code hosts and trackers only through Charrette:
+Agents reach code hosts and trackers only through Althar:
 
-- **Charrette's own steps** push the task's branch, open its pull request and
+- **Althar's own steps** push the task's branch, open its pull request and
   mark it ready.
-- **Charrette's tools** let agents read a pull request (comments, reviews,
+- **Althar's tools** let agents read a pull request (comments, reviews,
   checks with their logs) and an issue, and reply on a pull request. They
   reach only the task's own repository, and every call is recorded.
 - **Agents run without the person's ways into a host:** `gh` and `glab`
   signed out, git's credential helpers reset (`credential.helper` empty, in
-  git's environment), git's prompts off, and no SSH agent. Charrette pushes
+  git's environment), git's prompts off, and no SSH agent. Althar pushes
   for them. The environment is the boundary.
 - **The rules refuse** `gh` and `glab` commands that change a host, with a
-  reason that names Charrette's tool; and, for every role, the ways to
+  reason that names Althar's tool; and, for every role, the ways to
   credentials a shell still has: the keychain's `security`, and git's helpers
   called directly. Credentials the person keeps in plain files under their
   home folder remain readable to an agent that goes looking; only a sandbox
@@ -302,12 +302,12 @@ right default for durable product synchronization.
 
 ### Local broker
 
-The recommended target is a Charrette MCP broker:
+The recommended target is an Althar MCP broker:
 
 ```mermaid
 flowchart LR
     Provider["Provider runtime"]
-    Broker["Charrette MCP broker"]
+    Broker["Althar MCP broker"]
     Policy["Grant + approval policy"]
     Audit["Tool-call observations"]
     ServerA["Local MCP server"]
@@ -330,14 +330,14 @@ The broker:
 - enforces timeout, output-size, concurrency, and network policy;
 - translates provider-specific MCP configuration where necessary.
 
-ACP gives each session its MCP servers at `session/new`, so Charrette decides
+ACP gives each session its MCP servers at `session/new`, so Althar decides
 per session what an agent can reach, whatever the agent's own configuration
-says. Every session gets Charrette's own tools server
+says. Every session gets Althar's own tools server
 ([04](04-coordinator.md)) and the broker's allowed servers.
 
 When direct provider MCP configuration is allowed, record its exact
 configuration digest and treat pass-through as an explicit adapter capability.
-It has weaker uniform audit and enforcement than the Charrette broker.
+It has weaker uniform audit and enforcement than the Althar broker.
 
 ### MCP grants
 
@@ -363,12 +363,12 @@ grant.
 ### MCP tasks
 
 Newer MCP task capabilities may help represent long-running tool operations,
-but Charrette still wraps them in a workflow node/attempt. MCP task status is an
-external observation, not Charrette's run authority.
+but Althar still wraps them in a workflow node/attempt. MCP task status is an
+external observation, not Althar's run authority.
 
 ## Skills
 
-Charrette should adopt the open Agent Skills package shape:
+Althar should adopt the open Agent Skills package shape:
 
 ```text
 skill-name/
@@ -379,7 +379,7 @@ skill-name/
 ```
 
 The `SKILL.md` front matter and body provide discovery metadata and
-instructions; referenced files are loaded progressively. Charrette can add a
+instructions; referenced files are loaded progressively. Althar can add a
 manifest sidecar for provenance and compatibility without forking the content
 format.
 
@@ -528,7 +528,7 @@ Every integration connection records a principal and opaque credential
 reference. The same principles as provider auth apply:
 
 - use vendor-supported OAuth/app installation/API credentials;
-- keep local secrets where only Charrette can open them: sealed by the app,
+- keep local secrets where only Althar can open them: sealed by the app,
   with a key the OS keychain keeps for the app alone ("Signing in", above);
 - never place credentials in skills, repository config, or MCP arguments;
 - separate account connection from project authorization;
@@ -545,7 +545,7 @@ silently switch SaaS authority.
 - A project can connect an issue tracker without granting it to every run.
 - Duplicate or reordered webhooks converge without duplicate mutations.
 - A lost outbound response produces `unknown` until reconciliation.
-- Echoed Charrette-originated changes do not loop indefinitely.
+- Echoed Althar-originated changes do not loop indefinitely.
 - Rate-limit exhaustion cannot block unrelated connections.
 - Local-only operation never requires a public tunnel.
 - MCP discovery does not imply invocation permission.

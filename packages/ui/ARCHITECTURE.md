@@ -1,9 +1,9 @@
-# @charrette/ui — Architecture
+# @althar/ui — Architecture
 
-This package holds Charrette's interface components: the primitives (buttons, menus, popovers), the thread (messages, tool calls, steps, permissions), the composer, the coordinator's cards, the board, the dock beside it, a task's outputs, and the window's chrome. The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target. This document adds what is specific to UI components. Where the code does not yet meet it, see **Gaps** at the end.
+This package holds Althar's interface components: the primitives (buttons, menus, popovers), the thread (messages, tool calls, steps, permissions), the composer, the coordinator's cards, the board, the dock beside it, a task's outputs, and the window's chrome. The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target. This document adds what is specific to UI components. Where the code does not yet meet it, see **Gaps** at the end.
 
 - **Owner:** Repository maintainers
-- **Consumers:** the Charrette desktop shell. The pitch app may adopt components later.
+- **Consumers:** the Althar desktop shell. The pitch app may adopt components later.
 - **Dependency direction:** apps depend on this package; it depends on no app. Inside the package, see **Layers**.
 
 ## Layers
@@ -136,7 +136,7 @@ Plain semantic elements stay plain. A button is a `<button>`, and a list is a `<
 
 ### Icons and marks
 
-- **Icons are Iconoir** (`iconoir-react`, MIT). They are named by what they mean in Charrette (`work`, `after`, `corner`), not by their drawing. `Icon` sets a stroke width that holds up at 11–14px.
+- **Icons are Iconoir** (`iconoir-react`, MIT). They are named by what they mean in Althar (`work`, `after`, `corner`), not by their drawing. `Icon` sets a stroke width that holds up at 11–14px.
 - **Marks are brands, drawn in ink.** `BrandMark` draws a `Brand` from `foundations/brands/brands.ts`. That file is generated from Lobe Icons (MIT) and Simple Icons (CC0). Brand colour is not used, apart from Linear's issue card.
 
 ### Shared building blocks
@@ -197,9 +197,9 @@ The workbench (`workbench/`, `bun run workbench`) is where components are seen i
 
 ## Public API
 
-- `@charrette/ui` exports components, their prop and `text` types, their default `text`, and the enums, all from `src/index.ts`.
-- `@charrette/ui/screens` exports the whole screens, from `src/screens/index.ts`. They are one product's compositions, kept off the main entry so the parts' surface stays general.
-- `@charrette/ui/styles.css` provides the tokens and the base. The consumer imports it once and wraps its UI in `.ch-root`.
+- `@althar/ui` exports components, their prop and `text` types, their default `text`, and the enums, all from `src/index.ts`.
+- `@althar/ui/screens` exports the whole screens, from `src/screens/index.ts`. They are one product's compositions, kept off the main entry so the parts' surface stays general.
+- `@althar/ui/styles.css` provides the tokens and the base. The consumer imports it once and wraps its UI in `.ch-root`.
 - Anything not exported from `src/index.ts` is internal. Until there is a second consumer, the API may change without a deprecation period; after that, breaking changes need an ADR.
 
 ## Checks

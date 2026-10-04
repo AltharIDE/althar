@@ -41,14 +41,14 @@ flowchart LR
   Each computer maps that shared identity to its own local clone.
 - A **task** describes desired work and which repositories it may use.
 - A **run** is one submission of that task under a workflow and policy.
-- A **workflow execution** is the durable graph of steps Charrette coordinates.
+- A **workflow execution** is the durable graph of steps Althar coordinates.
 - Each task has one **lead**: the agent that implements it and that you talk
   to about it. Its **steps**, such as review, run other agents as nodes of the
   graph and report back to the lead ([05](05-workflow-engine.md)).
 - A **node attempt** is one try at a step.
 - A **provider session** is the temporary Claude Code, Codex, OpenCode, or other agent
   conversation used by a node.
-- An **observation** is something Charrette saw; an **artifact** is retained
+- An **observation** is something Althar saw; an **artifact** is retained
   evidence such as a patch, log, or report.
 - A **decision** records human authority. A **knowledge claim** promotes useful
   evidence into context that may help future work.
@@ -132,7 +132,7 @@ Two entrances lead to the same model.
 This is the fast path:
 
 1. The user selects an existing folder or supplies one Git URL.
-2. Charrette performs read-only inspection.
+2. Althar performs read-only inspection.
 3. It creates a project with one repository binding and, for a local folder,
    one device-local repository location.
 4. It suggests a project name and makes **Add source** permanently available.
@@ -158,7 +158,7 @@ Before confirmation, a project map shows:
 - whether the source is local-only;
 - suggested role such as `frontend`, `service`, `infrastructure`, or `docs`.
 
-Charrette must not recursively scan the computer or infer all sibling
+Althar must not recursively scan the computer or infer all sibling
 repositories. Selection is explicit and bounded.
 
 ### Adding a binding on a device
@@ -167,7 +167,7 @@ Each device offers three operations:
 
 1. **Use existing clone** — register an explicitly selected working copy
    without moving, resetting, or rewriting it.
-2. **Clone on this device** — clone into a Charrette-managed source area after
+2. **Clone on this device** — clone into an Althar-managed source area after
    destination and credential confirmation.
 3. **Map later** — retain the logical binding while this device remains unable
    to execute work that needs it.
@@ -181,8 +181,8 @@ Tasks, evidence, and decisions remain readable when a source is unavailable.
 ### Existing working copies
 
 An existing clone is an input source, not the default execution workspace.
-Charrette prepares a Git worktree per task in a folder it owns,
-`~/Charrette/<project>/<task>/<repository>` by default, with a root that can
+Althar prepares a Git worktree per task in a folder it owns,
+`~/Althar/<project>/<task>/<repository>` by default, with a root that can
 be changed per project ([ADR-006](../decisions/006-worktree-per-task.md)).
 Opening the task's folder in an editor shows all its repositories together.
 It never:
@@ -366,7 +366,7 @@ Identifiers must never be reused across these lifetimes.
 
 ## Chat input queue and interruption
 
-A Charrette conversation is a durable interaction stream around a task, a run,
+An Althar conversation is a durable interaction stream around a task, a run,
 or the project's coordinator; it is not merely the provider's current stdin.
 The coordinator's thread uses the same queue and dispositions as a task's. User input can arrive while the
 runtime is sampling, waiting for a tool, executing a tool, awaiting approval, or
@@ -411,11 +411,11 @@ Interruption has two observable facts:
 
 1. `InterruptRequested` — the runtime durably accepted the user's request. The
    UI can acknowledge this immediately.
-2. `TurnInterrupted` — the provider stopped, or Charrette reached a safe
+2. `TurnInterrupted` — the provider stopped, or Althar reached a safe
    boundary and fenced the old controller.
 
 If the provider cannot confirm interruption, record
-`InterruptionUncertain`. The new input remains queued, but Charrette must
+`InterruptionUncertain`. The new input remains queued, but Althar must
 reconcile possible tool or external effects before retrying them.
 
 ### Continuing prior work
@@ -447,7 +447,7 @@ than silently discard it.
 - A stale provider/controller cannot mark a newer input consumed.
 
 Provider-native queue or steering support may optimize delivery, but the
-Charrette queue remains authoritative. An adapter without live steering uses
+Althar queue remains authoritative. An adapter without live steering uses
 provider cancellation plus a new/resumed turn while preserving the same
 semantics at the domain layer.
 

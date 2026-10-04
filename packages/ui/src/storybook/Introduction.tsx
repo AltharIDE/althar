@@ -137,11 +137,11 @@ export function Hero() {
     <header className={s.hero}>
       <div className={s.name}>
         <Logo size={46} className={s.logo} />
-        <h1 className={s.title}>Charrette</h1>
+        <h1 className={s.title}>Althar</h1>
         <span className={s.kit}>ui</span>
       </div>
       <p className={s.lede}>
-        The components Charrette’s desktop app is built from. Each renders what it is given and reports what happened, so every one of them
+        The components Althar’s desktop app is built from. Each renders what it is given and reports what happened, so every one of them
         runs here on its own, with fixtures.
       </p>
     </header>
@@ -234,7 +234,7 @@ export function Notes() {
       <section className={s.note}>
         <h2 className={s.noteTitle}>Using it</h2>
         <pre className={s.code}>
-          <code>{`import '@charrette/ui/styles.css'\nimport { Composer } from '@charrette/ui'\n\n<div className="ch-root">…</div>`}</code>
+          <code>{`import '@althar/ui/styles.css'\nimport { Composer } from '@althar/ui'\n\n<div className="ch-root">…</div>`}</code>
         </pre>
         <p className={s.noteText}>
           Components take their words through a <code>text</code> prop with English defaults, and their data already resolved: a model, not

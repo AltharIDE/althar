@@ -2,8 +2,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { AgentDefinition } from '@charrette/provider-adapters'
-import { fakeAgent, fakeAgentMain } from '@charrette/provider-adapters/testing'
+import type { AgentDefinition } from '@althar/provider-adapters'
+import { fakeAgent, fakeAgentMain } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -46,7 +46,7 @@ const thread = Effect.gen(function* () {
 const withAgents = (ids: ReadonlyArray<string>, define: (agentId: string) => AgentDefinition) =>
   Runtime.layer({
     database: ':memory:',
-    worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
+    worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
     agents: Layer.succeed(
@@ -58,7 +58,7 @@ const withAgents = (ids: ReadonlyArray<string>, define: (agentId: string) => Age
             agentId === 'process'
               ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
               : agentId === 'missing'
-                ? { _tag: 'Process', spec: { command: 'charrette-no-such-agent', args: [] }, cwd }
+                ? { _tag: 'Process', spec: { command: 'althar-no-such-agent', args: [] }, cwd }
                 : { _tag: 'InProcess', agent: fakeAgent() },
         })),
       ),
@@ -117,7 +117,7 @@ describe('the models each agent offers', () => {
       const sql = yield* SqlClient.SqlClient
       const threadId = yield* thread
       yield* sessions.start({ threadId, agentId: 'codex', model: 'large', effort: 'high' })
-      // As a session started before Charrette kept the names recorded it: values alone.
+      // As a session started before Althar kept the names recorded it: values alone.
       const [row] = yield* sql<{ id: string; config: string }>`SELECT id, config FROM provider_sessions WHERE agent_id = 'codex'`
       const config = JSON.parse(row?.config ?? '{}') as { options: Array<Record<string, unknown>> }
       const bare = { ...config, options: config.options.map(({ choices: _, ...option }) => option) }
@@ -170,11 +170,11 @@ describe('the models each agent offers', () => {
       assert.deepStrictEqual(
         processes.map((process) => [process.purpose, process.state, process.executable, process.pid !== null, process.providerSessionId]),
         [
+          ['probe', 'unknown', 'althar-no-such-agent', false, null],
           ['probe', 'exited', 'bun', true, null],
-          ['probe', 'unknown', 'charrette-no-such-agent', false, null],
         ],
       )
-      // A default is for an agent Charrette has.
+      // A default is for an agent Althar has.
       assert.instanceOf(yield* Effect.flip(models.setDefaultEffort({ agentId: 'cursor', model: 'm', effort: 'high' })), UnknownAgent)
     }).pipe(Effect.provide(withAgents(['process', 'missing'], (agentId) => definition(agentId)))),
   )

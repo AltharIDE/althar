@@ -1,11 +1,11 @@
-# @charrette/connectors
+# @althar/connectors
 
-How Charrette talks to code hosts and trackers ([docs/architecture/06](../../docs/architecture/06-integrations-and-skills.md), [ADR-011](../../docs/decisions/011-own-connectors-for-hosts-and-trackers.md)): a model for each, one adapter per product (GitHub and Linear so far), the sign-in flows that need no secret, and a fake service for tests. Written with [Effect](https://effect.website).
+How Althar talks to code hosts and trackers ([docs/architecture/06](../../docs/architecture/06-integrations-and-skills.md), [ADR-011](../../docs/decisions/011-own-connectors-for-hosts-and-trackers.md)): a model for each, one adapter per product (GitHub and Linear so far), the sign-in flows that need no secret, and a fake service for tests. Written with [Effect](https://effect.website).
 
 ## Use it
 
 ```ts
-import { products } from '@charrette/connectors'
+import { products } from '@althar/connectors'
 
 const github = products.github.make!({
   fetch,
@@ -15,7 +15,7 @@ const github = products.github.make!({
 })
 const host = github.host!
 const repository = yield* host.repository(['meridian', 'api'])
-const change = yield* host.openChange(repository, { title, body, source: 'charrette/mer-231', target: repository.defaultBranch, draft: true })
+const change = yield* host.openChange(repository, { title, body, source: 'althar/mer-231', target: repository.defaultBranch, draft: true })
 const { comments, reviews, cursor } = yield* host.activity(repository, change.number, null)
 ```
 

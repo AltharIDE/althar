@@ -1,5 +1,5 @@
-import { type CommandEnvelope, Ids, newId, type ProjectId } from '@charrette/domain'
-import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@charrette/persistence-sqlite'
+import { type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
+import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
 import {
   type AgentConnection,
   type AgentSession,
@@ -7,7 +7,7 @@ import {
   type ConfigOption,
   type SessionEvent,
   type StopReport,
-} from '@charrette/provider-adapters'
+} from '@althar/provider-adapters'
 import { Cause, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -72,7 +72,7 @@ interface TaskThread {
 /**
  * The project's coordinator thread (docs/architecture/04): it reads the
  * project's repositories, fresh from their default branch, under the rules of
- * a role that only reads, and changes things only through Charrette's tools.
+ * a role that only reads, and changes things only through Althar's tools.
  */
 interface CoordinatorThread {
   readonly role: 'coordinator'
@@ -85,7 +85,7 @@ interface CoordinatorThread {
 /**
  * A task's review step (docs/architecture/05): another agent reads the task's
  * worktree under the rules of a role that only reads, and reports what it
- * found through Charrette's tool. Its thread spans the review's rounds.
+ * found through Althar's tool. Its thread spans the review's rounds.
  */
 interface ReviewThread {
   readonly role: 'reviewer'
@@ -103,7 +103,7 @@ type ThreadContext = TaskThread | CoordinatorThread | ReviewThread
 /** Where a thread's agent works. */
 const cwdOf = (thread: ThreadContext) => (thread.role === 'coordinator' ? thread.folder.folder : thread.worktree)
 
-/** A role's Charrette tools. */
+/** A role's Althar tools. */
 const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
 
 interface Running {
@@ -122,7 +122,7 @@ interface Running {
   readonly ended: Deferred.Deferred<void>
   /** The brief the session's first turn starts with, and what it asks for when no input is waiting. */
   brief: { readonly text: string; readonly closing: string } | undefined
-  /** Takes back the session's Charrette tools. */
+  /** Takes back the session's Althar tools. */
   readonly revokeTools: Effect.Effect<void>
   turnRunning: boolean
   stopping: boolean
@@ -218,7 +218,7 @@ export class Sessions extends Context.Service<
       readonly threadId: string
       readonly body: string
       readonly disposition?: Disposition
-      /** Input Charrette writes, such as findings to settle: delivered, but shown in the thread by what it came from, not as the person's message. */
+      /** Input Althar writes, such as findings to settle: delivered, but shown in the thread by what it came from, not as the person's message. */
       readonly quiet?: boolean
     }): Effect.Effect<AcceptedInput, NotFound | Failure>
     /** Changes the session's model; the session and its context carry on. */
@@ -247,7 +247,7 @@ export class Sessions extends Context.Service<
       Option.Option<{ readonly sessionId: string; readonly agentId: string; readonly accountId: string; readonly turnRunning: boolean }>
     >
   }
->()('@charrette/runtime/Sessions') {
+>()('@althar/runtime/Sessions') {
   static readonly layer: Layer.Layer<Sessions, never, Store> = Layer.effect(
     Sessions,
     Effect.gen(function* () {
@@ -513,7 +513,7 @@ export class Sessions extends Context.Service<
                 actorId: instance.systemId,
               })
               // Refused, nothing was delivered. Out of usage, what the person said waits for the agent that carries on;
-              // Charrette's own prompts are given again by what carries the work on.
+              // Althar's own prompts are given again by what carries the work on.
               const back = refused ? inputs : errorClass === 'usage_limit' ? inputs.filter((input) => input.author === 'person') : []
               for (const input of back) {
                 const inputRevision = yield* change('user_inputs', input.id, { state: 'queued' })
@@ -675,7 +675,7 @@ export class Sessions extends Context.Service<
                 description: {
                   task: 'Start the lead again to carry on; it picks up from the thread.',
                   coordinator: 'Say something to start the coordinator again; it picks up from the thread.',
-                  reviewer: 'The review waits; Charrette starts the reviewer again when the task resumes.',
+                  reviewer: 'The review waits; Althar starts the reviewer again when the task resumes.',
                 }[running.thread.role],
               },
             )
@@ -730,7 +730,7 @@ export class Sessions extends Context.Service<
                 ? { role: 'task', context: { worktree: thread.worktree, defaultBranch: thread.defaultBranch, taskBranch: thread.branch } }
                 : { role: 'reader' },
           }
-          // Charrette's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
+          // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
           const tools = yield* toolServer.grant({
             role: toolRoleOf(thread),
             projectId: thread.projectId,
@@ -748,7 +748,7 @@ export class Sessions extends Context.Service<
               })
               const agent = yield* connection.newSession({
                 cwd: cwdOf(thread),
-                // The coordinator and a reviewer only read: in the agent's read-only mode where that still lets it call Charrette's tools.
+                // The coordinator and a reviewer only read: in the agent's read-only mode where that still lets it call Althar's tools.
                 mode: thread.role === 'task' ? definition.modes.ask : definition.modes.reader,
                 modeOptionId: definition.options.mode,
                 mcpServers: [tools.server],
@@ -1076,11 +1076,11 @@ export class Sessions extends Context.Service<
             ORDER BY i.sequence DESC LIMIT 1`
           const summary = lead === undefined ? '' : ((JSON.parse(lead.content) as { summary?: string }).summary ?? '')
           return [
-            "You are reviewing another agent's change, in Charrette. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
+            "You are reviewing another agent's change, in Althar. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
             `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
-            `The change is in ${thread.worktree}: a copy of the lead's work as it stood when this round began, which Charrette throws away after; nothing you do there reaches the lead. See the change with \`git diff ${thread.baseCommit ?? 'HEAD~1'}\` there; new files are in it.`,
+            `The change is in ${thread.worktree}: a copy of the lead's work as it stood when this round began, which Althar throws away after; nothing you do there reaches the lead. See the change with \`git diff ${thread.baseCommit ?? 'HEAD~1'}\` there; new files are in it.`,
             ...(summary === '' ? [] : [`The lead says:\n${summary}`]),
-            "Look for what would make the change wrong or unsafe to merge: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Then call Charrette's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), where it is, and what is wrong. With no findings worth fixing, the verdict is pass.",
+            "Look for what would make the change wrong or unsafe to merge: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Then call Althar's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), where it is, and what is wrong. With no findings worth fixing, the verdict is pass.",
             ...(yield* threadSoFar(thread.threadId)),
           ].join('\n\n')
         })
@@ -1103,14 +1103,14 @@ export class Sessions extends Context.Service<
           const cap = (text: string) => (text.length > 4_000 ? `${text.slice(0, 4_000)}\n…` : text)
           return [
             why.kind === 'start'
-              ? 'You are working on a task in a git worktree of its own. Charrette keeps its record and answers your permission requests.'
+              ? 'You are working on a task in a git worktree of its own. Althar keeps its record and answers your permission requests.'
               : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same worktree. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
             `The worktree is ${thread.worktree}, on the branch ${thread.branch}, which started from ${thread.baseRef}${thread.baseCommit === null ? '' : ` at ${thread.baseCommit.slice(0, 12)}`}.`,
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
-            "When you have done the task, or can't go further without the person, call Charrette's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
-            // Charrette reaches the code host for the task (ADR-011).
-            "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Charrette pushes the branch and opens the task's pull request, where the repository's host is connected to Charrette. Where it isn't, the task ends on its branch, and the person opens its pull request from Charrette once they connect the host. After that, read it with Charrette's read_pull_request tool, answer what people say on it with reply_on_pull_request, and after new commits call publish_changes. read_issue reads the issue the task came from, or any other.",
+            "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
+            // Althar reaches the code host for the task (ADR-011).
+            "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, answer what people say on it with reply_on_pull_request, and after new commits call publish_changes. read_issue reads the issue the task came from, or any other.",
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),
             ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
             ...(status === '' ? [] : [`Not yet committed:\n${cap(status)}`]),
@@ -1124,12 +1124,12 @@ export class Sessions extends Context.Service<
           const agents = yield* Agents
           const repositories = thread.folder.repositories
           return [
-            `You are the coordinator of the project ${thread.projectName}, in Charrette. You talk with the person about the project as a whole: you answer their questions about the code and the work, and you turn the changes they want into tasks. You never change anything yourself, not even a one-line fix: a change is always a task, which an agent, its lead, does in a worktree of its own.`,
+            `You are the coordinator of the project ${thread.projectName}, in Althar. You talk with the person about the project as a whole: you answer their questions about the code and the work, and you turn the changes they want into tasks. You never change anything yourself, not even a one-line fix: a change is always a task, which an agent, its lead, does in a worktree of its own.`,
             repositories.length === 0
               ? 'The project has no repositories yet.'
               : `Your working folder holds read-only copies of the project's repositories, fresh from their default branches:\n${repositories.map((repository) => `- ${repository.name}: ${repository.path} (${repository.base})`).join('\n')}\nRead and search them to answer questions and to plan. Anything you write there is thrown away.`,
             [
-              "To get a change made, use Charrette's tools:",
+              "To get a change made, use Althar's tools:",
               '- draft_task, with a title that says what should change, in a line, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.',
               '- propose_plan, for the task you drafted: who implements it (its lead) and why, in a sentence, and who reviews it, or no review for something trivial. The reviewer only reads; the lead then settles what it finds. By default, review with an agent from a different provider. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
               '- list_tasks, read_task and read_thread, to see what is under way and how it went.',

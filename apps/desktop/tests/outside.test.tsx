@@ -2,8 +2,8 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type IssueSummary, type Product, type ThreadSnapshot } from '@charrette/contracts'
-import { Brand, IssuePriority, IssueStatus } from '@charrette/ui'
+import { ApiError, type IssueSummary, type Product, type ThreadSnapshot } from '@althar/contracts'
+import { Brand, IssuePriority, IssueStatus } from '@althar/ui'
 
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
@@ -75,7 +75,7 @@ describe('connections', () => {
     withServices(<Connections />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
     expect(open).toHaveBeenCalledWith('https://linear.app/oauth/authorize?x', '_blank')
-    expect(await screen.findByText('Approve Charrette on GitHub, in your browser.')).toBeTruthy()
+    expect(await screen.findByText('Approve Althar on GitHub, in your browser.')).toBeTruthy()
     expect(await screen.findByText('Sign-in was declined.', {}, { timeout: 4000 })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByText('Sign-in was declined.')).toBeNull()
@@ -315,7 +315,7 @@ describe('a task’s pull request', () => {
         snapshot({
           task: {
             ...snapshot().task,
-            branch: 'charrette/retry',
+            branch: 'althar/retry',
             baseRef: 'origin/main',
             changes: [change()],
             files: [file('src/limit.ts'), file('notes.md', { status: 'added', del: 0, uncommitted: true })],
@@ -326,7 +326,7 @@ describe('a task’s pull request', () => {
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: '2 files' }))
     const view = await screen.findByRole('dialog', { name: 'Changes' })
-    expect(within(view).getByText('charrette/retry into main')).toBeTruthy()
+    expect(within(view).getByText('althar/retry into main')).toBeTruthy()
     // The first file, read from the runtime when you get to it.
     const line = (words: string) => (_: string, element: Element | null) =>
       element?.tagName === 'SPAN' && element.textContent === words && element.querySelector('mark') !== null
@@ -395,12 +395,12 @@ describe('a task’s pull request', () => {
     withServices(<Task />, client)
     expect(await screen.findByText(/isn't connected to this repository's host/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(answer).toHaveBeenCalledWith({ attentionId: 'a-not_connected', answer: { kind: 'retry', agentId: 'charrette' } })
-    expect(stuckWords.publishing(call('failed_to_start').stuck)).toBe("Charrette couldn't open the pull request. The host said no.")
+    expect(answer).toHaveBeenCalledWith({ attentionId: 'a-not_connected', answer: { kind: 'retry', agentId: 'althar' } })
+    expect(stuckWords.publishing(call('failed_to_start').stuck)).toBe("Althar couldn't open the pull request. The host said no.")
     expect(stuckWords.publishing({ ...call('failed_to_start').stuck, why: 'restarted', detail: null })).toBe(
-      'Charrette restarted while it was opening the pull request.',
+      'Althar restarted while it was opening the pull request.',
     )
-    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, detail: null })).toBe("Charrette couldn't open the pull request.")
+    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, detail: null })).toBe("Althar couldn't open the pull request.")
   })
 })
 
@@ -427,7 +427,7 @@ describe('a project, reaching outside', () => {
       ),
     })
     withServices(<Project />, client)
-    expect(await screen.findByText("Charrette isn't connected to GitHub, so tasks here end on their branch.")).toBeTruthy()
+    expect(await screen.findByText("Althar isn't connected to GitHub, so tasks here end on their branch.")).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
     const panel = await screen.findByRole('complementary', { name: 'Code hosts and trackers' })
     expect(within(panel).getByText('GitHub')).toBeTruthy()
@@ -557,7 +557,7 @@ describe('what reaching outside says, in every case', () => {
             items.arrival({ kind: 'checks', from: null, text: null, passed: 0, failed: 2, failing: ['test', 'lint'] }),
             items.arrival({ kind: 'closed', from: null, text: null, source: 'gitlab', where: 'MR !4' }),
             items.arrival({ kind: 'ready', from: null, text: null }),
-            items.step({ step: 'publish', summary: 'Pushed charrette/x.', change: null }),
+            items.step({ step: 'publish', summary: 'Pushed althar/x.', change: null }),
             items.step({ step: 'publish', summary: 'Opened pull request #12 for review.', change: change({ draft: false }) }),
             items.you('See', null, [
               {

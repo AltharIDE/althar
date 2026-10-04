@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 
-import type { AgentStatus, IssueSummary, TaskEnd } from '@charrette/contracts'
+import type { AgentStatus, IssueSummary, TaskEnd } from '@althar/contracts'
 import {
   Button,
   Field,
@@ -12,7 +12,7 @@ import {
   SidePanelTitle,
   taskEndText,
   TaskEnd as End,
-} from '@charrette/ui'
+} from '@althar/ui'
 
 import { ModelChoice } from '../../shared/ModelChoice'
 import type { Choice } from '../../shared/models'

@@ -1,8 +1,8 @@
 {
-  "name": "@charrette/pitch",
+  "name": "@althar/pitch",
   "version": "1.0.0",
   "private": true,
-  "description": "Charrette's investor brief and research note: a static site built with Vite+.",
+  "description": "Althar's investor brief and research note: a static site built with Vite+.",
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {

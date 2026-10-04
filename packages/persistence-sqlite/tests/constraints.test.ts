@@ -1,4 +1,4 @@
-import * as Domain from '@charrette/domain'
+import * as Domain from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Exit, Layer, Predicate, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'

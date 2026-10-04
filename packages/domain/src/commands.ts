@@ -8,7 +8,7 @@ import { Timestamp } from './time'
  * id makes a retry safe: the runtime answers a repeated command with its first
  * result instead of running it again.
  */
-export class CommandEnvelope extends Schema.Class<CommandEnvelope>('@charrette/domain/CommandEnvelope')({
+export class CommandEnvelope extends Schema.Class<CommandEnvelope>('@althar/domain/CommandEnvelope')({
   commandId: CommandId,
   commandType: Schema.String.check(Schema.isPattern(/^[a-z][a-z_]*(\.[a-z_]+)+$/)),
   schemaVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),

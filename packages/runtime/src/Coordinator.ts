@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
-import { type CommandEnvelope, type ProjectId } from '@charrette/domain'
-import type { Commands, Ledger } from '@charrette/persistence-sqlite'
+import { type CommandEnvelope, type ProjectId } from '@althar/domain'
+import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -22,7 +22,7 @@ import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServe
 /*
  * The project's coordinator (docs/architecture/04; docs/plans/mvp.md, "The
  * coordinator loop"): the agent you talk to about the project as a whole. It
- * answers questions itself, and turns changes into tasks with Charrette's
+ * answers questions itself, and turns changes into tasks with Althar's
  * tools, which it has as its only way to change anything. It starts when you
  * first say something to it, on the agent you last used.
  */
@@ -68,7 +68,7 @@ const Passed = Schema.Struct({ task: Schema.String, message: Schema.String, now:
 
 const read = <A>(schema: Schema.Codec<A, unknown>, input: unknown) =>
   Schema.decodeUnknownEffect(schema)(input).pipe(
-    Effect.mapError((error) => new ToolRefused({ message: `Charrette couldn't read that: ${error.message}` })),
+    Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
   )
 
 export class Coordinator extends Context.Service<
@@ -86,7 +86,7 @@ export class Coordinator extends Context.Service<
       readonly disposition: Disposition
     }): Effect.Effect<void, unknown>
   }
->()('@charrette/runtime/Coordinator') {
+>()('@althar/runtime/Coordinator') {
   static readonly layer: Layer.Layer<Coordinator, never, Store> = Layer.effect(
     Coordinator,
     Effect.gen(function* () {
@@ -186,7 +186,7 @@ export class Coordinator extends Context.Service<
           ? Effect.succeed(agentId)
           : Effect.fail(
               new ToolRefused({
-                message: `Charrette has no agent ${agentId}. It has: ${agents.list.map((entry) => entry.definition.id).join(', ')}.`,
+                message: `Althar has no agent ${agentId}. It has: ${agents.list.map((entry) => entry.definition.id).join(', ')}.`,
               }),
             )
 
@@ -269,7 +269,7 @@ export class Coordinator extends Context.Service<
                   .read(from, access.projectId)
                   .pipe(
                     Effect.mapError(
-                      () => new ToolRefused({ message: `Charrette can't read ${from}. Draft the task without it, or check the link.` }),
+                      () => new ToolRefused({ message: `Althar can't read ${from}. Draft the task without it, or check the link.` }),
                     ),
                   )
           // The same title from the same session is the same command: an agent that calls again, unsure the first worked, gets the first task.
@@ -343,7 +343,7 @@ export class Coordinator extends Context.Service<
           const { issue: wanted } = yield* read(Asked, input)
           const issue = yield* issues
             .read(wanted, access.projectId)
-            .pipe(Effect.mapError(() => new ToolRefused({ message: `Charrette can't read ${wanted}: no connected tracker has it.` })))
+            .pipe(Effect.mapError(() => new ToolRefused({ message: `Althar can't read ${wanted}: no connected tracker has it.` })))
           return [
             `${issue.key}: ${issue.title}`,
             `${issue.status.name}${issue.priority === null || issue.priority.level === 'none' ? '' : `, ${issue.priority.name} priority`}${issue.container === null ? '' : `, in ${issue.container}`}. ${issue.url}`,
@@ -374,7 +374,7 @@ export class Coordinator extends Context.Service<
                 ? Effect.fail(error)
                 : Effect.andThen(
                     Effect.logWarning('A coordinator tool did not succeed', error),
-                    Effect.fail(new ToolRefused({ message: 'Charrette could not do that. Try again, or tell the person.' })),
+                    Effect.fail(new ToolRefused({ message: 'Althar could not do that. Try again, or tell the person.' })),
                   ),
             ),
           ),
@@ -394,7 +394,7 @@ export class Coordinator extends Context.Service<
           list(access),
         ),
         tool('read_task', 'A task: what it is, its branch, and what each of its steps reported.', named, readTask),
-        tool('read_thread', "A task's thread as text: what the person, the lead and Charrette said, oldest first.", named, readThread),
+        tool('read_thread', "A task's thread as text: what the person, the lead and Althar said, oldest first.", named, readThread),
         tool(
           'draft_task',
           "Drafts a task for a change: its title, saying what should change, in a line, and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue. Then propose its plan.",

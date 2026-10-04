@@ -3,8 +3,8 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Ids, newId, now } from '@charrette/domain'
-import { osStartTime } from '@charrette/provider-adapters'
+import { Ids, newId, now } from '@althar/domain'
+import { osStartTime } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -13,7 +13,7 @@ import { Instance } from '../src/Instance'
 import * as Runtime from '../src/Runtime'
 import { runtime, task } from './support'
 
-const database = () => join(mkdtempSync(join(tmpdir(), 'charrette-profile-')), 'charrette.sqlite')
+const database = () => join(mkdtempSync(join(tmpdir(), 'althar-profile-')), 'althar.sqlite')
 
 const alive = (pid: number) => {
   try {
@@ -63,7 +63,7 @@ describe('the runtime instance', () => {
       const file = database()
       const sleeper = yield* detached('sleep', ['30'])
       // A leader that exits at once, leaving what it started running in its group.
-      const leaderPidFile = join(mkdtempSync(join(tmpdir(), 'charrette-orphan-')), 'pid')
+      const leaderPidFile = join(mkdtempSync(join(tmpdir(), 'althar-orphan-')), 'pid')
       const leader = yield* detached('/bin/sh', ['-c', 'sleep 30 & echo $! > "$0"; sleep 0.2; exit 0', leaderPidFile])
       const leaderStarted = yield* osStartTime(leader.pid)
       yield* leader.exited
@@ -150,7 +150,7 @@ describe('the runtime instance', () => {
       }).pipe(Effect.provide(runtime(file)))
       assert.deepStrictEqual(
         said.map((row) => (JSON.parse(row.content) as { title: string }).title),
-        ['Charrette restarted.', 'Charrette restarted.', 'Charrette restarted.', 'Charrette restarted.'],
+        ['Althar restarted.', 'Althar restarted.', 'Althar restarted.', 'Althar restarted.'],
       )
       assert.deepStrictEqual(after, {
         crashedEnded: true,

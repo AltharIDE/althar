@@ -32,7 +32,7 @@ export function Problem() {
               people’s heads. Change agents and most of it stays behind.
             </p>
             <p className={ui.answer}>
-              Charrette’s answer <span>→</span> a memory the project owns
+              Althar’s answer <span>→</span> a memory the project owns
             </p>
           </div>
           <figure className={s.mig} data-step={step} aria-label="Switching from Claude Code to Codex, and what comes along">

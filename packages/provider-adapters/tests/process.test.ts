@@ -19,7 +19,7 @@ const isAlive = (pid: number) => {
   }
 }
 
-/** Whether a process is gone within a second: one Charrette did not start is reaped by the OS, in its own time. */
+/** Whether a process is gone within a second: one Althar did not start is reaped by the OS, in its own time. */
 const goneSoon = (pid: number) =>
   Effect.gen(function* () {
     for (let waited = 0; isAlive(pid) && waited < 1_000; waited += 25) yield* Effect.sleep('25 millis')
@@ -88,7 +88,7 @@ describe('the process transport', () => {
   it.live('fails to start a command that does not exist', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const error = yield* Effect.flip(spawnOwned({ command: 'charrette-no-such-agent', args: [] }, '/tmp'))
+        const error = yield* Effect.flip(spawnOwned({ command: 'althar-no-such-agent', args: [] }, '/tmp'))
         assert.instanceOf(error, AgentStartFailed)
       }),
     ),
@@ -145,7 +145,7 @@ describe('childEnvironment', () => {
     ANTHROPIC_API_KEY: 'test-key',
     OPENAI_API_KEY: 'test-key',
     CLAUDE_CONFIG_DIR: '/tmp/claude',
-    CHARRETTE_DATABASE: '/tmp/charrette.db',
+    ALTHAR_DATABASE: '/tmp/althar.db',
   }
 
   it('passes on only the allowlist, what the agent names, and its own variables', () => {

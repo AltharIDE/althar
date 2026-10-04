@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
 
-import type { AgentModels } from '@charrette/contracts'
+import type { AgentModels } from '@althar/contracts'
 
 import type { Client } from './client'
 import { useServices } from './services'

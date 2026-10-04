@@ -8,7 +8,7 @@ export function Abstract() {
       <div className={ui.wrap}>
         <p>
           Every major AI coding company is building a project layer, and each one ties it to the agent it sells.{' '}
-          <strong>Charrette keeps project knowledge open and independent,</strong> and uses it to run work across whichever agents are best
+          <strong>Althar keeps project knowledge open and independent,</strong> and uses it to run work across whichever agents are best
           this month.
         </p>
       </div>

@@ -2,8 +2,8 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { ProjectId } from '@charrette/domain'
-import type { FakeAgentOptions } from '@charrette/provider-adapters/testing'
+import type { ProjectId } from '@althar/domain'
+import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -23,7 +23,7 @@ import { fakeAgents, fakeConnectors, items, launches, repository, runtime, until
 
 /*
  * Several accounts per agent (ADR-012): the agent's usual folder first, then
- * homes Charrette makes and folders other tools made, each a sign-in of its
+ * homes Althar makes and folders other tools made, each a sign-in of its
  * own. A session runs in its account's home, and a usage limit puts one
  * account out, so work goes on with the agent's next.
  */
@@ -33,7 +33,7 @@ const withAccounts = (each: Readonly<Record<string, FakeAgentOptions>> = {}, sig
 
 /** A folder named as given, as another tool would have made for an account. */
 const folder = (name: string) => {
-  const path = join(mkdtempSync(join(tmpdir(), 'charrette-home-')), name)
+  const path = join(mkdtempSync(join(tmpdir(), 'althar-home-')), name)
   mkdirSync(path)
   return path
 }
@@ -85,7 +85,7 @@ const ranOnCodex = (projectId?: string) =>
 
 describe('accounts', () => {
   it.effect(
-    'are the agent’s usual folder first, then homes Charrette makes, with the person’s settings linked in, and folders other tools made',
+    'are the agent’s usual folder first, then homes Althar makes, with the person’s settings linked in, and folders other tools made',
     () =>
       Effect.gen(function* () {
         const accounts = yield* Accounts
@@ -110,7 +110,7 @@ describe('accounts', () => {
           [
             yield* refusal(accounts.add({ agentId: 'codex', name: 'Again', folder: client.home ?? '' })),
             yield* refusal(accounts.add({ agentId: 'codex', name: 'Usual', folder: usualFolder })),
-            yield* refusal(accounts.add({ agentId: 'codex', name: 'Nowhere', folder: join(tmpdir(), 'charrette-no-such-folder') })),
+            yield* refusal(accounts.add({ agentId: 'codex', name: 'Nowhere', folder: join(tmpdir(), 'althar-no-such-folder') })),
             yield* refusal(accounts.add({ agentId: 'codex', name: '  ' })),
             yield* refusal(accounts.add({ agentId: 'nobody', name: 'x' })),
             yield* refusal(accounts.remove(usual?.id ?? '')),
@@ -140,10 +140,10 @@ describe('accounts', () => {
           (yield* accounts.of('codex')).map((account) => account.name),
           ['main', 'Work plan'],
         )
-        // One Charrette made is signed out with the agent's own tool, in its home, and its folder goes.
+        // One Althar made is signed out with the agent's own tool, in its home, and its folder goes.
         const spare = yield* accounts.add({ agentId: 'codex', name: 'spare' })
         writeFileSync(join(spare.home ?? '', 'auth.json'), '{}')
-        const signedOut = join(mkdtempSync(join(tmpdir(), 'charrette-signed-out-')), 'homes')
+        const signedOut = join(mkdtempSync(join(tmpdir(), 'althar-signed-out-')), 'homes')
         process.env.FAKE_SIGNED_OUT = signedOut
         try {
           yield* accounts.remove(spare.id)
@@ -207,7 +207,7 @@ describe('accounts', () => {
       }).pipe(Effect.provide(withAccounts())),
   )
 
-  it.effect('share with a home Charrette made what isn’t the account’s own, brought up to date as a session starts', () =>
+  it.effect('share with a home Althar made what isn’t the account’s own, brought up to date as a session starts', () =>
     Effect.gen(function* () {
       const accounts = yield* Accounts
       // As OpenCode's data folder: its sign-in stays the account's, other tools' data is shared.
@@ -240,7 +240,7 @@ describe('accounts', () => {
       Effect.provide(
         Runtime.layer({
           database: ':memory:',
-          worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
+          worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
           appVersion: '0.0.0-test',
           deviceName: 'Test Mac',
           agents: fakeAgents(),
@@ -261,7 +261,7 @@ describe('accounts', () => {
   it.effect('finds the folders account switchers keep, by name, and not ones already added', () =>
     Effect.gen(function* () {
       const accounts = yield* Accounts
-      const home = mkdtempSync(join(tmpdir(), 'charrette-person-'))
+      const home = mkdtempSync(join(tmpdir(), 'althar-person-'))
       for (const made of [
         '.codex-work',
         '.codex-personal',

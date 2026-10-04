@@ -11,7 +11,7 @@ import { NotFound } from '../src/errors'
 
 /** A repository whose task changed a file, moved one, deleted one, added two (one not yet added to git), and a picture. */
 const changed = () => {
-  const root = mkdtempSync(join(tmpdir(), 'charrette-diffs-'))
+  const root = mkdtempSync(join(tmpdir(), 'althar-diffs-'))
   const git = (...args: Array<string>) =>
     execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd: root })
       .toString()
@@ -127,7 +127,7 @@ describe('what a task changed', () => {
 
 /** A repository with one commit on main, and a git command for it. */
 const started = () => {
-  const root = mkdtempSync(join(tmpdir(), 'charrette-diffs-'))
+  const root = mkdtempSync(join(tmpdir(), 'althar-diffs-'))
   const git = (...args: Array<string>) =>
     execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd: root })
       .toString()
@@ -143,7 +143,7 @@ describe('what a task changed, carefully', () => {
   it.effect('shows a new link as git would add it, its target, never what it points at; and reads nothing that isn’t a file', () =>
     Effect.gen(function* () {
       const { root, base } = started()
-      const outside = join(mkdtempSync(join(tmpdir(), 'charrette-secret-')), 'secrets.env')
+      const outside = join(mkdtempSync(join(tmpdir(), 'althar-secret-')), 'secrets.env')
       writeFileSync(outside, 'AWS_SECRET=abc123\n')
       symlinkSync(outside, join(root, 'notes.txt'))
       execFileSync('mkfifo', [join(root, 'pipe')])

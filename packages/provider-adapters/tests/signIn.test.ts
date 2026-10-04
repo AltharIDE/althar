@@ -145,7 +145,7 @@ describe('signInStatus', () => {
     Effect.gen(function* () {
       const missing: AgentDefinition = {
         ...agents.codex,
-        signIn: { ...agents.codex.signIn, status: () => ({ command: 'charrette-no-such-cli', args: [] }) },
+        signIn: { ...agents.codex.signIn, status: () => ({ command: 'althar-no-such-cli', args: [] }) },
       }
       assert.strictEqual(yield* signInStatus(missing), 'unknown')
       assert.deepStrictEqual(yield* signInCheck(missing), { status: 'unknown', paidBy: 'unknown' })

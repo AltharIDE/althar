@@ -27,7 +27,7 @@ import {
   type ThreadItem,
   type ThreadSnapshot,
   type WatchEvent,
-} from '@charrette/contracts'
+} from '@althar/contracts'
 import { Cause, Duration, Effect, Exit, Fiber, Layer, Option, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
@@ -120,7 +120,7 @@ export interface Client {
   readonly getProjectRules: (projectId: string) => Promise<ProjectRulesView>
   /** Changes what is given of a project's rules; the rules as they are after it. */
   readonly setProjectRules: (input: ProjectRulesChange) => Promise<ProjectRulesView>
-  /** Adds an account to an agent: in the folder a grant names, or one Charrette makes. */
+  /** Adds an account to an agent: in the folder a grant names, or one Althar makes. */
   readonly addAccount: (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => Promise<AccountStatus>
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
   /** Stops using an account; `anyway`, its folder goes even where its sign-out didn't happen. */
@@ -163,7 +163,7 @@ export type StuckAnswer =
 
 /** What went wrong with a call, in words a view can show. */
 export const messageOf = (error: unknown): string =>
-  error instanceof ApiError ? error.message : "Charrette's runtime didn't answer. If it keeps happening, restart Charrette."
+  error instanceof ApiError ? error.message : "Althar's runtime didn't answer. If it keeps happening, restart Althar."
 
 /** A new command id, as the contract has them. */
 export const newCommandId = (): string => `cmd_${globalThis.crypto.randomUUID().replaceAll('-', '')}`
@@ -272,7 +272,7 @@ export const receivePort = (target: Pick<Window, 'addEventListener' | 'removeEve
   new Promise((resolve) => {
     const onMessage = (event: MessageEvent) => {
       const port = event.ports[0]
-      if (event.data !== 'charrette:port' || port === undefined) return
+      if (event.data !== 'althar:port' || port === undefined) return
       target.removeEventListener('message', onMessage)
       resolve(port)
     }

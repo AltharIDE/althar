@@ -15,7 +15,7 @@ export const openInTerminal = (line: string): Effect.Effect<boolean> =>
   process.platform !== 'darwin'
     ? Effect.succeed(false)
     : Effect.callback<boolean>((resume) => {
-        const script = join(mkdtempSync(join(tmpdir(), 'charrette-sign-in-')), 'sign-in.command')
+        const script = join(mkdtempSync(join(tmpdir(), 'althar-sign-in-')), 'sign-in.command')
         writeFileSync(script, `#!/bin/sh\n${line}\n`, { mode: 0o700 })
         chmodSync(script, 0o700)
         execFile('open', ['-a', 'Terminal', script], (error) => resume(Effect.succeed(error === null)))

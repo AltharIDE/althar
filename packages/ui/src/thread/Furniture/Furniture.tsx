@@ -61,13 +61,13 @@ export interface RestartedText {
 }
 
 export const restartedText: RestartedText = {
-  checking: 'Charrette restarted. Checking where the lead had got to before carrying on',
+  checking: 'Althar restarted. Checking where the lead had got to before carrying on',
   carriedOn: 'Carried on after a restart',
   nothingTwice: 'nothing was run twice',
 }
 
 /**
- * Charrette restarted while the task ran. It first checks what had already
+ * Althar restarted while the task ran. It first checks what had already
  * happened, so nothing is done twice, then carries on. Asking you is only
  * for when that check can't tell.
  */

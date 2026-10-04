@@ -1,5 +1,5 @@
-import type { StuckStep } from '@charrette/contracts'
-import { Ledger } from '@charrette/persistence-sqlite'
+import type { StuckStep } from '@althar/contracts'
+import { Ledger } from '@althar/persistence-sqlite'
 import { Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -14,7 +14,7 @@ import { Sessions } from './Sessions'
  * a call or a task ready to accept, and how many such things wait, for the
  * app's badge. Never for progress. Read from the store, in two small
  * queries, whenever a change that can bear on it is recorded; what already
- * waited when Charrette started isn't nudged again.
+ * waited when Althar started isn't nudged again.
  */
 
 /** How long changes are gathered, so a burst is read once. */
@@ -70,7 +70,7 @@ export class Nudges extends Context.Service<
     /** How many things wait on the person now, then each nudge and each change of that count, as they come. */
     readonly events: Stream.Stream<NudgeEvent>
   }
->()('@charrette/runtime/Nudges') {
+>()('@althar/runtime/Nudges') {
   static readonly layer: Layer.Layer<Nudges, never, SqlClient.SqlClient | Ledger | Sessions | Agents> = Layer.effect(
     Nudges,
     Effect.gen(function* () {

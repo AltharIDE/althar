@@ -1,6 +1,6 @@
-# @charrette/pitch
+# @althar/pitch
 
-The Charrette brief, research note, and not-found page. This is a static React site in the Bun workspace. Every page is prerendered to complete HTML and then hydrated for scroll interactions.
+The Althar brief, research note, and not-found page. This is a static React site in the Bun workspace. Every page is prerendered to complete HTML and then hydrated for scroll interactions.
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) for the intended boundaries and quality gates.
 
@@ -27,7 +27,7 @@ Publish `apps/pitch/dist/` to a static host. Route unknown URLs to `404.html`. T
 
 | Variable | Effect |
 | --- | --- |
-| `SITE_URL` | Public origin, such as `https://charrette.dev`. Adds canonical URLs, absolute social image URLs, and a sitemap. |
+| `SITE_URL` | Public origin, such as `https://althar.dev`. Adds canonical URLs, absolute social image URLs, and a sitemap. |
 | `SITE_NOINDEX=1` | Keeps a preview deployment out of search results. |
 | `BASE_PATH` | Serves the site below a path such as `/pitch/`. |
 

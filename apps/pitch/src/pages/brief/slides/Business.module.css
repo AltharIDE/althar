@@ -7,7 +7,7 @@
 .bills p { margin: 0; padding: 16px 20px; border-radius: 10px; border: 1px solid var(--night-rule); font-size: 16px; line-height: 1.45; color: var(--on-ink-3); }
 .bills span { display: block; margin-bottom: 6px; font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .bills b { color: var(--on-ink); font-weight: 600; }
-/* what Charrette charges for, on Charrette's colour */
+/* what Althar charges for, on Althar's colour */
 .bills .ours { border-color: var(--cobalt); background: var(--cobalt); color: var(--on-cobalt); }
 .bills .ours span { color: var(--on-cobalt); }
 .bills .ours b { color: #fff; }
