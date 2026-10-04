@@ -9,10 +9,17 @@ const REPO = 'https://github.com/thetastemakers/althar'
 export const LINKS = {
   repo: REPO,
   thesis: `${REPO}/blob/main/THESIS.md`,
-  architecture: `${REPO}/blob/main/ARCHITECTURE_PLAN.md`,
-  discussions: `${REPO}/discussions`,
+  architecture: `${REPO}/tree/main/docs/architecture`,
   issues: `${REPO}/issues`,
   components: `${REPO}/tree/main/packages/ui`,
+  releases: `${REPO}/releases`,
+} as const
+
+/** How to install it. Not published yet: the release, the cask and the clone URL are placeholders until it ships. */
+export const INSTALL = {
+  brew: 'brew install --cask althar',
+  clone: 'git clone github.com/thetastemakers/althar',
+  platforms: 'macOS first. Linux and Windows after.',
 } as const
 
 export const LINE = {
@@ -87,7 +94,7 @@ export const EARLY = {
 /** Ways in, for someone who wants to help. */
 export const JOIN: readonly { k: string; t: string; href: string }[] = [
   { k: 'Argue with the thesis', t: 'Read it, then tell us where it’s wrong.', href: LINKS.thesis },
-  { k: 'Tell us how you work', t: 'What breaks when you switch agents today? Start a discussion.', href: LINKS.discussions },
-  { k: 'Read the architecture', t: 'Seven documents, from the project model to persistence.', href: LINKS.architecture },
+  { k: 'Tell us how you work', t: 'What breaks when you switch agents today? Open an issue.', href: LINKS.issues },
+  { k: 'Read the architecture', t: 'Eight documents, from the project model to persistence and the cloud.', href: LINKS.architecture },
   { k: 'Browse the components', t: 'The interface, piece by piece, with every state as a story.', href: LINKS.components },
 ]

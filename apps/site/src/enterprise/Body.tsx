@@ -175,7 +175,7 @@ export function Body() {
         <span className={s.footLinks}>
           <a href={LINKS.repo}>GitHub</a>
           <a href={THESIS}>Thesis</a>
-          <a href={LINKS.discussions}>Discussions</a>
+          <a href={LINKS.issues}>Issues</a>
         </span>
       </footer>
     </>

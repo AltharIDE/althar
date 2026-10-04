@@ -55,7 +55,7 @@ export function Thesis() {
   const [lede, claim, ...rest] = THESIS.intro
   return (
     <div className={s.page}>
-      <Masthead current="thesis" base="/" />
+      <Masthead current="thesis" base="/enterprise" />
 
       <main id="main" tabIndex={-1}>
         <header className={s.head}>
@@ -109,7 +109,7 @@ export function Thesis() {
               </section>
             ))}
             <p className={s.end}>
-              <a href={LINKS.thesis}>THESIS.md on GitHub</a> · <a href={LINKS.discussions}>Argue with it in Discussions</a>
+              <a href={LINKS.thesis}>THESIS.md on GitHub</a> · <a href={LINKS.issues}>Argue with it in an issue</a>
             </p>
           </article>
         </div>

@@ -1,191 +1,165 @@
-import { BrandMark, LiveDot } from '@althar/ui'
-import { useEffect, useRef } from 'react'
+import { Fragment } from 'react'
 
-import { LINE } from '../content/facts'
-import { cx } from '../lib/cx'
-import { useCurrent } from '../lib/useCurrent'
-import { clamp, playback } from '../lib/motion'
-import { BRAND_OF, TASKS } from '../content/site'
-import { Body, Follow } from './Body'
-import { Masthead, PARTS } from '../shared/Masthead'
+import { AGENTS } from '../content/agents'
+import { COORDINATOR, HERO, LOOP, PLANS } from '../content/home'
+import { AgentMark } from '../shared/AgentMark'
+import { Bar } from '../shared/Bar'
+import { Close, Get } from '../shared/Close'
+import { Coordinator } from './Coordinator'
 import s from './Home.module.css'
-import { paint, paletteOf, type Anchor } from './scene/render'
-import { stateAt, Sway, TOTAL } from './scene/timeline'
+import { Meters } from './Meters'
+import { TaskLoop } from './TaskLoop'
+import { Why } from './Why'
 
 /*
- * The landing page. The site in 3D, seen from across the street at eye height
- * and set up as a two-point perspective drawing. One tower crane sets a
- * floor per task, a different agent's name on its plate each time, picking
- * each panel off the laydown and swinging it round the back of the mast.
- * Each floor's note is pinned to the building's edge. Then the scaffold
- * comes off and the crane is parked, turning in the wind, ready for the
- * next task. Below the site, the page: what it is, the agents, task 418 in
- * elevation and where it stands.
+ * The developer page. One app for the coding agents you already pay for: the
+ * first screen shows your plans running side by side and a task moving on when
+ * one runs out. Then: what it signs in with, why more than one agent (in
+ * cobalt, with a ticker from the shifts list), the coordinator that hands out
+ * the work, one task's review loop, and how to get it.
  */
 
-const IDS = PARTS.map((p) => p.id)
+/** The punctuation after a name in a list: "Claude, Codex and OpenCode." The "and" goes between the spans. */
+const listMark = (i: number, count: number) => (i === count - 1 ? '.' : i === count - 2 ? '' : ',')
+
+function Part({ no, label }: { no: string; label: string }) {
+  return (
+    <p className={s.no}>
+      <b>{no}</b>
+      {label}
+    </p>
+  )
+}
 
 export function Home() {
-  const current = useCurrent(IDS)
-  const stage = useRef<HTMLDivElement>(null)
-  const canvas = useRef<HTMLCanvasElement>(null)
-  const words = useRef<HTMLDivElement>(null)
-  const chips = useRef<(HTMLDivElement | null)[]>([])
-  const items = useRef<(HTMLLIElement | null)[]>([])
-  const onCrane = useRef<HTMLSpanElement>(null)
-  const replay = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    const cv = canvas.current
-    const box = stage.current
-    const ctx = cv?.getContext('2d')
-    if (!cv || !box || !ctx) return
-    const pal = paletteOf(cv)
-    const sway = new Sway()
-    let W = 0
-    let H = 0
-    let last = 0
-    let keepOut: DOMRect[] = []
-
-    const place = (anchors: readonly Anchor[]) => {
-      chips.current.forEach((el, k) => {
-        if (!el) return
-        const a = anchors.find((x) => x.k === k)
-        if (!a) {
-          el.style.visibility = 'hidden'
-          return
-        }
-        const q = clamp((a.p - 0.42) / 0.4)
-        el.style.visibility = 'visible'
-        el.style.transform = `translate(${a.x.toFixed(1)}px, ${a.y.toFixed(1)}px) translate(${a.left ? '-100%' : '0'}, -50%)`
-        el.style.opacity = String(Math.min(1, q * 1.6))
-        const hide = `${((1 - q) * 100).toFixed(1)}%`
-        el.style.clipPath = a.left ? `inset(-6px -6px -6px ${hide})` : `inset(-6px ${hide} -6px -6px)`
-      })
-    }
-
-    const draw = (t: number) => {
-      last = t
-      const st = stateAt(t)
-      const wide = W > 860
-      place(paint(ctx, pal, { W, H, t, wide, keepOut }, st, sway.at(t)))
-      items.current.forEach((li, k) => {
-        if (li) li.style.opacity = String(0.3 + 0.7 * (st.floors[k] ?? 0))
-      })
-      if (onCrane.current) {
-        const k = st.task ? TASKS.indexOf(st.task) : -1
-        onCrane.current.textContent = st.task
-          ? `On the crane: ${st.task.who} · ${st.task.task} · floor +${k + 1}`
-          : st.parked
-            ? 'Six floors, six notes. The crane is parked for the next task.'
-            : 'Striking the scaffold'
-      }
-    }
-    const measure = () => {
-      const r = box.getBoundingClientRect()
-      const dpr = Math.min(2, window.devicePixelRatio || 1)
-      W = r.width
-      H = r.height
-      cv.width = Math.round(W * dpr)
-      cv.height = Math.round(H * dpr)
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      const parts = words.current ? Array.from(words.current.children) : []
-      keepOut = parts.map((el) => {
-        const e = el.getBoundingClientRect()
-        return new DOMRect(e.x - r.x, e.y - r.y, e.width, e.height)
-      })
-    }
-    measure()
-    void document.fonts.ready.then(() => {
-      measure()
-      draw(last)
-    })
-    const ro = new ResizeObserver(() => {
-      measure()
-      draw(last)
-    })
-    ro.observe(box)
-    const stop = playback({ total: TOTAL, draw, replay: replay.current, idle: true, watch: box })
-    return () => {
-      stop()
-      ro.disconnect()
-    }
-  }, [])
-
   return (
-    <div className={s.page}>
-      <Masthead current={current} />
-
+    <div className={s.page} id="top">
+      <div className={s.top}>
+        <Bar tone="blue" />
+      </div>
       <main id="main" tabIndex={-1}>
-        <section id="site" className={s.hero} aria-labelledby="ps-h1">
-          <div ref={stage} className={s.stage}>
-            <canvas ref={canvas} className={s.canvas} aria-hidden="true" />
-            <div className={s.notes} aria-hidden="true">
-              {TASKS.map((task, k) => (
-                <div
-                  key={task.task}
-                  ref={(el) => {
-                    chips.current[k] = el
-                  }}
-                  className={cx(s.chip, task.you && s.you)}
-                >
-                  <b>{task.short}</b>
-                  <span>
-                    +{k + 1} · {task.task} · <BrandMark brand={BRAND_OF[task.who as keyof typeof BRAND_OF]} size={11} /> {task.who}
-                  </span>
+        <div className={s.top}>
+          <header className={s.hero}>
+            <p className={s.kicker}>
+              <i aria-hidden="true" />
+              {HERO.kicker}
+            </p>
+            <h1 className={s.h1}>
+              <span className={s.dim}>{HERO.pay}</span>
+              <span>
+                {HERO.names.map((n, i) => (
+                  <Fragment key={n.agent}>
+                    <span className={s.name}>
+                      <AgentMark agent={n.agent} className={s.nameMark} />
+                      {n.word}
+                      {listMark(i, HERO.names.length)}
+                    </span>
+                    {i === HERO.names.length - 2 ? ' and ' : ' '}
+                  </Fragment>
+                ))}
+              </span>
+              <span>{HERO.use}</span>
+            </h1>
+            <div className={s.below}>
+              <div>
+                <p className={s.heroLead}>{HERO.lead}</p>
+                <div className={s.ctas}>
+                  <Get tone="blue" />
                 </div>
-              ))}
+                <p className={s.fine}>{HERO.fine}</p>
+              </div>
+              <Meters />
+            </div>
+          </header>
+        </div>
+
+        <section id="agents" className={s.section} aria-labelledby="agents-h">
+          <div className={s.two}>
+            <div>
+              <Part no={PLANS.no} label={PLANS.label} />
+              <h2 id="agents-h" className={s.h2}>
+                <span>{PLANS.title[0]}</span>
+                <span>{PLANS.title[1]}</span>
+              </h2>
+              <p className={s.lead}>{PLANS.lead}</p>
+            </div>
+            <div>
+              <table className={s.agents}>
+                <thead>
+                  <tr>
+                    <th scope="col">Agent</th>
+                    <th scope="col">Signed in with</th>
+                    <th scope="col">How Althar runs it</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {AGENTS.map((a) => (
+                    <tr key={a.id}>
+                      <th scope="row">
+                        <span className={s.agent}>
+                          <AgentMark agent={a.id} size={26} />
+                          {a.name}
+                        </span>
+                      </th>
+                      <td>{a.signIn}</td>
+                      <td>
+                        <code>{a.runs.code}</code>
+                        <span className={s.whose}>{a.runs.whose === 'bundled' ? 'bundled' : 'your install'}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className={s.note}>{PLANS.note}</p>
             </div>
           </div>
-
-          <div ref={words} className={s.text}>
-            <p className={s.kicker}>
-              <span className="ch-root">
-                <LiveDot ping />
-              </span>
-              Open source · very early · issued for comment
-            </p>
-            <h1 id="ps-h1" className={s.h1}>
-              <span>{LINE.come}</span> <span className={s.blue}>{LINE.stay}</span>
-            </h1>
-            <p className={s.sub}>
-              The agents are the cranes. Each one comes on site for a task and sets its floor. The building is the project, and every floor
-              is something it now knows.
-            </p>
-            <Follow className={s.ctas} />
-          </div>
-
-          <Follow className={s.ctasNarrow} />
-
-          <p className={s.cap}>
-            <span>
-              Perspective · two-point · <span ref={onCrane} className={s.onCrane} />
-            </span>
-            <button ref={replay} type="button" className={s.replay} hidden>
-              Build it again
-            </button>
-          </p>
-          <ol className={s.list} aria-label="What each floor keeps">
-            {TASKS.map((task, k) => (
-              <li
-                key={task.task}
-                ref={(el) => {
-                  items.current[k] = el
-                }}
-                className={cx(task.you && s.you)}
-              >
-                <b>+{k + 1}</b>
-                <span>{task.note}</span>
-                <small>
-                  {task.task} · {task.who} · {task.kind}
-                </small>
-              </li>
-            ))}
-          </ol>
         </section>
 
-        <Body />
+        <Why />
+
+        <section id="coordinator" className={s.section} aria-labelledby="coordinator-h">
+          <div className={s.two}>
+            <div>
+              <Part no={COORDINATOR.no} label={COORDINATOR.label} />
+              <h2 id="coordinator-h" className={s.h2}>
+                <span>{COORDINATOR.title[0]}</span>
+                <span>{COORDINATOR.title[1]}</span>
+              </h2>
+              <p className={s.lead}>{COORDINATOR.lead}</p>
+              <ol className={s.points}>
+                {COORDINATOR.points.map((p, i) => (
+                  <li key={p.title}>
+                    <span className={s.pn}>{String(i + 1).padStart(2, '0')}</span>
+                    <p>
+                      <b>{p.title}</b>
+                      <span>{p.body}</span>
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            </div>
+            <Coordinator />
+          </div>
+        </section>
+
+        <section id="loop" className={`${s.section} ${s.band}`} aria-labelledby="loop-h">
+          <div className={s.wrap}>
+            <div className={s.loopHead}>
+              <div>
+                <Part no={LOOP.no} label={LOOP.label} />
+                <h2 id="loop-h" className={s.h2}>
+                  <span>{LOOP.title[0]}</span>
+                  <span>{LOOP.title[1]}</span>
+                </h2>
+              </div>
+              <p className={s.lead}>{LOOP.lead}</p>
+            </div>
+            <TaskLoop />
+          </div>
+        </section>
       </main>
+
+      <Close />
     </div>
   )
 }

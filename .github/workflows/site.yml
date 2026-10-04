@@ -1,0 +1,41 @@
+name: site
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps/site/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/site.yml']
+  pull_request:
+    paths: ['apps/site/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/site.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/site
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run check
+      - run: bun run test
+      - run: bun run build
+      - uses: actions/upload-artifact@v6
+        with:
+          name: site
+          path: apps/site/dist
+          retention-days: 7

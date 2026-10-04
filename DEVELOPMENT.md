@@ -33,6 +33,7 @@ Each app and package has its own README with its own commands.
 | Path | What's there |
 | --- | --- |
 | [`apps/pitch`](apps/pitch) | The brief and research note, as a static site |
+| [`apps/site`](apps/site) | The public site: the developer page, the shifts and the thesis |
 | [`packages/ui`](packages/ui) | `@althar/ui`, the interface components, with a Storybook |
 | [`packages/domain`](packages/domain) | `@althar/domain`: identifiers, vocabularies, lifecycles and commands, as Effect schemas |
 | [`packages/persistence-sqlite`](packages/persistence-sqlite) | `@althar/persistence-sqlite`: the local store, its schema ([schema.sql](packages/persistence-sqlite/schema.sql)) and migrations |
@@ -82,7 +83,7 @@ Start from [the overview](docs/architecture/README.md), then:
 
 Work on a branch and open a pull request to `main`. On a pull request:
 
-- **GitHub Actions** runs a package's workflow when its files change: `pitch` for `apps/pitch`, `ui` for `packages/ui`, `harness` for `packages/contracts`, `packages/domain`, `packages/persistence-sqlite`, `packages/provider-adapters`, `packages/runtime` and `apps/cli`, and `desktop` for `apps/desktop` and everything it builds on. The desktop app's end-to-end tests run in CI with the fake agent, under a virtual display. The agent adapter's contract runs in CI against a scripted fake agent; the real agents run only on demand (`bun run test:agents` in `packages/provider-adapters`, and `e2e/real.spec.ts` in `apps/desktop`), since they need sign-in and cost usage. Every workflow also runs when the root `package.json`, `bun.lock` or `vite.config.ts` changes.
+- **GitHub Actions** runs a package's workflow when its files change: `pitch` for `apps/pitch`, `site` for `apps/site` and the UI kit it uses, `ui` for `packages/ui`, `harness` for `packages/contracts`, `packages/domain`, `packages/persistence-sqlite`, `packages/provider-adapters`, `packages/runtime` and `apps/cli`, and `desktop` for `apps/desktop` and everything it builds on. The desktop app's end-to-end tests run in CI with the fake agent, under a virtual display. The agent adapter's contract runs in CI against a scripted fake agent; the real agents run only on demand (`bun run test:agents` in `packages/provider-adapters`, and `e2e/real.spec.ts` in `apps/desktop`), since they need sign-in and cost usage. Every workflow also runs when the root `package.json`, `bun.lock` or `vite.config.ts` changes.
 - **Cloudflare Workers Builds** builds the pitch site. A branch gets a preview deployment (`wrangler preview`), and `main` deploys to production. The preview build fails without the `previews` block in `apps/pitch/wrangler.jsonc`, so keep it.
 
 Merge only when every check is green, the Cloudflare one included.

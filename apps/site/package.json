@@ -2,7 +2,7 @@
   "name": "@althar/site",
   "version": "0.0.0",
   "private": true,
-  "description": "Althar's landing page and the thesis, built with Vite+ and @althar/ui.",
+  "description": "Althar's site: the developer page, the shifts and the thesis, built with Vite+ and @althar/ui.",
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "preview": "vp preview",
     "deploy": "vp build && wrangler deploy",
     "check": "vp check",
+    "test": "vp test run",
     "fix": "vp check --fix"
   },
   "dependencies": {
