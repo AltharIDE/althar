@@ -1,6 +1,6 @@
 /*
  * The package's public surface: the parts a product composes. Whole screens
- * are a separate entry, @charrette/ui/screens, since they are one product's
+ * are a separate entry, @althar/ui/screens, since they are one product's
  * compositions and not parts. Fixtures and Storybook helpers are neither.
  */
 

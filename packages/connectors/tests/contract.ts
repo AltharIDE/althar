@@ -44,7 +44,7 @@ export const hostContract = (subject: HostSubject) =>
         const source = yield* subject.branch
         assert.isNull(yield* host.findChange(repository, source))
         const request = {
-          title: 'Charrette contract',
+          title: 'Althar contract',
           body: 'Opened by the connectors contract.',
           source,
           target: repository.defaultBranch,
@@ -59,7 +59,7 @@ export const hostContract = (subject: HostSubject) =>
           assert.strictEqual(again.number, opened.number, 'a second open adopts the first')
           assert.strictEqual((yield* host.findChange(repository, source))?.number, opened.number)
           const read = yield* host.change(repository, opened.number)
-          assert.strictEqual(read.title, 'Charrette contract')
+          assert.strictEqual(read.title, 'Althar contract')
           if (host.capabilities.drafts) assert.isFalse((yield* host.markReady(repository, read)).draft)
           const before = yield* host.activity(repository, opened.number, null)
           const reply = yield* host.reply(repository, opened.number, { body: 'A reply from the contract.', threadId: null })
@@ -94,9 +94,8 @@ export const trackerContract = (subject: TrackerSubject) =>
         assert.isNotEmpty(issue.title)
         assert.include(['triage', 'backlog', 'todo', 'started', 'done', 'cancelled'], issue.status.category)
         assert.isArray(yield* tracker.mine({ limit: 5 }))
-        yield* tracker.comment(issue, 'A comment from the Charrette connectors contract.')
-        if (tracker.capabilities.links)
-          yield* tracker.link(issue, { url: 'https://example.com/charrette-contract', title: 'Charrette contract' })
+        yield* tracker.comment(issue, 'A comment from the Althar connectors contract.')
+        if (tracker.capabilities.links) yield* tracker.link(issue, { url: 'https://example.com/althar-contract', title: 'Althar contract' })
       }),
     )
   })

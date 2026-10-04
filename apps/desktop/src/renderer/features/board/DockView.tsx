@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
-import type { AgentStatus, BoardTask, ThreadSnapshot } from '@charrette/contracts'
-import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, WorkPeek } from '@charrette/ui'
+import type { AgentStatus, BoardTask, ThreadSnapshot } from '@althar/contracts'
+import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, WorkPeek } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { modelInfo, waitsWords } from '../../shared/agents'

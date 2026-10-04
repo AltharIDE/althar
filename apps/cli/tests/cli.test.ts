@@ -1,4 +1,4 @@
-import type { LiveEvent } from '@charrette/runtime'
+import type { LiveEvent } from '@althar/runtime'
 import { assert, describe, it } from '@effect/vitest'
 
 import { parseLine } from '../src/input'
@@ -39,12 +39,12 @@ describe('the command line', () => {
   })
 
   it('keeps the profile where the platform keeps app data, unless told otherwise', () => {
-    assert.strictEqual(defaultProfile({}, 'darwin', '/Users/ada'), '/Users/ada/Library/Application Support/Charrette')
-    assert.strictEqual(defaultProfile({}, 'linux', '/home/ada'), '/home/ada/.local/share/charrette')
-    assert.strictEqual(defaultProfile({ XDG_DATA_HOME: '/data' }, 'linux', '/home/ada'), '/data/charrette')
-    assert.strictEqual(defaultProfile({ CHARRETTE_PROFILE: '/p' }, 'darwin', '/Users/ada'), '/p')
-    assert.strictEqual(defaultWorktrees({}, '/Users/ada'), '/Users/ada/Charrette')
-    assert.strictEqual(defaultWorktrees({ CHARRETTE_WORKTREES: '/w' }, '/Users/ada'), '/w')
+    assert.strictEqual(defaultProfile({}, 'darwin', '/Users/ada'), '/Users/ada/Library/Application Support/Althar')
+    assert.strictEqual(defaultProfile({}, 'linux', '/home/ada'), '/home/ada/.local/share/althar')
+    assert.strictEqual(defaultProfile({ XDG_DATA_HOME: '/data' }, 'linux', '/home/ada'), '/data/althar')
+    assert.strictEqual(defaultProfile({ ALTHAR_PROFILE: '/p' }, 'darwin', '/Users/ada'), '/p')
+    assert.strictEqual(defaultWorktrees({}, '/Users/ada'), '/Users/ada/Althar')
+    assert.strictEqual(defaultWorktrees({ ALTHAR_WORKTREES: '/w' }, '/Users/ada'), '/w')
   })
 })
 

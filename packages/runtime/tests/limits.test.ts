@@ -2,8 +2,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { ProjectId } from '@charrette/domain'
-import type { FakeAgentOptions } from '@charrette/provider-adapters/testing'
+import type { ProjectId } from '@althar/domain'
+import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -146,9 +146,9 @@ describe('an agent out of usage', () => {
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
   })
 
-  it.live('runs a held step again at its reset after Charrette restarts', () => {
+  it.live('runs a held step again at its reset after Althar restarts', () => {
     const back = Date.now() + 3000
-    const database = join(mkdtempSync(join(tmpdir(), 'charrette-limits-')), 'profile.sqlite')
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-limits-')), 'profile.sqlite')
     const layer = (agents: Readonly<Record<string, FakeAgentOptions>>) =>
       Queries.layer.pipe(Layer.provideMerge(runtime(database, {}, { each: agents })))
     return Effect.gen(function* () {
@@ -313,9 +313,9 @@ describe('an agent out of usage', () => {
 })
 
 describe('a message waiting for a reset', () => {
-  it.live('is answered then after Charrette restarts, by the agent it waited for', () => {
+  it.live('is answered then after Althar restarts, by the agent it waited for', () => {
     const back = Date.now() + 3000
-    const database = join(mkdtempSync(join(tmpdir(), 'charrette-limits-')), 'profile.sqlite')
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-limits-')), 'profile.sqlite')
     const layer = (agents: Readonly<Record<string, FakeAgentOptions>>) =>
       Queries.layer.pipe(Layer.provideMerge(runtime(database, {}, { each: agents })))
     return Effect.gen(function* () {

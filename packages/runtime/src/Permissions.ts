@@ -9,9 +9,9 @@ import {
   providerSessionLifecycle,
   type ProviderSessionState,
   transition,
-} from '@charrette/domain'
-import { Commands, Ledger } from '@charrette/persistence-sqlite'
-import { answerFor, type PermissionDecision, type PermissionMeanings, type PermissionRequest } from '@charrette/provider-adapters'
+} from '@althar/domain'
+import { Commands, Ledger } from '@althar/persistence-sqlite'
+import { answerFor, type PermissionDecision, type PermissionMeanings, type PermissionRequest } from '@althar/provider-adapters'
 import { Context, Crypto, Deferred, Effect, Layer, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -92,7 +92,7 @@ export class Permissions extends Context.Service<
     /** Withdraws every request a session is still waiting on, as when its agent has gone. */
     withdrawAll(sessionId: string): Effect.Effect<void>
   }
->()('@charrette/runtime/Permissions') {
+>()('@althar/runtime/Permissions') {
   static readonly layer: Layer.Layer<Permissions, never, Store> = Layer.effect(
     Permissions,
     Effect.gen(function* () {
@@ -309,7 +309,7 @@ export class Permissions extends Context.Service<
         decide: (requestContext, request) =>
           // A request the store couldn't record, or rules that failed, get a rejection: nothing runs that wasn't allowed.
           run(decideRequest(requestContext, request)).pipe(
-            Effect.catchCause(() => Effect.succeed<PermissionDecision>({ decision: 'reject', reason: 'Charrette could not decide.' })),
+            Effect.catchCause(() => Effect.succeed<PermissionDecision>({ decision: 'reject', reason: 'Althar could not decide.' })),
           ),
 
         answer: ({ envelope, attentionId, decision, reason }) =>

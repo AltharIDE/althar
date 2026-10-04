@@ -9,7 +9,7 @@ import { States, statesOn } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { FindingsReachMenu, Review, type ReviewFinding } from './Review'
 
-const INSTRUCTIONS = { path: '.charrette/review.md', ...reviewDoc }
+const INSTRUCTIONS = { path: '.althar/review.md', ...reviewDoc }
 const TWO = [{ model: SONNET }, { model: GEMINI_PRO }]
 const ONE_REVIEWER: readonly ReviewFinding[] = FINDINGS.filter((f) => f.by.includes(SONNET)).map((f) => ({
   ...f,

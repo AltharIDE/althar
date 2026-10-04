@@ -20,7 +20,7 @@ export class Folders extends Context.Service<
     /** The folder a grant names. */
     path(grant: string): Effect.Effect<string, NotFound>
   }
->()('@charrette/runtime/Folders') {
+>()('@althar/runtime/Folders') {
   static readonly layer: Layer.Layer<Folders> = Layer.sync(Folders, () => {
     const grants = new Map<string, string>()
     return Folders.of({

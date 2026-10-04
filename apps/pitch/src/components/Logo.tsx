@@ -2,7 +2,7 @@ import { cx } from '../lib/cx'
 import s from './Logo.module.css'
 
 /*
- * Charrette's mark, as @charrette/ui draws it: the section through a
+ * Althar's mark, as @althar/ui draws it: the section through a
  * triangular scale ruler, bored, with a point of colour in the bore. Ink is
  * the text colour around it; the point is cobalt, or whatever --logo-point
  * says (the mast makes it pale cobalt over a dark panel). Decorative.

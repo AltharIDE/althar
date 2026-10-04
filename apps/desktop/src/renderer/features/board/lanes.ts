@@ -1,4 +1,4 @@
-import type { BoardCall, BoardSnapshot, BoardTask } from '@charrette/contracts'
+import type { BoardCall, BoardSnapshot, BoardTask } from '@althar/contracts'
 
 /*
  * Which lane of the board each task and call goes in. Up next: a plan

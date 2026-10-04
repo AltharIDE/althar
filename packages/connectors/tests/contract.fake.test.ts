@@ -12,6 +12,6 @@ hostContract({
   name: 'The fake',
   host: fake,
   path: ['meridian', 'api'],
-  branch: Effect.sync(() => `charrette/contract-${(branches += 1)}`),
+  branch: Effect.sync(() => `althar/contract-${(branches += 1)}`),
 })
 trackerContract({ name: 'The fake', tracker: fake, ref: 'MER-231' })

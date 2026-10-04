@@ -3,8 +3,8 @@ import { hostname } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 
-import { agents, signInStatus } from '@charrette/provider-adapters'
-import { type Instance, Live, Permissions, Projects, Runtime, Sessions } from '@charrette/runtime'
+import { agents, signInStatus } from '@althar/provider-adapters'
+import { databaseIn, type Instance, Live, Permissions, Projects, Runtime, Sessions } from '@althar/runtime'
 import { Cause, type Crypto, Effect, Exit, Option, Queue, Stream } from 'effect'
 
 import { type Action, HELP, parseLine } from './input'
@@ -153,7 +153,7 @@ const program = Effect.gen(function* () {
 
 mkdirSync(options.profile, { recursive: true })
 const layer = Runtime.layer({
-  database: join(options.profile, 'charrette.sqlite'),
+  database: databaseIn(options.profile),
   worktreeRoot: options.worktrees,
   accountsRoot: join(options.profile, 'accounts'),
   appVersion: '0.0.0',

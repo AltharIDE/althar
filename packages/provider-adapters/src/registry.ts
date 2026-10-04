@@ -12,7 +12,7 @@ export type AgentId = 'claude-code' | 'codex' | 'opencode'
 
 /**
  * How to start a process: a command, its arguments, extra environment, and
- * which of Charrette's own environment variables it may inherit beyond the
+ * which of Althar's own environment variables it may inherit beyond the
  * common allowlist (see `process.ts`).
  */
 export interface LaunchSpec {
@@ -39,26 +39,26 @@ export interface PermissionMeanings {
 export interface AgentDefinition {
   readonly id: AgentId
   readonly name: string
-  /** Bundled adapters ship with Charrette at pinned versions; user-installed agents are found on the machine. */
+  /** Bundled adapters ship with Althar at pinned versions; user-installed agents are found on the machine. */
   readonly source: 'bundled' | 'user_installed'
   /** The command that starts it. `node` is the Node binary bundled adapters run on: Electron's own, in the app. */
   readonly launch: (node: string) => LaunchSpec
   /**
-   * The modes Charrette starts sessions in (ADR-007): one where the agent asks
+   * The modes Althar starts sessions in (ADR-007): one where the agent asks
    * before acting, never a bypass mode; one that only reads; and the one a
    * role that only reads (the coordinator, a reviewer) runs in. That is the
    * read-only mode only where it is a sandbox that still lets the agent call
-   * Charrette's tools. Claude Code's plan mode and OpenCode's plan agent are
-   * instructions to the model, and it refuses Charrette's tools in them
+   * Althar's tools. Claude Code's plan mode and OpenCode's plan agent are
+   * instructions to the model, and it refuses Althar's tools in them
    * (scripts/probe-tools.ts in the runtime), so those roles run in the mode
-   * that asks, with Charrette's rules denying every write.
+   * that asks, with Althar's rules denying every write.
    */
   readonly modes: { readonly ask: string; readonly readOnly: string; readonly reader: string }
   /** The ids of its session config options. */
   readonly options: { readonly mode: string; readonly model: string; readonly effort?: string }
   /**
    * The agent's own sign-in (docs/architecture/03: the official tool owns it).
-   * Charrette runs the documented status command and reads its output; it
+   * Althar runs the documented status command and reads its output; it
    * never reads a credential store. `login` is what the user runs.
    */
   readonly signIn: {
@@ -67,14 +67,14 @@ export interface AgentDefinition {
     readonly read: (output: string, exitCode: number | null) => boolean | undefined
     /**
      * How the sign-in is paid for, from the same output: a plan, or per use, on
-     * a key; undefined when it can't tell. Charrette moves work on to an agent
+     * a key; undefined when it can't tell. Althar moves work on to an agent
      * by itself only when its plan pays.
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
     readonly login: string
     /**
      * Its own sign-out, run in an account's home when the person removes an
-     * account Charrette made, before its folder goes (ADR-012). Without one,
+     * account Althar made, before its folder goes (ADR-012). Without one,
      * the sign-in is a file in the home, gone with it.
      */
     readonly logout?: {
@@ -89,7 +89,7 @@ export interface AgentDefinition {
    * set. `shared` picks, from what is in the usual folder, what isn't the
    * account's own: the person's settings and instructions, or other tools'
    * data where the variable is a general one. It is linked into a home
-   * Charrette makes, so every account works the same; never a sign-in.
+   * Althar makes, so every account works the same; never a sign-in.
    */
   readonly home: {
     readonly variable: string
@@ -151,7 +151,7 @@ const loggedInField = (output: string): boolean | undefined => {
 /**
  * OpenCode allows most actions without asking unless its config says
  * otherwise. Inline config overrides the project's own, so every OpenCode
- * process Charrette starts asks, and its requests reach Charrette. Agent-level
+ * process Althar starts asks, and its requests reach Althar. Agent-level
  * permissions take precedence over global ones, so the built-in agents are
  * set too, in case a repository's config allows more for them.
  *
@@ -168,18 +168,18 @@ const openCodeConfig = JSON.stringify({
 /**
  * Claude Code reads the user's settings and the repository's committed
  * `.claude/settings.json`, and an allow rule in either approves an action
- * before Charrette sees it. Ask rules win over allow rules, and over a hook
+ * before Althar sees it. Ask rules win over allow rules, and over a hook
  * that approves, so every session gets these, and bypass mode is made
  * unreachable for its whole life.
  *
  * Its sandbox keeps shell commands inside the worktree (docs/architecture/03):
  * a command that stays inside runs without asking, and one that has to leave
- * (the network, a write elsewhere) asks, and reaches Charrette. In a git
+ * (the network, a write elsewhere) asks, and reaches Althar. In a git
  * worktree the sandbox lets git write to the main repository's `.git`, except
  * its hooks and config. Where the sandbox can't start, commands run without
  * it and every one asks.
  *
- * Only the MCP servers Charrette gives a session are loaded, not the user's
+ * Only the MCP servers Althar gives a session are loaded, not the user's
  * or the repository's own, whose tools the ask list doesn't cover.
  */
 const claudeAsks = {
@@ -199,7 +199,7 @@ const claudeAsks = {
 /**
  * Claude Code for a role that only reads: its edit tools denied, which also
  * denies its sandbox's writes, and every shell command asking, so each one
- * reaches Charrette's reader rules rather than running because the sandbox
+ * reaches Althar's reader rules rather than running because the sandbox
  * would contain it. What it reads is a throwaway copy all the same.
  */
 const claudeReads = {
@@ -245,7 +245,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
     sessionMeta: (role = 'lead') => (role === 'reader' ? claudeReads : claudeAsks),
     knownGaps: [
-      'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Charrette always sets the mode.',
+      'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Althar always sets the mode.',
       "Hooks in the repository's or the user's settings run as code on the Mac whenever Claude uses a tool; they cannot approve past the ask rules.",
       "Its sandbox denies writes to a repository's tracked `.claude/` files, so git can fail to check those out inside it.",
       'Usage limits reach the Agent SDK but are not forwarded over ACP; only errors show them.',
@@ -258,8 +258,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     launch: (node) => ({ command: node, args: [bundled('@agentclientprotocol/codex-acp', 'dist/index.js')], inheritEnv: ['CODEX_HOME'] }),
     /*
      * Not `agent`, codex-acp's default: that mode sends every request to go
-     * beyond the sandbox to an automatic reviewer, so none reach Charrette.
-     * In `workspace-write` the person, through Charrette, is the reviewer.
+     * beyond the sandbox to an automatic reviewer, so none reach Althar.
+     * In `workspace-write` the person, through Althar, is the reviewer.
      */
     modes: { ask: 'workspace-write', readOnly: 'read-only', reader: 'read-only' },
     options: { mode: 'mode', model: 'model', effort: 'reasoning_effort' },
@@ -311,7 +311,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
         const count = /(\d+)\s+credentials?/i.exec(output)?.[1]
         return count !== undefined && Number(count) > 0 ? true : undefined
       },
-      /* It runs on the providers' keys it was given, whichever model a session picks: paid per use, as far as Charrette can tell. */
+      /* It runs on the providers' keys it was given, whichever model a session picks: paid per use, as far as Althar can tell. */
       paidBy: () => 'key',
       login: 'opencode auth login',
       // No sign-out: its sign-ins are `opencode/auth.json` in the home, gone with the folder; its own asks which to remove.

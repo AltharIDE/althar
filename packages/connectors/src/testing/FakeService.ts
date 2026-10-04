@@ -63,7 +63,7 @@ export interface FakeControls {
   readyByHand(number: number): void
   /** The next call to `method` fails with this: when to try again for a rate limit, and the HTTP status a host would give. */
   failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string, status?: number): void
-  /** Every change opened, with every comment on it, Charrette's included. */
+  /** Every change opened, with every comment on it, Althar's included. */
   readonly changes: ReadonlyArray<ChangeRequest>
   commentsOn(number: number): ReadonlyArray<Comment>
   issueComments(ref: string): ReadonlyArray<string>

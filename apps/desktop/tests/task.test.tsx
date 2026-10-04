@@ -2,8 +2,8 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type StuckStep, type ThreadSnapshot } from '@charrette/contracts'
-import { TaskStatus } from '@charrette/ui'
+import { ApiError, type StuckStep, type ThreadSnapshot } from '@althar/contracts'
+import { TaskStatus } from '@althar/ui'
 
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
 import { statusOf, TaskView } from '../src/renderer/features/task/TaskView'
@@ -44,7 +44,7 @@ describe('a task', () => {
     await screen.findByRole('heading', { name: 'Add a retry', level: 1 })
     // The lead's model, by the name its agent gives it.
     expect((await screen.findAllByText('Claude Code · Opus')).length).toBeGreaterThan(0)
-    expect(screen.getByText('charrette/add-a-retry')).toBeTruthy()
+    expect(screen.getByText('althar/add-a-retry')).toBeTruthy()
     // Work under way has no pull request to open yet.
     expect(screen.queryByRole('button', { name: 'Open a pull request' })).toBeNull()
     expect(screen.getByText('Idle')).toBeTruthy()
@@ -118,7 +118,7 @@ describe('a task', () => {
     await waitFor(() => expect(client.openChange).toHaveBeenCalledWith('t1'))
   })
 
-  it('keeps the person’s pinned models in this window, and their default efforts in Charrette', async () => {
+  it('keeps the person’s pinned models in this window, and their default efforts in Althar', async () => {
     // The runtime keeps defaults: what is set is what the models say when read again.
     const kept = new Map<string, Array<{ model: string; effort: string }>>()
     const getModels = vi.fn(async () => models.map((offered) => ({ ...offered, defaults: kept.get(offered.agentId) ?? [] })))
@@ -149,7 +149,7 @@ describe('a task', () => {
     await waitFor(() => expect(setDefaultEffort).toHaveBeenCalledWith({ agentId: 'codex', model: 'gpt-5.2', effort: 'extra-high' }))
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(JSON.parse(window.localStorage.getItem('charrette.models') ?? '{}')).toEqual({
+    expect(JSON.parse(window.localStorage.getItem('althar.models') ?? '{}')).toEqual({
       pins: ['claude-code:default', 'codex:gpt-5.2-codex', 'claude-code:opus'],
     })
 
@@ -268,7 +268,7 @@ describe('a task', () => {
       stuckWords.what({ step: 'implement', why, detail, agentId: null, round: 0, open }, 'Codex')
     expect([at('session_ended'), at('restarted'), at('failed_to_start'), at('round_limit', null, 1), at('usage_limit')]).toEqual([
       'Codex stopped before the step was done.',
-      'Charrette restarted while this step was running.',
+      'Althar restarted while this step was running.',
       "Codex couldn't start.",
       "Three rounds of review are done, and the lead's last changes haven't been reviewed. One finding is still open.",
       "Codex reached its usage limit and didn't say when it resets.",

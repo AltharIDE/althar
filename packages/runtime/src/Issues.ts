@@ -1,6 +1,6 @@
-import { type Issue, linksIn, type Product, type StatusCategory } from '@charrette/connectors'
-import { Ids, newId, type ProjectId } from '@charrette/domain'
-import type { Ledger } from '@charrette/persistence-sqlite'
+import { type Issue, linksIn, type Product, type StatusCategory } from '@althar/connectors'
+import { Ids, newId, type ProjectId } from '@althar/domain'
+import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -18,7 +18,7 @@ import { ToolRefused, ToolServer } from './ToolServer'
  * there: the issue's key, title and status, or the pull request's. A task can
  * come from an issue, which it keeps as a link of its own; its branch and its
  * pull request carry the issue's key, so the tracker's own Git integration
- * finds them. Charrette moves no issue's status (an open question).
+ * finds them. Althar moves no issue's status (an open question).
  */
 
 /** A link, unfurled where it was pasted: an issue or a change, as its service has it. */
@@ -92,7 +92,7 @@ export class Issues extends Context.Service<
     /** The issue a task came from, as last seen. */
     ofTask(taskId: string): Effect.Effect<IssueSummary | null, unknown>
   }
->()('@charrette/runtime/Issues') {
+>()('@althar/runtime/Issues') {
   static readonly layer: Layer.Layer<Issues, never, Store> = Layer.effect(
     Issues,
     Effect.gen(function* () {
@@ -295,7 +295,7 @@ export class Issues extends Context.Service<
                 issue.body === '' ? 'No description.' : issue.body,
               ].join('\n\n')
             }),
-          ).pipe(Effect.mapError(() => new ToolRefused({ message: 'Charrette can’t read that issue: no connected tracker has it.' }))),
+          ).pipe(Effect.mapError(() => new ToolRefused({ message: 'Althar can’t read that issue: no connected tracker has it.' }))),
       }
       const toolServer = yield* ToolServer
       yield* toolServer.serve('lead', [readIssueTool])

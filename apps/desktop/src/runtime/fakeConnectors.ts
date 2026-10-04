@@ -1,6 +1,6 @@
-import { products } from '@charrette/connectors'
-import { makeFakeService } from '@charrette/connectors/testing'
-import { Connectors } from '@charrette/runtime'
+import { products } from '@althar/connectors'
+import { makeFakeService } from '@althar/connectors/testing'
+import { Connectors } from '@althar/runtime'
 import { Layer } from 'effect'
 
 /*
@@ -8,13 +8,13 @@ import { Layer } from 'effect'
  * fake service in the runtime's own process, on an instance at
  * https://github.test, which no network reaches. Its repository is
  * meridian/api, with one issue; what is pushed to it goes to the bare
- * repository CHARRETTE_FAKE_REMOTE names. A pasted token connects it. Loaded
- * only when CHARRETTE_FAKE_AGENTS is set.
+ * repository ALTHAR_FAKE_REMOTE names. A pasted token connects it. Loaded
+ * only when ALTHAR_FAKE_AGENTS is set.
  */
 
 export const HOST = 'https://github.test'
 
-const github = makeFakeService({ pushUrl: () => process.env.CHARRETTE_FAKE_REMOTE ?? '' })
+const github = makeFakeService({ pushUrl: () => process.env.ALTHAR_FAKE_REMOTE ?? '' })
 github.addRepository(['meridian', 'api'])
 github.addIssue({ ref: 'meridian/api#12', title: 'Checkout gives up after one try', body: 'It should retry.' })
 

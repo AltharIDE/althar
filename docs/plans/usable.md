@@ -1,6 +1,6 @@
 # Usable end to end
 
-> **Temporary.** The plan for rounding Charrette off into something people use
+> **Temporary.** The plan for rounding Althar off into something people use
 > every day, not architecture. Delete it when the last step ships, and move
 > anything that lasted into the architecture docs.
 
@@ -8,16 +8,16 @@ Agreed with the user on 1 October 2026, after they used the app for real.
 
 ## Goal
 
-Charrette solves two problems:
+Althar solves two problems:
 
 1. **One app for all your agent conversations,** whatever subscription runs
    them, instead of a window per vendor.
 2. **Long-running work that doesn't need you:** loops that carry on, and only
    ask when something really is yours.
 
-The shell prototype (`charrette-designs/prototypes/shell`) is the target,
+The shell prototype (`althar-designs/prototypes/shell`) is the target,
 without the knowledge graph, which is set aside for now. Most of what the
-prototype shows is already in the kit (`@charrette/ui`); what's missing is
+prototype shows is already in the kit (`@althar/ui`); what's missing is
 the runtime behind it and the app wiring it up.
 
 ## What's missing
@@ -173,7 +173,7 @@ Settings, then the project rules screen.
   - Limits are kept per account.
 - **Adding one.**
   - Settings, under the agent: Add an account, with a name.
-  - Charrette makes the home, links the person's usual settings into it, and
+  - Althar makes the home, links the person's usual settings into it, and
     opens the agent's own sign-in in a terminal.
   - It then shows who the account is signed in as.
 - **Bringing one in.**
@@ -193,7 +193,7 @@ Settings, then the project rules screen.
   default), as a revision like the usage-limit rule. The runtime and the API
   (`SetProjectAccounts`) have them; the person sets them on the project
   rules screen, next.
-- **Removing one** Charrette made signs it out with the agent's own tool and
+- **Removing one** Althar made signs it out with the agent's own tool and
   deletes its folder; one another tool made stays as it is.
 - **Tests.**
   - Fake agents get a home each. A home's variable reaches the fake, which
@@ -207,7 +207,7 @@ Decided on 4 October 2026, after looking at how other agent tools do it
 (ADR-013 has the comparison). Their shape is the industry's: a mode, rules
 that ask or refuse with refusal winning, and commands matched by how they
 start, per command of a shell line. What changed from the prototype's
-screen, to say only what Charrette does:
+screen, to say only what Althar does:
 
 - **Who answers.** "Allow, except what you keep" is the default, with "Ask
   me" and "Allow everything". "The agent in charge decides" comes back with

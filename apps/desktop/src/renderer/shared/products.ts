@@ -1,5 +1,5 @@
-import type { Product } from '@charrette/contracts'
-import { Brand, IssuePriority, IssueStatus } from '@charrette/ui'
+import type { Product } from '@althar/contracts'
+import { Brand, IssuePriority, IssueStatus } from '@althar/ui'
 
 /*
  * How a code host or tracker is drawn: its name and its mark, whichever of

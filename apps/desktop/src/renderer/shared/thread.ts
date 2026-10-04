@@ -1,5 +1,5 @@
-import type { ThreadItem, Unfurl } from '@charrette/contracts'
-import { Delivery, PlanState, ToolKind, ToolState } from '@charrette/ui'
+import type { ThreadItem, Unfurl } from '@althar/contracts'
+import { Delivery, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { took } from './time'
 
@@ -48,7 +48,7 @@ export type Block =
       readonly text: string
       readonly at: string
       readonly delivery: Delivery
-      /** The links in it Charrette could unfurl: issues and pull requests. */
+      /** The links in it Althar could unfurl: issues and pull requests. */
       readonly links: ReadonlyArray<Unfurl>
     }
   | {
@@ -315,7 +315,7 @@ export const blocksOf = (
         blocks.push({ kind: 'card', id: item.id, card: item.content })
         continue
       case 'notice':
-        // What Charrette itself says, such as a change of agent or a restart, is a line across the thread.
+        // What Althar itself says, such as a change of agent or a restart, is a line across the thread.
         if (item.content.source === 'runtime') {
           blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
           continue

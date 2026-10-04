@@ -3,7 +3,7 @@
   // writes dist/, with thesis/index.html for the thesis; any other path gets the
   // landing page.
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "charrette-site",
+  "name": "althar-site",
   "compatibility_date": "2026-09-26",
   "assets": {
     "directory": "./dist",

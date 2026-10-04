@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 
-import { makeFakeService } from '@charrette/connectors/testing'
-import type { ProjectId } from '@charrette/domain'
+import { makeFakeService } from '@althar/connectors/testing'
+import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Cause, Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -80,7 +80,7 @@ describe('a task from an issue in its own repository', () => {
         snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
       )
       const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready', Duration.seconds(20))
-      assert.strictEqual(ready?.branch, 'charrette/issue-12-fix-the-limit')
+      assert.strictEqual(ready?.branch, 'althar/issue-12-fix-the-limit')
       assert.strictEqual(github.changes[0]?.title, 'Fix the limit')
       assert.include(github.changes[0]?.body, 'Issue: #12')
       assert.deepStrictEqual(github.linksOn('meridian/api#12'), [])
@@ -251,7 +251,7 @@ describe('a project’s host', () => {
       // On an instance the person connected.
       yield* connect('github', HOST)
       assert.deepStrictEqual(yield* hostOf(hosted().working), { product: 'github', name: 'GitHub', webUrl: HOST, connected: true })
-      // A repository with no remote, or one on a host no one knows, is on nothing Charrette reaches.
+      // A repository with no remote, or one on a host no one knows, is on nothing Althar reaches.
       const local = hosted().working
       execFileSync('git', ['remote', 'remove', 'origin'], { cwd: local })
       assert.isNull(yield* hostOf(local))
@@ -372,12 +372,12 @@ describe('a task that ends on its branch', () => {
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
   })
 
-  it.live('says so where its repository is on no host Charrette knows', () =>
+  it.live('says so where its repository is on no host Althar knows', () =>
     Effect.gen(function* () {
       const { said } = yield* onItsBranch(repository())
       assert.deepStrictEqual(
         (yield* said).flatMap((item) => (item.kind === 'notice' ? [item.content.description] : [])),
-        ["Its repository isn't on a code host Charrette knows, so nothing was pushed."],
+        ["Its repository isn't on a code host Althar knows, so nothing was pushed."],
       )
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )

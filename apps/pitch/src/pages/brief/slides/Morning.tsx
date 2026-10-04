@@ -105,7 +105,7 @@ export function Morning() {
                   site, and so does an unaudited change to token rotation.
                 </p>
                 <p className={s.then}>
-                  With Charrette <span>→</span> all seven steps, every time, and one question for you
+                  With Althar <span>→</span> all seven steps, every time, and one question for you
                 </p>
               </div>
             </figure>

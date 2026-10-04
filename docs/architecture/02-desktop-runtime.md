@@ -12,11 +12,11 @@ does not need prior process-management knowledge.
 
 The desktop application has a UI and a local backend:
 
-| Charrette component | Useful analogy | Responsibility |
+| Althar component | Useful analogy | Responsibility |
 |---|---|---|
 | Electron renderer | A React web application or Flutter widget tree | Render state and collect user intent |
 | Electron main process | A thin native mobile application shell | Create windows, handle application lifecycle, expose a narrow native bridge |
-| Charrette runtime process | A backend service running only on the user's computer | Own domain rules, workflows, persistence, integrations, and long-running work |
+| Althar runtime process | A backend service running only on the user's computer | Own domain rules, workflows, persistence, integrations, and long-running work |
 | SQLite | The runtime's local relational database | Store canonical structured state |
 | Artifact store | Local object storage | Store patches, logs, reports, and other large immutable files |
 | Provider child process | A locally launched worker | Run Claude Code, Codex, OpenCode, Git, tests, or another tool |
@@ -32,7 +32,7 @@ The renderer is MVVM, organised by feature
 
 ```mermaid
 flowchart TB
-    Views["Views<br/>React, composing @charrette/ui"]
+    Views["Views<br/>React, composing @althar/ui"]
     VM["View models<br/>hooks: state out, intents in"]
     Data["Data layer<br/>Effect: RPC client, change feed, caches"]
     Runtime["Runtime<br/>over MessagePort"]
@@ -62,7 +62,7 @@ Electron normally has at least:
 - a **main process**, which owns windows and native application lifecycle;
 - a **renderer process** for each window, which runs the web UI.
 
-Charrette adds a **runtime process** for durable application logic and launches
+Althar adds a **runtime process** for durable application logic and launches
 provider/tool **child processes** when work runs.
 
 This is not microservices. There is one installed product and one local
@@ -75,7 +75,7 @@ independent organizational ownership or network scaling.
 flowchart LR
     Renderer["Renderer<br/>web UI"]
     Main["Electron main<br/>native shell"]
-    Runtime["Charrette runtime<br/>local backend"]
+    Runtime["Althar runtime<br/>local backend"]
     DB[("SQLite")]
     Blobs[("Artifact store")]
     Children["Provider, Git, and<br/>verification processes"]
@@ -92,7 +92,7 @@ flowchart LR
 | Renderer | Presentation state, navigation, forms, accessibility | Shell commands, arbitrary paths, SQLite, secrets, process handles |
 | Electron main | Windows, deep links, application quit, updates, narrow IPC bridge | Workflow rules, provider sessions, project state |
 | Runtime | Commands, queries, policy, workflow scheduling, persistence, process supervision | Provider model loop or window state |
-| Provider child | Provider-native conversation, model/tool loop, provider context | Charrette project or workflow truth |
+| Provider child | Provider-native conversation, model/tool loop, provider context | Althar project or workflow truth |
 | SQLite | Canonical local structured state | Large blobs or live process streams |
 | Artifact store | Content-addressed immutable bytes | Mutable domain authority |
 
@@ -107,7 +107,7 @@ Putting everything in the renderer would be familiar but unsafe:
 - process cleanup and crash recovery would be coupled to component lifecycle;
 - a future CLI or cloud/local runner could not reuse the control plane cleanly.
 
-A separate runtime gives Charrette:
+A separate runtime gives Althar:
 
 1. **One owner of durable state.** Only the runtime writes SQLite.
 2. **One owner of child processes.** The code that launches a provider is also
@@ -183,7 +183,7 @@ When a workflow node starts an agent:
 1. The runtime commits that the attempt was admitted.
 2. It creates or selects the managed workspace.
 3. It launches the provider as an owned child process.
-4. Structured provider events become durable Charrette observations.
+4. Structured provider events become durable Althar observations.
 5. UI notifications update the visible projection.
 6. The workflow interprets completion, failure, approval, or uncertainty.
 
@@ -313,7 +313,7 @@ streams through which the runtime may send requests and receive structured
 events. Agents speak ACP over `stdio`.
 
 Bundled ACP adapters written for Node run on Electron's own Node (the Electron
-binary started with `ELECTRON_RUN_AS_NODE`), so Charrette doesn't depend on a
+binary started with `ELECTRON_RUN_AS_NODE`), so Althar doesn't depend on a
 Node installed on the machine.
 
 Starting a process is easy. Owning its complete lifecycle is the hard part.
@@ -334,7 +334,7 @@ The runtime records:
 A provider may launch shells, tools, language servers, or tests. Those form a
 **process tree**. Stopping only the first process can leave descendants running.
 
-On Unix-like systems, Charrette uses an owned process group. On Windows it uses
+On Unix-like systems, Althar uses an owned process group. On Windows it uses
 a Job Object or equivalent tree-owning mechanism. These are OS mechanisms for
 addressing all processes launched for one attempt as a unit.
 
@@ -353,7 +353,7 @@ verifying ownership; operating systems can reuse IDs.
 
 A **supervisor** is simply the component responsible for starting, observing,
 restarting, and stopping another process. Electron main supervises the
-Charrette runtime. The runtime supervises provider/tool children.
+Althar runtime. The runtime supervises provider/tool children.
 
 Supervision does not mean “always restart.” Restart is correct for the runtime
 after a crash; automatically rerunning an agent or deployment may duplicate an
@@ -362,7 +362,7 @@ effect. Domain reconciliation decides that separately.
 ### Controller generation and fencing
 
 A run attempt can outlive the in-memory worker currently controlling it. When a
-worker is replaced, Charrette increments the attempt's **controller
+worker is replaced, Althar increments the attempt's **controller
 generation**. Every later write includes the generation it belongs to; storage
 rejects writes from older generations.
 
@@ -371,7 +371,7 @@ number is a **fence**: it prevents a slow or disconnected old worker from
 reporting success after a replacement worker has taken control.
 
 **Reconciliation** is the read-only investigation that happens before deciding
-what to do next. Charrette compares the database, process state, provider
+what to do next. Althar compares the database, process state, provider
 session, workspace, and external system rather than assuming that a timeout or
 crash means nothing happened.
 
@@ -422,7 +422,7 @@ packages/
   persistence-sqlite/
   workflow/
   provider-adapters/      # the ACP adapter, agent registry, native side channels
-  charrette-tools/        # the MCP server agents use to reach Charrette
+  althar-tools/        # the MCP server agents use to reach Althar
   integration-connectors/
   mcp-broker/
   skills/

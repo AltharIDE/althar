@@ -50,7 +50,7 @@ import type { ComponentType, SVGProps } from 'react'
 
 /*
  * One icon set, one optical weight: Iconoir (MIT), outlined, round caps. The
- * names here are what an icon means in Charrette, not what it draws, so a
+ * names here are what an icon means in Althar, not what it draws, so a
  * component asks for `pr` and this table decides the drawing. Icons are
  * decoration: whatever holds one names itself.
  */

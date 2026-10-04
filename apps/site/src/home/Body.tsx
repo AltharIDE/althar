@@ -1,4 +1,4 @@
-import { Brand, BrandMark, Logo } from '@charrette/ui'
+import { Brand, BrandMark, Logo } from '@althar/ui'
 import type { ReactNode } from 'react'
 
 import { EARLY, JOIN, LINKS, STATUS, WHAT } from '../content/facts'
@@ -82,7 +82,7 @@ export function Body() {
             </div>
             <div>
               <dt>Very early</dt>
-              <dd>There is no runnable Charrette yet. Now is the time to have a say.</dd>
+              <dd>There is no runnable Althar yet. Now is the time to have a say.</dd>
             </div>
           </dl>
         </div>
@@ -96,7 +96,7 @@ export function Body() {
           <Crew />
           <div className={s.agentsCopy}>
             <p className={s.lede}>
-              Signed in as you, on your own subscriptions. Each agent keeps its own sign-in, so Charrette never holds a password or a key.
+              Signed in as you, on your own subscriptions. Each agent keeps its own sign-in, so Althar never holds a password or a key.
             </p>
             <p className={cx(s.lede, s.wideOnly)}>
               One task can use several labs, so one checks another, and you can switch agents in the middle of it. The project keeps what
@@ -169,7 +169,7 @@ export function Body() {
 
       <footer className={s.foot}>
         <span className={s.footBrand}>
-          <Logo size={20} /> Charrette
+          <Logo size={20} /> Althar
         </span>
         <span>Issued for comment · {DATE}</span>
         <span className={s.footLinks}>

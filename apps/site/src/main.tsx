@@ -1,6 +1,6 @@
 import '@fontsource-variable/inter'
 import '@fontsource-variable/jetbrains-mono'
-import '@charrette/ui/styles.css'
+import '@althar/ui/styles.css'
 import './styles/base.css'
 
 import { StrictMode } from 'react'

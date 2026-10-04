@@ -3,15 +3,15 @@
 - **Status:** Accepted
 - **Date:** 2026-09-28
 - **Owner:** Repository maintainers
-- **Context:** Charrette must not change the user's checkout. A task's steps
+- **Context:** Althar must not change the user's checkout. A task's steps
   work on the same code, and a switch to another agent keeps it.
 - **Decision:**
-  - Each task gets one git worktree per repository, in a folder Charrette
+  - Each task gets one git worktree per repository, in a folder Althar
     owns. The lead, its steps, and any agent that takes over share it.
   - They live in a visible folder with readable names and no spaces:
-    `~/Charrette/<project>/<task>/<repository>`. The root can be changed in
+    `~/Althar/<project>/<task>/<repository>`. The root can be changed in
     settings, and per project. "Open in editor" opens the task's folder, so a
-    task across several repositories opens as one workspace. Charrette's own
+    task across several repositories opens as one workspace. Althar's own
     data stays in its profile folder.
   - A project can declare a setup command and untracked files to copy into
     each worktree, such as `.env`.

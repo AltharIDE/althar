@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Ids, newId } from '@charrette/domain'
-import type { Ledger } from '@charrette/persistence-sqlite'
-import { type AgentDefinition, type ConfigOption, connect } from '@charrette/provider-adapters'
+import { Ids, newId } from '@althar/domain'
+import type { Ledger } from '@althar/persistence-sqlite'
+import { type AgentDefinition, type ConfigOption, connect } from '@althar/provider-adapters'
 import { Context, type Crypto, Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -19,10 +19,10 @@ import { SignIns } from './SignIns'
  * The models each agent offers, and how hard each can be asked to think, in
  * the agent's own names (docs/architecture/03: an agent's options are its
  * own). An agent says so in its session's settings: a select in the `model`
- * category, and one in `thought_level`. Charrette reads them from the latest
+ * category, and one in `thought_level`. Althar reads them from the latest
  * session an agent had, and what it is on from what that session was last
  * set to. An agent it has never run, or whose latest session was kept before
- * Charrette kept the names, it asks once a launch: it starts the agent in an
+ * Althar kept the names, it asks once a launch: it starts the agent in an
  * empty folder, in its read-only mode, reads the settings, and stops it,
  * recording nothing, as a sign-in check does. What can't be read is left
  * empty; a picker offers the agent's own default.
@@ -91,7 +91,7 @@ export class Models extends Context.Service<
       readonly effort: string
     }): Effect.Effect<void, SqlError.SqlError | UnknownAgent>
   }
->()('@charrette/runtime/Models') {
+>()('@althar/runtime/Models') {
   static readonly layer: Layer.Layer<Models, never, Store> = Layer.effect(
     Models,
     Effect.gen(function* () {
@@ -113,7 +113,7 @@ export class Models extends Context.Service<
        */
       const probe = (entry: AgentEntry) =>
         Effect.acquireUseRelease(
-          Effect.sync(() => mkdtempSync(join(tmpdir(), 'charrette-models-'))),
+          Effect.sync(() => mkdtempSync(join(tmpdir(), 'althar-models-'))),
           (folder) =>
             Effect.gen(function* () {
               const { definition } = entry
@@ -183,7 +183,7 @@ export class Models extends Context.Service<
           const settings = latest === undefined ? [] : settingsIn(latest.config)
           const seen = modelsOf(definition, settings)
           const now = latest === undefined ? {} : { model: latest.model, effort: latest.effort }
-          // Settings kept before Charrette kept their names say only ids: the agent is asked for its names.
+          // Settings kept before Althar kept their names say only ids: the agent is asked for its names.
           const named = settings.some((option) => option.choices !== undefined)
           if (seen.models.length > 0 && named) return { ...seen, ...now, defaults, probing: false }
           const asked = probed.get(definition.id)

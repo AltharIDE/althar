@@ -1,11 +1,11 @@
-# @charrette/provider-adapters
+# @althar/provider-adapters
 
-How Charrette talks to coding agents: one adapter over the [Agent Client Protocol](https://agentclientprotocol.com), the registry of agents it runs (Claude Code, Codex and OpenCode), and a scripted fake agent that lets the adapter's contract run in CI. Written with [Effect](https://effect.website).
+How Althar talks to coding agents: one adapter over the [Agent Client Protocol](https://agentclientprotocol.com), the registry of agents it runs (Claude Code, Codex and OpenCode), and a scripted fake agent that lets the adapter's contract run in CI. Written with [Effect](https://effect.website).
 
 ## Use it
 
 ```ts
-import { agents, connect, signInStatus } from '@charrette/provider-adapters'
+import { agents, connect, signInStatus } from '@althar/provider-adapters'
 
 const program = Effect.scoped(
   Effect.gen(function* () {
@@ -28,7 +28,7 @@ const program = Effect.scoped(
 )
 ```
 
-- **The agent runs as a process Charrette owns,** in its own process group, with only an allowlist of Charrette's environment. Closing the scope stops it and everything it started, even what outlived the agent, and says how that went.
+- **The agent runs as a process Althar owns,** in its own process group, with only an allowlist of Althar's environment. Closing the scope stops it and everything it started, even what outlived the agent, and says how that went.
 - **Every session starts in the mode it is given,** such as the agent's asking mode or its read-only mode, never the one the agent defaults to. Closing its scope closes it with the agent.
 - **A session runs one turn at a time.** A turn is a stream of normalized events in the order they arrived, ending with `TurnEnded`. A prompt during a turn fails with `TurnInProgress`; `interrupt` cancels the turn and waits for it to end. What the agent says between turns arrives on `events`.
 - **Permission requests go to `onPermission`.** The adapter sends the narrowest option that carries the decision out, never an "always" option, and resumes a turn that a rejection stopped. Cancelling a turn answers its waiting requests.
@@ -43,7 +43,7 @@ From `packages/provider-adapters`:
 | `bun run check` | Format, type-aware lint and type checks |
 | `bun run test` | The contract and unit tests, against the fake agent |
 | `bun run test:coverage` | The same, with the coverage gate: 90% of lines and branches |
-| `bun run test:agents` | The contract against the real agents, as installed and signed in here. Costs a little usage; pick agents with `CHARRETTE_AGENTS=codex,opencode` |
+| `bun run test:agents` | The contract against the real agents, as installed and signed in here. Costs a little usage; pick agents with `ALTHAR_AGENTS=codex,opencode` |
 | `bun run probe` | Prints what each real agent reports: capabilities, sign-in methods, modes, config options. Sends no prompt |
 | `bun run verify` | Check and coverage, as CI runs them |
 

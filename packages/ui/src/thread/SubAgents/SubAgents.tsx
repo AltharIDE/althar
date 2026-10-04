@@ -13,7 +13,7 @@ import s from './SubAgents.module.css'
 
 /*
  * A sub-agent is the agent's own: it split its turn, and its calls nest under
- * it. A step is Charrette's: the task moved on and another agent took the
+ * it. A step is Althar's: the task moved on and another agent took the
  * next node. The two are kept apart on purpose; see Step.
  */
 

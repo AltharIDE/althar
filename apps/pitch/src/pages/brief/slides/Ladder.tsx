@@ -75,7 +75,7 @@ export function Ladder() {
             <p>
               Each result decides the next step: a finding adds a repair, a sensitive file adds an audit. You’re asked only when it matters.
             </p>
-            <span className={s.rW}>Charrette</span>
+            <span className={s.rW}>Althar</span>
           </li>
         </ol>
         <p className={s.cap}>

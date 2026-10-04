@@ -1,16 +1,16 @@
 {
-  "name": "@charrette/cli",
+  "name": "@althar/cli",
   "version": "0.0.0",
   "private": true,
-  "description": "A command-line client for the Charrette runtime: open a project, start a task, and talk to its agent.",
+  "description": "A command-line client for the Althar runtime: open a project, start a task, and talk to its agent.",
   "license": "UNLICENSED",
   "bin": {
-    "charrette": "./dist/charrette.js"
+    "althar": "./dist/althar.js"
   },
   "type": "module",
   "scripts": {
     "build": "vp build",
-    "start": "node dist/charrette.js",
+    "start": "node dist/althar.js",
     "check": "vp check",
     "fix": "vp check --fix",
     "test": "vp test run",
@@ -20,9 +20,9 @@
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.84.0",
     "@agentclientprotocol/codex-acp": "2.0.0",
-    "@charrette/domain": "workspace:*",
-    "@charrette/provider-adapters": "workspace:*",
-    "@charrette/runtime": "workspace:*",
+    "@althar/domain": "workspace:*",
+    "@althar/provider-adapters": "workspace:*",
+    "@althar/runtime": "workspace:*",
     "effect": "4.0.0-rc.118"
   },
   "devDependencies": {

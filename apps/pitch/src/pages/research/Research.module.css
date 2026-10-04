@@ -1,6 +1,6 @@
-/* Charrette · Research note — the brief's calm companion.
+/* Althar · Research note — the brief's calm companion.
    Same type and palette as the deck, used the way a paper uses them:
-   colour only where it carries meaning. Cobalt is Charrette, violet is a person.
+   colour only where it carries meaning. Cobalt is Althar, violet is a person.
    Nothing is marked with a stripe down its side: a wash, a ring or a word says it. */
 
 .page {
@@ -233,7 +233,7 @@
 /* close */
 .close { margin-top: 72px; padding-top: 48px; border-top: 1.5px solid var(--ink); }
 .close-q { font-weight: var(--title); font-size: clamp(26px, 2.8vw, 36px); line-height: 1.15; letter-spacing: -.03em; margin: 0 0 40px; max-width: 30ch; }
-/* the way back to the brief: Charrette's own ground, as the brief ends on */
+/* the way back to the brief: Althar's own ground, as the brief ends on */
 .next { display: flex; gap: 24px; align-items: center; padding: 22px 26px; background: var(--cobalt); color: #fff; border-radius: 12px; text-decoration: none; transition: background 150ms; --logo-point: var(--cobalt); }
 .next:hover { background: #2230e0; }
 .next-k { display: inline-flex; align-items: center; gap: 8px; font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--on-cobalt); }

@@ -2,11 +2,11 @@ import { realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
-import type { PermissionRequest } from '@charrette/provider-adapters'
+import type { PermissionRequest } from '@althar/provider-adapters'
 
 /*
  * The rules for agents' requests (ADR-013). What no project can change:
- * agents reach a code host only through Charrette, and never read
+ * agents reach a code host only through Althar, and never read
  * credentials. Then the kinds of request the rules keep for the person:
  * pushes to the default branch, force pushes, pushes of every branch, tags
  * or patterns, deleting branches other than the task's, deploy and publish
@@ -20,7 +20,7 @@ import type { PermissionRequest } from '@charrette/provider-adapters'
  *
  * The agents' own sandboxes are the boundary for what commands write
  * (docs/architecture/03): Codex's and Claude Code's keep a command inside the
- * worktree, and a command that has to leave reaches Charrette as a request.
+ * worktree, and a command that has to leave reaches Althar as a request.
  * Such a request is allowed unless its words name a place outside the
  * worktree, or it is on the list above; git's own writes for the task, such
  * as `git add` and `git commit`, are allowed, since a worktree's git data
@@ -101,14 +101,14 @@ const ask = (reason: string): Verdict => ({ verdict: 'ask', reason })
 // ---- Code hosts --------------------------------------------------------------
 
 /*
- * Agents reach code hosts only through Charrette (ADR-011): Charrette pushes
+ * Agents reach code hosts only through Althar (ADR-011): Althar pushes
  * and opens the task's pull request, and the lead reads and answers on it with
- * Charrette's tools. So `gh` and `glab` may only look; anything else is
+ * Althar's tools. So `gh` and `glab` may only look; anything else is
  * refused with what to do instead.
  *
  * The boundary is the agent's environment, not these words: agents run with
  * `gh` and `glab` signed out, git's credential helpers reset, and no SSH agent
- * (Config.ts), and Charrette's own sign-ins are sealed where only the app can
+ * (Config.ts), and Althar's own sign-ins are sealed where only the app can
  * open them. What is left within a shell's reach, the keychain through
  * `security` and git's helpers called directly, is refused here, for every
  * role. Files the person keeps credentials in, under their home folder, are
@@ -117,7 +117,7 @@ const ask = (reason: string): Verdict => ({ verdict: 'ask', reason })
  */
 
 const CREDENTIALS_REFUSED =
-  "Agents don't read the person's credentials or the keychain. Charrette reaches the code host for the task; tell the person what's needed."
+  "Agents don't read the person's credentials or the keychain. Althar reaches the code host for the task; tell the person what's needed."
 
 /** Why an agent may not run a command that reads credentials: the keychain's `security`, or git's credential helpers. */
 const credentialReason = (words: ReadonlyArray<string>): string | undefined => {
@@ -167,19 +167,18 @@ const hostReason = (words: ReadonlyArray<string>): string | undefined => {
         )
         .find((found) => found !== undefined) ?? 'GET'
     if (method.toUpperCase() === 'GET' && !words.some((word) => HOST_WRITE_FLAGS.has(word.split('=')[0] ?? ''))) return undefined
-    return "Agents don't change things on the code host themselves; Charrette does that for the task. Tell the person what's needed."
+    return "Agents don't change things on the code host themselves; Althar does that for the task. Tell the person what's needed."
   }
   if (HOST_LOOKS[command]?.has(subcommand ?? '') === true) return undefined
   if ((command === 'pr' || command === 'mr') && subcommand === 'merge')
-    return "Merging is the person's to do: they accept the change in Charrette, or on the host."
+    return "Merging is the person's to do: they accept the change in Althar, or on the host."
   if ((command === 'pr' || command === 'mr') && (subcommand === 'comment' || subcommand === 'review' || subcommand === 'note'))
-    return "Answer on the task's pull request with Charrette's reply_on_pull_request tool."
+    return "Answer on the task's pull request with Althar's reply_on_pull_request tool."
   if (command === 'pr' || command === 'mr')
-    return "Charrette opens and updates the task's pull request itself. Commit, then call Charrette's publish_changes tool; read it with read_pull_request."
-  if (command === 'issue')
-    return "Charrette doesn't change issues from a task. Read one with read_issue, and tell the person what it needs."
-  if (command === 'auth') return "Agents run without the person's sign-in to the code host; Charrette's tools reach it for the task."
-  return "Agents don't change things on the code host themselves; Charrette does that for the task. Tell the person what's needed."
+    return "Althar opens and updates the task's pull request itself. Commit, then call Althar's publish_changes tool; read it with read_pull_request."
+  if (command === 'issue') return "Althar doesn't change issues from a task. Read one with read_issue, and tell the person what it needs."
+  if (command === 'auth') return "Agents run without the person's sign-in to the code host; Althar's tools reach it for the task."
+  return "Agents don't change things on the code host themselves; Althar does that for the task. Tell the person what's needed."
 }
 
 const field = (value: unknown, key: string): unknown =>
@@ -503,13 +502,13 @@ const pushKinds = (args: ReadonlyArray<string>, context: RuleContext): ReadonlyA
     else if (arg === '-d' || arg === '--delete') deleting = true
     else if (PUSH_OPTIONS_WITH_VALUE.includes(arg)) index += 1
     else if (!PUSH_OPTIONS_WITH_VALUE.some((option) => arg.startsWith(`${option}=`)) && !PUSH_FLAGS_HARMLESS.test(arg))
-      found.push(kept(`Charrette can't tell what \`${arg}\` does to a push, so it asks.`, 'unclear'))
+      found.push(kept(`Althar can't tell what \`${arg}\` does to a push, so it asks.`, 'unclear'))
   }
   const [, ...refspecs] = positional
   const destinations: Array<{ readonly branch: string; readonly deletes: boolean }> = []
   if (refspecs.length === 0) {
-    if (deleting) found.push(kept(`Charrette can't tell which branch this deletes, so it asks.`, 'unclear'))
-    else if (context.currentBranch === undefined) found.push(kept(`Charrette can't tell which branch this pushes, so it asks.`, 'unclear'))
+    if (deleting) found.push(kept(`Althar can't tell which branch this deletes, so it asks.`, 'unclear'))
+    else if (context.currentBranch === undefined) found.push(kept(`Althar can't tell which branch this pushes, so it asks.`, 'unclear'))
     else destinations.push({ branch: context.currentBranch, deletes: false })
   }
   for (const written of refspecs) {
@@ -529,7 +528,7 @@ const pushKinds = (args: ReadonlyArray<string>, context: RuleContext): ReadonlyA
     }
     if (destination === 'HEAD' || (colon === -1 && source === 'HEAD')) {
       if (context.currentBranch === undefined) {
-        found.push(kept(`Charrette can't tell which branch this pushes, so it asks.`, 'unclear'))
+        found.push(kept(`Althar can't tell which branch this pushes, so it asks.`, 'unclear'))
         continue
       }
       destination = context.currentBranch
@@ -539,7 +538,7 @@ const pushKinds = (args: ReadonlyArray<string>, context: RuleContext): ReadonlyA
       continue
     }
     if (destination.startsWith('refs/') && !destination.startsWith('refs/heads/')) {
-      found.push(kept(`Charrette can't tell what \`${destination}\` is, so it asks.`, 'unclear'))
+      found.push(kept(`Althar can't tell what \`${destination}\` is, so it asks.`, 'unclear'))
       continue
     }
     destinations.push({ branch: destination.replace(/^refs\/heads\//, ''), deletes: deleting || (colon !== -1 && source === '') })
@@ -669,7 +668,7 @@ const commandKinds = (text: string, context: RuleContext): ReadonlyArray<Kept> =
   const { commands, opaque } = parseCommandLine(text)
   const found: Array<Kept> = []
   if (opaque && /\bpush\b|\bdeploy\b|\bpublish\b|\bmerge\b/.test(text))
-    found.push(kept(`Charrette can't tell what this command does until it runs, so it asks.`, 'unclear'))
+    found.push(kept(`Althar can't tell what this command does until it runs, so it asks.`, 'unclear'))
   const where = places(context)
   let cwd = context.worktree
   for (const words of commands) {
@@ -748,7 +747,7 @@ const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray
   if (CHANGES.includes(request.kind)) {
     const paths = pathsOf(request)
     if (paths.length === 0)
-      return [kept(`Charrette can't tell where this ${request.kind === 'edit' ? 'edit writes' : 'change goes'}, so it asks.`, 'unclear')]
+      return [kept(`Althar can't tell where this ${request.kind === 'edit' ? 'edit writes' : 'change goes'}, so it asks.`, 'unclear')]
     const where = places(context)
     const escaping = paths.find((path) => outside(where, locate(where, context.worktree, path)))
     if (escaping !== undefined) return [kept(`Writing outside the task's worktree always asks: ${escaping}`, 'outside')]
@@ -762,7 +761,7 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
 /**
  * Decides a permission request from the rules and the project's (ADR-013).
  * What no project can change comes first: a code host is reached only
- * through Charrette, and no one reads credentials. A request can be several
+ * through Althar, and no one reads credentials. A request can be several
  * kinds at once (`git push --force origin main` is a force push and a push to
  * the default branch), and every kind counts. Then, in order:
  * - what the project never allows is refused: any kind it is, or a command
@@ -780,7 +779,7 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   const project = context.project ?? MVP_RULES
   const named = request.kind === 'execute' || request.kind === 'other' ? commandRule(commandOf(request), project.commands) : undefined
   if (request.kind === 'execute' || request.kind === 'other') {
-    // A code host is reached through Charrette: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
+    // A code host is reached through Althar: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
     const refused = parseCommandLine(commandOf(request))
       .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)))
       .find((reason) => reason !== undefined)
@@ -819,7 +818,7 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
  * reviewer, is never asked about and never asks: what it may do, it does, and
  * the rest is refused with a reason it reads. It may read anything, search,
  * fetch from the web, and run commands that only look. It may call
- * Charrette's own tools, which are how it changes anything. Every write, and
+ * Althar's own tools, which are how it changes anything. Every write, and
  * every command that could write, is refused. A change is a task.
  */
 
@@ -827,8 +826,8 @@ export type ReaderVerdict = { readonly verdict: 'allow' } | { readonly verdict: 
 
 const deny = (reason: string): ReaderVerdict => ({ verdict: 'deny', reason })
 
-/** Charrette's own tools, as each agent names them: `mcp__charrette__…` (Claude Code), `mcp.charrette.…` (Codex), `charrette_…` (OpenCode). */
-export const CHARRETTE_TOOL = /^(mcp__charrette__|mcp\.charrette\.|charrette_)/
+/** Althar's own tools, as each agent names them: `mcp__althar__…` (Claude Code), `mcp.althar.…` (Codex), `althar_…` (OpenCode). */
+export const ALTHAR_TOOL = /^(mcp__althar__|mcp\.althar\.|althar_)/
 
 /**
  * The flags a program may take in a reader's command, when some of its flags
@@ -1208,7 +1207,7 @@ const gitReason = (words: ReadonlyArray<string>): string | undefined => {
 /** Why a command a reader wants to run would change something, or nothing when it only looks. */
 const readerCommandReason = (text: string): string | undefined => {
   const { commands, opaque } = parseCommandLine(text)
-  if (opaque) return "Charrette can't tell what this command does until it runs, and this role only reads."
+  if (opaque) return "Althar can't tell what this command does until it runs, and this role only reads."
   for (const words of commands) {
     const program = (words[0] ?? '').split('/').at(-1) ?? ''
     const written = writes(words).filter((target) => target !== '/dev/null')
@@ -1251,7 +1250,7 @@ const readerCommandReason = (text: string): string | undefined => {
  * a reader's request is allowed or refused.
  */
 export const decideReader = (request: PermissionRequest): ReaderVerdict => {
-  if (CHARRETTE_TOOL.test(request.title)) return ALLOW
+  if (ALTHAR_TOOL.test(request.title)) return ALLOW
   switch (request.kind) {
     case 'read':
     case 'search':
@@ -1264,7 +1263,7 @@ export const decideReader = (request: PermissionRequest): ReaderVerdict => {
       return deny('This role only reads: a change is a task.')
     default: {
       const command = commandIn(request.rawInput) ?? (request.kind === 'execute' ? request.title : undefined)
-      if (command === undefined || command === '') return deny("Charrette can't tell what this does, and this role only reads.")
+      if (command === undefined || command === '') return deny("Althar can't tell what this does, and this role only reads.")
       const reason =
         parseCommandLine(command)
           .commands.map((words) => credentialReason(unwrap(words)))

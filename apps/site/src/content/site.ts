@@ -1,4 +1,4 @@
-import { Brand } from '@charrette/ui'
+import { Brand } from '@althar/ui'
 
 import type { AGENTS } from './facts'
 import { NOTES } from './meridian'

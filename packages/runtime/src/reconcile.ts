@@ -1,5 +1,5 @@
-import type { ActorId, DeviceId, ProjectId, RuntimeInstanceId } from '@charrette/domain'
-import { osStartTime, stopProcessGroup, type StopReport } from '@charrette/provider-adapters'
+import type { ActorId, DeviceId, ProjectId, RuntimeInstanceId } from '@althar/domain'
+import { osStartTime, stopProcessGroup, type StopReport } from '@althar/provider-adapters'
 import { Duration, Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -106,7 +106,7 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
       yield* addItem({ projectId: session.projectId, threadId: session.threadId, sessionId: session.id }, 'notice', {
         source: 'runtime',
         severity: 'warning',
-        title: 'Charrette restarted.',
+        title: 'Althar restarted.',
         description: {
           uncertain: 'The lead was stopping when it did. Start it again to carry on; nothing it was doing runs twice.',
           lost: 'The lead stopped with it. Start it again to carry on; nothing it was doing runs twice.',

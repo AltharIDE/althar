@@ -1,5 +1,5 @@
-import { Ids, newId, type ProjectId } from '@charrette/domain'
-import { ConnectorFailed } from '@charrette/connectors'
+import { Ids, newId, type ProjectId } from '@althar/domain'
+import { ConnectorFailed } from '@althar/connectors'
 import { Effect, Exit, Option, Cause } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -8,7 +8,7 @@ import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
 
 /*
- * Doing something outside Charrette, such as opening a pull request
+ * Doing something outside Althar, such as opening a pull request
  * (docs/architecture/06, "Outbound path"; the store's intent and receipt
  * pattern). The intent is committed first, as a work item this launch holds
  * and a receipt marked intended; then the call is made, outside any

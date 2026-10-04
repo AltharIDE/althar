@@ -15,7 +15,7 @@ import {
   type TaskSummary,
   type ThreadItem,
   type ThreadSnapshot,
-} from '@charrette/contracts'
+} from '@althar/contracts'
 import { Context, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -117,7 +117,7 @@ const callOf = (request: { readonly id: string; readonly kind: string; readonly 
   }
 }
 
-/** A pull request as Charrette last saw it (its external link's snapshot), in the contract's shape. */
+/** A pull request as Althar last saw it (its external link's snapshot), in the contract's shape. */
 export const changeOf = (value: unknown, product: string, listening: boolean): ChangeSummary | null => {
   const state = text(value, 'state')
   const words = field(value, 'words')
@@ -330,7 +330,7 @@ export class Queries extends Context.Service<
     /** The newest cursor in the feed. */
     readonly cursor: Effect.Effect<number, SqlError.SqlError>
   }
->()('@charrette/runtime/Queries') {
+>()('@althar/runtime/Queries') {
   static readonly layer: Layer.Layer<Queries, never, Store> = Layer.effect(
     Queries,
     Effect.gen(function* () {
@@ -792,7 +792,7 @@ export class Queries extends Context.Service<
 
       /**
        * Where a project's repository is hosted, from its remotes: on a
-       * connected instance, or on a hosted service Charrette knows; null when
+       * connected instance, or on a hosted service Althar knows; null when
        * its remotes name neither, as a local one doesn't.
        */
       const hostOf = (projectId: string) =>

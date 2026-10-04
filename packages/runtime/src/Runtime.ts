@@ -1,4 +1,4 @@
-import { Commands, Database, Ledger } from '@charrette/persistence-sqlite'
+import { Commands, Database, Ledger } from '@althar/persistence-sqlite'
 import { Layer } from 'effect'
 
 import { Accounts } from './Accounts'
@@ -47,7 +47,7 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry),
-    Layer.provideMerge(options.secrets ?? Secrets.none('Charrette keeps sign-ins in the app; it can open them, and this can’t.')),
+    Layer.provideMerge(options.secrets ?? Secrets.none('Althar keeps sign-ins in the app; it can open them, and this can’t.')),
     Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds)),
   )
   // Each project's rules; each agent's accounts, whether each is signed in, and which are out of usage until their reset (ADR-012).

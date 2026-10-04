@@ -1,4 +1,4 @@
-import { Brand, BrandMark, Logo } from '@charrette/ui'
+import { Brand, BrandMark, Logo } from '@althar/ui'
 import { useId, useSyncExternalStore, type ReactNode } from 'react'
 
 import { cx } from '../lib/cx'

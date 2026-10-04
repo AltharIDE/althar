@@ -15,7 +15,7 @@ import { WorkedFor } from '../WorkedFor/WorkedFor'
 import { You } from '../You/You'
 import { stepAudience, StepPanel, stepPanelText, type StepTab } from './StepPanel'
 
-const INSTRUCTIONS = { path: '.charrette/review.md', ...reviewDoc }
+const INSTRUCTIONS = { path: '.althar/review.md', ...reviewDoc }
 const SAID: Record<string, { took: string; summary: string; text: string }> = {
   [SONNET.id]: {
     took: '3m 50s',

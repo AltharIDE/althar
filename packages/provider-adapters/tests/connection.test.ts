@@ -143,10 +143,10 @@ describe('AgentConnection', () => {
           mode: 'read-only',
           additionalDirectories: ['/tmp/api'],
           mcpServers: [
-            { type: 'stdio', name: 'charrette', command: 'charrette-tools', args: [], env: { CHARRETTE_SESSION: 's1' } },
+            { type: 'stdio', name: 'althar', command: 'althar-tools', args: [], env: { ALTHAR_SESSION: 's1' } },
             { type: 'http', name: 'docs', url: 'http://127.0.0.1:9000/mcp', headers: { authorization: 'test' } },
           ],
-          meta: { charrette: true },
+          meta: { althar: true },
         })
         yield* session.setOption('model', 'large')
         assert.strictEqual(
@@ -232,7 +232,7 @@ describe('AgentConnection', () => {
   })
 
   describe('permissions', () => {
-    it.live('asks Charrette, and answers with a one-time option', () =>
+    it.live('asks Althar, and answers with a one-time option', () =>
       Effect.gen(function* () {
         const allowed = yield* turn(scenarios.tool, allow)
         assert.strictEqual(text(allowed.events), 'chosen=allow-once')
@@ -281,7 +281,7 @@ describe('AgentConnection', () => {
         assert.strictEqual(text(events), 'chosen=allow-once')
         assert.deepStrictEqual(
           { title: permissions[0]?.title, kind: permissions[0]?.kind, rawInput: permissions[0]?.rawInput },
-          { title: 'mcp.charrette.draft_task', kind: 'execute', rawInput: { title: 'Probe' } },
+          { title: 'mcp.althar.draft_task', kind: 'execute', rawInput: { title: 'Probe' } },
         )
       }),
     )

@@ -3,7 +3,7 @@ import type { Effect } from 'effect'
 import type { ConnectorFailed } from './errors'
 import type { Fetch } from './http'
 
-/** What signs Charrette in to a service: an OAuth token or a pasted one, a key sent as it is, or a user and token. */
+/** What signs Althar in to a service: an OAuth token or a pasted one, a key sent as it is, or a user and token. */
 export type Credential =
   | { readonly kind: 'bearer'; readonly token: string }
   | { readonly kind: 'key'; readonly token: string }

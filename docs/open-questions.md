@@ -6,21 +6,21 @@ chat primitives. Tick one off when it is settled, and say where it was decided
 
 Leanings are only where we are now. None of them are decisions.
 
-"The kit" is `@charrette/ui` (`packages/ui`). "The prototype" is the shell
-prototype in the `charrette-designs` repository (`prototypes/shell`).
+"The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
+prototype in the `althar-designs` repository (`prototypes/shell`).
 
 ## Project rules, 4 October
 
 Decided in [ADR-013](decisions/013-project-rules.md).
 
-- [ ] **Rules the sandbox hides from Charrette.** Codex's `workspace-write`
+- [ ] **Rules the sandbox hides from Althar.** Codex's `workspace-write`
   and Claude Code's sandboxed commands run without asking, so a project's
   command rule for something that stays in the worktree never fires.
   - Leaning: give each agent the project's command rules in its own form
     (Claude Code's ask rules, OpenCode's bash patterns, Codex's rules), so
-    it asks Charrette.
+    it asks Althar.
 - [ ] **Rules on paths.** Changes to CI config or migrations, say. Agents
-  differ in whether an edit inside the worktree reaches Charrette at all:
+  differ in whether an edit inside the worktree reaches Althar at all:
   Claude Code's do, Codex's don't.
   - Leaning: after the command rules reach the agents, since the same work
     is needed.
@@ -49,7 +49,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   - Settled after review of #23: rotation is off by default and turned on
     per project, among the accounts the project allows (ADR-012). Still
     re-check the terms before launch, and before ever making it the default.
-- [ ] **What a home Charrette makes shares with the person's usual folder.**
+- [ ] **What a home Althar makes shares with the person's usual folder.**
   Linked: Claude Code's settings, `CLAUDE.md`, agents, commands and plugins,
   and Codex's `config.toml`, `AGENTS.md` and skills. OpenCode's config stays
   under the person's `XDG_CONFIG_HOME` anyway.
@@ -81,34 +81,34 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   - Leaning: those that give each account a home, which are adopted as they
     are: `codex-profiles`, `~/.claude-*` folders and JoRo-Code's
     codex-account-switcher. The swapping and rotating kinds need nothing
-    from Charrette.
+    from Althar.
 
 ## Code hosts and trackers, 1 October
 
 - [ ] **Who moves an issue's status.** When a task starts, opens its pull
   request, or the pull request merges, the issue it came from could move
-  (started, in review, done). Charrette could move it; the tracker's own Git
+  (started, in review, done). Althar could move it; the tracker's own Git
   integration may already move it, by the key in the branch (Linear does,
   Jira's apps link it); or the person does. Two of them moving the same field
-  fight. A product question to try out before deciding. For now Charrette
+  fight. A product question to try out before deciding. For now Althar
   puts the key in the branch and the pull request's title and moves no
   status.
 - [ ] **What reaches the lead from a pull request.** Settled on 1 October,
   after review: failed checks, and what the person and the repository's own
   people (those who can write to it) say. Anyone else, as on a public
   repository, stays in the thread, marked, for the person to pass on; bots'
-  comments and Charrette's own replies (known by their receipts) don't
+  comments and Althar's own replies (known by their receipts) don't
   reach it. Still open: whether the lead should start for them when none is
   running, how often a lead may be woken before it needs the person, and the
   write-access check on GitLab, Bitbucket and Jira, whose comments don't
   carry it as GitHub's do.
   *Prototype:* task 431, "Listening".
 - [x] **How agents reach the hosts.** Settled on 1 October 2026: only through
-  Charrette. Charrette pushes and opens pull requests as steps of the plan;
-  agents read and reply through Charrette's tools; the rules refuse `gh` and
+  Althar. Althar pushes and opens pull requests as steps of the plan;
+  agents read and reply through Althar's tools; the rules refuse `gh` and
   `glab` commands that change a host, and agents run without the person's
   sign-ins for them. After review, the environment is the boundary: git's
-  credential helpers reset, no SSH agent, Charrette's tokens sealed by the
+  credential helpers reset, no SSH agent, Althar's tokens sealed by the
   app, and the rules refuse reading credentials.
   [ADR-011](decisions/011-own-connectors-for-hosts-and-trackers.md).
 - [ ] **A lead that needs the person's git sign-in.** A project with private
@@ -130,7 +130,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 
 - [x] **How read-only the coordinator and reviewers are.** Settled on 30
   September 2026 in the review of #15: every reader reads a throwaway copy,
-  its agent's sandbox is read-only where that still lets it call Charrette's
+  its agent's sandbox is read-only where that still lets it call Althar's
   tools, and the reader rules, an allowlist of commands and flags, are the
   backstop. Plan modes stay out while they refuse MCP tools.
   [ADR-004](decisions/004-coordinator-is-an-agent-session.md),
@@ -145,7 +145,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 
 - [ ] **Running the bundled adapters once the app is signed.** They run on
   Electron's own binary as Node (`ELECTRON_RUN_AS_NODE`), so the RunAsNode
-  fuse has to stay on, and then anything can run Charrette's signed binary as
+  fuse has to stay on, and then anything can run Althar's signed binary as
   Node with the app's entitlements. Leaning: ship a separate Node for the
   adapters and turn the fuse off. Decide before the first signed build.
 
@@ -163,20 +163,20 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 
 ## The harness, 28 September
 
-- [x] **How Charrette reaches agents.** Settled: ACP for every agent, with
+- [x] **How Althar reaches agents.** Settled: ACP for every agent, with
   Claude Code, Codex and OpenCode interchangeable in the MVP, and native side
   channels where ACP falls short.
   [ADR-002](decisions/002-acp-for-every-agent.md).
 - [x] **The shell.** Settled: Electron, with the runtime in a utility process.
   [ADR-003](decisions/003-electron-shell.md).
-- [x] **What the coordinator is.** Settled: an agent session with Charrette's
-  tools and read-only access; Charrette keeps its conversation.
+- [x] **What the coordinator is.** Settled: an agent session with Althar's
+  tools and read-only access; Althar keeps its conversation.
   [ADR-004](decisions/004-coordinator-is-an-agent-session.md),
   [architecture 04](architecture/04-coordinator.md).
 - [x] **Switching agent mid-task.** Settled for the MVP: the new agent takes
   over everything, from a brief, in the same workspace. Changing model within
   an agent keeps the session.
-  [ADR-005](decisions/005-charrette-briefs-every-agent.md).
+  [ADR-005](decisions/005-althar-briefs-every-agent.md).
 - [x] **Workspaces.** Settled: a git worktree per task, shared by its steps.
   [ADR-006](decisions/006-worktree-per-task.md).
 - [x] **How much rigour the proof of concept gets.** Settled: shortcuts in
@@ -191,13 +191,13 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   and the contract suite.
 - [ ] **Claude Code starts in the user's own default mode.** On a machine where
   that is `bypassPermissions`, the Agent SDK approves every tool call itself.
-  Charrette sets the mode on every session and turns bypass off for the
-  session's life, so this is handled, but should Charrette also warn when the
+  Althar sets the mode on every session and turns bypass off for the
+  session's life, so this is handled, but should Althar also warn when the
   user's Claude Code defaults to bypass, since their own use of it skips every
   check?
 - [ ] **Usage limits in ACP itself.** Propose a rate-limit extension to ACP,
   rather than keep a side channel per agent?
-- [x] **Agent settings that approve before Charrette sees.** Settled: every
+- [x] **Agent settings that approve before Althar sees.** Settled: every
   session gets settings that make the agent ask, and they win over the user's
   and the repository's own. Claude gets ask rules per session (ask beats allow
   in every settings file), Codex runs in `workspace-write` rather than its
@@ -205,7 +205,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   September 2026 against a repository whose settings allow everything.
   [Architecture 03](architecture/03-agent-runtime-and-auth.md#permission-routing).
 - [x] **What Claude's ask rules don't reach.** Settled on 29 September 2026:
-  Claude sessions load only the MCP servers Charrette gives them
+  Claude sessions load only the MCP servers Althar gives them
   (`strictMcpConfig`), so the user's and the repository's own servers, whose
   tools the ask list doesn't cover, never load. A hook that approves can't
   get past an ask rule; checked with a repository whose hook approves every
@@ -225,7 +225,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   September 2026: each agent's own sandbox is the boundary where it has one.
   Codex's is on in `workspace-write`; Claude Code's is now switched on for
   every session, so a command that stays inside runs without asking and one
-  that has to leave (the network, a write elsewhere) reaches Charrette. The
+  that has to leave (the network, a write elsewhere) reaches Althar. The
   rules read commands as a shell would, for pushes and for the places they
   write, as a second line. Still to do: wrap OpenCode, which has no sandbox,
   in the same sandbox-runtime Claude uses. Dev containers stay a later,
@@ -253,7 +253,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   ([MVP plan](plans/mvp.md)). Still open: whether task events prompt it, and
   whether it can skip the countdown when you asked for exactly that task. See
   [architecture 04](architecture/04-coordinator.md).
-- [x] **Where worktrees live.** Settled: `~/Charrette/<project>/<task>/<repository>`,
+- [x] **Where worktrees live.** Settled: `~/Althar/<project>/<task>/<repository>`,
   with a root that can be changed per project.
   [ADR-006](decisions/006-worktree-per-task.md).
 - [x] **How the lead, Verify and Review work together.** Settled: the lead's
@@ -269,7 +269,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 - [ ] **An acceptance-criteria checker.** A step type that checks the change
   against the task's acceptance criteria, beside Review. When, and what does
   it return?
-- [ ] **"Strongest available model."** How Charrette ranks models per provider
+- [ ] **"Strongest available model."** How Althar ranks models per provider
   for the default reviewer: a list it ships and updates, or something the
   agent reports?
 
@@ -285,7 +285,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 - [x] **What a stuck task looks like.** Settled: a violet call in the thread
   (kit `thread/Stuck`): what it tried, why as the lead reads it, the failing
   output, then Tell the lead, Try another agent or Abandon. On the board it is
-  a CallCard with no choices. After a restart, a quiet line says Charrette is
+  a CallCard with no choices. After a restart, a quiet line says Althar is
   checking where the lead had got to, then that nothing ran twice
   (`Restarted`). Prototype: the chat specimen's "When it can't finish".
   Still open: a "take it over yourself" choice, and what `uncertain` looks like
@@ -346,10 +346,10 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   it is signed in as, and nothing else. Does it need "use for this project",
   a default model, or a sign-out that hands off to the agent's own?
 - [ ] **API keys and local models.** "Connect another" now opens a panel
-  (kit `setup/ConnectAgent`): apps Charrette can run but didn't find, APIs that
+  (kit `setup/ConnectAgent`): apps Althar can run but didn't find, APIs that
   take a key (typed once, hidden, into the Keychain), model servers on this
   Mac, and any agent that speaks ACP by its command. Leaning: keys and local
-  models run through OpenCode, so Charrette still calls no model API itself
+  models run through OpenCode, so Althar still calls no model API itself
   ([ADR-002](decisions/002-acp-for-every-agent.md)). Open: which apps and APIs
   are listed at launch, and how a connected key shows in the agent list.
 - [ ] **Choosing subpaths in a workspace.** The map offers "only these
@@ -359,7 +359,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   needs mapping, needs access, changed, unavailable) has vocabulary but no
   screen. It is probably SourceMap with a state per row, in project settings.
 
-## Autonomy: how often Charrette pulls you in
+## Autonomy: how often Althar pulls you in
 
 - [ ] **Review findings: when do they reach you?** The default is that the lead
   settles them (fixes, or sets aside with a reason), and you see only what it
@@ -367,7 +367,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   review. We may only learn the right default from user testing.
   *Prototype:* chat workshop, Steps → "Review, settled by the lead", and the
   "Findings reach you" menu.
-- [ ] **A learning period.** Could Charrette start by asking about everything
+- [ ] **A learning period.** Could Althar start by asking about everything
   and ask less as you agree with the lead's calls? Open: what counts as
   agreement, whether it is per project or per kind of decision, and how you see
   where it stands ("6 of 10 so far"). We don't yet know how to build it.
@@ -377,9 +377,9 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   - Does the lead answer, or a separate cheap judge model? The lead is busy and
     expensive; a judge has no task context.
   - ~~How does this map onto ACP?~~ Settled: every session starts in a mode
-    that asks, and Charrette answers `session/request_permission` from the
+    that asks, and Althar answers `session/request_permission` from the
     rules. In the MVP the lead doesn't answer yet.
-    [ADR-007](decisions/007-permission-requests-reach-charrette.md).
+    [ADR-007](decisions/007-permission-requests-reach-althar.md).
   - ~~What goes on the default always-ask list?~~ Settled for now: pushes to
     the default branch, force pushes, merges, deploy commands, and writes
     outside the task's worktree.
@@ -408,7 +408,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   - **Reach, apart from who answers.** Where agents can write (the task's
     worktree, plus listed paths) and whether they have the network (off,
     listed domains, on). This is a sandbox, not a permission, so nothing
-    asks. Does Charrette enforce it, or pass it to each runtime's own sandbox?
+    asks. Does Althar enforce it, or pass it to each runtime's own sandbox?
   - **Scopes.** A personal layer (mine, on this machine) and an organisation
     layer that a project can't loosen.
   *Prototype:* none yet for allow rules, patterns or reach.
@@ -456,7 +456,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   be left out of Allow all?
   *Prototype:* Permissions → "Many at once".
 - [x] **Pasted links.** Settled on 1 October 2026: issues and pull requests
-  from the connected code hosts and trackers unfurl, through Charrette's own
+  from the connected code hosts and trackers unfurl, through Althar's own
   connectors, not MCP servers
   ([ADR-011](decisions/011-own-connectors-for-hosts-and-trackers.md)). Other
   sources, such as Sentry and Notion, wait for the MCP broker.
@@ -498,9 +498,9 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 ## Memory and where things live
 
 - [ ] **Where memory lives, including review instructions.** Everything in
-  the repo (`.charrette/review.md`, rules) is reviewable, diffable and travels
+  the repo (`.althar/review.md`, rules) is reviewable, diffable and travels
   with the code, but it is crude, and not everything belongs in git. The
-  alternative is Charrette's own project store. Maybe a mix: instructions in
+  alternative is Althar's own project store. Maybe a mix: instructions in
   the repo, learned context in the store. This needs its own conversation.
 - [ ] **When a dismissal reaches `review.md`.** At dismissal, or once the
   knowledge candidate is accepted? Leaning: once accepted, with the line shown

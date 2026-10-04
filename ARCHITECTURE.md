@@ -1,8 +1,8 @@
 # Architecture
 
-This document defines the **durable engineering target** for the Charrette repository. Code and tooling may temporarily lag behind it, but work should move them toward it. A material mismatch needs a convergence plan or an explicit, time-bound exception. Changing the code does not silently change the target; changing the target requires a recorded decision.
+This document defines the **durable engineering target** for the Althar repository. Code and tooling may temporarily lag behind it, but work should move them toward it. A material mismatch needs a convergence plan or an explicit, time-bound exception. Changing the code does not silently change the target; changing the target requires a recorded decision.
 
-These rules apply to every app and package. They do not fix Charrette's product model or mandate one folder structure. Each app and package has its own `ARCHITECTURE.md` for its specific design. Charrette is experimental; its abstractions should be able to change without making the code unsafe or opaque.
+These rules apply to every app and package. They do not fix Althar's product model or mandate one folder structure. Each app and package has its own `ARCHITECTURE.md` for its specific design. Althar is experimental; its abstractions should be able to change without making the code unsafe or opaque.
 
 ## Design
 
@@ -80,10 +80,10 @@ ADR-001 is recorded here. Later decisions are one file each in [`docs/decisions/
 
 - [ADR-002](docs/decisions/002-acp-for-every-agent.md) — 2026-09-28: ACP for every agent
 - [ADR-003](docs/decisions/003-electron-shell.md) — 2026-09-28: Electron shell, with the runtime in a utility process
-- [ADR-004](docs/decisions/004-coordinator-is-an-agent-session.md) — 2026-09-28: The coordinator is an agent session with Charrette's tools
-- [ADR-005](docs/decisions/005-charrette-briefs-every-agent.md) — 2026-09-28: Charrette briefs every agent, and a switch hands over everything
+- [ADR-004](docs/decisions/004-coordinator-is-an-agent-session.md) — 2026-09-28: The coordinator is an agent session with Althar's tools
+- [ADR-005](docs/decisions/005-althar-briefs-every-agent.md) — 2026-09-28: Althar briefs every agent, and a switch hands over everything
 - [ADR-006](docs/decisions/006-worktree-per-task.md) — 2026-09-28: A git worktree per task
-- [ADR-007](docs/decisions/007-permission-requests-reach-charrette.md) — 2026-09-28: Every permission request reaches Charrette
+- [ADR-007](docs/decisions/007-permission-requests-reach-althar.md) — 2026-09-28: Every permission request reaches Althar
 - [ADR-008](docs/decisions/008-shortcuts-in-behaviour-not-in-records.md) — 2026-09-28: Shortcuts in behaviour, never in recorded facts
 - [ADR-009](docs/decisions/009-effect-on-the-runtime-side.md) — 2026-09-28: Effect on the runtime side
 - [ADR-010](docs/decisions/010-desktop-app-mvvm.md) — 2026-09-28: The desktop app is MVVM, in feature folders
@@ -92,7 +92,7 @@ ADR-001 is recorded here. Later decisions are one file each in [`docs/decisions/
 
 - **Status:** Accepted
 - **Owner:** Repository maintainers
-- **Context:** Charrette will change quickly, and code produced with AI assistance needs a stable, reviewable engineering standard across apps and packages.
+- **Context:** Althar will change quickly, and code produced with AI assistance needs a stable, reviewable engineering standard across apps and packages.
 - **Decision:** This document defines the durable target state. Local architecture documents specialise it; code and tooling converge toward it. Material changes to the target require a new ADR, and temporary exceptions have an owner and expiry.
 - **Alternatives considered:** Treat documentation as a snapshot of current code, or leave standards to each package. Both make drift and inconsistent quality harder to detect.
 - **Trade-off:** Strong shared rules and gates impose implementation and maintenance cost; explicit exceptions keep the target clear while that work is completed.

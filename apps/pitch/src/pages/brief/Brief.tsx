@@ -28,7 +28,7 @@ export function Brief() {
   const deck = useRef<HTMLDivElement>(null)
   return (
     <div ref={deck} className={ui.deck}>
-      <Chrome deck={deck} total={SLIDE_COUNT} first="Charrette" />
+      <Chrome deck={deck} total={SLIDE_COUNT} first="Althar" />
       <main id="main" tabIndex={-1}>
         <Hero />
         <Abstract />

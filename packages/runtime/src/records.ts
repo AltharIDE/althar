@@ -1,5 +1,5 @@
-import { type ActorId, type AggregateType, type CommandId, now, type ProjectId } from '@charrette/domain'
-import { bumpRevision, Ledger, type RevisionedTable, RowNotFound } from '@charrette/persistence-sqlite'
+import { type ActorId, type AggregateType, type CommandId, now, type ProjectId } from '@althar/domain'
+import { bumpRevision, Ledger, type RevisionedTable, RowNotFound } from '@althar/persistence-sqlite'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 

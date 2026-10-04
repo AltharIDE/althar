@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { ApiError, type FoundAccount, type ProjectSummary, type Status } from '@charrette/contracts'
+import { ApiError, type FoundAccount, type ProjectSummary, type Status } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
 import { useServices, useWatch } from '../../data/services'
@@ -11,7 +11,7 @@ import { useServices, useWatch } from '../../data/services'
  * folder as a new one.
  */
 
-/** Where a new account signs in: a folder Charrette makes, one a switcher made (by its grant), or one the person chooses. */
+/** Where a new account signs in: a folder Althar makes, one a switcher made (by its grant), or one the person chooses. */
 export type AccountPlace = { readonly kind: 'own' } | { readonly kind: 'found'; readonly grant: string } | { readonly kind: 'choose' }
 
 export interface StartModel {

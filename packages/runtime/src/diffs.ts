@@ -12,7 +12,7 @@ import { git, gitExactly } from './git'
  * git when it is asked for and never kept: the record holds no file contents
  * (docs/architecture/07). The list says, for each file, how it changed, how
  * much, and whether some of that isn't committed yet, so isn't in what
- * Charrette pushes. A file's diff is its lines in hunks, with the stretch of a
+ * Althar pushes. A file's diff is its lines in hunks, with the stretch of a
  * changed line that differs marked; only a file on the list can be asked for.
  *
  * The base is where the task's branch meets its default branch, so what the

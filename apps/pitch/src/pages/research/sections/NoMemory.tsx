@@ -79,7 +79,7 @@ export function NoMemory() {
             But that merges two separate questions. <strong>Is this claim true?</strong> is a question about the project.{' '}
             <strong>When should an agent see it?</strong> is a question about delivery. A procedure for running a migration and the fact
             that a payment provider’s webhooks arrive out of order both load on demand, but only one of them can go stale, be contradicted
-            or be superseded. Charrette keeps the two axes separate.
+            or be superseded. Althar keeps the two axes separate.
           </p>
         </div>
         <figure className={s.ex}>
@@ -134,7 +134,7 @@ export function NoMemory() {
             Cursor, GitHub, Devin and the labs’ own agents all now offer coherent project surfaces, cloud agents, repository-aware work and
             durable artifacts. That’s strong evidence the need is real. It also creates a structural risk: if a project’s memory, task
             history and coordination rules live inside one commercial environment, the team’s accumulated operating knowledge becomes part
-            of that vendor’s moat. Changing the model is easy. Changing the system that remembers how the team builds is not. Charrette
+            of that vendor’s moat. Changing the model is easy. Changing the system that remembers how the team builds is not. Althar
             therefore treats provider independence as an architectural requirement, not a model picker.
           </p>
         </div>

@@ -1,8 +1,8 @@
 {
-  "name": "@charrette/connectors",
+  "name": "@althar/connectors",
   "version": "0.0.0",
   "private": true,
-  "description": "How Charrette talks to code hosts and trackers: a model for each, an adapter per product, and fakes for tests.",
+  "description": "How Althar talks to code hosts and trackers: a model for each, an adapter per product, and fakes for tests.",
   "license": "UNLICENSED",
   "type": "module",
   "exports": {

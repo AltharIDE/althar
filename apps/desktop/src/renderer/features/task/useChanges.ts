@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import type { DiffLine as ApiDiffLine } from '@charrette/contracts'
-import { type DiffLine, DiffLineKind, type FileView } from '@charrette/ui'
+import type { DiffLine as ApiDiffLine } from '@althar/contracts'
+import { type DiffLine, DiffLineKind, type FileView } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import { useServices } from '../../data/services'

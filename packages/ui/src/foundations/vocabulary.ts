@@ -107,7 +107,7 @@ export enum StuckAnswer {
   Told = 'told',
   /** Handed the step to another agent. */
   Retried = 'retried',
-  /** Ran the step again as it was: one Charrette does itself, such as opening the pull request. */
+  /** Ran the step again as it was: one Althar does itself, such as opening the pull request. */
   Again = 'again',
   Abandoned = 'abandoned',
 }
@@ -371,7 +371,7 @@ export enum Room {
   Both = 'both',
 }
 
-/** Where an agent runtime on this machine stands, as Charrette last found it. */
+/** Where an agent runtime on this machine stands, as Althar last found it. */
 export enum RuntimeState {
   Ready = 'ready',
   /** Asking the runtime who it is signed in as, and what version it is. */
@@ -383,7 +383,7 @@ export enum RuntimeState {
   OutOfUsage = 'out-of-usage',
   /** Not installed here. */
   Missing = 'missing',
-  /** Older than the versions Charrette works with. */
+  /** Older than the versions Althar works with. */
   Outdated = 'outdated',
 }
 
@@ -391,7 +391,7 @@ export enum RuntimeState {
 export enum SourceOrigin {
   /** A folder already on this device, used as it is. */
   Existing = 'existing',
-  /** Cloned into Charrette's own folder on this device. */
+  /** Cloned into Althar's own folder on this device. */
   Clone = 'clone',
   /** Part of the project, not yet on this device. */
   Later = 'later',

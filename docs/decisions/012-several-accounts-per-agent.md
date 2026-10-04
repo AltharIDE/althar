@@ -6,24 +6,24 @@
 - **Context:** Many developers have more than one sign-in for the same agent:
   a work and a personal Claude plan, a ChatGPT plan per client, three
   OpenCode logins. A whole family of tools has grown up to switch between
-  them (Codex, OpenCode and Claude Code account switchers). Charrette
+  them (Codex, OpenCode and Claude Code account switchers). Althar
   assumed one sign-in per agent per Mac: it took whatever the agent's usual
   folder held, and a usage limit put the whole agent out. Each agent's CLI
   keeps its sign-in in a folder it can be pointed at: Claude Code in
   `CLAUDE_CONFIG_DIR` (on macOS, a Keychain item named after the folder's
   path), Codex in `CODEX_HOME`, OpenCode under `$XDG_DATA_HOME/opencode`.
-  Charrette never reads, copies or moves an agent's credentials
+  Althar never reads, copies or moves an agent's credentials
   ([03](../architecture/03-agent-runtime-and-auth.md), Vendor CLI and
   subscription login policy), and runs many sessions of one agent at once.
 - **Decision:**
   - An **account** is one sign-in of an agent, in its own folder, its
     **home**. The agent's usual folder is its first account, so a person
-    with one sign-in sees no change. Charrette starts each session with its
+    with one sign-in sees no change. Althar starts each session with its
     account's home in the agent's environment, and records which account
     each session ran on.
   - **Adding an account** makes a home and opens the agent's own sign-in in
-    it, in a terminal, for the person. Charrette never sees the credential.
-    A home Charrette made holds that account's sign-in and the agent's own
+    it, in a terminal, for the person. Althar never sees the credential.
+    A home Althar made holds that account's sign-in and the agent's own
     history. What of the agent's usual folder isn't the account's own is
     linked into it, again as each session starts, so every account works the
     same way:
@@ -34,23 +34,23 @@
 
     A home stays where it was made: Claude Code ties its Keychain item to
     the folder's path.
-  - **Removing an account** Charrette made signs it out with the agent's own
+  - **Removing an account** Althar made signs it out with the agent's own
     tool, in its home, and deletes the folder, so nothing is left signed in
     out of sight. One another tool made stays as it is, that tool's.
   - **A home another tool made is adopted as it is.** Switchers that give
     each account a folder of its own are found where they keep them, and
-    any other folder can be added by hand. Charrette lists their names and
+    any other folder can be added by hand. Althar lists their names and
     never opens what is inside.
   - **Switchers that swap one live sign-in** (copying a saved login over
     the agent's usual one) are left to the person. Whatever they made active
-    is the agent's first account. Charrette doesn't drive them. A swap
+    is the agent's first account. Althar doesn't drive them. A swap
     changes the account under every session already running, and a login
     kept in two places breaks when one copy refreshes. The sign-in check
     notices a swap, and it is recorded. To run several of those accounts at
-    once, the person adds each to Charrette, signing in once in its own
+    once, the person adds each to Althar, signing in once in its own
     home.
   - **Switchers that rotate inside the agent or in front of it** (an
-    OpenCode plugin, a local gateway) work unchanged. Charrette sees one
+    OpenCode plugin, a local gateway) work unchanged. Althar sees one
     account, whose usage limit means the whole pool is out.
   - **A pool, which a project can narrow.** Every account the person adds
     can run work. A project's rules may limit each agent to some of its
@@ -59,9 +59,9 @@
   - **Rotation is the person's to turn on, per project.** Moving work to the
     agent's next account when one runs out is off until the person turns it
     on in the project's rules, among the accounts the project allows. It is
-    separation (work, personal, a client's plan) Charrette provides by
+    separation (work, personal, a client's plan) Althar provides by
     default. Failing over from one personal plan to the next is something
-    providers' consumer terms tend to restrict, so Charrette doesn't do it
+    providers' consumer terms tend to restrict, so Althar doesn't do it
     unasked.
   - **Picking an account:**
     - A conversation stays on the account it runs on.
@@ -70,7 +70,7 @@
   - **Usage limits are per account.** Under the project's "move on" rule,
     where the project rotates, work goes first to the same agent's next
     allowed account. It runs the same model, in a new session from a brief,
-    as at any switch ([ADR-005](005-charrette-briefs-every-agent.md)). Then,
+    as at any switch ([ADR-005](005-althar-briefs-every-agent.md)). Then,
     or without rotation, it goes to the next agent.
   - **Paid by:**
     - Another agent takes work over unasked only on an account a plan pays
@@ -83,18 +83,18 @@
   - **Swapping the agent's usual sign-in, as most switchers do.**
     - It needs no homes, but it is one account per Mac at a time.
     - It races the sessions already running.
-    - It means Charrette copying credentials, which it never does.
+    - It means Althar copying credentials, which it never does.
   - **One account per project only.** It is simple and fits work and
     personal, but a usage limit can't move work to the person's other plan.
   - **A pool with no project rule.** Simplest, but a client's code could run
     on another client's plan.
   - **Rotation on by default.** The most work done unattended, but it makes
-    Charrette the one that fails over between a person's plans, unasked.
+    Althar the one that fails over between a person's plans, unasked.
   - **A local gateway that picks the account per request.** It relays the
     person's tokens, and it works for only one agent's API at a time.
 - **Trade-off:**
-  - Each home Charrette makes is a sign-in for the person to make once.
-  - An agent's own history is split across homes. Charrette's thread is the
+  - Each home Althar makes is a sign-in for the person to make once.
+  - An agent's own history is split across homes. Althar's thread is the
     record that carries over, so a move between accounts starts a new
     session from a brief rather than loading the old one.
   - `XDG_DATA_HOME` reaches every program an OpenCode session runs, not

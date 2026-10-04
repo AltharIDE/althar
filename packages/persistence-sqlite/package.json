@@ -1,8 +1,8 @@
 {
-  "name": "@charrette/persistence-sqlite",
+  "name": "@althar/persistence-sqlite",
   "version": "0.0.0",
   "private": true,
-  "description": "Charrette's local store: the SQLite schema, migrations, and the record, change feed and command receipts.",
+  "description": "Althar's local store: the SQLite schema, migrations, and the record, change feed and command receipts.",
   "license": "UNLICENSED",
   "type": "module",
   "exports": {
@@ -16,7 +16,7 @@
     "verify": "bun run check && bun run test:coverage"
   },
   "dependencies": {
-    "@charrette/domain": "workspace:*",
+    "@althar/domain": "workspace:*",
     "@effect/sql-sqlite-node": "4.0.0-rc.118",
     "effect": "4.0.0-rc.118"
   },

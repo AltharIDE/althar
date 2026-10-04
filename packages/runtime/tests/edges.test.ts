@@ -2,9 +2,9 @@ import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { ConnectorFailed } from '@charrette/connectors'
-import { type FakeService, makeFakeService } from '@charrette/connectors/testing'
-import type { ProjectId } from '@charrette/domain'
+import { ConnectorFailed } from '@althar/connectors'
+import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -229,7 +229,7 @@ describe('the tools, as agents call them', () => {
     }).pipe(Effect.provide(runtimeWith({ github }, Duration.hours(1))))
   })
 
-  it.live('tell a lead whose task has no pull request yet that Charrette opens one', () => {
+  it.live('tell a lead whose task has no pull request yet that Althar opens one', () => {
     const { working } = hosted()
     return Effect.gen(function* () {
       const projects = yield* Projects

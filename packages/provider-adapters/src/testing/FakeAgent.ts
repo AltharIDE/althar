@@ -109,7 +109,7 @@ export interface FakeAgentOptions {
   readonly bare?: boolean
   /** Called when a session is closed with `session/close`. */
   readonly closed?: (sessionId: string) => void
-  /** Leave a permission request open when the turn is cancelled, for Charrette to answer. */
+  /** Leave a permission request open when the turn is cancelled, for Althar to answer. */
   readonly keepsRequests?: boolean
   /**
    * Out of usage: every prompt fails with Claude Code's usage-limit message,
@@ -130,14 +130,14 @@ interface SessionState {
   mcpServers: number
   /** Where the session works, for a step that writes. */
   cwd: string
-  /** Charrette's tools, when the session was given them over HTTP. */
+  /** Althar's tools, when the session was given them over HTTP. */
   tools: { readonly url: string; readonly headers: Record<string, string> } | undefined
   /** The role markers the session has been given, in any turn. */
   markers: Set<string>
 }
 
 /**
- * Calls Charrette's tools over the MCP server a session was given. The fake
+ * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task,
  * passing on the `[lead:…]` and `[review:…]` markers it was given;
@@ -150,7 +150,7 @@ interface SessionState {
  * until it is stopped, and `[lead:settle-quietly]` settles without reporting.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
- * Charrette says it isn't committed. Told what people said on its pull
+ * Althar says it isn't committed. Told what people said on its pull
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
  * publishes it. Asked to plan a change with a link in it, the coordinator
@@ -160,7 +160,7 @@ interface SessionState {
 const commitIn = (cwd: string, file: string, message: string) => {
   appendFileSync(join(cwd, file), `${file.replace(/\.txt$/, '')}\n`)
   const git = (...args: Array<string>) =>
-    execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@charrette.test', ...args], { cwd })
+    execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd })
   git('add', '-A')
   git('commit', '-q', '-m', message)
 }
@@ -205,7 +205,7 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
         if (!aside) commitIn(session.cwd, 'settled.txt', 'Settle the review')
-        // What became of each finding, by the ids Charrette gave them.
+        // What became of each finding, by the ids Althar gave them.
         const findings = (text.match(/find_[0-9a-f]{32}/g) ?? []).map((id) =>
           aside ? { id, outcome: 'set_aside', reason: 'It reads as intended.' } : { id, outcome: 'fixed' },
         )
@@ -437,7 +437,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
 
-      // With Charrette's tools, a marker in the prompt says which role to play.
+      // With Althar's tools, a marker in the prompt says which role to play.
       const played = await playRole(session, text)
       // Stopped while it played its part, the turn was cancelled, as an agent says.
       if (played !== undefined && session.cancelled) return { stopReason: 'cancelled' }
@@ -576,7 +576,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         case scenarios.bareAsk: {
           const described = {
             toolCallId: 'call-4',
-            title: 'mcp.charrette.draft_task',
+            title: 'mcp.althar.draft_task',
             kind: 'execute' as const,
             rawInput: { title: 'Probe' },
           }

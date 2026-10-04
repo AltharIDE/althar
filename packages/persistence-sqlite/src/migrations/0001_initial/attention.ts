@@ -88,9 +88,9 @@ export const attention: ReadonlyArray<string> = [
 
   /*
    * A decision answers exactly one subject. For a permission, `outcome` and
-   * `scope` are Charrette's own decision; `agent_option_id` is the option sent
+   * `scope` are Althar's own decision; `agent_option_id` is the option sent
    * back to the agent, which is always a one-time option, so every later
-   * request still reaches Charrette (ADR-007). A decision can be superseded by
+   * request still reaches Althar (ADR-007). A decision can be superseded by
    * a later one, never edited.
    */
   table(

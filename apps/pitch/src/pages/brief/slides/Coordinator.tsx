@@ -212,7 +212,7 @@ const MEMORY_CARDS = [
     n: String(PEOPLE.length),
     unit: 'people, one record',
     h: 'Shared by the team',
-    w: 'next · with Charrette for teams',
+    w: 'next · with Althar for teams',
     t: 'Everyone on the project reads and writes the same memory, with authors and history. A call Priya made in March briefs the agents of someone who joined last week.',
     why: 'The project remembers, so no one person has to.',
   },
@@ -289,7 +289,7 @@ export function MemoryList() {
         ))}
       </ul>
       <p className={s.memLead}>
-        <b>Next, with Charrette for teams:</b> {PEOPLE.length} people on one record. A call Priya made in March briefs the agents of someone
+        <b>Next, with Althar for teams:</b> {PEOPLE.length} people on one record. A call Priya made in March briefs the agents of someone
         who joined last week.
       </p>
     </section>

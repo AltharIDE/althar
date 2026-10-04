@@ -2,9 +2,9 @@ import { mkdirSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } f
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, sep } from 'node:path'
 
-import { Ids, newId } from '@charrette/domain'
-import type { Ledger, RevisionConflict, RowNotFound } from '@charrette/persistence-sqlite'
-import { type AgentDefinition, signOut } from '@charrette/provider-adapters'
+import { Ids, newId } from '@althar/domain'
+import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
+import { type AgentDefinition, signOut } from '@althar/provider-adapters'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -17,7 +17,7 @@ import { change, fact, timestamp } from './records'
  * Several accounts per agent (ADR-012, docs/architecture/03): each one sign-in
  * of an agent, kept by the agent in a folder of its own, its home. The
  * agent's usual folder is its first account, made the first time the agent
- * is asked for. Charrette points the agent at a home through its environment
+ * is asked for. Althar points the agent at a home through its environment
  * and never opens what the agent keeps there: a home it makes gets the
  * person's settings linked in and the agent's own sign-in opened in it, and
  * one another tool made is adopted as it is.
@@ -31,7 +31,7 @@ export interface Account {
   /** Its folder; null for the agent's usual one, its first account. */
   readonly home: string | null
   readonly position: number
-  /** What made its home, when Charrette didn't. */
+  /** What made its home, when Althar didn't. */
   readonly adoptedFrom: string | null
 }
 
@@ -99,9 +99,9 @@ export class Accounts extends Context.Service<
     get(accountId: string): Effect.Effect<Account, NotFound | SqlError.SqlError>
     /** What points the agent at the account's home: nothing for its usual folder. */
     env(account: Account): Readonly<Record<string, string>>
-    /** Readies a home Charrette made for a session: what came to the usual folder since is linked in too. */
+    /** Readies a home Althar made for a session: what came to the usual folder since is linked in too. */
     prepare(account: Account): Effect.Effect<void>
-    /** Adds an account: in the folder given, as another tool made it, or in a home Charrette makes. */
+    /** Adds an account: in the folder given, as another tool made it, or in a home Althar makes. */
     add(input: {
       readonly agentId: string
       readonly name: string
@@ -109,7 +109,7 @@ export class Accounts extends Context.Service<
     }): Effect.Effect<Account, AccountRefused | UnknownAgent | SqlError.SqlError | Schema.SchemaError>
     rename(accountId: string, name: string): Effect.Effect<void, AccountRefused | NotFound | Failure>
     /**
-     * Stops using an account. One in a folder Charrette made is signed out
+     * Stops using an account. One in a folder Althar made is signed out
      * with the agent's own tool and its folder deleted; one another tool made
      * stays as it is, signed in, that tool's.
      */
@@ -124,7 +124,7 @@ export class Accounts extends Context.Service<
     /** The line that signs the account in with the agent's own tool, in its home. */
     login(accountId: string): Effect.Effect<string, NotFound | UnknownAgent | SqlError.SqlError>
   }
->()('@charrette/runtime/Accounts') {
+>()('@althar/runtime/Accounts') {
   static readonly layer: Layer.Layer<Accounts, never, Store> = Layer.effect(
     Accounts,
     Effect.gen(function* () {
@@ -204,7 +204,7 @@ export class Accounts extends Context.Service<
           return account === undefined ? yield* new NotFound({ kind: 'account', id: accountId }) : account
         })
 
-      /** The folder of an account Charrette made, where it is still under the runtime's own: never one another tool made. */
+      /** The folder of an account Althar made, where it is still under the runtime's own: never one another tool made. */
       const madeHere = (account: Account): string | undefined => {
         const root = config.accountsRoot
         if (account.home === null || account.adoptedFrom !== null || root === undefined) return undefined
@@ -335,7 +335,7 @@ export class Accounts extends Context.Service<
               const sql = yield* SqlClient.SqlClient
               const account = yield* get(accountId)
               if (account.home === null) return yield* new AccountRefused({ reason: 'usual' })
-              // A folder Charrette made is signed out with the agent's own tool, then goes; one another tool made stays its.
+              // A folder Althar made is signed out with the agent's own tool, then goes; one another tool made stays its.
               const made = madeHere(account)
               // Anyway, as when the agent's tool is gone: the folder goes even where its sign-out didn't happen.
               if (made !== undefined)
@@ -391,7 +391,7 @@ export class Accounts extends Context.Service<
 }
 
 /**
- * Links into a home Charrette made what of the agent's usual folder isn't
+ * Links into a home Althar made what of the agent's usual folder isn't
  * the account's own (the registry's `shared`), where the home hasn't it
  * yet: the person's settings, or other tools' data. Never a sign-in.
  */

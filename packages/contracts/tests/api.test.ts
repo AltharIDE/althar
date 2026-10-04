@@ -229,7 +229,7 @@ describe('the API', () => {
         assert.strictEqual(yield* client.StartSession({ commandId, threadId: 'th1', agentId: 'codex' }), commandId)
         assert.strictEqual((yield* client.ConnectToken({ commandId, product: 'github', token: 't' })).account.login, 'you')
         assert.strictEqual((yield* client.StartSignIn({ commandId, product: 'linear' })).kind, 'browser')
-        // A product Charrette doesn't know isn't one.
+        // A product Althar doesn't know isn't one.
         assert.throws(() => Schema.decodeUnknownSync(Product)('gitea'))
         const refused = yield* Effect.flip(client.OpenProject({ commandId, grant: 'g1' }))
         assert.strictEqual(refused.message, 'No folder was chosen as g1.')

@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { scenarios } from '@charrette/provider-adapters/testing'
+import { scenarios } from '@althar/provider-adapters/testing'
 import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 

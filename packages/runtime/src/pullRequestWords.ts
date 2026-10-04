@@ -1,7 +1,7 @@
-import type { Check, Comment, Review } from '@charrette/connectors'
+import type { Check, Comment, Review } from '@althar/connectors'
 
 /*
- * What Charrette writes about a task's pull request: its description, made
+ * What Althar writes about a task's pull request: its description, made
  * from what the steps reported, and what it tells the lead of what people
  * said on it and how its checks went, in the host's own words (`PR #12`,
  * `MR !4`).
@@ -91,7 +91,7 @@ export const bodyOf = (input: {
   }
   if (input.issue !== null)
     parts.push(input.issue.sameHost ? `Issue: ${input.issue.key}` : `Issue: [${input.issue.key}](${input.issue.url})`)
-  parts.push('<sub>Opened by Charrette.</sub>')
+  parts.push('<sub>Opened by Althar.</sub>')
   return parts.join('\n\n')
 }
 
@@ -105,7 +105,7 @@ export const checksLine = (sum: ChecksSum) =>
     ? 'No checks have run.'
     : `Checks: ${sum.passed} passed, ${sum.failed} failed, ${sum.running} running${sum.failing.length === 0 ? '' : ` (failed: ${sum.failing.join(', ')})`}.`
 
-/** A comment, as a reading of the pull request lists it: who (or, for Charrette's own, `who`), where, its thread, and what. */
+/** A comment, as a reading of the pull request lists it: who (or, for Althar's own, `who`), where, its thread, and what. */
 export const commentLine = (comment: Comment, who?: string) =>
   `- ${who ?? comment.author.login}${whereOf(comment)}${comment.threadId === null ? '' : ` (thread ${comment.threadId})`}${comment.author.bot ? ' [bot]' : ''}:\n${quoted(unsigned(comment.body))}`
 
@@ -136,20 +136,26 @@ export const checksForLead = (sum: ChecksSum, name: string, logs: ReadonlyArray<
 export const outsidersLine = (count: number) =>
   `${count === 1 ? 'One comment' : `${count} comments`} from people who can't write to the repository ${count === 1 ? 'is' : 'are'} left out. On a public repository anyone can comment; the person reads them and passes on what matters.`
 
-const SIGNATURE = '<sub>From Charrette'
+const SIGNATURE = '<sub>From Althar'
 
 /**
  * A reply as posted: the lead's words, then a line saying it came from
- * Charrette and which agent wrote it. It goes up under the person's own
+ * Althar and which agent wrote it. It goes up under the person's own
  * account, so without the line colleagues would take it for theirs.
  */
 export const signed = (body: string, by: string | null) => `${body.trimEnd()}\n\n${SIGNATURE}${by === null ? '' : `, by ${by}`}.</sub>`
 
-/** Whether a comment carries Charrette's signature. */
-export const fromCharrette = (body: string) => body.trimEnd().split('\n').at(-1)?.startsWith(SIGNATURE) === true
+/** The signature replies carried while Althar was called Charrette, until October 2026. */
+const FORMER_SIGNATURE = '<sub>From Charrette'
 
-/** A comment without Charrette's signature, for reading back. */
-export const unsigned = (body: string) => (fromCharrette(body) ? body.trimEnd().split('\n').slice(0, -1).join('\n').trimEnd() : body)
+/** Whether a comment carries Althar's signature, or the one it signed with as Charrette. */
+export const fromAlthar = (body: string) => {
+  const last = body.trimEnd().split('\n').at(-1) ?? ''
+  return last.startsWith(SIGNATURE) || last.startsWith(FORMER_SIGNATURE)
+}
+
+/** A comment without Althar's signature, for reading back. */
+export const unsigned = (body: string) => (fromAlthar(body) ? body.trimEnd().split('\n').slice(0, -1).join('\n').trimEnd() : body)
 
 /** Files, named in code, the first few of them and how many more. */
 export const filesLine = (paths: ReadonlyArray<string>, shown = 8) => {

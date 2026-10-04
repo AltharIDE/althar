@@ -1,6 +1,6 @@
-# @charrette/desktop
+# @althar/desktop
 
-Charrette's desktop app: Electron, with the runtime in a utility process and the interface in the window. It opens a folder as a project, where you talk to the project's coordinator: it answers questions about the code and turns what you want changed into tasks. Each task shows in the conversation as a card: first its plan (who implements it, who reviews it), which starts on its own after 25 seconds unless you change or hold it, then where it stands. A task's own thread shows what the lead did, folded once each turn is over, with what each step reported: the lead's summary, and the review's findings. You talk to the lead from the composer, interrupt it, change its model, hand the task to another agent, or stop it. You can also plan a task yourself.
+Althar's desktop app: Electron, with the runtime in a utility process and the interface in the window. It opens a folder as a project, where you talk to the project's coordinator: it answers questions about the code and turns what you want changed into tasks. Each task shows in the conversation as a card: first its plan (who implements it, who reviews it), which starts on its own after 25 seconds unless you change or hold it, then where it stands. A task's own thread shows what the lead did, folded once each turn is over, with what each step reported: the lead's summary, and the review's findings. You talk to the lead from the composer, interrupt it, change its model, hand the task to another agent, or stop it. You can also plan a task yourself.
 
 It is step 3 of the [MVP plan](../../docs/plans/mvp.md): the coordinator loop.
 
@@ -16,11 +16,11 @@ The app shares its profile and worktrees with the command-line client (`apps/cli
 
 | Environment | Default |
 | --- | --- |
-| `CHARRETTE_PROFILE` | `~/Library/Application Support/Charrette` on macOS |
-| `CHARRETTE_WORKTREES` | `~/Charrette` |
-| `CHARRETTE_FAKE_AGENTS=1` | Off. Runs the scripted fake agent under Claude Code's and Codex's names, and a fake GitHub at `https://github.test`, keeping tokens in memory rather than the Keychain, for the end-to-end tests. Packaged builds leave it out |
-| `CHARRETTE_FAKE_REMOTE` | None. With the fakes, the bare repository that pushes to the fake GitHub land in |
-| `CHARRETTE_GITHUB_CLIENT_ID`, `CHARRETTE_GITLAB_CLIENT_ID`, `CHARRETTE_LINEAR_CLIENT_ID` | None. The public ids of Charrette's apps on those services, for signing in through the browser; without one, the service takes a pasted token |
+| `ALTHAR_PROFILE` | `~/Library/Application Support/Althar` on macOS |
+| `ALTHAR_WORKTREES` | `~/Althar` |
+| `ALTHAR_FAKE_AGENTS=1` | Off. Runs the scripted fake agent under Claude Code's and Codex's names, and a fake GitHub at `https://github.test`, keeping tokens in memory rather than the Keychain, for the end-to-end tests. Packaged builds leave it out |
+| `ALTHAR_FAKE_REMOTE` | None. With the fakes, the bare repository that pushes to the fake GitHub land in |
+| `ALTHAR_GITHUB_CLIENT_ID`, `ALTHAR_GITLAB_CLIENT_ID`, `ALTHAR_LINEAR_CLIENT_ID` | None. The public ids of Althar's apps on those services, for signing in through the browser; without one, the service takes a pasted token |
 
 ## Work on it
 
@@ -40,7 +40,7 @@ From `apps/desktop`:
 To run the end-to-end test against a real agent, signed in on this machine (it uses a little of its usage):
 
 ```bash
-CHARRETTE_REAL_AGENT=claude-code bunx playwright test e2e/real.spec.ts
+ALTHAR_REAL_AGENT=claude-code bunx playwright test e2e/real.spec.ts
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how it is put together.

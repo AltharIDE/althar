@@ -1,4 +1,4 @@
-import { Brand } from '@charrette/ui'
+import { Brand } from '@althar/ui'
 
 /*
  * The made-up project the site shows: Meridian, a payments service, and

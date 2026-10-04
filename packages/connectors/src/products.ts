@@ -5,7 +5,7 @@ import type { KnownHosts } from './links'
 import type { CodeHost, Product, Tracker } from './model'
 
 /*
- * Every product Charrette connects to: its name, where its hosted service
+ * Every product Althar connects to: its name, where its hosted service
  * is, whether it runs on people's own servers, how a person signs in to it
  * (docs/architecture/06, "Signing in"), and its adapter, once there is one.
  * A product without an adapter is listed so the model stays honest about
@@ -28,7 +28,7 @@ export interface ProductInfo {
   /**
    * The browser sign-in it gives a desktop app without a secret: a code the
    * person types on its page, or a page they approve that comes back here.
-   * Each needs Charrette's app registered with the service; until it is, the
+   * Each needs Althar's app registered with the service; until it is, the
    * product takes a pasted token.
    */
   readonly browser:
@@ -174,7 +174,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
   },
 }
 
-/** The products Charrette can connect to now: those with an adapter. */
+/** The products Althar can connect to now: those with an adapter. */
 export const available = (): ReadonlyArray<ProductInfo> => Object.values(products).filter((info) => info.make !== null)
 
 /** The hosts of these products' hosted services, for reading their links and remotes. */

@@ -38,7 +38,7 @@ const readableSchema = Effect.gen(function* () {
 
 const withFile = <A, E, R>(use: (filename: string) => Effect.Effect<A, E, R>) =>
   Effect.acquireUseRelease(
-    Effect.sync(() => mkdtempSync(join(tmpdir(), 'charrette-schema-'))),
+    Effect.sync(() => mkdtempSync(join(tmpdir(), 'althar-schema-'))),
     (directory) => use(join(directory, 'profile.sqlite')),
     (directory) => Effect.sync(() => rmSync(directory, { recursive: true, force: true })),
   )

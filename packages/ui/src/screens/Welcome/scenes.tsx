@@ -44,7 +44,7 @@ import s from './scenes.module.css'
 
 /*
  * The five scenes. Each is made of the real components, holding the demo
- * project's state, with a script that changes that state the way Charrette
+ * project's state, with a script that changes that state the way Althar
  * would, and a pointer where a person would act. `end` is where the script
  * finishes, so leaving a scene early, or arriving with no motion, shows the
  * same final picture.

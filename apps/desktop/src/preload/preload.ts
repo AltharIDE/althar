@@ -7,25 +7,25 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
  * Node, no file system, no shell.
  */
 
-ipcRenderer.on('charrette:port', (event) => {
-  window.postMessage('charrette:port', '*', event.ports)
+ipcRenderer.on('althar:port', (event) => {
+  window.postMessage('althar:port', '*', event.ports)
 })
 
 /* A thread a notification the person clicked opens: held until the page listens, as a window that just opened doesn't yet. */
 let pending: string | undefined
 const opening = new Set<(threadId: string) => void>()
-ipcRenderer.on('charrette:open', (_event, threadId: unknown) => {
+ipcRenderer.on('althar:open', (_event, threadId: unknown) => {
   if (typeof threadId !== 'string') return
   if (opening.size === 0) pending = threadId
   for (const listener of opening) listener(threadId)
 })
 
-contextBridge.exposeInMainWorld('charrette', {
-  pickFolder: (purpose: 'project' | 'account' = 'project'): Promise<string | null> => ipcRenderer.invoke('charrette:pick-folder', purpose),
+contextBridge.exposeInMainWorld('althar', {
+  pickFolder: (purpose: 'project' | 'account' = 'project'): Promise<string | null> => ipcRenderer.invoke('althar:pick-folder', purpose),
   // Only a file the person dropped has a path; one the page made has none.
   grantDropped: (file: File): Promise<string | null> => {
     const path = webUtils.getPathForFile(file)
-    return path === '' ? Promise.resolve(null) : ipcRenderer.invoke('charrette:grant-dropped', path)
+    return path === '' ? Promise.resolve(null) : ipcRenderer.invoke('althar:grant-dropped', path)
   },
   onOpen: (listener: (threadId: string) => void): (() => void) => {
     opening.add(listener)

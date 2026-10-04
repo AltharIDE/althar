@@ -1,4 +1,4 @@
-import { BRANDS, type Brand } from '@charrette/ui'
+import { BRANDS, type Brand } from '@althar/ui'
 
 import { clamp, ease, lerp } from '../../lib/motion'
 import { brandOf, TASKS } from '../../content/site'

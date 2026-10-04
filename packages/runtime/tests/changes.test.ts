@@ -3,8 +3,8 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { type FakeService, makeFakeService } from '@charrette/connectors/testing'
-import type { ProjectId } from '@charrette/domain'
+import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -26,7 +26,7 @@ import { fakeConnectors, HOST, hosted, items, repository, runtime, until } from 
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
- * steps are done, Charrette commits what the lead left, pushes the branch to
+ * steps are done, Althar commits what the lead left, pushes the branch to
  * the code host (here, a bare repository in its place), and opens a draft
  * pull request on it (here, the fake service); then it listens. What people
  * say arrives in the thread and reaches the lead; failed checks too; a merge
@@ -90,14 +90,14 @@ describe('a task that ends in a pull request', () => {
 
       // The branch is on the host, with what the steps reported as its description.
       const opened = github.changes[0]
-      assert.strictEqual(opened?.source, 'charrette/add-a-retry')
+      assert.strictEqual(opened?.source, 'althar/add-a-retry')
       assert.strictEqual(opened?.target, 'main')
       assert.isTrue(opened?.draft)
       assert.include(opened?.body, 'Did the task.')
       assert.include(opened?.body, 'Passed after one round of review.')
-      // What it pushed is what the lead committed; Charrette commits nothing of its own.
-      assert.strictEqual(git(bare, 'log', '-1', '--format=%an %s', 'charrette/add-a-retry'), 'Fake Change it')
-      assert.include(git(bare, 'ls-tree', '--name-only', 'charrette/add-a-retry'), 'change.txt')
+      // What it pushed is what the lead committed; Althar commits nothing of its own.
+      assert.strictEqual(git(bare, 'log', '-1', '--format=%an %s', 'althar/add-a-retry'), 'Fake Change it')
+      assert.include(git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry'), 'change.txt')
 
       const threadId = ready?.threadId ?? ''
       const published = (yield* items(threadId)).find((item) => item.kind === 'step_result' && item.content.step === 'publish')
@@ -113,11 +113,11 @@ describe('a task that ends in a pull request', () => {
         (replies) => replies.length === 1,
       )
       const reply = github.commentsOn(1).find((comment) => comment.author.login === 'you')
-      // It goes up under the person's account, so it says it came from Charrette, and which agent wrote it.
-      assert.strictEqual(reply?.body, 'Seconds, the same as charges.\n\n<sub>From Charrette, by Fake claude-code.</sub>')
+      // It goes up under the person's account, so it says it came from Althar, and which agent wrote it.
+      assert.strictEqual(reply?.body, 'Seconds, the same as charges.\n\n<sub>From Althar, by Fake claude-code.</sub>')
       assert.strictEqual(reply?.threadId, asked.threadId)
 
-      // The person comments from that same account: Charrette knows its own replies by their receipts, so this one reaches the lead.
+      // The person comments from that same account: Althar knows its own replies by their receipts, so this one reaches the lead.
       const sql = yield* SqlClient.SqlClient
       github.commentAs(1, 'you', 'Make it seconds everywhere.')
       yield* until(
@@ -186,10 +186,10 @@ describe('a task that ends in a pull request', () => {
       yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       github.setChecks(1, [{ name: 'test', state: 'failed', log: 'FAIL limit.test.ts\nExpected 30, got "Thu"' }])
       yield* until(
-        Effect.sync(() => (git(bare, 'ls-tree', '--name-only', 'charrette/add-a-retry').includes('fixed.txt') ? [true] : [])),
+        Effect.sync(() => (git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry').includes('fixed.txt') ? [true] : [])),
         (found) => found.length > 0,
       )
-      assert.include(git(bare, 'log', '--format=%s', 'charrette/add-a-retry'), 'Fix the failing check')
+      assert.include(git(bare, 'log', '--format=%s', 'althar/add-a-retry'), 'Fix the failing check')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -214,8 +214,8 @@ describe('a task that ends in a pull request', () => {
     const repository = github.addRepository(['meridian', 'api'])
     return Effect.gen(function* () {
       yield* connect('github', HOST)
-      // Opened some other way, before Charrette got to it.
-      yield* github.openChange(repository, { title: 'By hand', body: '', source: 'charrette/add-a-retry', target: 'main', draft: false })
+      // Opened some other way, before Althar got to it.
+      yield* github.openChange(repository, { title: 'By hand', body: '', source: 'althar/add-a-retry', target: 'main', draft: false })
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
       const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       assert.lengthOf(github.changes, 1)
@@ -326,7 +326,7 @@ describe('a task that ends in a pull request', () => {
       const instance = yield* Instance
       const onHost = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
       const local = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
-      // Before it is connected, github.test is no host Charrette knows: the branch, whatever the project asks.
+      // Before it is connected, github.test is no host Althar knows: the branch, whatever the project asks.
       yield* policies.set(onHost.projectId, { end: 'ready' }, instance.personId)
       assert.isNull(yield* changes.endFor(onHost.projectId))
       yield* connect('github', HOST)
@@ -335,7 +335,7 @@ describe('a task that ends in a pull request', () => {
       assert.strictEqual(yield* changes.endFor(onHost.projectId), 'draft')
       yield* policies.set(onHost.projectId, { end: 'none' }, instance.personId)
       assert.strictEqual(yield* changes.endFor(onHost.projectId), 'none')
-      // No host Charrette knows: a project that wants a pull request still ends on the branch, as it always has.
+      // No host Althar knows: a project that wants a pull request still ends on the branch, as it always has.
       yield* policies.set(local.projectId, { end: 'ready' }, instance.personId)
       assert.isNull(yield* changes.endFor(local.projectId))
     }).pipe(Effect.provide(runtimeWith({ github })))
@@ -410,7 +410,7 @@ describe('a task that ends in a pull request', () => {
         Duration.seconds(20),
       )
       assert.deepInclude(call?.stuck, { step: 'publish', why: 'not_connected' })
-      // Meanwhile something is left in the worktree: Charrette doesn't commit it, and says so.
+      // Meanwhile something is left in the worktree: Althar doesn't commit it, and says so.
       const sql = yield* SqlClient.SqlClient
       const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${created.taskId}`
       writeFileSync(join(workspace?.path ?? '', 'notes.txt'), 'later\n')
@@ -524,14 +524,14 @@ describe('a pull request, by the person and the lead', () => {
       assert.include(read, '- lee:\n> Looks fine to me.')
 
       yield* changes.reply(taskId, { body: 'Renamed it.', threadId: null, by: 'Claude Code' })
-      // The same reply asked for again isn't sent twice; it says it came from Charrette, and who wrote it.
+      // The same reply asked for again isn't sent twice; it says it came from Althar, and who wrote it.
       yield* changes.reply(taskId, { body: 'Renamed it.', threadId: null, by: 'Claude Code' })
       assert.lengthOf(
-        github.commentsOn(1).filter((comment) => comment.body === 'Renamed it.\n\n<sub>From Charrette, by Claude Code.</sub>'),
+        github.commentsOn(1).filter((comment) => comment.body === 'Renamed it.\n\n<sub>From Althar, by Claude Code.</sub>'),
         1,
       )
       // Read back, it is the lead's own, without the signature.
-      assert.include(yield* changes.read(taskId), '- you, through Charrette:\n> Renamed it.')
+      assert.include(yield* changes.read(taskId), '- you, through Althar:\n> Renamed it.')
 
       const sql = yield* SqlClient.SqlClient
       const [workspace] = yield* sql<{ path: string; branch: string }>`SELECT path, branch FROM workspaces WHERE task_id = ${taskId}`
@@ -564,7 +564,7 @@ describe('a pull request, by the person and the lead', () => {
 
 describe('what an earlier launch was doing outside', () => {
   it.live('is uncertain after a restart, and read back rather than done twice', () => {
-    const database = join(mkdtempSync(join(tmpdir(), 'charrette-outward-')), 'charrette.sqlite')
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-outward-')), 'althar.sqlite')
     const github = makeFakeService()
     return Effect.gen(function* () {
       const projectId = yield* Effect.scoped(

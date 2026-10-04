@@ -12,7 +12,7 @@ import { below, Heading, type HeadingLevel } from '../../primitives/Heading/Head
 import s from './ConnectAgent.module.css'
 
 /*
- * What "Connect another" opens: every other way Charrette can reach an
+ * What "Connect another" opens: every other way Althar can reach an
  * agent, grouped by how it signs in. An app it can run but didn't find, an
  * API that takes a key, a model server on this machine, or any command that
  * speaks ACP. A key is typed once and goes to the system keychain; the
@@ -68,7 +68,7 @@ export const connectAgentText: ConnectAgentText = {
   cancel: 'Cancel',
   connect: 'Connect',
   acp: 'Any agent that speaks ACP',
-  acpNote: 'The command that starts it. Charrette talks to it over the Agent Client Protocol.',
+  acpNote: 'The command that starts it. Althar talks to it over the Agent Client Protocol.',
   acpField: 'Command',
   acpPlaceholder: 'my-agent --acp',
   emptyCommand: 'Type the command that starts it',

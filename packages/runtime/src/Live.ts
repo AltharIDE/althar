@@ -1,4 +1,4 @@
-import type { SessionEvent } from '@charrette/provider-adapters'
+import type { SessionEvent } from '@althar/provider-adapters'
 import { Context, Effect, Layer, PubSub, type Scope, Stream } from 'effect'
 
 /*
@@ -52,7 +52,7 @@ export class Live extends Context.Service<
     /** Events from the moment this returns, for as long as the scope lasts: nothing published after it is missed. */
     readonly subscribe: Effect.Effect<Stream.Stream<LiveEvent>, never, Scope.Scope>
   }
->()('@charrette/runtime/Live') {
+>()('@althar/runtime/Live') {
   static readonly layer: Layer.Layer<Live> = Layer.effect(
     Live,
     Effect.gen(function* () {

@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
-import { type CommandEnvelope, Ids, newId, type ProjectId, type TaskId, type ThreadId } from '@charrette/domain'
-import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@charrette/persistence-sqlite'
+import { type CommandEnvelope, Ids, newId, type ProjectId, type TaskId, type ThreadId } from '@althar/domain'
+import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
 import { Context, Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -115,7 +115,7 @@ export class Projects extends Context.Service<
       readonly issueKey?: string
     }): Effect.Effect<CreatedTask, NotFound | GitFailed | Failure>
   }
->()('@charrette/runtime/Projects') {
+>()('@althar/runtime/Projects') {
   static readonly layer: Layer.Layer<Projects, never, Store> = Layer.effect(
     Projects,
     Effect.gen(function* () {
@@ -246,7 +246,7 @@ export class Projects extends Context.Service<
               yield* sql`INSERT INTO threads ${sql.insert({ id: threadId, projectId: project.id, kind: 'task', taskId, createdAt })}`
               const workspaceId = yield* newId(Ids.workspace)
               const worktree = join(config.worktreeRoot, project.slug, slug, project.bindingSlug)
-              const branch = input.issueKey === undefined ? `charrette/${slug}` : `charrette/${branchKey(input.issueKey)}-${slug}`
+              const branch = input.issueKey === undefined ? `althar/${slug}` : `althar/${branchKey(input.issueKey)}-${slug}`
               yield* sql`INSERT INTO workspaces ${sql.insert({
                 id: workspaceId,
                 projectId: project.id,

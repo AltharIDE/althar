@@ -11,7 +11,7 @@ export function Business() {
           <p>
             Provider independence is often described as picking a model from a dropdown. That’s too shallow. If the project’s memory,
             orchestration policy, run history, acceptance logic and team conventions stay proprietary, the model is replaceable but the
-            operating system is not. Charrette should be open because it sits in a privileged, durable position:
+            operating system is not. Althar should be open because it sits in a privileged, durable position:
           </p>
         </div>
         <ul className={cx(s.ticksList, s.proseList)}>
@@ -47,8 +47,8 @@ export function Business() {
         </div>
         <div className={s.prose}>
           <p>
-            Because Charrette doesn’t resell model access, it adds to an existing AI budget rather than competing with it, and stays out of
-            a price war with the labs. GitLab, Sentry, PostHog and Tailscale have followed versions of this model.
+            Because Althar doesn’t resell model access, it adds to an existing AI budget rather than competing with it, and stays out of a
+            price war with the labs. GitLab, Sentry, PostHog and Tailscale have followed versions of this model.
           </p>
         </div>
       </section>

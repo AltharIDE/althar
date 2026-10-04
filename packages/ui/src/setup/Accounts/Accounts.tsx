@@ -14,7 +14,7 @@ import s from './Accounts.module.css'
 /*
  * An agent's accounts: each one sign-in, kept by the agent in a folder of
  * its own (ADR-012). The agent's usual folder is the first; the person adds
- * more, in a folder Charrette makes and opens the agent's sign-in in, or one
+ * more, in a folder Althar makes and opens the agent's sign-in in, or one
  * an account switcher already made. Work runs on the first account, in this
  * order, that is signed in and not out of usage, and moves to the next when
  * one runs out. Each row says where the account stands and offers what would
@@ -24,7 +24,7 @@ import s from './Accounts.module.css'
 /** Where an account's sign-in is kept. */
 export type AccountPlace =
   | { kind: 'usual' }
-  /** A folder Charrette made for it. */
+  /** A folder Althar made for it. */
   | { kind: 'own' }
   /** A folder another tool made, or the person chose: as they'd recognise it, ~/.codex-work, and what made it. */
   | { kind: 'adopted'; folder: string; from?: string }
@@ -73,7 +73,7 @@ export interface AccountsText {
   up: string
   down: string
   remove: string
-  /** What removing does to one in a folder Charrette made, and to one another tool made. */
+  /** What removing does to one in a folder Althar made, and to one another tool made. */
   removeOwn: string
   removeAdopted: string
   save: string
@@ -117,7 +117,7 @@ export const accountsText: AccountsText = {
   add: 'Add an account',
   addTitle: (agent) => `Add a ${agent} account`,
   where: 'Where it signs in',
-  ownNote: (agent) => `Charrette makes the folder, with your settings, and opens ${agent}’s own sign-in there.`,
+  ownNote: (agent) => `Althar makes the folder, with your settings, and opens ${agent}’s own sign-in there.`,
   foundNote: (from) => `Already signed in, made by ${from}.`,
   choose: 'Another folder…',
   chooseNote: 'One the agent already signed in with.',

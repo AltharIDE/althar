@@ -1,5 +1,5 @@
-import { type ActorId, Ids, newId, type ProjectId } from '@charrette/domain'
-import type { Ledger } from '@charrette/persistence-sqlite'
+import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
+import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -105,7 +105,7 @@ export class Policies extends Context.Service<
       actorId: ActorId,
     ): Effect.Effect<void, SqlError.SqlError | Schema.SchemaError | NotFound>
   }
->()('@charrette/runtime/Policies') {
+>()('@althar/runtime/Policies') {
   static readonly layer: Layer.Layer<Policies, never, Store> = Layer.effect(
     Policies,
     Effect.gen(function* () {

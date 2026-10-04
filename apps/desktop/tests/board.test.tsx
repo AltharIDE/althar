@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@charrette/contracts'
+import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@althar/contracts'
 
 import { BoardView, trackOf } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
@@ -85,7 +85,7 @@ const board = (overrides: Partial<BoardSnapshot> = {}): BoardSnapshot => ({
       threadId: 'th5',
       title: 'Tidy the docs',
       slug: 'tidy-the-docs',
-      branch: 'charrette/tidy-the-docs',
+      branch: 'althar/tidy-the-docs',
       phase: 'ready',
       changed: { files: 2, add: 9, del: 4 },
     }),
@@ -143,7 +143,7 @@ describe('the board', () => {
     expect(within(work).getByText('Run make deploy')).toBeTruthy()
     expect(within(work).getByText('Rate-limit refunds')).toBeTruthy()
     // Ready on its branch, with no pull request: the branch, and how big its change is.
-    expect(within(work).getByText('charrette/tidy-the-docs')).toBeTruthy()
+    expect(within(work).getByText('althar/tidy-the-docs')).toBeTruthy()
     expect(within(work).getByText('PR #7 merged')).toBeTruthy()
     // Two running (one of them waiting on you), and three things that need you.
     expect(screen.getByText('2 running')).toBeTruthy()
@@ -221,7 +221,7 @@ describe('the board', () => {
           task: {
             ...snapshot().task,
             id: 't5',
-            branch: 'charrette/tidy',
+            branch: 'althar/tidy',
             files: [{ path: 'docs/a.md', from: null, status: 'modified', add: 9, del: 4, binary: false, uncommitted: false }],
           },
         }),
@@ -245,7 +245,7 @@ describe('the board', () => {
     const openChange = vi
       .fn()
       .mockRejectedValueOnce(
-        new ApiError({ reason: 'NotConnected', message: "Charrette isn't connected to GitHub. Connect it, then try again." }),
+        new ApiError({ reason: 'NotConnected', message: "Althar isn't connected to GitHub. Connect it, then try again." }),
       )
       .mockResolvedValue(undefined)
     const { client } = fakeClient({ openChange, getBoard: vi.fn(async () => board()) })
@@ -256,7 +256,7 @@ describe('the board', () => {
     await userEvent.click(within(dock).getByRole('button', { name: 'Open a pull request' }))
     expect(await within(dock).findByRole('alert')).toHaveProperty(
       'textContent',
-      "Charrette isn't connected to GitHub. Connect it, then try again.",
+      "Althar isn't connected to GitHub. Connect it, then try again.",
     )
     await userEvent.click(within(dock).getByRole('button', { name: 'Open a pull request' }))
     await waitFor(() => expect(within(dock).queryByRole('alert')).toBeNull())
@@ -289,7 +289,7 @@ describe('the board', () => {
     const { client } = fakeClient({ getBoard: vi.fn(async () => Promise.reject(new ApiError({ reason: 'SqlError', message: 'Broken.' }))) })
     withServices(<Project />, client)
     await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
-    expect(await screen.findByText('Charrette couldn’t read the board. Broken.')).toBeTruthy()
+    expect(await screen.findByText('Althar couldn’t read the board. Broken.')).toBeTruthy()
   })
 })
 
@@ -351,10 +351,10 @@ describe('every state the board shows', () => {
     expect(screen.getByText('Claude Code stopped before the step was done.')).toBeTruthy()
     // A step held for a usage limit says whom it waits for, and when they're back.
     expect(screen.getByText(`Waits for Codex, back at ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
-    expect(screen.getByText("Charrette couldn't open the pull request.")).toBeTruthy()
+    expect(screen.getByText("Althar couldn't open the pull request.")).toBeTruthy()
     expect(screen.getByText(/isn't connected to this repository's host/)).toBeTruthy()
     expect(screen.getByText('PR #12 closed')).toBeTruthy()
-    expect(screen.getAllByText('charrette/add-a-retry').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('althar/add-a-retry').length).toBeGreaterThan(0)
     return userEvent
       .click(screen.getByRole('button', { name: 'Held plan' }))
       .then(() => expect(onOpen).toHaveBeenCalledWith({ kind: 'task', id: 'a' }))

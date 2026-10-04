@@ -75,7 +75,7 @@ export function PriorArt() {
             <b>Factory</b>
             <p>
               A commercial reference for the full product surface: desktop, CLI, web and mobile, cloud computers, reviewable sessions and
-              enterprise controls. Relevant to the capital-intensive infrastructure Charrette will eventually need.
+              enterprise controls. Relevant to the capital-intensive infrastructure Althar will eventually need.
             </p>
             <span className={s.resL}>
               <a href="https://docs.factory.ai/" target="_blank" rel="noopener">
@@ -129,7 +129,7 @@ export function PriorArt() {
           <li>
             <b>Agetor</b>
             <p>
-              A local-first Kanban control plane for CLI agents, with approvals and transcripts. Close to Charrette’s board view; the board
+              A local-first Kanban control plane for CLI agents, with approvals and transcripts. Close to Althar’s board view; the board
               tracks sessions rather than what the project knows.
             </p>
             <span className={s.resL}>
@@ -181,7 +181,7 @@ export function PriorArt() {
             <b>“Complex Acts of Knowing”</b>
             <p>
               Dave Snowden’s knowledge-management paper. It informs the distinction between explicit project records and situated, tacit
-              knowledge, a boundary Charrette should expose rather than claim to eliminate.
+              knowledge, a boundary Althar should expose rather than claim to eliminate.
             </p>
             <span className={s.resL}>
               <a href="https://doi.org/10.1108/13673270210424639" target="_blank" rel="noopener">

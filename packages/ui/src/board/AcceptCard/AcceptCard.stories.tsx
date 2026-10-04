@@ -21,9 +21,9 @@ export const TwoRepositories: Story = { args: READY_TWO_REPOS }
 export const Current: Story = { args: { current: true } }
 /** Work with no pull request, as where no code host is connected: its branch, and no checks. */
 export const OnItsBranch: Story = {
-  args: { prs: [], branch: { name: 'charrette/add-a-retry', add: 48, del: 9 }, checks: undefined },
+  args: { prs: [], branch: { name: 'althar/add-a-retry', add: 48, del: 9 }, checks: undefined },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('charrette/add-a-retry')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText('althar/add-a-retry')).toBeInTheDocument()
     await expect(within(canvasElement).queryByText(/checks? passed/)).not.toBeInTheDocument()
   },
 }

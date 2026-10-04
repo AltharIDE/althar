@@ -1,4 +1,4 @@
-import type { ThreadItem } from '@charrette/contracts'
+import type { ThreadItem } from '@althar/contracts'
 
 import type { Streamed } from './thread'
 

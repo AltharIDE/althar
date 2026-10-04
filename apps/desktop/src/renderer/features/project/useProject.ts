@@ -10,7 +10,7 @@ import {
   type TaskEnd,
   type TaskSummary,
   type ThreadItem,
-} from '@charrette/contracts'
+} from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
 import { useServices, useWatch } from '../../data/services'

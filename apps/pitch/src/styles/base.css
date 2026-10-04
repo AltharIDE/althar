@@ -2,15 +2,15 @@
    Everything else lives in a CSS module next to the component it styles. */
 
 :root {
-  /* The product's paper and ink (@charrette/ui tokens.css), set at poster scale.
-     Colour is a signal: cobalt is Charrette and the work it runs, violet is a
+  /* The product's paper and ink (@althar/ui tokens.css), set at poster scale.
+     Colour is a signal: cobalt is Althar and the work it runs, violet is a
      person's call, red is what breaks without it. Everything else is ink on paper. */
   --ink: #141417; --ink-2: #45454c; --ink-3: #64646b; --ink-4: #8c8c92;
   --cream: #f4f2ec; /* the page */
   --white: #fcfbf8; /* raised: sheets, cards, the lighter panels */
   --paper: #fff; /* the lightest: what sits on a raised sheet */
   --stone: #e7e3da; /* pressed, selected */
-  --desk: #dcd8cd; /* behind the window: work done without Charrette */
+  --desk: #dcd8cd; /* behind the window: work done without Althar */
   --line: rgba(20, 20, 28, .07); --line-2: rgba(20, 20, 28, .11); --line-3: rgba(20, 20, 28, .2);
   --cobalt: #2b3bff; --cobalt-soft: #9aa6ff; --cobalt-wash: rgba(43, 59, 255, .07); --on-cobalt: #dfe2ff;
   --you: #7a3ff0; --you-ink: #6a2fd6; --you-soft: #b99bff; --you-paper: #f6f1ff;

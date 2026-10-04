@@ -2,7 +2,7 @@
    simpleicons.org), monochrome, on a 24px grid. Brand names and marks belong to their owners;
    they are used here only to name those products. Regenerate rather than edit by hand. */
 
-/** Every product Charrette can show a mark for: model labs, agent runtimes, and the places work comes from. */
+/** Every product Althar can show a mark for: model labs, agent runtimes, and the places work comes from. */
 export enum Brand {
   Anthropic = 'anthropic',
   OpenAI = 'openai',

@@ -1,12 +1,12 @@
-import type { AgentStatus, AttentionRequest, StuckStep } from '@charrette/contracts'
-import { Stuck, type StuckAttempt } from '@charrette/ui'
+import type { AgentStatus, AttentionRequest, StuckStep } from '@althar/contracts'
+import { Stuck, type StuckAttempt } from '@althar/ui'
 
 import type { StuckAnswer } from '../../data/client'
 import { modelInfo } from '../../shared/agents'
 
 /*
  * A step of the task's plan that needs the person (docs/architecture/05):
- * what went wrong, what Charrette tried, and the ways on. The lead's steps
+ * what went wrong, what Althar tried, and the ways on. The lead's steps
  * can be told what to do, handed to another agent, or abandoned; a review
  * can be run again, on the same agent or another, or gone on without.
  */
@@ -22,22 +22,22 @@ export const text = {
       case 'failed_to_start':
         return `${agent} couldn't start.${stuck.detail === null ? '' : ` ${stuck.detail}`}`
       case 'restarted':
-        return 'Charrette restarted while this step was running.'
+        return 'Althar restarted while this step was running.'
       case 'round_limit':
         return `Three rounds of review are done, and the lead's last changes haven't been reviewed.${
           stuck.open === 0 ? '' : stuck.open === 1 ? ' One finding is still open.' : ` ${stuck.open} findings are still open.`
         }`
       case 'not_connected':
-        return "Charrette isn't connected to this repository's host, so it can't push the branch or open the pull request. Connect it, then try again."
+        return "Althar isn't connected to this repository's host, so it can't push the branch or open the pull request. Connect it, then try again."
       case 'usage_limit':
         return `${agent} reached its usage limit and didn't say when it resets.`
     }
   },
-  /** For the pull request, which Charrette opens itself: what went wrong. */
+  /** For the pull request, which Althar opens itself: what went wrong. */
   publishing: (stuck: StuckStep): string =>
     stuck.why === 'restarted'
-      ? 'Charrette restarted while it was opening the pull request.'
-      : `Charrette couldn't open the pull request.${stuck.detail === null ? '' : ` ${stuck.detail}`}`,
+      ? 'Althar restarted while it was opening the pull request.'
+      : `Althar couldn't open the pull request.${stuck.detail === null ? '' : ` ${stuck.detail}`}`,
   publish: {
     abandon: 'Go on without it',
     abandoned: 'Went on without it',
@@ -83,14 +83,14 @@ export function StuckCall({
   const others = agents.filter((candidate) => review || candidate.id !== stuck.agentId)
   const lastRound = stuck.why === 'round_limit'
   const out = stuck.why === 'usage_limit'
-  // Opening the pull request is Charrette's own step: tried again as it was, or gone on without.
+  // Opening the pull request is Althar's own step: tried again as it was, or gone on without.
   if (stuck.step === 'publish')
     return (
       <Stuck
         step={text.step.publish}
         what={stuck.why === 'not_connected' ? text.what(stuck, agent) : text.publishing(stuck)}
         tried={[]}
-        onAgain={() => onAnswer(request.id, { kind: 'retry', agentId: 'charrette' })}
+        onAgain={() => onAnswer(request.id, { kind: 'retry', agentId: 'althar' })}
         onAbandon={() => onAnswer(request.id, { kind: 'abandon' })}
         text={text.publish}
       />

@@ -66,7 +66,7 @@ const ROWS: readonly Row[] = [
 ]
 
 const US: Row = {
-  name: 'Charrette',
+  name: 'Althar',
   agents: ['free', 'Any, mixed within one task'],
   models: ['free', 'Any, including self-hosted'],
   automation: ['free', 'Next step decided from evidence, across labs'],

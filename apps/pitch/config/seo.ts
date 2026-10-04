@@ -1,7 +1,7 @@
 /* Page metadata that depends on where the site is deployed. Pure, so the
    prerender and the tests share it.
 
-   SITE_URL (e.g. https://charrette.dev) adds canonical links, absolute
+   SITE_URL (e.g. https://althar.dev) adds canonical links, absolute
    social-card URLs and a sitemap. SITE_NOINDEX=1 keeps a deployment out of search. */
 
 import type { PageMeta } from '../src/meta'
@@ -36,13 +36,13 @@ export function headTags(page: PageMeta, { origin, base, noindex }: SeoOptions):
   const meta = (k: 'name' | 'property', key: string, content: string): string => `<meta ${k}="${key}" content="${attr(content)}" />`
   const tags = [
     meta('property', 'og:type', 'website'),
-    meta('property', 'og:site_name', 'Charrette'),
+    meta('property', 'og:site_name', 'Althar'),
     meta('property', 'og:title', page.title),
     meta('property', 'og:description', page.description),
     meta('property', 'og:image', image),
     meta('property', 'og:image:width', '1200'),
     meta('property', 'og:image:height', '630'),
-    meta('property', 'og:image:alt', 'Charrette: agents come and go, the project stays.'),
+    meta('property', 'og:image:alt', 'Althar: agents come and go, the project stays.'),
     meta('name', 'twitter:card', 'summary_large_image'),
   ]
   if (url && !page.noindex) tags.push(meta('property', 'og:url', url), `<link rel="canonical" href="${attr(url)}" />`)

@@ -1,6 +1,6 @@
-# @charrette/ui
+# @althar/ui
 
-Charrette's interface components: the thread (messages, tool calls, steps, permissions), the composer, the coordinator's cards, the board, the dock beside it, a task's outputs, the window's chrome, and the primitives they are built from. Each component has Storybook stories for its states.
+Althar's interface components: the thread (messages, tool calls, steps, permissions), the composer, the coordinator's cards, the board, the dock beside it, a task's outputs, the window's chrome, and the primitives they are built from. Each component has Storybook stories for its states.
 
 The components are presentational. Data comes in as props, already resolved, and effects go out as callbacks. Nothing inside fetches, stores, or knows which project it is in. The app that uses them wires them to its own state.
 
@@ -8,14 +8,14 @@ It is early. Until the package has a second consumer, its API can change without
 
 ## Use it
 
-The package is private to this workspace and is consumed as TypeScript source. Add it to an app's dependencies as `"@charrette/ui": "workspace:*"`.
+The package is private to this workspace and is consumed as TypeScript source. Add it to an app's dependencies as `"@althar/ui": "workspace:*"`.
 
 ```tsx
-import '@charrette/ui/styles.css'
+import '@althar/ui/styles.css'
 import '@fontsource-variable/inter'
 import '@fontsource-variable/jetbrains-mono'
 
-import { Button, WorkedFor } from '@charrette/ui'
+import { Button, WorkedFor } from '@althar/ui'
 
 export function Example({ onStart }: { onStart: () => void }) {
   return (
@@ -31,10 +31,10 @@ export function Example({ onStart }: { onStart: () => void }) {
 }
 ```
 
-- **Styles.** Import `@charrette/ui/styles.css` once. It holds only the tokens and a base layer that any component rule overrides. Wrap the UI in `.ch-root`, which sets the type the components inherit, in portals too.
+- **Styles.** Import `@althar/ui/styles.css` once. It holds only the tokens and a base layer that any component rule overrides. Wrap the UI in `.ch-root`, which sets the type the components inherit, in portals too.
 - **Fonts.** The tokens ask for Inter and JetBrains Mono, and fall back to system fonts. The consumer loads them; the example uses the Fontsource packages Storybook uses.
 - **Copy.** A component's own words come from its `text` prop, with English defaults exported beside it (`workedForText`). Translations live in the consumer. Content such as a message or a title is an ordinary prop.
-- **Screens.** Whole screens (Welcome, Start, NewProject, ProjectRules) are on a separate entry, `@charrette/ui/screens`, so the main entry stays general.
+- **Screens.** Whole screens (Welcome, Start, NewProject, ProjectRules) are on a separate entry, `@althar/ui/screens`, so the main entry stays general.
 - **Peers.** React 19. Overlays are built on Radix (`radix-ui`), which comes with the package.
 
 ## Work on it

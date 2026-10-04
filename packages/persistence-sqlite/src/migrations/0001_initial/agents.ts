@@ -72,7 +72,7 @@ export const agents: ReadonlyArray<string> = [
   ),
 
   /*
-   * Every process Charrette starts. The row is written as `launching` before
+   * Every process Althar starts. The row is written as `launching` before
    * the spawn, so a crash in between still leaves something to reconcile, and
    * the OS start time guards against a reused pid.
    */
@@ -146,7 +146,7 @@ export const agents: ReadonlyArray<string> = [
 
   /*
    * Which code a workspace held, and when: at the start and end of each node,
-   * at a switch and at an interrupt. Charrette owns the worktree, so it can
+   * at a switch and at an interrupt. Althar owns the worktree, so it can
    * commit or write a tree there to take one.
    */
   table(

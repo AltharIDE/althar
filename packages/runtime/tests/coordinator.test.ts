@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
-import { scenarios } from '@charrette/provider-adapters/testing'
+import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -142,7 +142,7 @@ describe('the coordinator loop', () => {
       const copy = join(dirname(workspace?.path ?? ''), '.review', basename(workspace?.path ?? ''))
       const head = (cwd: string) => execFileSync('git', ['rev-parse', 'HEAD'], { cwd }).toString().trim()
       assert.strictEqual(head(copy), snapshots.at(-1)?.commitSha)
-      // Charrette commits nothing on the lead's branch: what is there, the lead committed.
+      // Althar commits nothing on the lead's branch: what is there, the lead committed.
       assert.deepStrictEqual(
         execFileSync('git', ['log', '--format=%an %s', `${workspace?.baseCommit}..HEAD`], { cwd: workspace?.path })
           .toString()
@@ -175,7 +175,7 @@ describe('the coordinator loop', () => {
       }
       assert.strictEqual(
         yield* callTool(lead, 'finish_step', { summary: 'Again.' }),
-        'No step is waiting on you, so Charrette keeps no summary now.',
+        'No step is waiting on you, so Althar keeps no summary now.',
       )
       // What the person says to a task goes to its lead, not the coordinator.
       assert.instanceOf(yield* Effect.flip(say(ready?.threadId ?? '', 'Hello')), NotFound)
@@ -372,7 +372,7 @@ describe('the coordinator loop', () => {
           summary: 'One thing.',
           findings: [{ severity: 'minor', claim: 'Say why.' }],
         }),
-        /^Charrette has your review\. The lead settles/,
+        /^Althar has your review\. The lead settles/,
       )
       const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
       assert.deepStrictEqual(
@@ -432,15 +432,15 @@ describe('the coordinator loop', () => {
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.seconds(30) }))),
   )
 
-  it.live('holds what came due while Charrette was closed', () =>
+  it.live('holds what came due while Althar was closed', () =>
     Effect.gen(function* () {
-      const file = join(mkdtempSync(join(tmpdir(), 'charrette-plans-')), 'charrette.sqlite')
+      const file = join(mkdtempSync(join(tmpdir(), 'althar-plans-')), 'althar.sqlite')
       const projectId = yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const { projectId: id, threadId } = yield* opened
         yield* say(threadId, 'Later. [coordinator:plan]')
         yield* until(cardsOf(id), (cards) => cards.length === 1)
-        // As if Charrette had closed before its time came.
+        // As if Althar had closed before its time came.
         yield* sql`UPDATE task_plans SET starts_at = '2020-01-01T00:00:00.000Z'`
         return id
       }).pipe(Effect.provide(withQueries(file, undefined, { countdown: Duration.minutes(5) })))
@@ -529,7 +529,7 @@ describe('a step that needs the person', () => {
       const turns = yield* sql<{
         prompt: string
       }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at`
-      assert.match(turns[1]?.prompt ?? '', /isn't done until you call Charrette's finish_step tool/)
+      assert.match(turns[1]?.prompt ?? '', /isn't done until you call Althar's finish_step tool/)
       assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'waiting')
       // Told what to do, the lead reports, and with no review the task is ready.
       yield* answer(call.id, { kind: 'tell', note: 'You are done: report it. [lead:finish]' })
@@ -566,7 +566,7 @@ describe('a step that needs the person', () => {
 
   it.live('needs the person for a step a restart stopped', () =>
     Effect.gen(function* () {
-      const file = join(mkdtempSync(join(tmpdir(), 'charrette-steps-')), 'charrette.sqlite')
+      const file = join(mkdtempSync(join(tmpdir(), 'althar-steps-')), 'althar.sqlite')
       const taskId = yield* Effect.gen(function* () {
         const sessions = yield* Sessions
         const { task } = yield* planned('Interrupted', '[lead:wait]', [{ key: 'implement', agentId: 'codex' }])
@@ -673,7 +673,7 @@ describe('a step that needs the person', () => {
   )
 })
 
-/** Calls one of Charrette's tools as a session with this access would. */
+/** Calls one of Althar's tools as a session with this access would. */
 describe('the coordinator', () => {
   it.live('speaks when spoken to, in its read-only copies, and is refused a write', () =>
     Effect.gen(function* () {
@@ -712,11 +712,11 @@ describe('the coordinator', () => {
       const config = yield* RuntimeConfig
       const sql = yield* SqlClient.SqlClient
       const origin = repository()
-      const clone = join(mkdtempSync(join(tmpdir(), 'charrette-clone-')), 'meridian')
+      const clone = join(mkdtempSync(join(tmpdir(), 'althar-clone-')), 'meridian')
       execFileSync('git', ['clone', '-q', origin, clone])
       // The remote moves on after the clone.
       writeFileSync(join(origin, 'README.md'), '# Meridian, later\n')
-      execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@charrette.test', 'commit', '-qam', 'Later'], { cwd: origin })
+      execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'commit', '-qam', 'Later'], { cwd: origin })
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: clone })
       const threadId = yield* coordinator.thread(project.projectId)
       const turns = sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId}`
@@ -732,7 +732,7 @@ describe('the coordinator', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live("serves Charrette's tools only to the session it granted them", () =>
+  it.live("serves Althar's tools only to the session it granted them", () =>
     Effect.gen(function* () {
       const toolServer = yield* ToolServer
       const { projectId, threadId } = yield* opened
@@ -800,19 +800,19 @@ describe("the coordinator's tools", () => {
       })
       // A lead has its own tools, not the coordinator's; with no step waiting, its summary is still kept.
       const lead: ToolAccess = { role: 'lead', projectId, threadId, sessionId: 'none', taskId: null }
-      assert.strictEqual(yield* callTool(lead, 'draft_task', { title: 'x' }), 'Charrette has no tool called draft_task.')
-      assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Did it.' }), 'Charrette has your summary.')
+      assert.strictEqual(yield* callTool(lead, 'draft_task', { title: 'x' }), 'Althar has no tool called draft_task.')
+      assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Did it.' }), 'Althar has your summary.')
       const reviewer: ToolAccess = { role: 'reviewer', projectId, threadId, sessionId: 'none', taskId: null }
       assert.strictEqual(yield* callTool(reviewer, 'report_review', { verdict: 'pass', summary: 'Fine.' }), 'No review is waiting on you.')
-      // What goes wrong inside Charrette is told as such, not as the agent's mistake.
+      // What goes wrong inside Althar is told as such, not as the agent's mistake.
       const elsewhere: ToolAccess = { role: 'coordinator', projectId: 'prj_missing', threadId, sessionId: 'none', taskId: null }
       assert.strictEqual(
         yield* callTool(elsewhere, 'draft_task', { title: 'x' }),
-        'Charrette could not do that. Try again, or tell the person.',
+        'Althar could not do that. Try again, or tell the person.',
       )
       assert.strictEqual(
         yield* callTool({ ...lead, threadId: 'thr_missing' }, 'finish_step', { summary: 'Did it.' }),
-        'Charrette could not record that. Try again.',
+        'Althar could not record that. Try again.',
       )
     }).pipe(Effect.provide(withQueries())),
   )

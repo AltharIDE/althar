@@ -3,8 +3,8 @@
 - **Status:** Accepted
 - **Date:** 2026-10-04
 - **Owner:** Repository maintainers
-- **Context:** Every permission request reaches Charrette
-  ([ADR-007](007-permission-requests-reach-charrette.md)), which answers it
+- **Context:** Every permission request reaches Althar
+  ([ADR-007](007-permission-requests-reach-althar.md)), which answers it
   from its own rules. In the MVP those were fixed in code: everything
   allowed, except a list of risky kinds that always asked. A project needs
   to set this for itself. As of October 2026 the agent tools have converged
@@ -82,22 +82,22 @@
   - **A task's ending is worked out once, when its plan is made:** the
     plan's own, else the project's, else a draft where the host is
     connected. A project that wants a pull request but whose repository
-    names no host Charrette knows ends on its branch.
-  - **They hold for what reaches Charrette:** what an agent asks to do beyond
+    names no host Althar knows ends on its branch.
+  - **They hold for what reaches Althar:** what an agent asks to do beyond
     its sandbox, which is the network or outside the task. The screen says
     so.
   - **Each change is a revision, recorded as the person's.** The rules as
     they are decide the next request; a run cites the revision it started
     under.
-  - **The screen offers only what Charrette does.**
+  - **The screen offers only what Althar does.**
     - "The lead decides", the modes with a model as judge in other tools,
       comes when the lead answers requests.
     - The review findings row and asking about a usage limit come later.
 - **Alternatives considered:**
   - **Each agent's own rule files** (`.claude/settings.json`, Codex's rules,
-    `opencode.json`). Each agent's differ in shape and reach. Charrette's
+    `opencode.json`). Each agent's differ in shape and reach. Althar's
     reading of a request is the one that holds across agents.
-  - **An allowlist** (Cursor's). Charrette is permissive by default, and the
+  - **An allowlist** (Cursor's). Althar is permissive by default, and the
     person keeps the exceptions; an allowlist inverts that. One could serve
     the `ask` mode later.
   - **A model as judge now.** It comes as the lead deciding, which has its
@@ -111,9 +111,9 @@
     Giving each agent the project's command rules in its own form would
     close that gap: Claude Code's ask rules, OpenCode's bash patterns, and
     Codex's rules.
-  - **The rules live in Charrette's store, not the repository**, so a team
+  - **The rules live in Althar's store, not the repository**, so a team
     can't share them yet.
 - **Revisit when:**
   - The lead answers requests.
-  - Charrette has a cloud, for shared or managed rules.
+  - Althar has a cloud, for shared or managed rules.
   - An agent's sandbox stops asking about what the rules need to see.

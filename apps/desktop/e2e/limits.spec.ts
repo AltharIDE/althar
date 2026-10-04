@@ -9,16 +9,16 @@ import { chooseFolder, launch } from './support'
 
 /*
  * An agent out of usage, as the person sees it. The fake agents are out as
- * CHARRETTE_FAKE_OUT says: for an hour, with the reset in their error, or
+ * ALTHAR_FAKE_OUT says: for an hour, with the reset in their error, or
  * for good, saying none. The project moves work on, as projects do unless
  * told to wait.
  */
 
 /** Opens a project and starts a task led by Claude Code, without a review, whose lead reports at once. */
 const startTask = async (out: string) => {
-  const home = mkdtempSync(join(tmpdir(), 'charrette-e2e-'))
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
-  const { electronApp, page } = await launch(home, { CHARRETTE_FAKE_OUT: out })
+  const { electronApp, page } = await launch(home, { ALTHAR_FAKE_OUT: out })
   await chooseFolder(electronApp, repo)
   await page.getByRole('button', { name: /Open a folder/ }).click()
   await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
@@ -55,7 +55,7 @@ test('hands the task to the next free agent when its lead is out of usage', asyn
 test('waits for the reset where no other agent is free, and says so on its card, the board and the dock', async () => {
   const { electronApp, page } = await startTask('claude-code:3600,codex:3600')
   try {
-    // Charrette learns an agent is out when it tries it: Claude Code first, then Codex, which it waits for.
+    // Althar learns an agent is out when it tries it: Claude Code first, then Codex, which it waits for.
     await expect(page.getByText(/^Waits for Codex, back at /)).toBeVisible({ timeout: 15_000 })
     await page.screenshot({ path: 'test-results/limit-waits-card.png', animations: 'disabled' })
     await page.getByRole('radio', { name: /^Board/ }).click()

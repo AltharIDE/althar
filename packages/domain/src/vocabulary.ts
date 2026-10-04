@@ -73,7 +73,7 @@ export const ThreadItemKind = Schema.Literals([
   'plan',
   'step_result',
   'notice',
-  /** A task in the coordinator's thread: its plan, then its card. Charrette posts it. */
+  /** A task in the coordinator's thread: its plan, then its card. Althar posts it. */
   'task',
   /** Something heard from outside, written by someone else: a comment on the task's pull request, its checks. */
   'arrival',
@@ -138,7 +138,7 @@ export type FindingSeverity = typeof FindingSeverity.Type
 export const FindingState = Schema.Literals(['open', 'fixed', 'set_aside', 'dismissed'])
 export type FindingState = typeof FindingState.Type
 
-/** Why Charrette recorded what code a workspace held. */
+/** Why Althar recorded what code a workspace held. */
 export const SnapshotReason = Schema.Literals(['node_started', 'node_ended', 'switch', 'interrupt'])
 export type SnapshotReason = typeof SnapshotReason.Type
 
@@ -172,7 +172,7 @@ export type WorkItemState = typeof WorkItemState.Type
 export const MutationState = Schema.Literals(['intended', 'confirmed', 'failed', 'uncertain'])
 export type MutationState = typeof MutationState.Type
 
-/** The code hosts and trackers Charrette connects to (docs/architecture/06). Cloud and Data Center are separate products. */
+/** The code hosts and trackers Althar connects to (docs/architecture/06). Cloud and Data Center are separate products. */
 export const ConnectionProduct = Schema.Literals([
   'github',
   'gitlab',

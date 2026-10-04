@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import type { ChangeSummary, ThreadSnapshot } from '@charrette/contracts'
+import type { ChangeSummary, ThreadSnapshot } from '@althar/contracts'
 import {
   BackCrumb,
   Button,
@@ -24,7 +24,7 @@ import {
   ThreadDivider,
   ThreadMeasure,
   TitleBar,
-} from '@charrette/ui'
+} from '@althar/ui'
 
 import { useModels } from '../../data/models'
 import { modelInfo, waitsWords } from '../../shared/agents'

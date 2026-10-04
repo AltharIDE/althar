@@ -1,8 +1,8 @@
 import { create } from 'storybook/theming'
 
 /*
- * Storybook in Charrette's own materials: the window's chrome around the
- * page, ink type, and cobalt, Charrette's colour, for where you are. Values
+ * Storybook in Althar's own materials: the window's chrome around the
+ * page, ink type, and cobalt, Althar's colour, for where you are. Values
  * mirror src/styles/tokens.css; the manager cannot read CSS variables.
  */
 /* The favicon's tile: the Logo's ruler section in paper on cobalt (src/foundations/Logo). */
@@ -10,7 +10,7 @@ const mark = `<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"
 
 export const theme = create({
   base: 'light',
-  brandTitle: `<span style="display:inline-flex;align-items:center;gap:9px;font:600 14px/1 'Inter Variable',Inter,system-ui,sans-serif;letter-spacing:-0.01em;color:#141417">${mark}Charrette<span style="font:500 10.5px/1 'JetBrains Mono Variable',ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;color:#6f6f77">ui</span></span>`,
+  brandTitle: `<span style="display:inline-flex;align-items:center;gap:9px;font:600 14px/1 'Inter Variable',Inter,system-ui,sans-serif;letter-spacing:-0.01em;color:#141417">${mark}Althar<span style="font:500 10.5px/1 'JetBrains Mono Variable',ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;color:#6f6f77">ui</span></span>`,
   brandTarget: '_self',
 
   colorPrimary: '#141417',

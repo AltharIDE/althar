@@ -61,7 +61,7 @@ function Face({ busy, children, initialDoc }: { busy?: boolean; children: ReactN
     <StepPanel
       step={{ ...STEPS.review, ...step }}
       agents={[SONNET, GEMINI_PRO]}
-      instructions={{ path: '.charrette/review.md', ...reviewDoc }}
+      instructions={{ path: '.althar/review.md', ...reviewDoc }}
       body={() => <Prose>Both reviewers read the router and the limiter.</Prose>}
       composer={<Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Tell the reviewers" />}
       onClose={() => setStep(null)}

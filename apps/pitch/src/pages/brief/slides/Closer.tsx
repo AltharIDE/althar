@@ -16,7 +16,7 @@ export function Closer() {
           <span>Research note</span>The missing project layer: the full argument, in depth<i aria-hidden="true">→</i>
         </a>
         <p className={s.foot}>
-          <span>Charrette · open source</span>
+          <span>Althar · open source</span>
         </p>
       </div>
       <Wordmark />

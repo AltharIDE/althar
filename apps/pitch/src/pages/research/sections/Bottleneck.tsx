@@ -27,7 +27,7 @@ export function Bottleneck() {
               “can the project keep its intent and move the work to a trustworthy result, without a developer conducting every transition by
               hand?”
             </em>{' '}
-            Charrette treats this as one problem with two halves: memory and ownership, and attention and orchestration.
+            Althar treats this as one problem with two halves: memory and ownership, and attention and orchestration.
           </p>
         </div>
       </section>

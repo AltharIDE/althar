@@ -58,7 +58,7 @@ export function Market() {
                   <td className={s.lock}>Files in each lab’s own format</td>
                 </tr>
                 <tr className={s.isUs}>
-                  <td>Charrette</td>
+                  <td>Althar</td>
                   <td className={s.free}>Any</td>
                   <td className={s.free}>Any, including self-hosted</td>
                   <td className={s.free}>Your subscriptions</td>

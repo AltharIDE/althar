@@ -10,7 +10,7 @@ import { commitOf, fetchBranch, git } from './git'
 import { Instance } from './Instance'
 
 /*
- * The coordinator's working folder (docs/architecture/04): a Charrette-owned
+ * The coordinator's working folder (docs/architecture/04): an Althar-owned
  * folder with a worktree of each of the project's repositories, detached at
  * its default branch. Each is brought up to date with the remote before the
  * coordinator's turn, and anything written there is thrown away when it is:

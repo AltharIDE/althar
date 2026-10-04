@@ -1,4 +1,4 @@
-import { Brand } from '@charrette/ui'
+import { Brand } from '@althar/ui'
 import { describe, expect, it } from 'vitest'
 
 import { brandOf, modelInfo } from '../src/renderer/shared/agents'

@@ -1,6 +1,6 @@
 # Pitch architecture
 
-This is the durable target for `@charrette/pitch`, under the repository-wide [architecture](../../ARCHITECTURE.md). The site is a self-contained public document. Its job is to explain Charrette's thesis in a short brief and a longer research note. It does not own accounts, user data, or backend state. Repository maintainers own this app.
+This is the durable target for `@althar/pitch`, under the repository-wide [architecture](../../ARCHITECTURE.md). The site is a self-contained public document. Its job is to explain Althar's thesis in a short brief and a longer research note. It does not own accounts, user data, or backend state. Repository maintainers own this app.
 
 ## Pages and data flow
 

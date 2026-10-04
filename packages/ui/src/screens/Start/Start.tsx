@@ -9,7 +9,7 @@ import { Runtimes, type RuntimesProps } from '../../setup/Runtimes/Runtimes'
 import s from './Start.module.css'
 
 /*
- * The first thing Charrette shows, before there is a project: which agents
+ * The first thing Althar shows, before there is a project: which agents
  * it found on this machine and how each is signed in, then the way in: a
  * project. Nothing here is a step to finish. A project can be made with no
  * agent ready; its tasks start once one is.
@@ -27,9 +27,9 @@ export interface StartText {
 }
 
 export const startText: StartText = {
-  title: 'Charrette',
+  title: 'Althar',
   agents: 'Agents on this Mac',
-  agentsNote: 'Each keeps its own sign-in. Charrette asks it who you are, and never sees a password or a key.',
+  agentsNote: 'Each keeps its own sign-in. Althar asks it who you are, and never sees a password or a key.',
   noneReady: 'No agent is ready yet. You can still make a project; its tasks start once one is.',
   begin: 'Your first project',
   project:

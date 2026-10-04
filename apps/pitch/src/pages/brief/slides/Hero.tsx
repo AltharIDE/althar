@@ -51,7 +51,7 @@ function move(p: number, live: boolean, el: HTMLElement): void {
 
 export function Hero() {
   return (
-    <Pin id="top" tone="light" name="Charrette" className={s.hero} stickClassName={s.stick} steps={2} onProgress={move}>
+    <Pin id="top" tone="light" name="Althar" className={s.hero} stickClassName={s.stick} steps={2} onProgress={move}>
       {() => (
         <>
           <div className={cx(ui.wrap, s.copy)}>
@@ -59,8 +59,8 @@ export function Hero() {
             <Headline />
             <div className={s.row}>
               <p className={s.dek}>
-                Charrette gives a software project <b>a memory it owns</b> and <b>a coordinator that moves the work</b> between AI agents.
-                Any agent, any model, your own subscriptions, on your own servers.
+                Althar gives a software project <b>a memory it owns</b> and <b>a coordinator that moves the work</b> between AI agents. Any
+                agent, any model, your own subscriptions, on your own servers.
               </p>
               <aside className={s.prop}>
                 <b>The proposition</b>
@@ -82,7 +82,7 @@ export function Hero() {
                   width={1440}
                   height={780}
                   fetchPriority="high"
-                  alt="The Charrette board: tasks grouped as Up next, Running, Needs you and Settled, each showing its step, model and progress, with the decisions laid out as choices."
+                  alt="The Althar board: tasks grouped as Up next, Running, Needs you and Settled, each showing its step, model and progress, with the decisions laid out as choices."
                 />
               </picture>
             </div>

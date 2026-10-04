@@ -16,7 +16,7 @@ import { NoteForm } from '../../primitives/NoteForm/NoteForm'
 import s from './ChangeSet.module.css'
 
 /*
- * What a task changed, as its code host would show it and as Charrette knows it:
+ * What a task changed, as its code host would show it and as Althar knows it:
  * one piece of work, with as many pull requests as it has repositories,
  * merged in an order and never as one. Who led it and who reviewed it, the
  * files by how much they changed, and every check. When all of them pass it

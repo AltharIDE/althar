@@ -29,7 +29,7 @@ export const NothingConnected: Story = {}
 /** Signed in on github.com and a company's own server; Linear's sign-in stopped working and asks to be done again. */
 export const Connected: Story = { args: { connections: CONNECTED } }
 
-/** GitHub's own sign-in: a code to type on its page, while Charrette waits. */
+/** GitHub's own sign-in: a code to type on its page, while Althar waits. */
 export const TypingACode: Story = {
   args: { signingIn: { service: 'github', kind: 'device', code: 'ABCD-1234', url: 'https://github.com/login/device' } },
   play: async ({ args, canvasElement }) => {
@@ -41,7 +41,7 @@ export const TypingACode: Story = {
   },
 }
 
-/** A sign-in approved in the browser, which comes back to Charrette. */
+/** A sign-in approved in the browser, which comes back to Althar. */
 export const ApprovingInTheBrowser: Story = {
   args: { signingIn: { service: 'github', kind: 'browser', url: 'https://github.com/login/oauth/authorize?client_id=x' } },
 }

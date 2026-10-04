@@ -1,4 +1,4 @@
-import { BrandMark } from '@charrette/ui'
+import { BrandMark } from '@althar/ui'
 import { useEffect, useRef, useState } from 'react'
 
 import { AGENTS } from '../content/facts'

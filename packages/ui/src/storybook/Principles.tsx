@@ -17,7 +17,7 @@ import { TaskGlyph } from '../primitives/TaskGlyph/TaskGlyph'
 import s from './Principles.module.css'
 
 /*
- * The Charrette team's design principles, written for anyone outside the
+ * The Althar team's design principles, written for anyone outside the
  * team: what we believe, what you would notice because of it, and a real
  * component where you can see it. Every specimen is the component itself.
  */
@@ -60,7 +60,7 @@ const PRINCIPLES: Principle[] = [
       },
     ],
     specimen: <Colours />,
-    caption: 'The five inks, each where Charrette uses it, and the window’s status line reading the same way.',
+    caption: 'The five inks, each where Althar uses it, and the window’s status line reading the same way.',
     story: 'chrome-workstatus--all-states',
   },
   {
@@ -95,7 +95,7 @@ const PRINCIPLES: Principle[] = [
     id: 'intuitive',
     title: 'Obsessively intuitive',
     belief:
-      'You shouldn’t have to learn Charrette. We keep at it until the obvious guess is the right one: the button you reach for does what you meant, and the key you would try first works.',
+      'You shouldn’t have to learn Althar. We keep at it until the obvious guess is the right one: the button you reach for does what you meant, and the key you would try first works.',
     notice: [
       {
         lead: 'Controls follow the moment, not a mode.',
@@ -126,7 +126,7 @@ const PRINCIPLES: Principle[] = [
     notice: [
       {
         lead: 'Other tools look like themselves.',
-        body: 'Paste a Linear link and it unfolds into Linear’s card, its status and priority drawn the way Linear draws them. The only place Linear’s colour appears in Charrette is on Linear’s card.',
+        body: 'Paste a Linear link and it unfolds into Linear’s card, its status and priority drawn the way Linear draws them. The only place Linear’s colour appears in Althar is on Linear’s card.',
       },
       {
         lead: 'Decoration holds still.',
@@ -152,8 +152,8 @@ export function PrinciplesHero() {
     <header className={s.hero}>
       <h1 className={s.title}>Principles</h1>
       <p className={s.lede}>
-        Charrette is where agents do the work while you do yours. These are the four ideas the Charrette team designs by, and the details
-        where you can see each one.
+        Althar is where agents do the work while you do yours. These are the four ideas the Althar team designs by, and the details where
+        you can see each one.
       </p>
       <nav aria-label="Principles" className={s.index}>
         {PRINCIPLES.map((p, i) => (
@@ -197,12 +197,12 @@ export function PrinciplesList() {
           </figure>
         </section>
       ))}
-      <p className={s.close}>When Charrette falls short of one of these, we treat it as a bug.</p>
+      <p className={s.close}>When Althar falls short of one of these, we treat it as a bug.</p>
     </div>
   )
 }
 
-/* The five inks, each shown where Charrette uses it. */
+/* The five inks, each shown where Althar uses it. */
 function Colours() {
   const rows: { ink: string; name: string; means: string; shown: ReactNode }[] = [
     {

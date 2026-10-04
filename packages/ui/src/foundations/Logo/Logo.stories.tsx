@@ -58,7 +58,7 @@ export const Lockup: Story = {
           node: (
             <span className={s.lockup}>
               <Logo size={18} />
-              Charrette
+              Althar
             </span>
           ),
         },
@@ -67,7 +67,7 @@ export const Lockup: Story = {
           node: (
             <span className={`${s.lockup} ${s.lockupLarge}`}>
               <Logo size={40} />
-              Charrette
+              Althar
             </span>
           ),
         },

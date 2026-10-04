@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { BoardSnapshot, BoardTask } from '@charrette/contracts'
+import type { BoardSnapshot, BoardTask } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { newestReads } from '../../shared/items'

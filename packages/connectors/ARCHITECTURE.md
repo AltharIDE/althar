@@ -1,4 +1,4 @@
-# @charrette/connectors — Architecture
+# @althar/connectors — Architecture
 
 The code host and tracker connectors of [docs/architecture/06](../../docs/architecture/06-integrations-and-skills.md). The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target.
 
@@ -25,7 +25,7 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 - **A service's own words reach the screen; its shapes don't.** Changes, checks, reviews, comments and issues are the model's; the adapter converts, including text to Markdown.
 - **Every answer is read through a schema.** An answer that doesn't fit fails as `invalid_response`, never as a wrong value downstream.
 - **Cheap "anything new?".** A GET can be cached by its ETag, so polling an unchanged pull request costs GitHub's rate limit nothing; activity reads from a cursor.
-- **No secret of Charrette's.** Sign-in is the device flow or PKCE, which need none; anything else is a token the person pastes. Credentials are asked for per call and never logged.
+- **No secret of Althar's.** Sign-in is the device flow or PKCE, which need none; anything else is a token the person pastes. Credentials are asked for per call and never logged.
 - **Idempotent where the service isn't.** Opening a change first finds one already open from its branch.
 
 ## Checks
@@ -38,4 +38,4 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 
 - **GitLab, Jira, Bitbucket and Trello** have no adapter yet; `products.ts` lists them, and nothing offers them.
 - **Pagination** stops at the first hundred: of comments since a cursor, of reviews, of checks.
-- **Webhooks** aren't here: listening polls until Charrette has a cloud.
+- **Webhooks** aren't here: listening polls until Althar has a cloud.

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { ConnectionList, Product } from '@charrette/contracts'
-import type { ServiceSignIn, ServiceToken } from '@charrette/ui'
+import type { ConnectionList, Product } from '@althar/contracts'
+import type { ServiceSignIn, ServiceToken } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import { useServices, useWatch } from '../../data/services'

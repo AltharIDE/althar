@@ -1,6 +1,6 @@
 /*
  * Whether each agent, in its read-only mode, calls a tool from an MCP server
- * Charrette serves over HTTP: what the coordinator stands on (docs/architecture/04).
+ * Althar serves over HTTP: what the coordinator stands on (docs/architecture/04).
  * It starts a one-tool server, asks each agent once to call it, and prints the
  * permission requests and questions that came, and whether the call arrived.
  * It sends one short prompt per agent, so it costs a little usage.
@@ -24,7 +24,7 @@ import { join } from 'node:path'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import { agents, type AgentId, connect } from '@charrette/provider-adapters'
+import { agents, type AgentId, connect } from '@althar/provider-adapters'
 import { Effect, Stream } from 'effect'
 
 const TOKEN = 'probe-token'
@@ -36,12 +36,12 @@ const http = createServer(async (req, res) => {
     res.writeHead(401).end()
     return
   }
-  const server = new Server({ name: 'charrette', version: '0.0.0' }, { capabilities: { tools: {} } })
+  const server = new Server({ name: 'althar', version: '0.0.0' }, { capabilities: { tools: {} } })
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
         name: 'draft_task',
-        description: 'Drafts a task in Charrette. Takes its title.',
+        description: 'Drafts a task in Althar. Takes its title.',
         inputSchema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] },
       },
     ],
@@ -64,7 +64,7 @@ const probe = (id: AgentId) =>
   Effect.scoped(
     Effect.gen(function* () {
       const definition = agents[id]
-      const cwd = mkdtempSync(join(tmpdir(), `charrette-tools-${id}-`))
+      const cwd = mkdtempSync(join(tmpdir(), `althar-tools-${id}-`))
       const asked: Array<string> = []
       const connection = yield* connect({
         transport: { _tag: 'Process', spec: definition.launch(process.execPath), cwd },
@@ -73,7 +73,7 @@ const probe = (id: AgentId) =>
           Effect.sync(() => {
             asked.push(`permission: ${request.kind} "${request.title}" ${JSON.stringify(request.rawInput ?? null).slice(0, 200)}`)
             const said = `${request.title} ${JSON.stringify(request.rawInput ?? null)}`
-            return /draft_task|charrette/i.test(said) || process.env.ALLOW_ALL === '1'
+            return /draft_task|althar/i.test(said) || process.env.ALLOW_ALL === '1'
               ? { decision: 'allow' as const }
               : { decision: 'reject' as const, reason: 'Not in this probe.' }
           }),
@@ -87,14 +87,14 @@ const probe = (id: AgentId) =>
         cwd,
         mode: process.argv[3] === 'ask' ? definition.modes.ask : definition.modes.readOnly,
         modeOptionId: definition.options.mode,
-        mcpServers: [{ type: 'http', name: 'charrette', url, headers: { Authorization: `Bearer ${TOKEN}` } }],
+        mcpServers: [{ type: 'http', name: 'althar', url, headers: { Authorization: `Bearer ${TOKEN}` } }],
         ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta() }),
       })
       const tools: Array<string> = []
       let said = ''
       yield* Stream.runForEach(
         session.prompt(
-          'Call the draft_task tool from the charrette MCP server with the title "Probe". Do nothing else, then reply with the word done.',
+          'Call the draft_task tool from the althar MCP server with the title "Probe". Do nothing else, then reply with the word done.',
         ),
         (event) =>
           Effect.sync(() => {

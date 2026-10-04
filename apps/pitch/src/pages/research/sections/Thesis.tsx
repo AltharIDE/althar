@@ -5,11 +5,11 @@ export function Thesis() {
   return (
     <>
       <section className={s.s} id="s4">
-        <p className={s.sN}>4 · The Charrette thesis</p>
+        <p className={s.sN}>4 · The Althar thesis</p>
         <h2>Manage intent and evidence. Treat agent sessions as replaceable compute.</h2>
         <div className={s.prose}>
           <p>
-            Charrette is a control plane above coding agents. It owns the durable representation of the project and its tasks. Agents are
+            Althar is a control plane above coding agents. It owns the durable representation of the project and its tasks. Agents are
             workers, chosen for capability, availability, cost or trust.
           </p>
         </div>
@@ -38,7 +38,7 @@ export function Thesis() {
         </div>
         <figure className={s.ex}>
           <figcaption className={s.exH}>
-            <b>Figure 3</b> Where Charrette sits
+            <b>Figure 3</b> Where Althar sits
           </figcaption>
           <div className={s.layers}>
             <div className={s.ly}>
@@ -51,7 +51,7 @@ export function Thesis() {
             </div>
             <div className={cx(s.ly, s.isUs)}>
               <p className={s.lyK}>
-                Charrette<small>Persists with the project</small>
+                Althar<small>Persists with the project</small>
               </p>
               <div className={s.lyCore}>
                 <div>
@@ -76,9 +76,9 @@ export function Thesis() {
             </div>
           </div>
           <p className={s.exCap}>
-            Charrette drives the official agent tools through their own interfaces, under their own terms, on the user’s own plans. It holds
-            no model weights and resells no tokens. The only thing it owns is the project record, and that is stored in an open format the
-            team can read without Charrette.
+            Althar drives the official agent tools through their own interfaces, under their own terms, on the user’s own plans. It holds no
+            model weights and resells no tokens. The only thing it owns is the project record, and that is stored in an open format the team
+            can read without Althar.
           </p>
         </figure>
         <div className={s.prose}>

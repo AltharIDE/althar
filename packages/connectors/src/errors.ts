@@ -11,7 +11,7 @@ import { Schema } from 'effect'
  * - `unreachable`: the network, or the service, didn't answer.
  * - `rejected`: the service refused the request as it stands, such as a
  *   pull request whose branch has nothing to merge.
- * - `invalid_response`: an answer Charrette couldn't read.
+ * - `invalid_response`: an answer Althar couldn't read.
  */
 export class ConnectorFailed extends Schema.TaggedError<ConnectorFailed>()('ConnectorFailed', {
   product: Schema.String,

@@ -3,8 +3,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Api, ApiError, type DomMessagePort, emitterPort, serverProtocol, type WatchEvent } from '@charrette/contracts'
-import { connection, Folders, services } from '@charrette/runtime'
+import { Api, ApiError, type DomMessagePort, emitterPort, serverProtocol, type WatchEvent } from '@althar/contracts'
+import { connection, Folders, services } from '@althar/runtime'
 import { Context, Effect, Exit, Layer, Scope, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -39,7 +39,7 @@ const connected = async () => {
     Layer.buildWithScope(
       services({
         database: ':memory:',
-        worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
+        worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
         appVersion: '0.0.0-test',
         deviceName: 'Test Mac',
         agents: fakeAgents,
@@ -258,7 +258,7 @@ describe('messages', () => {
   it('says what went wrong: the runtime’s words, or that it didn’t answer', () => {
     expect(messageOf(new ApiError({ reason: 'NotARepository', message: 'Not a repository' }))).toBe('Not a repository')
     expect(messageOf(new Error('RpcClientError: the port closed'))).toBe(
-      "Charrette's runtime didn't answer. If it keeps happening, restart Charrette.",
+      "Althar's runtime didn't answer. If it keeps happening, restart Althar.",
     )
   })
 
@@ -272,8 +272,8 @@ describe('messages', () => {
     const received = receivePort(target)
     const { port1 } = new MessageChannel()
     target.dispatchEvent(new MessageEvent('message', { data: 'something else', ports: [port1] }))
-    target.dispatchEvent(new MessageEvent('message', { data: 'charrette:port' }))
-    target.dispatchEvent(new MessageEvent('message', { data: 'charrette:port', ports: [port1] }))
+    target.dispatchEvent(new MessageEvent('message', { data: 'althar:port' }))
+    target.dispatchEvent(new MessageEvent('message', { data: 'althar:port', ports: [port1] }))
     expect(await received).toBe(port1)
     port1.close()
   })

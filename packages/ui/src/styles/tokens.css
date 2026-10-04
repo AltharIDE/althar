@@ -1,5 +1,5 @@
 :root {
-  /* Paper — warm paper and ink. Cobalt is Charrette and the work it runs,
+  /* Paper — warm paper and ink. Cobalt is Althar and the work it runs,
      violet is a person's call. Everything else is ink on paper. */
   color-scheme: light;
 
@@ -46,7 +46,7 @@
   --on-signal: #ffffff;
 
   /* ---- Cobalt ------------------------------------------------------------
-     Charrette's own colour: the work it is running right now.               */
+     Althar's own colour: the work it is running right now.               */
   --live: #2b3bff;
   --live-dim: rgba(43, 59, 255, 0.1);
   --danger: #c4402f;

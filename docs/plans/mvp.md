@@ -30,7 +30,7 @@ the task itself. For now the catalogue has two:
 
 | Step | Who | What it does |
 |---|---|---|
-| Implement | The lead | Does the task as it sees fit, then ends the step by reporting to Charrette through its tool, with a summary |
+| Implement | The lead | Does the task as it sees fit, then ends the step by reporting to Althar through its tool, with a summary |
 | Review | Another agent | Read-only. By default on another provider's strongest model. Returns a verdict and findings. The lead settles them in its own session. Up to 3 rounds |
 
 ```mermaid

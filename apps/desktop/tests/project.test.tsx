@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type CoordinatorSnapshot } from '@charrette/contracts'
+import { ApiError, type CoordinatorSnapshot } from '@althar/contracts'
 
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'

@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
-import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@charrette/contracts'
-import { AgentExited, AgentRequestFailed, AgentStartFailed, OptionUnavailable, TurnInProgress } from '@charrette/provider-adapters'
-import { scenarios } from '@charrette/provider-adapters/testing'
+import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
+import { AgentExited, AgentRequestFailed, AgentStartFailed, OptionUnavailable, TurnInProgress } from '@althar/provider-adapters'
+import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Cause, Context, Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -29,8 +29,8 @@ import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
 import { Connectors } from '../src/Config'
 import { Secrets } from '../src/Secrets'
-import { ConnectorFailed, products } from '@charrette/connectors'
-import { makeFakeService } from '@charrette/connectors/testing'
+import { ConnectorFailed, products } from '@althar/connectors'
+import { makeFakeService } from '@althar/connectors/testing'
 
 import { fakeAgents, fakeConnectors, HOST, hosted, repository } from './support'
 
@@ -55,13 +55,13 @@ const connected = (
     const context = yield* Layer.build(
       services({
         database: ':memory:',
-        worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
+        worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
         appVersion: '0.0.0-test',
         deviceName: 'Test Mac',
         agents: fakeAgents({}, options.signedOut),
         secrets: Secrets.memory(),
         connectors: options.connectors ?? fakeConnectors({}),
-        accountsRoot: mkdtempSync(join(tmpdir(), 'charrette-accounts-')),
+        accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
         ...(options.noTerminal === true
           ? {}
           : { openTerminal: (line: string) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(true)) }),
@@ -119,7 +119,7 @@ describe('the API', () => {
         const creating = { commandId: commandId(), projectId: project.id, title: 'Say hello', description: 'Briefly.' }
         const task = yield* client.CreateTask(creating)
         assert.strictEqual((yield* client.CreateTask(creating)).id, task.id)
-        assert.strictEqual(task.branch, 'charrette/say-hello')
+        assert.strictEqual(task.branch, 'althar/say-hello')
         const listed = yield* client.ListProjects()
         assert.deepStrictEqual(
           listed.projects.map((summary) => [summary.id, summary.tasks]),
@@ -287,7 +287,7 @@ describe('the API', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
-        const plain = mkdtempSync(join(tmpdir(), 'charrette-plain-'))
+        const plain = mkdtempSync(join(tmpdir(), 'althar-plain-'))
         const error = yield* Effect.flip(client.OpenProject({ commandId: commandId(), grant: yield* grant(plain) }))
         assert.instanceOf(error, ApiError)
         assert.deepStrictEqual(
@@ -309,14 +309,14 @@ describe('the API', () => {
         const refused = yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'missing' }))
         assert.deepStrictEqual(
           [refused.reason, refused.message],
-          ['SessionFailed', "missing couldn't start. charrette-no-such-agent isn't installed, or isn't on this Mac's PATH."],
+          ['SessionFailed', "missing couldn't start. althar-no-such-agent isn't installed, or isn't on this Mac's PATH."],
         )
         const thread = yield* client.GetThread({ threadId: task.threadId })
         assert.deepStrictEqual(thread.items.at(-1)?.content, {
           source: 'runtime',
           severity: 'error',
           title: "Fake missing couldn't start.",
-          description: "charrette-no-such-agent isn't installed, or isn't on this Mac's PATH.",
+          description: "althar-no-such-agent isn't installed, or isn't on this Mac's PATH.",
         })
         assert.strictEqual(
           (yield* Effect.flip(client.GetThreadItem({ threadId: task.threadId, itemId: 'itm_missing' }))).reason,
@@ -342,7 +342,7 @@ describe('accounts, through the API', () => {
           const work = yield* client.AddAccount({ commandId: commandId(), agentId: 'codex', name: 'work' })
           assert.isNotNull(work.home)
           assert.strictEqual(work.adoptedFrom, null)
-          const chosen = mkdtempSync(join(tmpdir(), 'charrette-chosen-'))
+          const chosen = mkdtempSync(join(tmpdir(), 'althar-chosen-'))
           const client2 = yield* client.AddAccount({
             commandId: commandId(),
             agentId: 'codex',
@@ -666,7 +666,7 @@ describe('code hosts and trackers, through the API', () => {
           ],
         )
         assert.lengthOf(offered.connections, 0)
-        // Without Charrette's app registered, the browser sign-in isn't offered; a pasted token is.
+        // Without Althar's app registered, the browser sign-in isn't offered; a pasted token is.
         const unavailable = yield* Effect.flip(client.StartSignIn({ commandId: commandId(), product: 'github' }))
         assert.strictEqual(unavailable.reason, 'SignInUnavailable')
         assert.strictEqual((yield* Effect.flip(client.GetSignIn({ flowId: 'nope' }))).reason, 'NotFound')
@@ -706,7 +706,7 @@ describe('code hosts and trackers, through the API', () => {
           steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
           issue: 'MER-231',
         })
-        assert.strictEqual(started.branch, 'charrette/mer-231-rate-limit-refunds')
+        assert.strictEqual(started.branch, 'althar/mer-231-rate-limit-refunds')
         const thread = yield* eventually(client.GetThread({ threadId: started.threadId }), (snapshot) => snapshot.task.changes.length === 1)
         assert.strictEqual(thread.task.issue?.key, 'MER-231')
         assert.deepInclude(thread.task.changes[0], { number: 1, draft: true, state: 'open', short: 'PR', prefix: '#' })
@@ -736,7 +736,7 @@ describe('code hosts and trackers, through the API', () => {
 
         // A task created from #12 keeps it as its issue.
         const created = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Fix the limit', issue: '#12' })
-        assert.strictEqual(created.branch, 'charrette/issue-12-fix-the-limit')
+        assert.strictEqual(created.branch, 'althar/issue-12-fix-the-limit')
 
         // A planned task's ending can change before it starts.
         const planned = yield* client.StartTask({
@@ -763,7 +763,7 @@ describe('words', () => {
     assert.strictEqual(said(new NotARepository({ path: '/tmp/x' })), "/tmp/x isn't in a git repository. Choose a folder inside one.")
     assert.strictEqual(said(new NotFound({ kind: 'attention_request', id: 'a' })), "That call isn't there any more.")
     assert.strictEqual(said(new NotFound({ kind: 'something new', id: 'a' })), "That thing isn't there any more.")
-    assert.strictEqual(said({ _tag: 'UnknownAgent', agentId: 'cursor' }), 'Charrette has no agent called cursor.')
+    assert.strictEqual(said({ _tag: 'UnknownAgent', agentId: 'cursor' }), 'Althar has no agent called cursor.')
     assert.strictEqual(said({ _tag: 'SessionRunning' }), 'An agent is already working on this task.')
     assert.strictEqual(said(new SessionFailed({ agentId: 'codex', reason: 'stack', summary: '' })), "Codex couldn't start.")
     assert.strictEqual(
@@ -783,26 +783,26 @@ describe('words', () => {
     )
     assert.strictEqual(said(new GitFailed({ args: ['fetch'], cwd: '/r', stderr: '' })), "git fetch didn't work.")
     assert.strictEqual(said({ _tag: 'CommandIdReused' }), 'That request was already used for something else. Try again.')
-    assert.strictEqual(said({ _tag: 'DatabaseInUse' }), 'Another copy of Charrette is using this profile.')
+    assert.strictEqual(said({ _tag: 'DatabaseInUse' }), 'Another copy of Althar is using this profile.')
     assert.strictEqual(said(new TurnInProgress({ sessionId: 's' })), 'The lead is still on its last turn.')
     // What a code host or tracker said, or why it couldn't be asked.
     const host = (reason: ConnectorFailed['reason'], message = '') => said(new ConnectorFailed({ product: 'github', reason, message }))
-    assert.strictEqual(host('unauthorized'), "GitHub no longer takes Charrette's sign-in. Sign in to it again.")
+    assert.strictEqual(host('unauthorized'), "GitHub no longer takes Althar's sign-in. Sign in to it again.")
     assert.strictEqual(host('forbidden', 'Resource not accessible'), "GitHub won't let this account do that: Resource not accessible.")
     assert.strictEqual(host('forbidden'), "GitHub won't let this account do that.")
     assert.strictEqual(host('not_found'), "GitHub can't find it any more.")
-    assert.strictEqual(host('rate_limited'), 'GitHub is asking Charrette to slow down. Try again in a little while.')
-    assert.strictEqual(host('unreachable'), "Charrette couldn't reach GitHub. Try again in a moment.")
-    assert.strictEqual(host('invalid_response'), "GitHub answered in a way Charrette didn't understand.")
+    assert.strictEqual(host('rate_limited'), 'GitHub is asking Althar to slow down. Try again in a little while.')
+    assert.strictEqual(host('unreachable'), "Althar couldn't reach GitHub. Try again in a moment.")
+    assert.strictEqual(host('invalid_response'), "GitHub answered in a way Althar didn't understand.")
     assert.strictEqual(host('rejected', 'Pull Request is not mergeable'), 'GitHub said no: Pull Request is not mergeable.')
     assert.strictEqual(said(new ConnectorFailed({ product: 'gitea' as never, reason: 'rejected', message: '' })), 'The service said no.')
     assert.strictEqual(
       said(new NotConnected({ product: 'linear', what: 'MER-1' })),
-      "Charrette isn't connected to Linear. Connect it, then try again.",
+      "Althar isn't connected to Linear. Connect it, then try again.",
     )
     assert.strictEqual(
       said(new OutwardUncertain({ operation: 'merge' })),
-      "Charrette can't tell whether that went through: its answer was lost. Look on the host before trying again.",
+      "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again.",
     )
     assert.strictEqual(
       said(new ChangedSinceSeen({ taskId: 't' })),
@@ -822,7 +822,7 @@ describe('words', () => {
     )
     assert.deepStrictEqual(words(new Error('boom'), name), {
       reason: 'Unknown',
-      message: "Charrette's runtime couldn't do that. Its log has the details.",
+      message: "Althar's runtime couldn't do that. Its log has the details.",
     })
   })
 

@@ -25,7 +25,7 @@ const agents: Record<string, { readonly command: string; readonly args: Readonly
 }
 
 const probe = async (name: string, spec: { readonly command: string; readonly args: ReadonlyArray<string> }) => {
-  const cwd = mkdtempSync(join(tmpdir(), `charrette-probe-${name}-`))
+  const cwd = mkdtempSync(join(tmpdir(), `althar-probe-${name}-`))
   const child = spawn(spec.command, [...spec.args], { cwd, stdio: ['pipe', 'pipe', 'pipe'] })
   let stderr = ''
   child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()))
@@ -33,7 +33,7 @@ const probe = async (name: string, spec: { readonly command: string; readonly ar
   const timeout = setTimeout(() => child.kill('SIGKILL'), 60_000)
   try {
     const report = await acp
-      .client({ name: 'charrette-probe' })
+      .client({ name: 'althar-probe' })
       .onRequest(acp.methods.client.session.requestPermission, () => ({ outcome: { outcome: 'cancelled' } }))
       .connectWith(stream, async (context) => {
         const init = await context.request(acp.methods.agent.initialize, { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} })

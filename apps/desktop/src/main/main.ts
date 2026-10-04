@@ -3,6 +3,8 @@ import { stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+import { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
+
 import {
   app,
   BrowserWindow,
@@ -38,17 +40,8 @@ let runtime: UtilityProcess | undefined
 let quitting = false
 const restarts: Array<number> = []
 
-const given = (name: string) => (process.env[name] === '' ? undefined : process.env[name])
-
 /** The profile and worktrees, as the command-line client has them, so both see the same projects. */
-const locations = () => ({
-  profile:
-    given('CHARRETTE_PROFILE') ??
-    (process.platform === 'darwin'
-      ? join(app.getPath('appData'), 'Charrette')
-      : join(given('XDG_DATA_HOME') ?? join(homedir(), '.local', 'share'), 'charrette')),
-  worktrees: given('CHARRETTE_WORKTREES') ?? join(homedir(), 'Charrette'),
-})
+const locations = () => ({ profile: defaultProfile(process.env, process.platform), worktrees: defaultWorktrees(process.env) })
 
 /** Grants the runtime has yet to confirm, by request. */
 const granting = new Map<string, (grant: string | null) => void>()
@@ -74,7 +67,7 @@ const shown = new Set<Notification>()
 const openThread = (threadId: string) => {
   const existing = BrowserWindow.getAllWindows()[0]
   const window = existing ?? openWindow()
-  const send = () => window.webContents.send('charrette:open', threadId)
+  const send = () => window.webContents.send('althar:open', threadId)
   if (existing === undefined || window.webContents.isLoading()) window.webContents.once('did-finish-load', send)
   else send()
   if (window.isMinimized()) window.restore()
@@ -108,7 +101,7 @@ const seal = (child: UtilityProcess, message: RuntimeMessage) => {
   if (message.requestId === undefined || typeof message.value !== 'string') return
   const { requestId, value } = message
   try {
-    if (!safeStorage.isEncryptionAvailable()) throw new Error('The keychain Charrette seals sign-ins with isn’t available.')
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('The keychain Althar seals sign-ins with isn’t available.')
     child.postMessage({
       type: 'sealed',
       requestId,
@@ -125,9 +118,9 @@ const seal = (child: UtilityProcess, message: RuntimeMessage) => {
 const startRuntime = () => {
   const { profile, worktrees } = locations()
   const child = utilityProcess.fork(join(here, '../runtime/runtime.js'), [], {
-    serviceName: 'Charrette runtime',
+    serviceName: 'Althar runtime',
     stdio: 'inherit',
-    env: { ...process.env, CHARRETTE_PROFILE: profile, CHARRETTE_WORKTREES: worktrees, CHARRETTE_APP_VERSION: app.getVersion() },
+    env: { ...process.env, ALTHAR_PROFILE: profile, ALTHAR_WORKTREES: worktrees, ALTHAR_APP_VERSION: app.getVersion() },
   })
   child.on('message', (message: RuntimeMessage) => {
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
@@ -152,7 +145,7 @@ const startRuntime = () => {
       for (const window of BrowserWindow.getAllWindows()) window.webContents.reload()
       return
     }
-    dialog.showErrorBox('Charrette stopped', `Charrette's runtime keeps stopping (code ${code}). Open Charrette again to carry on.`)
+    dialog.showErrorBox('Althar stopped', `Althar's runtime keeps stopping (code ${code}). Open Althar again to carry on.`)
     app.quit()
   })
   runtime = child
@@ -172,7 +165,7 @@ const connect = (window: BrowserWindow) => {
   if (runtime === undefined) return
   const { port1, port2 } = new MessageChannelMain()
   runtime.postMessage({ type: 'connect' }, [port1])
-  window.webContents.postMessage('charrette:port', null, [port2])
+  window.webContents.postMessage('althar:port', null, [port2])
 }
 
 /** Opens a link from the window in the person's browser: web pages only, never a file or another app's scheme. */
@@ -204,7 +197,7 @@ const openWindow = () => {
   })
   window.webContents.on('did-finish-load', () => connect(window))
   window.once('ready-to-show', () => window.show())
-  // The window shows Charrette and nothing else: links open in the browser, and the window never goes anywhere.
+  // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
   window.webContents.setWindowOpenHandler(({ url }) => {
     openOutside(url)
     return { action: 'deny' }
@@ -217,7 +210,7 @@ const openWindow = () => {
   return window
 }
 
-ipcMain.handle('charrette:pick-folder', async (event, purpose: unknown) => {
+ipcMain.handle('althar:pick-folder', async (event, purpose: unknown) => {
   const window = BrowserWindow.fromWebContents(event.sender)
   // An account's folder is often hidden, as ~/.codex-work is: those show too.
   const options =
@@ -234,7 +227,7 @@ ipcMain.handle('charrette:pick-folder', async (event, purpose: unknown) => {
 })
 
 // A folder dropped on the window, by the path the preload read from the drop: only a folder on disk gets a grant.
-ipcMain.handle('charrette:grant-dropped', async (_event, path: unknown) => {
+ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   if (typeof path !== 'string' || path === '') return null
   const found = await stat(path).catch(() => undefined)
   return found?.isDirectory() === true ? allowFolder(path) : null
@@ -242,7 +235,7 @@ ipcMain.handle('charrette:grant-dropped', async (_event, path: unknown) => {
 
 void app.whenReady().then(() => {
   // The window asks for nothing: no notifications, camera, microphone or anything else a page can ask for.
-  // Charrette's own notifications come from here, as the runtime says something needs the person.
+  // Althar's own notifications come from here, as the runtime says something needs the person.
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, done) => done(false))
   session.defaultSession.setPermissionCheckHandler(() => false)
   startRuntime()

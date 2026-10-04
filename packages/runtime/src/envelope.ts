@@ -1,4 +1,4 @@
-import { type ActorId, CommandEnvelope, CommandId, Ids, newId, now } from '@charrette/domain'
+import { type ActorId, CommandEnvelope, CommandId, Ids, newId, now } from '@althar/domain'
 import { Effect, Schema } from 'effect'
 
 import { Instance } from './Instance'

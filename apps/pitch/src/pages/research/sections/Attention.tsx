@@ -10,7 +10,7 @@ export function Attention() {
         <div className={s.prose}>
           <p>
             The expensive part of an interruption isn’t the minute it takes to answer. It’s the loss of focus: noticing a run has stopped,
-            reloading its context, deciding, briefing the next agent, then finding your place in your own work again. Charrette draws a hard
+            reloading its context, deciding, briefing the next agent, then finding your place in your own work again. Althar draws a hard
             line around what’s allowed to spend that attention.
           </p>
         </div>

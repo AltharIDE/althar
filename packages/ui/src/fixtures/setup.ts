@@ -56,7 +56,7 @@ export const ROLES: SelectOption<string>[] = [
   { value: 'other', label: 'Other' },
 ]
 
-/* Meridian's repositories as Charrette read them, with what it found. */
+/* Meridian's repositories as Althar read them, with what it found. */
 export const MERIDIAN_MAP: SourceEntry[] = [
   {
     id: 'api',
@@ -133,7 +133,7 @@ export const MERIDIAN_MAP: SourceEntry[] = [
     name: 'meridian-infra',
     where: 'github.com/meridian/infra',
     origin: SourceOrigin.Clone,
-    cloneTo: '~/Charrette/meridian-infra',
+    cloneTo: '~/Althar/meridian-infra',
     role: 'infrastructure',
   },
 ]
@@ -159,7 +159,7 @@ export const EDGE_MAP: SourceEntry[] = [
     name: 'meridian-infra',
     where: 'github.com/meridian/infra',
     origin: SourceOrigin.Later,
-    cloneTo: '~/Charrette/meridian-infra',
+    cloneTo: '~/Althar/meridian-infra',
     role: 'infrastructure',
   },
 ]
@@ -199,7 +199,7 @@ export function useSourceMap(initial: readonly SourceEntry[]) {
           .pop() || url
       setSources((now) => [
         ...now,
-        { id: `${name}-${now.length}`, name, where: url, origin: SourceOrigin.Clone, cloneTo: `~/Charrette/${name}`, role: 'other' },
+        { id: `${name}-${now.length}`, name, where: url, origin: SourceOrigin.Clone, cloneTo: `~/Althar/${name}`, role: 'other' },
       ])
     },
   }
@@ -250,7 +250,7 @@ export const CONNECTED: ServiceConnection[] = [
   { id: 'conn_3', service: 'linear', account: 'You', needsSignIn: true },
 ]
 
-/** Codex with four accounts: its usual folder, one Charrette made, one codex-profiles made that is out of usage, and one signed out. */
+/** Codex with four accounts: its usual folder, one Althar made, one codex-profiles made that is out of usage, and one signed out. */
 export const ACCOUNTS: AccountEntry[] = [
   { id: 'acc_usual', name: 'main', place: { kind: 'usual' }, state: { kind: 'ready', paid: 'plan' } },
   { id: 'acc_work', name: 'work', place: { kind: 'own' }, state: { kind: 'ready', paid: 'plan' } },

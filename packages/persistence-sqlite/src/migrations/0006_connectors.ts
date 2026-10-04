@@ -25,7 +25,7 @@ import {
  *
  * An external link ties a task to something outside: the issue it came from,
  * or the pull request it opened (whose repository change has its URL). It
- * keeps what Charrette last saw of it, and, while the task listens to it, the
+ * keeps what Althar last saw of it, and, while the task listens to it, the
  * cursor its activity was last read from.
  *
  * Things heard from outside are observations; each comment, review or check

@@ -20,7 +20,7 @@ const meta = {
   component: ChangeView,
   parameters: { layout: 'fullscreen' },
   args: {
-    branch: 'charrette/mer-231-rate-limit-refunds',
+    branch: 'althar/mer-231-rate-limit-refunds',
     base: 'main',
     files: FILES,
     selected: 'src/refunds/router.ts',
@@ -54,7 +54,7 @@ export const Changes: Story = {
   play: async ({ args, canvasElement }) => {
     const body = within(canvasElement.ownerDocument.body)
     await expect(body.getByRole('dialog', { name: 'Changes' })).toBeInTheDocument()
-    await expect(body.getByText('charrette/mer-231-rate-limit-refunds into main')).toBeInTheDocument()
+    await expect(body.getByText('althar/mer-231-rate-limit-refunds into main')).toBeInTheDocument()
     await expect(body.getByText('7 files')).toBeInTheDocument()
     // j and k go through the files.
     await userEvent.keyboard('j')
@@ -85,7 +85,7 @@ export const Failed: Story = {
 export const Binary: Story = { args: at('assets/limit.png', { state: 'ready', lines: [] }) }
 /** Moved, nothing else changed. */
 export const Moved: Story = { args: at('docs/retry.md', { state: 'ready', lines: [] }) }
-/** Not committed yet, so not in what Charrette pushes. */
+/** Not committed yet, so not in what Althar pushes. */
 export const NotCommitted: Story = { args: at('notes/scratch.md', { state: 'ready', lines: ROUTER_DIFF.slice(0, 5) }) }
 /** Longer than it shows. */
 export const CutShort: Story = { args: at('src/refunds/router.ts', { state: 'ready', lines: ROUTER_DIFF, truncated: true }) }

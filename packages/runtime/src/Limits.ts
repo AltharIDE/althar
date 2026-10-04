@@ -1,6 +1,6 @@
-import { modelName } from '@charrette/contracts'
-import type { ConfigOption } from '@charrette/provider-adapters'
-import type { ProjectId } from '@charrette/domain'
+import { modelName } from '@althar/contracts'
+import type { ConfigOption } from '@althar/provider-adapters'
+import type { ProjectId } from '@althar/domain'
 import { Context, Duration, Effect, Layer, Option, type Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -117,7 +117,7 @@ export class Limits extends Context.Service<
       accountId?: string | null,
     ): Effect.Effect<{ readonly agent: string; readonly model: string | null }, SqlError.SqlError>
   }
->()('@charrette/runtime/Limits') {
+>()('@althar/runtime/Limits') {
   static readonly layer: Layer.Layer<Limits, never, SqlClient.SqlClient | Agents | SignIns | Accounts | Policies> = Layer.effect(
     Limits,
     Effect.gen(function* () {

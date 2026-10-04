@@ -14,7 +14,7 @@ import { Terminal } from '../Terminal/Terminal'
 import s from './Stuck.module.css'
 
 /*
- * A task that couldn't finish, asking you what next. Charrette tries on its
+ * A task that couldn't finish, asking you what next. Althar tries on its
  * own first: runs the step again, repairs what it can, hands the step to
  * another agent. Only when none of that works does it come to you, with
  * what it tried, the lead's read of why, and the output that keeps failing.
@@ -100,7 +100,7 @@ export interface StuckProps {
   step: string
   /** What keeps going wrong, in a sentence. */
   what: ReactNode
-  /** What Charrette tried on its own, in order. */
+  /** What Althar tried on its own, in order. */
   tried: readonly StuckAttempt[]
   /** The lead's read of why, and who the lead is. */
   read?: { by: ModelInfo; says: ReactNode }
@@ -112,7 +112,7 @@ export interface StuckProps {
   onTell?: (note: string) => void
   /** Hand the step to another agent. Without it (or `agents`), no Try another agent. */
   onRetry?: (model: ModelInfo) => void
-  /** Run the step again as it was, for one no agent does: Charrette's own, such as opening the pull request. Without it, no Try again. */
+  /** Run the step again as it was, for one no agent does: Althar's own, such as opening the pull request. Without it, no Try again. */
   onAgain?: () => void
   /** Settle the task without finishing it. Without it, no Abandon. */
   onAbandon?: () => void

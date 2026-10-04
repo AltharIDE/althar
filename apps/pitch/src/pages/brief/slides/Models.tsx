@@ -163,8 +163,8 @@ export function Models() {
           </figure>
           <p className={s.pull}>
             A tool tied to one lab is a bet that the lab stays on top.{' '}
-            <b>Charrette routes each step to whichever model is best at it now, open models included,</b> and the project keeps its memory
-            when the lead changes hands.
+            <b>Althar routes each step to whichever model is best at it now, open models included,</b> and the project keeps its memory when
+            the lead changes hands.
           </p>
           <p className={s.src}>
             Source: Artificial Analysis Intelligence Index v4.3.2, read 25 September 2026. Most scores before 2026 are their estimates on

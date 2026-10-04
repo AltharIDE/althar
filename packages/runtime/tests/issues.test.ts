@@ -1,5 +1,5 @@
-import { makeFakeService } from '@charrette/connectors/testing'
-import type { ProjectId } from '@charrette/domain'
+import { makeFakeService } from '@althar/connectors/testing'
+import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -77,7 +77,7 @@ describe('an issue', () => {
       )
       const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       assert.deepInclude(ready?.issue, { product: 'linear', key: 'MER-231' })
-      assert.strictEqual(ready?.branch, 'charrette/mer-231-rate-limit-refunds')
+      assert.strictEqual(ready?.branch, 'althar/mer-231-rate-limit-refunds')
       assert.strictEqual(github.changes[0]?.title, 'MER-231: Rate-limit refunds')
       assert.include(github.changes[0]?.body, 'Issue: [MER-231](https://linear.app/fake/issue/MER-231/rate-limit-refunds-like-charges)')
       assert.deepStrictEqual(tracker.linksOn('MER-231'), [
@@ -140,7 +140,7 @@ describe('an issue', () => {
         title: 'Do it',
         issueKey: 'MER-231',
       })
-      assert.strictEqual(created.branch, 'charrette/mer-231-do-it')
+      assert.strictEqual(created.branch, 'althar/mer-231-do-it')
       yield* issues.attach({ projectId, taskId: created.taskId, issue: 'MER-231' })
       yield* issues.attach({ projectId, taskId: created.taskId, issue: LINK })
       const sql = yield* SqlClient.SqlClient
@@ -156,7 +156,7 @@ describe('an issue', () => {
         title: 'Other',
         issueKey: '#12',
       })
-      assert.strictEqual(other.branch, 'charrette/issue-12-other')
+      assert.strictEqual(other.branch, 'althar/issue-12-other')
       assert.isNull(yield* issues.ofTask(other.taskId))
     }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
   })

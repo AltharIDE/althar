@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 
-import { type AgentModels, type AgentStatus, agentDefaultName, modelName as namedAmongAgents } from '@charrette/contracts'
-import { Brand, Lab, labBrand, type ModelInfo, type RuntimeInfo } from '@charrette/ui'
+import { type AgentModels, type AgentStatus, agentDefaultName, modelName as namedAmongAgents } from '@althar/contracts'
+import { Brand, Lab, labBrand, type ModelInfo, type RuntimeInfo } from '@althar/ui'
 
 import type { Client, Start } from '../data/client'
 
@@ -80,7 +80,7 @@ export interface Catalog {
   readonly defaults: ReadonlyMap<string, string>
 }
 
-/** A model's name in a list of every agent's models (see `@charrette/contracts`'s models). */
+/** A model's name in a list of every agent's models (see `@althar/contracts`'s models). */
 export const nameOf = namedAmongAgents
 
 /** An effort level as the picker writes it: the agent's word, unless it runs two together. */
@@ -177,7 +177,7 @@ export interface ModelPrefs {
   readonly pins: ReadonlyArray<string> | null
 }
 
-const STORED = 'charrette.models'
+const STORED = 'althar.models'
 const NONE: ModelPrefs = { pins: null }
 const listeners = new Set<() => void>()
 let last: { readonly raw: string | null; readonly prefs: ModelPrefs } = { raw: null, prefs: NONE }

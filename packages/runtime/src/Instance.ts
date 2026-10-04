@@ -1,8 +1,8 @@
-import { type ActorId, type DeviceId, Ids, newId, now, type RuntimeInstanceId } from '@charrette/domain'
+import { type ActorId, type DeviceId, Ids, newId, now, type RuntimeInstanceId } from '@althar/domain'
 import { Context, Crypto, Effect, Layer, type Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
-import { Ledger, type RevisionConflict, type RowNotFound } from '@charrette/persistence-sqlite'
+import { Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
 
 import { RuntimeConfig } from './Config'
 import { reconcile } from './reconcile'
@@ -13,14 +13,14 @@ export interface InstanceInfo {
   readonly deviceId: DeviceId
   /** The person using this profile. */
   readonly personId: ActorId
-  /** Charrette itself: the actor of what the rules decide and the runtime observes. */
+  /** Althar itself: the actor of what the rules decide and the runtime observes. */
   readonly systemId: ActorId
   /** The coordinator (docs/architecture/04): the actor of the tasks it drafts and the messages it passes on. */
   readonly coordinatorId: ActorId
 }
 
 /**
- * One person and one Charrette per profile; an agent actor by its agent id.
+ * One person and one Althar per profile; an agent actor by its agent id.
  * The coordinator's is `coordinator`, its role: it runs on whichever agent is
  * chosen, and each of its sessions records which.
  */
@@ -41,7 +41,7 @@ const findOrCreateActor = (kind: 'person' | 'system' | 'agent', displayName: str
  * left behind before anything new starts. Its scope ending records that the
  * launch ended.
  */
-export class Instance extends Context.Service<Instance, InstanceInfo>()('@charrette/runtime/Instance') {
+export class Instance extends Context.Service<Instance, InstanceInfo>()('@althar/runtime/Instance') {
   static readonly layer: Layer.Layer<
     Instance,
     SqlError.SqlError | Schema.SchemaError | RowNotFound | RevisionConflict,
@@ -58,7 +58,7 @@ export class Instance extends Context.Service<Instance, InstanceInfo>()('@charre
           if (device === undefined)
             yield* sql`INSERT INTO devices ${sql.insert({ id: deviceId, name: config.deviceName, createdAt: yield* now })}`
           const personId = yield* findOrCreateActor('person', 'You')
-          const systemId = yield* findOrCreateActor('system', 'Charrette')
+          const systemId = yield* findOrCreateActor('system', 'Althar')
           const coordinatorId = yield* findOrCreateActor('agent', 'Coordinator', 'coordinator')
           const id = yield* newId(Ids.runtimeInstance)
           yield* sql`INSERT INTO runtime_instances ${sql.insert({ id, deviceId, pid: process.pid, appVersion: config.appVersion, startedAt: yield* now })}`

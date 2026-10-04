@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { scenarios } from '@charrette/provider-adapters/testing'
+import { scenarios } from '@althar/provider-adapters/testing'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -95,7 +95,7 @@ describe('agents as processes', () => {
       const [row] = yield* sql<{ session: string; process: string; pid: number | null }>`
         SELECT s.state AS session, p.state AS process, p.pid FROM provider_sessions s JOIN processes p ON p.provider_session_id = s.id`
       assert.deepStrictEqual(row, { session: 'failed', process: 'unknown', pid: null })
-      assert.strictEqual(error.summary, "charrette-no-such-agent isn't installed, or isn't on this Mac's PATH.")
+      assert.strictEqual(error.summary, "althar-no-such-agent isn't installed, or isn't on this Mac's PATH.")
       assert.deepStrictEqual(yield* notices(created.threadId), [
         { source: 'runtime', severity: 'error', title: "Fake missing couldn't start.", description: error.summary },
       ])
@@ -104,7 +104,7 @@ describe('agents as processes', () => {
 
   it.live('stops and records every session when the runtime closes', () =>
     Effect.gen(function* () {
-      const file = join(mkdtempSync(join(tmpdir(), 'charrette-profile-')), 'charrette.sqlite')
+      const file = join(mkdtempSync(join(tmpdir(), 'althar-profile-')), 'althar.sqlite')
       const { sessionId, pid } = yield* Effect.gen(function* () {
         const sessions = yield* Sessions
         const { task: created } = yield* task()

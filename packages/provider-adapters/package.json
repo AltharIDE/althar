@@ -1,8 +1,8 @@
 {
-  "name": "@charrette/provider-adapters",
+  "name": "@althar/provider-adapters",
   "version": "0.0.0",
   "private": true,
-  "description": "How Charrette talks to agents: one ACP adapter, the agent registry, and native side channels.",
+  "description": "How Althar talks to agents: one ACP adapter, the agent registry, and native side channels.",
   "license": "UNLICENSED",
   "type": "module",
   "exports": {
@@ -22,7 +22,7 @@
     "@agentclientprotocol/claude-agent-acp": "0.84.0",
     "@agentclientprotocol/codex-acp": "2.0.0",
     "@agentclientprotocol/sdk": "1.5.1",
-    "@charrette/domain": "workspace:*",
+    "@althar/domain": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.31.0",
     "effect": "4.0.0-rc.118",
     "zod": "^4.0.0"

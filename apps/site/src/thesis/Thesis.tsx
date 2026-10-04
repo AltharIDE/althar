@@ -1,4 +1,4 @@
-import { Logo } from '@charrette/ui'
+import { Logo } from '@althar/ui'
 
 import source from '../../../../THESIS.md?raw'
 import { LINKS } from '../content/facts'
@@ -117,7 +117,7 @@ export function Thesis() {
 
       <footer className={s.foot}>
         <span className={s.footBrand}>
-          <Logo size={20} /> Charrette
+          <Logo size={20} /> Althar
         </span>
         <span>Issued for comment · {DATE}</span>
         <a href="/">Back to the site</a>

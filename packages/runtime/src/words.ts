@@ -1,4 +1,4 @@
-import { products } from '@charrette/connectors'
+import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
 import type { AccountRefused } from './Accounts'
@@ -102,7 +102,7 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
       case 'NotFound':
         return `That ${kinds[text(error, 'kind')] ?? 'thing'} isn't there any more.`
       case 'UnknownAgent':
-        return `Charrette has no agent called ${text(error, 'agentId')}.`
+        return `Althar has no agent called ${text(error, 'agentId')}.`
       case 'SessionRunning':
         return 'An agent is already working on this task.'
       case 'NoSession':
@@ -131,23 +131,23 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
       case 'CommandIdReused':
         return 'That request was already used for something else. Try again.'
       case 'DatabaseInUse':
-        return 'Another copy of Charrette is using this profile.'
+        return 'Another copy of Althar is using this profile.'
       case 'NoChangeToOpen':
         return noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working
       case 'SignOutFailed':
-        return `Charrette couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on this Mac any more, remove it anyway; its sign-in may stay behind.`
+        return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on this Mac any more, remove it anyway; its sign-in may stay behind.`
       case 'AccountRefused':
-        return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Charrette can't add that account."
+        return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Althar can't add that account."
       case 'ChangedSinceSeen':
         return 'The pull request changed since you looked at it. Have another look before you accept it.'
       case 'NotConnected':
-        return `Charrette isn't connected to ${productOf(text(error, 'product'))}. Connect it, then try again.`
+        return `Althar isn't connected to ${productOf(text(error, 'product'))}. Connect it, then try again.`
       case 'OutwardUncertain':
-        return "Charrette can't tell whether that went through: its answer was lost. Look on the host before trying again."
+        return "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again."
       case 'ConnectorFailed':
         return hostSaid(productOf(text(error, 'product')), text(error, 'reason'), text(error, 'message'))
       default:
-        return agentSaid(error) ?? "Charrette's runtime couldn't do that. Its log has the details."
+        return agentSaid(error) ?? "Althar's runtime couldn't do that. Its log has the details."
     }
   })()
   return { reason, message }
@@ -161,17 +161,17 @@ const hostSaid = (host: string, reason: string, said: string) => {
   const what = said === '' ? '' : `: ${lastLine(said)}`
   switch (reason) {
     case 'unauthorized':
-      return `${host} no longer takes Charrette's sign-in. Sign in to it again.`
+      return `${host} no longer takes Althar's sign-in. Sign in to it again.`
     case 'forbidden':
       return sentence(`${host} won't let this account do that${what}`)
     case 'not_found':
       return `${host} can't find it any more.`
     case 'rate_limited':
-      return `${host} is asking Charrette to slow down. Try again in a little while.`
+      return `${host} is asking Althar to slow down. Try again in a little while.`
     case 'unreachable':
-      return `Charrette couldn't reach ${host}. Try again in a moment.`
+      return `Althar couldn't reach ${host}. Try again in a moment.`
     case 'invalid_response':
-      return `${host} answered in a way Charrette didn't understand.`
+      return `${host} answered in a way Althar didn't understand.`
     default:
       return sentence(`${host} said no${what}`)
   }
@@ -201,7 +201,7 @@ export const expected = new Set([
 
 /** Why an account can't be added, renamed or removed, by reason. */
 const accountRefused = {
-  no_room: "Charrette has nowhere to keep a new account's folder here. Choose a folder the agent signed in with instead.",
+  no_room: "Althar has nowhere to keep a new account's folder here. Choose a folder the agent signed in with instead.",
   not_a_folder: "That isn't a folder. Choose the folder the agent keeps the account's sign-in in.",
   usual: "That's the agent's usual sign-in, its first account: it stays.",
   taken: 'That folder is an account already.',

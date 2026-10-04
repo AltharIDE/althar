@@ -1,6 +1,6 @@
 /*
  * How a model is named where several agents' models meet: the window's
- * pickers, and what Charrette says in a thread when work moves to another
+ * pickers, and what Althar says in a thread when work moves to another
  * agent. Each agent names its models for its own app, so a name can lean on
  * what that app shows around it.
  */

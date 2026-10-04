@@ -57,7 +57,7 @@ export const treeOf = (cwd: string): Effect.Effect<string, GitFailed> =>
       const index = resolve(cwd, yield* git(cwd, 'rev-parse', '--git-path', 'index'))
       return yield* Effect.try({
         try: () => {
-          const copy = join(mkdtempSync(join(tmpdir(), 'charrette-index-')), 'index')
+          const copy = join(mkdtempSync(join(tmpdir(), 'althar-index-')), 'index')
           if (existsSync(index)) copyFileSync(index, copy)
           return copy
         },
@@ -69,13 +69,13 @@ export const treeOf = (cwd: string): Effect.Effect<string, GitFailed> =>
     (copy) => Effect.sync(() => rmSync(dirname(copy), { recursive: true, force: true })),
   )
 
-/** Commits a tree on top of a parent without touching any branch, as Charrette: a snapshot a worktree can check out. */
+/** Commits a tree on top of a parent without touching any branch, as Althar: a snapshot a worktree can check out. */
 export const commitTree = (cwd: string, tree: string, parent: string, message: string): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, ['commit-tree', tree, '-p', parent, '-m', message], {
-    GIT_AUTHOR_NAME: 'Charrette',
-    GIT_AUTHOR_EMAIL: 'charrette@localhost',
-    GIT_COMMITTER_NAME: 'Charrette',
-    GIT_COMMITTER_EMAIL: 'charrette@localhost',
+    GIT_AUTHOR_NAME: 'Althar',
+    GIT_AUTHOR_EMAIL: 'althar@localhost',
+    GIT_COMMITTER_NAME: 'Althar',
+    GIT_COMMITTER_EMAIL: 'althar@localhost',
   })
 
 /** The top of the repository a path is in. */

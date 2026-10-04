@@ -1,4 +1,4 @@
-import { CommandEnvelope, now, type ProjectId } from '@charrette/domain'
+import { CommandEnvelope, now, type ProjectId } from '@althar/domain'
 import { Context, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -31,7 +31,7 @@ export class Commands extends Context.Service<
       readonly handle: Effect.Effect<A, E, R>
     }): Effect.Effect<A, E | CommandIdReused | SqlError.SqlError | Schema.SchemaError, R>
   }
->()('@charrette/persistence-sqlite/Commands') {
+>()('@althar/persistence-sqlite/Commands') {
   static readonly layer: Layer.Layer<Commands, never, SqlClient.SqlClient> = Layer.effect(
     Commands,
     Effect.gen(function* () {

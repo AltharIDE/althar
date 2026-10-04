@@ -30,7 +30,7 @@ export const InterruptedByYou: Story = {
     </Turn>
   ),
 }
-/** Charrette restarted mid-task: it checks what already happened before carrying on. */
+/** Althar restarted mid-task: it checks what already happened before carrying on. */
 export const RestartedChecking: Story = { render: () => <Restarted checking /> }
 /** Checked, and carried on: nothing was run twice. */
 export const RestartedCarriedOn: Story = { render: () => <Restarted /> }

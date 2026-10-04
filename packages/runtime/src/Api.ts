@@ -8,9 +8,9 @@ import {
   serverProtocol,
   type WatchEvent,
   type ProjectRulesView,
-} from '@charrette/contracts'
-import type { ProjectId } from '@charrette/domain'
-import { Ledger } from '@charrette/persistence-sqlite'
+} from '@althar/contracts'
+import type { ProjectId } from '@althar/domain'
+import { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
@@ -40,7 +40,7 @@ import { anyOf, SignIns } from './SignIns'
 import { expected, words } from './words'
 
 /*
- * The runtime's side of the API (`@charrette/contracts`): each call runs the
+ * The runtime's side of the API (`@althar/contracts`): each call runs the
  * service that owns it. Commands from the window become the person's commands
  * here, with the window's own command ids, so a retry gets the first one's
  * receipt. Every failure reaches the window as an `ApiError`, in words; what

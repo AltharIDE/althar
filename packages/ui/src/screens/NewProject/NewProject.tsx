@@ -45,7 +45,7 @@ export const newProjectText: NewProjectText = {
   sources: { label: 'Repositories', note: 'The ones its tasks may change. A project can have none.' },
   asks: { label: 'When agents need a yes', note: 'The rest of the project rules have defaults; change them any time.' },
   permission: permissionPolicyText,
-  foot: 'Charrette reads these folders and changes nothing in them. Tasks work in their own worktrees.',
+  foot: 'Althar reads these folders and changes nothing in them. Tasks work in their own worktrees.',
   create: 'Create project',
   cancel: 'Cancel',
 }

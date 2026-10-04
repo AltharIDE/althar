@@ -68,8 +68,8 @@ export const Abandoning: Story = {
   },
 }
 
-/** A step Charrette does itself, such as opening the pull request: tried again as it was, or gone on without. */
-export const OneCharretteDoes: Story = {
+/** A step Althar does itself, such as opening the pull request: tried again as it was, or gone on without. */
+export const OneAltharDoes: Story = {
   args: {
     step: 'Pull request',
     tried: [],
@@ -79,7 +79,7 @@ export const OneCharretteDoes: Story = {
     onTell: undefined,
     onRetry: undefined,
     onAgain: fn(),
-    what: 'Charrette couldn’t push the branch: the host said the token can’t write to meridian/api.',
+    what: 'Althar couldn’t push the branch: the host said the token can’t write to meridian/api.',
     text: { abandon: 'Go on without it' },
   },
   play: async ({ args, canvasElement }) => {

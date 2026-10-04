@@ -10,23 +10,23 @@ import { repository } from '../tests/repository'
  * The app with a real agent, as a process started from the runtime's utility
  * process: the path the fake agent, which runs in the runtime's own process,
  * never takes. It uses the agent's own sign-in on this machine, so it runs
- * only when asked: CHARRETTE_REAL_AGENT=claude-code (or codex).
+ * only when asked: ALTHAR_REAL_AGENT=claude-code (or codex).
  */
 
-const agent = process.env.CHARRETTE_REAL_AGENT
+const agent = process.env.ALTHAR_REAL_AGENT
 const names: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex' }
 
-test.skip(agent === undefined, 'Set CHARRETTE_REAL_AGENT to run it against a real agent')
+test.skip(agent === undefined, 'Set ALTHAR_REAL_AGENT to run it against a real agent')
 
 test('a real agent leads a task and answers', async () => {
   test.setTimeout(180_000)
   const name = names[agent ?? ''] ?? agent ?? ''
-  const home = mkdtempSync(join(tmpdir(), 'charrette-real-'))
+  const home = mkdtempSync(join(tmpdir(), 'althar-real-'))
   const repo = repository(home)
-  const { CHARRETTE_FAKE_AGENTS: _, ...env } = process.env
+  const { ALTHAR_FAKE_AGENTS: _, ...env } = process.env
   const app = await electron.launch({
     args: [join(import.meta.dirname, '..')],
-    env: { ...env, CHARRETTE_PROFILE: join(home, 'profile'), CHARRETTE_WORKTREES: join(home, 'worktrees') },
+    env: { ...env, ALTHAR_PROFILE: join(home, 'profile'), ALTHAR_WORKTREES: join(home, 'worktrees') },
   })
   try {
     await app.evaluate(({ dialog }, chosen) => {

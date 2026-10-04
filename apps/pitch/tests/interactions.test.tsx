@@ -73,7 +73,7 @@ describe('client behavior', () => {
     })
 
     render(<App pathname="/research/" />)
-    expect(document.title).toBe('Charrette · Research note')
+    expect(document.title).toBe('Althar · Research note')
     expect(document.querySelector('meta[name="theme-color"]')?.getAttribute('content')).toBe('#fcfbf8')
     expect(document.querySelector('a[href="#s1"]')?.getAttribute('aria-current')).toBe('location')
 
@@ -93,7 +93,7 @@ describe('client behavior', () => {
     })
 
     render(<App pathname="/" />)
-    expect(document.title).toBe('Charrette · Brief')
+    expect(document.title).toBe('Althar · Brief')
     const stage = (): Element | null => document.querySelector('#flow [data-phase]')
     expect(document.querySelectorAll('#flow [data-node]')).toHaveLength(1)
     expect(stage()?.getAttribute('data-phase')).toBe('task')
