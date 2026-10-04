@@ -6,7 +6,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { envelope } from './envelope'
 import { Instance } from './Instance'
 import { Live } from './Live'
-import { treeCpu } from './processTree'
+import { treeCpus } from './processTree'
 import { Sessions } from './Sessions'
 import { makeStallWatch, spanOf, type StallAction } from './stallWatch'
 import { addItem } from './threads'
@@ -72,7 +72,7 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
       turns: options.turns ?? 40,
       busyShare: 0.05,
     })
-    const cpuOf = options.cpuOf ?? treeCpu
+    const cpuOf = options.cpuOf ?? treeCpus
 
     const nameOf = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
 
@@ -112,16 +112,27 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
         const asked = yield* onGiveUp(action)
         // Outside a step, work isn't held to a budget.
         if (!asked && action.why === 'over_budget') return
+        // Stalled even after a fresh start, it may be stuck for good: it is stopped.
+        if (action.why === 'stalled') {
+          if (!asked)
+            yield* say(
+              place.projectId,
+              action.threadId,
+              `${place.name} showed no sign of work again after Althar started it afresh, so Althar stopped it.`,
+              STARTING_AGAIN[place.kind],
+            )
+          return yield* Effect.ignore(sessions.stop(action.threadId))
+        }
+        // One that loops or ran long is working: only its turn stops, so it keeps what it knows for whatever comes next.
         if (!asked)
           yield* say(
             place.projectId,
             action.threadId,
-            action.why === 'looping'
-              ? `${place.name} kept repeating \`${action.detail ?? ''}\`, so Althar stopped it.`
-              : `${place.name} showed no sign of work again after Althar started it afresh, so Althar stopped it.`,
-            STARTING_AGAIN[place.kind],
+            `${place.name} kept repeating \`${action.detail ?? ''}\`, so Althar stopped its turn.`,
+            'Say what to do instead, and it carries on from there.',
           )
-        yield* Effect.ignore(sessions.stop(action.threadId))
+        const stopped = yield* sessions.interrupt(action.threadId).pipe(Effect.timeoutOption(cancelGrace), Effect.option)
+        if (Option.isNone(stopped) || Option.isNone(stopped.value)) yield* Effect.ignore(sessions.stop(action.threadId))
       })
 
     const act = (action: StallAction) =>
@@ -184,13 +195,19 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
       Effect.forever(
         Effect.gen(function* () {
           yield* Effect.sleep(every)
-          const cpu = new Map<string, number | null>()
+          // Each turn's agent process, and what they've all used, from one listing.
+          const pids = new Map<string, number>()
           for (const threadId of watch.turning()) {
             const running = yield* sessions.running(threadId)
-            cpu.set(threadId, Option.isSome(running) && running.value.pid !== null ? yield* cpuOf(running.value.pid) : null)
+            if (Option.isSome(running) && running.value.pid !== null) pids.set(threadId, running.value.pid)
           }
+          const used = yield* cpuOf([...pids.values()])
           const now = yield* Clock.currentTimeMillis
-          for (const action of watch.look(now, (threadId) => cpu.get(threadId) ?? null)) yield* Effect.forkScoped(act(action))
+          const cpu = (threadId: string) => {
+            const pid = pids.get(threadId)
+            return pid === undefined ? null : (used.get(pid) ?? null)
+          }
+          for (const action of watch.look(now, cpu)) yield* Effect.forkScoped(act(action))
         }),
       ),
     )

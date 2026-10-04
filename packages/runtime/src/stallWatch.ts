@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type { SessionEvent } from '@althar/provider-adapters'
 
 import type { LiveEvent } from './Live'
@@ -76,7 +78,7 @@ interface Watch {
   /** The CPU its processes had used at the last look. */
   cpu: number | null
   /** Its tool calls by id, and which still run. */
-  readonly calls: Map<string, { kind: string; title: string; command: string | null }>
+  readonly calls: Map<string, Call>
   readonly running: Set<string>
   /** Questions to the person it waits on. */
   readonly asking: Set<string>
@@ -97,8 +99,25 @@ interface Watch {
 /** How many finished calls are kept to tell a loop by. */
 const KEPT = 12
 
-/** A tool call, as the same one again is known: what kind, and its command or title. */
-const keyOf = (call: { kind: string; title: string; command: string | null }) => `${call.kind}:${call.command ?? call.title}`
+/** A tool call as far as the agent has said: its kind, title, command, and its whole input, as a digest. */
+interface Call {
+  readonly id: string
+  readonly kind: string
+  readonly title: string
+  readonly command: string | null
+  readonly input: string | null
+}
+
+/**
+ * A tool call, as the same one again is known: its kind and its command, or
+ * its whole input. Never its title alone: Claude Code titles every edit to a
+ * file alike, so distinct edits would read as one. A call with nothing else to
+ * tell it by is its own, and never the same as another.
+ */
+const keyOf = (call: Call) => `${call.kind}:${call.command ?? call.input ?? `#${call.id}`}`
+
+const digestOf = (input: unknown) =>
+  input === undefined || input === null ? null : createHash('sha256').update(JSON.stringify(input)).digest('hex').slice(0, 16)
 
 /** A duration in words: 6 hours, 90 minutes. */
 export const spanOf = (ms: number) => {
@@ -173,10 +192,13 @@ export const makeStallWatch = (limits: StallLimits) => {
     event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>,
   ): ReadonlyArray<StallAction> => {
     const known = watch.calls.get(event.toolCallId)
-    const call = {
+    // Some agents, Claude Code among them, send a call's input only in a later update: what was said before carries on.
+    const call: Call = {
+      id: event.toolCallId,
       kind: event._tag === 'ToolCall' ? event.kind : (known?.kind ?? 'other'),
       title: event.title ?? known?.title ?? '',
       command: commandIn(event.rawInput) ?? known?.command ?? null,
+      input: digestOf(event.rawInput) ?? known?.input ?? null,
     }
     watch.calls.set(event.toolCallId, call)
     if (event.status !== 'completed' && event.status !== 'failed') {
@@ -293,7 +315,9 @@ export const makeStallWatch = (limits: StallLimits) => {
         if (watch.stopAskedAt !== null) watch.stopAskedAt = now
         continue
       }
-      if (busy) watch.lifeAt = now
+      // CPU tells only while a tool runs: otherwise the agent waits on its model, which says so as it goes,
+      // and what it left running in the background, such as a dev server, isn't the turn at work.
+      if (busy && watch.running.size > 0) watch.lifeAt = now
       // Waiting on the person is neither work nor a stall.
       if (watch.asking.size > 0) {
         watch.lifeAt = now

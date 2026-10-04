@@ -2,7 +2,7 @@ import type { SessionEvent } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 
 import type { LiveEvent } from '../src/Live'
-import { cpuTimeOf, treeCpu, treeCpuOf } from '../src/processTree'
+import { cpuTimeOf, treeCpuOf, treeCpus } from '../src/processTree'
 import { type Finished, makeStallWatch, repeated, spanOf, type StallAction, type StallLimits } from '../src/stallWatch'
 import { Effect } from 'effect'
 
@@ -85,13 +85,20 @@ describe('a turn that stalls', () => {
     watch.observe(said, 500)
     watch.observe({ _tag: 'Streaming', threadId: T, itemId: 'i', kind: 'agent_message', agentId: 'codex', text: 'W' }, 1_100)
     assert.deepStrictEqual(looks(0, 1_590), [])
-    // A build: a tenth of a CPU at every look.
+    // A build: a tenth of a CPU at every look, while the command runs.
+    watch.observe(command('build', 'npm run build'), 1_600)
     assert.deepStrictEqual(
       looks(1_620, 4_000, (now) => now * 0.1),
       [],
     )
     // Idle, a hundredth of one: it stalls.
-    assert.deepStrictEqual(tags(looks(4_020, 4_620, (now) => 400 + (now - 4_000) * 0.01)), ['CarryOn'])
+    assert.deepStrictEqual(tags(looks(4_020, 5_220, (now) => 400 + (now - 4_000) * 0.01)), ['CarryOn'])
+  })
+
+  it("doesn't take CPU for life while no tool runs: that's what the agent left running, such as a dev server", () => {
+    const { watch, looks } = watching()
+    watch.observe(started('u1'), 0)
+    assert.deepStrictEqual(tags(looks(0, 600, (now) => now)), ['CarryOn'])
   })
 
   it('waits longer while a tool runs, and says which', () => {
@@ -188,6 +195,45 @@ describe('an agent going round in circles', () => {
     assert.isNull(repeated([]))
   })
 
+  const edit = (id: string, path: string, change: string) => [
+    agent({ _tag: 'ToolCall', toolCallId: id, title: `Edit ${path}`, kind: 'edit', status: 'pending' }),
+    agent({ _tag: 'ToolCallUpdate', toolCallId: id, rawInput: { file_path: path, old_string: change, new_string: `${change}!` } }),
+    done(id, 'completed', `The file ${path} has been updated successfully.`),
+  ]
+
+  it('tells edits apart by what they change, not by their title and the same reply, as Claude Code sends them', () => {
+    const { watch } = watching()
+    watch.observe(started('u1'), 0)
+    const oneFile = ['a', 'b', 'c', 'd'].flatMap((change) => edit(change, 'src/board.ts', change))
+    assert.deepStrictEqual(
+      oneFile.flatMap((event) => watch.observe(event, 10)),
+      [],
+    )
+    const byTurns = ['e', 'f', 'g', 'h', 'i', 'j'].flatMap((change, index) =>
+      edit(change, index % 2 === 0 ? 'Card.tsx' : 'Card.test.tsx', change),
+    )
+    assert.deepStrictEqual(
+      byTurns.flatMap((event) => watch.observe(event, 20)),
+      [],
+    )
+    // The same change, again and again, is going round in circles.
+    const same = ['k', 'l', 'm', 'n'].flatMap((id) => edit(id, 'src/board.ts', 'x'))
+    assert.deepStrictEqual(tags(same.flatMap((event) => watch.observe(event, 30))), ['Redirect'])
+  })
+
+  it('never takes a call with nothing to tell it by but its title for the same as another', () => {
+    const { watch } = watching()
+    watch.observe(started('u1'), 0)
+    const bare = ['a', 'b', 'c', 'd'].flatMap((id) => [
+      agent({ _tag: 'ToolCall', toolCallId: id, title: 'Thinking', kind: 'think', status: 'pending' }),
+      done(id, 'failed', null),
+    ])
+    assert.deepStrictEqual(
+      bare.flatMap((event) => watch.observe(event, 10)),
+      [],
+    )
+  })
+
   it('reads a call by its command, with its input sent late as some agents do', () => {
     const { watch } = watching()
     watch.observe(started('u1'), 0)
@@ -219,6 +265,7 @@ describe('the budget of work since the person last spoke', () => {
   it('asks the person after too long at work, not counting waiting on them', () => {
     const { watch, looks } = watching({ ...LIMITS, work: 300 })
     watch.observe(started('u1'), 0)
+    watch.observe(command('build', 'npm run build'), 0)
     watch.observe({ _tag: 'AttentionNeeded', threadId: T, attentionId: 'a1', title: 'Push', reason: 'Asks.' }, 0)
     assert.deepStrictEqual(
       looks(0, 3_000, (now) => now),
@@ -275,11 +322,12 @@ describe('the CPU an agent uses', () => {
     assert.isNull(treeCpuOf(listing, 99))
   })
 
-  it.effect('reads this process from the machine', () =>
+  it.effect('reads every process asked for from the machine, in one listing', () =>
     Effect.gen(function* () {
-      const used = yield* treeCpu(process.pid)
-      assert.isNotNull(used)
-      assert.isNull(yield* treeCpu(2 ** 22 + 12_345))
+      const used = yield* treeCpus([process.pid, 2 ** 22 + 12_345])
+      assert.isNotNull(used.get(process.pid))
+      assert.isNull(used.get(2 ** 22 + 12_345))
+      assert.strictEqual((yield* treeCpus([])).size, 0)
     }),
   )
 })

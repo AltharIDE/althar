@@ -818,6 +818,19 @@ describe("the coordinator's tools", () => {
   )
 })
 
+/** The thread's session, once it is there with no turn running: its id. */
+const idleOn = (threadId: string) =>
+  Effect.gen(function* () {
+    const sessions = yield* Sessions
+    const [idle] = yield* until(
+      Effect.map(sessions.running(threadId), (running) =>
+        running._tag === 'Some' && !running.value.turnRunning ? [running.value.sessionId] : [],
+      ),
+      (rows) => rows.length === 1,
+    )
+    return idle ?? ''
+  })
+
 /** Stalls told in a moment rather than minutes; a stop is waited for long enough to see it come. */
 const FAST: StallOptions = {
   every: Duration.millis(50),
@@ -893,6 +906,8 @@ describe('a step whose agent stalls or goes round in circles', () => {
         (yield* notices(task.threadId)).map((notice) => notice.title),
         'Fake codex ran `npm test` 3 times in a row to the same end, so Althar stopped its turn and told it to try another way.',
       )
+      // Only its turn stops: it keeps what it knows for what the person says.
+      yield* idleOn(task.threadId)
     }).pipe(Effect.provide(withQueries(undefined, undefined, { stalls: FAST }))),
   )
 
@@ -952,11 +967,22 @@ describe('a step whose agent stalls or goes round in circles', () => {
     }).pipe(Effect.provide(withQueries(undefined, undefined, { stalls: FAST }))),
   )
 
-  it.live('needs the person when a step runs past its budget of turns', () =>
+  it.live('needs the person when a step runs past its budget of turns, and lets it carry on in the same session', () =>
     Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
       const { task } = yield* planned('Many turns', '[lead:hang]', [{ key: 'implement', agentId: 'codex' }])
       const call = yield* stuckCall(task.taskId)
       assert.deepStrictEqual([call.why, (call as unknown as { detail: string }).detail], ['over_budget', 'a turn'])
+      const session = yield* idleOn(task.threadId)
+      const before = (yield* turns(task.threadId)).length
+      yield* answer(call.id, { kind: 'retry', agentId: 'codex' })
+      const carried = (yield* until(turns(task.threadId), (all) => all.length > before)).at(-1)
+      assert.strictEqual(carried?.prompt?.startsWith('Carry on with the task from where it stands.'), true)
+      assert.strictEqual(carried?.providerSessionId, session)
+      assert.strictEqual(
+        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM provider_sessions WHERE thread_id = ${task.threadId}`)[0]?.n,
+        1,
+      )
     }).pipe(Effect.provide(withQueries(undefined, undefined, { stalls: { ...FAST, turns: 1 } }))),
   )
 })

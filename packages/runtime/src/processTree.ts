@@ -40,10 +40,15 @@ export const treeCpuOf = (listing: string, pid: number): number | null => {
   return total
 }
 
-/** The CPU time `pid` and everything it started have used, in milliseconds, or null once it's gone or `ps` can't say. */
-export const treeCpu = (pid: number): Effect.Effect<number | null> =>
-  Effect.callback<number | null>((resume) => {
+/**
+ * The CPU time each of `pids` and everything it started have used, in
+ * milliseconds, or null once it's gone or `ps` can't say: from one listing,
+ * however many there are.
+ */
+export const treeCpus = (pids: ReadonlyArray<number>): Effect.Effect<ReadonlyMap<number, number | null>> =>
+  Effect.callback<ReadonlyMap<number, number | null>>((resume) => {
+    if (pids.length === 0) return resume(Effect.succeed(new Map()))
     execFile('ps', ['-A', '-o', 'pid=,ppid=,time='], { timeout: 10_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
-      resume(Effect.succeed(error === null ? treeCpuOf(stdout, pid) : null))
+      resume(Effect.succeed(new Map(pids.map((pid) => [pid, error === null ? treeCpuOf(stdout, pid) : null]))))
     })
   })

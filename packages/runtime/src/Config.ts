@@ -46,8 +46,8 @@ export interface StallOptions {
   readonly work?: Duration.Duration
   /** How many turns they may take in that time: 40. */
   readonly turns?: number
-  /** The CPU time a process and everything it started have used, in milliseconds, or null once it's gone: read with `ps`. */
-  readonly cpuOf?: (pid: number) => Effect.Effect<number | null>
+  /** The CPU time each process and everything it started have used, in milliseconds, or null once it's gone: read with `ps`, once a look. */
+  readonly cpuOf?: (pids: ReadonlyArray<number>) => Effect.Effect<ReadonlyMap<number, number | null>>
 }
 
 export class RuntimeConfig extends Context.Service<RuntimeConfig, RuntimeOptions>()('@althar/runtime/RuntimeConfig') {}
