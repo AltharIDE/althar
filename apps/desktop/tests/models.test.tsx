@@ -49,7 +49,7 @@ describe('the models every agent offers', () => {
   })
 
   it('say whose a shared name is, keep a provider apart, put back a family a name leaves out, and carry the maker’s mark', () => {
-    const opencode: AgentStatus = { id: 'opencode', name: 'OpenCode', signIn: 'signed_in', login: 'opencode auth login' }
+    const opencode: AgentStatus = { id: 'opencode', name: 'OpenCode', signIn: 'signed_in', login: 'opencode auth login', accounts: [] }
     const offered: AgentModels = {
       agentId: 'opencode',
       models: [

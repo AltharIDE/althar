@@ -52,6 +52,11 @@ reading a credential store, and tells the user the agent's own login command
 when it is signed out. The Claude Code desktop app and the `claude` command
 line sign in separately; the adapter uses the command line's sign-in.
 
+An agent can have several sign-ins. Each is an account with its own folder,
+and the agent's usual folder is the first
+([ADR-012](../decisions/012-several-accounts-per-agent.md); Several accounts,
+below).
+
 Another ACP agent, such as Gemini CLI, is added by a registry entry and the
 contract suite, not new code.
 
@@ -358,8 +363,10 @@ release (Tier D), and provider-signed reasoning is lost either way.
 ## Usage limits
 
 A usage limit belongs to an account (`ProviderPrincipal`), so it pauses every
-session on that account at once ([05](05-workflow-engine.md)). ACP does not
-report limits. Charrette detects them in two layers:
+session on that account at once ([05](05-workflow-engine.md)). The agent's
+other accounts are not out, and moving on tries them first (Several
+accounts, below). ACP does not report limits. Charrette detects them in two
+layers:
 
 1. **From errors, on every agent.** Each adapter classifies a failed turn as
    `usage_limit`, with the reset time when the error carries one. Claude's
@@ -526,12 +533,108 @@ Rules:
 8. If no supported remote credential exists, the correct architecture is a
    local runner—not credential emulation.
 9. Account switching is explicit and recorded. A run snapshots the observed
-   principal and aborts or seeks approval if it changes.
+   principal and aborts or seeks approval if it changes. Charrette's own
+   moves between accounts are recorded as switches. A swap made by another
+   tool shows up in the next sign-in check, and is recorded then.
 10. Logging redacts tokens, authorization headers, cookies, device codes, and
     provider-defined secret fields before persistence.
 
 This is both safer and more durable than coupling Charrette to the current shape
 of a vendor's private auth cache.
+
+### Several accounts
+
+An agent can have several sign-ins on one Mac: a work and a personal plan,
+a plan per client, several OpenCode logins
+([ADR-012](../decisions/012-several-accounts-per-agent.md)). Each is an
+**account**: one sign-in, kept by the agent in a folder of its own, its
+**home**. Charrette only points the agent at the folder, and the rules above
+still hold: it never reads, copies or moves what the agent keeps there.
+
+```ts
+type AgentAccount = {
+  id: string
+  agentId: string
+  deviceId: string
+  name: string               // the person's own: "work", "client A"
+  home: string | null        // null: the agent's usual folder, its first account
+  order: number              // the person's order; the first allowed one is used first
+  principalId?: string       // who the agent last said it is signed in as
+  paidBy?: "plan" | "key"    // from the agent's status command
+  adoptedFrom?: string       // the tool that made the home, when Charrette didn't
+}
+```
+
+What makes a home, per agent:
+
+| Agent | The home | Its sign-in | What else it holds |
+|---|---|---|---|
+| Claude Code | `CLAUDE_CONFIG_DIR` | On macOS, a Keychain item named after the folder's path (`Claude Code-credentials-` and a hash of it), so a home can't move | Settings, `CLAUDE.md`, agents, commands, plugins, history |
+| Codex | `CODEX_HOME` | `auth.json` in the home, or the Keychain where it is set to use it | `config.toml`, `AGENTS.md`, skills, history |
+| OpenCode | `XDG_DATA_HOME`, with OpenCode's data under `opencode/` | `auth.json`, one entry per provider | Its database and history. Its config is under `XDG_CONFIG_HOME`, which stays the person's |
+
+**Adding an account.**
+- Charrette makes a home under its own data folder, named by the account's
+  id, so it never moves.
+- It opens the agent's own sign-in there, in a terminal, for the person:
+  `claude auth login`, `codex login`, `opencode auth login`, each with the
+  home in its environment.
+- What of the agent's usual folder isn't the account's own is linked into
+  the home, again as each session starts (the registry's `shared`): the
+  person's settings, instructions and skills, and for OpenCode, whose home is
+  the general data folder, all of it but `opencode`, so tools such as mise,
+  fnm or pnpm find their data. The sign-in and the agent's own history are
+  the home's own.
+- **Removing one** signs it out with the agent's own sign-out, run in its
+  home (`claude auth logout`, `codex logout`; OpenCode's sign-in is a file
+  in the home), and deletes the folder. A folder another tool made is never
+  touched.
+- The status command, run with the home, says who the account is and
+  whether a plan or a key pays for it.
+
+**Adopting a home another tool made.** Charrette offers the folders of
+known switchers, and the person can add any folder by hand. It reads the
+folders' names, never what is inside, and leaves them as the tool made them.
+
+| Kind of switcher | Examples | What Charrette does |
+|---|---|---|
+| A home per account | `codex-profiles`; codex-account-switcher (JoRo-Code); codex-accounts (omarhoumz), isolated homes; ccam's and the other `~/.claude-*` profile folders; claude-multi-account | Adopts each folder as an account |
+| One live sign-in, swapped by copying a saved one over it | opencode-swap; opcode-switch; the OpenCode profile switcher script; opencode-openai-sub-switcher; opencode-switcher (Copilot); cx-switch; codex-accounts (marivaldojr); ccam's `claude-switch` | Runs whichever account is active, as the agent's first account. It never swaps, because a swap changes the account under every running session, and a login kept in two places breaks when one copy refreshes. Each saved account the person wants in parallel is added once, with a sign-in of its own |
+| Rotation inside the agent or in front of it | oc-codex-multi-auth and opencode-antigravity-multi-auth (OpenCode plugins); codex-multi-auth; codex-account-gateway; claude-code-multi-account | Works unchanged. Charrette sees one account, and its usage limit means the whole pool is out |
+
+The switchers' folders and commands are read from each one when its
+support is built, and checked again by the contract suite.
+
+**Which account runs.**
+- Every account can run work. A project's rules can limit each agent to some
+  of its accounts, which is an `ExecutionGrant`'s `allowedProjectIds`.
+- Moving to the agent's next account on a limit is the project's rule too,
+  off until the person turns it on (ADR-012).
+- A conversation stays on the account it runs on, for its session and its
+  prompt cache.
+- A new session takes the first account, in the person's order, that is
+  allowed for the project, signed in, and not out of usage.
+- The account is not picked per message. Pinning a conversation to one
+  account can come later.
+
+**Out of usage.**
+- A limit puts one account out, not the agent. The side channels above
+  report per session, so what they report goes to that session's account.
+- Under the project's "move on" rule, where the project rotates, work first
+  goes to the same agent's next allowed account, on the same model. A home is separate, so the new
+  account starts a session from a brief, as at any switch (Switching model
+  or agent).
+- Only then does the work go to the next agent, and only on an account a plan
+  pays for: another agent never spends the person's money unasked. The
+  agent's own accounts take work over whatever pays for them, since the
+  person added each one.
+- The thread names the accounts, for example "Codex (personal) is out until
+  14:00; Codex (work) took over".
+
+**Environment.** A home's variable reaches every program the session runs,
+not only the agent. `XDG_DATA_HOME` is the one that matters, since other
+programs read it too: what is linked into the home is what keeps them
+working.
 
 ### Claude plans in third-party apps
 

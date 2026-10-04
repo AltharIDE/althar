@@ -217,9 +217,17 @@ const openWindow = () => {
   return window
 }
 
-ipcMain.handle('charrette:pick-folder', async (event) => {
+ipcMain.handle('charrette:pick-folder', async (event, purpose: unknown) => {
   const window = BrowserWindow.fromWebContents(event.sender)
-  const options = { properties: ['openDirectory' as const], message: 'Choose a folder in a git repository' }
+  // An account's folder is often hidden, as ~/.codex-work is: those show too.
+  const options =
+    purpose === 'account'
+      ? {
+          properties: ['openDirectory' as const, 'showHiddenFiles' as const],
+          message: 'Choose the folder the agent keeps this account’s sign-in in',
+          defaultPath: homedir(),
+        }
+      : { properties: ['openDirectory' as const], message: 'Choose a folder in a git repository' }
   const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
   const path = result.canceled ? undefined : result.filePaths[0]
   return path === undefined ? null : allowFolder(path)

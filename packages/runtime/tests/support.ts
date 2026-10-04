@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import type { AgentDefinition, AgentId } from '@charrette/provider-adapters'
 import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, fakeAgentMain } from '@charrette/provider-adapters/testing'
@@ -41,6 +41,15 @@ export const repository = () => {
   return path
 }
 
+/** Where the fake agents' usual folders are: each agent's own, under one made for the test run. */
+const fakeHomes = mkdtempSync(join(tmpdir(), 'charrette-fake-homes-'))
+
+/** Lines the runtime would have opened in a terminal, such as an account's sign-in. */
+export const opened: Array<string> = []
+
+/** Every fake agent started, with the environment its account gave it: its home, or nothing for its usual folder. */
+export const launches: Array<{ readonly agentId: string; readonly env: Readonly<Record<string, string>> }> = []
+
 export const definition = (id: string, signedOut: ReadonlyArray<string> = [], perUse: ReadonlyArray<string> = []): AgentDefinition => ({
   id: id as AgentId,
   name: `Fake ${id}`,
@@ -48,13 +57,18 @@ export const definition = (id: string, signedOut: ReadonlyArray<string> = [], pe
   launch: () => ({ command: 'bun', args: [fakeAgentMain] }),
   modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
   options: { mode: 'mode', model: 'model', effort: 'effort' },
+  // Its status says the home it ran in: signed out, or paid per use, where the test names the agent or that home.
   signIn: {
-    status: () => ({ command: 'true', args: [] }),
-    read: () => !signedOut.includes(id),
+    status: () => ({ command: 'sh', args: ['-c', 'printf %s "$FAKE_HOME"'] }),
+    read: (output) => !signedOut.includes(id) && !signedOut.includes(output.trim()),
     // On a plan, unless the test says it is paid per use.
-    paidBy: () => (perUse.includes(id) ? 'key' : 'plan'),
-    login: 'true',
+    paidBy: (output) => (perUse.includes(id) || perUse.includes(output.trim()) ? 'key' : 'plan'),
+    login: `fake-login ${id}`,
+    // Says which home it signed out of, in the file the test names.
+    logout: () => ({ command: 'sh', args: ['-c', 'printf "%s\\n" "$FAKE_HOME" >> "${FAKE_SIGNED_OUT:-/dev/null}"'] }),
   },
+  // Shares everything in its usual folder but its sign-in, as OpenCode's data folder does.
+  home: { variable: 'FAKE_HOME', usual: () => join(fakeHomes, id), shared: (names) => names.filter((name) => name !== 'auth.json') },
   permissions: codexLikeMeanings,
   // One fake agent passes session options, as Claude Code's entry does.
   ...(id === 'claude-code' ? { sessionMeta: () => ({ fake: { asks: true } }) } : {}),
@@ -75,12 +89,22 @@ export const fakeAgents = (
 ) => {
   const entry = (agentId: string): AgentEntry => ({
     definition: definition(agentId, signedOut, perUse),
-    transport: (cwd) =>
-      agentId === 'process'
+    transport: (cwd, env = {}) => {
+      launches.push({ agentId, env })
+      return agentId === 'process'
         ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
         : agentId === 'missing'
           ? { _tag: 'Process', spec: { command: 'charrette-no-such-agent', args: [] }, cwd }
-          : { _tag: 'InProcess', agent: fakeAgent({ ...options, ...each[agentId] }) },
+          : // An account's own options, by its home's folder name (`codex@work`), or `@usual` for the agent's usual folder.
+            {
+              _tag: 'InProcess',
+              agent: fakeAgent({
+                ...options,
+                ...each[agentId],
+                ...each[`${agentId}@${env.FAKE_HOME === undefined ? 'usual' : basename(env.FAKE_HOME)}`],
+              }),
+            }
+    },
   })
   return Layer.succeed(
     Agents,
@@ -129,6 +153,9 @@ export const runtime = (
   Runtime.layer({
     database,
     worktreeRoot: mkdtempSync(join(tmpdir(), 'charrette-worktrees-')),
+    accountsRoot: mkdtempSync(join(tmpdir(), 'charrette-accounts-')),
+    // Nothing opens on the Mac running the tests: what would have is kept.
+    openTerminal: (line) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(false)),
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
     agents: fakeAgents(options, more.signedOut, more.each, more.perUse),

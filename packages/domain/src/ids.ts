@@ -38,6 +38,7 @@ export const Ids = {
   agentInstallation: kind('inst', 'AgentInstallationId'),
   principal: kind('prin', 'PrincipalId'),
   accountStatus: kind('acct', 'AccountStatusId'),
+  agentAccount: kind('acc', 'AgentAccountId'),
   providerSession: kind('sess', 'ProviderSessionId'),
   process: kind('proc', 'ProcessId'),
   permissionRequest: kind('perm', 'PermissionRequestId'),

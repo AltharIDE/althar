@@ -2,7 +2,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import { type AgentDefinition, agents } from '../src/registry'
-import { signInCheck, signInStatus } from '../src/signIn'
+import { signInCheck, signInStatus, signOut } from '../src/signIn'
 
 const withStatus = (script: string): AgentDefinition => ({
   ...agents.codex,
@@ -53,10 +53,63 @@ describe('reading sign-in status', () => {
     assert.isUndefined(read('', 0))
   })
 
+  it('signs an account out with the agent’s own command, in its home, where the agent has one', () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const outIn = (script: string): AgentDefinition => ({
+          ...agents.codex,
+          signIn: { ...agents.codex.signIn, logout: () => ({ command: 'bun', args: ['-e', script] }) },
+        })
+        assert.isTrue(
+          yield* signOut(outIn("process.exit(process.env.CODEX_HOME === '/homes/work' ? 0 : 1)"), process.execPath, {
+            CODEX_HOME: '/homes/work',
+          }),
+        )
+        assert.isFalse(yield* signOut(outIn('process.exit(1)')))
+        assert.isTrue(yield* signOut(agents.opencode))
+        assert.deepStrictEqual(
+          [agents['claude-code'].signIn.logout?.('node').args, agents.codex.signIn.logout?.('node').args.at(-1)],
+          [['auth', 'logout'], 'logout'],
+        )
+      }),
+    ))
+
   it('names the command the user runs to sign in', () => {
     assert.deepStrictEqual(
       Object.values(agents).map((agent) => agent.signIn.login),
       ['claude auth login', 'codex login', 'opencode auth login'],
+    )
+  })
+})
+
+/** What a usual folder might hold: settings, sign-ins, and other tools' data. */
+const PRESENT = ['settings.json', 'CLAUDE.md', 'config.toml', 'AGENTS.md', 'auth.json', '.credentials.json', 'opencode', 'mise', 'pnpm']
+
+describe('an agent’s homes', () => {
+  it('names the variable that points each agent at a home, and its usual folder', () => {
+    const usual = (env: Record<string, string>) =>
+      Object.values(agents).map((agent) => [agent.home.variable, agent.home.usual(env, '/Users/me')])
+    assert.deepStrictEqual(usual({}), [
+      ['CLAUDE_CONFIG_DIR', '/Users/me/.claude'],
+      ['CODEX_HOME', '/Users/me/.codex'],
+      ['XDG_DATA_HOME', '/Users/me/.local/share'],
+    ])
+    assert.deepStrictEqual(
+      usual({ CLAUDE_CONFIG_DIR: '/c', CODEX_HOME: '/x', XDG_DATA_HOME: '/d' }).map(([, folder]) => folder),
+      ['/c', '/x', '/d'],
+    )
+  })
+
+  it('shares only settings and instructions, never a sign-in', () => {
+    // Where the home is the agent's own folder, nothing that signs in is shared.
+    for (const agent of [agents['claude-code'], agents.codex])
+      for (const name of agent.home.shared(PRESENT)) assert.notMatch(name, /auth|credential|token|\.claude\.json|keychain/i, agent.id)
+    assert.deepStrictEqual(agents['claude-code'].home.shared(PRESENT), ['settings.json', 'CLAUDE.md'])
+    assert.deepStrictEqual(agents.codex.home.shared(PRESENT), ['config.toml', 'AGENTS.md'])
+    // OpenCode's home is the data folder every program uses: only its own stays apart.
+    assert.deepStrictEqual(
+      agents.opencode.home.shared(PRESENT),
+      PRESENT.filter((name) => name !== 'opencode'),
     )
   })
 })
@@ -67,6 +120,10 @@ describe('signInStatus', () => {
       assert.strictEqual(yield* signInStatus(withStatus("console.log('Logged in using ChatGPT')")), 'signed_in')
       assert.strictEqual(yield* signInStatus(withStatus("console.log('Not logged in'); process.exit(1)")), 'signed_out')
       assert.strictEqual(yield* signInStatus(withStatus("console.log('something else')")), 'unknown')
+      // In an account's home: the status command runs with it.
+      const home = withStatus("console.log(process.env.CODEX_HOME === '/homes/work' ? 'Logged in using ChatGPT' : 'Not logged in')")
+      assert.strictEqual((yield* signInCheck(home, process.execPath, { CODEX_HOME: '/homes/work' })).status, 'signed_in')
+      assert.strictEqual((yield* signInCheck(home)).status, 'signed_out')
       // With how it is paid for, where the agent says.
       assert.deepStrictEqual(yield* signInCheck(withStatus("console.log('Logged in using ChatGPT')")), {
         status: 'signed_in',

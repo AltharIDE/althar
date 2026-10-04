@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { emitterPort } from '@charrette/contracts'
 import { connection, Folders, Nudges, Secrets, SecretsUnavailable, services } from '@charrette/runtime'
 import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Queue, Stream } from 'effect'
+import { openInTerminal } from './terminal'
 
 /*
  * The runtime, in Electron's utility process (ADR-003). It opens the profile,
@@ -84,6 +85,8 @@ const secrets = Secrets.sealed(join(profile, 'secrets'), {
 const options = {
   database: join(profile, 'charrette.sqlite'),
   worktreeRoot: required('CHARRETTE_WORKTREES'),
+  accountsRoot: join(profile, 'accounts'),
+  openTerminal: openInTerminal,
   appVersion: process.env.CHARRETTE_APP_VERSION ?? '0.0.0',
   deviceName: hostname(),
 }
@@ -104,6 +107,8 @@ const program = Effect.gen(function* () {
           agents: (yield* Effect.promise(() => import('./fakeAgents'))).fakeAgents,
           connectors: (yield* Effect.promise(() => import('./fakeConnectors'))).fakeConnectors,
           secrets: Secrets.memory(),
+          // Nothing opens in Terminal while the tests drive the app.
+          openTerminal: () => Effect.succeed(false),
         }
       : undefined
   const context = yield* Layer.build(services(fake === undefined ? { ...options, clientIds, secrets } : { ...options, ...fake }))

@@ -11,6 +11,10 @@ import { UnknownAgent } from './errors'
 export interface RuntimeOptions {
   /** Where task worktrees go: `<root>/<project>/<task>/<repository>` (ADR-006). */
   readonly worktreeRoot: string
+  /** Where the homes of accounts Charrette makes go (ADR-012): `<root>/<account>`. Without it, it makes none. */
+  readonly accountsRoot?: string
+  /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
+  readonly openTerminal?: (line: string) => Effect.Effect<boolean>
   readonly appVersion: string
   /** What this device is called, when the profile is new. */
   readonly deviceName: string
@@ -27,7 +31,8 @@ export class RuntimeConfig extends Context.Service<RuntimeConfig, RuntimeOptions
 /** An agent the runtime can start: its registry entry, and how to reach it from a working directory. */
 export interface AgentEntry {
   readonly definition: AgentDefinition
-  readonly transport: (cwd: string) => Transport
+  /** How to reach it from a working directory, with an account's home in its environment (ADR-012). */
+  readonly transport: (cwd: string, env?: Readonly<Record<string, string>>) => Transport
 }
 
 /**
@@ -65,9 +70,9 @@ export class Agents extends Context.Service<
     return Agents.from(
       Object.values(agents).map((definition) => ({
         definition,
-        transport: (cwd: string) => {
+        transport: (cwd: string, env: Readonly<Record<string, string>> = {}) => {
           const spec = definition.launch(process.execPath)
-          return { _tag: 'Process' as const, spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut) } }, cwd }
+          return { _tag: 'Process' as const, spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...env } }, cwd }
         },
       })),
     )

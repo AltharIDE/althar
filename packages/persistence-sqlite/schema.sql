@@ -43,7 +43,7 @@
 -- pull_request_state: none, draft, ready, merged, closed
 -- work_item_state: pending, claimed, done, failed, uncertain
 -- mutation_state: intended, confirmed, failed, uncertain
--- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy
+-- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account
 -- connection_product: github, gitlab, bitbucket_cloud, bitbucket_dc, linear, jira_cloud, jira_dc, trello
 -- connection_auth: device_flow, pkce, token
 -- connection_state: ready, reauth_required, removed
@@ -494,7 +494,7 @@ CREATE TABLE principals (
   subject_hint TEXT NOT NULL,
   auth_mode TEXT NOT NULL REFERENCES vocab_auth_mode (word),
   observed_at TEXT NOT NULL CHECK (observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
-) STRICT;
+, account_id TEXT REFERENCES agent_accounts (id)) STRICT;
 
 CREATE TABLE account_statuses (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'acct_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
@@ -524,7 +524,7 @@ CREATE TABLE provider_sessions (
   last_event_sequence INTEGER NOT NULL DEFAULT 0 CHECK (last_event_sequence >= 0),
   started_at TEXT NOT NULL CHECK (started_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), account_id TEXT REFERENCES agent_accounts (id),
   CHECK ((state = 'superseded') = (superseded_by_session_id IS NOT NULL)),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   FOREIGN KEY (run_attempt_id, project_id) REFERENCES run_attempts (id, project_id),
@@ -940,3 +940,20 @@ CREATE TABLE model_preferences (
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   PRIMARY KEY (agent_id, model)
 ) STRICT;
+
+CREATE TABLE agent_accounts (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'acc_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
+  agent_id TEXT NOT NULL,
+  device_id TEXT NOT NULL REFERENCES devices (id),
+  name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+  home TEXT,
+  position INTEGER NOT NULL CHECK (position >= 0),
+  adopted_from TEXT,
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  removed_at TEXT CHECK (removed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
+) STRICT;
+
+CREATE UNIQUE INDEX agent_accounts_usual ON agent_accounts (device_id, agent_id) WHERE home IS NULL AND removed_at IS NULL;
+
+CREATE UNIQUE INDEX agent_accounts_by_home ON agent_accounts (device_id, home) WHERE home IS NOT NULL AND removed_at IS NULL;

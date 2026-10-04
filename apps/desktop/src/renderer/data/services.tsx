@@ -16,8 +16,8 @@ import type { Client } from './client'
  * back a grant the runtime knows the folder by.
  */
 export interface Host {
-  /** Asks the person for a folder; its grant, or null when they cancel. */
-  readonly pickFolder: () => Promise<string | null>
+  /** Asks the person for a folder, for a project or an agent's account; its grant, or null when they cancel. */
+  readonly pickFolder: (purpose?: 'project' | 'account') => Promise<string | null>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */
   readonly grantDropped: (file: File) => Promise<string | null>
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */

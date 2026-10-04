@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Brand } from '../foundations/brands/brands'
 import { ConnectKind, RuntimeState, SourceOrigin } from '../foundations/vocabulary'
 import type { SelectOption } from '../primitives/Select/Select'
+import type { AccountEntry, FoundFolder } from '../setup/Accounts/Accounts'
 import type { ConnectOption } from '../setup/ConnectAgent/ConnectAgent'
 import type { ServiceConnection, ServiceOption } from '../setup/Connections/Connections'
 import type { RuntimeEntry } from '../setup/Runtimes/Runtimes'
@@ -247,4 +248,23 @@ export const CONNECTED: ServiceConnection[] = [
   { id: 'conn_1', service: 'github', account: 'you' },
   { id: 'conn_2', service: 'github', account: 'you', instance: 'https://git.meridian.dev' },
   { id: 'conn_3', service: 'linear', account: 'You', needsSignIn: true },
+]
+
+/** Codex with four accounts: its usual folder, one Charrette made, one codex-profiles made that is out of usage, and one signed out. */
+export const ACCOUNTS: AccountEntry[] = [
+  { id: 'acc_usual', name: 'main', place: { kind: 'usual' }, state: { kind: 'ready', paid: 'plan' } },
+  { id: 'acc_work', name: 'work', place: { kind: 'own' }, state: { kind: 'ready', paid: 'plan' } },
+  {
+    id: 'acc_client',
+    name: 'Client',
+    place: { kind: 'adopted', folder: '~/.codex-client', from: 'codex-profiles' },
+    state: { kind: 'out', back: '14:00' },
+  },
+  { id: 'acc_side', name: 'side', place: { kind: 'own' }, state: { kind: 'signedOut' } },
+]
+
+/** Folders account switchers keep Codex accounts in, not added yet. */
+export const FOUND: FoundFolder[] = [
+  { id: 'grant_personal', name: 'personal', folder: '~/.codex-personal', from: 'codex-profiles' },
+  { id: 'grant_side', name: 'side', folder: '~/.local/share/codex-accounts/accounts/side', from: 'codex-account-switcher' },
 ]

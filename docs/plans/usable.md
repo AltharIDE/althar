@@ -41,6 +41,11 @@ the runtime behind it and the app wiring it up.
    - **macOS notifications** and a dock badge when something needs you or is
      ready. A notification only while the person looks elsewhere, never for
      progress; the badge counts calls and tasks ready, across projects.
+   - **Several accounts per agent**
+     ([ADR-012](../decisions/012-several-accounts-per-agent.md)). They form a
+     pool, which a project's rules can narrow, and switchers people already
+     use are supported. A usage limit moves work to the agent's next account
+     first.
 4. **One app for your conversations.**
    - **Talking without planning:** a session or a question, besides a task
      with a plan.
@@ -64,7 +69,19 @@ One pull request each:
    own: a new run of the task with the note as its input, which ends with the
    lead's summary and a push, rather than a message the lead may or may not
    push after.
-3. **Work that doesn't need you.**
+3. **Work that doesn't need you.** Done so far:
+   - usage limits;
+   - notifications and the Dock badge.
+
+   Next:
+   1. **Accounts in the runtime,** and the agent's accounts in Settings
+      (Accounts, below).
+   2. **The project rules screen:**
+      - the always-ask list;
+      - the usage-limit rule;
+      - which accounts the project may use.
+   3. A step that stalls becomes a call.
+   4. Local merging, and sending work back as a step.
 4. **Conversations.**
 
 Brought forward from step 4, after the board: **the model picker.** Every
@@ -93,6 +110,15 @@ Confirmed with the user on 1 October 2026:
   move to the next agent automatically. Where it is set comes later; the
   setting exists from the start.
 
+Confirmed with the user on 3 October 2026:
+
+- **Several accounts per agent,** each in its own folder. They form a pool
+  that a project's rules can narrow, as in ADR-012. The account switchers
+  people already use for Codex, OpenCode and Claude Code are supported:
+  - homes a switcher made are adopted;
+  - the account a swapping switcher made active is the agent's first;
+  - rotation inside the agent works unchanged.
+
 ## Usage limits
 
 Next, decided with the user on 3 October 2026, as designed in docs 03 and 05.
@@ -100,12 +126,17 @@ Next, decided with the user on 3 October 2026, as designed in docs 03 and 05.
 - **When.** A turn fails with the agent's usage limit, which its error says,
   with the reset time where it gives one: a lead's, a reviewer's or the
   coordinator's. Also a step about to start on an agent known to be out.
-- **Who is out.** The agent's account on this Mac, until its reset. Without
-  a reset time, for an hour, then it is tried again.
+- **Who is out.** The account the work ran on, until its reset. Without a
+  reset time, for an hour, then it is tried again. Until accounts come, an
+  agent has one, so the agent is out. With accounts, its others are not
+  (ADR-012).
 - **What happens** is one of the project's rules: move on (the default) or
   wait, a new revision of its rules when the person changes it, which a run
   cites. Where the person sets it comes later.
-  - **Move on.** The work goes to the next free agent: signed in on a plan,
+  - **Move on.** With accounts, where the project rotates (off until the
+    person turns it on), the work first goes to the same agent's next
+    account that the project allows, signed in and not out, on the same
+    model; the person added it, so a key pays as well as a plan. Then it goes to the next free agent: signed in on a plan,
     not out, in the agents' order, and not the other step's agent unless
     nothing else is free (the thread then says it reviews its own work). An
     agent paid per use, on a key, is never moved to unasked: that spends the
@@ -120,6 +151,57 @@ Next, decided with the user on 3 October 2026, as designed in docs 03 and 05.
 - **Outside a step,** the coordinator or a lead the person is talking to
   moves on the same way, and the person's message goes to the agent that
   took over. Waiting, the message waits in the queue until the reset.
+
+## Accounts
+
+Next in step 3, decided with the user on 3 October 2026, as designed in
+ADR-012 and doc 03 (Several accounts). One pull request for the runtime and
+Settings, then the project rules screen.
+
+- **The record.** An account per sign-in, with:
+  - its agent and device;
+  - the person's name for it and their order;
+  - its home, or none for the agent's usual folder;
+  - who it is signed in as, and whether a plan or a key pays for it.
+
+  Each session records its account. A migration gives every agent's existing
+  sign-in an account with no home, so nothing changes for one sign-in.
+- **Running on an account.**
+  - The registry says each agent's home variable (`CLAUDE_CONFIG_DIR`,
+    `CODEX_HOME`, `XDG_DATA_HOME`), and a session starts with its account's
+    home set in it.
+  - The sign-in check, the paid-by reading and the model probe run per
+    account.
+  - Limits are kept per account.
+- **Adding one.**
+  - Settings, under the agent: Add an account, with a name.
+  - Charrette makes the home, links the person's usual settings into it, and
+    opens the agent's own sign-in in a terminal.
+  - It then shows who the account is signed in as.
+- **Bringing one in.**
+  - Settings lists the folders of the known switchers that give each account
+    a home, and the person picks which to add. Any other folder can be added
+    by hand.
+  - Nothing is opened inside them.
+- **Which runs.**
+  - A conversation stays on its account.
+  - A new session takes the first allowed account in the person's order
+    that is signed in and not out.
+  - On a limit, the same agent's next account comes before the next agent.
+  - The thread names accounts only where it matters: a move, a session's
+    header, Settings.
+- **The project's rules** gain which accounts of each agent the project may
+  use (all by default) and whether work rotates through them (off by
+  default), as a revision like the usage-limit rule. The runtime and the API
+  (`SetProjectAccounts`) have them; the person sets them on the project
+  rules screen, next.
+- **Removing one** Charrette made signs it out with the agent's own tool and
+  deletes its folder; one another tool made stays as it is.
+- **Tests.**
+  - Fake agents get a home each. A home's variable reaches the fake, which
+    says which account it runs on.
+  - An e2e test where one account is out and the same agent's next takes
+    over.
 
 ## Which model the next agent runs
 

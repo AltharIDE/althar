@@ -24,6 +24,17 @@ export const ProjectRules = Schema.Struct({
   alwaysAsk: Schema.Array(Schema.String),
   /** Without one, it moves on. */
   usageLimit: Schema.optional(Schema.Literals(['move', 'wait'])),
+  /**
+   * An agent's accounts here (ADR-012): whether work moves on to the agent's
+   * next account when one runs out, which the person turns on (off without
+   * it), and which accounts each agent may use, by agent (every one without).
+   */
+  accounts: Schema.optional(
+    Schema.Struct({
+      rotate: Schema.Boolean,
+      only: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+    }),
+  ),
 })
 export type ProjectRules = typeof ProjectRules.Type
 
@@ -35,6 +46,12 @@ const FIRST: ProjectRules = {
 
 /** What a revision's rules say a usage limit does. */
 export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimit ?? 'move'
+
+/** The project's rule for an agent's accounts: rotation, off unless the person turned it on, and the accounts it may use. */
+export type AccountRule = NonNullable<ProjectRules['accounts']>
+
+/** What a revision's rules say of accounts: no rotation, and every account, unless the person said otherwise. */
+export const accountsOf = (rules: ProjectRules): AccountRule => rules.accounts ?? { rotate: false }
 
 type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance
 
@@ -51,6 +68,12 @@ export class Policies extends Context.Service<
     setUsageLimit(
       projectId: string,
       usageLimit: UsageLimit,
+      actorId: ActorId,
+    ): Effect.Effect<void, SqlError.SqlError | Schema.SchemaError | NotFound>
+    /** A new revision of the project's rules for agents' accounts, recorded as the person's. */
+    setAccounts(
+      projectId: string,
+      accounts: AccountRule,
       actorId: ActorId,
     ): Effect.Effect<void, SqlError.SqlError | Schema.SchemaError | NotFound>
   }
@@ -96,6 +119,21 @@ export class Policies extends Context.Service<
           return yield* insert(projectId, 1, FIRST, instance.systemId)
         })
 
+      /** A new revision of the project's rules, where the change makes one: none for what it says already. */
+      const revise = (projectId: string, actorId: ActorId, change: (rules: ProjectRules) => ProjectRules | undefined) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
+          if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+          const now = yield* current(project.id)
+          const next = change(now.rules)
+          if (next === undefined) return
+          const [last] = yield* sql<{
+            revision: number
+          }>`SELECT max(revision) AS revision FROM policies WHERE project_id = ${projectId}`
+          yield* sql.withTransaction(insert(project.id, (last?.revision ?? 0) + 1, next, actorId))
+        })
+
       return Policies.of({
         current: (projectId) => provide(current(projectId)),
         rulesOf: (policyId) =>
@@ -108,18 +146,12 @@ export class Policies extends Context.Service<
             }),
           ),
         setUsageLimit: (projectId, usageLimit, actorId) =>
+          provide(revise(projectId, actorId, (rules) => (usageLimitOf(rules) === usageLimit ? undefined : { ...rules, usageLimit }))),
+        setAccounts: (projectId, accounts, actorId) =>
           provide(
-            Effect.gen(function* () {
-              const sql = yield* SqlClient.SqlClient
-              const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
-              if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
-              const now = yield* current(project.id)
-              if (usageLimitOf(now.rules) === usageLimit) return
-              const [last] = yield* sql<{
-                revision: number
-              }>`SELECT max(revision) AS revision FROM policies WHERE project_id = ${projectId}`
-              yield* sql.withTransaction(insert(project.id, (last?.revision ?? 0) + 1, { ...now.rules, usageLimit }, actorId))
-            }),
+            revise(projectId, actorId, (rules) =>
+              JSON.stringify(accountsOf(rules)) === JSON.stringify(accounts) ? undefined : { ...rules, accounts },
+            ),
           ),
       })
     }),
