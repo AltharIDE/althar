@@ -35,7 +35,7 @@ const HOUR = 60 * 60 * 1000
 const withAgents = (each: Readonly<Record<string, FakeAgentOptions>>, signedOut: ReadonlyArray<string> = []) =>
   Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { each, signedOut })))
 
-/** A project with a task planned on these steps, and what starts it. */
+/** A project with a task planned on these steps, and what starts it: only that, not the plan's countdown, however slow the machine. */
 const planned = (steps: ReadonlyArray<PlanStep>, title = 'Retry the checkout [lead:finish]') =>
   Effect.gen(function* () {
     const projects = yield* Projects
@@ -54,6 +54,7 @@ const planned = (steps: ReadonlyArray<PlanStep>, title = 'Retry the checkout [le
       steps,
       reason: null,
       actorId: instance.personId,
+      startsIn: Duration.minutes(5),
       end: null,
     })
     return { projectId: project.projectId, task, start: plans.start(planId, instance.personId) }
