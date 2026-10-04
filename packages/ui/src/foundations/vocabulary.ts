@@ -206,6 +206,8 @@ export enum TaskEnd {
 
 /** Who answers a step's permission requests in a project. */
 export enum PermissionPolicy {
+  /** What no rule keeps is allowed: the always-ask list waits for you, the never list is refused. */
+  Rules = 'rules',
   /** The lead allows what the task needs and passes the rest to you. */
   Lead = 'lead',
   /** Nothing asks; every request is still recorded. */

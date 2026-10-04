@@ -5,11 +5,14 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { PermissionRequest } from '@charrette/provider-adapters'
 
 /*
- * The project rules for the MVP (docs/plans/mvp.md): everything is allowed and
- * recorded, except what the always-ask list keeps for the person. Pushes to
- * the default branch, force pushes and pushes of every branch or of tags,
- * deleting branches other than the task's, merges, deploy and publish
- * commands, and writes outside the task's worktree.
+ * The rules for agents' requests (ADR-013). What no project can change:
+ * agents reach a code host only through Charrette, and never read
+ * credentials. Then the kinds of request the rules keep for the person:
+ * pushes to the default branch, force pushes, pushes of every branch, tags
+ * or patterns, deleting branches other than the task's, deploy and publish
+ * commands, and writes outside the task's worktree; and what they can't
+ * tell. A project's rules (Policies) say which of those ask and which are
+ * never allowed, which commands it names, and what happens to the rest.
  *
  * Commands are read as a shell would split them, into commands and words, so
  * `cd x && git -C y push origin HEAD:refs/heads/main` is understood. Where
@@ -29,6 +32,52 @@ export type Verdict =
   | { readonly verdict: 'ask'; readonly reason: string }
   | { readonly verdict: 'deny'; readonly reason: string }
 
+/**
+ * The kinds of request the rules keep for the person (ADR-013): each one a
+ * project can have ask, refuse, or let through. Where the rules can't tell
+ * what a request does, it asks whatever the project says, short of
+ * allowing everything.
+ */
+export const RULES = ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'] as const
+export type RuleId = (typeof RULES)[number]
+
+/** What each kind is, in the words a refusal says it. */
+const RULE_WORDS: Readonly<Record<RuleId, string>> = {
+  'default-branch': 'pushing to the default branch',
+  'force-push': 'force pushes',
+  'many-branches': 'pushing every branch, tags, or a pattern of branches',
+  'delete-branch': "deleting branches that aren't the task's",
+  deploy: 'deploying and publishing',
+  outside: "writing outside the task's worktree",
+}
+
+/** Why the rules keep a request for the person, and which kind it is: one a project names, or one they can't tell. */
+interface Kept {
+  readonly reason: string
+  readonly rule: RuleId | 'unclear'
+}
+
+const kept = (reason: string, rule: RuleId | 'unclear'): Kept => ({ reason, rule })
+
+/** A project's rules, as the rules read them (ADR-013, Policies). */
+export interface ProjectRuleSet {
+  /**
+   * What happens to what no rule keeps: it is allowed (`rules`), it waits
+   * for the person (`ask`); or everything is allowed (`allow`), the
+   * always-ask list with it, and only what is never allowed is refused.
+   */
+  readonly mode: 'rules' | 'ask' | 'allow'
+  /** The kinds that ask the person. */
+  readonly ask: ReadonlyArray<RuleId>
+  /** The kinds refused outright, whoever would answer. */
+  readonly never: ReadonlyArray<RuleId>
+  /** Commands the person named, by how they start (`npm publish`, `terraform *`): asked about, or refused. */
+  readonly commands: ReadonlyArray<{ readonly pattern: string; readonly decision: 'ask' | 'never' }>
+}
+
+/** The MVP's rules, a project's first: everything allowed but every kind above, which asks. */
+export const MVP_RULES: ProjectRuleSet = { mode: 'rules', ask: RULES, never: [], commands: [] }
+
 export interface RuleContext {
   /** The task's worktree, where the agent works. */
   readonly worktree: string
@@ -42,6 +91,8 @@ export interface RuleContext {
   readonly realPath?: (path: string) => string
   /** Folders anything may write to, such as the temp folder. */
   readonly scratch?: ReadonlyArray<string>
+  /** The project's rules; the MVP's without them. */
+  readonly project?: ProjectRuleSet
 }
 
 const ALLOW: Verdict = { verdict: 'allow' }
@@ -309,6 +360,14 @@ const unwrap = (command: ReadonlyArray<string>): ReadonlyArray<string> => {
   let index = 0
   while (index < command.length) {
     const word = command[index] ?? ''
+    // `timeout [options] 60 cmd`: its options, then how long, then the command.
+    if (word === 'timeout') {
+      index += 1
+      while ((command[index] ?? '').startsWith('-'))
+        index += ['-s', '-k', '--signal', '--kill-after'].includes(command[index] ?? '') ? 2 : 1
+      index += 1
+      continue
+    }
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) || ['sudo', 'command', 'exec', 'env', 'nice', 'time', 'nohup', 'caffeinate'].includes(word)) {
       index += 1
       // `sudo -u x`, `env -i`, `nice -n 5`: their options too.
@@ -422,10 +481,11 @@ const PUSH_OPTIONS_WITH_VALUE = ['--repo', '-o', '--push-option', '--receive-pac
 const PUSH_FLAGS_HARMLESS =
   /^(-u|--set-upstream|-n|--dry-run|-v|--verbose|-q|--quiet|--progress|--no-progress|--no-verify|--verify|--atomic|--no-atomic|--porcelain|--ipv4|--ipv6|-4|-6|--thin|--no-thin|--signed(=.*)?|--no-signed|--recurse-submodules=.*|--no-recurse-submodules|--no-force-with-lease|--no-force-if-includes|--no-tags|--no-follow-tags)$/
 
-/** Why a push asks, or nothing when it goes only where the task may push. */
-const pushReason = (args: ReadonlyArray<string>, context: RuleContext): string | undefined => {
+/** What a push does that the rules keep for the person: every kind it is; none where it goes only where the task may push. */
+const pushKinds = (args: ReadonlyArray<string>, context: RuleContext): ReadonlyArray<Kept> => {
   const main = context.defaultBranch
   const own = (branch: string) => branch === context.taskBranch
+  const found: Array<Kept> = []
   const positional: Array<string> = []
   let deleting = false
   for (let index = 0; index < args.length; index += 1) {
@@ -435,55 +495,152 @@ const pushReason = (args: ReadonlyArray<string>, context: RuleContext): string |
       continue
     }
     if (/^(-f|--force|--force-with-lease(=.*)?|--force-if-includes)$/.test(arg) || /^-[a-z]*f[a-z]*$/.test(arg))
-      return 'A force push always asks.'
-    if (/^(--all|--branches|--mirror)$/.test(arg)) return 'Pushing every branch always asks.'
-    if (/^(--tags|--follow-tags)$/.test(arg)) return 'Pushing tags always asks; they often start a release.'
-    if (arg === '--prune') return 'A push that deletes remote branches always asks.'
-    if (arg === '-d' || arg === '--delete') {
-      deleting = true
-      continue
-    }
-    if (PUSH_OPTIONS_WITH_VALUE.includes(arg)) {
-      index += 1
-      continue
-    }
-    if (PUSH_OPTIONS_WITH_VALUE.some((option) => arg.startsWith(`${option}=`)) || PUSH_FLAGS_HARMLESS.test(arg)) continue
-    return `Charrette can't tell what \`${arg}\` does to a push, so it asks.`
+      found.push(kept('A force push always asks.', 'force-push'))
+    else if (/^(--all|--branches|--mirror)$/.test(arg)) found.push(kept('Pushing every branch always asks.', 'many-branches'))
+    else if (/^(--tags|--follow-tags)$/.test(arg))
+      found.push(kept('Pushing tags always asks; they often start a release.', 'many-branches'))
+    else if (arg === '--prune') found.push(kept('A push that deletes remote branches always asks.', 'delete-branch'))
+    else if (arg === '-d' || arg === '--delete') deleting = true
+    else if (PUSH_OPTIONS_WITH_VALUE.includes(arg)) index += 1
+    else if (!PUSH_OPTIONS_WITH_VALUE.some((option) => arg.startsWith(`${option}=`)) && !PUSH_FLAGS_HARMLESS.test(arg))
+      found.push(kept(`Charrette can't tell what \`${arg}\` does to a push, so it asks.`, 'unclear'))
   }
   const [, ...refspecs] = positional
   const destinations: Array<{ readonly branch: string; readonly deletes: boolean }> = []
   if (refspecs.length === 0) {
-    if (deleting) return `Charrette can't tell which branch this deletes, so it asks.`
-    if (context.currentBranch === undefined) return `Charrette can't tell which branch this pushes, so it asks.`
-    destinations.push({ branch: context.currentBranch, deletes: false })
+    if (deleting) found.push(kept(`Charrette can't tell which branch this deletes, so it asks.`, 'unclear'))
+    else if (context.currentBranch === undefined) found.push(kept(`Charrette can't tell which branch this pushes, so it asks.`, 'unclear'))
+    else destinations.push({ branch: context.currentBranch, deletes: false })
   }
-  for (const refspec of refspecs) {
-    if (refspec.startsWith('+')) return 'A force push always asks.'
-    if (refspec.includes('*')) return 'A push to a pattern of branches always asks.'
+  for (const written of refspecs) {
+    // A forced refspec still goes somewhere, which counts too.
+    if (written.startsWith('+')) found.push(kept('A force push always asks.', 'force-push'))
+    const refspec = written.replace(/^\+/, '')
+    if (refspec.includes('*')) {
+      found.push(kept('A push to a pattern of branches always asks.', 'many-branches'))
+      continue
+    }
     const colon = refspec.lastIndexOf(':')
     const source = colon === -1 ? refspec : refspec.slice(0, colon)
     let destination = colon === -1 ? refspec : refspec.slice(colon + 1)
-    if (colon !== -1 && destination === '') return 'A push of matching branches always asks.'
+    if (colon !== -1 && destination === '') {
+      found.push(kept('A push of matching branches always asks.', 'many-branches'))
+      continue
+    }
     if (destination === 'HEAD' || (colon === -1 && source === 'HEAD')) {
-      if (context.currentBranch === undefined) return `Charrette can't tell which branch this pushes, so it asks.`
+      if (context.currentBranch === undefined) {
+        found.push(kept(`Charrette can't tell which branch this pushes, so it asks.`, 'unclear'))
+        continue
+      }
       destination = context.currentBranch
     }
-    if (destination.startsWith('refs/tags/')) return 'Pushing tags always asks; they often start a release.'
-    if (destination.startsWith('refs/') && !destination.startsWith('refs/heads/'))
-      return `Charrette can't tell what \`${destination}\` is, so it asks.`
+    if (destination.startsWith('refs/tags/')) {
+      found.push(kept('Pushing tags always asks; they often start a release.', 'many-branches'))
+      continue
+    }
+    if (destination.startsWith('refs/') && !destination.startsWith('refs/heads/')) {
+      found.push(kept(`Charrette can't tell what \`${destination}\` is, so it asks.`, 'unclear'))
+      continue
+    }
     destinations.push({ branch: destination.replace(/^refs\/heads\//, ''), deletes: deleting || (colon !== -1 && source === '') })
   }
   for (const { branch, deletes } of destinations) {
-    if (branch === main) return deletes ? `Deleting ${main} always asks.` : `A push to ${main} always asks.`
-    if (deletes && !own(branch)) return `Deleting ${branch}, which isn't this task's branch, always asks.`
+    if (branch === main) found.push(kept(deletes ? `Deleting ${main} always asks.` : `A push to ${main} always asks.`, 'default-branch'))
+    else if (deletes && !own(branch)) found.push(kept(`Deleting ${branch}, which isn't this task's branch, always asks.`, 'delete-branch'))
   }
-  return undefined
+  return found
 }
 
 // ---- Commands --------------------------------------------------------------
 
-const DEPLOY =
-  /\bdeploy\b|\b(wrangler|vercel|netlify|flyctl|fly|firebase|serverless|cdk|sam)\s+(deploy|publish)\b|\bvercel\b.*--prod\b|\bkubectl\s+(apply|delete|rollout|replace|patch)\b|\bterraform\s+(apply|destroy)\b|\bpulumi\s+(up|destroy)\b|\bhelm\s+(install|upgrade|uninstall)\b|\b(npm|bun|pnpm|yarn|cargo|gem|twine|poetry)\s+publish\b|\bgh\s+release\s+create\b/
+/**
+ * Tools that deploy or publish, by the subcommands that do: read in the
+ * subcommand's place, never in arguments or quoted text, so `grep deploy`
+ * and `git commit -m "Fix the deploy script"` aren't deploys.
+ */
+const DEPLOYERS: Readonly<Record<string, RegExp>> = {
+  wrangler: /^(deploy|publish)$/,
+  vercel: /^(deploy|publish)$/,
+  netlify: /^deploy$/,
+  flyctl: /^deploy$/,
+  fly: /^deploy$/,
+  firebase: /^deploy$/,
+  serverless: /^deploy$/,
+  sls: /^deploy$/,
+  cdk: /^(deploy|destroy)$/,
+  sam: /^deploy$/,
+  kubectl: /^(apply|delete|rollout|replace|patch)$/,
+  terraform: /^(apply|destroy)$/,
+  tofu: /^(apply|destroy)$/,
+  pulumi: /^(up|destroy)$/,
+  helm: /^(install|upgrade|uninstall|rollback)$/,
+  npm: /^publish$/,
+  bun: /^publish$/,
+  pnpm: /^publish$/,
+  yarn: /^publish$/,
+  cargo: /^publish$/,
+  gem: /^(publish|push)$/,
+  twine: /^upload$/,
+  poetry: /^publish$/,
+}
+
+/** Task runners whose targets name what they do: `make deploy`, `just publish-docs`. */
+const RUNNERS = ['make', 'just', 'task', 'rake', 'mage']
+
+const DEPLOY_WORD = /^(deploy|publish|release)([:._-]|$)/
+
+/** Whether a command deploys or publishes, as its program and subcommand say. */
+const deploys = (words: ReadonlyArray<string>): boolean => {
+  const [first = '', ...rest] = words
+  const program = first.slice(first.lastIndexOf('/') + 1)
+  const [sub = '', next = ''] = rest.filter((word) => !word.startsWith('-'))
+  // A script named for it: `./deploy.sh`, `scripts/release`.
+  if (DEPLOY_WORD.test(program) && program !== 'release') return true
+  if (DEPLOYERS[program]?.test(sub) === true) return true
+  if (program === 'vercel' && rest.includes('--prod')) return true
+  if (program === 'gh' && sub === 'release' && next === 'create') return true
+  if (['npm', 'pnpm', 'yarn', 'bun'].includes(program) && sub === 'run' && DEPLOY_WORD.test(next)) return true
+  if (RUNNERS.includes(program) && rest.some((word) => !word.startsWith('-') && DEPLOY_WORD.test(word))) return true
+  // A script given its own subcommand: `./ops.sh deploy prod`.
+  return (first.includes('/') || /\.(sh|py|js|ts|rb)$/.test(program)) && DEPLOY_WORD.test(sub)
+}
+
+/**
+ * The command a package runner runs for it, as its own words: `npx vercel
+ * deploy`, `pnpm exec prisma migrate reset`. None where the command isn't one.
+ */
+const runnerRuns = (words: ReadonlyArray<string>): ReadonlyArray<string> | undefined => {
+  const [first = '', second = ''] = words
+  const program = first.slice(first.lastIndexOf('/') + 1)
+  const start = ['npx', 'bunx', 'pnpx', 'uvx'].includes(program)
+    ? 1
+    : (program === 'pnpm' && (second === 'exec' || second === 'dlx')) ||
+        (program === 'yarn' && (second === 'exec' || second === 'dlx')) ||
+        (program === 'npm' && second === 'exec') ||
+        (program === 'bun' && second === 'x')
+      ? 2
+      : undefined
+  if (start === undefined) return undefined
+  let index = start
+  while ((words[index] ?? '').startsWith('-')) index += ['-p', '--package', '-c', '--call', '--from'].includes(words[index] ?? '') ? 2 : 1
+  if (words[index] === '--') index += 1
+  return words.slice(index)
+}
+
+/** Shells and interpreters that run a script they're given: `bash ops/run.sh deploy`. */
+const INTERPRETERS = ['bash', 'sh', 'zsh', 'dash', 'python', 'python3', 'node', 'ruby', 'perl']
+
+/** The script an interpreter runs, as a command of its own; none where it runs no script. */
+const scriptRuns = (words: ReadonlyArray<string>): ReadonlyArray<string> | undefined => {
+  const [first = '', ...rest] = words
+  if (!INTERPRETERS.includes(first.slice(first.lastIndexOf('/') + 1))) return undefined
+  const at = rest.findIndex((word) => !word.startsWith('-'))
+  return at === -1 ? undefined : rest.slice(at)
+}
+
+/** A command as itself, and as what a package runner or an interpreter runs for it. */
+const commandsIn = (words: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<string>> =>
+  [words, runnerRuns(words), scriptRuns(words)].filter((each): each is ReadonlyArray<string> => each !== undefined && each.length > 0)
 
 /** Programs whose arguments are places they write: all of them, or the last. */
 const WRITES_ALL = ['touch', 'mkdir', 'rm', 'rmdir', 'tee', 'truncate', 'chmod', 'chown', 'chgrp', 'unlink', 'shred']
@@ -507,15 +664,16 @@ const writes = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
   return targets
 }
 
-const commandReason = (text: string, context: RuleContext): string | undefined => {
+/** What a command line does that the rules keep for the person: every kind, in every command of it. */
+const commandKinds = (text: string, context: RuleContext): ReadonlyArray<Kept> => {
   const { commands, opaque } = parseCommandLine(text)
+  const found: Array<Kept> = []
   if (opaque && /\bpush\b|\bdeploy\b|\bpublish\b|\bmerge\b/.test(text))
-    return `Charrette can't tell what this command does until it runs, so it asks.`
+    found.push(kept(`Charrette can't tell what this command does until it runs, so it asks.`, 'unclear'))
   const where = places(context)
   let cwd = context.worktree
   for (const words of commands) {
-    const joined = words.join(' ')
-    if (DEPLOY.test(joined)) return 'Deploying or publishing always asks.'
+    if (commandsIn(words).some(deploys)) found.push(kept('Deploying or publishing always asks.', 'deploy'))
     if (words[0] === 'cd') {
       cwd = locate(where, cwd, words[1] ?? '~')
       continue
@@ -524,49 +682,133 @@ const commandReason = (text: string, context: RuleContext): string | undefined =
     if (git !== undefined) {
       const repository = [locate(where, cwd, git.cwd), ...git.elsewhere.map((path) => locate(where, cwd, path))]
       if (repository.some((path) => outside(where, path)))
-        return `Git in another folder always asks: ${repository.find((path) => outside(where, path))}`
-      if (git.subcommand === 'push') {
-        const reason = pushReason(git.args, context)
-        if (reason !== undefined) return reason
-      }
+        found.push(kept(`Git in another folder always asks: ${repository.find((path) => outside(where, path))}`, 'outside'))
+      if (git.subcommand === 'push') found.push(...pushKinds(git.args, context))
       if (git.subcommand === 'worktree' || git.subcommand === 'clone') {
         const target = writes([
           'touch',
           ...git.args.filter((arg) => !['add', 'remove', 'prune', 'move', 'lock', 'unlock'].includes(arg)),
         ]).find((path) => outside(where, locate(where, cwd, path)))
-        if (target !== undefined) return `Writing outside the task's worktree always asks: ${target}`
+        if (target !== undefined) found.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
       }
       continue
     }
     const target = writes(words).find((path) => outside(where, locate(where, cwd, path)))
-    if (target !== undefined) return `Writing outside the task's worktree always asks: ${target}`
+    if (target !== undefined) found.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
   }
-  return undefined
+  return found
 }
 
+/** Escapes a string for a regular expression. */
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 /**
- * Decides a permission request from the rules. A command is checked against
- * the always-ask list and the places it names; an edit, against the worktree.
- * Anything the rules don't keep for the person is allowed.
+ * Whether a command's words start as a project's pattern says: its words in
+ * order, `*` for anything. A program is matched by its name, wherever it
+ * lives: `npm publish` matches `/usr/local/bin/npm publish --tag next`, not
+ * `npm publisher`.
+ */
+export const matchesPattern = (pattern: string, words: ReadonlyArray<string>): boolean => {
+  const [program = '', ...rest] = words
+  const line = [program.slice(program.lastIndexOf('/') + 1), ...rest].join(' ')
+  // A word that is only `*` stands for any words, or none: `psql *` matches `psql` too.
+  const source = pattern
+    .trim()
+    .split(/\s+/)
+    .map((part, index) => (part === '*' ? '(?: .*)?' : `${index === 0 ? '' : ' '}${part.split('*').map(literal).join('.*')}`))
+    .join('')
+  return new RegExp(`^${source}(?: .*)?$`).test(line)
+}
+
+/** Whether a line names a program as a word of its own, wherever it lives: `npm` in `$(npm …)`, not in `pnpm`. */
+const namesProgram = (text: string, program: string) =>
+  program !== '' && new RegExp(`(^|[\\s/;&|()$\`"'])${literal(program)}(?=$|[\\s;&|()\`"'])`).test(text)
+
+/**
+ * The project's command rule a command line meets, a refusal before an ask:
+ * each command in it is read on its own, as a shell would run it, and as
+ * what a package runner runs for it (`npx prisma …`). A line whose commands
+ * only show when it runs, that names a pattern's program, meets that pattern.
+ */
+const commandRule = (text: string, rules: ProjectRuleSet['commands']) => {
+  const { commands, opaque } = parseCommandLine(text)
+  const met = rules.filter(
+    (rule) =>
+      commands.some((words) => commandsIn(words).some((each) => matchesPattern(rule.pattern, each))) ||
+      (opaque && namesProgram(text, rule.pattern.trim().split(/\s+/)[0] ?? '')),
+  )
+  return met.find((rule) => rule.decision === 'never') ?? met[0]
+}
+
+const CHANGES: ReadonlyArray<PermissionRequest['kind']> = ['edit', 'delete', 'move']
+
+/** What the rules keep for the person in a request, whatever the project says of it: every kind it is, and why. */
+const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray<Kept> => {
+  if (request.kind === 'execute' || request.kind === 'other') return commandKinds(commandOf(request), context)
+  if (CHANGES.includes(request.kind)) {
+    const paths = pathsOf(request)
+    if (paths.length === 0)
+      return [kept(`Charrette can't tell where this ${request.kind === 'edit' ? 'edit writes' : 'change goes'}, so it asks.`, 'unclear')]
+    const where = places(context)
+    const escaping = paths.find((path) => outside(where, locate(where, context.worktree, path)))
+    if (escaping !== undefined) return [kept(`Writing outside the task's worktree always asks: ${escaping}`, 'outside')]
+  }
+  return []
+}
+
+/** Kinds of request that only look, which even a project that asks about everything lets through. */
+const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'think']
+
+/**
+ * Decides a permission request from the rules and the project's (ADR-013).
+ * What no project can change comes first: a code host is reached only
+ * through Charrette, and no one reads credentials. A request can be several
+ * kinds at once (`git push --force origin main` is a force push and a push to
+ * the default branch), and every kind counts. Then, in order:
+ * - what the project never allows is refused: any kind it is, or a command
+ *   the project named;
+ * - with everything allowed, anything else is allowed, short of what the
+ *   rules can't read where the project never allows something: that is
+ *   refused, with how to run it so they can;
+ * - a kind on the always-ask list, one the rules can't tell, or a command
+ *   the project asks about, waits for the person;
+ * - a project that asks about everything asks about the rest, except reads
+ *   and changes to the task's own files, which every agent's sandbox keeps;
+ * - anything else is allowed.
  */
 export const decide = (request: PermissionRequest, context: RuleContext): Verdict => {
+  const project = context.project ?? MVP_RULES
+  const named = request.kind === 'execute' || request.kind === 'other' ? commandRule(commandOf(request), project.commands) : undefined
   if (request.kind === 'execute' || request.kind === 'other') {
     // A code host is reached through Charrette: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
     const refused = parseCommandLine(commandOf(request))
       .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)))
       .find((reason) => reason !== undefined)
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
-    const reason = commandReason(commandOf(request), context)
-    if (reason !== undefined) return ask(reason)
+    if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
   }
-  if (request.kind === 'edit' || request.kind === 'delete' || request.kind === 'move') {
-    const paths = pathsOf(request)
-    if (paths.length === 0)
-      return ask(`Charrette can't tell where this ${request.kind === 'edit' ? 'edit writes' : 'change goes'}, so it asks.`)
-    const where = places(context)
-    const escaping = paths.find((path) => outside(where, locate(where, context.worktree, path)))
-    if (escaping !== undefined) return ask(`Writing outside the task's worktree always asks: ${escaping}`)
+  const found = keptOf(request, context)
+  const never = found.find((each) => each.rule !== 'unclear' && project.never.includes(each.rule))
+  if (never !== undefined && never.rule !== 'unclear')
+    return { verdict: 'deny', reason: `The project's rules never allow ${RULE_WORDS[never.rule]}.` }
+  const unclear = found.find((each) => each.rule === 'unclear')
+  if (project.mode === 'allow') {
+    // With no one to ask, what the rules can't read can't be let past what is never allowed.
+    const neverAny = project.never.length > 0 || project.commands.some((rule) => rule.decision === 'never')
+    return unclear !== undefined && neverAny
+      ? {
+          verdict: 'deny',
+          reason: `${unclear.reason.replace(/,? so it asks\.$/, '.')} The project's rules never allow some things, so it's refused: run it with its words spelled out, without \`eval\` or \`$(…)\`, naming the branch or file.`,
+        }
+      : ALLOW
   }
+  const asked = found.find((each) => each.rule === 'unclear' || project.ask.includes(each.rule))
+  if (asked !== undefined) return ask(asked.reason)
+  if (named !== undefined) return ask(`The project's rules ask before \`${named.pattern.trim()}\`.`)
+  // Reads, and changes to the task's own files, go through, as they would in any agent's sandbox.
+  const ownFiles = CHANGES.includes(request.kind) && found.length === 0
+  if (project.mode === 'ask' && !LOOKS.includes(request.kind) && !ownFiles)
+    return ask("This project asks you before anything an agent does beyond the task's own files.")
   return ALLOW
 }
 

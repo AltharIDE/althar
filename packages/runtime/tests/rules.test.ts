@@ -5,7 +5,20 @@ import { join } from 'node:path'
 import type { PermissionRequest } from '@charrette/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 
-import { CHARRETTE_TOOL, commandOf, decide, decideReader, essentials, parseCommandLine, pathsOf, type RuleContext } from '../src/rules'
+import {
+  CHARRETTE_TOOL,
+  commandOf,
+  decide,
+  decideReader,
+  essentials,
+  matchesPattern,
+  MVP_RULES,
+  RULES,
+  parseCommandLine,
+  pathsOf,
+  type ProjectRuleSet,
+  type RuleContext,
+} from '../src/rules'
 
 const worktree = '/work/meridian/retry/app'
 const context: RuleContext = { worktree, defaultBranch: 'main', taskBranch: 'charrette/retry', currentBranch: 'charrette/retry' }
@@ -413,5 +426,174 @@ describe('a role that only reads', () => {
       const decided = decideReader(request({ kind: 'execute', title: command, rawInput: { command } }))
       assert.include(decided.verdict === 'deny' ? decided.reason : '', "don't read the person's credentials", command)
     }
+  })
+})
+
+describe('a project’s rules (ADR-013)', () => {
+  const rules = (project: Partial<ProjectRuleSet>) => ({ project: { ...MVP_RULES, ...project } })
+  const verdictOf = (command: string, project: Partial<ProjectRuleSet>) => run(command, rules(project))
+
+  it('ask about the kinds on the always-ask list, let the rest through, and refuse what is never allowed', () => {
+    assert.strictEqual(verdictOf('git push --force origin charrette/retry', {}).verdict, 'ask')
+    assert.strictEqual(verdictOf('git push --force origin charrette/retry', { ask: ['deploy'] }).verdict, 'allow')
+    assert.deepStrictEqual(verdictOf('git push --force origin charrette/retry', { never: ['force-push'] }), {
+      verdict: 'deny',
+      reason: "The project's rules never allow force pushes.",
+    })
+    assert.deepStrictEqual(verdictOf('npx vercel deploy --prod', { ask: [], never: ['deploy'] }), {
+      verdict: 'deny',
+      reason: "The project's rules never allow deploying and publishing.",
+    })
+    // What the rules can't tell asks, even with the list off.
+    assert.strictEqual(verdictOf('git push --weird origin', { ask: [] }).verdict, 'ask')
+  })
+
+  it('allow everything, short of what is never allowed and what no project can change', () => {
+    const allow = { mode: 'allow' as const, never: ['deploy' as const], commands: [{ pattern: 'rm -rf /', decision: 'never' as const }] }
+    assert.strictEqual(verdictOf('git push --force origin main', allow).verdict, 'allow')
+    // What the rules can't read is refused, with how to spell it out, while something is never allowed; let through when nothing is.
+    assert.strictEqual(verdictOf('git push --weird origin', allow).verdict, 'deny')
+    assert.strictEqual(verdictOf('git push --weird origin', { mode: 'allow' }).verdict, 'allow')
+    assert.strictEqual(verdictOf('vercel deploy', allow).verdict, 'deny')
+    assert.strictEqual(verdictOf('rm -rf / --no-preserve-root', allow).verdict, 'deny')
+    assert.strictEqual(verdictOf('gh pr create', allow).verdict, 'deny')
+    assert.strictEqual(verdictOf('security find-generic-password -s Charrette -w', allow).verdict, 'deny')
+  })
+
+  it('ask about everything beyond the sandbox where the project says so, short of reads', () => {
+    assert.deepStrictEqual(verdictOf('npm test', { mode: 'ask' }), {
+      verdict: 'ask',
+      reason: "This project asks you before anything an agent does beyond the task's own files.",
+    })
+    assert.strictEqual(
+      decide(request({ kind: 'read', title: 'Read README.md' }), { ...context, ...rules({ mode: 'ask' }) }).verdict,
+      'allow',
+    )
+    assert.strictEqual(verdictOf('npm test', {}).verdict, 'allow')
+  })
+
+  it('ask about or refuse the commands it names, each command in a line read on its own', () => {
+    const commands = [
+      { pattern: 'terraform *', decision: 'ask' as const },
+      { pattern: 'npm publish', decision: 'never' as const },
+      { pattern: 'npm', decision: 'ask' as const },
+    ]
+    assert.deepStrictEqual(verdictOf('cd infra && terraform plan -out plan.tfplan', { commands }), {
+      verdict: 'ask',
+      reason: "The project's rules ask before `terraform *`.",
+    })
+    // A kind on the always-ask list says its own reason first.
+    assert.deepStrictEqual(verdictOf('terraform apply', { commands }), { verdict: 'ask', reason: 'Deploying or publishing always asks.' })
+    // A refusal wins over an ask that also matches.
+    assert.deepStrictEqual(verdictOf('FOO=1 /usr/local/bin/npm publish --tag next', { commands }), {
+      verdict: 'deny',
+      reason: "The project's rules never allow `npm publish`.",
+    })
+    assert.strictEqual(verdictOf('npm test', { commands }).verdict, 'ask')
+    assert.strictEqual(verdictOf('npm run build', { commands: commands.slice(0, 2) }).verdict, 'allow')
+    // A line whose commands show only when it runs meets a pattern whose program it names.
+    assert.strictEqual(verdictOf('eval "$(echo terraform) plan"', { commands: commands.slice(0, 1) }).verdict, 'ask')
+  })
+
+  it('match a pattern by how a command starts, its program by name, `*` for anything', () => {
+    assert.isTrue(matchesPattern('npm publish', ['/usr/local/bin/npm', 'publish', '--tag', 'next']))
+    assert.isFalse(matchesPattern('npm publish', ['npm', 'publisher']))
+    assert.isTrue(matchesPattern(' terraform  * ', ['terraform', 'apply']))
+    assert.isTrue(matchesPattern('git push * --force', ['git', 'push', 'origin', '--force']))
+    assert.isFalse(matchesPattern('a.b', ['axb']))
+    assert.isFalse(matchesPattern('kubectl apply', ['kubectl', 'get', 'pods']))
+  })
+})
+
+describe('a project’s rules, after review of #24', () => {
+  const rules = (project: Partial<ProjectRuleSet>) => ({ project: { ...MVP_RULES, ...project } })
+  const verdictOf = (command: string, project: Partial<ProjectRuleSet>) => run(command, rules(project)).verdict
+
+  it('refuse a request for any kind it is that is never allowed, not only the first one noticed', () => {
+    const neverMain = { never: ['default-branch' as const], ask: RULES.filter((kind) => kind !== 'force-push') }
+    for (const command of [
+      'git push --force origin main',
+      'git push origin +HEAD:main',
+      'git push --force origin charrette/retry && git push origin main',
+    ])
+      assert.strictEqual(verdictOf(command, neverMain), 'deny', command)
+    for (const command of ['git push -f origin main', 'npm publish && git push origin main'])
+      assert.strictEqual(verdictOf(command, { never: ['default-branch'] }), 'deny', command)
+  })
+
+  it('count deploying only where a command’s program or subcommand says so', () => {
+    const never = { never: ['deploy' as const] }
+    for (const command of [
+      'cat docs/deploy.md',
+      'grep -rn deploy src',
+      'git commit -m "Fix the deploy script"',
+      'ls scripts/deploy',
+      'npm test -- deploy.test.ts',
+    ])
+      assert.strictEqual(verdictOf(command, never), 'allow', command)
+    for (const command of [
+      './scripts/deploy.sh staging',
+      'make deploy-prod',
+      'npm run deploy:staging',
+      'npx vercel deploy --prod',
+      'fly deploy',
+      'twine upload dist/*',
+      'bash ops/run.sh deploy prod',
+    ])
+      assert.strictEqual(verdictOf(command, never), 'deny', command)
+  })
+
+  it('refuse with everything allowed what the rules can’t read, while something is never allowed', () => {
+    const allow = { mode: 'allow' as const, never: ['default-branch' as const, 'deploy' as const] }
+    assert.strictEqual(verdictOf('git push origin main', allow), 'deny')
+    for (const command of ['eval "git push origin main"', 'git push origin $(echo main)', 'eval "npm publish"'])
+      assert.strictEqual(verdictOf(command, allow), 'deny', command)
+    assert.include(
+      run('eval "npm publish"', rules(allow)).verdict === 'deny'
+        ? (run('eval "npm publish"', rules(allow)) as { reason: string }).reason
+        : '',
+      'without `eval` or `$(…)`',
+    )
+  })
+
+  it('let the task’s own files be changed when the project asks about everything, as every agent’s sandbox would', () => {
+    const askAll = rules({ mode: 'ask' })
+    const edit = (path: string) =>
+      decide(request({ kind: 'edit', title: `Edit ${path}`, paths: [path] }), { ...context, ...askAll }).verdict
+    assert.strictEqual(edit(`${worktree}/src/app.ts`), 'allow')
+    assert.strictEqual(edit('/etc/hosts'), 'ask')
+    // Outside the worktree it still asks, with writing outside off the always-ask list.
+    const outsideOff = rules({ mode: 'ask', ask: RULES.filter((kind) => kind !== 'outside') })
+    assert.strictEqual(
+      decide(request({ kind: 'edit', title: 'Edit /etc/hosts', paths: ['/etc/hosts'] }), { ...context, ...outsideOff }).verdict,
+      'ask',
+    )
+    assert.strictEqual(verdictOf('npm test', { mode: 'ask' }), 'ask')
+  })
+
+  it('match a command rule on an unreadable line by the program as a word of its own', () => {
+    assert.strictEqual(verdictOf('echo $(date) && pnpm install', { commands: [{ pattern: 'npm run *', decision: 'never' }] }), 'allow')
+    assert.strictEqual(
+      verdictOf('npm run format -- $(git ls-files "*.ts")', { commands: [{ pattern: 'rm *', decision: 'never' }] }),
+      'allow',
+    )
+    assert.strictEqual(verdictOf('echo $(rm -rf build)', { commands: [{ pattern: 'rm *', decision: 'never' }] }), 'deny')
+  })
+
+  it('see through `timeout` and package runners', () => {
+    const commands = [
+      { pattern: 'psql *', decision: 'never' as const },
+      { pattern: 'prisma migrate reset', decision: 'never' as const },
+    ]
+    for (const command of [
+      "timeout 60 psql -c 'drop table users'",
+      'timeout -s KILL 5m psql',
+      'npx prisma migrate reset',
+      'npx -y prisma migrate reset --force',
+      'pnpm exec prisma migrate reset',
+      'bunx prisma migrate reset',
+    ])
+      assert.strictEqual(verdictOf(command, { commands }), 'deny', command)
+    assert.strictEqual(verdictOf('npx prisma generate', { commands }), 'allow')
   })
 })

@@ -71,17 +71,15 @@ One pull request each:
    push after.
 3. **Work that doesn't need you.** Done so far:
    - usage limits;
-   - notifications and the Dock badge.
+   - notifications and the Dock badge;
+   - accounts in the runtime, and the agent's accounts on the start
+     (Accounts, below);
+   - the project rules screen (Project rules, below).
 
    Next:
-   1. **Accounts in the runtime,** and the agent's accounts in Settings
-      (Accounts, below).
-   2. **The project rules screen:**
-      - the always-ask list;
-      - the usage-limit rule;
-      - which accounts the project may use.
-   3. A step that stalls becomes a call.
-   4. Local merging, and sending work back as a step.
+   1. A step that stalls becomes a call.
+   2. Local merging, and sending work back as a step.
+   3. The lead answers permission requests: the "lead decides" mode.
 4. **Conversations.**
 
 Brought forward from step 4, after the board: **the model picker.** Every
@@ -202,6 +200,36 @@ Settings, then the project rules screen.
     says which account it runs on.
   - An e2e test where one account is out and the same agent's next takes
     over.
+
+## Project rules
+
+Decided on 4 October 2026, after looking at how other agent tools do it
+(ADR-013 has the comparison). Their shape is the industry's: a mode, rules
+that ask or refuse with refusal winning, and commands matched by how they
+start, per command of a shell line. What changed from the prototype's
+screen, to say only what Charrette does:
+
+- **Who answers.** "Allow, except what you keep" is the default, with "Ask
+  me" and "Allow everything". "The agent in charge decides" comes back with
+  the lead answering requests.
+- **Always ask me, and Never:**
+  - the kinds of request the rules know, each switchable;
+  - commands the person adds by how they start, with a note that rules hold
+    for what agents ask to do beyond their sandbox.
+- **Rows dropped for now:** review findings, and "Ask me" on a usage limit.
+- **Usage limits:** move or wait.
+- **Accounts:** for agents with more than one account, which ones the
+  project may use, and whether work goes on with the next account when one
+  runs out (off by default).
+- **When a task is done:** the project's ending, used where a plan names
+  none.
+- **Where it lives:** the project's title bar opens it, and each change is
+  saved at once, as a revision.
+
+Folded in, from #23's review: rotation off means each agent's first allowed
+account (skipping one signed out), with its being out handled by the
+usage-limit rule. A removed account's folder goes only after the agent's own
+sign-out worked, and only ever a folder right under the accounts root.
 
 ## Which model the next agent runs
 

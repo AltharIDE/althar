@@ -20,3 +20,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [010](010-desktop-app-mvvm.md) | The desktop app is MVVM, in feature folders |
 | [011](011-own-connectors-for-hosts-and-trackers.md) | Charrette's own connectors for code hosts and trackers |
 | [012](012-several-accounts-per-agent.md) | Several accounts per agent, each in its own home |
+| [013](013-project-rules.md) | Project rules: a mode, always ask, never, and command rules |

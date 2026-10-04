@@ -16,6 +16,7 @@ function Project() {
       connections={useConnections()}
       onBack={() => void navigate({ to: '/' })}
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
+      onRules={() => void navigate({ to: '/projects/$projectId/rules', params: { projectId } })}
     />
   )
 }

@@ -724,9 +724,11 @@ including the always-ask list
   - A decision that fails to be made is a rejection.
 - Cancelling a turn answers the requests still waiting with `cancelled`, as
   ACP asks of the client, whether or not the agent withdraws them.
-- Charrette answers from the project rules. Nearly everything is allowed
-  without the user; only what the rules keep for the user becomes an attention
-  request. Every answer is recorded on the task, and the thread shows allowed
+- Charrette answers from the project rules
+  ([ADR-013](../decisions/013-project-rules.md)). With the default mode,
+  nearly everything is allowed without the user; only what the rules keep for
+  the user becomes an attention request. The rules see what reaches
+  Charrette, which is what agents ask to do beyond their sandbox. Every answer is recorded on the task, and the thread shows allowed
   requests as one quiet line.
 - A session with a read-only role, such as the coordinator or a review step,
   starts in the agent's read-only mode where it has one (for example Claude

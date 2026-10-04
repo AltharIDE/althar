@@ -397,8 +397,13 @@ person ([03](03-agent-runtime-and-auth.md), Permission routing). The leaning:
 - everything allowed without the user is recorded on the task and shown as one
   quiet line.
 
-Open: whether the lead or a separate cheap judge model answers. In the MVP,
-the rules and the always-ask list answer, and the lead does not yet.
+Open: whether the lead or a separate cheap judge model answers. For now a
+project's rules answer ([ADR-013](../decisions/013-project-rules.md)):
+- a mode for what no rule keeps (allowed, asked about, or everything allowed);
+- the kinds that always ask and those never allowed;
+- commands the person named by how they start.
+
+The lead does not answer yet.
 
 **Usage limits pause an account, not an agent.** A limit belongs to one of an
 agent's accounts ([ADR-012](../decisions/012-several-accounts-per-agent.md)),

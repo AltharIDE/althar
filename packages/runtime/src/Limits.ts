@@ -66,7 +66,11 @@ type Failure = SqlError.SqlError | Schema.SchemaError
 export class Limits extends Context.Service<
   Limits,
   {
-    /** Whether the agent is out now, every account it could run on (in the project, where given), and until when: the soonest back. */
+    /**
+     * Whether the agent is out now, and until when: every account work could
+     * run on (in the project, where given: its first, unless it rotates),
+     * the soonest back.
+     */
     out(agentId: string, projectId?: string): Effect.Effect<Option.Option<Out>, Failure>
     /** Whether the project moves work on to the agent's next account when one runs out: the person's to turn on (ADR-012). */
     rotates(projectId: string): Effect.Effect<boolean, Failure>
@@ -75,8 +79,10 @@ export class Limits extends Context.Service<
     /**
      * The account a session on the agent runs on, of those the project
      * allows: the one given; else the thread's own, while it can; else the
-     * first, in the person's order, that isn't signed out or out of usage;
-     * else the first.
+     * first, in the person's order, that isn't signed out and, where the
+     * project rotates, isn't out of usage; else the first. Where it doesn't
+     * rotate, an account out of usage is still the one work runs on: its
+     * limit is handled as the project says (move to another agent, or wait).
      */
     pick(input: {
       readonly agentId: string
@@ -127,7 +133,9 @@ export class Limits extends Context.Service<
           const list = yield* accounts.of(agentId)
           if (projectId === undefined) return list
           const only = accountsOf((yield* policies.current(projectId as ProjectId)).rules).only?.[agentId]
-          return only === undefined ? list : list.filter((account) => only.includes(account.id))
+          const kept = only === undefined ? list : list.filter((account) => only.includes(account.id))
+          // A project left with none of an agent's accounts, as when the one it named was removed, has all of them back.
+          return kept.length === 0 ? list : kept
         })
 
       const outOf = (account: Account) =>
@@ -144,18 +152,33 @@ export class Limits extends Context.Service<
             : Option.none<Out>()
         })
 
-      /** An account work can run on now: not signed out, and not out of usage. */
-      const usable = (account: Account) =>
+      /** Whether the project moves work through an agent's accounts (ADR-012); without a project, as if it did. */
+      const rotating = (projectId?: string) =>
+        projectId === undefined
+          ? Effect.succeed(true)
+          : Effect.map(policies.current(projectId as ProjectId), ({ rules }) => accountsOf(rules).rotate)
+
+      /**
+       * The accounts work on the agent can run on here: those the project
+       * allows that aren't signed out. Where the project doesn't rotate, only
+       * the first of them, whose being out of usage puts the agent out.
+       */
+      const runnable = (agentId: string, projectId?: string) =>
         Effect.gen(function* () {
-          if ((yield* signIns.account(account)).status === 'signed_out') return false
-          return Option.isNone(yield* outOf(account))
+          const rotate = yield* rotating(projectId)
+          const found: Array<Account> = []
+          for (const account of yield* allowed(agentId, projectId)) {
+            if ((yield* signIns.account(account)).status === 'signed_out') continue
+            found.push(account)
+            if (!rotate) break
+          }
+          return found
         })
 
       const out = (agentId: string, projectId?: string) =>
         Effect.gen(function* () {
           const outs: Array<Out> = []
-          for (const account of yield* allowed(agentId, projectId)) {
-            if ((yield* signIns.account(account)).status === 'signed_out') continue
+          for (const account of yield* runnable(agentId, projectId)) {
             const found = yield* outOf(account)
             if (Option.isNone(found)) return Option.none<Out>()
             outs.push(found.value)
@@ -175,14 +198,22 @@ export class Limits extends Context.Service<
           Effect.gen(function* () {
             if (input.accountId !== undefined) return yield* accounts.get(input.accountId)
             const list = yield* allowed(input.agentId, input.projectId)
-            if (input.threadId !== undefined) {
+            const rotate = yield* rotating(input.projectId)
+            // One it can run on: not signed out, and, where the project rotates, not out of usage.
+            const runs = (account: Account) =>
+              Effect.gen(function* () {
+                if ((yield* signIns.account(account)).status === 'signed_out') return false
+                return !rotate || Option.isNone(yield* outOf(account))
+              })
+            // A conversation stays on its account only where the project rotates; otherwise work runs on the first, as `out` reads it.
+            if (rotate && input.threadId !== undefined) {
               const [last] = yield* sql<{ accountId: string | null }>`
                 SELECT account_id FROM provider_sessions WHERE thread_id = ${input.threadId} AND agent_id = ${input.agentId}
                 ORDER BY started_at DESC LIMIT 1`
               const own = list.find((account) => account.id === last?.accountId)
-              if (own !== undefined && (yield* usable(own))) return own
+              if (own !== undefined && (yield* runs(own))) return own
             }
-            for (const account of list) if (yield* usable(account)) return account
+            for (const account of list) if (yield* runs(account)) return account
             const [first] = list
             return first ?? (yield* new NotFound({ kind: 'account', id: input.agentId }))
           }),
@@ -192,9 +223,8 @@ export class Limits extends Context.Service<
             // Those the work would rather not go to come last.
             for (const agentId of [...candidates.filter((id) => !rather.includes(id)), ...candidates.filter((id) => rather.includes(id))]) {
               // Another agent takes work over unasked only on an account its plan pays for.
-              for (const account of yield* allowed(agentId, projectId)) {
-                const check = yield* signIns.account(account)
-                if (check.status === 'signed_out' || check.paidBy !== 'plan') continue
+              for (const account of yield* runnable(agentId, projectId)) {
+                if ((yield* signIns.account(account)).paidBy !== 'plan') continue
                 if (Option.isNone(yield* outOf(account))) return agentId
               }
             }

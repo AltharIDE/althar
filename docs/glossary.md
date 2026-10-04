@@ -56,7 +56,9 @@ say the right. When something new needs a name on screen, add it here first.
 | Knowledge | knowledge claims | Everything the project holds. It has two parts: |
 | Notes | canonical claims | What every task starts with: decisions, conventions, architecture. |
 | Seen in tasks | episodic claims | What one task observed. It can be proposed as a note. |
-| Project rules | execution policy | When agents need a yes, what always asks, what is never allowed, how a task ends, what a usage limit does. |
+| Project rules | execution policy, `ProjectRules` | When agents need a yes, what always asks, what is never allowed, how a task ends, what a usage limit does, and which accounts work runs on (ADR-013). |
+| Always ask me | `alwaysAsk` kinds, `ask` command rules | What waits for the person whoever would answer: kinds of request, and commands they named by how they start. |
+| Never | `never` kinds and command rules | What is refused without asking anyone, even with everything allowed. |
 | Settled | terminal states | Calls answered, changes accepted, tasks abandoned. |
 
 ## Words the interface doesn't use

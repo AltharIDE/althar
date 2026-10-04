@@ -38,6 +38,23 @@ export const Default: Story = {
 
 export const Disabled: Story = { args: { disabled: true } }
 
+function KeepingOne() {
+  const [v, setV] = useState<readonly string[]>(['prod', 'main'])
+  return <CheckList label="Accounts this project may use" items={ITEMS} value={v} onChange={setV} keepOne />
+}
+
+/** At least one stays on: the last one on can't be turned off. */
+export const KeepOne: Story = {
+  render: () => <KeepingOne />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('checkbox', { name: 'Pushing to main' }))
+    await expect(c.getByRole('checkbox', { name: /Deploys/ })).toBeDisabled()
+    await userEvent.click(c.getByRole('checkbox', { name: 'Pushing to main' }))
+    await expect(c.getByRole('checkbox', { name: /Deploys/ })).toBeEnabled()
+  },
+}
+
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'label:first-of-type', focus: 'label:first-of-type button', pressed: 'label:first-of-type' }),
   render: (args) => (

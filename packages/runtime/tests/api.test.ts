@@ -259,7 +259,7 @@ describe('the API', () => {
         const waiting = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
         assert.deepStrictEqual(
           { title: waiting.attention[0]?.title, reason: waiting.attention[0]?.reason, command: waiting.attention[0]?.command },
-          { title: 'Run make deploy', reason: 'Deploying or publishing always asks.', command: 'Run make deploy' },
+          { title: 'Run make deploy', reason: 'Deploying or publishing always asks.', command: 'make deploy' },
         )
         assert.strictEqual((yield* client.ListProjects()).projects[0]?.waiting, 1)
         const answering = {
@@ -383,6 +383,65 @@ describe('accounts, through the API', () => {
           })
         }),
       ),
+  )
+})
+
+describe('project rules, through the API', () => {
+  it.live('reads a project’s rules, and changes them in part as the person', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), {
+          projectId: project.id,
+          permissions: 'rules',
+          alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
+          never: [],
+          commands: [],
+          end: null,
+          usageLimit: 'move',
+          rotateAccounts: false,
+          onlyAccounts: null,
+        })
+        const changed = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          alwaysAsk: ['default-branch', 'deploy'],
+          never: ['force-push'],
+          commands: [{ pattern: 'terraform *', decision: 'ask' }],
+          end: 'ready',
+          usageLimit: 'wait',
+          rotateAccounts: true,
+          onlyAccounts: { codex: ['acc_x'] },
+        })
+        assert.deepStrictEqual(
+          [
+            changed.alwaysAsk,
+            changed.never,
+            changed.commands,
+            changed.end,
+            changed.usageLimit,
+            changed.rotateAccounts,
+            changed.onlyAccounts,
+          ],
+          [
+            ['default-branch', 'deploy'],
+            ['force-push'],
+            [{ pattern: 'terraform *', decision: 'ask' }],
+            'ready',
+            'wait',
+            true,
+            { codex: ['acc_x'] },
+          ],
+        )
+        // Back to deciding the ending by the host, and every account; the rest stays.
+        const back = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, end: null, onlyAccounts: null })
+        assert.deepStrictEqual([back.end, back.onlyAccounts, back.rotateAccounts, back.never], [null, null, true, ['force-push']])
+        assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
+        const missing = yield* Effect.flip(client.GetProjectRules({ projectId: 'proj_missing' }))
+        assert.strictEqual(missing.reason, 'NotFound')
+      }),
+    ),
   )
 })
 

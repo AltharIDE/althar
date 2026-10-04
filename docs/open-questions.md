@@ -9,6 +9,34 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@charrette/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `charrette-designs` repository (`prototypes/shell`).
 
+## Project rules, 4 October
+
+Decided in [ADR-013](decisions/013-project-rules.md).
+
+- [ ] **Rules the sandbox hides from Charrette.** Codex's `workspace-write`
+  and Claude Code's sandboxed commands run without asking, so a project's
+  command rule for something that stays in the worktree never fires.
+  - Leaning: give each agent the project's command rules in its own form
+    (Claude Code's ask rules, OpenCode's bash patterns, Codex's rules), so
+    it asks Charrette.
+- [ ] **Rules on paths.** Changes to CI config or migrations, say. Agents
+  differ in whether an edit inside the worktree reaches Charrette at all:
+  Claude Code's do, Codex's don't.
+  - Leaning: after the command rules reach the agents, since the same work
+    is needed.
+- [ ] **Rules in the repository.** Other tools keep a project's rules in
+  the repository, shared with the team, applying them once the folder is
+  trusted.
+  - Leaning: with the cloud, alongside rules an organisation manages.
+- [ ] **An allowlist for "Ask me".** Asking about everything, a person will
+  want some commands let through, as Cursor's and Roo's allowlists do.
+- [ ] **The lead decides.** Other tools' modes with a model as judge, such as
+  Claude Code's auto, Codex's auto-review and VS Code's Assisted, are this
+  row. Whether the lead answers or a separate cheaper model does is still
+  open (05).
+- [ ] **The network.** Rules on domains, as Codex's network proxy and Claude
+  Code's `WebFetch(domain:…)` have.
+
 ## Several accounts, 3 October
 
 Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).

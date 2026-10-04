@@ -58,7 +58,7 @@ describe('reading sign-in status', () => {
       Effect.gen(function* () {
         const outIn = (script: string): AgentDefinition => ({
           ...agents.codex,
-          signIn: { ...agents.codex.signIn, logout: () => ({ command: 'bun', args: ['-e', script] }) },
+          signIn: { ...agents.codex.signIn, logout: { run: () => ({ command: 'bun', args: ['-e', script] }), line: 'codex logout' } },
         })
         assert.isTrue(
           yield* signOut(outIn("process.exit(process.env.CODEX_HOME === '/homes/work' ? 0 : 1)"), process.execPath, {
@@ -68,8 +68,12 @@ describe('reading sign-in status', () => {
         assert.isFalse(yield* signOut(outIn('process.exit(1)')))
         assert.isTrue(yield* signOut(agents.opencode))
         assert.deepStrictEqual(
-          [agents['claude-code'].signIn.logout?.('node').args, agents.codex.signIn.logout?.('node').args.at(-1)],
-          [['auth', 'logout'], 'logout'],
+          [
+            agents['claude-code'].signIn.logout?.run('node').args,
+            agents.codex.signIn.logout?.run('node').args.at(-1),
+            agents.codex.signIn.logout?.line,
+          ],
+          [['auth', 'logout'], 'logout', 'codex logout'],
         )
       }),
     ))

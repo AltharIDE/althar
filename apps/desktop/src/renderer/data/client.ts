@@ -2,6 +2,7 @@ import {
   type AccountStatus,
   type AgentModels,
   type FoundAccount,
+  type ProjectRulesView,
   Api,
   ApiError,
   type BoardSnapshot,
@@ -41,6 +42,9 @@ import { RpcClient } from 'effect/rpc'
  * receipt instead of doing it twice. `watch` picks up from the last change it
  * heard when its stream breaks.
  */
+
+/** What may change of a project's rules at once: any of it. */
+export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<ProjectRulesView, 'projectId'>>
 
 export interface Client {
   /** The runtime's version and the agents on this Mac; `recheck` asks each agent again rather than trust the last minute's answer. */
@@ -112,10 +116,15 @@ export interface Client {
     readonly token: string
   }) => Promise<ConnectionSummary>
   readonly disconnect: (connectionId: string) => Promise<void>
+  /** A project's rules. */
+  readonly getProjectRules: (projectId: string) => Promise<ProjectRulesView>
+  /** Changes what is given of a project's rules; the rules as they are after it. */
+  readonly setProjectRules: (input: ProjectRulesChange) => Promise<ProjectRulesView>
   /** Adds an account to an agent: in the folder a grant names, or one Charrette makes. */
   readonly addAccount: (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => Promise<AccountStatus>
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
-  readonly removeAccount: (accountId: string) => Promise<void>
+  /** Stops using an account; `anyway`, its folder goes even where its sign-out didn't happen. */
+  readonly removeAccount: (accountId: string, anyway?: boolean) => Promise<void>
   readonly orderAccounts: (agentId: string, accountIds: ReadonlyArray<string>) => Promise<void>
   /** Folders account switchers keep the agent's accounts in, not added yet. */
   readonly findAccounts: (agentId: string) => Promise<ReadonlyArray<FoundAccount>>
@@ -225,9 +234,12 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     cancelSignIn: (flowId) => command((commandId) => api.CancelSignIn({ commandId, flowId })),
     connectToken: (input) => command((commandId) => api.ConnectToken({ commandId, ...input })),
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
+    getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),
+    setProjectRules: (input) => command((commandId) => api.SetProjectRules({ commandId, ...input })),
     addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),
     renameAccount: (accountId, name) => command((commandId) => api.RenameAccount({ commandId, accountId, name })),
-    removeAccount: (accountId) => command((commandId) => api.RemoveAccount({ commandId, accountId })),
+    removeAccount: (accountId, anyway) =>
+      command((commandId) => api.RemoveAccount({ commandId, accountId, ...(anyway === undefined ? {} : { anyway }) })),
     orderAccounts: (agentId, accountIds) => command((commandId) => api.OrderAccounts({ commandId, agentId, accountIds })),
     findAccounts: (agentId) => settle(api.FindAccounts({ agentId })).then((list) => list.found),
     signInAccount: (accountId) => command((commandId) => api.SignInAccount({ commandId, accountId })),

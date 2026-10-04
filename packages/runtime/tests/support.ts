@@ -65,7 +65,14 @@ export const definition = (id: string, signedOut: ReadonlyArray<string> = [], pe
     paidBy: (output) => (perUse.includes(id) || perUse.includes(output.trim()) ? 'key' : 'plan'),
     login: `fake-login ${id}`,
     // Says which home it signed out of, in the file the test names.
-    logout: () => ({ command: 'sh', args: ['-c', 'printf "%s\\n" "$FAKE_HOME" >> "${FAKE_SIGNED_OUT:-/dev/null}"'] }),
+    logout: {
+      // Fails where the test says so.
+      run: () => ({
+        command: 'sh',
+        args: ['-c', '[ -z "$FAKE_SIGN_OUT_FAILS" ] && printf "%s\\n" "$FAKE_HOME" >> "${FAKE_SIGNED_OUT:-/dev/null}"'],
+      }),
+      line: 'fake-logout',
+    },
   },
   // Shares everything in its usual folder but its sign-in, as OpenCode's data folder does.
   home: { variable: 'FAKE_HOME', usual: () => join(fakeHomes, id), shared: (names) => names.filter((name) => name !== 'auth.json') },

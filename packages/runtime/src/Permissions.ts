@@ -19,6 +19,7 @@ import { AttentionClosed, NotFound } from './errors'
 import { currentBranch } from './git'
 import { Instance } from './Instance'
 import { Live } from './Live'
+import { Policies, ruleSetOf } from './Policies'
 import { change, fact, timestamp } from './records'
 import { commandOf, decide, decideReader, essentials, pathsOf, type RuleContext } from './rules'
 
@@ -74,7 +75,7 @@ export const moveSession = (sessionId: string, to: ProviderSessionState, set: Re
     return yield* change('provider_sessions', sessionId, { ...set, state: to })
   })
 
-type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | Live
+type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | Live | Policies
 
 export class Permissions extends Context.Service<
   Permissions,
@@ -97,6 +98,7 @@ export class Permissions extends Context.Service<
     Effect.gen(function* () {
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
+      const policies = yield* Policies
       const live = yield* Live
       const waiting = new Map<string, Waiting>()
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
@@ -231,7 +233,9 @@ export class Permissions extends Context.Service<
           const rules = requestContext.rules.context
           // Where a push without a destination goes depends on the branch checked out now.
           const current = request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(rules.worktree) : undefined
-          const verdict = decide(request, { ...rules, ...(current === undefined ? {} : { currentBranch: current }) })
+          // The project's rules as they are now: a change the person makes applies to the next request.
+          const project = ruleSetOf((yield* policies.current(requestContext.projectId)).rules)
+          const verdict = decide(request, { ...rules, project, ...(current === undefined ? {} : { currentBranch: current }) })
           // What the rules refuse outright, such as an agent changing things on the code host, is answered at once with what to do instead.
           if (verdict.verdict === 'deny') {
             const decision: PermissionDecision = { decision: 'reject', reason: verdict.reason }

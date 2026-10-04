@@ -65,6 +65,7 @@ export function NewTask({
   agents,
   starting,
   connected,
+  defaultEnd = null,
   listIssues,
   onStart,
   onClose,
@@ -73,13 +74,15 @@ export function NewTask({
   starting: boolean
   /** The repository's host is connected: the task can end with a pull request. */
   connected: boolean
+  /** The project's ending, which the choice starts from; a draft pull request without one. */
+  defaultEnd?: TaskEnd | null
   listIssues: () => Promise<ReadonlyArray<IssueSummary>>
   onStart: (task: Planned) => void
   onClose: () => void
 }) {
   const [issues, setIssues] = useState<ReadonlyArray<IssueSummary> | null>(null)
   const [issue, setIssue] = useState<string>(NONE)
-  const [end, setEnd] = useState<TaskEnd>('draft')
+  const [end, setEnd] = useState<TaskEnd>(defaultEnd ?? 'draft')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [lead, setLead] = useState<Choice | null>(null)

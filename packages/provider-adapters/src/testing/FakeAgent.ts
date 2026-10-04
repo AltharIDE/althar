@@ -463,6 +463,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             toolCallId: 'call-2',
             title: command ? 'Run make deploy' : 'Edit app.ts',
             kind: command ? ('execute' as const) : ('edit' as const),
+            // As agents do, the command itself, which the title only describes.
+            ...(command ? { rawInput: { command: 'make deploy' } } : {}),
           }
           await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
           const chosen = await ask(toolCall, command ? commandOptions : fileEditOptions)

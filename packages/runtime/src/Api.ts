@@ -7,6 +7,7 @@ import {
   type PortLike,
   serverProtocol,
   type WatchEvent,
+  type ProjectRulesView,
 } from '@charrette/contracts'
 import type { ProjectId } from '@charrette/domain'
 import { Ledger } from '@charrette/persistence-sqlite'
@@ -16,6 +17,7 @@ import { SqlClient } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
 import { Changes } from './Changes'
+import { NotFound } from './errors'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { Folders } from './Folders'
@@ -23,7 +25,7 @@ import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
-import { Policies } from './Policies'
+import { accountsOf, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from './Policies'
 import { Models } from './Models'
 import { Permissions } from './Permissions'
 import { Projects } from './Projects'
@@ -126,6 +128,23 @@ export const handlers = Api.toLayer(
     /** The issue a task comes from, read before the task is made, so its key can go in the task's branch. */
     const issueFor = (projectId: string, issue: string | undefined) =>
       issue === undefined ? Effect.succeed(undefined) : issues.read(issue, projectId)
+
+    /** A project's rules as its rules screen shows them. */
+    const rulesView = (projectId: string, rules: ProjectRules): ProjectRulesView => {
+      const set = ruleSetOf(rules)
+      const accounts = accountsOf(rules)
+      return {
+        projectId,
+        permissions: set.mode,
+        alwaysAsk: set.ask,
+        never: set.never,
+        commands: set.commands,
+        end: rules.end ?? null,
+        usageLimit: usageLimitOf(rules),
+        rotateAccounts: accounts.rotate,
+        onlyAccounts: accounts.only ?? null,
+      }
+    }
 
     /* An account as the window shows it: signed in, checked at most once a minute, paid for how, and out until when. */
     const accountStatus = (account: Account, recheck: boolean) =>
@@ -421,7 +440,7 @@ export const handlers = Api.toLayer(
           ),
         ),
       RenameAccount: ({ commandId, accountId, name }) => once(commandId, api(accounts.rename(accountId, name))),
-      RemoveAccount: ({ commandId, accountId }) => once(commandId, api(accounts.remove(accountId))),
+      RemoveAccount: ({ commandId, accountId, anyway }) => once(commandId, api(accounts.remove(accountId, { anyway: anyway === true }))),
       OrderAccounts: ({ commandId, agentId, accountIds }) => once(commandId, api(accounts.order(agentId, accountIds))),
       FindAccounts: ({ agentId }) =>
         api(
@@ -442,6 +461,37 @@ export const handlers = Api.toLayer(
               const line = yield* accounts.login(accountId)
               // Opened where the app can, in Terminal; elsewhere the person runs it.
               return { line, opened: config.openTerminal === undefined ? false : yield* config.openTerminal(line) }
+            }),
+          ),
+        ),
+      GetProjectRules: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
+            if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+            return rulesView(projectId, (yield* policies.current(project.id)).rules)
+          }),
+        ),
+      SetProjectRules: ({ commandId, projectId, rotateAccounts, onlyAccounts, ...change }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const now = accountsOf((yield* policies.current(projectId as ProjectId)).rules)
+              const accounts =
+                rotateAccounts === undefined && onlyAccounts === undefined
+                  ? {}
+                  : {
+                      accounts: {
+                        rotate: rotateAccounts ?? now.rotate,
+                        ...((onlyAccounts === undefined ? now.only : onlyAccounts) == null
+                          ? {}
+                          : { only: (onlyAccounts === undefined ? now.only : onlyAccounts) ?? {} }),
+                      },
+                    }
+              const rules = yield* policies.set(projectId, { ...change, ...accounts }, instance.personId)
+              return rulesView(projectId, rules)
             }),
           ),
         ),

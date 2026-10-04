@@ -5,6 +5,7 @@ import type {
   ConnectionList,
   ConnectionSummary,
   CoordinatorSnapshot,
+  ProjectRulesView,
   ProjectSummary,
   Status,
   TaskSummary,
@@ -15,7 +16,7 @@ import type {
 } from '@charrette/contracts'
 import { vi } from 'vitest'
 
-import type { Client } from '../src/renderer/data/client'
+import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
 import type { Host } from '../src/renderer/data/services'
 
 /* What the runtime would say, as plain values, and a client that says it. */
@@ -32,6 +33,19 @@ export const usual = (id: string, signIn: AgentStatus['signIn']): AgentStatus['a
   outUntil: null,
   adoptedFrom: null,
 })
+
+/** A project's first rules, as the runtime keeps them. */
+export const projectRules: ProjectRulesView = {
+  projectId: 'p1',
+  permissions: 'rules',
+  alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
+  never: [],
+  commands: [],
+  end: null,
+  usageLimit: 'move',
+  rotateAccounts: false,
+  onlyAccounts: null,
+}
 
 export const agents: ReadonlyArray<AgentStatus> = [
   { id: 'claude-code', name: 'Claude Code', signIn: 'signed_in', login: 'claude auth login', accounts: [usual('acc_claude', 'signed_in')] },
@@ -397,6 +411,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     cancelSignIn: vi.fn(async () => {}),
     connectToken: vi.fn(async () => connectionList.connections[0] ?? githubConnection),
     disconnect: vi.fn(async () => {}),
+    getProjectRules: vi.fn(async (projectId: string) => ({ ...projectRules, projectId })),
+    setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({ ...projectRules, ...change, projectId })),
     addAccount: vi.fn(async (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => ({
       ...usual('acc_added', 'signed_out'),
       name: input.name,

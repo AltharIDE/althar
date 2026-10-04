@@ -118,6 +118,30 @@ export const ProjectSummary = Schema.Struct({
 export type ProjectSummary = typeof ProjectSummary.Type
 
 export const ProjectList = Schema.Struct({ cursor: Cursor, projects: Schema.Array(ProjectSummary) })
+
+/** The kinds of request a project's rules can have ask the person, or refuse (ADR-013). */
+export const RuleKind = Schema.Literals(['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'])
+export type RuleKind = typeof RuleKind.Type
+
+/** A command the person named, by how it starts (`npm publish`, `terraform *`): asked about, or refused. */
+export const CommandRule = Schema.Struct({ pattern: Schema.String, decision: Schema.Literals(['ask', 'never']) })
+export type CommandRule = typeof CommandRule.Type
+
+/** A project's rules, as its rules screen shows them. */
+export const ProjectRulesView = Schema.Struct({
+  projectId: Schema.String,
+  /** What happens to what no rule keeps: allowed (`rules`), asked about (`ask`); or everything allowed (`allow`), short of `never`. */
+  permissions: Schema.Literals(['rules', 'ask', 'allow']),
+  alwaysAsk: Schema.Array(RuleKind),
+  never: Schema.Array(RuleKind),
+  commands: Schema.Array(CommandRule),
+  /** How a task ends when its plan doesn't say; null: a draft pull request where Charrette is connected to the host, else its branch. */
+  end: Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
+  usageLimit: Schema.Literals(['move', 'wait']),
+  rotateAccounts: Schema.Boolean,
+  onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+})
+export type ProjectRulesView = typeof ProjectRulesView.Type
 export type ProjectList = typeof ProjectList.Type
 
 export const TaskSummary = Schema.Struct({
@@ -841,7 +865,7 @@ export const Api = RpcGroup.make(
   command('AddAccount', { agentId: Schema.String, name: Schema.String, grant: Schema.optional(Schema.String) }, AccountStatus),
   command('RenameAccount', { accountId: Schema.String, name: Schema.String }, Schema.Void),
   /** Stops using an account; its folder, with its sign-in, stays. Not the agent's usual one. */
-  command('RemoveAccount', { accountId: Schema.String }, Schema.Void),
+  command('RemoveAccount', { accountId: Schema.String, anyway: Schema.optional(Schema.Boolean) }, Schema.Void),
   /** Puts an agent's accounts in the person's order: the first that can runs work first. */
   command('OrderAccounts', { agentId: Schema.String, accountIds: Schema.Array(Schema.String) }, Schema.Void),
   /** Folders account switchers keep the agent's accounts in, not added yet. */
@@ -851,6 +875,24 @@ export const Api = RpcGroup.make(
    * person signs in: the line it runs, and whether it could open it.
    */
   command('SignInAccount', { accountId: Schema.String }, Schema.Struct({ line: Schema.String, opened: Schema.Boolean })),
+  /** A project's rules. */
+  call('GetProjectRules', { projectId: Schema.String }, ProjectRulesView),
+  /** Changes what is given of a project's rules, as a new revision recorded as the person's. */
+  command(
+    'SetProjectRules',
+    {
+      projectId: Schema.String,
+      permissions: Schema.optional(Schema.Literals(['rules', 'ask', 'allow'])),
+      alwaysAsk: Schema.optional(Schema.Array(RuleKind)),
+      never: Schema.optional(Schema.Array(RuleKind)),
+      commands: Schema.optional(Schema.Array(CommandRule)),
+      end: Schema.optional(Schema.NullOr(Schema.Literals(['draft', 'ready', 'none']))),
+      usageLimit: Schema.optional(Schema.Literals(['move', 'wait'])),
+      rotateAccounts: Schema.optional(Schema.Boolean),
+      onlyAccounts: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String)))),
+    },
+    ProjectRulesView,
+  ),
   /** Whether work moves on to an agent's next account in the project, and which accounts each agent may use there (null: every one). */
   command(
     'SetProjectAccounts',

@@ -77,7 +77,11 @@ export interface AgentDefinition {
      * account Charrette made, before its folder goes (ADR-012). Without one,
      * the sign-in is a file in the home, gone with it.
      */
-    readonly logout?: (node: string) => LaunchSpec
+    readonly logout?: {
+      readonly run: (node: string) => LaunchSpec
+      /** The same, as the person would type it. */
+      readonly line: string
+    }
   }
   /**
    * Where it keeps a sign-in (ADR-012): the environment variable that points
@@ -229,7 +233,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       paidBy: claudePaidBy,
       login: 'claude auth login',
       // Its sign-in is a Keychain item named after the home's path, which deleting the folder would leave behind.
-      logout: () => ({ command: 'claude', args: ['auth', 'logout'] }),
+      logout: { run: () => ({ command: 'claude', args: ['auth', 'logout'] }), line: 'claude auth logout' },
     },
     /* On macOS its sign-in is a Keychain item named after the folder's path, so a home never moves. */
     home: {
@@ -265,7 +269,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       /* "Logged in using ChatGPT" is the person's plan; "using an API key" is paid per use. */
       paidBy: (output) => (/using chatgpt/i.test(output) ? 'plan' : /api key/i.test(output) ? 'key' : undefined),
       login: 'codex login',
-      logout: (node) => ({ command: node, args: [bundledCodex(), 'logout'] }),
+      logout: { run: (node) => ({ command: node, args: [bundledCodex(), 'logout'] }), line: 'codex logout' },
     },
     home: {
       variable: 'CODEX_HOME',

@@ -6,13 +6,15 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { fact, timestamp } from './records'
+import { type ProjectRuleSet, type RuleId, RULES } from './rules'
 
 /*
- * A project's rules (the glossary's project rules; docs/architecture/05):
- * what the person keeps for themselves, and what a usage limit does. Each
- * change is a new revision, recorded as a fact by whoever made it, and a run
- * cites the revision it ran under, so it can always say which way the
- * project was set.
+ * A project's rules (the glossary's project rules; docs/architecture/05,
+ * ADR-013): who answers agents' requests and what the person keeps for
+ * themselves, how a task ends, what a usage limit does, and the agents'
+ * accounts. Each change is a new revision, recorded as a fact by whoever
+ * made it, and a run cites the revision it ran under, so it can always say
+ * which way the project was set.
  */
 
 /** What a project does when an agent's account reaches its usage limit: move the work on to the next free agent, or wait for the reset. */
@@ -20,8 +22,16 @@ export type UsageLimit = 'move' | 'wait'
 
 export const ProjectRules = Schema.Struct({
   source: Schema.String,
-  /** What the rules always keep for the person. */
+  /** What happens to what no rule keeps (rules.ts): allowed, asked about, or everything allowed. Allowed without it. */
+  permissions: Schema.optional(Schema.Literals(['rules', 'ask', 'allow'])),
+  /** The kinds of request that always ask the person, by id (rules.ts). The MVP's first revisions held them in words, which read as every kind. */
   alwaysAsk: Schema.Array(Schema.String),
+  /** The kinds refused outright, by id. */
+  never: Schema.optional(Schema.Array(Schema.String)),
+  /** Commands the person named, by how they start: asked about, or refused. */
+  commands: Schema.optional(Schema.Array(Schema.Struct({ pattern: Schema.String, decision: Schema.Literals(['ask', 'never']) }))),
+  /** How a task ends when its plan doesn't say: a draft pull request, one ready for review, or its branch alone. */
+  end: Schema.optional(Schema.Literals(['draft', 'ready', 'none'])),
   /** Without one, it moves on. */
   usageLimit: Schema.optional(Schema.Literals(['move', 'wait'])),
   /**
@@ -38,10 +48,22 @@ export const ProjectRules = Schema.Struct({
 })
 export type ProjectRules = typeof ProjectRules.Type
 
-/** The MVP's rules, a project's first revision. */
-const FIRST: ProjectRules = {
-  source: 'mvp',
-  alwaysAsk: ['push to the default branch', 'force push', 'merge', 'deploy', 'write outside the worktree'],
+/** The MVP's rules, a project's first revision: every kind asks, the rest is allowed. */
+const FIRST: ProjectRules = { source: 'mvp', alwaysAsk: [...RULES] }
+
+const isRule = (id: string): id is RuleId => (RULES as ReadonlyArray<string>).includes(id)
+
+/** A revision's rules as the rules read them; one the MVP wrote in words asks about every kind, as the MVP did. */
+export const ruleSetOf = (rules: ProjectRules): ProjectRuleSet => ({
+  mode: rules.permissions ?? 'rules',
+  ask: rules.alwaysAsk.every(isRule) ? rules.alwaysAsk.filter(isRule) : RULES,
+  never: (rules.never ?? []).filter(isRule),
+  commands: rules.commands ?? [],
+})
+
+/** What the person may change of a project's rules, at once; an end of null goes back to deciding by the code host. */
+export type RulesChange = { readonly [Key in keyof Omit<ProjectRules, 'source' | 'end'>]?: ProjectRules[Key] | undefined } & {
+  readonly end?: ProjectRules['end'] | null | undefined
 }
 
 /** What a revision's rules say a usage limit does. */
@@ -70,6 +92,12 @@ export class Policies extends Context.Service<
       usageLimit: UsageLimit,
       actorId: ActorId,
     ): Effect.Effect<void, SqlError.SqlError | Schema.SchemaError | NotFound>
+    /** A new revision of the project's rules with what the person changed, recorded as theirs: none where nothing changed. */
+    set(
+      projectId: string,
+      change: RulesChange,
+      actorId: ActorId,
+    ): Effect.Effect<ProjectRules, SqlError.SqlError | Schema.SchemaError | NotFound>
     /** A new revision of the project's rules for agents' accounts, recorded as the person's. */
     setAccounts(
       projectId: string,
@@ -113,25 +141,39 @@ export class Policies extends Context.Service<
       const current = (projectId: ProjectId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [known] = yield* sql<{ id: string; rules: string }>`
-            SELECT id, rules FROM policies WHERE project_id = ${projectId} ORDER BY revision DESC LIMIT 1`
-          if (known !== undefined) return { id: known.id, rules: decode(known.rules) }
-          return yield* insert(projectId, 1, FIRST, instance.systemId)
+          const latest = Effect.map(
+            sql<{ id: string; rules: string }>`
+              SELECT id, rules FROM policies WHERE project_id = ${projectId} ORDER BY revision DESC LIMIT 1`,
+            ([row]) => (row === undefined ? undefined : { id: row.id, rules: decode(row.rules) }),
+          )
+          const known = yield* latest
+          if (known !== undefined) return known
+          // The first revision, once: read again in the transaction, so readers at the same moment make one between them.
+          return yield* sql.withTransaction(
+            Effect.flatMap(latest, (again) =>
+              again === undefined ? insert(projectId, 1, FIRST, instance.systemId) : Effect.succeed(again),
+            ),
+          )
         })
 
       /** A new revision of the project's rules, where the change makes one: none for what it says already. */
+      // Read, changed and written together, so two changes made at once each build on the other.
       const revise = (projectId: string, actorId: ActorId, change: (rules: ProjectRules) => ProjectRules | undefined) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
-          if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
-          const now = yield* current(project.id)
-          const next = change(now.rules)
-          if (next === undefined) return
-          const [last] = yield* sql<{
-            revision: number
-          }>`SELECT max(revision) AS revision FROM policies WHERE project_id = ${projectId}`
-          yield* sql.withTransaction(insert(project.id, (last?.revision ?? 0) + 1, next, actorId))
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
+              if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+              const now = yield* current(project.id)
+              const next = change(now.rules)
+              if (next === undefined) return
+              const [last] = yield* sql<{
+                revision: number
+              }>`SELECT max(revision) AS revision FROM policies WHERE project_id = ${projectId}`
+              yield* insert(project.id, (last?.revision ?? 0) + 1, next, actorId)
+            }),
+          )
         })
 
       return Policies.of({
@@ -147,6 +189,34 @@ export class Policies extends Context.Service<
           ),
         setUsageLimit: (projectId, usageLimit, actorId) =>
           provide(revise(projectId, actorId, (rules) => (usageLimitOf(rules) === usageLimit ? undefined : { ...rules, usageLimit }))),
+        set: (projectId, change, actorId) =>
+          provide(
+            Effect.gen(function* () {
+              const commands = change.commands?.flatMap((rule) => {
+                const pattern = rule.pattern.trim().replace(/\s+/g, ' ')
+                return pattern === '' ? [] : [{ pattern, decision: rule.decision }]
+              })
+              let next: ProjectRules | undefined
+              const { end, ...given } = change
+              // What isn't given stays as it is.
+              const rest = Object.fromEntries(Object.entries(given).filter(([, value]) => value !== undefined)) as Partial<ProjectRules>
+              yield* revise(projectId, actorId, (rules) => {
+                const { end: before, ...kept } = rules
+                const ending = end === undefined ? before : (end ?? undefined)
+                const changed: ProjectRules = {
+                  ...kept,
+                  ...rest,
+                  ...(commands === undefined ? {} : { commands }),
+                  ...(ending === undefined ? {} : { end: ending }),
+                  source: 'person',
+                }
+                next = changed
+                const same = (rule: ProjectRules) => JSON.stringify({ ...rule, source: '' })
+                return same(changed) === same(rules) ? undefined : changed
+              })
+              return next ?? (yield* current(projectId as ProjectId)).rules
+            }),
+          ),
         setAccounts: (projectId, accounts, actorId) =>
           provide(
             revise(projectId, actorId, (rules) =>

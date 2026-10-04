@@ -3,8 +3,8 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { ALWAYS_ASK, ALWAYS_ON, NEVER, NEVER_ON } from '../../fixtures/coordinator'
 import { FindingsReach, LimitPolicy, PermissionPolicy, TaskEnd } from '../../foundations/vocabulary'
+import { ProjectRules, projectRulesText } from './ProjectRules'
 import { States, statesOn } from '../../storybook/States'
-import { ProjectRules } from './ProjectRules'
 
 const meta = {
   title: 'Screens/ProjectRules',
@@ -23,6 +23,7 @@ const meta = {
     onAlwaysOnChange: fn(),
     onNeverOnChange: fn(),
     onAddNever: fn(),
+    onReachChange: fn(),
   },
 } satisfies Meta<typeof ProjectRules>
 export default meta
@@ -71,6 +72,68 @@ export const Careful: Story = {
     defaultReach: FindingsReach.All,
     defaultEnd: TaskEnd.PushOnly,
     defaultLimits: LimitPolicy.Wait,
+  },
+}
+
+/** A rule added by how its command starts; an empty one says what it needs. */
+export const AddingARule: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const [always] = c.getAllByRole('button', { name: 'Add a rule' })
+    if (always === undefined) throw new Error('No way to add a rule')
+    await userEvent.click(always)
+    const field = c.getByRole('textbox', { name: 'A command, as it starts' })
+    await expect(field).toHaveFocus()
+    await userEvent.click(c.getByRole('button', { name: 'Add' }))
+    await expect(c.getByRole('alert')).toHaveTextContent('Type how the command starts')
+    await userEvent.type(field, '  terraform apply ')
+    await userEvent.click(c.getByRole('button', { name: 'Add' }))
+    await expect(args.onAddRule).toHaveBeenCalledWith('terraform apply')
+    await expect(c.queryByRole('textbox', { name: 'A command, as it starts' })).toBeNull()
+    // Escape steps back out of it.
+    await userEvent.click(c.getAllByRole('button', { name: 'Add a rule' })[1] ?? always)
+    await userEvent.keyboard('{Escape}')
+    await expect(args.onAddNever).not.toHaveBeenCalled()
+  },
+}
+
+/**
+ * As Charrette has it now: the rules allow, ask or allow everything; no
+ * review findings row; usage limits move or wait; the accounts of agents
+ * with more than one, rotating only where the person says.
+ */
+export const AsCharretteHasIt: Story = {
+  args: {
+    permissionOptions: [PermissionPolicy.Rules, PermissionPolicy.Ask, PermissionPolicy.AllowAll],
+    defaultPermissions: PermissionPolicy.Rules,
+    limitOptions: [LimitPolicy.Move, LimitPolicy.Wait],
+    onReachChange: undefined,
+    agentAccounts: [
+      {
+        id: 'codex',
+        name: 'Codex',
+        accounts: [
+          { id: 'acc_main', label: 'main' },
+          { id: 'acc_client', label: 'Client' },
+        ],
+      },
+    ],
+    allowed: { codex: ['acc_client'] },
+    onRotateChange: fn(),
+    onAllowedChange: fn(),
+    text: { foot: '' },
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.queryByRole('radiogroup', { name: projectRulesText.reach.label })).toBeNull()
+    await expect(c.queryByRole('radio', { name: /Ask me.*A card/ })).toBeNull()
+    await expect(c.getByRole('checkbox', { name: 'main' })).not.toBeChecked()
+    // The only account ticked stays ticked: a project keeps at least one of an agent's accounts.
+    await expect(c.getByRole('checkbox', { name: 'Client' })).toBeDisabled()
+    await userEvent.click(c.getByRole('checkbox', { name: 'main' }))
+    await expect(args.onAllowedChange).toHaveBeenCalledWith('codex', ['acc_main', 'acc_client'])
+    await userEvent.click(c.getByRole('radio', { name: /The next account/ }))
+    await expect(args.onRotateChange).toHaveBeenCalledWith(true)
   },
 }
 

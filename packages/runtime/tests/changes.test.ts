@@ -16,12 +16,13 @@ import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
-import { fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { fakeConnectors, HOST, hosted, items, repository, runtime, until } from './support'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -311,6 +312,66 @@ describe('a task that ends in a pull request', () => {
       assert.include(git(bare, 'ls-tree', '--name-only', created.branch), 'change.txt')
       const published = (yield* items(ready?.threadId ?? '')).find((item) => item.kind === 'step_result' && item.content.step === 'publish')
       assert.strictEqual(published?.content.summary, `Pushed ${created.branch}.`)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('works a task’s ending out once, as the project says, else by its host, and on its branch where no host is known', () => {
+    const { working } = hosted()
+    const github = makeFakeService({ pushUrl: () => working })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const projects = yield* Projects
+      const policies = yield* Policies
+      const changes = yield* Changes
+      const instance = yield* Instance
+      const onHost = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const local = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      // Before it is connected, github.test is no host Charrette knows: the branch, whatever the project asks.
+      yield* policies.set(onHost.projectId, { end: 'ready' }, instance.personId)
+      assert.isNull(yield* changes.endFor(onHost.projectId))
+      yield* connect('github', HOST)
+      assert.strictEqual(yield* changes.endFor(onHost.projectId), 'ready')
+      yield* policies.set(onHost.projectId, { end: null }, instance.personId)
+      assert.strictEqual(yield* changes.endFor(onHost.projectId), 'draft')
+      yield* policies.set(onHost.projectId, { end: 'none' }, instance.personId)
+      assert.strictEqual(yield* changes.endFor(onHost.projectId), 'none')
+      // No host Charrette knows: a project that wants a pull request still ends on the branch, as it always has.
+      yield* policies.set(local.projectId, { end: 'ready' }, instance.personId)
+      assert.isNull(yield* changes.endFor(local.projectId))
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('ends as the project says where the plan doesn’t: its branch alone, though the host is connected', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      yield* policies.set(project.projectId, { end: 'none' }, instance.personId)
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Push it',
+        description: '[lead:finish] [lead:edit]',
+        draft: true,
+      })
+      const planId = yield* plans.propose({
+        projectId: project.projectId as ProjectId,
+        taskId: created.taskId,
+        steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        reason: null,
+        actorId: instance.personId,
+        end: null,
+      })
+      yield* plans.start(planId, instance.personId)
+      yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      assert.lengthOf(github.changes, 0)
+      assert.include(git(bare, 'ls-tree', '--name-only', created.branch), 'change.txt')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

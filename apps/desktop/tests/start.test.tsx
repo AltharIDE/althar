@@ -79,6 +79,31 @@ describe('accounts on the start', () => {
     await waitFor(() => expect(client.removeAccount).toHaveBeenCalledWith('acc_work'))
   })
 
+  it('offers to remove an account anyway when its sign-out didn’t work', async () => {
+    const { client } = fakeClient({
+      removeAccount: vi.fn(async (_accountId: string, anyway?: boolean) => {
+        if (anyway !== true) throw new ApiError({ reason: 'SignOutFailed', message: 'Charrette couldn’t sign this account out.' })
+      }),
+      status: vi.fn(async () => ({
+        apiVersion: 1,
+        appVersion: '0.0.0',
+        agents: [
+          {
+            ...(agents[1] ?? agents[0]!),
+            accounts: [usual('acc_usual', 'signed_in'), { ...usual('acc_x', 'signed_in'), name: 'x', home: '/x' }],
+          },
+        ],
+      })),
+    })
+    withServices(<Start onProject={vi.fn()} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for x' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Remove/ }))
+    expect((await screen.findByRole('alert')).textContent).toContain('couldn’t sign this account out')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove anyway' }))
+    await waitFor(() => expect(client.removeAccount).toHaveBeenLastCalledWith('acc_x', true))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove anyway' })).toBeNull())
+  })
+
   it('says the line to run where Terminal can’t open', async () => {
     const { client } = fakeClient({
       signInAccount: vi.fn(async () => ({ line: 'CODEX_HOME=/x codex login', opened: false })),

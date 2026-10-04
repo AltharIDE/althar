@@ -21,11 +21,13 @@ export interface CheckListProps {
   onChange: (value: readonly string[]) => void
   /** The whole list, while something else overrides it. */
   disabled?: boolean
+  /** At least one stays on: the last one on can't be turned off. */
+  keepOne?: boolean
   className?: string
 }
 
 /** A few independent switches, each a row you can click anywhere on. Radix checkboxes in a fieldset, so disabling the list disables each one. */
-export function CheckList({ label, items, value, onChange, disabled, className }: CheckListProps) {
+export function CheckList({ label, items, value, onChange, disabled, keepOne = false, className }: CheckListProps) {
   const base = useId()
   const name = useControlName(label)
   /* the ids come back in the list's order, whatever order they were switched on in */
@@ -48,7 +50,13 @@ export function CheckList({ label, items, value, onChange, disabled, className }
         const on = value.includes(item.id)
         return (
           <label key={item.id} htmlFor={id} className={s.row}>
-            <Checkbox.Root id={id} checked={on} onCheckedChange={(next) => toggle(item.id, next === true)} className={s.box}>
+            <Checkbox.Root
+              id={id}
+              checked={on}
+              disabled={keepOne && on && value.length === 1}
+              onCheckedChange={(next) => toggle(item.id, next === true)}
+              className={s.box}
+            >
               <Checkbox.Indicator className={s.tick}>
                 <Icon name="check" size={10} />
               </Checkbox.Indicator>

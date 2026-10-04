@@ -18,6 +18,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import type { PlanStep } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
+import { RULES } from '../src/rules'
 import { Sessions } from '../src/Sessions'
 import { items, repository, runtime, until } from './support'
 
@@ -34,7 +35,7 @@ const HOUR = 60 * 60 * 1000
 const withAgents = (each: Readonly<Record<string, FakeAgentOptions>>, signedOut: ReadonlyArray<string> = []) =>
   Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { each, signedOut })))
 
-/** A project with a task planned on these steps, and what starts it. */
+/** A project with a task planned on these steps, and what starts it: only that, not the plan's countdown, however slow the machine. */
 const planned = (steps: ReadonlyArray<PlanStep>, title = 'Retry the checkout [lead:finish]') =>
   Effect.gen(function* () {
     const projects = yield* Projects
@@ -53,6 +54,7 @@ const planned = (steps: ReadonlyArray<PlanStep>, title = 'Retry the checkout [le
       steps,
       reason: null,
       actorId: instance.personId,
+      startsIn: Duration.minutes(5),
       end: null,
     })
     return { projectId: project.projectId, task, start: plans.start(planId, instance.personId) }
@@ -372,7 +374,7 @@ describe('limits', () => {
       yield* policies.setUsageLimit(project.projectId, 'wait', instance.personId)
       yield* policies.setUsageLimit(project.projectId, 'wait', instance.personId)
       const revised = yield* policies.current(project.projectId as ProjectId)
-      assert.deepStrictEqual([usageLimitOf(revised.rules), revised.rules.alwaysAsk.length], ['wait', 5])
+      assert.deepStrictEqual([usageLimitOf(revised.rules), revised.rules.alwaysAsk], ['wait', [...RULES]])
       assert.deepStrictEqual(yield* policies.rulesOf(revised.id), revised.rules)
       assert.strictEqual((yield* queries.projects).projects[0]?.usageLimit, 'wait')
       const facts = yield* sql<{ revision: number; actor: string }>`
