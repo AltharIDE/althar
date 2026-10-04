@@ -119,10 +119,10 @@ export const useBoard = (projectId: string): BoardModel => {
         setSending(task.taskId)
         setError(null)
         try {
-          // A lead that stopped starts again, on the agent that led it, to read the note.
+          // A lead that stopped starts again, on the agent that led it, with the note as its first turn: queued first, so it reads it then.
           const head = await client.getThread(task.threadId, { limit: 0 })
-          if (head.session === null && task.lead !== null) await client.startSession({ threadId: task.threadId, agentId: task.lead })
           await client.send({ threadId: task.threadId, body: note, disposition: 'after_current' })
+          if (head.session === null && task.lead !== null) await client.startSession({ threadId: task.threadId, agentId: task.lead })
           return true
         } catch (failure) {
           fail(failure)

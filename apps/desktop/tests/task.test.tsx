@@ -335,19 +335,20 @@ describe('a task', () => {
     )
   })
 
-  it('starts a lead when none is working, with the one that last led', async () => {
+  it('starts the lead picked when the person says something to a task none is working on, with that as its first turn', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread({ session: null })) })
     withServices(<Task />, client)
-    await screen.findByText('No agent is working on this task.')
-    expect(screen.getByText('Stopped')).toBeTruthy()
-    expect(screen.getByRole('textbox', { name: 'Start a lead to talk to it' })).toBeTruthy()
+    expect(await screen.findByText('Stopped')).toBeTruthy()
+    // No button to start one that has nothing to do: saying something starts it.
+    expect(screen.queryByRole('button', { name: 'Start the lead' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'More for this task' })).toBeNull()
     await userEvent.click(await screen.findByRole('button', { name: 'Lead: gpt-5.2-codex Medium' }))
     await userEvent.click(await screen.findByRole('radio', { name: /Claude Code default/ }))
-    await userEvent.click(screen.getByRole('button', { name: 'Start the lead' }))
-    expect(client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'default' })
-    await userEvent.click(screen.getByRole('button', { name: 'More for this task' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: /Resume/ }))
-    expect(client.startSession).toHaveBeenCalledTimes(2)
+    await userEvent.type(screen.getByRole('textbox', { name: 'Tell Claude Code something' }), 'Carry on with the retry.{Enter}')
+    await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'default' }))
+    expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Carry on with the retry.', disposition: 'after_current' })
+    // Queued before the lead starts, so it reads it in its first turn.
+    expect(vi.mocked(client.send).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.startSession).mock.invocationCallOrder[0] ?? 0)
   })
 
   it('shows text as it streams; reads a changed item alone, and the head alone for anything else', async () => {

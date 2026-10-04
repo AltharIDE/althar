@@ -34,11 +34,13 @@ export interface TaskModel {
   /** Earlier items are on their way. */
   readonly loadingEarlier: boolean
   readonly loadEarlier: () => Promise<void>
-  readonly send: (body: string) => Promise<void>
+  /**
+   * Says something to the lead. With no lead working, `start` names the one
+   * to start: the message is its first turn, with its brief.
+   */
+  readonly send: (body: string, start?: Choice) => Promise<void>
   readonly sendNow: (body: string) => Promise<void>
   readonly interrupt: () => Promise<void>
-  /** Starts a lead, as the person chose it. */
-  readonly start: (choice: Choice) => Promise<void>
   /** Puts the lead on another model or effort, or hands the task to another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
   readonly stop: () => Promise<void>
@@ -171,10 +173,14 @@ export const useTask = (threadId: string): TaskModel => {
     pending,
     loadingEarlier,
     loadEarlier,
-    send: (body) => act(() => client.send({ threadId, body, disposition: 'after_current' })),
+    send: (body, start) =>
+      act(async () => {
+        // Queued first, so the lead that starts reads it in its first turn rather than after one of its own.
+        await client.send({ threadId, body, disposition: 'after_current' })
+        if (start !== undefined) await client.startSession(startOf(threadId, start))
+      }),
     sendNow: (body) => act(() => client.send({ threadId, body, disposition: 'interrupt_and_continue' })),
     interrupt: () => act(() => client.interrupt(threadId)),
-    start: (choice) => act(() => client.startSession(startOf(threadId, choice))),
     choose: (choice) =>
       act(async () => {
         const session = snapshot?.session

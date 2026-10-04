@@ -27,14 +27,6 @@
   gap: 8px;
 }
 
-.start {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--t-2);
-  font-size: 13px;
-}
-
 .failure {
   margin: 0;
   color: var(--danger);
