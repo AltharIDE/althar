@@ -19,10 +19,10 @@ type Who = readonly Agent[] | 'coordinator' | 'you'
 const NODES: readonly { name: string; who: Who; rule?: boolean }[] = [
   { name: 'Plan', who: 'coordinator' },
   { name: 'Implement', who: [Agent.Claude] },
-  { name: 'Review', who: [Agent.Codex, Agent.Gemini] },
+  { name: 'Review', who: [Agent.Codex, Agent.OpenCode] },
   { name: 'Fix', who: [Agent.Claude] },
   { name: 'Security review', who: [Agent.Codex], rule: true },
-  { name: 'Verify', who: [Agent.Gemini] },
+  { name: 'Verify', who: [Agent.OpenCode] },
   { name: 'Open PR', who: [Agent.Claude] },
   { name: 'Merge', who: 'you' },
 ]
@@ -47,7 +47,7 @@ const RULE = 6.0
 
 const LOG = [
   [1.0, '09:14', 'Plan ready. Claude Code leads.'],
-  [3.5, '09:36', 'Codex and Gemini reviewed: 3 findings.'],
+  [3.5, '09:36', 'Codex and OpenCode reviewed: 3 findings.'],
   [4.7, '09:49', 'Claude Code fixed 2 and set 1 aside, with a reason. Back for review.'],
   [6.1, '09:55', 'Round 2 is clean. Your rule added a security review: it touches money.'],
   [7.9, '10:03', '214 tests pass. PR 1192 opened.'],

@@ -80,7 +80,7 @@ export const SHIFTS: readonly Shift[] = [
     date: '2026-09-25',
     kind: ShiftKind.Outage,
     who: 'OpenAI',
-    title: 'Codex goes down, then says “Limit reached”',
+    title: 'Codex outage, then early limit errors',
     what: 'Errors on ChatGPT and Codex ran into the next day, and Pro users hit usage walls without notice. Paid limits were reset early afterwards.',
     source: {
       name: 'OpenAI Developer Community',
@@ -114,7 +114,7 @@ export const SHIFTS: readonly Shift[] = [
     kind: ShiftKind.Tools,
     who: 'Anthropic',
     title: 'Claude Code reads AGENTS.md',
-    what: 'About a year after it was asked for, and only in projects with no CLAUDE.md.',
+    what: 'Claude Code now reads AGENTS.md in projects that have no CLAUDE.md.',
     source: {
       name: 'Enterprise DNA',
       url: 'https://enterprisedna.co/resources/ai-pulse/ai-pulse-2026-09-19-claude-code-adopts-agents-md-standard/',
@@ -173,7 +173,7 @@ export const SHIFTS: readonly Shift[] = [
     date: '2026-08-29',
     kind: ShiftKind.Access,
     who: 'OpenAI',
-    title: 'OpenAI is cutting Cursor off',
+    title: 'OpenAI ends Cursor’s direct model access',
     what: 'After SpaceX bought Cursor, OpenAI said Cursor’s direct access to its models ends on 12 November, and its upcoming models won’t go there.',
     source: { name: 'CNBC', url: 'https://www.cnbc.com/2026/08/29/openai-cursor-spacex-model-access.html' },
   },

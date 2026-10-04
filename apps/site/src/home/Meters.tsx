@@ -22,7 +22,6 @@ interface Row {
 const ROWS: readonly Row[] = [
   { agent: Agent.Claude, plan: 'Claude Max plan', window: '5-hour window', use: [0.74, 1] },
   { agent: Agent.Codex, plan: 'ChatGPT Plus plan', window: 'weekly limit', use: [0.22, 0.41] },
-  { agent: Agent.Gemini, plan: 'Google account', window: 'daily limit', use: [0.08, 0.15] },
   { agent: Agent.OpenCode, plan: 'Any API key, or a local model', window: 'pay as you go', use: null },
 ]
 
@@ -30,7 +29,7 @@ const ROWS: readonly Row[] = [
 const TASKS = [
   ['431', 'Refunds', Agent.Claude, Agent.Codex],
   ['432', 'Webhooks', Agent.Codex, null],
-  ['433', 'Docs', Agent.Gemini, null],
+  ['433', 'Docs', Agent.OpenCode, null],
   ['434', 'Lint', Agent.OpenCode, null],
 ] as const
 
@@ -95,7 +94,7 @@ export function Meters() {
           <div className={s.chips}>
             {TASKS.flatMap(([n, title, on, moves]) =>
               [on, moves]
-                .filter((a): a is Agent => a === r.agent)
+                .filter((a): a is NonNullable<typeof a> => a === r.agent)
                 .map((a) => (
                   <span key={`${n}-${a}`} className={s.chip} data-chip={n} data-on={a} hidden={a === moves}>
                     <i aria-hidden="true" />

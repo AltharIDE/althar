@@ -1,5 +1,6 @@
-import { lazy, Suspense, type ComponentType } from 'react'
+import { lazy, Suspense, useEffect, type ComponentType } from 'react'
 
+import { pageMeta } from './content/pages'
 import { Home } from './home/Home'
 import { Shifts } from './shifts/Shifts'
 
@@ -17,6 +18,10 @@ const PAGES: Record<string, ComponentType> = {
 /** The developer page at the root, and the other pages by path. Any other path is the developer page. */
 export function App({ pathname }: { pathname: string }) {
   const Page = PAGES[pathname.replace(/\/+$/, '')] ?? Home
+  const { title } = pageMeta(pathname)
+  useEffect(() => {
+    document.title = title
+  }, [title])
   return (
     <>
       <a className="skip" href="#main">

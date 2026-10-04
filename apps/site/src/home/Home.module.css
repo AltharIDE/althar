@@ -32,7 +32,7 @@
 .agents tbody th { width: 220px; }
 .agent { display: flex; align-items: center; gap: 12px; font-weight: 650; font-size: 17px; }
 .agents code { font: 13.5px var(--mono); color: var(--t-2); }
-.agents code::before { content: '$ '; color: var(--t-4); }
+.whose { display: block; margin-top: 3px; font-size: 13px; color: var(--t-3); }
 .note { margin-top: 18px; font-size: 14px; color: var(--t-3); }
 
 .points { margin: 36px 0 0; padding: 0; list-style: none; }

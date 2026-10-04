@@ -112,10 +112,9 @@ function Swap() {
 const PLAN_USE = [
   [Agent.Claude, 0.62, 1],
   [Agent.Codex, 0.28, 0.5],
-  [Agent.Gemini, 0.1, 0.26],
 ] as const
 
-/** Tile B: three plans filling at their own rates; a full one waits for its reset. */
+/** Tile B: two plans filling at their own rates; a full one waits for its reset. */
 function Plans() {
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => {

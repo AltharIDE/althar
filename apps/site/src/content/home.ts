@@ -12,15 +12,14 @@ export const BRAND = 'Althar'
 
 export const HERO = {
   kicker: 'Open source · desktop app',
-  /** "You pay for Claude, Codex, Gemini. Use them all at once." The names are drawn with their marks. */
+  /** "You pay for Claude and Codex. Use them both at once." The names are drawn with their marks. Gemini joins them when Althar runs it. */
   pay: 'You pay for',
   names: [
     { agent: Agent.Claude, word: 'Claude' },
     { agent: Agent.Codex, word: 'Codex' },
-    { agent: Agent.Gemini, word: 'Gemini' },
   ],
-  use: 'Use them all at once.',
-  lead: 'Althar runs Claude Code, Codex, Gemini and OpenCode side by side, on the plans you already have. One hits its limit, the next takes over. One gets it wrong, another catches it.',
+  use: 'Use them both at once.',
+  lead: 'Althar runs Claude Code, Codex and OpenCode side by side, on the plans you already have. One hits its limit, the next takes over. One gets it wrong, another catches it.',
   fine: 'Free and open source. No account, and no API key of its own.',
 } as const
 
@@ -28,8 +27,8 @@ export const PLANS = {
   no: '01',
   label: 'No new bill',
   title: ['No new account.', 'No new bill.'],
-  lead: 'Althar drives the CLIs already on your machine, signed in the way they already are. No token reselling, no proxy, nothing of ours between you and the model.',
-  note: 'Any agent that speaks the Agent Client Protocol can join. Next month’s too.',
+  lead: 'Althar uses the sign-ins already on your machine: your Claude plan, your ChatGPT plan, your keys. No token reselling, no proxy, nothing of ours between you and the model.',
+  note: 'Agents join through the Agent Client Protocol, so a new one takes an adapter, not a rewrite.',
 } as const
 
 export const WHY = {
@@ -68,13 +67,13 @@ export const COORDINATOR = {
   title: ['Tell it what.', 'It picks the team.'],
   lead: 'One chat for all your projects. Say what you want done; it turns that into tasks and proposes who does each step. Leave it alone and it starts.',
   points: [
-    { title: 'Remembers your projects.', body: 'The repos, your rules, what earlier tasks ran into. You don’t explain twice.' },
+    { title: 'Knows your projects.', body: 'It reads the repos and your rules before it plans. You don’t explain twice.' },
     { title: 'Runs several at once.', body: 'Ask for three things, get three tasks going side by side.' },
     { title: 'Builds the team.', body: 'A lead to implement, other models to review and audit. Swap anyone before it starts.' },
   ],
   ask: 'Rate-limit refunds like charges, and fix the refunds docs while you’re there.',
   reply:
-    'Two tasks. Refunds write to money records, so your security review applies, and Codex caught the 429 case on this code last time, so it reviews again. Change anyone before they start.',
+    'Two tasks. Refunds write to money records, so your security review applies, and Codex reviews Claude’s work. Change anyone before they start.',
 } as const
 
 export const LOOP = {

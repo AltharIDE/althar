@@ -8,7 +8,7 @@ import s from './Coordinator.module.css'
 
 /*
  * The coordinator, as the app shows it. You ask for two things; it answers
- * with what it remembers about the project and the plan for the first task,
+ * with what applies to the project and the plan for the first task,
  * in the product's own TaskLaunch card: who does each step, and a countdown.
  * Leaving it alone is a yes, so it starts on its own once you've seen it, and
  * becomes the running task's card.
@@ -26,7 +26,7 @@ const model = (agent: Agent): ModelInfo => ({
 
 const PLAN: readonly LaunchStep[] = [
   { id: 'impl', label: 'Implement', agents: [model(Agent.Claude)], why: 'recommended for money code', fixed: 'the lead' },
-  { id: 'review', label: 'Review', agents: [model(Agent.Codex), model(Agent.Gemini)], why: 'two labs, combined', optional: true },
+  { id: 'review', label: 'Review', agents: [model(Agent.Codex), model(Agent.OpenCode)], why: 'two models, combined', optional: true },
   {
     id: 'sec',
     label: 'Security review',
@@ -34,7 +34,7 @@ const PLAN: readonly LaunchStep[] = [
     why: 'required by your rule for money handling',
     fixed: 'your rule',
   },
-  { id: 'verify', label: 'Verify', agents: [model(Agent.Gemini)], why: 'the full suite', optional: true },
+  { id: 'verify', label: 'Verify', agents: [model(Agent.OpenCode)], why: 'the full suite', optional: true },
 ]
 
 const TITLE = 'Rate-limit refunds like charges'
@@ -66,7 +66,7 @@ export function Coordinator() {
         {started ? (
           <TaskCard
             fresh
-            task="432"
+            task="431"
             title={TITLE}
             status={TaskStatus.Running}
             steps={started}
@@ -77,7 +77,7 @@ export function Coordinator() {
           />
         ) : (
           <TaskLaunch
-            task="432"
+            task="431"
             title={TITLE}
             project="billing-api"
             estimate="About 40 min · about $2 on your plans"
@@ -97,10 +97,10 @@ export function Coordinator() {
         </span>
         <span className={s.then}>then</span>
         <span className={s.pill}>
-          <AgentMark agent={Agent.Gemini} size={13} />
-          {agentName(Agent.Gemini)}
+          <AgentMark agent={Agent.Codex} size={13} />
+          {agentName(Agent.Codex)}
         </span>
-        <span className={s.when}>{started ? 'Running' : 'Starts with 432'}</span>
+        <span className={s.when}>{started ? 'Running' : 'Starts with 431'}</span>
       </p>
     </div>
   )

@@ -19,6 +19,9 @@ import { Why } from './Why'
  * the work, one task's review loop, and how to get it.
  */
 
+/** The punctuation after a name in a list: "Claude, Codex and OpenCode." The "and" goes between the spans. */
+const listMark = (i: number, count: number) => (i === count - 1 ? '.' : i === count - 2 ? '' : ',')
+
 function Part({ no, label }: { no: string; label: string }) {
   return (
     <p className={s.no}>
@@ -49,8 +52,9 @@ export function Home() {
                     <span className={s.name}>
                       <AgentMark agent={n.agent} className={s.nameMark} />
                       {n.word}
-                      {i < HERO.names.length - 1 ? ',' : '.'}
-                    </span>{' '}
+                      {listMark(i, HERO.names.length)}
+                    </span>
+                    {i === HERO.names.length - 2 ? ' and ' : ' '}
                   </Fragment>
                 ))}
               </span>
@@ -85,7 +89,7 @@ export function Home() {
                   <tr>
                     <th scope="col">Agent</th>
                     <th scope="col">Signed in with</th>
-                    <th scope="col">Althar runs</th>
+                    <th scope="col">How Althar runs it</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -99,7 +103,8 @@ export function Home() {
                       </th>
                       <td>{a.signIn}</td>
                       <td>
-                        <code>{a.command}</code>
+                        <code>{a.runs.code}</code>
+                        <span className={s.whose}>{a.runs.whose === 'bundled' ? 'bundled' : 'your install'}</span>
                       </td>
                     </tr>
                   ))}
