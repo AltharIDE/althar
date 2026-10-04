@@ -82,6 +82,8 @@ export const project: ProjectSummary = {
   running: 1,
   waiting: 0,
   usageLimit: 'move',
+  rotateAccounts: false,
+  onlyAccounts: null,
 }
 
 export const task: TaskSummary = {

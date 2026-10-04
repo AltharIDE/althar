@@ -348,16 +348,31 @@ export class Queries extends Context.Service<
       const projects = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const at = yield* cursor
-        const rows = yield* sql<ProjectList['projects'][number]>`
+        const rows = yield* sql<
+          Omit<ProjectList['projects'][number], 'rotateAccounts' | 'onlyAccounts'> & {
+            readonly rotateAccounts: number
+            readonly onlyAccounts: string | null
+          }
+        >`
           SELECT p.id, p.name, p.slug,
             (SELECT l.path FROM repository_bindings b JOIN repository_locations l ON l.binding_id = b.id
               WHERE b.project_id = p.id AND l.device_id = ${instance.deviceId} ORDER BY b.created_at LIMIT 1) AS repository,
             (SELECT count(*) FROM tasks t WHERE t.project_id = p.id) AS tasks,
             (SELECT count(*) FROM provider_sessions s WHERE s.project_id = p.id AND s.state IN (${sql.unsafe(live)})) AS running,
             (SELECT count(*) FROM attention_requests a WHERE a.project_id = p.id AND a.state = 'open') AS waiting,
-            coalesce((SELECT json_extract(r.rules, '$.usageLimit') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 'move') AS usage_limit
+            coalesce((SELECT json_extract(r.rules, '$.usageLimit') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 'move') AS usage_limit,
+            coalesce((SELECT json_extract(r.rules, '$.accounts.rotate') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 0) AS rotate_accounts,
+            (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts
           FROM projects p WHERE p.archived_at IS NULL ORDER BY p.created_at DESC, p.id DESC`
-        return { cursor: at, projects: rows }
+        return {
+          cursor: at,
+          projects: rows.map((row) => ({
+            ...row,
+            rotateAccounts: row.rotateAccounts === 1,
+            onlyAccounts:
+              row.onlyAccounts === null ? null : (JSON.parse(row.onlyAccounts) as Readonly<Record<string, ReadonlyArray<string>>>),
+          })),
+        }
       })
 
       const taskRows = (where: { readonly projectId?: string; readonly taskId?: string }) =>

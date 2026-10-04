@@ -133,7 +133,8 @@ Next, decided with the user on 3 October 2026, as designed in docs 03 and 05.
 - **What happens** is one of the project's rules: move on (the default) or
   wait, a new revision of its rules when the person changes it, which a run
   cites. Where the person sets it comes later.
-  - **Move on.** With accounts, the work first goes to the same agent's next
+  - **Move on.** With accounts, where the project rotates (off until the
+    person turns it on), the work first goes to the same agent's next
     account that the project allows, signed in and not out, on the same
     model; the person added it, so a key pays as well as a plan. Then it goes to the next free agent: signed in on a plan,
     not out, in the agents' order, and not the other step's agent unless
@@ -190,8 +191,12 @@ Settings, then the project rules screen.
   - The thread names accounts only where it matters: a move, a session's
     header, Settings.
 - **The project's rules** gain which accounts of each agent the project may
-  use (all by default), as a revision like the usage-limit rule. They come
-  with the project rules screen.
+  use (all by default) and whether work rotates through them (off by
+  default), as a revision like the usage-limit rule. The runtime and the API
+  (`SetProjectAccounts`) have them; the person sets them on the project
+  rules screen, next.
+- **Removing one** Charrette made signs it out with the agent's own tool and
+  deletes its folder; one another tool made stays as it is.
 - **Tests.**
   - Fake agents get a home each. A home's variable reaches the fake, which
     says which account it runs on.

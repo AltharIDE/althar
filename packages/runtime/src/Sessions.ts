@@ -699,7 +699,8 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { definition } = entry
-          // In the account's home: its sign-in, not the agent's usual one (ADR-012).
+          // In the account's home: its sign-in, not the agent's usual one (ADR-012), with what it shares brought up to date.
+          yield* accounts.prepare(account)
           const transport = entry.transport(cwdOf(thread), accounts.env(account))
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
           if (transport._tag === 'Process' && processId !== undefined) {
@@ -902,7 +903,12 @@ export class Sessions extends Context.Service<
             if (threads.has(input.threadId)) return yield* new SessionRunning({ threadId: input.threadId })
             const thread = yield* loadThread(input.threadId)
             const entry = yield* (yield* Agents).get(input.agentId)
-            const account = yield* limits.pick({ agentId: entry.definition.id, threadId: input.threadId, ...accountOf(input) })
+            const account = yield* limits.pick({
+              agentId: entry.definition.id,
+              projectId: thread.projectId,
+              threadId: input.threadId,
+              ...accountOf(input),
+            })
             const sessionId = yield* createSession(thread, entry.definition.id, account)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
             // Every session starts from a brief (ADR-005), even the first on a task.
@@ -1157,7 +1163,12 @@ export class Sessions extends Context.Service<
             const entry = yield* (yield* Agents).get(input.agentId)
             const previous = threads.get(input.threadId)
             const from = previous?.entry.definition.name
-            const account = yield* limits.pick({ agentId: entry.definition.id, threadId: input.threadId, ...accountOf(input) })
+            const account = yield* limits.pick({
+              agentId: entry.definition.id,
+              projectId: thread.projectId,
+              threadId: input.threadId,
+              ...accountOf(input),
+            })
             const sessionId = yield* createSession(thread, entry.definition.id, account)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
             if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })

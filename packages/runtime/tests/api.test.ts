@@ -361,6 +361,14 @@ describe('accounts, through the API', () => {
             ['main', 'Work plan'],
           )
           assert.deepStrictEqual(yield* client.FindAccounts({ agentId: 'opencode' }), { found: [] })
+          // A project's rule for accounts: rotation, off until turned on, and which accounts each agent may use there.
+          const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+          assert.deepStrictEqual([project.rotateAccounts, project.onlyAccounts], [false, null])
+          yield* client.SetProjectAccounts({ commandId: commandId(), projectId: project.id, rotate: true, only: { codex: [work.id] } })
+          const listed = (yield* client.ListProjects()).projects.find((each) => each.id === project.id)
+          assert.deepStrictEqual([listed?.rotateAccounts, listed?.onlyAccounts], [true, { codex: [work.id] }])
+          yield* client.SetProjectAccounts({ commandId: commandId(), projectId: project.id, rotate: true, only: null })
+          assert.isNull((yield* client.ListProjects()).projects.find((each) => each.id === project.id)?.onlyAccounts)
           const refused = yield* Effect.flip(client.RemoveAccount({ commandId: commandId(), accountId: codex?.accounts[0]?.id ?? '' }))
           assert.deepStrictEqual(
             [refused.reason, refused.message],

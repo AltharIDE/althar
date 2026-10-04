@@ -233,6 +233,8 @@ export const handlers = Api.toLayer(
                 running: 0,
                 waiting: 0,
                 usageLimit: 'move' as const,
+                rotateAccounts: false,
+                onlyAccounts: null,
               }
             )
           }),
@@ -443,6 +445,8 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      SetProjectAccounts: ({ commandId, projectId, rotate, only }) =>
+        once(commandId, api(policies.setAccounts(projectId, only === null ? { rotate } : { rotate, only }, instance.personId))),
       SetUsageLimit: ({ commandId, projectId, policy }) =>
         once(commandId, api(policies.setUsageLimit(projectId, policy, instance.personId))),
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),

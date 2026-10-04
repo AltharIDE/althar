@@ -50,13 +50,17 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(options.secrets ?? Secrets.none('Charrette keeps sign-ins in the app; it can open them, and this can’t.')),
     Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds)),
   )
-  // Each agent's accounts, whether each is signed in, and which are out of usage until their reset (ADR-012).
-  const able = Limits.layer.pipe(Layer.provideMerge(SignIns.layer.pipe(Layer.provideMerge(Accounts.layer.pipe(Layer.provideMerge(base))))))
+  // Each project's rules; each agent's accounts, whether each is signed in, and which are out of usage until their reset (ADR-012).
+  const able = Limits.layer.pipe(
+    Layer.provideMerge(
+      SignIns.layer.pipe(Layer.provideMerge(Accounts.layer.pipe(Layer.provideMerge(Policies.layer.pipe(Layer.provideMerge(base)))))),
+    ),
+  )
   const core = Layer.mergeAll(Projects.layer, Sessions.layer).pipe(Layer.provideMerge(Permissions.layer.pipe(Layer.provideMerge(able))))
   // A task's pull request and issue, through the person's connections to code hosts and trackers.
   const linked = Layer.mergeAll(Changes.layer, Issues.layer).pipe(Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(core))))
   // Runs drive a task's steps; plans start runs when their time comes; the coordinator plans tasks and passes messages on.
-  const work = Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(Policies.layer.pipe(Layer.provideMerge(linked))))))
+  const work = Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))
   // The models each agent offers, read from its sessions, or asked of it once.
   const known = Models.layer.pipe(Layer.provideMerge(work))
   return Coordinator.layer.pipe(Layer.provideMerge(known))

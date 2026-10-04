@@ -1,11 +1,13 @@
 import { modelName } from '@charrette/contracts'
 import type { ConfigOption } from '@charrette/provider-adapters'
-import { Context, Duration, Effect, Layer, Option } from 'effect'
+import type { ProjectId } from '@charrette/domain'
+import { Context, Duration, Effect, Layer, Option, type Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
 import { Agents } from './Config'
 import { NotFound } from './errors'
+import { accountsOf, Policies } from './Policies'
 import { timestamp } from './records'
 import { SignIns } from './SignIns'
 
@@ -59,30 +61,36 @@ export const outWords = (input: {
   return `${out} ${input.waits === 'step' ? 'The step' : 'Your message'} waits until ${input.resetsAt === null ? 'it is back' : 'then'}.`
 }
 
+type Failure = SqlError.SqlError | Schema.SchemaError
+
 export class Limits extends Context.Service<
   Limits,
   {
-    /** Whether the agent is out now, every account it could run on, and until when: the soonest back. */
-    out(agentId: string): Effect.Effect<Option.Option<Out>, SqlError.SqlError>
+    /** Whether the agent is out now, every account it could run on (in the project, where given), and until when: the soonest back. */
+    out(agentId: string, projectId?: string): Effect.Effect<Option.Option<Out>, Failure>
+    /** Whether the project moves work on to the agent's next account when one runs out: the person's to turn on (ADR-012). */
+    rotates(projectId: string): Effect.Effect<boolean, Failure>
     /** Whether an account is out now, and until when. */
     outAccount(accountId: string): Effect.Effect<Option.Option<Out>, SqlError.SqlError>
     /**
-     * The account a session on the agent runs on: the one given; else the
-     * thread's own, while it can; else the first, in the person's order,
-     * that isn't signed out or out of usage; else the first.
+     * The account a session on the agent runs on, of those the project
+     * allows: the one given; else the thread's own, while it can; else the
+     * first, in the person's order, that isn't signed out or out of usage;
+     * else the first.
      */
     pick(input: {
       readonly agentId: string
+      readonly projectId?: string
       readonly threadId?: string
       readonly accountId?: string
-    }): Effect.Effect<Account, SqlError.SqlError | NotFound>
+    }): Effect.Effect<Account, Failure | NotFound>
     /**
      * The first agent free to take work over, besides those given: signed in
      * on a plan, not out, in the agents' order; one the work would rather not
      * go to (the other step's) only if none else is free. An agent paid per
      * use, on a key, is never moved to unasked: that spends the person's money.
      */
-    free(besides: ReadonlyArray<string>, rather?: ReadonlyArray<string>): Effect.Effect<string | undefined, SqlError.SqlError>
+    free(besides: ReadonlyArray<string>, rather?: ReadonlyArray<string>, projectId?: string): Effect.Effect<string | undefined, Failure>
     /**
      * The model an agent takes work over on: the one the plan named for it on
      * the step, else the last it ran in the project, else its own default.
@@ -104,13 +112,23 @@ export class Limits extends Context.Service<
     ): Effect.Effect<{ readonly agent: string; readonly model: string | null }, SqlError.SqlError>
   }
 >()('@charrette/runtime/Limits') {
-  static readonly layer: Layer.Layer<Limits, never, SqlClient.SqlClient | Agents | SignIns | Accounts> = Layer.effect(
+  static readonly layer: Layer.Layer<Limits, never, SqlClient.SqlClient | Agents | SignIns | Accounts | Policies> = Layer.effect(
     Limits,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const agents = yield* Agents
       const signIns = yield* SignIns
       const accounts = yield* Accounts
+      const policies = yield* Policies
+
+      /** The agent's accounts the project allows, in the person's order: every one, unless its rules name some. */
+      const allowed = (agentId: string, projectId?: string) =>
+        Effect.gen(function* () {
+          const list = yield* accounts.of(agentId)
+          if (projectId === undefined) return list
+          const only = accountsOf((yield* policies.current(projectId as ProjectId)).rules).only?.[agentId]
+          return only === undefined ? list : list.filter((account) => only.includes(account.id))
+        })
 
       const outOf = (account: Account) =>
         Effect.gen(function* () {
@@ -133,10 +151,10 @@ export class Limits extends Context.Service<
           return Option.isNone(yield* outOf(account))
         })
 
-      const out = (agentId: string) =>
+      const out = (agentId: string, projectId?: string) =>
         Effect.gen(function* () {
           const outs: Array<Out> = []
-          for (const account of yield* accounts.of(agentId)) {
+          for (const account of yield* allowed(agentId, projectId)) {
             if ((yield* signIns.account(account)).status === 'signed_out') continue
             const found = yield* outOf(account)
             if (Option.isNone(found)) return Option.none<Out>()
@@ -147,6 +165,7 @@ export class Limits extends Context.Service<
 
       return Limits.of({
         out,
+        rotates: (projectId) => Effect.map(policies.current(projectId as ProjectId), ({ rules }) => accountsOf(rules).rotate),
         outAccount: (accountId) =>
           accounts.get(accountId).pipe(
             Effect.flatMap(outOf),
@@ -155,7 +174,7 @@ export class Limits extends Context.Service<
         pick: (input) =>
           Effect.gen(function* () {
             if (input.accountId !== undefined) return yield* accounts.get(input.accountId)
-            const list = yield* accounts.of(input.agentId)
+            const list = yield* allowed(input.agentId, input.projectId)
             if (input.threadId !== undefined) {
               const [last] = yield* sql<{ accountId: string | null }>`
                 SELECT account_id FROM provider_sessions WHERE thread_id = ${input.threadId} AND agent_id = ${input.agentId}
@@ -167,13 +186,13 @@ export class Limits extends Context.Service<
             const [first] = list
             return first ?? (yield* new NotFound({ kind: 'account', id: input.agentId }))
           }),
-        free: (besides, rather = []) =>
+        free: (besides, rather = [], projectId) =>
           Effect.gen(function* () {
             const candidates = agents.list.map((entry) => entry.definition.id).filter((agentId) => !besides.includes(agentId))
             // Those the work would rather not go to come last.
             for (const agentId of [...candidates.filter((id) => !rather.includes(id)), ...candidates.filter((id) => rather.includes(id))]) {
               // Another agent takes work over unasked only on an account its plan pays for.
-              for (const account of yield* accounts.of(agentId)) {
+              for (const account of yield* allowed(agentId, projectId)) {
                 const check = yield* signIns.account(account)
                 if (check.status === 'signed_out' || check.paidBy !== 'plan') continue
                 if (Option.isNone(yield* outOf(account))) return agentId

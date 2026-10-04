@@ -110,6 +110,10 @@ export const ProjectSummary = Schema.Struct({
   waiting: Schema.Number,
   /** When an agent reaches its usage limit: its work moves on to the next free agent, or waits for the reset. */
   usageLimit: Schema.Literals(['move', 'wait']),
+  /** Whether work moves on to an agent's next account here when one runs out (ADR-012): off unless the person turned it on. */
+  rotateAccounts: Schema.Boolean,
+  /** The accounts each agent may use here, by agent; null for every one. */
+  onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
 })
 export type ProjectSummary = typeof ProjectSummary.Type
 
@@ -847,6 +851,16 @@ export const Api = RpcGroup.make(
    * person signs in: the line it runs, and whether it could open it.
    */
   command('SignInAccount', { accountId: Schema.String }, Schema.Struct({ line: Schema.String, opened: Schema.Boolean })),
+  /** Whether work moves on to an agent's next account in the project, and which accounts each agent may use there (null: every one). */
+  command(
+    'SetProjectAccounts',
+    {
+      projectId: Schema.String,
+      rotate: Schema.Boolean,
+      only: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+    },
+    Schema.Void,
+  ),
   /** What the project does when an agent reaches its usage limit. */
   command('SetUsageLimit', { projectId: Schema.String, policy: Schema.Literals(['move', 'wait']) }, Schema.Void),
   /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */

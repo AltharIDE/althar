@@ -23,7 +23,7 @@ const definition = (real: AgentDefinition): AgentDefinition => ({
   home: {
     variable: 'CHARRETTE_FAKE_HOME',
     usual: () => join(process.env.CHARRETTE_PROFILE ?? tmpdir(), 'fake-homes', real.id),
-    shared: [],
+    shared: () => [],
   },
   permissions: codexLikeMeanings,
 })

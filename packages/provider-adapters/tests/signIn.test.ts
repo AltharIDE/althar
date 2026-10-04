@@ -2,7 +2,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import { type AgentDefinition, agents } from '../src/registry'
-import { signInCheck, signInStatus } from '../src/signIn'
+import { signInCheck, signInStatus, signOut } from '../src/signIn'
 
 const withStatus = (script: string): AgentDefinition => ({
   ...agents.codex,
@@ -53,6 +53,27 @@ describe('reading sign-in status', () => {
     assert.isUndefined(read('', 0))
   })
 
+  it('signs an account out with the agent’s own command, in its home, where the agent has one', () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const outIn = (script: string): AgentDefinition => ({
+          ...agents.codex,
+          signIn: { ...agents.codex.signIn, logout: () => ({ command: 'bun', args: ['-e', script] }) },
+        })
+        assert.isTrue(
+          yield* signOut(outIn("process.exit(process.env.CODEX_HOME === '/homes/work' ? 0 : 1)"), process.execPath, {
+            CODEX_HOME: '/homes/work',
+          }),
+        )
+        assert.isFalse(yield* signOut(outIn('process.exit(1)')))
+        assert.isTrue(yield* signOut(agents.opencode))
+        assert.deepStrictEqual(
+          [agents['claude-code'].signIn.logout?.('node').args, agents.codex.signIn.logout?.('node').args.at(-1)],
+          [['auth', 'logout'], 'logout'],
+        )
+      }),
+    ))
+
   it('names the command the user runs to sign in', () => {
     assert.deepStrictEqual(
       Object.values(agents).map((agent) => agent.signIn.login),
@@ -60,6 +81,9 @@ describe('reading sign-in status', () => {
     )
   })
 })
+
+/** What a usual folder might hold: settings, sign-ins, and other tools' data. */
+const PRESENT = ['settings.json', 'CLAUDE.md', 'config.toml', 'AGENTS.md', 'auth.json', '.credentials.json', 'opencode', 'mise', 'pnpm']
 
 describe('an agent’s homes', () => {
   it('names the variable that points each agent at a home, and its usual folder', () => {
@@ -77,8 +101,16 @@ describe('an agent’s homes', () => {
   })
 
   it('shares only settings and instructions, never a sign-in', () => {
-    for (const agent of Object.values(agents))
-      for (const name of agent.home.shared) assert.notMatch(name, /auth|credential|token|\.claude\.json|keychain/i, agent.id)
+    // Where the home is the agent's own folder, nothing that signs in is shared.
+    for (const agent of [agents['claude-code'], agents.codex])
+      for (const name of agent.home.shared(PRESENT)) assert.notMatch(name, /auth|credential|token|\.claude\.json|keychain/i, agent.id)
+    assert.deepStrictEqual(agents['claude-code'].home.shared(PRESENT), ['settings.json', 'CLAUDE.md'])
+    assert.deepStrictEqual(agents.codex.home.shared(PRESENT), ['config.toml', 'AGENTS.md'])
+    // OpenCode's home is the data folder every program uses: only its own stays apart.
+    assert.deepStrictEqual(
+      agents.opencode.home.shared(PRESENT),
+      PRESENT.filter((name) => name !== 'opencode'),
+    )
   })
 })
 

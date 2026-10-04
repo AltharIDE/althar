@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, readdirSync, realpathSync, statSync, symlinkSync } from 'node:fs'
+import { mkdirSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 
 import { Ids, newId } from '@charrette/domain'
 import type { Ledger, RevisionConflict, RowNotFound } from '@charrette/persistence-sqlite'
-import type { AgentDefinition } from '@charrette/provider-adapters'
+import { type AgentDefinition, signOut } from '@charrette/provider-adapters'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -96,6 +96,8 @@ export class Accounts extends Context.Service<
     get(accountId: string): Effect.Effect<Account, NotFound | SqlError.SqlError>
     /** What points the agent at the account's home: nothing for its usual folder. */
     env(account: Account): Readonly<Record<string, string>>
+    /** Readies a home Charrette made for a session: what came to the usual folder since is linked in too. */
+    prepare(account: Account): Effect.Effect<void>
     /** Adds an account: in the folder given, as another tool made it, or in a home Charrette makes. */
     add(input: {
       readonly agentId: string
@@ -103,7 +105,11 @@ export class Accounts extends Context.Service<
       readonly folder?: string
     }): Effect.Effect<Account, AccountRefused | UnknownAgent | SqlError.SqlError | Schema.SchemaError>
     rename(accountId: string, name: string): Effect.Effect<void, AccountRefused | NotFound | Failure>
-    /** Stops using an account. Its home stays where it is, with its sign-in, for the agent's own tool. */
+    /**
+     * Stops using an account. One in a folder Charrette made is signed out
+     * with the agent's own tool and its folder deleted; one another tool made
+     * stays as it is, signed in, that tool's.
+     */
     remove(accountId: string): Effect.Effect<void, AccountRefused | NotFound | Failure>
     /** Puts an agent's accounts in the order given; any left out keep theirs, after. */
     order(agentId: string, accountIds: ReadonlyArray<string>): Effect.Effect<void, Failure>
@@ -192,6 +198,22 @@ export class Accounts extends Context.Service<
           return account === undefined ? yield* new NotFound({ kind: 'account', id: accountId }) : account
         })
 
+      /** The folder of an account Charrette made, where it is still under the runtime's own: never one another tool made. */
+      const madeHere = (account: Account): string | undefined => {
+        const root = config.accountsRoot
+        if (account.home === null || account.adoptedFrom !== null || root === undefined) return undefined
+        return relative(root, account.home).startsWith('..') ? undefined : account.home
+      }
+
+      /** Signs the account out with its agent's own tool, in its home, then deletes the folder: whether the agent said it signed out. */
+      const forget = (account: Account, folder: string) =>
+        Effect.gen(function* () {
+          const definition = definitionOf(account.agentId)
+          const signedOut = definition === undefined ? false : yield* signOut(definition, process.execPath, env(account))
+          yield* Effect.sync(() => rmSync(folder, { recursive: true, force: true }))
+          return signedOut
+        })
+
       const env = (account: Account): Readonly<Record<string, string>> => {
         const definition = definitionOf(account.agentId)
         return account.home === null || definition === undefined ? {} : { [definition.home.variable]: account.home }
@@ -254,13 +276,8 @@ export class Accounts extends Context.Service<
           const id = yield* newId(Ids.agentAccount)
           // Named by the account, so it never moves: Claude Code ties its sign-in to the folder's path.
           const home = join(config.accountsRoot, id)
-          yield* Effect.sync(() => {
-            mkdirSync(home, { recursive: true, mode: 0o700 })
-            // The person's settings and instructions, so every account works the same; never a sign-in.
-            const usual = usualOf(definition)
-            for (const shared of definition.home.shared)
-              if (existsSync(join(usual, shared)) && !existsSync(join(home, shared))) symlinkSync(join(usual, shared), join(home, shared))
-          })
+          yield* Effect.sync(() => mkdirSync(home, { recursive: true, mode: 0o700 }))
+          link(definition, home)
           return yield* sql.withTransaction(
             Effect.gen(function* () {
               const account = yield* insert({ agentId: input.agentId, name, home, adoptedFrom: null })
@@ -274,6 +291,12 @@ export class Accounts extends Context.Service<
         of: (agentId) => provide(of(agentId)),
         get: (accountId) => provide(get(accountId)),
         env,
+        prepare: (account) =>
+          Effect.sync(() => {
+            const definition = definitionOf(account.agentId)
+            const made = madeHere(account)
+            if (definition !== undefined && made !== undefined) link(definition, made)
+          }),
         add: (input) => provide(add(input)),
         rename: (accountId, name) =>
           provide(
@@ -296,10 +319,13 @@ export class Accounts extends Context.Service<
               const sql = yield* SqlClient.SqlClient
               const account = yield* get(accountId)
               if (account.home === null) return yield* new AccountRefused({ reason: 'usual' })
+              // A folder Charrette made is signed out with the agent's own tool, then goes; one another tool made stays its.
+              const made = madeHere(account)
+              const signedOut = made === undefined ? false : yield* forget(account, made)
               yield* sql.withTransaction(
                 Effect.gen(function* () {
                   const revision = yield* change('agent_accounts', account.id, { removedAt: yield* timestamp })
-                  yield* record(account, 'agent_account.removed', revision, {})
+                  yield* record(account, 'agent_account.removed', revision, { deleted: made !== undefined, signedOut })
                 }),
               )
             }),
@@ -340,6 +366,23 @@ export class Accounts extends Context.Service<
       })
     }),
   )
+}
+
+/**
+ * Links into a home Charrette made what of the agent's usual folder isn't
+ * the account's own (the registry's `shared`), where the home hasn't it
+ * yet: the person's settings, or other tools' data. Never a sign-in.
+ */
+const link = (definition: AgentDefinition, home: string) => {
+  const usual = definition.home.usual(process.env, homedir())
+  const names = listing(usual).map((entry) => entry.name)
+  for (const name of definition.home.shared(names)) {
+    try {
+      symlinkSync(join(usual, name), join(home, name))
+    } catch {
+      // There already, as the home's own or linked before.
+    }
+  }
 }
 
 /** A folder's entries, by name and kind; none where it can't be read. */

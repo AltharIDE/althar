@@ -73,7 +73,9 @@ export interface AccountsText {
   up: string
   down: string
   remove: string
-  removeNote: string
+  /** What removing does to one in a folder Charrette made, and to one another tool made. */
+  removeOwn: string
+  removeAdopted: string
   save: string
   cancel: string
   nameField: string
@@ -106,7 +108,8 @@ export const accountsText: AccountsText = {
   up: 'Move up',
   down: 'Move down',
   remove: 'Remove',
-  removeNote: 'Its folder stays, signed in, for the agent’s own tool.',
+  removeOwn: 'Signs it out and deletes its folder.',
+  removeAdopted: 'Its folder stays, signed in, for the tool that made it.',
   save: 'Save',
   cancel: 'Cancel',
   nameField: 'Name',
@@ -272,7 +275,12 @@ function Row({ account, first, last, t, onSignIn, onRename, onMove, onRemove }: 
       {removable && (
         <>
           <MenuSeparator />
-          <MenuItem icon="remove" tone="danger" description={t.removeNote} onSelect={() => onRemove(account.id)}>
+          <MenuItem
+            icon="remove"
+            tone="danger"
+            description={place.kind === 'own' ? t.removeOwn : t.removeAdopted}
+            onSelect={() => onRemove(account.id)}
+          >
             {t.remove}
           </MenuItem>
         </>

@@ -72,18 +72,25 @@ export interface AgentDefinition {
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
     readonly login: string
+    /**
+     * Its own sign-out, run in an account's home when the person removes an
+     * account Charrette made, before its folder goes (ADR-012). Without one,
+     * the sign-in is a file in the home, gone with it.
+     */
+    readonly logout?: (node: string) => LaunchSpec
   }
   /**
    * Where it keeps a sign-in (ADR-012): the environment variable that points
    * it at a folder of its own, a home, and its usual folder when that isn't
-   * set. `shared` are the person's settings and instructions in that folder,
-   * linked into a home Charrette makes, so every account works the same;
-   * never anything that holds a sign-in.
+   * set. `shared` picks, from what is in the usual folder, what isn't the
+   * account's own: the person's settings and instructions, or other tools'
+   * data where the variable is a general one. It is linked into a home
+   * Charrette makes, so every account works the same; never a sign-in.
    */
   readonly home: {
     readonly variable: string
     readonly usual: (env: Readonly<Record<string, string | undefined>>, homeDir: string) => string
-    readonly shared: ReadonlyArray<string>
+    readonly shared: (names: ReadonlyArray<string>) => ReadonlyArray<string>
   }
   readonly permissions: PermissionMeanings
   /**
@@ -95,6 +102,12 @@ export interface AgentDefinition {
   /** What it does differently, for the support matrix. */
   readonly knownGaps: ReadonlyArray<string>
 }
+
+/** Shares these names, where the usual folder has them. */
+const only =
+  (names: ReadonlyArray<string>) =>
+  (present: ReadonlyArray<string>): ReadonlyArray<string> =>
+    present.filter((name) => names.includes(name))
 
 const require = createRequire(import.meta.url)
 const bundled = (packageName: string, entry: string) => join(dirname(require.resolve(`${packageName}/package.json`)), entry)
@@ -215,12 +228,14 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       read: loggedInField,
       paidBy: claudePaidBy,
       login: 'claude auth login',
+      // Its sign-in is a Keychain item named after the home's path, which deleting the folder would leave behind.
+      logout: () => ({ command: 'claude', args: ['auth', 'logout'] }),
     },
     /* On macOS its sign-in is a Keychain item named after the folder's path, so a home never moves. */
     home: {
       variable: 'CLAUDE_CONFIG_DIR',
       usual: (env, homeDir) => env.CLAUDE_CONFIG_DIR || join(homeDir, '.claude'),
-      shared: ['settings.json', 'CLAUDE.md', 'agents', 'commands', 'skills', 'plugins', 'output-styles'],
+      shared: only(['settings.json', 'CLAUDE.md', 'agents', 'commands', 'skills', 'plugins', 'output-styles']),
     },
     /* From claude-agent-acp's permissions/options/shared.js. Rejecting skips the action and Claude carries on. */
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
@@ -250,11 +265,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       /* "Logged in using ChatGPT" is the person's plan; "using an API key" is paid per use. */
       paidBy: (output) => (/using chatgpt/i.test(output) ? 'plan' : /api key/i.test(output) ? 'key' : undefined),
       login: 'codex login',
+      logout: (node) => ({ command: node, args: [bundledCodex(), 'logout'] }),
     },
     home: {
       variable: 'CODEX_HOME',
       usual: (env, homeDir) => env.CODEX_HOME || join(homeDir, '.codex'),
-      shared: ['config.toml', 'AGENTS.md', 'skills', 'prompts', 'rules'],
+      shared: only(['config.toml', 'AGENTS.md', 'skills', 'prompts', 'rules']),
     },
     /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
@@ -294,12 +310,18 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       /* It runs on the providers' keys it was given, whichever model a session picks: paid per use, as far as Charrette can tell. */
       paidBy: () => 'key',
       login: 'opencode auth login',
+      // No sign-out: its sign-ins are `opencode/auth.json` in the home, gone with the folder; its own asks which to remove.
     },
-    /* Its sign-ins and its history are under the data folder's `opencode`; its config stays the person's, under XDG_CONFIG_HOME. */
+    /*
+     * Its sign-ins and its history are under the data folder's `opencode`;
+     * its config stays the person's, under XDG_CONFIG_HOME. The data folder
+     * is every program's, so all else in it is shared: what a session runs,
+     * such as mise, fnm or pnpm, finds its data where it always does.
+     */
     home: {
       variable: 'XDG_DATA_HOME',
       usual: (env, homeDir) => env.XDG_DATA_HOME || join(homeDir, '.local', 'share'),
-      shared: [],
+      shared: (names) => names.filter((name) => name !== 'opencode'),
     },
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { once: 'once' } },

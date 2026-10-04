@@ -202,6 +202,7 @@ describe('the client', () => {
           ListIssues: () => Effect.die('unused'),
           MarkReady: () => Effect.die('unused'),
           SetUsageLimit: () => Effect.die('unused'),
+          SetProjectAccounts: () => Effect.die('unused'),
           RenameAccount: () => Effect.die('unused'),
           RemoveAccount: () => Effect.die('unused'),
           OrderAccounts: () => Effect.die('unused'),

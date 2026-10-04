@@ -24,9 +24,19 @@
   - **Adding an account** makes a home and opens the agent's own sign-in in
     it, in a terminal, for the person. Charrette never sees the credential.
     A home Charrette made holds that account's sign-in and the agent's own
-    history. The person's usual settings, instructions and skills are linked
-    into it, so every account works the same way. A home stays where it was
-    made: Claude Code ties its Keychain item to the folder's path.
+    history. What of the agent's usual folder isn't the account's own is
+    linked into it, again as each session starts, so every account works the
+    same way:
+    - the person's settings, instructions and skills;
+    - for OpenCode, whose home is the data folder every program uses, all
+      of it but OpenCode's own, so mise, fnm or pnpm find their data where
+      they always do.
+
+    A home stays where it was made: Claude Code ties its Keychain item to
+    the folder's path.
+  - **Removing an account** Charrette made signs it out with the agent's own
+    tool, in its home, and deletes the folder, so nothing is left signed in
+    out of sight. One another tool made stays as it is, that tool's.
   - **A home another tool made is adopted as it is.** Switchers that give
     each account a folder of its own are found where they keep them, and
     any other folder can be added by hand. Charrette lists their names and
@@ -46,15 +56,22 @@
     can run work. A project's rules may limit each agent to some of its
     accounts (a client's repository to the client's plan). Like any rule
     change, this makes a new revision, which a run cites.
+  - **Rotation is the person's to turn on, per project.** Moving work to the
+    agent's next account when one runs out is off until the person turns it
+    on in the project's rules, among the accounts the project allows. It is
+    separation (work, personal, a client's plan) Charrette provides by
+    default. Failing over from one personal plan to the next is something
+    providers' consumer terms tend to restrict, so Charrette doesn't do it
+    unasked.
   - **Picking an account:**
     - A conversation stays on the account it runs on.
     - A new session takes the first account, in the person's order, that is
       allowed for the project, signed in, and not out of usage.
   - **Usage limits are per account.** Under the project's "move on" rule,
-    work goes first to the same agent's next allowed account. It runs the
-    same model, in a new session from a brief, as at any switch
-    ([ADR-005](005-charrette-briefs-every-agent.md)). Only then does it go
-    to the next agent.
+    where the project rotates, work goes first to the same agent's next
+    allowed account. It runs the same model, in a new session from a brief,
+    as at any switch ([ADR-005](005-charrette-briefs-every-agent.md)). Then,
+    or without rotation, it goes to the next agent.
   - **Paid by:**
     - Another agent takes work over unasked only on an account a plan pays
       for, as before.
@@ -71,6 +88,8 @@
     personal, but a usage limit can't move work to the person's other plan.
   - **A pool with no project rule.** Simplest, but a client's code could run
     on another client's plan.
+  - **Rotation on by default.** The most work done unattended, but it makes
+    Charrette the one that fails over between a person's plans, unasked.
   - **A local gateway that picks the account per request.** It relays the
     person's tokens, and it works for only one agent's API at a time.
 - **Trade-off:**
@@ -79,10 +98,11 @@
     record that carries over, so a move between accounts starts a new
     session from a brief rather than loading the old one.
   - `XDG_DATA_HOME` reaches every program an OpenCode session runs, not
-    only OpenCode.
+    only OpenCode. The rest of the usual data folder is linked in for them,
+    so a tool that writes a new folder there writes it in the home.
   - Providers' terms differ on several personal plans. Each account is the
-    person's own, and adding one and allowing it for a project is their
-    choice to use it.
+    person's own; rotating between them is the person's choice, made per
+    project.
 - **Revisit when:**
   - An agent gains first-class profiles (Codex's `--auth-profile`
     proposal).

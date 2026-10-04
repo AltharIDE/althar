@@ -64,8 +64,11 @@ export const definition = (id: string, signedOut: ReadonlyArray<string> = [], pe
     // On a plan, unless the test says it is paid per use.
     paidBy: (output) => (perUse.includes(id) || perUse.includes(output.trim()) ? 'key' : 'plan'),
     login: `fake-login ${id}`,
+    // Says which home it signed out of, in the file the test names.
+    logout: () => ({ command: 'sh', args: ['-c', 'printf "%s\\n" "$FAKE_HOME" >> "${FAKE_SIGNED_OUT:-/dev/null}"'] }),
   },
-  home: { variable: 'FAKE_HOME', usual: () => join(fakeHomes, id), shared: ['settings.json'] },
+  // Shares everything in its usual folder but its sign-in, as OpenCode's data folder does.
+  home: { variable: 'FAKE_HOME', usual: () => join(fakeHomes, id), shared: (names) => names.filter((name) => name !== 'auth.json') },
   permissions: codexLikeMeanings,
   // One fake agent passes session options, as Claude Code's entry does.
   ...(id === 'claude-code' ? { sessionMeta: () => ({ fake: { asks: true } }) } : {}),

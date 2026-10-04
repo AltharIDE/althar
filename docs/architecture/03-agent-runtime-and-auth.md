@@ -579,8 +579,16 @@ What makes a home, per agent:
 - It opens the agent's own sign-in there, in a terminal, for the person:
   `claude auth login`, `codex login`, `opencode auth login`, each with the
   home in its environment.
-- The person's usual settings, instructions and skills are linked into the
-  home; the sign-in and the agent's own history are the home's own.
+- What of the agent's usual folder isn't the account's own is linked into
+  the home, again as each session starts (the registry's `shared`): the
+  person's settings, instructions and skills, and for OpenCode, whose home is
+  the general data folder, all of it but `opencode`, so tools such as mise,
+  fnm or pnpm find their data. The sign-in and the agent's own history are
+  the home's own.
+- **Removing one** signs it out with the agent's own sign-out, run in its
+  home (`claude auth logout`, `codex logout`; OpenCode's sign-in is a file
+  in the home), and deletes the folder. A folder another tool made is never
+  touched.
 - The status command, run with the home, says who the account is and
   whether a plan or a key pays for it.
 
@@ -600,6 +608,8 @@ support is built, and checked again by the contract suite.
 **Which account runs.**
 - Every account can run work. A project's rules can limit each agent to some
   of its accounts, which is an `ExecutionGrant`'s `allowedProjectIds`.
+- Moving to the agent's next account on a limit is the project's rule too,
+  off until the person turns it on (ADR-012).
 - A conversation stays on the account it runs on, for its session and its
   prompt cache.
 - A new session takes the first account, in the person's order, that is
@@ -610,8 +620,8 @@ support is built, and checked again by the contract suite.
 **Out of usage.**
 - A limit puts one account out, not the agent. The side channels above
   report per session, so what they report goes to that session's account.
-- Under the project's "move on" rule, work first goes to the same agent's
-  next allowed account, on the same model. A home is separate, so the new
+- Under the project's "move on" rule, where the project rotates, work first
+  goes to the same agent's next allowed account, on the same model. A home is separate, so the new
   account starts a session from a brief, as at any switch (Switching model
   or agent).
 - Only then does the work go to the next agent, and only on an account a plan
@@ -623,7 +633,8 @@ support is built, and checked again by the contract suite.
 
 **Environment.** A home's variable reaches every program the session runs,
 not only the agent. `XDG_DATA_HOME` is the one that matters, since other
-programs read it too.
+programs read it too: what is linked into the home is what keeps them
+working.
 
 ### Claude plans in third-party apps
 

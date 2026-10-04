@@ -49,3 +49,23 @@ export const signInCheck = (
 /** Whether the user is signed in to an agent (see `signInCheck`). */
 export const signInStatus = (agent: AgentDefinition, node: string = process.execPath): Effect.Effect<SignInStatus> =>
   Effect.map(signInCheck(agent, node), (check) => check.status)
+
+/**
+ * Signs an account out with the agent's own sign-out command, run in the
+ * account's home: true when it says it did, or when the agent has none (its
+ * sign-in is a file in the home). Never an error.
+ */
+export const signOut = (
+  agent: AgentDefinition,
+  node: string = process.execPath,
+  home: Readonly<Record<string, string>> = {},
+): Effect.Effect<boolean> => {
+  const logout = agent.signIn.logout
+  if (logout === undefined) return Effect.succeed(true)
+  return Effect.callback<boolean>((resume) => {
+    const spec = logout(node)
+    execFile(spec.command, [...spec.args], { timeout: 15_000, env: { ...process.env, ...asNode(spec), ...spec.env, ...home } }, (error) =>
+      resume(Effect.succeed(error === null)),
+    )
+  })
+}

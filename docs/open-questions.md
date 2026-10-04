@@ -18,11 +18,9 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   plan) are ordinary. Moving work to another personal plan because one ran
   out is the part terms may object to. Re-check Anthropic's and OpenAI's
   terms before launch.
-  - Leaning: it stays the person's choice, made by adding the account and
-    allowing it for the project, and it is worded as "your accounts", not as
-    a way round limits.
-  - If a provider objects, the move between that agent's accounts gets a
-    switch that is off by default.
+  - Settled after review of #23: rotation is off by default and turned on
+    per project, among the accounts the project allows (ADR-012). Still
+    re-check the terms before launch, and before ever making it the default.
 - [ ] **What a home Charrette makes shares with the person's usual folder.**
   Linked: Claude Code's settings, `CLAUDE.md`, agents, commands and plugins,
   and Codex's `config.toml`, `AGENTS.md` and skills. OpenCode's config stays
@@ -40,8 +38,10 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 - [ ] **OpenCode without `XDG_DATA_HOME`.** That variable reaches every
   program the session runs. Is there an OpenCode-only way, such as
   `OPENCODE_DB` and an auth path?
-  - Leaning: `XDG_DATA_HOME` for now. The session's environment is
-    Charrette's anyway.
+  - For now (#23): the rest of the usual data folder is linked into the
+    home, again at each session start, so mise, fnm and pnpm find their
+    data. A tool that makes a new folder there mid-session makes it in the
+    home. An OpenCode-only way would still be better.
 - [ ] **Models per account.** Plans offer different models, Plus against Pro
   for example.
   - Leaning: models stay per agent until an account says otherwise. The

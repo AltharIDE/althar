@@ -9,12 +9,13 @@ import { chooseFolder, launch } from './support'
 
 /*
  * Several accounts per agent (ADR-012), as the person sees them: added on
- * the start, each in a folder of its own, and taking work over from the
- * agent's other account when that one runs out. Claude Code's usual account
- * is out for an hour here (CHARRETTE_FAKE_OUT); the one added isn't.
+ * the start, each in a folder of its own, and named where one runs out.
+ * Claude Code's usual account is out for an hour here (CHARRETTE_FAKE_OUT);
+ * the one added isn't. A project doesn't rotate through an agent's accounts
+ * until the person turns that on, so the work goes to another agent.
  */
 
-test('adds an account to an agent, and a task goes on with it when the agent’s usual account runs out', async () => {
+test('adds an account to an agent, and names the one that ran out when a task moves on', async () => {
   const home = mkdtempSync(join(tmpdir(), 'charrette-e2e-'))
   const repo = repository(home)
   const { electronApp, page } = await launch(home, { CHARRETTE_FAKE_OUT: 'claude-code@usual:3600' })
@@ -40,12 +41,10 @@ test('adds an account to an agent, and a task goes on with it when the agent’s
     await page.getByRole('button', { name: 'No review' }).click()
     await page.getByRole('button', { name: 'Start the task' }).click()
 
-    // Claude Code's other account took the step over and finished it.
+    // The project doesn't rotate: Codex took the step over and finished it.
     await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 15_000 })
     await page.getByRole('button', { name: /^Open task/ }).click()
-    await expect(
-      page.getByText(/^Claude Code \(main\) reached its usage limit, until .+\. Claude Code \(work\) takes over(, on .+)?\.$/),
-    ).toBeVisible()
+    await expect(page.getByText(/^Claude Code \(main\) reached its usage limit, until .+\. Codex takes over(, on .+)?\.$/)).toBeVisible()
     await expect(page.getByText('Did the task.')).toBeVisible()
     await page.screenshot({ path: 'test-results/accounts-moved.png', animations: 'disabled' })
   } finally {

@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, mkdtempSync, readlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -13,6 +13,7 @@ import { Agents } from '../src/Config'
 import { Instance } from '../src/Instance'
 import { Limits } from '../src/Limits'
 import { Plans } from '../src/Plans'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
@@ -39,6 +40,48 @@ const folder = (name: string) => {
 
 const refusal = <A, E>(effect: Effect.Effect<A, E>) =>
   Effect.map(Effect.flip(effect), (error) => (error as { readonly reason?: string }).reason ?? (error as { readonly _tag: string })._tag)
+
+/** Which agent and account each session on a thread ran on, in order. */
+const sessionsOn = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ agentId: string; accountId: string }>`
+      SELECT agent_id, account_id FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at`
+    return rows.map((row) => [row.agentId, row.accountId])
+  })
+
+/** A task planned for Codex alone, started, until its lead is done: what its thread said, and where. */
+const ranOnCodex = (projectId?: string) =>
+  Effect.gen(function* () {
+    const projects = yield* Projects
+    const plans = yield* Plans
+    const instance = yield* Instance
+    const project =
+      projectId ?? (yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })).projectId
+    const task = yield* projects.createTask({
+      envelope: yield* Runtime.envelope('task.create', {}),
+      projectId: project,
+      title: 'Retry the checkout [lead:finish]',
+      draft: true,
+    })
+    const planId = yield* plans.propose({
+      projectId: project as ProjectId,
+      taskId: task.taskId,
+      steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+      reason: null,
+      actorId: instance.personId,
+      end: null,
+    })
+    yield* plans.start(planId, instance.personId)
+    const said = yield* until(
+      Effect.map(items(task.threadId), (all) =>
+        all.flatMap((item) => (item.kind === 'notice' || item.kind === 'step_result' ? [JSON.stringify(item.content)] : [])),
+      ),
+      (lines) => lines.some((line) => line.includes('Did the task.')),
+      Duration.seconds(20),
+    )
+    return { projectId: project, threadId: task.threadId, said: said.join('\n') }
+  })
 
 describe('accounts', () => {
   it.effect(
@@ -90,11 +133,25 @@ describe('accounts', () => {
             ['Work plan', 2],
           ],
         )
+        // A folder another tool made stays, signed in, that tool's.
         yield* accounts.remove(client.id)
+        assert.isTrue(existsSync(client.home ?? ''))
         assert.deepStrictEqual(
           (yield* accounts.of('codex')).map((account) => account.name),
           ['main', 'Work plan'],
         )
+        // One Charrette made is signed out with the agent's own tool, in its home, and its folder goes.
+        const spare = yield* accounts.add({ agentId: 'codex', name: 'spare' })
+        writeFileSync(join(spare.home ?? '', 'auth.json'), '{}')
+        const signedOut = join(mkdtempSync(join(tmpdir(), 'charrette-signed-out-')), 'homes')
+        process.env.FAKE_SIGNED_OUT = signedOut
+        try {
+          yield* accounts.remove(spare.id)
+        } finally {
+          delete process.env.FAKE_SIGNED_OUT
+        }
+        assert.isFalse(existsSync(spare.home ?? ''))
+        assert.strictEqual(readFileSync(signedOut, 'utf8'), `${spare.home}\n`)
         assert.strictEqual(yield* accounts.login(work.id), `FAKE_HOME='${work.home}' fake-login codex`)
         assert.strictEqual(yield* accounts.login(usual?.id ?? ''), 'fake-login codex')
         // An agent the registry doesn't know, as a test's `process` agent, runs in its usual folder, and has no sign-in to open.
@@ -116,9 +173,34 @@ describe('accounts', () => {
             'agent_account.moved',
             'agent_account.moved',
             'agent_account.removed',
+            'agent_account.added',
+            'agent_account.removed',
           ],
         )
       }).pipe(Effect.provide(withAccounts())),
+  )
+
+  it.effect('share with a home Charrette made what isn’t the account’s own, brought up to date as a session starts', () =>
+    Effect.gen(function* () {
+      const accounts = yield* Accounts
+      // As OpenCode's data folder: its sign-in stays the account's, other tools' data is shared.
+      const usualFolder = (yield* (yield* Agents).get('opencode')).definition.home.usual({}, '')
+      mkdirSync(join(usualFolder, 'mise'), { recursive: true })
+      writeFileSync(join(usualFolder, 'auth.json'), '{}')
+      const own = yield* accounts.add({ agentId: 'opencode', name: 'second' })
+      const home = own.home ?? ''
+      assert.isTrue(lstatSync(join(home, 'mise')).isSymbolicLink())
+      assert.isFalse(existsSync(join(home, 'auth.json')))
+      // What came to the usual folder since is linked as a session starts.
+      mkdirSync(join(usualFolder, 'pnpm'))
+      yield* accounts.prepare(own)
+      yield* accounts.prepare(own)
+      assert.strictEqual(readlinkSync(join(home, 'pnpm')), join(usualFolder, 'pnpm'))
+      // A folder another tool made is left as it is.
+      const adopted = yield* accounts.add({ agentId: 'opencode', name: 'third', folder: folder('third') })
+      yield* accounts.prepare(adopted)
+      assert.isFalse(existsSync(join(adopted.home ?? '', 'pnpm')))
+    }).pipe(Effect.provide(withAccounts())),
   )
 
   it.effect('make no folder of their own where the runtime has nowhere to keep one', () =>
@@ -210,55 +292,69 @@ describe('accounts', () => {
     }).pipe(Effect.provide(withAccounts({}, [away])))
   })
 
-  it.live('put one account out of usage, so a step goes on with the agent’s next account, in its home, and the thread says so', () => {
+  it.live('put one account out of usage, and by default the project doesn’t rotate: another agent takes the step over, on a plan', () => {
+    const back = Date.now() + 60 * 60 * 1000
+    return Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const limits = yield* Limits
+      const [usual] = yield* accounts.of('codex')
+      yield* accounts.add({ agentId: 'codex', name: 'work', folder: folder('work') })
+      const ran = yield* ranOnCodex()
+      assert.match(ran.said, /Fake codex \(main\) reached its usage limit, until [^.]+\. Fake claude-code takes over/)
+      assert.deepStrictEqual(
+        (yield* sessionsOn(ran.threadId)).map(([agentId]) => agentId),
+        ['codex', 'claude-code'],
+      )
+      assert.isFalse(yield* limits.rotates(ran.projectId))
+      // A new session there still starts on the account that can run.
+      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId: ran.projectId })).name, 'work')
+      assert.isTrue((yield* limits.outAccount(usual?.id ?? ''))._tag === 'Some')
+    }).pipe(Effect.provide(withAccounts({ 'codex@usual': { outOfUsage: { until: back } } })))
+  })
+
+  it.live('go on with the agent’s next account, in its home, where the project turned that on, among the accounts it allows', () => {
     const back = Date.now() + 60 * 60 * 1000
     const workFolder = folder('work')
     return Effect.gen(function* () {
       const accounts = yield* Accounts
-      const projects = yield* Projects
-      const plans = yield* Plans
+      const policies = yield* Policies
       const instance = yield* Instance
-      const sql = yield* SqlClient.SqlClient
+      const projects = yield* Projects
+      const limits = yield* Limits
       const [usual] = yield* accounts.of('codex')
       const work = yield* accounts.add({ agentId: 'codex', name: 'work', folder: workFolder })
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
-      const task = yield* projects.createTask({
-        envelope: yield* Runtime.envelope('task.create', {}),
-        projectId: project.projectId,
-        title: 'Retry the checkout [lead:finish]',
-        draft: true,
-      })
-      const planId = yield* plans.propose({
-        projectId: project.projectId as ProjectId,
-        taskId: task.taskId,
-        steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
-        reason: null,
-        actorId: instance.personId,
-        end: null,
-      })
-      yield* plans.start(planId, instance.personId)
-      const said = yield* until(
-        Effect.map(items(task.threadId), (all) =>
-          all.flatMap((item) => (item.kind === 'notice' || item.kind === 'step_result' ? [JSON.stringify(item.content)] : [])),
-        ),
-        (lines) => lines.some((line) => line.includes('Did the task.')),
-        Duration.seconds(20),
-      )
-      assert.match(said.join('\n'), /Fake codex \(main\) reached its usage limit, until [^.]+\. Fake codex \(work\) takes over/)
-      const sessionsOn = yield* sql<{ agentId: string; accountId: string }>`
-        SELECT agent_id, account_id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at`
-      assert.deepStrictEqual(
-        sessionsOn.map((session) => [session.agentId, session.accountId]),
-        [
-          ['codex', usual?.id],
-          ['codex', work.id],
-        ],
-      )
+      yield* policies.setAccounts(project.projectId, { rotate: true }, instance.personId)
+      // Saying it again makes no new revision.
+      yield* policies.setAccounts(project.projectId, { rotate: true }, instance.personId)
+      const ran = yield* ranOnCodex(project.projectId)
+      assert.match(ran.said, /Fake codex \(main\) reached its usage limit, until [^.]+\. Fake codex \(work\) takes over/)
+      assert.deepStrictEqual(yield* sessionsOn(ran.threadId), [
+        ['codex', usual?.id],
+        ['codex', work.id],
+      ])
       assert.deepInclude(launches, { agentId: 'codex', env: { FAKE_HOME: workFolder } })
       // The usual account is out until its reset; the agent isn't, while work can run.
-      const limits = yield* Limits
-      assert.isTrue((yield* limits.outAccount(usual?.id ?? ''))._tag === 'Some')
-      assert.isTrue((yield* limits.out('codex'))._tag === 'None')
+      assert.isTrue((yield* limits.out('codex', project.projectId))._tag === 'None')
+
+      // Limited to the usual account, the project has no other: Codex is out there, and a new step goes to another agent.
+      yield* policies.setAccounts(project.projectId, { rotate: true, only: { codex: [usual?.id ?? ''] } }, instance.personId)
+      assert.isTrue((yield* limits.out('codex', project.projectId))._tag === 'Some')
+      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId: project.projectId })).id, usual?.id)
+      const limited = yield* ranOnCodex(project.projectId)
+      assert.match(limited.said, /Fake codex reached its usage limit, until [^.]+\. Fake claude-code takes over/)
+      assert.deepStrictEqual(
+        (yield* sessionsOn(limited.threadId)).map(([agentId]) => agentId),
+        ['claude-code'],
+      )
+      const sql = yield* SqlClient.SqlClient
+      const revisions = yield* sql<{
+        revision: number
+      }>`SELECT revision FROM policies WHERE project_id = ${project.projectId} ORDER BY revision`
+      assert.deepStrictEqual(
+        revisions.map((row) => row.revision),
+        [1, 2, 3],
+      )
     }).pipe(Effect.provide(withAccounts({ 'codex@usual': { outOfUsage: { until: back } } })))
   })
 })

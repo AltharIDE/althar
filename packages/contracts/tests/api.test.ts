@@ -194,6 +194,7 @@ describe('the API', () => {
               ListIssues: () => Effect.succeed({ issues: [] }),
               MarkReady: () => Effect.void,
               SetUsageLimit: () => Effect.void,
+              SetProjectAccounts: () => Effect.void,
               RenameAccount: () => Effect.void,
               RemoveAccount: () => Effect.void,
               OrderAccounts: () => Effect.void,
