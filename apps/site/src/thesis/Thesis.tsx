@@ -55,7 +55,7 @@ export function Thesis() {
   const [lede, claim, ...rest] = THESIS.intro
   return (
     <div className={s.page}>
-      <Masthead current="thesis" base="/" />
+      <Masthead current="thesis" base="/enterprise" />
 
       <main id="main" tabIndex={-1}>
         <header className={s.head}>

@@ -4,19 +4,23 @@ import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite-plus'
 
-/** The thesis is a route in the app; give it its own index.html so any static host serves it. */
-const thesisPage = (): Plugin => ({
-  name: 'thesis-page',
+/** The app's other routes; each gets its own index.html so any static host serves it. */
+const ROUTES = ['shifts', 'thesis', 'enterprise'] as const
+
+const routePages = (): Plugin => ({
+  name: 'route-pages',
   apply: 'build',
   async closeBundle() {
     const out = resolve(import.meta.dirname, 'dist')
-    await mkdir(resolve(out, 'thesis'), { recursive: true })
-    await copyFile(resolve(out, 'index.html'), resolve(out, 'thesis/index.html'))
+    for (const route of ROUTES) {
+      await mkdir(resolve(out, route), { recursive: true })
+      await copyFile(resolve(out, 'index.html'), resolve(out, route, 'index.html'))
+    }
   },
 })
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), thesisPage()],
+  plugins: [react(), routePages()],
   css: {
     modules: {
       localsConvention: 'camelCaseOnly',
@@ -26,4 +30,8 @@ export default defineConfig(({ mode }) => ({
   server: { port: 5320, strictPort: true },
   preview: { port: 4320, strictPort: true },
   build: { target: 'baseline-widely-available' },
+  test: {
+    include: ['tests/**/*.test.{ts,tsx}'],
+    environment: 'node',
+  },
 }))

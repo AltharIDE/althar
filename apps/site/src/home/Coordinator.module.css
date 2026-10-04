@@ -1,0 +1,14 @@
+.chat { display: flex; flex-direction: column; gap: 16px; }
+.you { align-self: flex-end; max-width: 80%; padding: 11px 15px; border-radius: 14px; background: var(--n-4); font-size: 15px; }
+.said { margin-top: 2px; }
+.said p:last-child { margin-top: 6px; font-size: 15.5px; line-height: 1.5; }
+.me { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 14px; }
+.me span { font-weight: 400; font-size: 13px; color: var(--t-3); }
+.sq { width: 10px; height: 10px; border-radius: 2px; background: var(--live); }
+
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 7px; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line-3); font-size: 12.5px; font-weight: 550; white-space: nowrap; }
+
+.next { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 18px; border-radius: 10px; background: var(--paper); box-shadow: 0 0 0 1px var(--line-2); font-size: 13.5px; }
+.n { font: 500 12px var(--mono); color: var(--t-3); }
+.then { font-size: 12px; color: var(--t-4); }
+.when { margin-left: auto; font-size: 12.5px; color: var(--t-3); }

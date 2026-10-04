@@ -1,10 +1,10 @@
 # @althar/site
 
-Althar's landing page, and the thesis. A Vite+ React app, styled with CSS Modules, using `@althar/ui` for the product's own marks, logo and tokens.
+The site for Althar. A Vite+ React app, styled with CSS Modules, using `@althar/ui` for the product's own marks, logo, tokens and cards.
 
-The page's idea: agents come and go, the project stays. The first screen is a building site in 3D, drawn on a canvas as a two-point perspective. A tower crane sets a floor per task, a different agent's name on its plate each time, and each floor is a note the project keeps. Below it: what Althar is, the agents it runs, task 418 as its graph with the review loop, what the project knows, and where it stands. `/thesis` is `THESIS.md`, set for reading.
+The page at `/` is for developers who code with agents today: one app for the coding agents they already pay for, a coordinator that hands out the work, and tasks that review and fix themselves. It doesn't pitch project knowledge or talk like an enterprise. `/shifts` is the running list of what changed under those developers (new models, limits, owners and terms), each entry dated and sourced. `/thesis` is `THESIS.md`, set for reading. `/enterprise` keeps the earlier page (the building site in 3D) for the later company version; nothing links to it.
 
-It is a prototype. Nothing is prerendered yet, there are no tests, and the copy will change.
+It is a prototype. Nothing is prerendered yet, and the copy will change.
 
 ## Run
 
@@ -16,12 +16,13 @@ From the repository root, run `bun install`. Then run these from `apps/site`:
 | `bun run build` | Production build into `dist/` |
 | `bun run preview` | Serve the build at `http://localhost:4320` |
 | `bun run check` | Format, lint and TypeScript checks |
+| `bun run test` | Unit tests (`tests/`) |
 
-`?t=6.5` in the address holds the site's first screen at that second, for looking at one frame.
+`?t=6.5` in the address holds every timeline on the page at that second, for looking at one frame. The coordinator's plan card keeps its own clock, as it does in the app.
 
 ## Deploying
 
-`dist/` is static: `index.html` for the landing page, `thesis/index.html` for the thesis, and `assets/`. `wrangler.jsonc` deploys it to Cloudflare as static assets, with no Worker code; any other path gets the landing page.
+`dist/` is static: `index.html` for the developer page, an `index.html` each for `shifts/`, `thesis/` and `enterprise/`, and `assets/`. `wrangler.jsonc` deploys it to Cloudflare as static assets, with no Worker code; any other path gets the developer page.
 
 On Cloudflare (Workers Builds), connected to this repository:
 
@@ -35,20 +36,27 @@ From a machine logged in with `bunx wrangler login`, `bun run deploy` builds and
 
 ## Where things live
 
-- `src/App.tsx`: the landing page at `/`, the thesis at `/thesis`.
-- `src/home/`: the landing page.
-  - `Home.tsx`: the first screen, with the canvas, the floors' notes and the headline.
-  - `scene/`: the 3D site. `model.ts` is the building, scaffold and crane in metres; `timeline.ts` is what the crane does each second, with the load's swing as a damped pendulum; `render.ts` projects and paints it. No 3D library.
-  - `Body.tsx`: the parts below: what it is, the agents (`Crew.tsx`), task 418 (`TaskGraph.tsx`), what it knows (`Knowledge.tsx`), and where it stands.
+- `src/App.tsx`: the pages by path. The thesis and the enterprise page load only on their own paths.
+- `src/home/`: the developer page.
+  - `Home.tsx`: the page, top to bottom: the cobalt first screen, what it signs in with, why more than one agent, the coordinator, one task's loop.
+  - `Meters.tsx`: the first screen's card: your plans' usage, and a task moving to Codex when Claude hits its limit.
+  - `Why.tsx`: the rolling "best coding agent right now", three reasons with small working pictures, and a ticker of the latest shifts.
+  - `Coordinator.tsx`: a chat and the product's own `TaskLaunch` card, which starts on its own and becomes a `TaskCard`.
+  - `TaskLoop.tsx`: one task's steps with the review loop; a list on narrow screens.
+- `src/shifts/`: the shifts page (`Shifts.tsx`) and the ordering and grouping both pages use (`group.ts`).
+- `src/shared/`: the developer pages' bar (`Bar.tsx`), their cobalt end with the wordmark (`Close.tsx`), and the agents' marks (`AgentMark.tsx`). `Masthead.tsx` and `sheet.tsx` belong to the enterprise page and the thesis.
+- `src/enterprise/`: the earlier page, unchanged: the 3D site in `scene/`, and its body.
 - `src/thesis/`: the thesis. `prose.tsx` compiles `THESIS.md` with `marked` into the site's own elements, with no HTML passed through. Edit `THESIS.md`, not the page.
-- `src/shared/`: the bar along the top (`Masthead.tsx`), and the drawing set's pieces both pages use (`sheet.tsx`): task 418's keyed steps, the revision block, the stamp, the definition.
-- `src/content/`: what the site says. `facts.ts` holds every claim, link and status line; `meridian.ts` the made-up project and task 418; `site.ts` the six tasks the crane builds and their notes; `sheet.ts` the revisions and the definition. Change the facts here, not in a component.
+- `src/content/`: what the site says. `home.ts` is the developer page's copy, `agents.ts` the agents and how they sign in, `shifts.ts` the shifts with their sources, and `facts.ts` the links and install lines. The enterprise page's content is `meridian.ts`, `site.ts` and `sheet.ts`. Change the facts here, not in a component.
 - `src/lib/`: `motion.ts` (the timeline player and easing), `useCurrent.ts` (which part is on screen), `cx.ts`.
 
-The earlier concepts (Set, Cover, Markup, Faces, Stays, Front sheet, Dimensions, Scaffold, Lift, Plan, Axonometric) and the concept browser are archived in `althar-designs/prototypes/_archive/landing-concepts-2026-09-29/`, with the kits they import.
+The developer page's drafts are in `althar-designs/althar-dev/` (`a.html` is the one this page follows). The enterprise page's earlier concepts are archived in `althar-designs/prototypes/_archive/landing-concepts-2026-09-29/`.
 
 ## Before this ships
 
+- Check every shift against its source, and swap secondary sources for the company's own post where there is one (see the note at the top of `content/shifts.ts`).
+- Replace the placeholders in `facts.ts`: the release link, the Homebrew cask and the clone URL.
+- Re-check that Claude plans may still be used through third-party apps; the page's first claim depends on it.
 - Prerender it, as the pitch app does, so the page reads without JavaScript.
-- Choose the licence. The page says it is still to be chosen.
-- Check the links against the real repository, which may not be public yet.
+- Split the main bundle further; most of it is `@althar/ui`.
+- Choose the licence, and check the links against the real repository, which may not be public yet.

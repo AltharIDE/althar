@@ -13,6 +13,14 @@ export const LINKS = {
   discussions: `${REPO}/discussions`,
   issues: `${REPO}/issues`,
   components: `${REPO}/tree/main/packages/ui`,
+  releases: `${REPO}/releases`,
+} as const
+
+/** How to install it. Not published yet: the release, the cask and the clone URL are placeholders until it ships. */
+export const INSTALL = {
+  brew: 'brew install --cask althar',
+  clone: 'git clone github.com/thetastemakers/althar',
+  platforms: 'macOS first. Linux and Windows after.',
 } as const
 
 export const LINE = {

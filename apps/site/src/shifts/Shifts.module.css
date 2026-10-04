@@ -1,0 +1,75 @@
+.page { background: var(--n-2); }
+.wrap { max-width: var(--max); margin: 0 auto; padding: 0 var(--gut); }
+
+/* ---- head, in cobalt ---- */
+.head { background: var(--live); color: #fff; padding: 72px 0 0; overflow-x: clip; }
+.kicker { display: flex; align-items: center; gap: 8px; font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255, 255, 255, 0.75); }
+.kicker i { width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+.h1 { margin-top: 24px; font-size: 84px; line-height: 1; letter-spacing: -0.055em; font-weight: 700; }
+.h1 span { display: block; }
+.dim { color: rgba(255, 255, 255, 0.6); }
+.lead { margin-top: 28px; max-width: 700px; font-size: 19px; line-height: 1.55; color: rgba(255, 255, 255, 0.86); }
+
+/* every shift on one strip of days */
+.strip { position: relative; margin-top: 72px; padding-bottom: 28px; }
+.marks { position: relative; height: 92px; margin: 0; padding: 0; list-style: none; border-bottom: 1px solid rgba(255, 255, 255, 0.35); }
+.marks li { position: absolute; left: calc(var(--at) * 100%); bottom: calc(10px + var(--stack) * 22px); transform: translateX(-50%); }
+.mark { position: relative; display: block; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+.mark[data-kind='open-model'] { background: none; box-shadow: inset 0 0 0 2.5px #fff; }
+.mark[data-kind='limits'], .mark[data-kind='pricing'] { border-radius: 3px; }
+.mark[data-kind='access'], .mark[data-kind='outage'] { border-radius: 3px; transform: rotate(45deg) scale(0.86); }
+.marks li::after { content: ''; position: absolute; left: 50%; top: 100%; width: 1px; height: calc(10px + var(--stack) * 22px); background: rgba(255, 255, 255, 0.35); }
+.tip { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); width: max-content; max-width: 260px; padding: 6px 9px; border-radius: 7px; background: #fff; color: var(--t-1); font: 500 12.5px/1.35 var(--font); box-shadow: 0 6px 20px rgba(10, 16, 120, 0.3); opacity: 0; pointer-events: none; transition: opacity 0.15s; z-index: 2; }
+.mark[data-kind='access'] .tip, .mark[data-kind='outage'] .tip { transform: translateX(-50%) rotate(-45deg); }
+.tip b { font: 500 11px var(--mono); color: var(--t-3); text-transform: uppercase; }
+.mark:hover .tip, .mark:focus-visible .tip { opacity: 1; }
+.mark[data-side='start'] .tip { left: -4px; transform: none; }
+.mark[data-side='end'] .tip { left: auto; right: -4px; transform: none; }
+.mark[data-side][data-kind='access'] .tip, .mark[data-side][data-kind='outage'] .tip { transform: rotate(-45deg); }
+.axis { position: relative; height: 22px; margin-top: 8px; }
+.axis span { position: absolute; left: calc(var(--at) * 100%); font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255, 255, 255, 0.7); }
+.axis span::before { content: ''; position: absolute; left: 0; top: -8px; width: 1px; height: 6px; background: rgba(255, 255, 255, 0.5); }
+
+/* ---- the list ---- */
+.list { padding: 72px 0 120px; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.filters button { display: inline-flex; gap: 8px; align-items: center; padding: 8px 13px; border: 0; border-radius: 999px; background: var(--n-1); box-shadow: inset 0 0 0 1px var(--line-2); font: 600 13.5px var(--font); color: var(--t-1); cursor: pointer; }
+.filters button span { font: 500 12px var(--mono); color: var(--t-3); }
+.filters button[aria-pressed='true'] { background: var(--t-1); color: #fff; box-shadow: none; }
+.filters button[aria-pressed='true'] span { color: rgba(255, 255, 255, 0.7); }
+/* the strip's shapes, as the legend */
+.shape { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.shape[data-kind='open-model'] { background: none; box-shadow: inset 0 0 0 2px currentColor; }
+.shape[data-kind='limits'], .shape[data-kind='pricing'] { border-radius: 2px; }
+.shape[data-kind='access'], .shape[data-kind='outage'] { border-radius: 2px; transform: rotate(45deg) scale(0.86); }
+
+.month { margin-top: 64px; }
+.monthName { display: flex; align-items: baseline; gap: 14px; padding-bottom: 14px; border-bottom: 2px solid var(--t-1); font-size: 40px; letter-spacing: -0.04em; font-weight: 700; }
+.monthName span { font: 500 13px var(--mono); color: var(--t-3); letter-spacing: 0; }
+.entries { margin: 0; padding: 0; list-style: none; }
+.entry { display: grid; grid-template-columns: 76px 150px minmax(0, 1fr) 200px; gap: 24px; align-items: start; padding: 24px 0; border-bottom: 1px solid var(--line-2); scroll-margin-top: 40px; }
+.entry:target { background: var(--live-dim); box-shadow: -12px 0 0 var(--live-dim), 12px 0 0 var(--live-dim); }
+.date { padding-top: 3px; font: 500 13px var(--mono); text-transform: uppercase; color: var(--t-3); }
+.who { display: flex; align-items: center; gap: 9px; padding-top: 1px; font-weight: 600; font-size: 15px; }
+.kind { font: 600 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--live); }
+.kind[data-kind='limits'], .kind[data-kind='pricing'], .kind[data-kind='access'], .kind[data-kind='outage'] { color: var(--t-1); }
+.title { margin-top: 6px; font-size: 21px; line-height: 1.2; letter-spacing: -0.02em; font-weight: 650; }
+.what { margin-top: 6px; font-size: 16px; line-height: 1.5; color: var(--t-2); }
+.source { padding-top: 3px; justify-self: end; font-size: 13.5px; color: var(--t-2); text-underline-offset: 4px; text-align: right; }
+.note { margin-top: 40px; font-size: 14.5px; color: var(--t-3); }
+.note a { color: var(--t-1); text-underline-offset: 4px; }
+
+@media (max-width: 900px) {
+  .h1 { font-size: 52px; }
+  .entry { grid-template-columns: 64px minmax(0, 1fr); gap: 6px 16px; }
+  .who { grid-column: 2; }
+  .body { grid-column: 2; }
+  .source { grid-column: 2; justify-self: start; text-align: left; }
+  .tip { display: none; }
+}
+@media (max-width: 640px) {
+  .h1 { font-size: 40px; }
+  .lead { font-size: 17px; }
+  .monthName { font-size: 30px; }
+}
