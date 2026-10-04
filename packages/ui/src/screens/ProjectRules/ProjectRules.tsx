@@ -296,6 +296,7 @@ export function ProjectRules({
                 value={allowed[agent.id] ?? agent.accounts.map((account) => account.id)}
                 onChange={(ids) => onAllowedChange?.(agent.id, ids)}
                 disabled={onAllowedChange === undefined}
+                keepOne
               />
             ))}
           </div>

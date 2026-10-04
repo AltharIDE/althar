@@ -54,6 +54,8 @@ export interface ProjectModel {
   readonly streaming: ReadonlyMap<string, Streamed>
   /** Agents that could work: signed in, or that don't say. */
   readonly agents: ReadonlyArray<AgentStatus>
+  /** How the project's tasks end where a plan doesn't say; null where its host decides. */
+  readonly end: TaskEnd | null
   readonly error: string | null
   /** An action is on its way to the runtime. */
   readonly pending: boolean
@@ -113,6 +115,15 @@ export const useProject = (projectId: string): ProjectModel => {
       ),
     [client, projectId, newest, fail],
   )
+
+  // The project's ending, which a task the person plans starts from.
+  const [end, setEnd] = useState<TaskEnd | null>(null)
+  useEffect(() => {
+    client.getProjectRules(projectId).then(
+      (rules) => setEnd(rules.end),
+      () => {},
+    )
+  }, [client, projectId])
 
   useEffect(() => {
     Promise.all([client.listProjects(), client.getCoordinator(projectId)]).then(([projects, first]) => {
@@ -241,6 +252,7 @@ export const useProject = (projectId: string): ProjectModel => {
     coordinator,
     streaming,
     agents,
+    end,
     error,
     pending,
     starting,

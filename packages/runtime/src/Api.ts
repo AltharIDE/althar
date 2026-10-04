@@ -440,7 +440,7 @@ export const handlers = Api.toLayer(
           ),
         ),
       RenameAccount: ({ commandId, accountId, name }) => once(commandId, api(accounts.rename(accountId, name))),
-      RemoveAccount: ({ commandId, accountId }) => once(commandId, api(accounts.remove(accountId))),
+      RemoveAccount: ({ commandId, accountId, anyway }) => once(commandId, api(accounts.remove(accountId, { anyway: anyway === true }))),
       OrderAccounts: ({ commandId, agentId, accountIds }) => once(commandId, api(accounts.order(agentId, accountIds))),
       FindAccounts: ({ agentId }) =>
         api(

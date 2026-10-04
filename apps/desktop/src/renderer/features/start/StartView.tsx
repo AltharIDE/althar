@@ -25,6 +25,7 @@ export const text = {
   running: (n: number) => `${n} working`,
   waiting: (n: number) => (n === 1 ? '1 call waits on you' : `${n} calls wait on you`),
   connecting: 'Looking at the agents on this Mac…',
+  removeAnyway: 'Remove anyway',
   /** The kit's start screen, saying only what this app does: one folder, by the button or ⌘N. */
   first: {
     create: { title: 'Open a folder', note: 'A folder in a git repository becomes a project', kbd: '⌘N' },
@@ -142,9 +143,16 @@ export function StartView({
     ) ?? []
   const error =
     model.error === null ? null : (
-      <p className={s.error} role="alert">
-        {model.error}
-      </p>
+      <div className={s.failure}>
+        <p className={s.error} role="alert">
+          {model.error}
+        </p>
+        {model.unremoved !== null && (
+          <Button size="small" onClick={() => void model.removeAnyway()}>
+            {text.removeAnyway}
+          </Button>
+        )}
+      </div>
     )
 
   if (model.projects !== null && model.projects.length === 0) {

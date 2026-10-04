@@ -13,6 +13,7 @@ import {
   essentials,
   matchesPattern,
   MVP_RULES,
+  RULES,
   parseCommandLine,
   pathsOf,
   type ProjectRuleSet,
@@ -450,7 +451,9 @@ describe('a project’s rules (ADR-013)', () => {
   it('allow everything, short of what is never allowed and what no project can change', () => {
     const allow = { mode: 'allow' as const, never: ['deploy' as const], commands: [{ pattern: 'rm -rf /', decision: 'never' as const }] }
     assert.strictEqual(verdictOf('git push --force origin main', allow).verdict, 'allow')
-    assert.strictEqual(verdictOf('git push --weird origin', allow).verdict, 'allow')
+    // What the rules can't read is refused, with how to spell it out, while something is never allowed; let through when nothing is.
+    assert.strictEqual(verdictOf('git push --weird origin', allow).verdict, 'deny')
+    assert.strictEqual(verdictOf('git push --weird origin', { mode: 'allow' }).verdict, 'allow')
     assert.strictEqual(verdictOf('vercel deploy', allow).verdict, 'deny')
     assert.strictEqual(verdictOf('rm -rf / --no-preserve-root', allow).verdict, 'deny')
     assert.strictEqual(verdictOf('gh pr create', allow).verdict, 'deny')
@@ -460,7 +463,7 @@ describe('a project’s rules (ADR-013)', () => {
   it('ask about everything beyond the sandbox where the project says so, short of reads', () => {
     assert.deepStrictEqual(verdictOf('npm test', { mode: 'ask' }), {
       verdict: 'ask',
-      reason: 'This project asks you before anything an agent does beyond its sandbox.',
+      reason: "This project asks you before anything an agent does beyond the task's own files.",
     })
     assert.strictEqual(
       decide(request({ kind: 'read', title: 'Read README.md' }), { ...context, ...rules({ mode: 'ask' }) }).verdict,
@@ -499,5 +502,98 @@ describe('a project’s rules (ADR-013)', () => {
     assert.isTrue(matchesPattern('git push * --force', ['git', 'push', 'origin', '--force']))
     assert.isFalse(matchesPattern('a.b', ['axb']))
     assert.isFalse(matchesPattern('kubectl apply', ['kubectl', 'get', 'pods']))
+  })
+})
+
+describe('a project’s rules, after review of #24', () => {
+  const rules = (project: Partial<ProjectRuleSet>) => ({ project: { ...MVP_RULES, ...project } })
+  const verdictOf = (command: string, project: Partial<ProjectRuleSet>) => run(command, rules(project)).verdict
+
+  it('refuse a request for any kind it is that is never allowed, not only the first one noticed', () => {
+    const neverMain = { never: ['default-branch' as const], ask: RULES.filter((kind) => kind !== 'force-push') }
+    for (const command of [
+      'git push --force origin main',
+      'git push origin +HEAD:main',
+      'git push --force origin charrette/retry && git push origin main',
+    ])
+      assert.strictEqual(verdictOf(command, neverMain), 'deny', command)
+    for (const command of ['git push -f origin main', 'npm publish && git push origin main'])
+      assert.strictEqual(verdictOf(command, { never: ['default-branch'] }), 'deny', command)
+  })
+
+  it('count deploying only where a command’s program or subcommand says so', () => {
+    const never = { never: ['deploy' as const] }
+    for (const command of [
+      'cat docs/deploy.md',
+      'grep -rn deploy src',
+      'git commit -m "Fix the deploy script"',
+      'ls scripts/deploy',
+      'npm test -- deploy.test.ts',
+    ])
+      assert.strictEqual(verdictOf(command, never), 'allow', command)
+    for (const command of [
+      './scripts/deploy.sh staging',
+      'make deploy-prod',
+      'npm run deploy:staging',
+      'npx vercel deploy --prod',
+      'fly deploy',
+      'twine upload dist/*',
+      'bash ops/run.sh deploy prod',
+    ])
+      assert.strictEqual(verdictOf(command, never), 'deny', command)
+  })
+
+  it('refuse with everything allowed what the rules can’t read, while something is never allowed', () => {
+    const allow = { mode: 'allow' as const, never: ['default-branch' as const, 'deploy' as const] }
+    assert.strictEqual(verdictOf('git push origin main', allow), 'deny')
+    for (const command of ['eval "git push origin main"', 'git push origin $(echo main)', 'eval "npm publish"'])
+      assert.strictEqual(verdictOf(command, allow), 'deny', command)
+    assert.include(
+      run('eval "npm publish"', rules(allow)).verdict === 'deny'
+        ? (run('eval "npm publish"', rules(allow)) as { reason: string }).reason
+        : '',
+      'without `eval` or `$(…)`',
+    )
+  })
+
+  it('let the task’s own files be changed when the project asks about everything, as every agent’s sandbox would', () => {
+    const askAll = rules({ mode: 'ask' })
+    const edit = (path: string) =>
+      decide(request({ kind: 'edit', title: `Edit ${path}`, paths: [path] }), { ...context, ...askAll }).verdict
+    assert.strictEqual(edit(`${worktree}/src/app.ts`), 'allow')
+    assert.strictEqual(edit('/etc/hosts'), 'ask')
+    // Outside the worktree it still asks, with writing outside off the always-ask list.
+    const outsideOff = rules({ mode: 'ask', ask: RULES.filter((kind) => kind !== 'outside') })
+    assert.strictEqual(
+      decide(request({ kind: 'edit', title: 'Edit /etc/hosts', paths: ['/etc/hosts'] }), { ...context, ...outsideOff }).verdict,
+      'ask',
+    )
+    assert.strictEqual(verdictOf('npm test', { mode: 'ask' }), 'ask')
+  })
+
+  it('match a command rule on an unreadable line by the program as a word of its own', () => {
+    assert.strictEqual(verdictOf('echo $(date) && pnpm install', { commands: [{ pattern: 'npm run *', decision: 'never' }] }), 'allow')
+    assert.strictEqual(
+      verdictOf('npm run format -- $(git ls-files "*.ts")', { commands: [{ pattern: 'rm *', decision: 'never' }] }),
+      'allow',
+    )
+    assert.strictEqual(verdictOf('echo $(rm -rf build)', { commands: [{ pattern: 'rm *', decision: 'never' }] }), 'deny')
+  })
+
+  it('see through `timeout` and package runners', () => {
+    const commands = [
+      { pattern: 'psql *', decision: 'never' as const },
+      { pattern: 'prisma migrate reset', decision: 'never' as const },
+    ]
+    for (const command of [
+      "timeout 60 psql -c 'drop table users'",
+      'timeout -s KILL 5m psql',
+      'npx prisma migrate reset',
+      'npx -y prisma migrate reset --force',
+      'pnpm exec prisma migrate reset',
+      'bunx prisma migrate reset',
+    ])
+      assert.strictEqual(verdictOf(command, { commands }), 'deny', command)
+    assert.strictEqual(verdictOf('npx prisma generate', { commands }), 'allow')
   })
 })

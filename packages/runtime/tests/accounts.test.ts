@@ -154,10 +154,14 @@ describe('accounts', () => {
         assert.strictEqual(readFileSync(signedOut, 'utf8'), `${spare.home}\n`)
         // Where the agent doesn't sign it out, it and its folder stay, and the person is given the line to run.
         const kept = yield* accounts.add({ agentId: 'codex', name: 'kept' })
+        const stale = yield* accounts.add({ agentId: 'codex', name: 'stale' })
         process.env.FAKE_SIGN_OUT_FAILS = '1'
         try {
           const failed = yield* Effect.flip(accounts.remove(kept.id))
           assert.deepStrictEqual(failed, new SignOutFailed({ line: `FAKE_HOME='${kept.home}' fake-logout` }))
+          // Removed anyway, as when the agent's tool is gone: the folder goes all the same.
+          yield* accounts.remove(stale.id, { anyway: true })
+          assert.isFalse(existsSync(stale.home ?? ''))
         } finally {
           delete process.env.FAKE_SIGN_OUT_FAILS
         }
@@ -195,6 +199,8 @@ describe('accounts', () => {
             'agent_account.added',
             'agent_account.removed',
             'agent_account.added',
+            'agent_account.added',
+            'agent_account.removed',
             'agent_account.removed',
           ],
         )
@@ -361,6 +367,14 @@ describe('accounts', () => {
       // The usual account is out until its reset; the agent isn't, while work can run.
       assert.isTrue((yield* limits.out('codex', project.projectId))._tag === 'None')
 
+      // The conversation stays on its account where the project rotates; where it doesn't, work goes back to the first.
+      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId: project.projectId, threadId: ran.threadId })).id, work.id)
+      yield* policies.setAccounts(project.projectId, { rotate: false }, instance.personId)
+      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId: project.projectId, threadId: ran.threadId })).id, usual?.id)
+      // A project left with none of an agent's accounts, as when the one it named is gone, has all of them back.
+      yield* policies.setAccounts(project.projectId, { rotate: true, only: { codex: ['acc_gone'] } }, instance.personId)
+      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId: project.projectId })).id, work.id)
+
       // Limited to the usual account, the project has no other: Codex is out there, and a new step goes to another agent.
       yield* policies.setAccounts(project.projectId, { rotate: true, only: { codex: [usual?.id ?? ''] } }, instance.personId)
       assert.isTrue((yield* limits.out('codex', project.projectId))._tag === 'Some')
@@ -377,7 +391,7 @@ describe('accounts', () => {
       }>`SELECT revision FROM policies WHERE project_id = ${project.projectId} ORDER BY revision`
       assert.deepStrictEqual(
         revisions.map((row) => row.revision),
-        [1, 2, 3],
+        [1, 2, 3, 4, 5],
       )
     }).pipe(Effect.provide(withAccounts({ 'codex@usual': { outOfUsage: { until: back } } })))
   })

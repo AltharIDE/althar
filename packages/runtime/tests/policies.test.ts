@@ -50,6 +50,27 @@ describe('a project’s rules, as kept', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.effect('keep both of two changes made at the same moment', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const projectId = project.projectId as ProjectId
+      yield* policies.current(projectId)
+      yield* Effect.all(
+        [
+          policies.set(projectId, { permissions: 'ask' }, instance.personId),
+          policies.set(projectId, { never: ['deploy'] }, instance.personId),
+          policies.set(projectId, { end: 'none' }, instance.personId),
+        ],
+        { concurrency: 'unbounded' },
+      )
+      const { rules } = yield* policies.current(projectId)
+      assert.deepStrictEqual([rules.permissions, rules.never, rules.end], ['ask', ['deploy'], 'none'])
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.effect('change by revisions recorded as the person’s, none where nothing changes, commands tidied and an ending cleared', () =>
     Effect.gen(function* () {
       const projects = yield* Projects

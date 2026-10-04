@@ -259,7 +259,7 @@ describe('the API', () => {
         const waiting = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
         assert.deepStrictEqual(
           { title: waiting.attention[0]?.title, reason: waiting.attention[0]?.reason, command: waiting.attention[0]?.command },
-          { title: 'Run make deploy', reason: 'Deploying or publishing always asks.', command: 'Run make deploy' },
+          { title: 'Run make deploy', reason: 'Deploying or publishing always asks.', command: 'make deploy' },
         )
         assert.strictEqual((yield* client.ListProjects()).projects[0]?.waiting, 1)
         const answering = {

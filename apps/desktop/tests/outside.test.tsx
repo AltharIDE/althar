@@ -15,7 +15,18 @@ import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { issuePriority, issueStatus, productBrand, productName } from '../src/renderer/shared/products'
 import { blocksOf } from '../src/renderer/shared/thread'
-import { card, change, changed, connectionList, coordinatorSnapshot, fakeClient, githubConnection, items, snapshot } from './fixtures'
+import {
+  card,
+  change,
+  changed,
+  connectionList,
+  coordinatorSnapshot,
+  fakeClient,
+  githubConnection,
+  items,
+  projectRules,
+  snapshot,
+} from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -443,6 +454,22 @@ describe('a project, reaching outside', () => {
         expect.objectContaining({ title: 'Rate-limit refunds like charges', issue: 'MER-231', end: 'ready' }),
       ),
     )
+  })
+
+  it('starts a new task from the project’s ending', async () => {
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({ host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } }),
+      ),
+      getProjectRules: vi.fn(async () => ({ ...projectRules, end: 'none' as const })),
+    })
+    withServices(<Project />, client)
+    await waitFor(() => expect(client.getProjectRules).toHaveBeenCalledWith('p1'))
+    await userEvent.click(await screen.findByRole('button', { name: 'New task' }))
+    const panel = await screen.findByRole('complementary', { name: 'New task' })
+    await userEvent.type(within(panel).getByLabelText('What should change'), 'Push it')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Start the task' }))
+    await waitFor(() => expect(client.startTask).toHaveBeenCalledWith(expect.objectContaining({ title: 'Push it', end: 'none' })))
   })
 
   it('shows a task’s issue and pull request on its card, and its ending on its plan, which can change', async () => {

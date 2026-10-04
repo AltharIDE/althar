@@ -157,18 +157,23 @@ export class Policies extends Context.Service<
         })
 
       /** A new revision of the project's rules, where the change makes one: none for what it says already. */
+      // Read, changed and written together, so two changes made at once each build on the other.
       const revise = (projectId: string, actorId: ActorId, change: (rules: ProjectRules) => ProjectRules | undefined) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
-          if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
-          const now = yield* current(project.id)
-          const next = change(now.rules)
-          if (next === undefined) return
-          const [last] = yield* sql<{
-            revision: number
-          }>`SELECT max(revision) AS revision FROM policies WHERE project_id = ${projectId}`
-          yield* sql.withTransaction(insert(project.id, (last?.revision ?? 0) + 1, next, actorId))
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
+              if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+              const now = yield* current(project.id)
+              const next = change(now.rules)
+              if (next === undefined) return
+              const [last] = yield* sql<{
+                revision: number
+              }>`SELECT max(revision) AS revision FROM policies WHERE project_id = ${projectId}`
+              yield* insert(project.id, (last?.revision ?? 0) + 1, next, actorId)
+            }),
+          )
         })
 
       return Policies.of({

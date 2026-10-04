@@ -47,23 +47,42 @@
     - **Commands the person names** by how they start (`npm publish`,
       `terraform *`), to ask about or refuse.
     - **How a task ends** when its plan doesn't say.
-  - **Precedence:**
+  - **Precedence.** A request can be several kinds at once: `git push
+    --force origin main` is a force push and a push to the default branch.
+    Every kind counts.
     1. What no project can change: reading credentials, and changing the
        code host
        ([ADR-011](011-own-connectors-for-hosts-and-trackers.md)).
-    2. What is never allowed, a kind or a command.
-    3. Allowing everything.
+    2. What is never allowed, any kind of it or a command.
+    3. Allowing everything. While Never lists anything, a request the rules
+       can't read (`eval`, `$(…)`) is refused, saying how to spell it out:
+       there is no one to ask.
     4. What asks: a kind on the always-ask list, a request the rules can't
        tell, or a command the project asks about.
-    5. Asking about everything.
+    5. Asking about everything beyond the task's own files: reads and
+       changes inside the worktree are let through, as every agent's
+       sandbox would.
     6. Otherwise, allowed.
   - **How command rules match:**
     - Each command of a line is read as the shell would run it, with
-      environment assignments and wrappers such as `sudo` taken off.
+      environment assignments and wrappers such as `sudo` and `timeout`
+      taken off.
+    - It is also read as what a package runner (`npx`, `pnpm exec`, `bunx`)
+      or an interpreter (`bash script.sh`) runs for it.
     - The program is matched by its name, wherever it lives. `*` matches
-      anything.
+      anything, and a lone `*` also matches nothing (`psql *` matches
+      `psql`).
     - A line whose commands only show when it runs (`eval`, `$(…)`) meets a
-      rule whose program it names.
+      rule whose program it names as a word of its own.
+  - **Deploying is read where a command says it:** in a tool's subcommand
+    (`fly deploy`, `terraform apply`), a script named for it
+    (`./deploy.sh`), or a runner's target (`make deploy`, `npm run
+    deploy`). It is never read from arguments or quoted text, so `grep
+    deploy` and `git commit -m "Fix the deploy script"` aren't deploys.
+  - **A task's ending is worked out once, when its plan is made:** the
+    plan's own, else the project's, else a draft where the host is
+    connected. A project that wants a pull request but whose repository
+    names no host Charrette knows ends on its branch.
   - **They hold for what reaches Charrette:** what an agent asks to do beyond
     its sandbox, which is the network or outside the task. The screen says
     so.

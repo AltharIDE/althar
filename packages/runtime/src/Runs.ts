@@ -443,9 +443,8 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           // A plan made while the repository's host wasn't connected opens its pull request if it is by now.
-          // The plan's ending, else the project's, else a draft where Charrette is connected to the code host.
-          const end =
-            (yield* stepsOf(run)).end ?? (yield* policies.current(run.projectId)).rules.end ?? (yield* changes.endFor(run.projectId))
+          // The plan's ending, else the project's, as when a plan is made: one made while the host wasn't connected opens its pull request if it is by now.
+          const end = (yield* stepsOf(run)).end ?? (yield* changes.endFor(run.projectId))
           if (end === null) {
             yield* onBranch(run)
             return yield* finish(run, 'succeeded')
@@ -1105,7 +1104,7 @@ export class Runs extends Context.Service<
             return yield* new ToolRefused({ message: 'No step is waiting on you, so Charrette keeps no summary now.' })
           const step = attempt.nodeKey === 'settle' ? 'settle' : 'implement'
           // A task that ends on its host pushes commits only: what isn't committed is the lead's to commit or clear away first.
-          if ((yield* stepsOf(current)).end !== null) {
+          if (((yield* stepsOf(current)).end ?? (yield* changes.endFor(current.projectId))) !== null) {
             const [workspace] = yield* sql<{ path: string }>`
               SELECT path FROM workspaces WHERE task_id = ${current.taskId} AND device_id = ${instance.deviceId}`
             const left = workspace === undefined ? [] : yield* uncommittedFiles(workspace.path)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import type { FoundAccount, ProjectSummary, Status } from '@charrette/contracts'
+import { ApiError, type FoundAccount, type ProjectSummary, type Status } from '@charrette/contracts'
 
 import { messageOf } from '../../data/client'
 import { useServices, useWatch } from '../../data/services'
@@ -33,6 +33,9 @@ export interface StartModel {
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
   readonly moveAccount: (agentId: string, accountId: string, to: 'up' | 'down') => Promise<void>
   readonly removeAccount: (accountId: string) => Promise<void>
+  /** An account whose removal couldn't sign it out, which can be removed anyway; null when there's none. */
+  readonly unremoved: string | null
+  readonly removeAnyway: () => Promise<void>
 }
 
 /** Changes that move what the start screen shows: a project's name, its tasks, who is working, what waits on you. */
@@ -46,6 +49,7 @@ export const useStart = (): StartModel => {
   const [error, setError] = useState<string | null>(null)
   const [opening, setOpening] = useState(false)
   const [found, setFound] = useState<Readonly<Record<string, ReadonlyArray<FoundAccount>>>>({})
+  const [unremoved, setUnremoved] = useState<string | null>(null)
 
   const loadProjects = useCallback(() => {
     client.listProjects().then(
@@ -169,6 +173,21 @@ export const useStart = (): StartModel => {
     signInAccount,
     renameAccount: (accountId, name) => changing(() => client.renameAccount(accountId, name)),
     moveAccount,
-    removeAccount: (accountId) => changing(() => client.removeAccount(accountId)),
+    removeAccount: (accountId) =>
+      changing(async () => {
+        setUnremoved(null)
+        try {
+          await client.removeAccount(accountId)
+        } catch (failure) {
+          if (failure instanceof ApiError && failure.reason === 'SignOutFailed') setUnremoved(accountId)
+          throw failure
+        }
+      }),
+    unremoved,
+    removeAnyway: () =>
+      changing(async () => {
+        if (unremoved !== null) await client.removeAccount(unremoved, true)
+        setUnremoved(null)
+      }),
   }
 }

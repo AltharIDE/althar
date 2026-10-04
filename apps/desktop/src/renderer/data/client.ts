@@ -123,7 +123,8 @@ export interface Client {
   /** Adds an account to an agent: in the folder a grant names, or one Charrette makes. */
   readonly addAccount: (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => Promise<AccountStatus>
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
-  readonly removeAccount: (accountId: string) => Promise<void>
+  /** Stops using an account; `anyway`, its folder goes even where its sign-out didn't happen. */
+  readonly removeAccount: (accountId: string, anyway?: boolean) => Promise<void>
   readonly orderAccounts: (agentId: string, accountIds: ReadonlyArray<string>) => Promise<void>
   /** Folders account switchers keep the agent's accounts in, not added yet. */
   readonly findAccounts: (agentId: string) => Promise<ReadonlyArray<FoundAccount>>
@@ -237,7 +238,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setProjectRules: (input) => command((commandId) => api.SetProjectRules({ commandId, ...input })),
     addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),
     renameAccount: (accountId, name) => command((commandId) => api.RenameAccount({ commandId, accountId, name })),
-    removeAccount: (accountId) => command((commandId) => api.RemoveAccount({ commandId, accountId })),
+    removeAccount: (accountId, anyway) =>
+      command((commandId) => api.RemoveAccount({ commandId, accountId, ...(anyway === undefined ? {} : { anyway }) })),
     orderAccounts: (agentId, accountIds) => command((commandId) => api.OrderAccounts({ commandId, agentId, accountIds })),
     findAccounts: (agentId) => settle(api.FindAccounts({ agentId })).then((list) => list.found),
     signInAccount: (accountId) => command((commandId) => api.SignInAccount({ commandId, accountId })),

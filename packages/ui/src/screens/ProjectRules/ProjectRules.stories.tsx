@@ -128,6 +128,8 @@ export const AsCharretteHasIt: Story = {
     await expect(c.queryByRole('radiogroup', { name: projectRulesText.reach.label })).toBeNull()
     await expect(c.queryByRole('radio', { name: /Ask me.*A card/ })).toBeNull()
     await expect(c.getByRole('checkbox', { name: 'main' })).not.toBeChecked()
+    // The only account ticked stays ticked: a project keeps at least one of an agent's accounts.
+    await expect(c.getByRole('checkbox', { name: 'Client' })).toBeDisabled()
     await userEvent.click(c.getByRole('checkbox', { name: 'main' }))
     await expect(args.onAllowedChange).toHaveBeenCalledWith('codex', ['acc_main', 'acc_client'])
     await userEvent.click(c.getByRole('radio', { name: /The next account/ }))

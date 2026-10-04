@@ -865,7 +865,7 @@ export const Api = RpcGroup.make(
   command('AddAccount', { agentId: Schema.String, name: Schema.String, grant: Schema.optional(Schema.String) }, AccountStatus),
   command('RenameAccount', { accountId: Schema.String, name: Schema.String }, Schema.Void),
   /** Stops using an account; its folder, with its sign-in, stays. Not the agent's usual one. */
-  command('RemoveAccount', { accountId: Schema.String }, Schema.Void),
+  command('RemoveAccount', { accountId: Schema.String, anyway: Schema.optional(Schema.Boolean) }, Schema.Void),
   /** Puts an agent's accounts in the person's order: the first that can runs work first. */
   command('OrderAccounts', { agentId: Schema.String, accountIds: Schema.Array(Schema.String) }, Schema.Void),
   /** Folders account switchers keep the agent's accounts in, not added yet. */

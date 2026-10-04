@@ -42,6 +42,7 @@ import {
   standing,
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
+import { Policies } from './Policies'
 import { Sessions } from './Sessions'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
@@ -175,7 +176,17 @@ const snapshotOf = (
   checks,
 })
 
-type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections | Sessions | RuntimeConfig | ToolServer | Agents
+type Store =
+  | SqlClient.SqlClient
+  | Instance
+  | Ledger
+  | Crypto.Crypto
+  | Connections
+  | Sessions
+  | RuntimeConfig
+  | ToolServer
+  | Agents
+  | Policies
 
 interface LinkRow {
   readonly id: string
@@ -225,8 +236,14 @@ export class Changes extends Context.Service<
     refresh(taskId: string): Effect.Effect<void>
     /** Does something with a task's pull request as one action: one at a time with replying, pushing, marking ready and merging. */
     exclusive<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
-    /** What a new task of the project does when its work is done: a draft pull request when its repository's host is connected, else nothing outside. */
-    endFor(projectId: string): Effect.Effect<'draft' | null, unknown>
+    /**
+     * How a task of the project ends when its plan doesn't say, worked out
+     * once, when the plan is made: as the project's rules say, else a draft
+     * pull request where its repository's host is connected, else on its
+     * branch. A project that wants a pull request where no host Charrette
+     * knows is named ends on its branch, as it always has.
+     */
+    endFor(projectId: string): Effect.Effect<'draft' | 'ready' | 'none' | null, unknown>
     /** The code host the project's repository is on, and whether Charrette is connected to it; null where its remotes name none Charrette knows. */
     hostFor(projectId: string): Effect.Effect<Host | null>
   }
@@ -1039,7 +1056,19 @@ export class Changes extends Context.Service<
             news(taskId),
             Effect.sync(() => wakeNow(taskId)),
           ),
-        endFor: (projectId) => Effect.map(provide(hostFor(projectId)), (host) => (host?.connected === true ? 'draft' : null)),
+        endFor: (projectId) =>
+          provide(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
+              if (project === undefined) return null
+              const host = yield* hostFor(projectId)
+              const wanted = (yield* (yield* Policies).current(project.id)).rules.end
+              if (wanted === 'none') return wanted
+              if (wanted !== undefined) return host === null ? null : wanted
+              return host?.connected === true ? ('draft' as const) : null
+            }),
+          ),
         hostFor: (projectId) => provide(hostFor(projectId)),
       })
     }),

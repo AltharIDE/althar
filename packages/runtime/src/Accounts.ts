@@ -113,7 +113,10 @@ export class Accounts extends Context.Service<
      * with the agent's own tool and its folder deleted; one another tool made
      * stays as it is, signed in, that tool's.
      */
-    remove(accountId: string): Effect.Effect<void, AccountRefused | SignOutFailed | NotFound | Failure>
+    remove(
+      accountId: string,
+      options?: { readonly anyway?: boolean },
+    ): Effect.Effect<void, AccountRefused | SignOutFailed | NotFound | Failure>
     /** Puts an agent's accounts in the order given; any left out keep theirs, after. */
     order(agentId: string, accountIds: ReadonlyArray<string>): Effect.Effect<void, Failure>
     /** Folders known switchers keep the agent's accounts in that aren't accounts here yet. */
@@ -326,7 +329,7 @@ export class Accounts extends Context.Service<
               )
             }),
           ),
-        remove: (accountId) =>
+        remove: (accountId, options = {}) =>
           provide(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
@@ -334,7 +337,13 @@ export class Accounts extends Context.Service<
               if (account.home === null) return yield* new AccountRefused({ reason: 'usual' })
               // A folder Charrette made is signed out with the agent's own tool, then goes; one another tool made stays its.
               const made = madeHere(account)
-              if (made !== undefined) yield* forget(account, made)
+              // Anyway, as when the agent's tool is gone: the folder goes even where its sign-out didn't happen.
+              if (made !== undefined)
+                yield* forget(account, made).pipe(
+                  Effect.catchTag('SignOutFailed', (failed) =>
+                    options.anyway === true ? Effect.sync(() => rmSync(made, { recursive: true, force: true })) : Effect.fail(failed),
+                  ),
+                )
               yield* sql.withTransaction(
                 Effect.gen(function* () {
                   const revision = yield* change('agent_accounts', account.id, { removedAt: yield* timestamp })

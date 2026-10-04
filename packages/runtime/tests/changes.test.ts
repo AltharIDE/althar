@@ -22,7 +22,7 @@ import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
-import { fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { fakeConnectors, HOST, hosted, items, repository, runtime, until } from './support'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -312,6 +312,32 @@ describe('a task that ends in a pull request', () => {
       assert.include(git(bare, 'ls-tree', '--name-only', created.branch), 'change.txt')
       const published = (yield* items(ready?.threadId ?? '')).find((item) => item.kind === 'step_result' && item.content.step === 'publish')
       assert.strictEqual(published?.content.summary, `Pushed ${created.branch}.`)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('works a task’s ending out once, as the project says, else by its host, and on its branch where no host is known', () => {
+    const { working } = hosted()
+    const github = makeFakeService({ pushUrl: () => working })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const projects = yield* Projects
+      const policies = yield* Policies
+      const changes = yield* Changes
+      const instance = yield* Instance
+      const onHost = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const local = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      // Before it is connected, github.test is no host Charrette knows: the branch, whatever the project asks.
+      yield* policies.set(onHost.projectId, { end: 'ready' }, instance.personId)
+      assert.isNull(yield* changes.endFor(onHost.projectId))
+      yield* connect('github', HOST)
+      assert.strictEqual(yield* changes.endFor(onHost.projectId), 'ready')
+      yield* policies.set(onHost.projectId, { end: null }, instance.personId)
+      assert.strictEqual(yield* changes.endFor(onHost.projectId), 'draft')
+      yield* policies.set(onHost.projectId, { end: 'none' }, instance.personId)
+      assert.strictEqual(yield* changes.endFor(onHost.projectId), 'none')
+      // No host Charrette knows: a project that wants a pull request still ends on the branch, as it always has.
+      yield* policies.set(local.projectId, { end: 'ready' }, instance.personId)
+      assert.isNull(yield* changes.endFor(local.projectId))
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

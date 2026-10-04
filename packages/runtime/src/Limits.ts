@@ -133,7 +133,9 @@ export class Limits extends Context.Service<
           const list = yield* accounts.of(agentId)
           if (projectId === undefined) return list
           const only = accountsOf((yield* policies.current(projectId as ProjectId)).rules).only?.[agentId]
-          return only === undefined ? list : list.filter((account) => only.includes(account.id))
+          const kept = only === undefined ? list : list.filter((account) => only.includes(account.id))
+          // A project left with none of an agent's accounts, as when the one it named was removed, has all of them back.
+          return kept.length === 0 ? list : kept
         })
 
       const outOf = (account: Account) =>
@@ -203,7 +205,8 @@ export class Limits extends Context.Service<
                 if ((yield* signIns.account(account)).status === 'signed_out') return false
                 return !rotate || Option.isNone(yield* outOf(account))
               })
-            if (input.threadId !== undefined) {
+            // A conversation stays on its account only where the project rotates; otherwise work runs on the first, as `out` reads it.
+            if (rotate && input.threadId !== undefined) {
               const [last] = yield* sql<{ accountId: string | null }>`
                 SELECT account_id FROM provider_sessions WHERE thread_id = ${input.threadId} AND agent_id = ${input.agentId}
                 ORDER BY started_at DESC LIMIT 1`

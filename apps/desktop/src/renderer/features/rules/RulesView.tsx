@@ -30,10 +30,13 @@ export const text = {
     permissions: { label: 'Permissions', note: 'What agents ask to do beyond their sandbox: the network, or writing outside the task' },
     permission: {
       ...projectRulesText.permission,
-      [PermissionPolicy.Ask]: { title: 'Ask me', note: 'Everything agents ask to do beyond their sandbox waits for you, except reading.' },
+      [PermissionPolicy.Ask]: {
+        title: 'Ask me',
+        note: 'What agents ask to do beyond the task’s own files waits for you. OpenCode has no sandbox, so each of its commands waits too.',
+      },
       [PermissionPolicy.AllowAll]: {
         title: 'Allow everything',
-        note: 'Nothing waits for you; what “Never” lists is still refused. Every request is recorded on its task.',
+        note: 'Nothing waits for you. What “Never” lists is still refused, and, while it lists anything, a command Charrette can’t read.',
       },
     },
     foot: '',

@@ -261,6 +261,7 @@ export function ProjectView({
                       agents={model.agents}
                       starting={model.starting}
                       connected={coordinator.host?.connected === true}
+                      defaultEnd={model.end}
                       listIssues={model.listIssues}
                       onClose={() => setPanel(null)}
                       onStart={(task) =>
