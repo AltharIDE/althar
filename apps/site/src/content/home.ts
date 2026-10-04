@@ -65,9 +65,9 @@ export const COORDINATOR = {
   no: '03',
   label: 'The coordinator',
   title: ['Tell it what.', 'It picks the team.'],
-  lead: 'One chat for all your projects. Say what you want done; it turns that into tasks and proposes who does each step. Leave it alone and it starts.',
+  lead: 'One chat per project. Say what you want done; it turns that into tasks and proposes who does each step. Leave it alone and it starts.',
   points: [
-    { title: 'Knows your projects.', body: 'It reads the repos and your rules before it plans. You don’t explain twice.' },
+    { title: 'Knows the project.', body: 'It reads the repo and your rules before it plans. You don’t explain twice.' },
     { title: 'Runs several at once.', body: 'Ask for three things, get three tasks going side by side.' },
     { title: 'Builds the team.', body: 'A lead to implement, other models to review and audit. Swap anyone before it starts.' },
   ],
