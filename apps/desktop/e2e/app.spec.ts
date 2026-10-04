@@ -107,7 +107,9 @@ test('opens a project, starts a task, and talks to its lead', async () => {
     await expect(page.getByText(/Althar restarted\. The lead stopped with it/)).toBeVisible({ timeout: 20_000 })
     // Its run passed, so the task is still ready, with no lead running.
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
-    await expect(page.getByText('No agent is working on this task.')).toBeVisible()
+    // Nothing to press to start it: what the person says next starts it.
+    await expect(page.getByRole('textbox', { name: /^Tell .+ something$/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Start the lead' })).toHaveCount(0)
     await page.screenshot({ path: 'test-results/restarted.png' })
   } finally {
     await electronApp.close()

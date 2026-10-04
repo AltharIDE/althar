@@ -52,12 +52,9 @@ import type { TaskModel } from './useTask'
 export const text = {
   thread: 'Thread',
   noLead: 'No lead',
-  noLeadNote: 'No agent is working on this task.',
-  startLead: 'Start the lead',
   lead: 'Lead',
   placeholderBusy: 'Add to the queue, or interrupt the lead',
   placeholder: (lead: string) => `Tell ${lead} something`,
-  placeholderNone: 'Start a lead to talk to it',
   handsOver: (agent: string) => `hands the task to ${agent}`,
   takesOver: (to: string, from: string) => `${to} takes over from a brief; ${from}’s turn stops.`,
   handOver: 'Hand it over',
@@ -241,9 +238,11 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
   const chosen: Choice | null = pick ?? (resume === undefined ? null : { agentId: resume.id, model: null, effort: null })
   const choice = session === null ? chosen : runningOn(session)
 
+  // With no lead working, what the person says starts the one picked, as its first turn.
   const send = (body: string, now: boolean) => {
     setDraft('')
-    void (now ? model.sendNow(body) : model.send(body))
+    if (session === null) void model.send(body, chosen ?? undefined)
+    else void (now ? model.sendNow(body) : model.send(body))
   }
 
   const change = snapshot.task.changes[0] ?? null
@@ -273,10 +272,7 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
   )
   const actions =
     session === null ? (
-      <>
-        {changeButton}
-        {chosen !== null && <TaskMenu status={status} onResume={() => void model.start(chosen)} />}
-      </>
+      changeButton
     ) : (
       <>
         {changeButton}
@@ -291,16 +287,6 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
           {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
         </p>
       )}
-      {session === null && (
-        <div className={s.start}>
-          <span>{text.noLeadNote}</span>
-          {chosen !== null && (
-            <Button variant="signal" size="small" busy={model.pending} onClick={() => void model.start(chosen)}>
-              {text.startLead}
-            </Button>
-          )}
-        </div>
-      )}
       <Composer
         value={draft}
         onChange={setDraft}
@@ -308,7 +294,7 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
-        placeholder={session === null ? text.placeholderNone : busy ? text.placeholderBusy : text.placeholder(session.agentName)}
+        placeholder={busy ? text.placeholderBusy : text.placeholder(session?.agentName ?? agentName(chosen?.agentId ?? null))}
         // Another agent's model hands the task to that agent.
         picker={
           model.agents.length > 0 &&

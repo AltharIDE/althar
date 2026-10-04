@@ -198,12 +198,14 @@ describe('the board', () => {
     await waitFor(() => expect(merge).toHaveBeenCalledTimes(2))
     // At the head the dock showed.
     expect(merge).toHaveBeenLastCalledWith('t4', 'abc123')
-    // Sent back, its lead, which stopped, starts again to read the note.
+    // Sent back, its lead, which stopped, starts again with the note as its first turn.
     await userEvent.click(within(dock).getByRole('button', { name: /Send back/ }))
     await userEvent.type(within(dock).getByRole('textbox'), 'Name it better.')
     await userEvent.click(within(dock).getByRole('button', { name: /Send back/ }))
     await waitFor(() => expect(send).toHaveBeenCalledWith({ threadId: 'th4', body: 'Name it better.', disposition: 'after_current' }))
-    expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' })
+    await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
+    // The note is queued first, so the lead reads it in its first turn.
+    expect(send.mock.invocationCallOrder[0]).toBeLessThan(startSession.mock.invocationCallOrder[0] ?? 0)
   })
 
   it('pushes what the lead committed since before the pull request can be accepted, up to what the dock showed', async () => {
