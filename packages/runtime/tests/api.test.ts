@@ -386,6 +386,65 @@ describe('accounts, through the API', () => {
   )
 })
 
+describe('project rules, through the API', () => {
+  it.live('reads a project’s rules, and changes them in part as the person', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), {
+          projectId: project.id,
+          permissions: 'rules',
+          alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
+          never: [],
+          commands: [],
+          end: null,
+          usageLimit: 'move',
+          rotateAccounts: false,
+          onlyAccounts: null,
+        })
+        const changed = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          alwaysAsk: ['default-branch', 'deploy'],
+          never: ['force-push'],
+          commands: [{ pattern: 'terraform *', decision: 'ask' }],
+          end: 'ready',
+          usageLimit: 'wait',
+          rotateAccounts: true,
+          onlyAccounts: { codex: ['acc_x'] },
+        })
+        assert.deepStrictEqual(
+          [
+            changed.alwaysAsk,
+            changed.never,
+            changed.commands,
+            changed.end,
+            changed.usageLimit,
+            changed.rotateAccounts,
+            changed.onlyAccounts,
+          ],
+          [
+            ['default-branch', 'deploy'],
+            ['force-push'],
+            [{ pattern: 'terraform *', decision: 'ask' }],
+            'ready',
+            'wait',
+            true,
+            { codex: ['acc_x'] },
+          ],
+        )
+        // Back to deciding the ending by the host, and every account; the rest stays.
+        const back = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, end: null, onlyAccounts: null })
+        assert.deepStrictEqual([back.end, back.onlyAccounts, back.rotateAccounts, back.never], [null, null, true, ['force-push']])
+        assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
+        const missing = yield* Effect.flip(client.GetProjectRules({ projectId: 'proj_missing' }))
+        assert.strictEqual(missing.reason, 'NotFound')
+      }),
+    ),
+  )
+})
+
 describe('the coordinator, through the API', () => {
   it.live('plans what the person asks for, and takes their changes to the plan', () =>
     Effect.scoped(

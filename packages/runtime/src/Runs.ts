@@ -443,7 +443,9 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           // A plan made while the repository's host wasn't connected opens its pull request if it is by now.
-          const end = (yield* stepsOf(run)).end ?? (yield* changes.endFor(run.projectId))
+          // The plan's ending, else the project's, else a draft where Charrette is connected to the code host.
+          const end =
+            (yield* stepsOf(run)).end ?? (yield* policies.current(run.projectId)).rules.end ?? (yield* changes.endFor(run.projectId))
           if (end === null) {
             yield* onBranch(run)
             return yield* finish(run, 'succeeded')

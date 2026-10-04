@@ -8,7 +8,9 @@ import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { AttentionClosed, NoSession, NotFound, SessionFailed, SessionRunning } from '../src/errors'
+import { Instance } from '../src/Instance'
 import { Permissions } from '../src/Permissions'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { errorClassOf, promptFor, Sessions } from '../src/Sessions'
@@ -194,6 +196,33 @@ describe('sessions', () => {
         .map((item) => item.content.text)
       assert.deepStrictEqual(replies, ['chosen=decline'])
     }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live(
+    'decides by the project’s rules as they are when the agent asks: refused where never allowed, let through where everything is',
+    () =>
+      Effect.gen(function* () {
+        const policies = yield* Policies
+        const instance = yield* Instance
+        const sql = yield* SqlClient.SqlClient
+        const { project, task: created } = yield* task()
+        yield* policies.set(project.projectId, { never: ['deploy'] }, instance.personId)
+        yield* begin(created.threadId, 'codex')
+        yield* say(created.threadId, scenarios.commandChoices)
+        yield* ended(created.threadId, 1)
+        yield* policies.set(project.projectId, { never: [], permissions: 'allow' }, instance.personId)
+        yield* say(created.threadId, scenarios.commandChoices)
+        yield* ended(created.threadId, 2)
+        const decisions = yield* sql<{ outcome: string; reason: string }>`SELECT outcome, reason FROM decisions ORDER BY rowid`
+        assert.deepStrictEqual(
+          decisions.map((decision) => [decision.outcome, decision.reason]),
+          [
+            ['reject', "The project's rules never allow deploying and publishing."],
+            ['allow', 'Allowed by the project rules.'],
+          ],
+        )
+        assert.deepStrictEqual(yield* sql`SELECT id FROM attention_requests`, [])
+      }).pipe(Effect.provide(runtime())),
   )
 
   it.live('withdraws a question to the person when the turn is interrupted', () =>

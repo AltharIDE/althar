@@ -29,6 +29,52 @@ export type Verdict =
   | { readonly verdict: 'ask'; readonly reason: string }
   | { readonly verdict: 'deny'; readonly reason: string }
 
+/**
+ * The kinds of request the rules keep for the person (ADR-013): each one a
+ * project can have ask, refuse, or let through. Where the rules can't tell
+ * what a request does, it asks whatever the project says, short of
+ * allowing everything.
+ */
+export const RULES = ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'] as const
+export type RuleId = (typeof RULES)[number]
+
+/** What each kind is, in the words a refusal says it. */
+const RULE_WORDS: Readonly<Record<RuleId, string>> = {
+  'default-branch': 'pushing to the default branch',
+  'force-push': 'force pushes',
+  'many-branches': 'pushing every branch, tags, or a pattern of branches',
+  'delete-branch': "deleting branches that aren't the task's",
+  deploy: 'deploying and publishing',
+  outside: "writing outside the task's worktree",
+}
+
+/** Why the rules keep a request for the person, and which kind it is: one a project names, or one they can't tell. */
+interface Kept {
+  readonly reason: string
+  readonly rule: RuleId | 'unclear'
+}
+
+const kept = (reason: string, rule: RuleId | 'unclear'): Kept => ({ reason, rule })
+
+/** A project's rules, as the rules read them (ADR-013, Policies). */
+export interface ProjectRuleSet {
+  /**
+   * What happens to what no rule keeps: it is allowed (`rules`), it waits
+   * for the person (`ask`); or everything is allowed (`allow`), the
+   * always-ask list with it, and only what is never allowed is refused.
+   */
+  readonly mode: 'rules' | 'ask' | 'allow'
+  /** The kinds that ask the person. */
+  readonly ask: ReadonlyArray<RuleId>
+  /** The kinds refused outright, whoever would answer. */
+  readonly never: ReadonlyArray<RuleId>
+  /** Commands the person named, by how they start (`npm publish`, `terraform *`): asked about, or refused. */
+  readonly commands: ReadonlyArray<{ readonly pattern: string; readonly decision: 'ask' | 'never' }>
+}
+
+/** The MVP's rules, a project's first: everything allowed but every kind above, which asks. */
+export const MVP_RULES: ProjectRuleSet = { mode: 'rules', ask: RULES, never: [], commands: [] }
+
 export interface RuleContext {
   /** The task's worktree, where the agent works. */
   readonly worktree: string
@@ -42,6 +88,8 @@ export interface RuleContext {
   readonly realPath?: (path: string) => string
   /** Folders anything may write to, such as the temp folder. */
   readonly scratch?: ReadonlyArray<string>
+  /** The project's rules; the MVP's without them. */
+  readonly project?: ProjectRuleSet
 }
 
 const ALLOW: Verdict = { verdict: 'allow' }
@@ -423,7 +471,7 @@ const PUSH_FLAGS_HARMLESS =
   /^(-u|--set-upstream|-n|--dry-run|-v|--verbose|-q|--quiet|--progress|--no-progress|--no-verify|--verify|--atomic|--no-atomic|--porcelain|--ipv4|--ipv6|-4|-6|--thin|--no-thin|--signed(=.*)?|--no-signed|--recurse-submodules=.*|--no-recurse-submodules|--no-force-with-lease|--no-force-if-includes|--no-tags|--no-follow-tags)$/
 
 /** Why a push asks, or nothing when it goes only where the task may push. */
-const pushReason = (args: ReadonlyArray<string>, context: RuleContext): string | undefined => {
+const pushReason = (args: ReadonlyArray<string>, context: RuleContext): Kept | undefined => {
   const main = context.defaultBranch
   const own = (branch: string) => branch === context.taskBranch
   const positional: Array<string> = []
@@ -435,10 +483,10 @@ const pushReason = (args: ReadonlyArray<string>, context: RuleContext): string |
       continue
     }
     if (/^(-f|--force|--force-with-lease(=.*)?|--force-if-includes)$/.test(arg) || /^-[a-z]*f[a-z]*$/.test(arg))
-      return 'A force push always asks.'
-    if (/^(--all|--branches|--mirror)$/.test(arg)) return 'Pushing every branch always asks.'
-    if (/^(--tags|--follow-tags)$/.test(arg)) return 'Pushing tags always asks; they often start a release.'
-    if (arg === '--prune') return 'A push that deletes remote branches always asks.'
+      return kept('A force push always asks.', 'force-push')
+    if (/^(--all|--branches|--mirror)$/.test(arg)) return kept('Pushing every branch always asks.', 'many-branches')
+    if (/^(--tags|--follow-tags)$/.test(arg)) return kept('Pushing tags always asks; they often start a release.', 'many-branches')
+    if (arg === '--prune') return kept('A push that deletes remote branches always asks.', 'delete-branch')
     if (arg === '-d' || arg === '--delete') {
       deleting = true
       continue
@@ -448,34 +496,34 @@ const pushReason = (args: ReadonlyArray<string>, context: RuleContext): string |
       continue
     }
     if (PUSH_OPTIONS_WITH_VALUE.some((option) => arg.startsWith(`${option}=`)) || PUSH_FLAGS_HARMLESS.test(arg)) continue
-    return `Charrette can't tell what \`${arg}\` does to a push, so it asks.`
+    return kept(`Charrette can't tell what \`${arg}\` does to a push, so it asks.`, 'unclear')
   }
   const [, ...refspecs] = positional
   const destinations: Array<{ readonly branch: string; readonly deletes: boolean }> = []
   if (refspecs.length === 0) {
-    if (deleting) return `Charrette can't tell which branch this deletes, so it asks.`
-    if (context.currentBranch === undefined) return `Charrette can't tell which branch this pushes, so it asks.`
+    if (deleting) return kept(`Charrette can't tell which branch this deletes, so it asks.`, 'unclear')
+    if (context.currentBranch === undefined) return kept(`Charrette can't tell which branch this pushes, so it asks.`, 'unclear')
     destinations.push({ branch: context.currentBranch, deletes: false })
   }
   for (const refspec of refspecs) {
-    if (refspec.startsWith('+')) return 'A force push always asks.'
-    if (refspec.includes('*')) return 'A push to a pattern of branches always asks.'
+    if (refspec.startsWith('+')) return kept('A force push always asks.', 'force-push')
+    if (refspec.includes('*')) return kept('A push to a pattern of branches always asks.', 'many-branches')
     const colon = refspec.lastIndexOf(':')
     const source = colon === -1 ? refspec : refspec.slice(0, colon)
     let destination = colon === -1 ? refspec : refspec.slice(colon + 1)
-    if (colon !== -1 && destination === '') return 'A push of matching branches always asks.'
+    if (colon !== -1 && destination === '') return kept('A push of matching branches always asks.', 'many-branches')
     if (destination === 'HEAD' || (colon === -1 && source === 'HEAD')) {
-      if (context.currentBranch === undefined) return `Charrette can't tell which branch this pushes, so it asks.`
+      if (context.currentBranch === undefined) return kept(`Charrette can't tell which branch this pushes, so it asks.`, 'unclear')
       destination = context.currentBranch
     }
-    if (destination.startsWith('refs/tags/')) return 'Pushing tags always asks; they often start a release.'
+    if (destination.startsWith('refs/tags/')) return kept('Pushing tags always asks; they often start a release.', 'many-branches')
     if (destination.startsWith('refs/') && !destination.startsWith('refs/heads/'))
-      return `Charrette can't tell what \`${destination}\` is, so it asks.`
+      return kept(`Charrette can't tell what \`${destination}\` is, so it asks.`, 'unclear')
     destinations.push({ branch: destination.replace(/^refs\/heads\//, ''), deletes: deleting || (colon !== -1 && source === '') })
   }
   for (const { branch, deletes } of destinations) {
-    if (branch === main) return deletes ? `Deleting ${main} always asks.` : `A push to ${main} always asks.`
-    if (deletes && !own(branch)) return `Deleting ${branch}, which isn't this task's branch, always asks.`
+    if (branch === main) return kept(deletes ? `Deleting ${main} always asks.` : `A push to ${main} always asks.`, 'default-branch')
+    if (deletes && !own(branch)) return kept(`Deleting ${branch}, which isn't this task's branch, always asks.`, 'delete-branch')
   }
   return undefined
 }
@@ -507,15 +555,15 @@ const writes = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
   return targets
 }
 
-const commandReason = (text: string, context: RuleContext): string | undefined => {
+const commandReason = (text: string, context: RuleContext): Kept | undefined => {
   const { commands, opaque } = parseCommandLine(text)
   if (opaque && /\bpush\b|\bdeploy\b|\bpublish\b|\bmerge\b/.test(text))
-    return `Charrette can't tell what this command does until it runs, so it asks.`
+    return kept(`Charrette can't tell what this command does until it runs, so it asks.`, 'unclear')
   const where = places(context)
   let cwd = context.worktree
   for (const words of commands) {
     const joined = words.join(' ')
-    if (DEPLOY.test(joined)) return 'Deploying or publishing always asks.'
+    if (DEPLOY.test(joined)) return kept('Deploying or publishing always asks.', 'deploy')
     if (words[0] === 'cd') {
       cwd = locate(where, cwd, words[1] ?? '~')
       continue
@@ -524,7 +572,7 @@ const commandReason = (text: string, context: RuleContext): string | undefined =
     if (git !== undefined) {
       const repository = [locate(where, cwd, git.cwd), ...git.elsewhere.map((path) => locate(where, cwd, path))]
       if (repository.some((path) => outside(where, path)))
-        return `Git in another folder always asks: ${repository.find((path) => outside(where, path))}`
+        return kept(`Git in another folder always asks: ${repository.find((path) => outside(where, path))}`, 'outside')
       if (git.subcommand === 'push') {
         const reason = pushReason(git.args, context)
         if (reason !== undefined) return reason
@@ -534,39 +582,99 @@ const commandReason = (text: string, context: RuleContext): string | undefined =
           'touch',
           ...git.args.filter((arg) => !['add', 'remove', 'prune', 'move', 'lock', 'unlock'].includes(arg)),
         ]).find((path) => outside(where, locate(where, cwd, path)))
-        if (target !== undefined) return `Writing outside the task's worktree always asks: ${target}`
+        if (target !== undefined) return kept(`Writing outside the task's worktree always asks: ${target}`, 'outside')
       }
       continue
     }
     const target = writes(words).find((path) => outside(where, locate(where, cwd, path)))
-    if (target !== undefined) return `Writing outside the task's worktree always asks: ${target}`
+    if (target !== undefined) return kept(`Writing outside the task's worktree always asks: ${target}`, 'outside')
   }
   return undefined
 }
 
+/** Escapes a string for a regular expression. */
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 /**
- * Decides a permission request from the rules. A command is checked against
- * the always-ask list and the places it names; an edit, against the worktree.
- * Anything the rules don't keep for the person is allowed.
+ * Whether a command's words start as a project's pattern says: its words in
+ * order, `*` for anything. A program is matched by its name, wherever it
+ * lives: `npm publish` matches `/usr/local/bin/npm publish --tag next`, not
+ * `npm publisher`.
+ */
+export const matchesPattern = (pattern: string, words: ReadonlyArray<string>): boolean => {
+  const [program = '', ...rest] = words
+  const line = [program.slice(program.lastIndexOf('/') + 1), ...rest].join(' ')
+  const source = pattern
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.split('*').map(literal).join('.*'))
+    .join(' ')
+  return new RegExp(`^${source}(\\s.*)?$`).test(line)
+}
+
+/**
+ * The project's command rule a command line meets, a refusal before an ask:
+ * each command in it is read on its own, as a shell would run it. A line
+ * whose commands only show when it runs, that names a pattern's program,
+ * meets that pattern.
+ */
+const commandRule = (text: string, rules: ProjectRuleSet['commands']) => {
+  const { commands, opaque } = parseCommandLine(text)
+  const met = rules.filter(
+    (rule) =>
+      commands.some((words) => matchesPattern(rule.pattern, words)) || (opaque && text.includes(rule.pattern.trim().split(/\s+/)[0] ?? '')),
+  )
+  return met.find((rule) => rule.decision === 'never') ?? met[0]
+}
+
+/** What the rules keep for the person in a request, whatever the project says of it: the kind, and why. */
+const keptOf = (request: PermissionRequest, context: RuleContext): Kept | undefined => {
+  if (request.kind === 'execute' || request.kind === 'other') return commandReason(commandOf(request), context)
+  if (request.kind === 'edit' || request.kind === 'delete' || request.kind === 'move') {
+    const paths = pathsOf(request)
+    if (paths.length === 0)
+      return kept(`Charrette can't tell where this ${request.kind === 'edit' ? 'edit writes' : 'change goes'}, so it asks.`, 'unclear')
+    const where = places(context)
+    const escaping = paths.find((path) => outside(where, locate(where, context.worktree, path)))
+    if (escaping !== undefined) return kept(`Writing outside the task's worktree always asks: ${escaping}`, 'outside')
+  }
+  return undefined
+}
+
+/** Kinds of request that only look, which even a project that asks about everything lets through. */
+const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'think']
+
+/**
+ * Decides a permission request from the rules and the project's (ADR-013).
+ * What no project can change comes first: a code host is reached only
+ * through Charrette, and no one reads credentials. Then, in order:
+ * - what the project never allows is refused: a kind of request, or a
+ *   command it named;
+ * - with everything allowed, anything else is allowed;
+ * - a kind on the always-ask list, one the rules can't tell, or a command
+ *   the project asks about, waits for the person;
+ * - a project that asks about everything asks about the rest, except reads;
+ * - anything else is allowed.
  */
 export const decide = (request: PermissionRequest, context: RuleContext): Verdict => {
+  const project = context.project ?? MVP_RULES
+  const named = request.kind === 'execute' || request.kind === 'other' ? commandRule(commandOf(request), project.commands) : undefined
   if (request.kind === 'execute' || request.kind === 'other') {
     // A code host is reached through Charrette: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
     const refused = parseCommandLine(commandOf(request))
       .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)))
       .find((reason) => reason !== undefined)
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
-    const reason = commandReason(commandOf(request), context)
-    if (reason !== undefined) return ask(reason)
+    if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
   }
-  if (request.kind === 'edit' || request.kind === 'delete' || request.kind === 'move') {
-    const paths = pathsOf(request)
-    if (paths.length === 0)
-      return ask(`Charrette can't tell where this ${request.kind === 'edit' ? 'edit writes' : 'change goes'}, so it asks.`)
-    const where = places(context)
-    const escaping = paths.find((path) => outside(where, locate(where, context.worktree, path)))
-    if (escaping !== undefined) return ask(`Writing outside the task's worktree always asks: ${escaping}`)
-  }
+  const found = keptOf(request, context)
+  if (found !== undefined && found.rule !== 'unclear' && project.never.includes(found.rule))
+    return { verdict: 'deny', reason: `The project's rules never allow ${RULE_WORDS[found.rule]}.` }
+  if (project.mode === 'allow') return ALLOW
+  if (found !== undefined && (found.rule === 'unclear' || project.ask.includes(found.rule))) return ask(found.reason)
+  if (named !== undefined) return ask(`The project's rules ask before \`${named.pattern.trim()}\`.`)
+  if (project.mode === 'ask' && !LOOKS.includes(request.kind))
+    return ask('This project asks you before anything an agent does beyond its sandbox.')
   return ALLOW
 }
 

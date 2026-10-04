@@ -16,6 +16,7 @@ import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
@@ -311,6 +312,40 @@ describe('a task that ends in a pull request', () => {
       assert.include(git(bare, 'ls-tree', '--name-only', created.branch), 'change.txt')
       const published = (yield* items(ready?.threadId ?? '')).find((item) => item.kind === 'step_result' && item.content.step === 'publish')
       assert.strictEqual(published?.content.summary, `Pushed ${created.branch}.`)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('ends as the project says where the plan doesn’t: its branch alone, though the host is connected', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      yield* policies.set(project.projectId, { end: 'none' }, instance.personId)
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Push it',
+        description: '[lead:finish] [lead:edit]',
+        draft: true,
+      })
+      const planId = yield* plans.propose({
+        projectId: project.projectId as ProjectId,
+        taskId: created.taskId,
+        steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        reason: null,
+        actorId: instance.personId,
+        end: null,
+      })
+      yield* plans.start(planId, instance.personId)
+      yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      assert.lengthOf(github.changes, 0)
+      assert.include(git(bare, 'ls-tree', '--name-only', created.branch), 'change.txt')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

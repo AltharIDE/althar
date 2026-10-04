@@ -18,6 +18,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import type { PlanStep } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
+import { RULES } from '../src/rules'
 import { Sessions } from '../src/Sessions'
 import { items, repository, runtime, until } from './support'
 
@@ -372,7 +373,7 @@ describe('limits', () => {
       yield* policies.setUsageLimit(project.projectId, 'wait', instance.personId)
       yield* policies.setUsageLimit(project.projectId, 'wait', instance.personId)
       const revised = yield* policies.current(project.projectId as ProjectId)
-      assert.deepStrictEqual([usageLimitOf(revised.rules), revised.rules.alwaysAsk.length], ['wait', 5])
+      assert.deepStrictEqual([usageLimitOf(revised.rules), revised.rules.alwaysAsk], ['wait', [...RULES]])
       assert.deepStrictEqual(yield* policies.rulesOf(revised.id), revised.rules)
       assert.strictEqual((yield* queries.projects).projects[0]?.usageLimit, 'wait')
       const facts = yield* sql<{ revision: number; actor: string }>`
