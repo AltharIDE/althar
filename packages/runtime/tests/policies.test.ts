@@ -34,6 +34,22 @@ describe('a project’s rules, as kept', () => {
     )
   })
 
+  it.effect('make a project’s first revision once, however many read it at the same moment', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const policies = yield* Policies
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const projectId = project.projectId as ProjectId
+      const read = yield* Effect.all(
+        Array.from({ length: 5 }, () => policies.current(projectId)),
+        { concurrency: 'unbounded' },
+      )
+      assert.lengthOf(new Set(read.map((policy) => policy.id)), 1)
+      assert.lengthOf(yield* sql`SELECT id FROM policies WHERE project_id = ${projectId}`, 1)
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.effect('change by revisions recorded as the person’s, none where nothing changes, commands tidied and an ending cleared', () =>
     Effect.gen(function* () {
       const projects = yield* Projects

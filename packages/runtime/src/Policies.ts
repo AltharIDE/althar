@@ -141,10 +141,19 @@ export class Policies extends Context.Service<
       const current = (projectId: ProjectId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [known] = yield* sql<{ id: string; rules: string }>`
-            SELECT id, rules FROM policies WHERE project_id = ${projectId} ORDER BY revision DESC LIMIT 1`
-          if (known !== undefined) return { id: known.id, rules: decode(known.rules) }
-          return yield* insert(projectId, 1, FIRST, instance.systemId)
+          const latest = Effect.map(
+            sql<{ id: string; rules: string }>`
+              SELECT id, rules FROM policies WHERE project_id = ${projectId} ORDER BY revision DESC LIMIT 1`,
+            ([row]) => (row === undefined ? undefined : { id: row.id, rules: decode(row.rules) }),
+          )
+          const known = yield* latest
+          if (known !== undefined) return known
+          // The first revision, once: read again in the transaction, so readers at the same moment make one between them.
+          return yield* sql.withTransaction(
+            Effect.flatMap(latest, (again) =>
+              again === undefined ? insert(projectId, 1, FIRST, instance.systemId) : Effect.succeed(again),
+            ),
+          )
         })
 
       /** A new revision of the project's rules, where the change makes one: none for what it says already. */
