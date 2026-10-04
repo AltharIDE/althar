@@ -189,14 +189,13 @@ describe('the tools, as agents call them', () => {
 
       const sql = yield* SqlClient.SqlClient
       const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${taskId}`
+      // Pushing is the person's: the lead has no tool for it.
+      assert.match(yield* callTool(lead, 'publish_changes', {}), /^Althar has no tool called publish_changes/)
       writeFileSync(join(workspace?.path ?? '', 'loose.txt'), 'not committed\n')
-      assert.match(yield* callTool(lead, 'publish_changes', {}), /uncommitted changes/)
-      execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-qam', 'x', '--allow-empty'], {
-        cwd: workspace?.path,
-      })
       execFileSync('git', ['add', '-A'], { cwd: workspace?.path })
       execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-qm', 'Loose'], { cwd: workspace?.path })
-      assert.match(yield* callTool(lead, 'publish_changes', {}), /^Pushed to PR #1\./)
+      const changes = yield* Changes
+      yield* changes.push(taskId, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace?.path }).toString().trim())
 
       // Publishing asked the host for news at once; once that's done, the next read is the tool's.
       yield* Effect.sleep('500 millis')
@@ -247,7 +246,6 @@ describe('the tools, as agents call them', () => {
         taskId: created.taskId,
       }
       assert.match(yield* callTool(lead, 'read_pull_request', {}), /no pull request yet/)
-      assert.match(yield* callTool(lead, 'publish_changes', {}), /no pull request yet/)
     }).pipe(Effect.provide(runtimeWith({})))
   })
 })

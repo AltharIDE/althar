@@ -49,6 +49,8 @@ export interface TaskModel {
   readonly markReady: () => Promise<void>
   /** Opens the pull request of a task whose work ended on its branch. */
   readonly openChange: () => Promise<void>
+  /** Pushes the task's branch to its pull request, up to the commit the person saw. */
+  readonly push: (head: string) => Promise<void>
   readonly dismissError: () => void
 }
 
@@ -186,6 +188,7 @@ export const useTask = (threadId: string): TaskModel => {
     answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
     markReady: () => act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id))),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id))),
+    push: (head) => act(async () => (snapshot === null ? undefined : client.push(snapshot.task.id, head))),
     dismissError: () => setError(null),
   }
 }

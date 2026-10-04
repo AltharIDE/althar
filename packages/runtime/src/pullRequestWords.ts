@@ -129,7 +129,7 @@ export const checksForLead = (sum: ChecksSum, name: string, logs: ReadonlyArray<
   [
     `Checks failed on ${name}: ${sum.failing.join(', ')}.`,
     ...logs,
-    'Fix what broke, commit, and call publish_changes; or, if it isn’t the task’s to fix, say why.',
+    'Fix what broke and commit it: the person looks at it and pushes it. Or, if it isn’t the task’s to fix, say why.',
   ].join('\n\n')
 
 /** What the lead is told of what it can't read: people outside the repository, whom the person passes on. */
@@ -165,4 +165,4 @@ export const filesLine = (paths: ReadonlyArray<string>, shown = 8) => {
 
 /** How the lead answers what people said. */
 export const answerHint =
-  'Answer on the pull request with reply_on_pull_request (in a thread, by its id), or change the code, commit, and call publish_changes. If it needs the person, say so.'
+  'Answer on the pull request with reply_on_pull_request (in a thread, by its id), or change the code and commit it, for the person to look at and push. If it needs the person, say so.'

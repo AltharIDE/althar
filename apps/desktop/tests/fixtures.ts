@@ -281,6 +281,8 @@ export const change = (overrides: Partial<ChangeSummary> = {}): ChangeSummary =>
     ],
   },
   listening: true,
+  localHead: null,
+  unpushed: 0,
   ...overrides,
 })
 
@@ -374,6 +376,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
     getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [] })),
     merge: vi.fn(async () => {}),
+    push: vi.fn(async () => {}),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
       file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
       lines: [

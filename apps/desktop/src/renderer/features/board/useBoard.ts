@@ -45,8 +45,12 @@ export interface BoardModel {
   readonly sending: string | null
   /** The task whose pull request is being opened. */
   readonly opening: string | null
+  /** The task whose commits are being pushed. */
+  readonly pushing: string | null
   /** Merges a ready task's pull request at the head the person saw; whether it went through. */
   readonly merge: (taskId: string, head: string) => Promise<boolean>
+  /** Pushes a task's branch to its pull request, up to the commit the person saw; whether it went through. */
+  readonly push: (taskId: string, head: string) => Promise<boolean>
   /** Sends a ready task back to its lead with a note, starting the lead again if it stopped; whether it went through. */
   readonly sendBack: (task: BoardTask, note: string) => Promise<boolean>
   /** Opens the pull request of a task whose work ended on its branch. */
@@ -63,6 +67,7 @@ export const useBoard = (projectId: string): BoardModel => {
   const [merging, setMerging] = useState<string | null>(null)
   const [sending, setSending] = useState<string | null>(null)
   const [opening, setOpening] = useState<string | null>(null)
+  const [pushing, setPushing] = useState<string | null>(null)
   // Watched from the first read on; later reads don't start the watch again.
   const [since, setSince] = useState<number | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -98,6 +103,23 @@ export const useBoard = (projectId: string): BoardModel => {
     merging,
     sending,
     opening,
+    pushing,
+    push: useCallback(
+      async (taskId, head) => {
+        setPushing(taskId)
+        setError(null)
+        try {
+          await client.push(taskId, head)
+          return true
+        } catch (failure) {
+          fail(failure)
+          return false
+        } finally {
+          setPushing(null)
+        }
+      },
+      [client, fail],
+    ),
     merge: useCallback(
       async (taskId, head) => {
         setMerging(taskId)

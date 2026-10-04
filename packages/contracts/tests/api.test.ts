@@ -158,6 +158,7 @@ describe('the API', () => {
               GetFileDiff: () => Effect.die('unused'),
               GetBoard: () => Effect.die('unused'),
               Merge: () => Effect.die('unused'),
+              Push: () => Effect.die('unused'),
               SetEffort: () => Effect.die('unused'),
               GetModels: () => Effect.die('unused'),
               SetDefaultEffort: () => Effect.die('unused'),

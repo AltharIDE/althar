@@ -206,6 +206,22 @@ describe('the board', () => {
     expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' })
   })
 
+  it('pushes what the lead committed since before the pull request can be accepted, up to what the dock showed', async () => {
+    const push = vi.fn(async () => {})
+    const later = board().tasks.map((work) =>
+      work.taskId === 't4' && work.change !== null ? { ...work, change: { ...work.change, unpushed: 2, localHead: 'def456' } } : work,
+    )
+    const { client } = fakeClient({ push, getBoard: vi.fn(async () => board({ tasks: later })) })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Rate-limit refunds' }))
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    expect(within(dock).getByText('2 commits aren’t on the pull request yet')).toBeTruthy()
+    expect(within(dock).queryByRole('button', { name: /Accept and merge/ })).toBeNull()
+    await userEvent.click(within(dock).getByRole('button', { name: 'Push' }))
+    await waitFor(() => expect(push).toHaveBeenCalledWith('t4', 'def456'))
+  })
+
   it('opens work ready on its branch to review its changes, and any task in its own window', async () => {
     const onTask = vi.fn()
     const getFileDiff = vi.fn(async (_taskId: string, path: string) => ({

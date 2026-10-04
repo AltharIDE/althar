@@ -77,6 +77,9 @@ export const text = {
   closed: (change: ChangeSummary, host: string) => `${text.change(change)} was closed on ${host}.`,
   markReady: 'Mark ready for review',
   openChange: 'Open a pull request',
+  push: (n: number) => (n === 1 ? 'Push 1 commit' : `Push ${n} commits`),
+  unpushed: (n: number, change: ChangeSummary) =>
+    n === 1 ? `One commit isn’t on the ${change.noun} yet.` : `${n} commits aren’t on the ${change.noun} yet.`,
   openOn: (host: string) => `Open on ${host}`,
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
@@ -109,6 +112,7 @@ function ChangePanel({
   lead,
   agentName,
   onReady,
+  onPush,
   onClose,
   onOpenFile,
   pending,
@@ -118,6 +122,8 @@ function ChangePanel({
   lead: ModelInfo
   agentName: (id: string | null) => string
   onReady: () => void
+  /** Pushes what the lead committed since, up to the commit shown. */
+  onPush: (head: string) => void
   onClose: () => void
   /** Opens what the task changed over the whole window, on a file or the first. */
   onOpenFile: (path?: string) => void
@@ -165,7 +171,15 @@ function ChangePanel({
             }}
           />
         )}
+        {change.state === 'open' && change.unpushed > 0 && change.localHead !== null && (
+          <p className={s.quiet}>{text.unpushed(change.unpushed, change)}</p>
+        )}
         <div className={s.changeActions}>
+          {change.state === 'open' && change.unpushed > 0 && change.localHead !== null && (
+            <Button variant="signal" busy={pending} onClick={() => onPush(change.localHead ?? '')}>
+              {text.push(change.unpushed)}
+            </Button>
+          )}
           {change.state === 'open' && change.draft && (
             <Button variant="signal" busy={pending} onClick={onReady}>
               {text.markReady}
@@ -246,6 +260,11 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
       )}
       {files.length > 0 && (
         <ChromeButton icon="file" label={text.files(files.length)} expanded={changes.open} onClick={() => changes.show()} />
+      )}
+      {change !== null && change.state === 'open' && change.unpushed > 0 && change.localHead !== null && (
+        <Button size="small" busy={model.pending} onClick={() => void model.push(change.localHead ?? '')}>
+          {text.push(change.unpushed)}
+        </Button>
       )}
       {change !== null && (
         <ChromeButton icon="pr" label={text.change(change)} expanded={showChange} onClick={() => setShowChange((open) => !open)} />
@@ -338,6 +357,7 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
               agentName={agentName}
               pending={model.pending}
               onReady={() => void model.markReady()}
+              onPush={(head) => void model.push(head)}
               onClose={() => setShowChange(false)}
               onOpenFile={changes.show}
             />

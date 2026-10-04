@@ -154,9 +154,6 @@ export const remoteUrls = (cwd: string) =>
 export const addWorktree = (repository: string, path: string, branch: string, base: string) =>
   git(repository, 'worktree', 'add', '-b', branch, path, base)
 
-/** Whether the worktree has changes not yet committed: tracked or untracked, ignored files aside. */
-export const uncommitted = (cwd: string) => Effect.map(git(cwd, 'status', '--porcelain'), (output) => output !== '')
-
 /** The files the worktree hasn't committed, changed, new or deleted, ignored files aside; by path, sorted. */
 export const uncommittedFiles = (cwd: string) =>
   Effect.gen(function* () {
@@ -169,14 +166,47 @@ export const uncommittedFiles = (cwd: string) =>
 export const commitsAhead = (cwd: string, base: string) => Effect.map(git(cwd, 'rev-list', '--count', `${base}..HEAD`), Number)
 
 /**
+ * A worktree's head, and how many commits on it what was pushed doesn't have:
+ * what is still the person's to push. What was pushed is the first of
+ * `pushed` the worktree knows, such as the pull request's head, else the
+ * commit Althar last pushed. None, where it can't be told.
+ */
+export const unpushedOf = (cwd: string, pushed: ReadonlyArray<string | null>) =>
+  Effect.gen(function* () {
+    const localHead = yield* commitOf(cwd, 'HEAD').pipe(Effect.orElseSucceed(() => null))
+    for (const candidate of pushed) {
+      if (candidate === null || localHead === null) continue
+      const known = yield* commitOf(cwd, candidate).pipe(Effect.orElseSucceed(() => ''))
+      if (known === '') continue
+      // Counted up to the head read, not HEAD again: the lead may commit in between.
+      const ahead = yield* git(cwd, 'rev-list', '--count', `${known}..${localHead}`).pipe(
+        Effect.map(Number),
+        Effect.orElseSucceed(() => 0),
+      )
+      return { localHead, unpushed: ahead }
+    }
+    return { localHead, unpushed: 0 }
+  })
+
+/** Whether `commit` is the worktree's head or behind it. */
+export const onHead = (cwd: string, commit: string) =>
+  Effect.match(git(cwd, 'merge-base', '--is-ancestor', commit, 'HEAD'), { onFailure: () => false, onSuccess: () => true })
+
+/**
  * Pushes HEAD to a branch of a remote by URL, never forced. The header that
  * signs the push in goes to git through its environment, so it is in no
  * process's arguments.
  */
-export const pushTo = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string) =>
+export const pushTo = (
+  cwd: string,
+  target: { readonly url: string; readonly header: string | null },
+  branch: string,
+  /** What is pushed: the worktree's head, or a commit the person saw. */
+  commit = 'HEAD',
+) =>
   run(
     120_000,
     cwd,
-    ['push', '--quiet', '--no-verify', target.url, `HEAD:refs/heads/${branch}`],
+    ['push', '--quiet', '--no-verify', target.url, `${commit}:refs/heads/${branch}`],
     target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
   )

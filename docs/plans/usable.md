@@ -65,10 +65,7 @@ One pull request each:
      task's header, from a file in its pull request, or with ⌘D.
 2. **The board,** and the chrome's counts. Merging from it, as the person's
    click, at the head the person saw. Local merging for a task without a pull
-   request comes with step 3, and so does sending work back as a step of its
-   own: a new run of the task with the note as its input, which ends with the
-   lead's summary and a push, rather than a message the lead may or may not
-   push after.
+   request comes with step 3.
 3. **Work that doesn't need you.** Done so far:
    - usage limits;
    - notifications and the Dock badge;
@@ -79,9 +76,20 @@ One pull request each:
      afresh, then asked about; loops and a budget of time and turns besides
      ([05](../architecture/05-workflow-engine.md)).
 
+   - pushing is the person's: what the lead commits after the pull request
+     opens waits for a Push button, which pushes up to the commit the person
+     saw.
+
    Next:
-   1. Local merging, and sending work back as a step.
+   1. Local merging.
    2. The lead answers permission requests: the "lead decides" mode.
+
+   Decided on 2026-10-04:
+   - **No "send back" step.** The task's chat is how the person sends work
+     back: the card shows the lead at work and is ready again after. The
+     dock's note goes into that same chat.
+   - **Later: always push.** A choice next to Push, per project, for people
+     who want follow-ups pushed as the lead commits them.
 4. **Conversations.**
 
 Brought forward from step 4, after the board: **the model picker.** Every
