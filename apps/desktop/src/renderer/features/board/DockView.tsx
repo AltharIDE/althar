@@ -153,6 +153,10 @@ export function DockView({
           // The head the dock showed: a pull request that moved on since isn't merged unseen.
           onAccept={() => void model.merge(task.taskId, change.head ?? '')}
           onSendBack={(note) => void model.sendBack(task, note)}
+          // What the lead committed since, up to the head the dock showed: pushed first, as the person says.
+          unpushed={change.localHead === null ? 0 : change.unpushed}
+          onPush={() => void model.push(task.taskId, change.localHead ?? '')}
+          pushing={model.pushing === task.taskId}
           onOpenFile={(path) => onChanges(task, path)}
           accepting={model.merging === task.taskId}
           sendingBack={model.sending === task.taskId}

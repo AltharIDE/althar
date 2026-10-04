@@ -292,6 +292,10 @@ export const ChangeSummary = Schema.Struct({
   head: Schema.NullOr(Schema.String),
   /** Althar asks its host for news while the task is open. */
   listening: Schema.Boolean,
+  /** The head of the task's branch here, for an open one: what pushing it pushes, and nothing newer. */
+  localHead: Schema.NullOr(Schema.String),
+  /** Commits on the task's branch here that aren't on it yet: the person pushes them once they've looked. */
+  unpushed: Schema.Number,
 })
 export type ChangeSummary = typeof ChangeSummary.Type
 
@@ -927,6 +931,8 @@ export const Api = RpcGroup.make(
    * since isn't merged. Agents never merge.
    */
   command('Merge', { taskId: Schema.String, head: Schema.String }, Schema.Void),
+  /** Pushes the task's branch to its open pull request, up to the commit the person saw. */
+  command('Push', { taskId: Schema.String, head: Schema.String }, Schema.Void),
   /** Asks the task's pull request for news now. */
   command('RefreshTask', { taskId: Schema.String }, Schema.Void),
   /** What changes after `since`, or from now without it. */

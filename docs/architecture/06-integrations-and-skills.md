@@ -199,6 +199,13 @@ service's model.
   nothing itself; a step that ends in a push isn't done while the worktree
   has uncommitted files, so the lead commits what belongs to the task and
   clears away the rest. The record keeps the commit pushed.
+- **After the first push, pushing is the person's.** When a plan's steps are
+  done, Althar pushes the branch and opens the pull request. What the lead
+  commits after, answering the person, a review or failed checks, waits on the
+  task's branch until the person has looked at it and pushes it: the task
+  says how many commits aren't on the pull request yet, and Push pushes up to
+  the commit they saw, never one the lead made since. The lead has no tool to
+  push.
 - **Merging is the person's.** The model has `merge`, and Althar calls it
   only when the person accepts the change (from the board, or the task),
   never on an agent's word: the rules refuse agents' merges. A draft is
@@ -216,7 +223,7 @@ service's model.
 - **Everything arrives in the task's thread,** once: comments, reviews,
   checks finishing, merged, closed, marked ready. Bots aside.
 - **Only some of it reaches the lead.** Failed checks do, with the end of
-  their logs. So do comments and reviews from the person and from people who
+  their logs: the lead fixes and commits, and the person pushes. So do comments and reviews from the person and from people who
   can write to the repository (GitHub's owners, members and collaborators).
   On a public repository anyone can comment, so what anyone else says stays in
   the thread, marked as not passed on, for the person to pass on in their own

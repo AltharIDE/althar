@@ -163,6 +163,7 @@ describe('the client', () => {
           GetFileDiff: () => Effect.die('unused'),
           GetBoard: () => Effect.die('unused'),
           Merge: () => Effect.die('unused'),
+          Push: () => Effect.die('unused'),
           ListProjects: () => Effect.die('unused'),
           OpenProject: () => Effect.die('unused'),
           ListTasks: () => Effect.die('unused'),

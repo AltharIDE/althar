@@ -19,7 +19,9 @@ import s from './AcceptPeek.module.css'
  * Accepting from the board: enough to decide on a small change without
  * opening its task. The pull request, who led it and who reviewed it, its
  * files and checks, and the two answers: accept and merge, or send it back
- * with a note. A change that isn't small is one click away, in its task.
+ * with a note. Commits the lead made since that aren't on the pull request
+ * yet come first: pushed, as the person says, before anything is accepted. A
+ * change that isn't small is one click away, in its task.
  */
 
 export interface AcceptPeekText {
@@ -37,6 +39,9 @@ export interface AcceptPeekText {
   checksFirst: string
   /** Said where the checks would be, when none ran. */
   noChecks: string
+  /** Said in place of Accept while the lead's later commits aren't on the pull request. */
+  unpushed: (n: number) => string
+  push: string
 }
 
 export const acceptPeekText: AcceptPeekText = {
@@ -52,6 +57,8 @@ export const acceptPeekText: AcceptPeekText = {
   cancel: 'Cancel',
   checksFirst: 'It can be accepted once its checks pass',
   noChecks: 'No checks ran on it.',
+  unpushed: (n) => (n === 1 ? 'One commit isn’t on the pull request yet' : `${n} commits aren’t on the pull request yet`),
+  push: 'Push',
 }
 
 export interface AcceptPeekProps {
@@ -70,6 +77,11 @@ export interface AcceptPeekProps {
   checks: readonly ChangeCheck[]
   onAccept: () => void
   onSendBack: (note: string) => void
+  /** Commits on the task's branch that aren't on the pull request yet: pushed first, with `onPush`. */
+  unpushed?: number
+  onPush?: () => void
+  /** Pushing is under way: Push shows it and ignores presses. */
+  pushing?: boolean
   onOpenFile?: (path: string) => void
   /** Accepting is under way: Accept shows it and ignores presses. */
   accepting?: boolean
@@ -93,6 +105,9 @@ export function AcceptPeek({
   checks,
   onAccept,
   onSendBack,
+  unpushed = 0,
+  onPush,
+  pushing = false,
   onOpenFile,
   accepting = false,
   sendingBack = false,
@@ -160,7 +175,14 @@ export function AcceptPeek({
           />
         ) : (
           <>
-            {passed ? (
+            {unpushed > 0 && onPush ? (
+              <>
+                <Button variant="signal" busy={pushing} onClick={onPush}>
+                  {t.push}
+                </Button>
+                <span className={s.wait}>{t.unpushed(unpushed)}</span>
+              </>
+            ) : passed ? (
               <Button variant="signal" busy={accepting} onClick={onAccept}>
                 {t.accept}
               </Button>

@@ -286,6 +286,26 @@ describe('a task’s pull request', () => {
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Pull request' })).toBeNull())
   })
 
+  it('pushes what the lead committed since, from the header or the panel, up to what it showed', async () => {
+    const push = vi.fn(async () => {})
+    const { client } = fakeClient({
+      push,
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: { ...snapshot().task, phase: 'ready', changes: [change({ unpushed: 2, localHead: 'def456' })], commits: 4 },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Push 2 commits' }))
+    await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456'))
+    await userEvent.click(screen.getByRole('button', { name: 'PR #12' }))
+    const panel = await screen.findByRole('complementary', { name: 'Pull request' })
+    expect(within(panel).getByText('2 commits aren’t on the pull request yet.')).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Push 2 commits' }))
+    await waitFor(() => expect(push).toHaveBeenCalledTimes(2))
+  })
+
   it('shows what it changed, file by file, from its header, its pull request, or ⌘D', async () => {
     const file = (path: string, more: Partial<ThreadSnapshot['task']['files'][number]> = {}) => ({
       path,

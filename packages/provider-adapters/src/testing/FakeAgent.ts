@@ -297,9 +297,10 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
           ...(thread === undefined ? {} : { thread_id: thread }),
         })
       }
-      if (available.has('publish_changes') && session.markers.has('[lead:fix]') && text.startsWith('Checks failed')) {
+      // Fixed and committed, for the person to push.
+      if (session.markers.has('[lead:fix]') && text.startsWith('Checks failed')) {
         commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
-        return await call('publish_changes', {})
+        return 'Fixed the failing check, and committed it.'
       }
       // Works until it is stopped: for a lead that goes in the middle of its step.
       if (text.includes('[lead:wait]')) {

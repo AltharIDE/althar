@@ -25,7 +25,7 @@ import { Coordinator } from './Coordinator'
 import { baseOf, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
-import { git } from './git'
+import { git, unpushedOf } from './git'
 import { commandIn } from './rules'
 import { Sessions } from './Sessions'
 
@@ -169,6 +169,8 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
           },
     head: text(value, 'headSha') || null,
     listening,
+    localHead: null,
+    unpushed: 0,
   }
 }
 
@@ -527,12 +529,23 @@ export class Queries extends Context.Service<
               container: text(kept, 'container') || null,
             }
           })()
-          const changes = links
-            .filter((link) => link.kind === 'change')
-            .flatMap((link) => {
-              const found = changeOf(parse(link.snapshot), link.product, link.listening === 1)
+          const [workspace] = yield* sql<{ path: string }>`
+            SELECT path FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND state = 'ready'`
+          const changes = yield* Effect.forEach(
+            links.flatMap((link) => {
+              const found = link.kind === 'change' ? changeOf(parse(link.snapshot), link.product, link.listening === 1) : null
               return found === null ? [] : [found]
-            })
+            }),
+            // An open one says how far the branch here is ahead of it: commits the person hasn't pushed yet.
+            (change) =>
+              change.state !== 'open' || workspace === undefined || !existsSync(workspace.path)
+                ? Effect.succeed(change)
+                : Effect.gen(function* () {
+                    const [recorded] = yield* sql<{ headCommit: string | null }>`
+                      SELECT head_commit FROM repository_changes WHERE pull_request_url = ${change.url} ORDER BY updated_at DESC LIMIT 1`
+                    return { ...change, ...(yield* unpushedOf(workspace.path, [change.head, recorded?.headCommit ?? null])) }
+                  }),
+          )
           return { issue, changes }
         })
 

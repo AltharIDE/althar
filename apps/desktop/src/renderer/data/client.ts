@@ -138,6 +138,8 @@ export interface Client {
   readonly openChange: (taskId: string) => Promise<void>
   /** Merges the task's pull request at the head the person saw, as they said to; a draft is marked ready first. */
   readonly merge: (taskId: string, head: string) => Promise<void>
+  /** Pushes the task's branch to its pull request, up to the commit the person saw. */
+  readonly push: (taskId: string, head: string) => Promise<void>
   /** Asks a task's pull request for news now. */
   readonly refreshTask: (taskId: string) => Promise<void>
   /** The person's answer to a step that needs them. */
@@ -247,6 +249,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     markReady: (taskId) => command((commandId) => api.MarkReady({ commandId, taskId })),
     openChange: (taskId) => command((commandId) => api.OpenChange({ commandId, taskId })),
     merge: (taskId, head) => command((commandId) => api.Merge({ commandId, taskId, head })),
+    push: (taskId, head) => command((commandId) => api.Push({ commandId, taskId, head })),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     watch: (listener, since) => {

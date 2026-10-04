@@ -175,7 +175,7 @@ const hostReason = (words: ReadonlyArray<string>): string | undefined => {
   if ((command === 'pr' || command === 'mr') && (subcommand === 'comment' || subcommand === 'review' || subcommand === 'note'))
     return "Answer on the task's pull request with Althar's reply_on_pull_request tool."
   if (command === 'pr' || command === 'mr')
-    return "Althar opens and updates the task's pull request itself. Commit, then call Althar's publish_changes tool; read it with read_pull_request."
+    return "Althar opens the task's pull request itself, and the person pushes what you commit to it once they've looked. Commit; read it with read_pull_request."
   if (command === 'issue') return "Althar doesn't change issues from a task. Read one with read_issue, and tell the person what it needs."
   if (command === 'auth') return "Agents run without the person's sign-in to the code host; Althar's tools reach it for the task."
   return "Agents don't change things on the code host themselves; Althar does that for the task. Tell the person what's needed."

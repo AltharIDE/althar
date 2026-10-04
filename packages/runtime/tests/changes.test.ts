@@ -173,7 +173,7 @@ describe('a task that ends in a pull request', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
-  it.live('fixes a failed check and publishes the fix', () => {
+  it.live('fixes a failed check, and the person pushes the fix', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
@@ -185,10 +185,12 @@ describe('a task that ends in a pull request', () => {
       )
       yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       github.setChecks(1, [{ name: 'test', state: 'failed', log: 'FAIL limit.test.ts\nExpected 30, got "Thu"' }])
-      yield* until(
-        Effect.sync(() => (git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry').includes('fixed.txt') ? [true] : [])),
-        (found) => found.length > 0,
-      )
+      // The lead fixes and commits it; nothing goes up until the person pushes it.
+      const [fixed] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1, Duration.seconds(20))
+      assert.notInclude(git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry'), 'fixed.txt')
+      const changes = yield* Changes
+      yield* changes.push(fixed?.taskId ?? '', fixed?.change?.localHead ?? '')
+      assert.include(git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry'), 'fixed.txt')
       assert.include(git(bare, 'log', '--format=%s', 'althar/add-a-retry'), 'Fix the failing check')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -493,7 +495,7 @@ describe('a task that ends in a pull request', () => {
 })
 
 describe('a pull request, by the person and the lead', () => {
-  it.live('is marked ready by the person, read and replied on by the lead, and refuses uncommitted changes', () => {
+  it.live('is marked ready by the person, read and replied on by the lead, and pushed by the person as far as they saw', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
@@ -535,11 +537,25 @@ describe('a pull request, by the person and the lead', () => {
 
       const sql = yield* SqlClient.SqlClient
       const [workspace] = yield* sql<{ path: string; branch: string }>`SELECT path, branch FROM workspaces WHERE task_id = ${taskId}`
-      execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '--allow-empty', '-m', 'More'], {
-        cwd: workspace?.path,
-      })
-      yield* changes.pushChanges(taskId)
-      assert.include(git(bare, 'log', '--format=%s', workspace?.branch ?? ''), 'More')
+      // What the lead commits after waits for the person: the card says how many, and they push what they saw.
+      const commit = (message: string) =>
+        execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '--allow-empty', '-m', message], {
+          cwd: workspace?.path,
+        })
+      commit('More')
+      const [seen] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1)
+      const head = seen?.change?.localHead ?? ''
+      assert.strictEqual(head, git(workspace?.path ?? '', 'rev-parse', 'HEAD').trim())
+      commit('Later')
+      yield* changes.push(taskId, head)
+      const pushed = git(bare, 'log', '--format=%s', workspace?.branch ?? '')
+      assert.include(pushed, 'More')
+      assert.notInclude(pushed, 'Later')
+      // Only what came after is left to push.
+      yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1 && all[0]?.change?.localHead !== head)
+      // A commit that isn't on the branch any more isn't pushed.
+      const gone = yield* Effect.flip(changes.push(taskId, '0000000000000000000000000000000000000000'))
+      assert.strictEqual(gone instanceof Error ? gone.name : String(gone), 'ChangedSinceSeen')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

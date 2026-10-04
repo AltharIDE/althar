@@ -21,7 +21,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import { envelope } from './envelope'
 import { ChangedSinceSeen, NotFound } from './errors'
-import { commitOf, commitsAhead, pushTo, uncommitted, uncommittedFiles } from './git'
+import { commitOf, commitsAhead, onHead, pushTo, uncommittedFiles } from './git'
 import { Instance } from './Instance'
 import { outward, reconcileOutward } from './outward'
 import {
@@ -213,8 +213,12 @@ export class Changes extends Context.Service<
       readonly runId: string
       readonly end: 'draft' | 'ready' | 'none'
     }): Effect.Effect<Published, unknown>
-    /** Pushes what the lead committed since, to the task's open pull request. */
-    pushChanges(taskId: string): Effect.Effect<{ readonly change: ChangeSummary }, unknown>
+    /**
+     * Pushes the task's branch to its open pull request, up to the commit the
+     * person saw: theirs to do, after looking at what the lead committed. One
+     * that isn't on the branch any more isn't pushed.
+     */
+    push(taskId: string, head: string): Effect.Effect<{ readonly change: ChangeSummary }, unknown>
     /** Marks the task's draft pull request ready for review: the person's to do. */
     markReady(taskId: string): Effect.Effect<void, unknown>
     /**
@@ -562,15 +566,16 @@ export class Changes extends Context.Service<
           yield* touchCard(link.taskId)
         })
 
-      const pushChanges = (taskId: string) =>
+      const push = (taskId: string, head: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { link, snapshot, host, repository } = yield* current(taskId)
           const [workspace] = yield* sql<{ path: string; branch: string }>`
             SELECT path, branch FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId}`
           if (workspace === undefined) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
-          yield* pushTo(workspace.path, yield* host.pushTarget(repository), workspace.branch)
-          const head = yield* commitOf(workspace.path, 'HEAD')
+          // What the person saw, and nothing the lead committed after: one rewritten away since isn't pushed.
+          if (!(yield* onHead(workspace.path, head))) return yield* new ChangedSinceSeen({ taskId })
+          yield* pushTo(workspace.path, yield* host.pushTarget(repository), workspace.branch, head)
           yield* sql`UPDATE repository_changes SET head_commit = ${head}, updated_at = ${yield* timestamp}, revision = revision + 1
             WHERE pull_request_url = ${snapshot.url} AND project_id = ${link.projectId}`
           yield* news(taskId)
@@ -1001,7 +1006,7 @@ export class Changes extends Context.Service<
         ),
         leadTool(
           'reply_on_pull_request',
-          "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. For answering what people said; a change to the code is a commit and publish_changes.",
+          "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. For answering what people said; a change to the code is a commit, which the person pushes.",
           { type: 'object', properties: { body: { type: 'string' }, thread_id: { type: 'string' } }, required: ['body'] },
           (taskId, input, access) =>
             Effect.gen(function* () {
@@ -1020,29 +1025,11 @@ export class Changes extends Context.Service<
               return `Replied on ${nameOf(change)}.`
             }),
         ),
-        leadTool(
-          'publish_changes',
-          "Pushes what you have committed on the task's branch to its pull request, so its checks run again and reviewers see it. Commit first: Althar pushes commits, never uncommitted changes.",
-          { type: 'object', properties: {} },
-          (taskId) =>
-            Effect.gen(function* () {
-              const sql = yield* SqlClient.SqlClient
-              const [workspace] = yield* sql<{
-                path: string
-              }>`SELECT path FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId}`
-              if (workspace !== undefined && (yield* uncommitted(workspace.path)))
-                return yield* new ToolRefused({
-                  message: 'The worktree has uncommitted changes. Commit them, then call publish_changes again.',
-                })
-              const { change } = yield* locked(taskId)(pushChanges(taskId))
-              return `Pushed to ${nameOf(change)}. Its checks run again; Althar tells you how they end.`
-            }),
-        ),
       ])
 
       return Changes.of({
         publish: (input) => provide(publish(input)),
-        pushChanges: (taskId) => provide(locked(taskId)(pushChanges(taskId))),
+        push: (taskId, head) => provide(locked(taskId)(push(taskId, head))),
         markReady: (taskId) => provide(locked(taskId)(markReady(taskId))),
         exclusive: (taskId, effect) => locked(taskId)(effect),
         merge: (taskId, head) => provide(locked(taskId)(merge(taskId, head))),

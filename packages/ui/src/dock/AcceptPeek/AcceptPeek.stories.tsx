@@ -51,6 +51,18 @@ export const SendingBack: Story = {
   },
 }
 
+/** The lead committed more since: pushed first, before anything can be accepted. */
+export const Unpushed: Story = {
+  args: { unpushed: 2, onPush: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('2 commits aren’t on the pull request yet')).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Accept and merge' })).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Push' }))
+    await expect(args.onPush).toHaveBeenCalledOnce()
+  },
+}
+
 export const AllStates: Story = {
   render: (args) => (
     <States
@@ -61,6 +73,8 @@ export const AllStates: Story = {
         { state: 'a check still running', node: <AcceptPeek {...args} checks={CHECKS_RUNNING} /> },
         { state: 'accepting', node: <AcceptPeek {...args} accepting /> },
         { state: 'sending back', node: <AcceptPeek {...args} sendingBack /> },
+        { state: 'a commit to push', node: <AcceptPeek {...args} unpushed={1} onPush={() => {}} /> },
+        { state: 'pushing', node: <AcceptPeek {...args} unpushed={2} onPush={() => {}} pushing /> },
         { state: 'accept failed', node: <AcceptPeek {...args} error="GitHub refused the merge: the branch is behind main." /> },
       ]}
     />
