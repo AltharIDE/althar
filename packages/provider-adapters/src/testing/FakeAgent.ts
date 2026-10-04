@@ -134,6 +134,72 @@ interface SessionState {
   tools: { readonly url: string; readonly headers: Record<string, string> } | undefined
   /** The role markers the session has been given, in any turn. */
   markers: Set<string>
+  /** Markers it has played once already, such as `[lead:hang-once]`. */
+  played: Set<string>
+}
+
+/** Worktrees where a lead has stopped answering once: started afresh, it answers. Kept across sessions, as a restart makes a new one. */
+const wedgedIn = new Set<string>()
+
+/**
+ * A lead that stalls or goes round in circles, as markers say:
+ * `[lead:hang]` runs \`npm run dev\` and never ends its turn until cancelled,
+ * every turn; `[lead:hang-once]` does that once. `[lead:wedge-once]` doesn't
+ * stop when cancelled either, until it is started afresh. `[lead:loop]` runs a
+ * failing \`npm test\` three times in a row, every turn, then waits until
+ * cancelled; `[lead:loop-once]` does that once. `[lead:long-once]` stops once
+ * at its output limit, and `[lead:refuse]` refuses. Otherwise, nothing: the
+ * turn goes on as it would.
+ */
+const playStall = async (
+  session: SessionState,
+  text: string,
+  update: (value: acp.SessionUpdate) => Promise<void>,
+): Promise<acp.PromptResponse | undefined> => {
+  for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
+  const once = (marker: string) => session.markers.has(marker) && !session.played.has(marker) && session.played.add(marker) !== undefined
+  /** Waits until cancelled, or, stubborn, until the test is long over. */
+  const hang = async (stubborn = false) => {
+    for (let waited = 0; (stubborn || !session.cancelled) && waited < 30_000; waited += 10) await pause(10)
+    return { stopReason: session.cancelled ? 'cancelled' : 'end_turn' } satisfies acp.PromptResponse
+  }
+  if (session.markers.has('[lead:refuse]')) return { stopReason: 'refusal' }
+  if (once('[lead:long-once]')) return { stopReason: 'max_tokens' }
+  if (session.markers.has('[lead:wedge-once]') && !wedgedIn.has(session.cwd)) {
+    wedgedIn.add(session.cwd)
+    return await hang(true)
+  }
+  if (session.markers.has('[lead:hang]') || once('[lead:hang-once]')) {
+    await update({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'dev',
+      title: 'npm run dev',
+      kind: 'execute',
+      status: 'in_progress',
+      rawInput: { command: 'npm run dev' },
+    })
+    return await hang()
+  }
+  if (session.markers.has('[lead:loop]') || once('[lead:loop-once]')) {
+    for (const call of ['test-1', 'test-2', 'test-3']) {
+      await update({
+        sessionUpdate: 'tool_call',
+        toolCallId: call,
+        title: 'npm test',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { command: 'npm test' },
+      })
+      await update({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: call,
+        status: 'failed',
+        rawOutput: { exitCode: 1, output: '1 failing' },
+      })
+    }
+    return await hang()
+  }
+  return undefined
 }
 
 /**
@@ -212,7 +278,9 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
         return await call('finish_step', { summary: 'Fixed the heading.', findings })
       }
       // Told to carry on, as a lead that took a step over is, it finishes as it was told to at first.
-      if (text.includes('[lead:finish]') || (text.startsWith('Carry on with the task') && session.markers.has('[lead:finish]'))) {
+      // Told to carry on, or to try another way, as Althar tells one that stalled or went round in circles.
+      const toldToGoOn = /^(Carry on with the task|Your last turn|You ran )/.test(text)
+      if (text.includes('[lead:finish]') || (toldToGoOn && session.markers.has('[lead:finish]'))) {
         if (session.markers.has('[lead:edit]')) commitIn(session.cwd, 'change.txt', 'Change it')
         if (!session.markers.has('[lead:scratch]')) return await call('finish_step', { summary: 'Did the task.' })
         appendFileSync(join(session.cwd, 'scratch.log'), 'trying things\n')
@@ -374,6 +442,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             : { url: server.url, headers: Object.fromEntries(server.headers.map((header) => [header.name, header.value])) }
         })(),
         markers: new Set(),
+        played: new Set(),
       }
       sessions.set(sessionId, session)
       return {
@@ -437,6 +506,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
 
+      // A lead that stalls or loops, where a marker says so.
+      const stalled = await playStall(session, text, update)
+      if (stalled !== undefined) return stalled
       // With Althar's tools, a marker in the prompt says which role to play.
       const played = await playRole(session, text)
       // Stopped while it played its part, the turn was cancelled, as an agent says.

@@ -8,7 +8,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { RuntimeConfig } from '../src/Config'
+import { RuntimeConfig, type StallOptions } from '../src/Config'
 import { Coordinator, CoordinatorUnavailable } from '../src/Coordinator'
 import { NotFound } from '../src/errors'
 import { Plans } from '../src/Plans'
@@ -18,7 +18,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
-import { callTool, repository, runtime, until } from './support'
+import { callTool, notices, repository, runtime, task as newTask, turns, until } from './support'
 
 /*
  * The coordinator loop (docs/plans/mvp.md): the person asks the coordinator,
@@ -815,5 +815,148 @@ describe("the coordinator's tools", () => {
         'Althar could not record that. Try again.',
       )
     }).pipe(Effect.provide(withQueries())),
+  )
+})
+
+/** Stalls told in a moment rather than minutes; a stop is waited for long enough to see it come. */
+const FAST: StallOptions = {
+  every: Duration.millis(50),
+  quiet: Duration.millis(400),
+  quietInTool: Duration.millis(400),
+  cancelGrace: Duration.seconds(2),
+}
+
+describe('a step whose agent stalls or goes round in circles', () => {
+  it.live('tells a lead that went quiet to carry on, and it finishes', () =>
+    Effect.gen(function* () {
+      const { projectId, task } = yield* planned('Quiet once', '[lead:hang-once] [lead:finish]', [{ key: 'implement', agentId: 'codex' }])
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      assert.strictEqual(card?.summary, 'Did the task.')
+      assert.include(
+        (yield* notices(task.threadId)).map((notice) => notice.title),
+        'Fake codex showed no sign of work for a minute while running `npm run dev`, so Althar stopped its turn and told it to carry on.',
+      )
+      const told = (yield* turns(task.threadId)).map((turn) => turn.prompt ?? '')
+      assert.isTrue(
+        told.some(
+          (prompt) => prompt.startsWith('Your last turn showed no sign of work') && prompt.includes('`npm run dev` was still running'),
+        ),
+      )
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { stalls: FAST }))),
+  )
+
+  it.live('starts a lead that went quiet again afresh, then needs the person, with what Althar tried', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { projectId, task } = yield* planned('Never answers', '[lead:hang]', [{ key: 'implement', agentId: 'codex' }])
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why, call.agentId], ['implement', 'stalled', 'codex'])
+      assert.deepStrictEqual((call as unknown as { tried: ReadonlyArray<string> }).tried, ['carried_on', 'restarted'])
+      assert.include(
+        (yield* notices(task.threadId)).map((notice) => notice.title),
+        'Fake codex showed no sign of work again, so Althar started it afresh.',
+      )
+      // Nothing is left running while the call waits.
+      yield* until(
+        Effect.map(sessions.running(task.threadId), (running) => (running._tag === 'None' ? [running] : [])),
+        (rows) => rows.length === 1,
+      )
+      yield* answer(call.id, { kind: 'abandon' })
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'stopped')
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { stalls: FAST }))),
+  )
+
+  it.live("starts afresh a lead that doesn't stop its turn when asked, and it finishes", () =>
+    Effect.gen(function* () {
+      const { projectId, task } = yield* planned('Wedged', '[lead:wedge-once] [lead:finish]', [{ key: 'implement', agentId: 'codex' }])
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(15))
+      assert.include(
+        (yield* notices(task.threadId)).map((notice) => notice.title),
+        "Fake codex didn't stop its turn when asked, so Althar started it afresh.",
+      )
+    }).pipe(
+      Effect.provide(
+        withQueries(undefined, undefined, { stalls: { ...FAST, cancelGrace: Duration.millis(300) }, stopGrace: Duration.millis(300) }),
+      ),
+    ),
+  )
+
+  it.live('tells a lead going round in circles to try another way, then needs the person', () =>
+    Effect.gen(function* () {
+      const { task } = yield* planned('Circles', '[lead:loop]', [{ key: 'implement', agentId: 'codex' }])
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual(
+        [call.why, (call as unknown as { detail: string }).detail, (call as unknown as { tried: ReadonlyArray<string> }).tried],
+        ['looping', 'npm test', ['redirected']],
+      )
+      assert.include(
+        (yield* notices(task.threadId)).map((notice) => notice.title),
+        'Fake codex ran `npm test` 3 times in a row to the same end, so Althar stopped its turn and told it to try another way.',
+      )
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { stalls: FAST }))),
+  )
+
+  it.live('lets a lead told to try another way finish', () =>
+    Effect.gen(function* () {
+      const { projectId, task } = yield* planned('Circles once', '[lead:loop-once] [lead:finish]', [{ key: 'implement', agentId: 'codex' }])
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      const told = (yield* turns(task.threadId)).map((turn) => turn.prompt ?? '')
+      assert.isTrue(told.some((prompt) => prompt.startsWith('You ran `npm test` 3 times in a row')))
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { stalls: FAST }))),
+  )
+
+  it.live('carries a lead cut off at its output limit on, without a reminder', () =>
+    Effect.gen(function* () {
+      const { projectId, task } = yield* planned('Long', '[lead:long-once] [lead:finish]', [{ key: 'implement', agentId: 'codex' }])
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      const told = yield* turns(task.threadId)
+      assert.deepStrictEqual(
+        told.slice(0, 2).map((turn) => turn.stopReason),
+        ['max_tokens', 'end_turn'],
+      )
+      assert.isTrue(told[1]?.prompt?.startsWith("Your last turn stopped at the agent's own limit"))
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('needs the person at once when the lead refuses', () =>
+    Effect.gen(function* () {
+      const { task } = yield* planned('Refused', '[lead:refuse]', [{ key: 'implement', agentId: 'codex' }])
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why], ['implement', 'refused'])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('outside a step, stops an agent that stays quiet after it was started afresh, and says so in the thread', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task } = yield* newTask('Talking')
+      yield* sessions.start({ threadId: task.threadId, agentId: 'codex' })
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'Serve it. [lead:hang]' })
+      const [last] = yield* until(
+        Effect.map(notices(task.threadId), (said) => said.slice(-1)),
+        (said) => said[0]?.title?.endsWith('so Althar stopped it.') === true,
+      )
+      assert.deepStrictEqual(last, {
+        source: 'runtime',
+        severity: 'warning',
+        title: 'Fake codex showed no sign of work again after Althar started it afresh, so Althar stopped it.',
+        description: 'Start the lead again to carry on; it picks up from the thread.',
+      })
+      yield* until(
+        Effect.map(sessions.running(task.threadId), (running) => (running._tag === 'None' ? [running] : [])),
+        (rows) => rows.length === 1,
+      )
+      // Outside a step, nothing asks the person for a call.
+      const sql = yield* SqlClient.SqlClient
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM attention_requests WHERE kind = 'stuck'`)[0]?.n, 0)
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { stalls: FAST }))),
+  )
+
+  it.live('needs the person when a step runs past its budget of turns', () =>
+    Effect.gen(function* () {
+      const { task } = yield* planned('Many turns', '[lead:hang]', [{ key: 'implement', agentId: 'codex' }])
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.why, (call as unknown as { detail: string }).detail], ['over_budget', 'a turn'])
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { stalls: { ...FAST, turns: 1 } }))),
   )
 })

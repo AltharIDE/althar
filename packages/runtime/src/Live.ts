@@ -27,8 +27,17 @@ export type LiveEvent =
       readonly model?: string
     }
   | { readonly _tag: 'SessionEnded'; readonly threadId: string; readonly sessionId: string; readonly state: string }
-  | { readonly _tag: 'TurnStarted'; readonly threadId: string; readonly turnId: string }
-  | { readonly _tag: 'TurnEnded'; readonly threadId: string; readonly turnId: string; readonly state: string; readonly errorClass?: string }
+  /** A turn began; `byPerson` when it carries something the person said, not only what Althar wrote. */
+  | { readonly _tag: 'TurnStarted'; readonly threadId: string; readonly turnId: string; readonly byPerson?: boolean }
+  | {
+      readonly _tag: 'TurnEnded'
+      readonly threadId: string
+      readonly turnId: string
+      readonly state: string
+      readonly errorClass?: string
+      /** Why the agent stopped, as it said: `max_tokens` when its output ran out, say. */
+      readonly stopReason?: string
+    }
   | {
       readonly _tag: 'AttentionNeeded'
       readonly threadId: string

@@ -1,4 +1,4 @@
-export { Agents, type AgentEntry, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
+export { Agents, type AgentEntry, RuntimeConfig, type RuntimeOptions, type StallOptions, WebCrypto } from './Config'
 export * from './errors'
 export { Instance, type InstanceInfo } from './Instance'
 export { Live, type LiveEvent } from './Live'

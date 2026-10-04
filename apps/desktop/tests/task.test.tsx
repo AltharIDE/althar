@@ -273,6 +273,42 @@ describe('a task', () => {
       "Three rounds of review are done, and the lead's last changes haven't been reviewed. One finding is still open.",
       "Codex reached its usage limit and didn't say when it resets.",
     ])
+    expect([at('stalled'), at('looping', 'npm test'), at('over_budget', '6 hours'), at('refused')]).toEqual([
+      'Codex stopped showing any sign of work on this step.',
+      'Codex kept running `npm test` to the same end.',
+      "Codex has worked on this step for 6 hours since you last said anything, and isn't done.",
+      'Codex declined to go on with this step.',
+    ])
+  })
+
+  it('shows what Althar tried for a lead that went quiet, and starts it again', async () => {
+    const quiet = {
+      id: 'st7',
+      kind: 'stuck' as const,
+      title: 'Implement',
+      reason: '',
+      command: null,
+      createdAt: '2026-09-29T12:00:00.000Z',
+      stuck: {
+        step: 'implement' as const,
+        why: 'stalled' as const,
+        detail: null,
+        agentId: 'codex',
+        round: 0,
+        open: 0,
+        tried: ['carried_on' as const, 'restarted' as const],
+      },
+    }
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [quiet] })) })
+    withServices(<Task />, client)
+    await screen.findByText('Codex stopped showing any sign of work on this step.')
+    expect(screen.getByText('Stopped its turn and told it to carry on')).toBeTruthy()
+    expect(screen.getByText('Started Codex afresh')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Tell the lead' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Start Codex again' }))
+    await waitFor(() =>
+      expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st7', answer: { kind: 'retry', agentId: 'codex' } }),
+    )
   })
 
   it('hands a step whose agent is out of usage on, or tries it again, and never tells it anything', async () => {

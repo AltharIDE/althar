@@ -241,10 +241,15 @@ export class Sessions extends Context.Service<
     /** Stops the thread's session, after ending its turn. */
     stop(threadId: string): Effect.Effect<void, NoSession>
     /** The session running on a thread, if there is one. */
-    running(
-      threadId: string,
-    ): Effect.Effect<
-      Option.Option<{ readonly sessionId: string; readonly agentId: string; readonly accountId: string; readonly turnRunning: boolean }>
+    running(threadId: string): Effect.Effect<
+      Option.Option<{
+        readonly sessionId: string
+        readonly agentId: string
+        readonly accountId: string
+        readonly turnRunning: boolean
+        /** The agent's process, where it runs as one. */
+        readonly pid: number | null
+      }>
     >
   }
 >()('@althar/runtime/Sessions') {
@@ -258,6 +263,7 @@ export class Sessions extends Context.Service<
       const accounts = yield* Accounts
       const limits = yield* Limits
       const toolServer = yield* ToolServer
+      const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
@@ -339,8 +345,9 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { thread } = running
-          const queued = yield* sql<{ id: string; body: string; disposition: string; author: string; cutBy: string | null }>`
+          const queued = yield* sql<{ id: string; body: string; disposition: string; author: string; shown: number; cutBy: string | null }>`
             SELECT i.id, i.body, i.disposition, a.kind AS author,
+              EXISTS (SELECT 1 FROM thread_items ti WHERE ti.user_input_id = i.id) AS shown,
               (SELECT s.agent_id FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
                 JOIN provider_sessions s ON s.id = d.provider_session_id
                 WHERE di.user_input_id = i.id AND d.error_class = 'usage_limit' ORDER BY d.requested_at DESC LIMIT 1) AS cut_by
@@ -427,7 +434,13 @@ export class Sessions extends Context.Service<
           running.turnRunning = true
           // A task's card says when its lead or reviewer is at work.
           if (thread.role !== 'coordinator') yield* touchCard(thread.taskId)
-          yield* live.publish({ _tag: 'TurnStarted', threadId: thread.threadId, turnId })
+          yield* live.publish({
+            _tag: 'TurnStarted',
+            threadId: thread.threadId,
+            turnId,
+            // What the person wrote shows in the thread; what Althar writes for them goes quietly.
+            byPerson: inputs.some((input) => input.shown === 1),
+          })
 
           const items = recorder({
             projectId: thread.projectId,
@@ -545,6 +558,7 @@ export class Sessions extends Context.Service<
             turnId,
             state,
             ...(errorClass === undefined ? {} : { errorClass }),
+            ...(ended === undefined ? {} : { stopReason: ended.stopReason }),
           })
           // Out of usage, nothing more goes to it until what carries the work on says so.
           return !refused && errorClass !== 'usage_limit'
@@ -872,12 +886,22 @@ export class Sessions extends Context.Service<
           return sessionId
         })
 
-      /** Ends the turn running, then the session. */
+      /**
+       * Ends the turn running, then the session. An agent that doesn't end its
+       * turn when asked is stopped with its process, so stopping never waits
+       * on it for ever; the turn it was on is recorded as cut short.
+       */
       const stopRunning = (running: Running, request: StopRequest) =>
         Effect.gen(function* () {
           running.stopping = true
-          yield* Effect.ignore(running.agent.interrupt)
-          yield* running.delivering.withPermits(1)(Deferred.succeed(running.stopRequest, request))
+          const ended = yield* Effect.andThen(
+            Effect.ignore(running.agent.interrupt),
+            running.delivering.withPermits(1)(Deferred.succeed(running.stopRequest, request)),
+          ).pipe(Effect.timeoutOption(stopGrace))
+          if (Option.isNone(ended)) {
+            yield* Deferred.succeed(running.stopRequest, request)
+            yield* Scope.close(running.scope, Exit.void)
+          }
           yield* Deferred.await(running.ended)
         })
 
@@ -1230,6 +1254,7 @@ export class Sessions extends Context.Service<
                   agentId: running.entry.definition.id,
                   accountId: running.account.id,
                   turnRunning: running.turnRunning,
+                  pid: running.connection.process?.pid ?? null,
                 })
           }),
       })

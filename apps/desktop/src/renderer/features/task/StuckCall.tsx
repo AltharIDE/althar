@@ -31,7 +31,26 @@ export const text = {
         return "Althar isn't connected to this repository's host, so it can't push the branch or open the pull request. Connect it, then try again."
       case 'usage_limit':
         return `${agent} reached its usage limit and didn't say when it resets.`
+      case 'stalled':
+        return `${agent} stopped showing any sign of work on this step.`
+      case 'looping':
+        return `${agent} kept running ${stuck.detail === null ? 'the same thing' : `\`${stuck.detail}\``} to the same end.`
+      case 'over_budget':
+        return `${agent} has worked on this step for ${stuck.detail ?? 'a long time'} since you last said anything, and isn't done.`
+      case 'refused':
+        return `${agent} declined to go on with this step.`
     }
+  },
+  /** What Althar did before it asked. */
+  tried: (agent: string): Record<NonNullable<StuckStep['tried']>[number], { what: string; result: string }> => ({
+    carried_on: { what: 'Stopped its turn and told it to carry on', result: 'it went quiet again' },
+    restarted: { what: `Started ${agent} afresh`, result: 'it went quiet again' },
+    redirected: { what: 'Told it to try another way', result: 'it went back to the same' },
+  }),
+  /** Tried again on the same agent: started again where it went quiet, or let go on where it ran long. */
+  again: {
+    stalled: { again: (agent: string) => `Start ${agent} again`, tryingAgain: (agent: string) => `Starting ${agent} again` },
+    over_budget: { again: (agent: string) => `Let ${agent} carry on`, tryingAgain: (agent: string) => `${agent} carries on` },
   },
   /** For the pull request, which Althar opens itself: what went wrong. */
   publishing: (stuck: StuckStep): string =>
@@ -77,12 +96,17 @@ export function StuckCall({
   onAnswer: (attentionId: string, answer: StuckAnswer) => void
 }) {
   const agent = agentName(stuck.agentId) || 'The agent'
-  const tried: ReadonlyArray<StuckAttempt> = stuck.why === 'no_report' ? [{ id: 'reminded', ...text.reminded }] : []
+  const tried: ReadonlyArray<StuckAttempt> =
+    stuck.why === 'no_report'
+      ? [{ id: 'reminded', ...text.reminded }]
+      : (stuck.tried ?? []).map((each) => ({ id: each, ...text.tried(agent)[each] }))
   const review = stuck.step === 'review'
   // A review can run again on the agent it had; a lead's step goes to another.
   const others = agents.filter((candidate) => review || candidate.id !== stuck.agentId)
   const lastRound = stuck.why === 'round_limit'
   const out = stuck.why === 'usage_limit'
+  // Gone quiet, or long at it, a lead's agent can start again, or carry on; a review runs again by its own button.
+  const again = stuck.why === 'stalled' || stuck.why === 'over_budget' ? text.again[stuck.why] : undefined
   // Opening the pull request is Althar's own step: tried again as it was, or gone on without.
   if (stuck.step === 'publish')
     return (
@@ -104,24 +128,28 @@ export function StuckCall({
         .filter((candidate) => !out || candidate.id !== stuck.agentId)
         .map((candidate) => ({ model: modelInfo({ id: candidate.id, name: candidate.name }, null) }))}
       {...(review || out ? {} : { onTell: (note: string) => onAnswer(request.id, { kind: 'tell', note }) })}
-      {...(out && stuck.agentId !== null ? { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId: stuck.agentId ?? '' }) } : {})}
+      {...((out || (again !== undefined && !review)) && stuck.agentId !== null
+        ? { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId: stuck.agentId ?? '' }) }
+        : {})}
       onRetry={(model) => onAnswer(request.id, { kind: 'retry', agentId: model.runtime })}
       onAbandon={() => onAnswer(request.id, { kind: 'abandon' })}
       {...(out
         ? { text: { again: text.out.again(agent), tryingAgain: text.out.tryingAgain(agent) } }
-        : review
-          ? {
-              text: {
-                retry: text.review.retry,
-                retryLabel: text.review.retryLabel,
-                retried: text.review.retried,
-                retriedNote: text.review.retriedNote,
-                abandon: lastRound ? text.review.accept : text.review.skip,
-                abandoned: lastRound ? text.review.accepted : text.review.skipped,
-                abandonedNote: lastRound ? text.review.acceptedNote : text.review.skippedNote,
-              },
-            }
-          : {})}
+        : again !== undefined && !review
+          ? { text: { again: again.again(agent), tryingAgain: again.tryingAgain(agent) } }
+          : review
+            ? {
+                text: {
+                  retry: text.review.retry,
+                  retryLabel: text.review.retryLabel,
+                  retried: text.review.retried,
+                  retriedNote: text.review.retriedNote,
+                  abandon: lastRound ? text.review.accept : text.review.skip,
+                  abandoned: lastRound ? text.review.accepted : text.review.skipped,
+                  abandonedNote: lastRound ? text.review.acceptedNote : text.review.skippedNote,
+                },
+              }
+            : {})}
     />
   )
 }

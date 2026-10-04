@@ -547,7 +547,19 @@ export type SessionSummary = typeof SessionSummary.Type
  */
 export const StuckStep = Schema.Struct({
   step: Schema.Literals(['implement', 'review', 'settle', 'publish']),
-  why: Schema.Literals(['no_report', 'session_ended', 'failed_to_start', 'restarted', 'round_limit', 'not_connected', 'usage_limit']),
+  why: Schema.Literals([
+    'no_report',
+    'session_ended',
+    'failed_to_start',
+    'restarted',
+    'round_limit',
+    'not_connected',
+    'usage_limit',
+    'stalled',
+    'looping',
+    'over_budget',
+    'refused',
+  ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
   /** The agent on the step. */
@@ -556,6 +568,8 @@ export const StuckStep = Schema.Struct({
   round: Schema.Number,
   /** Review findings the lead hasn't settled. */
   open: Schema.Number,
+  /** What Althar did before asking: told the agent to carry on, started it afresh, or told it to try another way. */
+  tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected']))),
 })
 export type StuckStep = typeof StuckStep.Type
 
