@@ -10,7 +10,7 @@ import { Code } from '../../primitives/Code/Code'
 import { Field } from '../../primitives/Field/Field'
 import { Caret, Disclosure, DisclosureTrigger, Fold, type Disclosable } from '../../primitives/Fold/Fold'
 import { Select } from '../../primitives/Select/Select'
-import { AskAnswered, AskCard, AskFoot, AskNote } from '../Ask/Ask'
+import { AskAnswered, AskCard, AskFoot, AskNote } from '../../primitives/Ask/Ask'
 import s from './Permission.module.css'
 import { Rhythm } from '../../lib/rhythm'
 

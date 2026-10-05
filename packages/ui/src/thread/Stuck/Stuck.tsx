@@ -9,7 +9,7 @@ import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Button } from '../../primitives/Button/Button'
 import { Menu, MenuItem } from '../../primitives/Menu/Menu'
 import { NoteForm } from '../../primitives/NoteForm/NoteForm'
-import { AskAnswered, AskCard, AskFoot, AskNote } from '../Ask/Ask'
+import { AskAnswered, AskCard, AskFoot, AskNote } from '../../primitives/Ask/Ask'
 import { Terminal } from '../Terminal/Terminal'
 import s from './Stuck.module.css'
 
