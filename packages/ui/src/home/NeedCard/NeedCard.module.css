@@ -125,7 +125,18 @@
 .checks {
   display: inline-flex;
   align-items: center;
+  gap: 10px;
+}
+.check,
+.failed {
+  display: inline-flex;
+  align-items: center;
   gap: 5px;
+}
+/* a failing check needs the person: violet, like every call */
+.failed {
+  font-weight: 500;
+  color: var(--signal);
 }
 .ok {
   color: var(--ok);

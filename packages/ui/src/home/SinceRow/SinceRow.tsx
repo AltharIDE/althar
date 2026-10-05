@@ -10,7 +10,8 @@ import s from './SinceRow.module.css'
  * request opened, work moved to another agent at a usage limit, a stalled
  * step started afresh, permission asks a lead answered within the rules. What
  * happened first, then quieter why, then whose and when. Merging is never
- * here: that is the person's own click.
+ * here: that is the person's own click. Opened, what happened is the target,
+ * stretched over the row, as a running task's title is.
  */
 
 export interface SinceRowText {
@@ -36,14 +37,16 @@ export type SinceRowProps = RootProps<
     detail?: string
     /** When: 12:58. */
     at: string
+    /** Open what it happened to: the task, or its pull request. Without it, the row is words. */
+    onOpen?: () => void
     text?: Partial<SinceRowText>
   }
 >
 
-export function SinceRow({ icon, project, task, what, detail, at, className, text, ...rest }: SinceRowProps) {
+export function SinceRow({ icon, project, task, what, detail, at, onOpen, className, text, ...rest }: SinceRowProps) {
   const t = { ...sinceRowText, ...text }
   return (
-    <div className={cx(s.row, className)} {...rest}>
+    <div className={cx(s.row, onOpen && s.opens, className)} {...rest}>
       <Icon name={icon} size={12} className={s.icon} />
       <span className={s.body}>
         {task && (
@@ -52,7 +55,13 @@ export function SinceRow({ icon, project, task, what, detail, at, className, tex
             {task}
           </span>
         )}
-        <span className={s.what}>{what}</span>
+        {onOpen ? (
+          <button type="button" className={cx(s.what, s.open)} onClick={onOpen}>
+            {what}
+          </button>
+        ) : (
+          <span className={s.what}>{what}</span>
+        )}
         {detail && <span className={s.detail}>{detail}</span>}
       </span>
       {project ? <ProjectWord project={project} className={s.project} /> : <span className={s.everywhere}>{t.everywhere}</span>}

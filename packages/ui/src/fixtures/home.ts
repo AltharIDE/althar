@@ -49,7 +49,16 @@ export const READY = {
   task: '416',
   title: 'Return 409 when a refund idempotency key is reused',
   at: '22m ago',
-  change: { host: GITHUB, repo: 'meridian-api', number: 1191, add: 212, del: 41, checks: 3, lead: OPUS, reviewer: SONNET },
+  change: {
+    host: GITHUB,
+    repo: 'meridian-api',
+    number: 1191,
+    add: 212,
+    del: 41,
+    checks: { passed: 3, failed: 0, running: 0 },
+    lead: OPUS,
+    reviewer: SONNET,
+  },
 }
 
 export const DECISION = {

@@ -102,6 +102,13 @@ export function composition(seed: string): MarkCell[] {
  * An ink for a project nobody has given one. The seed chooses where to start, so
  * the same seed gets the same ink; an ink in `taken`, such as the other
  * projects' inks, is passed over while a free one is left.
+ *
+ * Keep what this returns. Choose the ink once, when the project is made, with
+ * the inks of the projects that exist then, and store it with the project;
+ * after that, read it, never work it out again. Worked out on every render,
+ * it would change whenever another project is added, removed or listed in a
+ * different order, and differ between devices: the opposite of a mark you
+ * learn by sight.
  */
 export function projectInk(seed: string, taken: readonly ProjectInk[] = []): ProjectInk {
   const start = mix(hash(seed)) % INKS.length

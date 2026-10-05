@@ -52,6 +52,20 @@ export const ReadyToAccept: Story = {
   },
 }
 
+const change = (checks: { passed: number; failed: number; running: number }) => ({
+  ...ReadyToAccept.args,
+  detail: <NeedChange {...READY.change} checks={checks} />,
+})
+
+/** A check failed: said first, in violet, since only a person can take a change that fails. */
+export const ChecksFailing: Story = { args: change({ passed: 2, failed: 1, running: 0 }) }
+
+/** Some checks still run. */
+export const ChecksRunning: Story = { args: change({ passed: 1, failed: 0, running: 2 }) }
+
+/** No checks ran on it. */
+export const NoChecks: Story = { args: change({ passed: 0, failed: 0, running: 0 }) }
+
 /** A decision, with its choices on the card so you see what you're asked before you open it. */
 export const Decision: Story = {
   args: {
@@ -158,6 +172,9 @@ export const AllStates: Story = {
       cells={[
         { state: 'permission', node: <NeedCard {...args} {...Permission.args} /> },
         { state: 'ready to accept', node: <NeedCard {...args} {...ReadyToAccept.args} /> },
+        { state: 'checks failing', node: <NeedCard {...args} {...ChecksFailing.args} /> },
+        { state: 'checks running', node: <NeedCard {...args} {...ChecksRunning.args} /> },
+        { state: 'no checks', node: <NeedCard {...args} {...NoChecks.args} /> },
         { state: 'decision', node: <NeedCard {...args} {...Decision.args} /> },
         { state: 'sign-in', node: <NeedCard {...args} {...SignIn.args} /> },
         { state: 'stuck', node: <NeedCard {...args} {...Stuck.args} /> },

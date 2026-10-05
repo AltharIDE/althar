@@ -43,8 +43,16 @@ export function SidePanel({ label, head, actions, onClose, children, className, 
   const panel = useRef<HTMLElement>(null)
   useEffect(() => {
     const back = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    panel.current?.focus()
-    return () => back?.focus()
+    // Focus moves just after the commit, in the same frame, as AskAnswered's does: inside a
+    // test's act scope, focusing while React still flushes is reported as a suspension.
+    let open = true
+    queueMicrotask(() => {
+      if (open) panel.current?.focus()
+    })
+    return () => {
+      open = false
+      queueMicrotask(() => back?.focus())
+    }
   }, [])
   return (
     <aside

@@ -45,6 +45,7 @@ const meta = {
     looked: '3 h ago',
     projects: PROJECT_LIST,
     onOpenTask: fn(),
+    onOpenEvent: fn(),
     onOpenProject: fn(),
     onOpenFolder: fn(),
   },
@@ -301,15 +302,15 @@ export const Busy: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Allow once' }))
-    await expect(canvas.getByText('Allowed npm publish')).toBeInTheDocument()
+    await expect(await canvas.findByText('Allowed npm publish')).toBeInTheDocument()
     await userEvent.click(canvas.getByRole('button', { name: 'Decide' }))
-    await expect(canvas.getByRole('button', { name: 'Record decision' })).toBeInTheDocument()
+    await expect(await canvas.findByRole('button', { name: 'Record decision' })).toBeInTheDocument()
   },
 }
 
 /** A quiet morning: nothing waits on you, one task runs, and the night's work is listed. */
 export const Quiet: Story = {
-  args: { running: RUNNING_QUIET, since: SINCE_QUIET, looked: 'last night, 23:40', projects: PROJECTS_QUIET },
+  args: { needs: [], running: RUNNING_QUIET, since: SINCE_QUIET, looked: 'last night, 23:40', projects: PROJECTS_QUIET },
   render: (args) => (
     <Window agents={AGENTS_READY} running={args.running.length} waiting={0}>
       <Home {...args} waiting={0} />

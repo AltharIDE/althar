@@ -34,6 +34,18 @@ describe('Home', () => {
     expect(screen.queryByRole('complementary', { name: 'Projects' })).toBeNull()
   })
 
+  it('says nothing waits when the calls come as an empty list', () => {
+    home({ needs: [].map(() => null) })
+    expect(screen.getByText('Nothing is waiting on you.')).toBeInTheDocument()
+  })
+
+  it('opens what something the loop did happened to, by its id', () => {
+    const onOpenEvent = vi.fn()
+    home({ onOpenEvent })
+    fireEvent.click(screen.getByRole('button', { name: 'Pull request #1191 opened' }))
+    expect(onOpenEvent).toHaveBeenCalledWith('s1')
+  })
+
   it('says what is empty, and marks the task open in the dock', () => {
     const { container } = home({ running: RUNNING, current: 'h207', since: [] })
     expect(screen.getByText('Nothing is waiting on you.')).toBeInTheDocument()

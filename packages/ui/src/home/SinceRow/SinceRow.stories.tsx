@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { fn } from 'storybook/test'
 
 import { SINCE } from '../../fixtures/home'
-import { States } from '../../storybook/States'
+import { States, statesOn } from '../../storybook/States'
 import { SinceRow } from './SinceRow'
 import s from './SinceRow.stories.module.css'
 
@@ -34,10 +35,14 @@ export const StartedAfresh: Story = { args: strip(RESTARTED) }
 /** Something across every project, which names no project. */
 export const Everywhere: Story = { args: strip(ANSWERED) }
 
+/** It opens what it happened to: the task, or its pull request. What happened is the target, stretched over the row. */
+export const Opening: Story = { args: { onOpen: fn() } }
+
 /** What happened, with nothing more to say about it. */
 export const WithoutDetail: Story = { args: { detail: undefined } }
 
 export const AllStates: Story = {
+  parameters: statesOn({ hover: '> div', focus: 'button', pressed: 'button' }),
   render: () => (
     <States
       size="thread"
@@ -45,6 +50,9 @@ export const AllStates: Story = {
         ...[OPENED, MOVED, FIXED, RESTARTED].map((event) => ({ state: event.what, node: <SinceRow {...strip(event)} /> })),
         { state: 'everywhere', node: <SinceRow {...strip(ANSWERED)} /> },
         { state: 'no detail', node: <SinceRow {...strip(OPENED)} detail={undefined} /> },
+        { state: 'opens', node: <SinceRow {...strip(OPENED)} onOpen={fn()} /> },
+        { state: 'hover', node: <SinceRow {...strip(OPENED)} onOpen={fn()} /> },
+        { state: 'focus', node: <SinceRow {...strip(OPENED)} onOpen={fn()} /> },
       ]}
     />
   ),

@@ -18,6 +18,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'chrome/ProjectSwitcher/ProjectSwitcher.tsx': 'the switcher’s trigger and its project rows',
   'home/NeedCard/NeedCard.tsx': 'the call’s title, which opens it in the dock',
   'home/RunRow/RunRow.tsx': 'a running task’s title, stretched over its row',
+  'home/SinceRow/SinceRow.tsx': 'what happened, stretched over its row',
   'home/ProjectRow/ProjectRow.tsx': 'a project’s row, which opens the project',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',

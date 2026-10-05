@@ -84,7 +84,17 @@ export function AskAnswered({
 }: AskAnsweredProps) {
   const line = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (focusOnMount) line.current?.focus()
+    if (!focusOnMount) return
+    // Moved just after the commit rather than inside it, in the same frame: focusing
+    // inside a test's act scope, while React is still flushing, makes React report a
+    // suspension that isn't one.
+    let live = true
+    queueMicrotask(() => {
+      if (live) line.current?.focus()
+    })
+    return () => {
+      live = false
+    }
   }, [focusOnMount])
   return (
     <div ref={line} className={cx(s.answered, className)} tabIndex={focusOnMount ? -1 : undefined} {...rest}>

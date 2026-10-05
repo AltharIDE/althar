@@ -1,4 +1,4 @@
-import { type ReactNode, useId } from 'react'
+import { Children, type ReactNode, useId } from 'react'
 
 import { HomeLane } from '../../foundations/vocabulary'
 import { HomeSection } from '../../home/HomeSection/HomeSection'
@@ -42,7 +42,7 @@ export const homeText: HomeText = {
 export type HomeRun = Omit<RunRowProps, 'onOpen' | 'current' | 'text'> & { id: string }
 
 /** Something the loop did, as its line is given it. */
-export type HomeEvent = Omit<SinceRowProps, 'text'> & { id: string }
+export type HomeEvent = Omit<SinceRowProps, 'onOpen' | 'text'> & { id: string }
 
 /** A project, as its row is given it. */
 export type HomeProject = Omit<ProjectRowProps, 'onOpen' | 'className' | 'text'> & { id: string }
@@ -62,6 +62,8 @@ export interface HomeProps {
   /** What is open beside the stream, in the projects' place: a Dock. */
   dock?: ReactNode
   onOpenTask?: (id: string) => void
+  /** Open what something the loop did happened to, by the event's id. */
+  onOpenEvent?: (id: string) => void
   onOpenProject?: (id: string) => void
   /** Open a folder as a new project. Without it, no way to from here. */
   onOpenFolder?: () => void
@@ -79,6 +81,7 @@ export function Home({
   current,
   dock,
   onOpenTask,
+  onOpenEvent,
   onOpenProject,
   onOpenFolder,
   className,
@@ -94,7 +97,7 @@ export function Home({
         </Heading>
         <div className={s.column}>
           <HomeSection lane={HomeLane.Yours} count={waiting}>
-            {needs && <div className={s.cards}>{needs}</div>}
+            {Children.toArray(needs).length > 0 && <div className={s.cards}>{needs}</div>}
           </HomeSection>
           <HomeSection lane={HomeLane.Running} count={running.length}>
             {running.length > 0 && (
@@ -112,7 +115,7 @@ export function Home({
               <ul className={s.events}>
                 {since.map(({ id, ...event }) => (
                   <li key={id}>
-                    <SinceRow {...event} />
+                    <SinceRow {...event} {...(onOpenEvent ? { onOpen: () => onOpenEvent(id) } : {})} />
                   </li>
                 ))}
               </ul>

@@ -25,7 +25,7 @@ export type ProjectMarkProps = RootProps<
   {
     /** What the drawing comes from. Pass what stays when the project is renamed, such as its id. */
     seed: string
-    /** The project's ink. `projectInk(seed)` gives one to a project nobody has given one. */
+    /** The project's ink, as stored with it. `projectInk` chooses one when the project is made. */
     ink: ProjectInk
     /** Width and height, in pixels: 15 beside a name, 18 in a bar, 40 in a list of projects. */
     size?: number
