@@ -6,7 +6,7 @@ import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
 import { FieldError } from '../../primitives/Field/Field'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
-import { AskAnswered } from '../Ask/Ask'
+import { AskAnswered } from '../../primitives/Ask/Ask'
 import s from './Question.module.css'
 
 export interface QuestionOption {

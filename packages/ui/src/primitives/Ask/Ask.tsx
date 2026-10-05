@@ -3,14 +3,14 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
-import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { LinkButton } from '../LinkButton/LinkButton'
 import s from './Ask.module.css'
 
 /*
- * Something that waits on a person, as a card in the thread: a permission,
- * a graph change beyond what the run was given. Violet, like every ask. Once
- * answered it folds to one line saying what was said, with Undo when the
- * consumer can take the answer back.
+ * Something that waits on a person: a permission or a graph change beyond
+ * what the run was given, as a card in the thread, or a call on the home.
+ * Violet, like every ask. Once answered it folds to one line saying what was
+ * said, with Undo when the consumer can take the answer back.
  */
 
 export type AskCardProps = RootProps<
@@ -84,7 +84,17 @@ export function AskAnswered({
 }: AskAnsweredProps) {
   const line = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (focusOnMount) line.current?.focus()
+    if (!focusOnMount) return
+    // Moved just after the commit rather than inside it, in the same frame: focusing
+    // inside a test's act scope, while React is still flushing, makes React report a
+    // suspension that isn't one.
+    let live = true
+    queueMicrotask(() => {
+      if (live) line.current?.focus()
+    })
+    return () => {
+      live = false
+    }
   }, [focusOnMount])
   return (
     <div ref={line} className={cx(s.answered, className)} tabIndex={focusOnMount ? -1 : undefined} {...rest}>

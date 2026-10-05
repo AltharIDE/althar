@@ -1,6 +1,6 @@
 # @althar/ui — Architecture
 
-This package holds Althar's interface components: the primitives (buttons, menus, popovers), the thread (messages, tool calls, steps, permissions), the composer, the coordinator's cards, the board, the dock beside it, a task's outputs, and the window's chrome. The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target. This document adds what is specific to UI components. Where the code does not yet meet it, see **Gaps** at the end.
+This package holds Althar's interface components: the primitives (buttons, menus, popovers), the thread (messages, tool calls, steps, permissions), the composer, the coordinator's cards, the board, the dock beside it, the home's stream, a task's outputs, and the window's chrome. The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target. This document adds what is specific to UI components. Where the code does not yet meet it, see **Gaps** at the end.
 
 - **Owner:** Repository maintainers
 - **Consumers:** the Althar desktop shell. The pitch app may adopt components later.
@@ -10,22 +10,23 @@ This package holds Althar's interface components: the primitives (buttons, menus
 
 | Layer | What it holds |
 | --- | --- |
-| `foundations` | Tokens, icons, brand marks, `Model`, and the domain vocabularies. |
-| `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel. |
-| `thread` | What appears in a conversation: turns, tool calls, steps, permissions, questions, Stuck, documents, and Ask, which the asking parts share. |
+| `foundations` | Tokens, icons, brand marks, project marks, `Model`, and the domain vocabularies. |
+| `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, and Ask, which every part that asks a person shares. |
+| `thread` | What appears in a conversation: turns, tool calls, steps, permissions, questions, Stuck, documents. |
 | `composer` | What writes into a conversation: Composer, ModelPick, ContextRing, Listening, Running. |
 | `coordinator` | What the coordinator shows about tasks: Issue, TaskLaunch, TaskCard, TaskMark, TaskHeld. |
 | `board` | The project's work in lanes: Board, BoardColumn, and a card or row for each lane. |
 | `dock` | What opens beside the board: Dock and a peek for each kind of card. |
+| `home` | Work across every project, as the home shows it: HomeSection, NeedCard, RunRow, SinceRow, ProjectRow, ProjectWord. |
 | `outputs` | What a task made: ChangeSet, ArtifactCard. |
-| `chrome` | The window's own furniture: TitleBar, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu. |
+| `chrome` | The window's own furniture: TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu. |
 | `setup` | What comes before a project: Runtimes, ConnectAgent, SourceMap. |
-| `screens` | Whole screens made from the layers above: Welcome, Start, NewProject, ProjectRules. |
+| `screens` | Whole screens made from the layers above: Welcome, Start, Home, NewProject, ProjectRules. |
 
 The rules between them:
 
-- `foundations` ← `primitives` ← the eight middle layers ← `screens`. A layer imports only from layers before it in that chain.
-- The eight middle layers don't import each other. Where one needs another's part inside it, it takes a slot and the consumer fills it: StepPanel's composer is a slot.
+- `foundations` ← `primitives` ← the nine middle layers ← `screens`. A layer imports only from layers before it in that chain.
+- The nine middle layers don't import each other. Where one needs another's part inside it, it takes a slot and the consumer fills it: StepPanel's composer is a slot.
 - Nothing imports `screens`. It is exported on its own entry (see **Public API**).
 - `fixtures` and `storybook` serve stories, tests and the workbench. Nothing else in `src` imports them. `fixtures/models.ts` stands in for what a consumer owns: the demo models, runtimes, pins and default efforts.
 - A screen is made of the real components, not pictures of them. Content a screen ships with, like the welcome's demo project, lives beside it, not in `fixtures`.
@@ -96,6 +97,7 @@ The same holds for formatting: dates, durations, counts and file sizes arrive fo
   - green is only for additions and merges
   - `--danger` is only for deletions and failures
   - source colours, like `--linear`, are only for that source's mark
+  - project inks, `--project-*`, are only for a project's mark
 - Visual rules from the product voice apply. There are no side stripes, coloured shadows or badge pills, and there is no selling copy.
 - **Text meets contrast.** `--t-4` is for disabled text and decoration, never for information.
 - **Spacing between parts belongs to the layout, not the parts.** A part never sets its own top margin in a thread. Its root carries `data-rhythm` (the `Rhythm` enum in `src/lib/rhythm.ts`), and `Thread` and `Turn` space parts from it:
@@ -138,6 +140,7 @@ Plain semantic elements stay plain. A button is a `<button>`, and a list is a `<
 
 - **Icons are Iconoir** (`iconoir-react`, MIT). They are named by what they mean in Althar (`work`, `after`, `corner`), not by their drawing. `Icon` sets a stroke width that holds up at 11–14px.
 - **Marks are brands, drawn in ink.** `BrandMark` draws a `Brand` from `foundations/brands/brands.ts`. That file is generated from Lobe Icons (MIT) and Simple Icons (CC0). Brand colour is not used, apart from Linear's issue card.
+- **A project's mark is generated, never chosen from pictures.** `ProjectMark` draws a composition from a seed that survives renaming, in one of the project inks, so every project has a mark from the moment it exists.
 
 ### Shared building blocks
 
@@ -145,7 +148,7 @@ A pattern that appears in two components becomes one part, so the two cannot dri
 
 | Part | What it is | Used by |
 | --- | --- | --- |
-| Ask (`AskCard`, `AskFoot`, `AskAnswered`, `AskNote`) | A card that waits on a person, and the line it folds to once answered | Permission, GraphProposal, Question, Stuck |
+| Ask (`AskCard`, `AskFoot`, `AskAnswered`, `AskNote`) | A card that waits on a person, and the line it folds to once answered | Permission, GraphProposal, Question, Stuck, and the home's answered calls |
 | SidePanel | What opens beside a thread or the board | DocPanel, StepPanel, Dock |
 | TaskGlyph | Where a task stands, as a glyph | TaskCard, WorkCard, TaskHeader, WorkPeek |
 | FileChanges, Delta, DiffStat | Files a change touched, with lines added and removed | ChangeSet, AcceptPeek, and a tool call's meta |

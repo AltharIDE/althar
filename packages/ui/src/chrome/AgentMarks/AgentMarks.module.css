@@ -1,0 +1,27 @@
+.agents {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.name {
+  font-weight: 500;
+}
+/* out until a reset: said, not raised */
+.out {
+  color: var(--t-2);
+}
+/* signed out: only a person can sign it in */
+.you {
+  color: var(--signal);
+}

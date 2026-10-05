@@ -1,0 +1,32 @@
+/* the window the home sits in, as the app draws it */
+.window {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--n-2);
+}
+.body {
+  flex: 1;
+  min-height: 0;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+/* a window shrunk to fit a cell of the states grid */
+.cell {
+  width: 1280px;
+  height: 720px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.cell .window {
+  position: relative;
+  height: 100%;
+}

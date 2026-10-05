@@ -1,0 +1,106 @@
+/* A project's mark: its cells in two depths of its ink on a tint of it. */
+.mark {
+  position: relative;
+  flex: none;
+  display: inline-block;
+  line-height: 0;
+  vertical-align: middle;
+}
+.tile {
+  display: block;
+}
+
+.clay {
+  --mark-ink: var(--project-clay);
+}
+.ochre {
+  --mark-ink: var(--project-ochre);
+}
+.olive {
+  --mark-ink: var(--project-olive);
+}
+.moss {
+  --mark-ink: var(--project-moss);
+}
+.teal {
+  --mark-ink: var(--project-teal);
+}
+.slate {
+  --mark-ink: var(--project-slate);
+}
+.rose {
+  --mark-ink: var(--project-rose);
+}
+.umber {
+  --mark-ink: var(--project-umber);
+}
+
+.ground {
+  fill: color-mix(in srgb, var(--mark-ink) 22%, var(--paper));
+}
+.ink {
+  fill: var(--mark-ink);
+}
+.deep {
+  fill: color-mix(in srgb, var(--mark-ink) 62%, var(--t-1));
+}
+.paper {
+  fill: var(--n-1);
+}
+.edge {
+  fill: none;
+  stroke: var(--line);
+}
+
+/* nothing going on: the mark steps back */
+.quiet .tile {
+  opacity: 0.45;
+  filter: saturate(0.6);
+}
+
+/* work runs: an arc goes round, on a faint track */
+.run {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  overflow: visible;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+.track {
+  fill: none;
+  stroke: color-mix(in srgb, var(--live) 16%, transparent);
+  stroke-width: 1.5;
+}
+.arc {
+  fill: none;
+  stroke: var(--live);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 16 84;
+  animation: round 2.8s linear infinite;
+}
+@keyframes round {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .arc {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}
+
+/* something waits on you: a violet dot on the corner, ringed in whatever the
+   mark sits on (--project-mark-ground, the page unless told) */
+.you {
+  position: absolute;
+  top: -12%;
+  right: -12%;
+  width: max(8px, 30%);
+  aspect-ratio: 1;
+  border-radius: 99px;
+  background: var(--signal);
+  box-shadow: 0 0 0 2.5px var(--project-mark-ground, var(--n-2));
+}
