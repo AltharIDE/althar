@@ -93,6 +93,7 @@
         "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
         "vite-plus": "1.0.0-rc.0",
         "vitest": "5.0.1",
+        "wrangler": "^4.143.0",
       },
     },
     "apps/site": {
@@ -281,6 +282,28 @@
 
     "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@1.5.1", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-nSUIrC1fOR9+ppKfx9KdwjBBND2sAPzFHo4yVQrGbXZHnayUYpwL8CDVR5LSxbapY/oKMOzNP0wvwfyx3PS2KA=="],
 
+    "@althar/cli": ["@althar/cli@workspace:apps/cli"],
+
+    "@althar/connectors": ["@althar/connectors@workspace:packages/connectors"],
+
+    "@althar/contracts": ["@althar/contracts@workspace:packages/contracts"],
+
+    "@althar/desktop": ["@althar/desktop@workspace:apps/desktop"],
+
+    "@althar/domain": ["@althar/domain@workspace:packages/domain"],
+
+    "@althar/persistence-sqlite": ["@althar/persistence-sqlite@workspace:packages/persistence-sqlite"],
+
+    "@althar/pitch": ["@althar/pitch@workspace:apps/pitch"],
+
+    "@althar/provider-adapters": ["@althar/provider-adapters@workspace:packages/provider-adapters"],
+
+    "@althar/runtime": ["@althar/runtime@workspace:packages/runtime"],
+
+    "@althar/site": ["@althar/site@workspace:apps/site"],
+
+    "@althar/ui": ["@althar/ui@workspace:packages/ui"],
+
     "@anthropic-ai/claude-agent-sdk": ["@anthropic-ai/claude-agent-sdk@0.3.284", "", { "optionalDependencies": { "@anthropic-ai/claude-agent-sdk-darwin-arm64": "0.3.284", "@anthropic-ai/claude-agent-sdk-darwin-x64": "0.3.284", "@anthropic-ai/claude-agent-sdk-linux-arm64": "0.3.284", "@anthropic-ai/claude-agent-sdk-linux-arm64-musl": "0.3.284", "@anthropic-ai/claude-agent-sdk-linux-x64": "0.3.284", "@anthropic-ai/claude-agent-sdk-linux-x64-musl": "0.3.284", "@anthropic-ai/claude-agent-sdk-win32-arm64": "0.3.284", "@anthropic-ai/claude-agent-sdk-win32-x64": "0.3.284" }, "peerDependencies": { "@anthropic-ai/sdk": ">=0.93.0", "@modelcontextprotocol/sdk": "^1.29.0", "zod": "^4.0.0" } }, "sha512-NSoJwEq6nFSf8dtaacYx37QdGgqApI3eHFUlxclMLYi8irb6ZJwEaUnPnLUCyAyg9W/tMkgZC0GXWLRCc01I0w=="],
 
     "@anthropic-ai/claude-agent-sdk-darwin-arm64": ["@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.284", "", { "os": "darwin", "cpu": "arm64" }, "sha512-gKY9MUjY83398uCiPLHsd87kyzu7agIM7ApqWpJkpSINep6hxx4rNoR8bUbNWg49Aoe/PW/DJkQByAQuNzR9rg=="],
@@ -346,28 +369,6 @@
     "@blazediff/core": ["@blazediff/core@1.10.0", "", {}, "sha512-AOQff0zgR7cGsZL+4E7hVkmujoPUpm0J9xzWGWZj5wCjd3gmxESXAPfKyuzs93VdpQNFhHlBhfOjrcZ+XTERtQ=="],
 
     "@bramus/specificity": ["@bramus/specificity@2.4.2", "", { "dependencies": { "css-tree": "^3.0.0" }, "bin": { "specificity": "bin/cli.js" } }, "sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw=="],
-
-    "@althar/cli": ["@althar/cli@workspace:apps/cli"],
-
-    "@althar/connectors": ["@althar/connectors@workspace:packages/connectors"],
-
-    "@althar/contracts": ["@althar/contracts@workspace:packages/contracts"],
-
-    "@althar/desktop": ["@althar/desktop@workspace:apps/desktop"],
-
-    "@althar/domain": ["@althar/domain@workspace:packages/domain"],
-
-    "@althar/persistence-sqlite": ["@althar/persistence-sqlite@workspace:packages/persistence-sqlite"],
-
-    "@althar/pitch": ["@althar/pitch@workspace:apps/pitch"],
-
-    "@althar/provider-adapters": ["@althar/provider-adapters@workspace:packages/provider-adapters"],
-
-    "@althar/runtime": ["@althar/runtime@workspace:packages/runtime"],
-
-    "@althar/site": ["@althar/site@workspace:apps/site"],
-
-    "@althar/ui": ["@althar/ui@workspace:packages/ui"],
 
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.5.0", "", {}, "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg=="],
 
