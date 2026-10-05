@@ -5,6 +5,7 @@ import type { BoardSnapshot, BoardTask } from '@althar/contracts'
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { newestReads } from '../../shared/items'
 import { useServices, useWatch } from '../../data/services'
+import { headsOf } from '../../shared/mergeHere'
 
 /*
  * A project's board: every task it hasn't settled, the most recently
@@ -49,6 +50,8 @@ export interface BoardModel {
   readonly pushing: string | null
   /** Merges a ready task's pull request at the head the person saw; whether it went through. */
   readonly merge: (taskId: string, head: string, url?: string) => Promise<boolean>
+  /** Merges a ready task without a pull request into its repositories' default branches here, up to the heads the dock showed; whether it went through. */
+  readonly mergeHere: (task: BoardTask) => Promise<boolean>
   /** Pushes a task's branch to its pull request, up to the commit the person saw; whether it went through. */
   readonly push: (taskId: string, head: string, url?: string) => Promise<boolean>
   /** Sends a ready task back to its lead with a note, starting the lead again if it stopped; whether it went through. */
@@ -104,6 +107,22 @@ export const useBoard = (projectId: string): BoardModel => {
     sending,
     opening,
     pushing,
+    mergeHere: useCallback(
+      async (task) => {
+        setMerging(task.taskId)
+        setError(null)
+        try {
+          await client.mergeHere(task.taskId, headsOf(task.here))
+          return true
+        } catch (failure) {
+          fail(failure)
+          return false
+        } finally {
+          setMerging(null)
+        }
+      },
+      [client, fail],
+    ),
     push: useCallback(
       async (taskId, head, url) => {
         setPushing(taskId)

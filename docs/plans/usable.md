@@ -83,11 +83,13 @@ One pull request each:
      on 2026-10-05: a folder's repositories are listed to keep or leave out, a
      task names the ones it changes, and each is worked, published and pushed
      on its own
-     ([01](../architecture/01-concepts-and-project-model.md)).
+     ([01](../architecture/01-concepts-and-project-model.md));
+   - local merging, for a task that ended on its branch: into each of its
+     repositories' default branches here, all or none, nothing pushed
+     ([06](../architecture/06-integrations-and-skills.md)).
 
    Next:
-   1. Local merging.
-   2. The lead answers permission requests: the "lead decides" mode.
+   1. The lead answers permission requests: the "lead decides" mode.
 
    Decided on 2026-10-04:
    - **No "send back" step.** The task's chat is how the person sends work

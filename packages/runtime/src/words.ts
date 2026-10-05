@@ -2,7 +2,7 @@ import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
 import type { AccountRefused } from './Accounts'
-import type { NoChangeToOpen } from './errors'
+import type { CantMerge, NoChangeToOpen } from './errors'
 
 /*
  * What went wrong, in words a person reads in the window. The runtime's
@@ -139,6 +139,10 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
         return 'That request was already used for something else. Try again.'
       case 'DatabaseInUse':
         return 'Another copy of Althar is using this profile.'
+      case 'CantMerge': {
+        const detail = text(error, 'detail')
+        return cantMerge[text(error, 'why') as CantMerge['why']]?.(detail) ?? `Althar couldn't merge it. ${detail}`
+      }
       case 'NoChangeToOpen':
         return noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working
       case 'SignOutFailed':
@@ -184,6 +188,20 @@ const hostSaid = (host: string, reason: string, said: string) => {
   }
 }
 
+/** Why Althar won't merge a task here, by reason. */
+const cantMerge = {
+  pull_request: () => 'The task has a pull request: merge it there.',
+  settled: () => 'The task is settled, so its branch stays as it is.',
+  changed: () => 'The task’s branch changed since you looked. Look again, then merge.',
+  conflicts: (files: string) =>
+    `It conflicts with the default branch, in ${files}. Tell the lead to bring its branch up to date, then merge again.`,
+  busy: (where: string) =>
+    `The default branch is checked out in ${where} with changes not committed. Commit or put them away, then merge again.`,
+  untracked: (files: string) => `The merge would overwrite files git doesn’t track: ${files}. Move them away, then merge again.`,
+  moved: (branch: string) => `${branch} moved while Althar was merging, so nothing was merged. Merge again.`,
+  missing: (branch: string) => `This Mac has no ${branch} branch to merge into.`,
+} as const satisfies Record<CantMerge['why'], (detail: string) => string>
+
 /** Why a task has no pull request to open, by reason. */
 const noChangeToOpen = {
   working: "The task's work isn't done yet. Its pull request opens when it is.",
@@ -195,6 +213,7 @@ const noChangeToOpen = {
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
   'ChangedSinceSeen',
+  'CantMerge',
   'NoChangeToOpen',
   'NotConnected',
   'NotARepository',

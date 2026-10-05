@@ -8,7 +8,7 @@ import { TaskStatus } from '@althar/ui'
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
 import { statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
-import { changed, fakeClient, items, models, snapshot, streamed } from './fixtures'
+import { change, changed, fakeClient, items, models, snapshot, streamed } from './fixtures'
 import { clock } from '../src/renderer/shared/time'
 import { withServices } from './render'
 
@@ -116,6 +116,46 @@ describe('a task', () => {
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Open a pull request' }))
     await waitFor(() => expect(client.openChange).toHaveBeenCalledWith('t1'))
+  })
+
+  it('merges work that ended on its branch here, up to the heads it showed', async () => {
+    const here = [
+      { repository: 'api', name: 'api', branch: 'main', head: 'abc111' },
+      { repository: 'web', name: 'web', branch: 'develop', head: 'def222' },
+    ]
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ session: null, task: { ...snapshot().task, phase: 'ready', commits: 2, here } })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge into each default branch' }))
+    await waitFor(() =>
+      expect(client.mergeHere).toHaveBeenCalledWith('t1', [
+        { repository: 'api', head: 'abc111' },
+        { repository: 'web', head: 'def222' },
+      ]),
+    )
+  })
+
+  it('merges a repository that ended on its branch here, beside the pull request of the rest', async () => {
+    const here = [
+      { repository: 'tools', name: 'tools', branch: 'main', head: 'abc111' },
+      { repository: 'docs', name: 'docs', branch: 'main', head: 'def222' },
+    ]
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({ session: null, task: { ...snapshot().task, phase: 'ready', commits: 2, here, changes: [change()] } }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge tools and docs into main' }))
+    await waitFor(() =>
+      expect(client.mergeHere).toHaveBeenCalledWith('t1', [
+        { repository: 'tools', head: 'abc111' },
+        { repository: 'docs', head: 'def222' },
+      ]),
+    )
+    // Its pull request is open already.
+    expect(screen.queryByRole('button', { name: 'Open a pull request' })).toBeNull()
   })
 
   it('keeps the person’s pinned models in this window, and their default efforts in Althar', async () => {

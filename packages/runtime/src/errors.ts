@@ -82,6 +82,18 @@ export class NoChangeToOpen extends Schema.TaggedError<NoChangeToOpen>()('NoChan
   why: Schema.Literals(['working', 'stopped', 'settled', 'opened']),
 }) {}
 
+/**
+ * A task's branch can't be merged here: it has a pull request to merge
+ * instead, it's settled, what the person saw isn't on its branch any more,
+ * it conflicts, or the default branch is checked out with changes not
+ * committed. `detail` says where.
+ */
+export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
+  taskId: Schema.String,
+  why: Schema.Literals(['pull_request', 'settled', 'changed', 'conflicts', 'busy', 'untracked', 'moved', 'missing']),
+  detail: Schema.String,
+}) {}
+
 /** The pull request moved on since the person looked: accepting it would merge what they didn't see. */
 export class ChangedSinceSeen extends Schema.TaggedError<ChangedSinceSeen>()('ChangedSinceSeen', {
   taskId: Schema.String,
