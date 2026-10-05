@@ -8,6 +8,7 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
+import { applyMerges, planMerge } from '../src/localMerge'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { notices, repository, runtime } from './support'
@@ -177,6 +178,90 @@ describe('merging a task here', () => {
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
         'Merged here: api into main, web into main.',
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('merges nothing where a checkout has a file git doesn’t track where the merge puts one, and says which', () =>
+    Effect.gen(function* () {
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+      const roots = ['api', 'web'].map((name) => {
+        const root = join(folder, name)
+        mkdirSync(root)
+        git(root, 'init', '-q', '-b', 'main')
+        commit(root, 'README.md', `# ${name}\n`)
+        writeFileSync(join(root, '.gitignore'), 'dist/\n')
+        git(root, 'add', '.')
+        git(root, 'commit', '-q', '-m', 'Ignore dist')
+        return root
+      })
+      const { task, worktrees } = yield* taskIn(roots, folder)
+      const heads = worktrees.map((worktree) => ({ repository: worktree.slug, head: commit(worktree.path, 'new.ts', 'new\n') }))
+      const before = roots.map((root) => git(root, 'rev-parse', 'main'))
+      // The person started the same file in web: git won't overwrite it, so neither moves.
+      writeFileSync(join(roots[1] ?? '', 'new.ts'), 'mine\n')
+      // One git ignores isn't in the way: git replaces those.
+      mkdirSync(join(roots[0] ?? '', 'dist'))
+      writeFileSync(join(roots[0] ?? '', 'dist', 'new.ts'), 'built\n')
+      const refused = yield* Effect.flip(mergeHere(task.taskId, heads))
+      assert.deepStrictEqual(cantOf(refused).slice(1), ['untracked', `new.ts in ${roots[1] ?? ''}`])
+      assert.deepStrictEqual(
+        roots.map((root) => git(root, 'rev-parse', 'main')),
+        before,
+      )
+      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('moves refs first and checkouts last, and puts back what moved when one refuses', () =>
+    Effect.gen(function* () {
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+      const [bare, open, other] = ['api', 'web', 'docs'].map((name) => {
+        const root = join(folder, name)
+        mkdirSync(root)
+        git(root, 'init', '-q', '-b', 'main')
+        commit(root, 'README.md', `# ${name}\n`)
+        return root
+      })
+      // api's main is checked out nowhere, so it moves as a ref; web's and docs' are checked out, so they fast-forward there.
+      git(bare ?? '', 'checkout', '-q', '-b', 'mine')
+      const planOf = (root: string) =>
+        Effect.gen(function* () {
+          git(root, 'checkout', '-q', '-b', 'task', 'main')
+          const head = commit(root, 'retry.ts', 'retry\n')
+          git(root, 'checkout', '-q', root === bare ? 'mine' : 'main')
+          const plan = yield* planMerge(root, 'main', head, 'Merge task')
+          if (plan.kind !== 'move') return assert.fail(`planned ${plan.kind}`)
+          return { root, branch: 'main', plan, before: git(root, 'rev-parse', 'main') }
+        })
+      const moves = [yield* planOf(bare ?? ''), yield* planOf(open ?? ''), yield* planOf(other ?? '')]
+      assert.deepStrictEqual(
+        moves.map((move) => move.plan.checkout),
+        [null, open, other],
+      )
+      // Something written in docs since the plan: its fast-forward refuses, last, and api and web go back.
+      writeFileSync(join(other ?? '', 'retry.ts'), 'mine\n')
+      const refused = yield* applyMerges(moves.toReversed())
+      assert.strictEqual(refused?.root, other)
+      assert.deepStrictEqual(
+        moves.map((move) => git(move.root, 'rev-parse', 'main')),
+        moves.map((move) => move.before),
+      )
+      assert.strictEqual(git(open ?? '', 'status', '--porcelain'), '')
+      // A ref that moved since the plan refuses as well, and nothing else moves.
+      git(other ?? '', 'clean', '-q', '-f')
+      git(bare ?? '', 'update-ref', 'refs/heads/main', git(bare ?? '', 'rev-parse', 'task'))
+      assert.strictEqual((yield* applyMerges(moves))?.root, bare)
+      assert.deepStrictEqual(
+        moves.slice(1).map((move) => git(move.root, 'rev-parse', 'main')),
+        moves.slice(1).map((move) => move.before),
+      )
+      // Nothing in the way, every one moves.
+      git(bare ?? '', 'update-ref', 'refs/heads/main', moves[0]?.before ?? '')
+      assert.isNull(yield* applyMerges(moves))
+      assert.deepStrictEqual(
+        moves.map((move) => git(move.root, 'rev-parse', 'main')),
+        moves.map((move) => move.plan.to),
       )
     }).pipe(Effect.provide(runtime())),
   )

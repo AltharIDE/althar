@@ -316,6 +316,20 @@ describe('the board', () => {
     expect(mergeHere).toHaveBeenLastCalledWith('t5', [{ repository: 'meridian', head: 'abc111' }])
   })
 
+  it('merges a repository that ended on its branch here, beside the pull request of the rest', async () => {
+    const mergeHere = vi.fn(async () => {})
+    const here = [{ repository: 'tools', name: 'tools', branch: 'main', head: 'abc111' }]
+    const tasks = board().tasks.map((work) => (work.taskId === 't4' ? { ...work, here } : work))
+    const { client } = fakeClient({ mergeHere, getBoard: vi.fn(async () => board({ tasks })) })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Rate-limit refunds' }))
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    expect(within(dock).getByRole('button', { name: /Accept and merge/ })).toBeTruthy()
+    await userEvent.click(within(dock).getByRole('button', { name: 'Merge tools into main' }))
+    await waitFor(() => expect(mergeHere).toHaveBeenCalledWith('t4', [{ repository: 'tools', head: 'abc111' }]))
+  })
+
   it('is read again when something it shows changes, not for what is said in a thread', async () => {
     const getBoard = vi.fn(async () => board())
     const { client, emit } = fakeClient({ getBoard })

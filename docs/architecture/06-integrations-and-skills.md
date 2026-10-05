@@ -206,16 +206,26 @@ service's model.
   says how many commits aren't on the pull request yet, and Push pushes up to
   the commit they saw, never one the lead made since. The lead has no tool to
   push.
-- **A task without a pull request merges here, as the person says.** Where
-  it ended on its branch (no host Althar knows, a host not connected, or
-  "push the branch only"), the person can merge it into each of its
-  repositories' default branches on this Mac, up to the commit they saw in
-  each. It is worked out for every repository first, without any working
-  tree, so a conflict anywhere merges nothing and says which files. The
-  default branch then moves: as a ref where nothing has it checked out, or by
-  a fast-forward in the working tree that has it, only while that has nothing
-  uncommitted; the person's own work is never touched. Nothing is pushed, and
-  the task settles.
+- **A repository without a pull request merges here, as the person says.**
+  Where a task ended on its branch (no host Althar knows, a host not
+  connected, or "push the branch only"), the person can merge it into each
+  of its repositories' default branches on this Mac, up to the commit they
+  saw in each. In a task of several, the ones with a pull request merge
+  through it, and the button names the others ("Merge tools into main").
+  - It is worked out for every repository first, without any working tree,
+    so a conflict anywhere merges nothing and says which files.
+  - The default branch then moves: as a ref where nothing has it checked
+    out, or by a fast-forward in the working tree that has it. That needs
+    nothing uncommitted there, and no file git doesn't track where the merge
+    puts one, so the person's own work is never touched.
+  - Refs move first and checkouts last. A checkout that refuses anyway
+    (something written there since) puts back what moved, so it is all or
+    none.
+  - Nothing is pushed.
+- **A task is done once each of its repositories is merged:** its pull
+  request merged, or, where it has none, its branch in its default branch
+  here. A pull request closed without merging keeps the task open. Until
+  then, the thread says which is still open.
 - **Merging is the person's.** The model has `merge`, and Althar calls it
   only when the person accepts the change (from the board, or the task),
   never on an agent's word: the rules refuse agents' merges. A draft is

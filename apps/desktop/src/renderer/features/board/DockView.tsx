@@ -164,7 +164,17 @@ export function DockView({
           {...(model.error === null ? {} : { error: model.error })}
           text={{ number: (n: number) => `${change.prefix}${n}` }}
         />
-        {open(task.threadId)}
+        <div className={s.actions}>
+          {/* A repository of the task that ended on its branch merges here, beside the pull request of the rest. */}
+          {task.here.length > 0 && (
+            <ActionButton icon="branch" disabled={model.merging === task.taskId} onClick={() => void model.mergeHere(task)}>
+              {mergeHereLabel(task.here, true)}
+            </ActionButton>
+          )}
+          <ActionButton icon="arrow" onClick={() => onTask(task.threadId)}>
+            {text.openTask}
+          </ActionButton>
+        </div>
       </Dock>
     )
   }

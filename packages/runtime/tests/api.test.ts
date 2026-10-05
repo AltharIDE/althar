@@ -15,6 +15,7 @@ import { RpcClient } from 'effect/rpc'
 import { connection, services } from '../src/Api'
 import {
   ChangedSinceSeen,
+  CantMerge,
   EffortUnchanged,
   GitFailed,
   NoChangeToOpen,
@@ -856,6 +857,18 @@ describe('words', () => {
         "The task's work isn't done yet. Its pull request opens when it is.",
         'The task’s work stopped before it was done, so it has no pull request to open.',
         'The task is settled, so its branch stays as it is.',
+      ],
+    )
+    assert.deepStrictEqual(
+      (
+        [
+          ['untracked', 'new.ts in /code/web'],
+          ['moved', 'web’s main'],
+        ] as const
+      ).map(([why, detail]) => said(new CantMerge({ taskId: 't', why, detail }))),
+      [
+        'The merge would overwrite files git doesn’t track: new.ts in /code/web. Move them away, then merge again.',
+        'web’s main moved while Althar was merging, so nothing was merged. Merge again.',
       ],
     )
     assert.strictEqual(

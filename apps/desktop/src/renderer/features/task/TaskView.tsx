@@ -258,20 +258,22 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
   const shown = pullRequests.find((candidate) => candidate.url === showChange) ?? null
   const several = pullRequests.length > 1
   const issue = snapshot.task.issue
-  // Work that ended on its branch can still open its pull request, as the person says.
-  const unpublished = snapshot.task.phase === 'ready' && change === null && snapshot.task.commits > 0
+  const ready = snapshot.task.phase === 'ready'
+  // Work that ended on its branch merges here, beside any pull request of the rest, or can still open its pull request.
+  const mergeable = ready && snapshot.task.here.length > 0
+  const unpublished = ready && change === null && snapshot.task.commits > 0
   // Its pull request opens beside the thread.
   const changeButton = (
     <>
+      {mergeable && (
+        <Button size="small" busy={model.pending} onClick={() => void model.mergeHere()}>
+          {mergeHereLabel(snapshot.task.here, change !== null)}
+        </Button>
+      )}
       {unpublished && (
-        <>
-          <Button size="small" busy={model.pending} onClick={() => void model.mergeHere()}>
-            {mergeHereLabel(snapshot.task.here)}
-          </Button>
-          <Button size="small" busy={model.pending} onClick={() => void model.openChange()}>
-            {text.openChange}
-          </Button>
-        </>
+        <Button size="small" busy={model.pending} onClick={() => void model.openChange()}>
+          {text.openChange}
+        </Button>
       )}
       {files.length > 0 && (
         <ChromeButton icon="file" label={text.files(files.length)} expanded={changes.open} onClick={() => changes.show()} />

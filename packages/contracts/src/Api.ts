@@ -667,8 +667,7 @@ export const FileDiff = Schema.Struct({
 })
 export type FileDiff = typeof FileDiff.Type
 
-/** A task's thread: its task and project, the agent working on it, the calls waiting on the person, and a page of its items. */
-/** One of a task's repositories on this Mac: the default branch merging here goes into, and the head of its branch as last read. */
+/** One of a task's repositories that merges on this Mac, with no pull request: the default branch it goes into, and the head of its branch as last read. */
 export const TaskRepositoryHere = Schema.Struct({
   /** Its slug, which merging names it by. */
   repository: Schema.String,
@@ -678,6 +677,7 @@ export const TaskRepositoryHere = Schema.Struct({
 })
 export type TaskRepositoryHere = typeof TaskRepositoryHere.Type
 
+/** A task's thread: its task and project, the agent working on it, the calls waiting on the person, and a page of its items. */
 export const ThreadSnapshot = Schema.Struct({
   threadId: Schema.String,
   cursor: Cursor,
@@ -702,7 +702,7 @@ export const ThreadSnapshot = Schema.Struct({
     /** What it changed since it started, committed or not, file by file, and in how many commits; empty without a worktree here. */
     files: Schema.Array(ChangedFile),
     commits: Schema.Number,
-    /** Its repositories here, for merging it without a pull request. */
+    /** Its repositories with no pull request, not merged yet, which merge here. */
     here: Schema.Array(TaskRepositoryHere),
   }),
   session: Schema.NullOr(SessionSummary),
@@ -722,7 +722,7 @@ export const BoardTask = Schema.Struct({
   settledAt: Schema.NullOr(Schema.String),
   /** What a ready task changed, when it has no pull request to say so: its files, and lines added and removed. */
   changed: Schema.NullOr(Schema.Struct({ files: Schema.Number, add: Schema.Number, del: Schema.Number })),
-  /** A ready task's repositories here, when it has no pull request: for merging it here. */
+  /** A ready task's repositories with no pull request, not merged yet, which merge here. */
   here: Schema.Array(TaskRepositoryHere),
 })
 export type BoardTask = typeof BoardTask.Type

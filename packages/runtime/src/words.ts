@@ -188,7 +188,7 @@ const hostSaid = (host: string, reason: string, said: string) => {
   }
 }
 
-/** Why a task has no pull request to open, by reason. */
+/** Why Althar won't merge a task here, by reason. */
 const cantMerge = {
   pull_request: () => 'The task has a pull request: merge it there.',
   settled: () => 'The task is settled, so its branch stays as it is.',
@@ -197,9 +197,12 @@ const cantMerge = {
     `It conflicts with the default branch, in ${files}. Tell the lead to bring its branch up to date, then merge again.`,
   busy: (where: string) =>
     `The default branch is checked out in ${where} with changes not committed. Commit or put them away, then merge again.`,
+  untracked: (files: string) => `The merge would overwrite files git doesn’t track: ${files}. Move them away, then merge again.`,
+  moved: (branch: string) => `${branch} moved while Althar was merging, so nothing was merged. Merge again.`,
   missing: (branch: string) => `This Mac has no ${branch} branch to merge into.`,
 } as const satisfies Record<CantMerge['why'], (detail: string) => string>
 
+/** Why a task has no pull request to open, by reason. */
 const noChangeToOpen = {
   working: "The task's work isn't done yet. Its pull request opens when it is.",
   stopped: 'The task’s work stopped before it was done, so it has no pull request to open.',

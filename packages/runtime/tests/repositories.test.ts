@@ -17,7 +17,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { callTool, fakeConnectors, HOST, launches, repository, runtime, turns, until } from './support'
+import { callTool, fakeConnectors, HOST, launches, notices, repository, runtime, turns, until } from './support'
 
 /*
  * Projects of several repositories, and of a folder inside one
@@ -255,6 +255,41 @@ describe('a task of several repositories', () => {
       )
       assert.lengthOf(github.changes, 1)
       assert.include(git(bare, 'log', '--format=%s', task.branch), 'Retry')
+
+      // web, on its branch, merges here beside api's pull request; the task is done once both are merged.
+      const changes = yield* Changes
+      const [card] = yield* until(
+        Effect.map(queries.board(opened.projectId), (board) =>
+          board.tasks.filter((one) => one.taskId === task.taskId && one.phase === 'ready'),
+        ),
+        (found) => found.length === 1,
+      )
+      assert.deepStrictEqual(
+        card?.here.map((one) => one.repository),
+        ['web'],
+      )
+      const heads = (card?.here ?? []).flatMap((one) => (one.head === null ? [] : [{ repository: one.repository, head: one.head }]))
+      assert.deepStrictEqual(
+        (yield* changes.mergeHere(task.taskId, heads)).map((one) => one.repository),
+        ['web'],
+      )
+      assert.include(git(join(folder, 'web'), 'log', '--format=%s', 'main'), 'Retry')
+      assert.notInclude(git(join(folder, 'api'), 'log', '--format=%s', 'main'), 'Retry')
+      assert.deepStrictEqual((yield* notices(task.threadId)).map((notice) => notice.title).slice(-2), [
+        'Merged here: web into main.',
+        `Not done yet: PR #${github.changes[0]?.number ?? 0} in api is still open.`,
+      ])
+      assert.deepStrictEqual((yield* queries.thread(task.threadId, { limit: 0 })).task.here, [])
+      const state = sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.taskId}`
+      assert.strictEqual((yield* state)[0]?.state, 'open')
+      // Asked again, it's merged already.
+      assert.deepStrictEqual(
+        (yield* changes.mergeHere(task.taskId, heads)).map((one) => one.already),
+        [true],
+      )
+      github.mergeByHand(github.changes[0]?.number ?? 0)
+      yield* changes.refresh(task.taskId)
+      yield* until(state, (rows) => rows[0]?.state === 'done')
     }).pipe(Effect.provide(withQueries(':memory:', {}, { connectors: fakeConnectors({ github }) })))
   })
 

@@ -25,7 +25,7 @@ import { Coordinator } from './Coordinator'
 import { baseOf, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
-import { commitOf, git, unpushedOf } from './git'
+import { commitOf, git, gitOutcome, unpushedOf } from './git'
 import { commandIn } from './rules'
 import { Sessions } from './Sessions'
 
@@ -497,16 +497,34 @@ export class Queries extends Context.Service<
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
         })
 
-      /** A task's repositories here, for merging it here: each one's default branch, and its branch's head as it stands. */
+      /**
+       * A task's repositories that merge here, for its Merge button: those
+       * with no pull request whose branch isn't in their default branch here
+       * yet, each with its default branch and its branch's head as it stands.
+       * A task whose every repository has a pull request reads no git.
+       */
       const hereOf = (taskId: string) =>
-        Effect.flatMap(worktreesOf(taskId), (worktrees) =>
-          Effect.forEach(worktrees, (worktree) =>
-            Effect.map(
-              existsSync(worktree.path) ? commitOf(worktree.path, 'HEAD').pipe(Effect.orElseSucceed(() => null)) : Effect.succeed(null),
-              (head) => ({ repository: worktree.slug, name: worktree.name, branch: worktree.defaultBranch, head }),
-            ),
-          ),
-        )
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ slug: string; name: string; defaultBranch: string; path: string; root: string | null }>`
+            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, l.path AS root
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+              AND NOT EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL)
+            ORDER BY b.created_at, b.rowid`
+          const here = yield* Effect.forEach(rows, (row) =>
+            Effect.gen(function* () {
+              const head = existsSync(row.path) ? yield* commitOf(row.path, 'HEAD').pipe(Effect.orElseSucceed(() => null)) : null
+              const merged =
+                head !== null &&
+                row.root !== null &&
+                (yield* gitOutcome(row.root, 'merge-base', '--is-ancestor', head, `refs/heads/${row.defaultBranch}`)).code === 0
+              return merged ? [] : [{ repository: row.slug, name: row.name, branch: row.defaultBranch, head }]
+            }),
+          )
+          return here.flat()
+        })
 
       /**
        * What a task changed across its repositories: in one, as `changedOf`
@@ -798,7 +816,7 @@ export class Queries extends Context.Service<
                       del: files.reduce((sum, file) => sum + file.del, 0),
                     }))
                   : null
-              const here = card.phase === 'ready' && card.change === null ? yield* hereOf(row.id) : []
+              const here = card.phase === 'ready' ? yield* hereOf(row.id) : []
               const read = { ...card, state: row.state, createdAt: row.createdAt, settledAt: row.settledAt, changed, here }
               if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, read)
               return [read]
