@@ -1,4 +1,45 @@
-.card { background: var(--paper); color: var(--t-1); border-radius: 12px; padding: 8px 22px 18px; box-shadow: 0 30px 70px rgba(10, 16, 120, 0.35); }
+/* A slim card held up at an angle, turned toward the headline: the near
+   corner is bottom right, so that's where its edge shows. The edge is a stack
+   of hard shadows in the card's own plane; the drop shadow sits far below. */
+.stage { --tx: 0; --ty: 0; perspective: 1800px; perspective-origin: 30% 40%; }
+.float { transform-style: preserve-3d; animation: float 9s ease-in-out infinite; }
+.card {
+  position: relative;
+  padding: 8px 22px 18px;
+  border-radius: 14px;
+  color: var(--t-1);
+  background: linear-gradient(155deg, #fff 30%, #f4f5fb 100%);
+  transform: rotateX(calc(9deg - var(--ty) * 3deg)) rotateY(calc(-13deg + var(--tx) * 4deg)) rotateZ(1.2deg);
+  transform-origin: 40% 50%;
+  transition: transform 900ms cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    1px 1px 0 #dfe1f1,
+    2px 2px 0 #d6d9ee,
+    3px 3px 0 #ced1ea,
+    4px 4px 0 #c6cae6,
+    5px 5px 0 #bec2e2,
+    6px 6px 0 #b4b9de,
+    30px 44px 60px rgba(6, 10, 70, 0.32),
+    60px 90px 120px rgba(6, 10, 70, 0.18);
+}
+/* A soft sheen across the face, as light catches it. */
+.card::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0) 35%, rgba(255, 255, 255, 0.5) 48%, rgba(255, 255, 255, 0) 62%);
+  background-size: 260% 100%;
+  background-position: calc(80% - var(--tx) * 20%) 0;
+  transition: background-position 900ms cubic-bezier(0.22, 1, 0.36, 1);
+  mix-blend-mode: soft-light;
+}
+@keyframes float {
+  0%, 100% { transform: translate3d(0, 0, 0) rotateZ(0deg); }
+  50% { transform: translate3d(0, -10px, 12px) rotateZ(-0.6deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .float { animation: none; }
+  .card { transition: none; }
+}
 .head { display: flex; justify-content: space-between; padding: 14px 0 6px; font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
 
 .row { display: grid; grid-template-columns: 170px 1fr; gap: 6px 18px; align-items: center; padding: 16px 0; border-top: 1px solid var(--line); }
@@ -10,20 +51,26 @@
 .row[data-full] .bar b { background: var(--t-1); }
 .state { grid-row: 2; grid-column: 2; display: flex; justify-content: space-between; margin-top: -4px; font-size: 12.5px; color: var(--t-3); }
 .row[data-full] .used { color: var(--t-1); font-weight: 600; }
-.chips { grid-column: 2; display: flex; flex-wrap: wrap; gap: 8px; min-height: 0; }
-.chips:empty { display: none; }
-.chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 7px; background: var(--paper); box-shadow: 0 0 0 1px var(--line-2), 0 2px 6px rgba(20, 20, 28, 0.06); font-size: 12.5px; font-weight: 600; animation: land 0.5s var(--ease) both; }
-.chip[hidden] { display: none; }
-.chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 3px var(--live-dim); }
+/* The tasks on a plan: running lines of text, a pulse and a number, nothing to press. */
+.tasks { grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 2px 0 0; padding: 0; list-style: none; }
+.tasks:empty { display: none; }
+.task { display: inline-flex; align-items: baseline; gap: 7px; font-size: 13px; font-weight: 550; color: var(--t-1); animation: land 0.6s var(--ease) both; }
+.task[hidden] { display: none; }
+.task i { position: relative; top: -1px; width: 6px; height: 6px; border-radius: 50%; background: var(--live); animation: pulse 2.4s ease-in-out infinite; }
 .n { font: 500 11px var(--mono); color: var(--t-3); }
-@keyframes land { from { opacity: 0; transform: translateY(-6px); } }
-@media (prefers-reduced-motion: reduce) { .chip { animation: none; } }
+@keyframes land { from { opacity: 0; transform: translateY(-5px); filter: blur(4px); } }
+@keyframes pulse { 50% { box-shadow: 0 0 0 4px var(--live-dim); } }
+@media (prefers-reduced-motion: reduce) { .task, .task i { animation: none; } }
 
 .note { display: flex; gap: 12px; margin-top: 8px; font-size: 13px; color: var(--t-2); }
 .time { font: 500 12px var(--mono); color: var(--t-3); }
 
+@media (max-width: 1100px) {
+  .card { transform: rotateX(calc(7deg - var(--ty) * 3deg)) rotateY(calc(-8deg + var(--tx) * 4deg)) rotateZ(0.8deg); }
+}
 @media (max-width: 560px) {
+  .card { transform: rotateX(6deg) rotateY(-5deg) rotateZ(0.6deg); }
   .row { grid-template-columns: 1fr; }
-  .bar, .state, .chips { grid-column: 1; grid-row: auto; }
+  .bar, .state, .tasks { grid-column: 1; grid-row: auto; }
   .plan { margin-top: -8px; }
 }

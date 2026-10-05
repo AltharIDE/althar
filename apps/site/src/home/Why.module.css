@@ -21,16 +21,16 @@
 .tile p { margin-top: 14px; font-size: 16px; line-height: 1.5; color: rgba(255, 255, 255, 0.82); }
 .vis { margin-top: auto; padding-top: 26px; font-size: 13.5px; }
 
-.vrow { display: flex; align-items: center; gap: 10px; margin: 0; padding: 9px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); transition: opacity 0.4s, background 0.4s, color 0.4s; }
-.vrow + .vrow { margin-top: 8px; }
+/* Lines of a list on hairlines, not filled rows: nothing here should look like an option to pick. */
+.vrow { display: flex; align-items: center; gap: 10px; margin: 0; padding: 10px 0; border-top: 1px solid rgba(255, 255, 255, 0.18); color: rgba(255, 255, 255, 0.78); transition: opacity 0.4s, color 0.4s; }
 .r { margin-left: auto; font: 500 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255, 255, 255, 0.7); white-space: nowrap; }
 
 .swap [data-when] { display: none; }
 .swap [data-state='on'] [data-when='on'],
 .swap [data-state='off'] [data-when='off'],
 .swap [data-state='gone'] [data-when='off'] { display: inline; }
-.swap [data-state='on'] { background: #fff; color: var(--live); }
-.swap [data-state='on'] .r { color: var(--live); }
+.swap [data-state='on'] { color: #fff; font-weight: 600; }
+.swap [data-state='on'] .r { color: #fff; }
 .swap [data-state='gone'] { opacity: 0.45; }
 
 .pname { width: 104px; flex: none; white-space: nowrap; }

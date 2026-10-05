@@ -1,59 +1,72 @@
-import { TaskCard, TaskLaunch, TaskStatus, type LaunchPick, type LaunchStep, type ModelInfo } from '@althar/ui'
-import { useState } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { Agent, agentName } from '../content/agents'
 import { COORDINATOR } from '../content/home'
 import { AgentMark } from '../shared/AgentMark'
+import { playback } from '../lib/motion'
 import s from './Coordinator.module.css'
 
 /*
- * The coordinator, as the app shows it. You ask for two things; it answers
- * with what applies to the project and the plan for the first task,
- * in the product's own TaskLaunch card: who does each step, and a countdown.
- * Leaving it alone is a yes, so it starts on its own once you've seen it, and
- * becomes the running task's card.
+ * The coordinator. You ask for two things; it answers with what applies to
+ * the project and the plan for the first task: who does each step, and why.
+ * Leaving it alone is a yes, so the plan counts down and starts on its own.
+ *
+ * Drawn for the page, not the app's own launch card: it has no buttons,
+ * pickers or menus, since nothing here can be pressed.
  */
 
-/** The agents as the product's cards take them: one model each, named for the agent. */
-const model = (agent: Agent): ModelInfo => ({
-  id: agent,
-  name: agentName(agent),
-  short: agentName(agent),
-  runtime: agent,
-  context: 1000,
-  efforts: [],
-})
+interface Step {
+  label: string
+  who: readonly Agent[]
+  why: string
+  /** Why it can't be dropped: it leads, or a rule asks for it. */
+  tag?: string
+}
 
-const PLAN: readonly LaunchStep[] = [
-  { id: 'impl', label: 'Implement', agents: [model(Agent.Claude)], why: 'recommended for money code', fixed: 'the lead' },
-  { id: 'review', label: 'Review', agents: [model(Agent.Codex), model(Agent.OpenCode)], why: 'two models, combined', optional: true },
-  {
-    id: 'sec',
-    label: 'Security review',
-    agents: [model(Agent.Codex)],
-    why: 'required by your rule for money handling',
-    fixed: 'your rule',
-  },
-  { id: 'verify', label: 'Verify', agents: [model(Agent.OpenCode)], why: 'the full suite', optional: true },
+const PLAN: readonly Step[] = [
+  { label: 'Implement', who: [Agent.Claude], why: 'Recommended for money code', tag: 'The lead' },
+  { label: 'Review', who: [Agent.Codex, Agent.OpenCode], why: 'Two models, findings combined' },
+  { label: 'Security review', who: [Agent.Codex], why: 'Your rule for money handling', tag: 'Your rule' },
+  { label: 'Verify', who: [Agent.OpenCode], why: 'The full suite' },
 ]
 
-const TITLE = 'Rate-limit refunds like charges'
-const isAgent = (id: string): id is Agent => Object.values<string>(Agent).includes(id)
+/** Seconds the plan waits before it starts on its own. */
+const WAIT = 20
 
-/** Who runs a step, on this page: the agent, not a picker. In the app this is the composer's model picker. */
-function Who({ agent }: LaunchPick) {
+function Who({ who }: { who: readonly Agent[] }) {
   return (
-    <span className={s.pill}>
-      {isAgent(agent.runtime) && <AgentMark agent={agent.runtime} size={13} />}
-      {agent.name}
+    <span className={s.who}>
+      {who.map((a, i) => (
+        <span key={a} className={s.ag}>
+          {i > 0 && <em aria-hidden="true">+</em>}
+          <AgentMark agent={a} size={14} />
+          {agentName(a)}
+        </span>
+      ))}
     </span>
   )
 }
 
 export function Coordinator() {
-  const [started, setStarted] = useState<readonly string[] | null>(null)
+  const box = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = box.current
+    if (!el) return
+    const left = el.querySelector<HTMLElement>('[data-left]')
+    const next = el.querySelector<HTMLElement>('[data-next]')
+    const draw = (t: number) => {
+      const started = t >= WAIT
+      el.toggleAttribute('data-started', started)
+      el.style.setProperty('--wait', String(Math.min(t / WAIT, 1)))
+      if (left) left.textContent = started ? 'Started · Claude Code is implementing' : `Starts on its own in ${Math.ceil(WAIT - t)}s`
+      if (next) next.textContent = started ? 'Running' : 'Starts with 431'
+    }
+    return playback({ total: WAIT, draw, watch: el })
+  }, [])
+
   return (
-    <div className={s.chat}>
+    <div ref={box} className={s.chat}>
       <p className={s.you}>{COORDINATOR.ask}</p>
       <div className={s.said}>
         <p className={s.me}>
@@ -62,45 +75,49 @@ export function Coordinator() {
         </p>
         <p>{COORDINATOR.reply}</p>
       </div>
-      <div className="ch-root">
-        {started ? (
-          <TaskCard
-            fresh
-            task="431"
-            title={TITLE}
-            status={TaskStatus.Running}
-            steps={started}
-            at={0}
-            now="Implement · reading the code it touches"
-            started="started just now"
-            lead={model(Agent.Claude)}
-          />
-        ) : (
-          <TaskLaunch
-            task="431"
-            title={TITLE}
-            project="billing-api"
-            estimate="About 40 min · about $2 on your plans"
-            defaultSteps={PLAN}
-            picker={(pick) => <Who {...pick} />}
-            wait={20}
-            onStart={(steps) => setStarted([...steps.filter((st) => !st.skipped).map((st) => st.label), 'Draft PR'])}
-          />
-        )}
+
+      <div className={s.plan}>
+        <p className={s.title}>
+          <span className={s.n}>431</span>
+          <b>Rate-limit refunds like charges</b>
+          <span className={s.project}>billing-api</span>
+        </p>
+        <ol className={s.steps}>
+          {PLAN.map((st, i) => (
+            <li key={st.label} data-first={i === 0 || undefined}>
+              <span className={s.i}>{i + 1}</span>
+              <span className={s.step}>
+                <b>{st.label}</b>
+                <span className={s.why}>{st.why}</span>
+              </span>
+              <Who who={st.who} />
+              {st.tag && <span className={s.tag}>{st.tag}</span>}
+            </li>
+          ))}
+          <li>
+            <span className={s.i}>{PLAN.length + 1}</span>
+            <span className={s.step}>
+              <b>Open a draft PR</b>
+              <span className={s.why}>billing-api’s rule</span>
+            </span>
+          </li>
+        </ol>
+        <p className={s.foot}>
+          <span>About 40 min · about $2 on your plans</span>
+          <span className={s.left} data-left />
+          <span className={s.wait} aria-hidden="true" />
+        </p>
       </div>
+
       <p className={s.next}>
         <span className={s.n}>433</span>
         <b>Update the refunds docs</b>
-        <span className={s.pill}>
-          <AgentMark agent={Agent.OpenCode} size={13} />
-          {agentName(Agent.OpenCode)}
+        <span className={s.then}>
+          <Who who={[Agent.OpenCode]} />
+          <span>then</span>
+          <Who who={[Agent.Codex]} />
         </span>
-        <span className={s.then}>then</span>
-        <span className={s.pill}>
-          <AgentMark agent={Agent.Codex} size={13} />
-          {agentName(Agent.Codex)}
-        </span>
-        <span className={s.when}>{started ? 'Running' : 'Starts with 431'}</span>
+        <span className={s.when} data-next />
       </p>
     </div>
   )
