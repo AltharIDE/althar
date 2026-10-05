@@ -1,3 +1,6 @@
+import { realpathSync } from 'node:fs'
+import { sep } from 'node:path'
+
 import {
   type AccountStatus,
   API_VERSION,
@@ -52,6 +55,15 @@ const FEED_FALLBACK = '1 second'
 
 /** How many session commands' results are kept for retries, per launch. */
 const RECENT_COMMANDS = 1_000
+
+/** A path as the file system has it, without symbolic links; as given, where it can't be read. */
+const realpathOf = (path: string) => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
 
 export const handlers = Api.toLayer(
   Effect.gen(function* () {
@@ -235,11 +247,36 @@ export const handlers = Api.toLayer(
           }),
         ),
       ListProjects: () => api(queries.projects),
-      OpenProject: ({ commandId, grant }) =>
+      ReadFolder: ({ grant }) =>
+        api(
+          Effect.gen(function* () {
+            const reading = yield* projects.read(yield* folders.path(grant))
+            return { ...reading, repositories: [...reading.repositories] }
+          }),
+        ),
+      OpenProject: ({ commandId, grant, name, repositories }) =>
         api(
           Effect.gen(function* () {
             const path = yield* folders.path(grant)
-            const opened = yield* projects.open({ envelope: yield* envelope('project.open', { path }, commandId), path })
+            // Each repository the person kept is named by its root, inside a folder they chose: the window names no other path.
+            const roots =
+              repositories === undefined
+                ? undefined
+                : yield* Effect.forEach(repositories, (repository) =>
+                    Effect.gen(function* () {
+                      const within = realpathOf(yield* folders.path(repository.grant))
+                      const root = realpathOf(repository.path)
+                      if (root !== within && !root.startsWith(`${within}${sep}`))
+                        return yield* new NotFound({ kind: 'folder', id: repository.path })
+                      return root
+                    }),
+                  )
+            const opened = yield* projects.open({
+              envelope: yield* envelope('project.open', { path }, commandId),
+              path,
+              ...(name === undefined ? {} : { name }),
+              ...(roots === undefined ? {} : { repositories: roots }),
+            })
             const { projects: all } = yield* queries.projects
             const found = all.find((project) => project.id === opened.projectId)
             return (
@@ -248,6 +285,7 @@ export const handlers = Api.toLayer(
                 name: opened.name,
                 slug: opened.slug,
                 repository: opened.repository,
+                repositories: [],
                 tasks: 0,
                 running: 0,
                 waiting: 0,
@@ -259,7 +297,7 @@ export const handlers = Api.toLayer(
           }),
         ),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
-      CreateTask: ({ commandId, projectId, title, description, issue }) =>
+      CreateTask: ({ commandId, projectId, title, description, issue, repositories }) =>
         api(
           Effect.gen(function* () {
             const from = yield* issueFor(projectId, issue)
@@ -269,6 +307,7 @@ export const handlers = Api.toLayer(
               title,
               ...(description === undefined ? {} : { description }),
               ...(from === undefined ? {} : { issueKey: from.key }),
+              ...(repositories === undefined ? {} : { repositories }),
             })
             if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
             return yield* queries.task(created.taskId)
@@ -324,7 +363,7 @@ export const handlers = Api.toLayer(
         ),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
-      StartTask: ({ commandId, projectId, title, description, steps, issue, end }) =>
+      StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories }) =>
         once(
           commandId,
           api(
@@ -337,6 +376,7 @@ export const handlers = Api.toLayer(
                 ...(description === undefined ? {} : { description }),
                 draft: true,
                 ...(from === undefined ? {} : { issueKey: from.key }),
+                ...(repositories === undefined ? {} : { repositories }),
               })
               if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
               // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
@@ -347,7 +387,7 @@ export const handlers = Api.toLayer(
                 reason: null,
                 actorId: instance.personId,
                 startsIn: Duration.zero,
-                end: end === undefined ? yield* pullRequests.endFor(projectId) : end,
+                end: end === undefined ? yield* pullRequests.endFor(projectId, created.taskId) : end,
               })
               yield* plans.start(planId, instance.personId)
               return yield* queries.task(created.taskId)
@@ -427,7 +467,7 @@ export const handlers = Api.toLayer(
         ),
       Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
-      MarkReady: ({ commandId, taskId }) => once(commandId, api(pullRequests.markReady(taskId))),
+      MarkReady: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.markReady(taskId, url))),
       AddAccount: ({ commandId, agentId, name, grant }) =>
         once(
           commandId,
@@ -500,8 +540,8 @@ export const handlers = Api.toLayer(
       SetUsageLimit: ({ commandId, projectId, policy }) =>
         once(commandId, api(policies.setUsageLimit(projectId, policy, instance.personId))),
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),
-      Merge: ({ commandId, taskId, head }) => once(commandId, api(pullRequests.merge(taskId, head))),
-      Push: ({ commandId, taskId, head }) => once(commandId, api(Effect.asVoid(pullRequests.push(taskId, head)))),
+      Merge: ({ commandId, taskId, head, url }) => once(commandId, api(pullRequests.merge(taskId, head, url))),
+      Push: ({ commandId, taskId, head, url }) => once(commandId, api(Effect.asVoid(pullRequests.push(taskId, head, url)))),
       RefreshTask: ({ taskId }) => pullRequests.refresh(taskId),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
     })

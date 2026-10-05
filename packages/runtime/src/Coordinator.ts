@@ -11,7 +11,9 @@ import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { Plans } from './Plans'
+import { Policies, ruleSetOf } from './Policies'
 import { Projects } from './Projects'
+import { sayRules } from './rules'
 import { envelope } from './envelope'
 import { type PlanStep } from './Runs'
 import { type Disposition, Sessions } from './Sessions'
@@ -55,8 +57,14 @@ type Store =
   | Crypto.Crypto
   | Changes
   | Issues
+  | Policies
 
-const Drafted = Schema.Struct({ title: Schema.String, description: Schema.optional(Schema.String), issue: Schema.optional(Schema.String) })
+const Drafted = Schema.Struct({
+  title: Schema.String,
+  description: Schema.optional(Schema.String),
+  issue: Schema.optional(Schema.String),
+  repositories: Schema.optional(Schema.Array(Schema.String)),
+})
 const Asked = Schema.Struct({ issue: Schema.String })
 const Proposed = Schema.Struct({
   task: Schema.String,
@@ -194,17 +202,23 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${access.projectId}`
-          const repositories = yield* sql<{ name: string; base: string | null; path: string }>`
-            SELECT b.display_name AS name, b.default_base_ref AS base, l.path FROM repository_bindings b
+          const repositories = yield* sql<{ name: string; base: string | null; within: string | null; path: string }>`
+            SELECT b.display_name AS name, b.default_base_ref AS base, b.folder AS within, l.path FROM repository_bindings b
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE b.project_id = ${access.projectId} AND b.detached_at IS NULL`
+            WHERE b.project_id = ${access.projectId} AND b.detached_at IS NULL
+            ORDER BY b.created_at, b.rowid`
           const [counts] = yield* sql<{ open: number; drafts: number }>`
             SELECT sum(state = 'open') AS open, sum(state = 'draft') AS drafts FROM tasks WHERE project_id = ${access.projectId}`
           return [
             `Project: ${project?.name ?? ''}`,
-            `Repositories:\n${repositories.map((repository) => `- ${repository.name} (${repository.base ?? 'main'}), on this Mac at ${repository.path}`).join('\n')}`,
+            `Repositories:\n${repositories
+              .map(
+                (repository) =>
+                  `- ${repository.name} (${repository.base ?? 'main'}), on this Mac at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
+              )
+              .join('\n')}`,
             `Tasks: ${counts?.open ?? 0} open, ${counts?.drafts ?? 0} planned and not yet started.`,
-            "Rules: agents may do anything inside a task's worktree. Pushes to the default branch, force pushes, merges, deploys and writes outside the worktree wait for the person.",
+            `Rules: ${sayRules(ruleSetOf((yield* (yield* Policies).current(access.projectId as ProjectId)).rules))}`,
           ].join('\n\n')
         })
 
@@ -233,12 +247,15 @@ export class Coordinator extends Context.Service<
           const task = yield* taskOf(access, reference)
           const results = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result' ORDER BY sequence`
-          const [workspace] = yield* sql<{ branch: string; path: string }>`
-            SELECT branch, path FROM workspaces WHERE task_id = ${task.id} AND device_id = ${instance.deviceId}`
+          const workspaces = yield* sql<{ branch: string; path: string; name: string }>`
+            SELECT w.branch, w.path, b.display_name AS name FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            WHERE w.task_id = ${task.id} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
           return [
             `${task.slug}: ${task.title}`,
             task.description === '' ? '' : task.description,
-            workspace === undefined ? '' : `Branch ${workspace.branch}, in ${workspace.path}.`,
+            workspaces.length === 1
+              ? `Branch ${workspaces[0]?.branch ?? ''}, in ${workspaces[0]?.path ?? ''}.`
+              : workspaces.map((workspace) => `${workspace.name}: branch ${workspace.branch}, in ${workspace.path}.`).join('\n'),
             ...results.map((row) => {
               const result = JSON.parse(row.content) as { step?: string; verdict?: string; summary?: string }
               return `${result.step ?? 'step'}${result.verdict === undefined ? '' : ` (${result.verdict})`}: ${result.summary ?? ''}`
@@ -260,7 +277,7 @@ export class Coordinator extends Context.Service<
 
       const draft = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          const { title, description, issue: from } = yield* read(Drafted, input)
+          const { title, description, issue: from, repositories } = yield* read(Drafted, input)
           // The issue it comes from is read first: its key goes in the task's branch.
           const issue =
             from === undefined
@@ -274,14 +291,29 @@ export class Coordinator extends Context.Service<
                   )
           // The same title from the same session is the same command: an agent that calls again, unsure the first worked, gets the first task.
           const commandId = `cmd_${createHash('sha256').update(`${access.sessionId}\u0000${title.trim().toLowerCase()}`).digest('hex').slice(0, 32)}`
-          const created = yield* projects.createTask({
-            envelope: yield* envelope('task.create', { title: title.trim().toLowerCase() }, commandId, instance.coordinatorId),
-            projectId: access.projectId,
-            title,
-            ...(description === undefined ? {} : { description }),
-            draft: true,
-            ...(issue === undefined ? {} : { issueKey: issue.key }),
-          })
+          const created = yield* projects
+            .createTask({
+              envelope: yield* envelope('task.create', { title: title.trim().toLowerCase() }, commandId, instance.coordinatorId),
+              projectId: access.projectId,
+              title,
+              ...(description === undefined ? {} : { description }),
+              draft: true,
+              ...(issue === undefined ? {} : { issueKey: issue.key }),
+              ...(repositories === undefined ? {} : { repositories }),
+            })
+            .pipe(
+              // A project of several repositories needs to hear which the task changes: said so, with the ones it has.
+              Effect.catchTag('RepositoriesNeeded', (needed) =>
+                Effect.fail(
+                  new ToolRefused({
+                    message:
+                      needed.unknown.length > 0
+                        ? `The project has no repository called ${needed.unknown.join(' or ')}. Its repositories: ${needed.choices.join(', ')}.`
+                        : `Say which of the project's repositories the task changes, as repositories: ${needed.choices.join(', ')}.`,
+                  }),
+                ),
+              ),
+            )
           if (issue !== undefined && from !== undefined)
             yield* issues.attach({ projectId: access.projectId as ProjectId, taskId: created.taskId, issue: from })
           return `Drafted ${created.slug}${issue === undefined ? '' : `, from ${issue.key}`}. Now propose its plan with propose_plan.`
@@ -309,7 +341,7 @@ export class Coordinator extends Context.Service<
             steps,
             reason: proposed.lead.reason ?? null,
             actorId: instance.coordinatorId,
-            end: yield* changes.endFor(access.projectId),
+            end: yield* changes.endFor(access.projectId, task.id),
           })
           return `Planned ${task.slug}. It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again.`
         })
@@ -404,6 +436,12 @@ export class Coordinator extends Context.Service<
               title: { type: 'string' },
               description: { type: 'string' },
               issue: { type: 'string', description: 'The issue it comes from: its link, or its key (MER-231, #12).' },
+              repositories: {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                  "The project's repositories the task changes, by name. Needed only in a project of several; the lead can still read the others.",
+              },
             },
             required: ['title'],
           },

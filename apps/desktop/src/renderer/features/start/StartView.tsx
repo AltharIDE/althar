@@ -1,12 +1,25 @@
 import { type DragEvent, useEffect } from 'react'
 
 import type { AccountStatus, AgentStatus, ProjectSummary } from '@althar/contracts'
-import { type AccountEntry, Accounts, Button, Heading, type RuntimeEntry, Runtimes, RuntimeState, Spinner, TitleBar } from '@althar/ui'
-import { Start } from '@althar/ui/screens'
+import {
+  type AccountEntry,
+  Accounts,
+  Button,
+  Heading,
+  PermissionPolicy,
+  type RuntimeEntry,
+  Runtimes,
+  RuntimeState,
+  SourceOrigin,
+  Spinner,
+  TitleBar,
+} from '@althar/ui'
+import { NewProject, Start } from '@althar/ui/screens'
 
 import { brandOf } from '../../shared/agents'
 import { clock } from '../../shared/time'
 import { ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
+import { text as rulesText } from '../rules/RulesView'
 import type { ConnectionsModel } from '../connections/useConnections'
 import s from './Start.module.css'
 import type { StartModel } from './useStart'
@@ -26,10 +39,16 @@ export const text = {
   waiting: (n: number) => (n === 1 ? '1 call waits on you' : `${n} calls wait on you`),
   connecting: 'Looking at the agents on this Mac…',
   removeAnyway: 'Remove anyway',
+  /** A folder of several repositories, before it is a project: what was found, and the answers Althar gives. */
+  forming: {
+    because: (name: string, n: number) => `Althar found ${n} git repositories in ${name}. Leave out any its tasks shouldn’t change.`,
+    sources: { label: 'Repositories', note: 'The ones its tasks may change. You can add others from elsewhere.' },
+    foot: 'Althar read these folders and changed nothing in them. Tasks work in worktrees of their own.',
+  },
   /** The kit's start screen, saying only what this app does: one folder, by the button or ⌘N. */
   first: {
-    create: { title: 'Open a folder', note: 'A folder in a git repository becomes a project', kbd: '⌘N' },
-    drop: 'Or drop a repository folder anywhere on this window.',
+    create: { title: 'Open a folder', note: 'A repository, a folder in one, or a folder of them becomes a project', kbd: '⌘N' },
+    drop: 'Or drop the folder anywhere on this window.',
   },
 }
 
@@ -98,6 +117,7 @@ export function StartView({
     if (project !== null) onProject(project.id)
   }
   const open = () => void model.openFolder().then(opened)
+  const modes = { [PermissionPolicy.Rules]: 'rules', [PermissionPolicy.Ask]: 'ask', [PermissionPolicy.AllowAll]: 'allow' } as const
 
   // ⌘N opens a folder, as the first screen says.
   useEffect(() => {
@@ -154,6 +174,42 @@ export function StartView({
         )}
       </div>
     )
+
+  // A folder of several repositories: which to keep, the project's name, and who answers when agents need a yes.
+  if (model.forming !== null) {
+    const { forming } = model
+    return (
+      <div className={s.window}>
+        <TitleBar>{null}</TitleBar>
+        <div className={`${s.scroll} ${s.first}`}>
+          <NewProject
+            defaultName={forming.name}
+            because={text.forming.because(forming.name, forming.repositories.length)}
+            sources={forming.repositories.map((kept) => ({
+              id: kept.path,
+              name: kept.name,
+              where: shortFolder(kept.path),
+              origin: SourceOrigin.Existing,
+              ...(kept.branch === null ? {} : { branch: kept.branch }),
+              ...(kept.remote === null ? {} : { remote: kept.remote }),
+              role: '',
+            }))}
+            onRemove={model.leaveOut}
+            onChooseFolders={() => void model.addFolders()}
+            defaultPermissions={PermissionPolicy.Rules}
+            permissionOptions={[PermissionPolicy.Rules, PermissionPolicy.Ask, PermissionPolicy.AllowAll]}
+            onCreate={({ name, permissions }) =>
+              void model.create({ name, permissions: modes[permissions as keyof typeof modes] ?? 'rules' }).then(opened)
+            }
+            onCancel={model.cancelForming}
+            creating={model.creating}
+            {...(model.error === null ? {} : { error: model.error })}
+            text={{ sources: text.forming.sources, foot: text.forming.foot, permission: rulesText.screen.permission }}
+          />
+        </div>
+      </div>
+    )
+  }
 
   if (model.projects !== null && model.projects.length === 0) {
     return (

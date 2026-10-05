@@ -21,6 +21,21 @@ export const git = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<
 export const gitWithin = (timeout: number, cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(timeout, cwd, args)
 
+/** A git command's exit code and output, for a command whose failure says something, such as `merge-tree`'s conflicts. */
+export const gitOutcome = (
+  cwd: string,
+  ...args: ReadonlyArray<string>
+): Effect.Effect<{ readonly code: number; readonly stdout: string }> =>
+  Effect.callback<{ readonly code: number; readonly stdout: string }>((resume) => {
+    execFile(
+      'git',
+      ['-c', 'core.hooksPath=/dev/null', ...args],
+      { cwd, timeout: 60_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' } },
+      (error, stdout) =>
+        resume(Effect.succeed({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 128, stdout: stdout.trim() })),
+    )
+  })
+
 /** A git command's output exactly as it wrote it, for output whose spaces and last line matter, such as a diff. */
 export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, args, {}, false)

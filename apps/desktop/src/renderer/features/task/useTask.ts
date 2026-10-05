@@ -47,12 +47,12 @@ export interface TaskModel {
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string) => Promise<void>
   /** Answers a step that needs the person. */
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
-  /** Marks the task's draft pull request ready for review. */
-  readonly markReady: () => Promise<void>
+  /** Marks the task's draft pull request ready for review: the one at `url`, in a task of several. */
+  readonly markReady: (url?: string) => Promise<void>
   /** Opens the pull request of a task whose work ended on its branch. */
   readonly openChange: () => Promise<void>
-  /** Pushes the task's branch to its pull request, up to the commit the person saw. */
-  readonly push: (head: string) => Promise<void>
+  /** Pushes the task's branch to its pull request, up to the commit the person saw: the one at `url`, in a task of several. */
+  readonly push: (head: string, url?: string) => Promise<void>
   readonly dismissError: () => void
 }
 
@@ -192,9 +192,9 @@ export const useTask = (threadId: string): TaskModel => {
     answer: (attentionId, decision, reason) =>
       act(() => client.answer({ attentionId, decision, ...(reason === undefined || reason === '' ? {} : { reason }) })),
     answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
-    markReady: () => act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id))),
+    markReady: (url) => act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id, url))),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id))),
-    push: (head) => act(async () => (snapshot === null ? undefined : client.push(snapshot.task.id, head))),
+    push: (head, url) => act(async () => (snapshot === null ? undefined : client.push(snapshot.task.id, head, url))),
     dismissError: () => setError(null),
   }
 }

@@ -98,7 +98,14 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
   const message = ((): string => {
     switch (reason) {
       case 'NotARepository':
-        return `${text(error, 'path')} isn't in a git repository. Choose a folder inside one.`
+        return `${text(error, 'path')} isn't a git repository, in one, or a folder with one directly inside it. Choose another folder.`
+      case 'RepositoriesNeeded': {
+        const unknown = (error as { readonly unknown?: ReadonlyArray<string> }).unknown ?? []
+        const choices = ((error as { readonly choices?: ReadonlyArray<string> }).choices ?? []).join(', ')
+        return unknown.length > 0
+          ? `The project has no repository called ${unknown.join(' or ')}. It has ${choices}.`
+          : `Say which of the project's repositories the task changes: ${choices}.`
+      }
       case 'NotFound':
         return `That ${kinds[text(error, 'kind')] ?? 'thing'} isn't there any more.`
       case 'UnknownAgent':
@@ -191,6 +198,7 @@ export const expected = new Set([
   'NoChangeToOpen',
   'NotConnected',
   'NotARepository',
+  'RepositoriesNeeded',
   'NotFound',
   'UnknownAgent',
   'SessionRunning',

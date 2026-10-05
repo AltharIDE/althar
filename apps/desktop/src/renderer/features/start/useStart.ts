@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { ApiError, type FoundAccount, type ProjectSummary, type Status } from '@althar/contracts'
+import { ApiError, type FoundAccount, type FoundRepository, type ProjectSummary, type Status } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
 import { useServices, useWatch } from '../../data/services'
@@ -10,6 +10,18 @@ import { useServices, useWatch } from '../../data/services'
  * accounts and how each is signed in (ADR-012), the projects, and opening a
  * folder as a new one.
  */
+
+/** A repository found where the person opened a folder, with the grant of the folder it was found in. */
+export interface KeptRepository extends FoundRepository {
+  readonly grant: string
+}
+
+/** A folder of several repositories, read and waiting to be made a project: the folder's grant, its name, and the repositories kept. */
+export interface Forming {
+  readonly grant: string
+  readonly name: string
+  readonly repositories: ReadonlyArray<KeptRepository>
+}
 
 /** Where a new account signs in: a folder Althar makes, one a switcher made (by its grant), or one the person chooses. */
 export type AccountPlace = { readonly kind: 'own' } | { readonly kind: 'found'; readonly grant: string } | { readonly kind: 'choose' }
@@ -23,6 +35,16 @@ export interface StartModel {
   readonly openFolder: () => Promise<ProjectSummary | null>
   /** Opens a folder dropped on the window as a project; null when it couldn't. */
   readonly openDropped: (file: File) => Promise<ProjectSummary | null>
+  /** A folder of several repositories, waiting for the person to say which to keep; null otherwise. */
+  readonly forming: Forming | null
+  /** Adds the repositories in folders the person chooses to the one being formed. */
+  readonly addFolders: () => Promise<void>
+  /** Leaves a repository out of the project being formed. */
+  readonly leaveOut: (path: string) => void
+  /** Makes the project being formed, with its name and who answers when agents need a yes; null when it couldn't. */
+  readonly create: (project: { readonly name: string; readonly permissions: 'rules' | 'ask' | 'allow' }) => Promise<ProjectSummary | null>
+  readonly creating: boolean
+  readonly cancelForming: () => void
   /** Folders account switchers keep each agent's accounts in, as last looked for. */
   readonly found: Readonly<Record<string, ReadonlyArray<FoundAccount>>>
   readonly lookForAccounts: (agentId: string) => void
@@ -48,6 +70,8 @@ export const useStart = (): StartModel => {
   const [since, setSince] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [opening, setOpening] = useState(false)
+  const [forming, setForming] = useState<Forming | null>(null)
+  const [creating, setCreating] = useState(false)
   const [found, setFound] = useState<Readonly<Record<string, ReadonlyArray<FoundAccount>>>>({})
   const [unremoved, setUnremoved] = useState<string | null>(null)
 
@@ -140,12 +164,18 @@ export const useStart = (): StartModel => {
     if (event._tag === 'Changed' && SHOWN.has(event.aggregateType)) loadProjects()
   }, since)
 
+  // A folder of several repositories waits for the person to say which to keep; anything else opens at once.
   const open = useCallback(
     async (grant: string | null) => {
       if (grant === null) return null
       setError(null)
       setOpening(true)
       try {
+        const reading = await client.readFolder(grant)
+        if (reading.project === null && reading.kind === 'folder' && reading.repositories.length > 1) {
+          setForming({ grant, name: reading.name, repositories: reading.repositories.map((found) => ({ ...found, grant })) })
+          return null
+        }
         return await client.openProject(grant)
       } catch (failure) {
         setError(messageOf(failure))
@@ -158,6 +188,64 @@ export const useStart = (): StartModel => {
   )
 
   const openFolder = useCallback(async () => open(await host.pickFolder()), [host, open])
+
+  const addFolders = useCallback(async () => {
+    const grant = await host.pickFolder()
+    if (grant === null) return
+    try {
+      const reading = await client.readFolder(grant)
+      // A folder inside a repository is a project of its own, not one of several: the repository itself is what's added.
+      const [inside] = reading.kind === 'inside' ? reading.repositories : []
+      if (inside !== undefined) {
+        setError(`That’s a folder inside ${inside.name}. Add ${inside.name} itself.`)
+        return
+      }
+      setError(null)
+      setForming((now) =>
+        now === null
+          ? now
+          : {
+              ...now,
+              repositories: [
+                ...now.repositories,
+                ...reading.repositories
+                  .filter((found) => !now.repositories.some((kept) => kept.path === found.path))
+                  .map((found) => ({ ...found, grant })),
+              ],
+            },
+      )
+    } catch (failure) {
+      setError(messageOf(failure))
+    }
+  }, [client, host])
+
+  const create = useCallback(
+    async (project: { readonly name: string; readonly permissions: 'rules' | 'ask' | 'allow' }) => {
+      if (forming === null) return null
+      if (forming.repositories.length === 0) {
+        setError('Keep at least one repository.')
+        return null
+      }
+      setError(null)
+      setCreating(true)
+      try {
+        const opened = await client.openProject(forming.grant, {
+          name: project.name,
+          repositories: forming.repositories.map((kept) => ({ grant: kept.grant, path: kept.path })),
+        })
+        // Who answers when agents need a yes is the project's first rule, where the person chose other than the default.
+        if (project.permissions !== 'rules') await client.setProjectRules({ projectId: opened.id, permissions: project.permissions })
+        setForming(null)
+        return opened
+      } catch (failure) {
+        setError(messageOf(failure))
+        return null
+      } finally {
+        setCreating(false)
+      }
+    },
+    [client, forming],
+  )
   const openDropped = useCallback(async (file: File) => open(await host.grantDropped(file)), [host, open])
 
   return {
@@ -167,6 +255,13 @@ export const useStart = (): StartModel => {
     opening,
     openFolder,
     openDropped,
+    forming,
+    addFolders,
+    leaveOut: (path) =>
+      setForming((now) => (now === null ? now : { ...now, repositories: now.repositories.filter((kept) => kept.path !== path) })),
+    create,
+    creating,
+    cancelForming: () => setForming(null),
     found,
     lookForAccounts,
     addAccount,

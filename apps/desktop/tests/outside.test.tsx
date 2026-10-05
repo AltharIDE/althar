@@ -24,6 +24,7 @@ import {
   fakeClient,
   githubConnection,
   items,
+  project,
   projectRules,
   snapshot,
 } from './fixtures'
@@ -281,7 +282,7 @@ describe('a task’s pull request', () => {
     expect(within(panel).getByText('Its checks run on it; mark it ready when you are')).toBeTruthy()
     expect(within(panel).getByRole('link', { name: 'Open on GitHub' }).getAttribute('href')).toBe('https://github.com/meridian/api/pull/12')
     await userEvent.click(within(panel).getByRole('button', { name: 'Mark ready for review' }))
-    expect(ready).toHaveBeenCalledWith('t1')
+    expect(ready).toHaveBeenCalledWith('t1', 'https://github.com/meridian/api/pull/12')
     await userEvent.click(within(panel).getByRole('button', { name: 'Close the panel' }))
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Pull request' })).toBeNull())
   })
@@ -298,7 +299,7 @@ describe('a task’s pull request', () => {
     })
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Push 2 commits' }))
-    await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456'))
+    await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456', 'https://github.com/meridian/api/pull/12'))
     await userEvent.click(screen.getByRole('button', { name: 'PR #12' }))
     const panel = await screen.findByRole('complementary', { name: 'Pull request' })
     expect(within(panel).getByText('2 commits aren’t on the pull request yet.')).toBeTruthy()
@@ -474,6 +475,57 @@ describe('a project, reaching outside', () => {
         expect.objectContaining({ title: 'Rate-limit refunds like charges', issue: 'MER-231', end: 'ready' }),
       ),
     )
+  })
+
+  it('names the repositories a task changes, in a project of several', async () => {
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 3, projects: [{ ...project, repositories: ['api', 'web', 'docs'] }] })),
+    })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'New task' }))
+    const panel = await screen.findByRole('complementary', { name: 'New task' })
+    // The first, until the person ticks others; the last ticked can't be unticked.
+    expect(within(panel).getByRole('checkbox', { name: 'api' })).toHaveProperty('ariaChecked', 'true')
+    await userEvent.click(within(panel).getByRole('checkbox', { name: 'web' }))
+    await userEvent.type(within(panel).getByLabelText('What should change'), 'Share the retry')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Start the task' }))
+    await waitFor(() => expect(client.startTask).toHaveBeenCalledWith(expect.objectContaining({ repositories: ['api', 'web'] })))
+  })
+
+  it('shows each of a task’s pull requests by its repository, and acts on the one open', async () => {
+    const ready = vi.fn(async () => {})
+    const web = change({ number: 4, repository: 'meridian/web', url: 'https://github.com/meridian/web/pull/4' })
+    const { client } = fakeClient({
+      markReady: ready,
+      getThread: vi.fn(async () => snapshot({ task: { ...snapshot().task, phase: 'ready', changes: [change(), web] } })),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByRole('button', { name: 'api PR #12' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'web PR #4' }))
+    const panel = await screen.findByRole('complementary', { name: 'Pull request' })
+    await userEvent.click(within(panel).getByRole('button', { name: 'Mark ready for review' }))
+    expect(ready).toHaveBeenCalledWith('t1', 'https://github.com/meridian/web/pull/4')
+  })
+
+  it('pushes what the lead committed since to the repository it was committed in', async () => {
+    const push = vi.fn(async () => {})
+    const web = change({
+      number: 4,
+      repository: 'meridian/web',
+      url: 'https://github.com/meridian/web/pull/4',
+      unpushed: 1,
+      localHead: 'def456',
+    })
+    const { client } = fakeClient({
+      push,
+      getThread: vi.fn(async () =>
+        snapshot({ task: { ...snapshot().task, changes: [change({ unpushed: 2, localHead: 'abc999' }), web] } }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByRole('button', { name: 'Push 2 commits to api' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Push 1 commit to web' }))
+    await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456', 'https://github.com/meridian/web/pull/4'))
   })
 
   it('starts a new task from the project’s ending', async () => {

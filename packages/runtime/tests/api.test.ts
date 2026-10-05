@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
-import { mkdtempSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
@@ -19,6 +20,7 @@ import {
   NoChangeToOpen,
   ModelUnchanged,
   NotARepository,
+  RepositoriesNeeded,
   NotFound,
   OutwardUncertain,
   SessionFailed,
@@ -283,6 +285,35 @@ describe('the API', () => {
     ),
   )
 
+  it.live('reads a folder the person chose, and opens the repositories they kept in it, never a path outside what they chose', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+        for (const name of ['api', 'web']) {
+          const made = repository()
+          execFileSync('git', ['clone', '-q', made, join(folder, name)])
+        }
+        const chosen = yield* grant(folder)
+        const reading = yield* client.ReadFolder({ grant: chosen })
+        assert.deepStrictEqual([reading.kind, reading.repositories.map((found) => found.name)], ['folder', ['api', 'web']])
+        // A path the window names outside the folder the person chose isn't opened.
+        const elsewhere = yield* Effect.flip(
+          client.OpenProject({ commandId: commandId(), grant: chosen, repositories: [{ grant: chosen, path: repository() }] }),
+        )
+        assert.strictEqual(elsewhere.reason, 'NotFound')
+        const project = yield* client.OpenProject({
+          commandId: commandId(),
+          grant: chosen,
+          name: 'Meridian',
+          repositories: [{ grant: chosen, path: join(folder, 'web') }],
+        })
+        assert.deepStrictEqual([project.name, project.repository, project.repositories], ['Meridian', folder, ['web']])
+        assert.deepStrictEqual((yield* client.ReadFolder({ grant: chosen })).project, { id: project.id, name: 'Meridian' })
+      }),
+    ),
+  )
+
   it.live('says what went wrong, in words', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -292,7 +323,7 @@ describe('the API', () => {
         assert.instanceOf(error, ApiError)
         assert.deepStrictEqual(
           [error.reason, error.message],
-          ['NotARepository', `${plain} isn't in a git repository. Choose a folder inside one.`],
+          ['NotARepository', `${plain} isn't a git repository, in one, or a folder with one directly inside it. Choose another folder.`],
         )
         // The window can't name a folder the person didn't choose.
         assert.strictEqual(
@@ -760,7 +791,18 @@ describe('words', () => {
 
   it("says each of the runtime's errors as the window shows it", () => {
     const said = (error: unknown) => words(error, name).message
-    assert.strictEqual(said(new NotARepository({ path: '/tmp/x' })), "/tmp/x isn't in a git repository. Choose a folder inside one.")
+    assert.strictEqual(
+      said(new NotARepository({ path: '/tmp/x' })),
+      "/tmp/x isn't a git repository, in one, or a folder with one directly inside it. Choose another folder.",
+    )
+    assert.strictEqual(
+      said(new RepositoriesNeeded({ unknown: [], choices: ['api', 'web'] })),
+      "Say which of the project's repositories the task changes: api, web.",
+    )
+    assert.strictEqual(
+      said(new RepositoriesNeeded({ unknown: ['mobile'], choices: ['api', 'web'] })),
+      'The project has no repository called mobile. It has api, web.',
+    )
     assert.strictEqual(said(new NotFound({ kind: 'attention_request', id: 'a' })), "That call isn't there any more.")
     assert.strictEqual(said(new NotFound({ kind: 'something new', id: 'a' })), "That thing isn't there any more.")
     assert.strictEqual(said({ _tag: 'UnknownAgent', agentId: 'cursor' }), 'Althar has no agent called cursor.')

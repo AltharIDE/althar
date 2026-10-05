@@ -103,6 +103,8 @@ export const ProjectSummary = Schema.Struct({
   name: Schema.String,
   slug: Schema.String,
   repository: Schema.NullOr(Schema.String),
+  /** The repositories its tasks may change, by name, the first first. */
+  repositories: Schema.Array(Schema.String),
   tasks: Schema.Number,
   /** Sessions working now. */
   running: Schema.Number,
@@ -118,6 +120,35 @@ export const ProjectSummary = Schema.Struct({
 export type ProjectSummary = typeof ProjectSummary.Type
 
 export const ProjectList = Schema.Struct({ cursor: Cursor, projects: Schema.Array(ProjectSummary) })
+
+/** A git repository found where a folder was opened. */
+export const FoundRepository = Schema.Struct({
+  /** Its root on this Mac. */
+  path: Schema.String,
+  /** The folder inside it the project would be about, such as one package of a monorepo; null for all of it. */
+  folder: Schema.NullOr(Schema.String),
+  name: Schema.String,
+  /** The branch checked out there, or null when none is. */
+  branch: Schema.NullOr(Schema.String),
+  /** Its first remote, without any password in it; null when it has none. */
+  remote: Schema.NullOr(Schema.String),
+})
+export type FoundRepository = typeof FoundRepository.Type
+
+/**
+ * What opening a folder would make, read before anything is: a repository, a
+ * folder inside one, or a folder holding several, one level down. Reading it
+ * changes nothing there.
+ */
+export const FolderReading = Schema.Struct({
+  kind: Schema.Literals(['repository', 'inside', 'folder']),
+  /** The project's name, unless the person gives another: the folder's. */
+  name: Schema.String,
+  repositories: Schema.Array(FoundRepository),
+  /** The project it already is, when it was opened before. */
+  project: Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String })),
+})
+export type FolderReading = typeof FolderReading.Type
 
 /** The kinds of request a project's rules can have ask the person, or refuse (ADR-013). */
 export const RuleKind = Schema.Literals(['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'])
@@ -778,12 +809,34 @@ export const Api = RpcGroup.make(
   /** The runtime's version and the agents on this machine. Sign-in is checked at most once a minute, unless `recheck`. */
   call('Status', { recheck: Schema.optional(Schema.Boolean) }, Status),
   Rpc.make('ListProjects', { success: ProjectList, error: ApiError }),
-  /** Opens the folder the person chose, by the grant the app gave for it: the window never names a path. */
-  command('OpenProject', { grant: Schema.String }, ProjectSummary),
+  /** Reads a folder the person chose, by its grant, for what opening it would make. */
+  call('ReadFolder', { grant: Schema.String }, FolderReading),
+  /**
+   * Opens the folder the person chose, by the grant the app gave for it: the
+   * window never names a path. A folder holding several repositories opens
+   * with `repositories`, the ones the person kept, each by the grant of the
+   * folder it was found in and its root as read; without it, every one found.
+   */
+  command(
+    'OpenProject',
+    {
+      grant: Schema.String,
+      name: Schema.optional(Schema.String),
+      repositories: Schema.optional(Schema.Array(Schema.Struct({ grant: Schema.String, path: Schema.String }))),
+    },
+    ProjectSummary,
+  ),
   call('ListTasks', { projectId: Schema.String }, TaskList),
   command(
     'CreateTask',
-    { projectId: Schema.String, title: Schema.String, description: Schema.optional(Schema.String), issue: Schema.optional(Schema.String) },
+    {
+      projectId: Schema.String,
+      title: Schema.String,
+      description: Schema.optional(Schema.String),
+      issue: Schema.optional(Schema.String),
+      /** The project's repositories it changes, by name: needed only in a project of several. */
+      repositories: Schema.optional(Schema.Array(Schema.String)),
+    },
     TaskSummary,
   ),
   /** The thread, with the newest `limit` items before `before` (a sequence), or none with `limit: 0`. */
@@ -807,6 +860,8 @@ export const Api = RpcGroup.make(
       issue: Schema.optional(Schema.String),
       /** What happens when the work is done; without it, a draft pull request where the repository's host is connected. */
       end: Schema.optional(Schema.NullOr(TaskEnd)),
+      /** The project's repositories it changes, by name: needed only in a project of several. */
+      repositories: Schema.optional(Schema.Array(Schema.String)),
     },
     TaskSummary,
   ),
@@ -875,7 +930,7 @@ export const Api = RpcGroup.make(
   /** The person's open issues on the connected trackers, and in the project's repository. */
   call('ListIssues', { projectId: Schema.String }, IssueList),
   /** Marks the task's draft pull request ready for review. */
-  command('MarkReady', { taskId: Schema.String }, Schema.Void),
+  command('MarkReady', { taskId: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
   /**
    * Adds an account to an agent: the folder a grant names, as another tool
    * made it, or, without one, a folder Althar makes, to sign in to.
@@ -930,9 +985,9 @@ export const Api = RpcGroup.make(
    * said to; a draft is marked ready first. A pull request that moved on
    * since isn't merged. Agents never merge.
    */
-  command('Merge', { taskId: Schema.String, head: Schema.String }, Schema.Void),
+  command('Merge', { taskId: Schema.String, head: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
   /** Pushes the task's branch to its open pull request, up to the commit the person saw. */
-  command('Push', { taskId: Schema.String, head: Schema.String }, Schema.Void),
+  command('Push', { taskId: Schema.String, head: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
   /** Asks the task's pull request for news now. */
   command('RefreshTask', { taskId: Schema.String }, Schema.Void),
   /** What changes after `since`, or from now without it. */

@@ -364,14 +364,20 @@ export class Queries extends Context.Service<
         const sql = yield* SqlClient.SqlClient
         const at = yield* cursor
         const rows = yield* sql<
-          Omit<ProjectList['projects'][number], 'rotateAccounts' | 'onlyAccounts'> & {
+          Omit<ProjectList['projects'][number], 'rotateAccounts' | 'onlyAccounts' | 'repositories'> & {
             readonly rotateAccounts: number
             readonly onlyAccounts: string | null
+            readonly repositories: string
           }
         >`
           SELECT p.id, p.name, p.slug,
-            (SELECT l.path FROM repository_bindings b JOIN repository_locations l ON l.binding_id = b.id
-              WHERE b.project_id = p.id AND l.device_id = ${instance.deviceId} ORDER BY b.created_at LIMIT 1) AS repository,
+            coalesce(
+              (SELECT f.path FROM project_folders f WHERE f.project_id = p.id AND f.device_id = ${instance.deviceId}),
+              (SELECT l.path FROM repository_bindings b JOIN repository_locations l ON l.binding_id = b.id
+                WHERE b.project_id = p.id AND l.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid LIMIT 1)
+            ) AS repository,
+            (SELECT json_group_array(name) FROM (SELECT b.display_name AS name FROM repository_bindings b
+              WHERE b.project_id = p.id AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid)) AS repositories,
             (SELECT count(*) FROM tasks t WHERE t.project_id = p.id) AS tasks,
             (SELECT count(*) FROM provider_sessions s WHERE s.project_id = p.id AND s.state IN (${sql.unsafe(live)})) AS running,
             (SELECT count(*) FROM attention_requests a WHERE a.project_id = p.id AND a.state = 'open') AS waiting,
@@ -386,6 +392,7 @@ export class Queries extends Context.Service<
             rotateAccounts: row.rotateAccounts === 1,
             onlyAccounts:
               row.onlyAccounts === null ? null : (JSON.parse(row.onlyAccounts) as Readonly<Record<string, ReadonlyArray<string>>>),
+            repositories: JSON.parse(row.repositories) as ReadonlyArray<string>,
           })),
         }
       })
@@ -401,7 +408,7 @@ export class Queries extends Context.Service<
               k.created_at
             FROM tasks k
             JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-            LEFT JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
+            LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE ${where.taskId === undefined ? sql`k.project_id = ${where.projectId ?? ''}` : sql`k.id = ${where.taskId}`}
             ORDER BY k.created_at DESC, k.id DESC`
         })
@@ -473,15 +480,60 @@ export class Queries extends Context.Service<
               return { files, commits: Number(commits) || 0 }
             }).pipe(Effect.orElseSucceed(() => ({ files: [], commits: 0 })))
 
-      /** One file a task changed, as a diff from its base to its worktree on this device. */
-      const diffOf = (taskId: string, path: string) =>
+      /** A task's worktrees on this device, one per repository it changes, the project's first first. */
+      const worktreesOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [workspace] = yield* sql<{ path: string; baseRef: string | null; baseCommit: string | null }>`
-            SELECT path, base_ref, base_commit FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId}`
-          if (workspace === undefined || workspace.baseCommit === null || !existsSync(workspace.path))
+          return yield* sql<{ slug: string; path: string; baseRef: string | null; baseCommit: string | null }>`
+            SELECT b.slug, w.path, w.base_ref, w.base_commit FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
+        })
+
+      /**
+       * What a task changed across its repositories: in one, as `changedOf`
+       * reads it; in several, each file under its repository's name, and the
+       * commits of all of them.
+       */
+      const changedOfTask = (taskId: string) =>
+        Effect.gen(function* () {
+          const worktrees = yield* worktreesOf(taskId)
+          const each = yield* Effect.forEach(worktrees, (worktree) =>
+            Effect.map(changedOf(worktree.path, worktree.baseRef, worktree.baseCommit), (changed) => ({ worktree, changed })),
+          )
+          return {
+            files: each.flatMap(({ worktree, changed }) =>
+              worktrees.length > 1
+                ? changed.files.map((file) => ({
+                    ...file,
+                    path: `${worktree.slug}/${file.path}`,
+                    from: file.from === null ? null : `${worktree.slug}/${file.from}`,
+                  }))
+                : changed.files,
+            ),
+            commits: each.reduce((sum, { changed }) => sum + changed.commits, 0),
+          }
+        })
+
+      /** One file a task changed, as a diff from its base to its worktree on this device; in several repositories, named under its repository's. */
+      const diffOf = (taskId: string, path: string) =>
+        Effect.gen(function* () {
+          const worktrees = yield* worktreesOf(taskId)
+          const slash = path.indexOf('/')
+          const named = worktrees.length > 1 ? worktrees.find((worktree) => worktree.slug === path.slice(0, slash)) : worktrees[0]
+          const inside = worktrees.length > 1 ? path.slice(slash + 1) : path
+          if (named === undefined || named.baseCommit === null || !existsSync(named.path))
             return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
-          return yield* fileDiff(workspace.path, yield* baseOf(workspace.path, workspace.baseRef, workspace.baseCommit), path)
+          const diff = yield* fileDiff(named.path, yield* baseOf(named.path, named.baseRef, named.baseCommit), inside)
+          return worktrees.length > 1
+            ? {
+                ...diff,
+                file: {
+                  ...diff.file,
+                  path: `${named.slug}/${diff.file.path}`,
+                  from: diff.file.from === null ? null : `${named.slug}/${diff.file.from}`,
+                },
+              }
+            : diff
         })
 
       /** A task's issue and pull requests, as their external links last saw them. */
@@ -529,21 +581,27 @@ export class Queries extends Context.Service<
               container: text(kept, 'container') || null,
             }
           })()
-          const [workspace] = yield* sql<{ path: string }>`
-            SELECT path FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND state = 'ready'`
           const changes = yield* Effect.forEach(
             links.flatMap((link) => {
               const found = link.kind === 'change' ? changeOf(parse(link.snapshot), link.product, link.listening === 1) : null
               return found === null ? [] : [found]
             }),
-            // An open one says how far the branch here is ahead of it: commits the person hasn't pushed yet.
+            // An open one says how far its repository's branch here is ahead of it: commits the person hasn't pushed yet.
             (change) =>
-              change.state !== 'open' || workspace === undefined || !existsSync(workspace.path)
+              change.state !== 'open'
                 ? Effect.succeed(change)
                 : Effect.gen(function* () {
-                    const [recorded] = yield* sql<{ headCommit: string | null }>`
-                      SELECT head_commit FROM repository_changes WHERE pull_request_url = ${change.url} ORDER BY updated_at DESC LIMIT 1`
-                    return { ...change, ...(yield* unpushedOf(workspace.path, [change.head, recorded?.headCommit ?? null])) }
+                    // Its repository's worktree, as the record of the push says; the task's first, where it doesn't.
+                    const [here] = yield* sql<{ path: string; headCommit: string | null }>`
+                      SELECT w.path, (SELECT c.head_commit FROM repository_changes c WHERE c.pull_request_url = ${change.url}
+                          ORDER BY c.updated_at DESC LIMIT 1) AS head_commit
+                      FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+                      WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
+                      ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${change.url} LIMIT 1) DESC,
+                        b.created_at, b.rowid
+                      LIMIT 1`
+                    if (here === undefined || !existsSync(here.path)) return change
+                    return { ...change, ...(yield* unpushedOf(here.path, [change.head, here.headCommit])) }
                   }),
           )
           return { issue, changes }
@@ -605,7 +663,7 @@ export class Queries extends Context.Service<
                 WHERE h.task_id = k.id AND s.state = 'starting') AS starting
             FROM tasks k
             JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-            LEFT JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
+            LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             LEFT JOIN task_plans p ON p.id = (SELECT id FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1)
             LEFT JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
             WHERE k.id = ${taskId}`
@@ -662,7 +720,8 @@ export class Queries extends Context.Service<
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
                   },
             issue: issue === null ? null : { product: issue.product, key: issue.key, title: issue.title, url: issue.url },
-            change: changes[0] ?? null,
+            // The first still open, for the person to act on: one merged while another isn't leaves the other.
+            change: changes.find((candidate) => candidate.state === 'open') ?? changes[0] ?? null,
             step: task.step,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (planned.find((step) => step.key === 'implement')?.agentId || null),
@@ -700,7 +759,7 @@ export class Queries extends Context.Service<
             baseCommit: string | null
           }>`
             SELECT k.id, k.state, k.created_at, k.settled_at, w.path AS worktree, w.base_ref, w.base_commit
-            FROM tasks k LEFT JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
+            FROM tasks k LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE k.project_id = ${projectId} AND (k.state NOT IN ('done', 'abandoned') OR k.id IN (
               SELECT id FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')
               ORDER BY settled_at DESC LIMIT ${SETTLED_SHOWN}))
@@ -714,7 +773,7 @@ export class Queries extends Context.Service<
               // Ready without a pull request, its size is its branch's, read from git.
               const changed =
                 card.phase === 'ready' && card.change === null
-                  ? yield* Effect.map(changedOf(row.worktree, row.baseRef, row.baseCommit), ({ files }) => ({
+                  ? yield* Effect.map(changedOfTask(row.id), ({ files }) => ({
                       files: files.length,
                       add: files.reduce((sum, file) => sum + file.add, 0),
                       del: files.reduce((sum, file) => sum + file.del, 0),
@@ -786,7 +845,7 @@ export class Queries extends Context.Service<
             SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.slug, k.state,
               w.branch, w.path AS worktree, w.base_ref, w.base_commit
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
-            LEFT JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
+            LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE t.id = ${threadId} AND t.kind = 'task'`
           if (head === undefined) return yield* new NotFound({ kind: 'task thread', id: threadId })
           const { items, earlier } = yield* pageOf(threadId, page)
@@ -807,7 +866,7 @@ export class Queries extends Context.Service<
               baseRef: head.baseRef,
               ...(yield* Effect.map(cardFor(head.taskId), (card) => ({ phase: card?.phase ?? null, waits: card?.waits ?? null }))),
               ...(yield* linksOf(head.taskId)),
-              ...(yield* changedOf(head.worktree, head.baseRef, head.baseCommit)),
+              ...(yield* changedOfTask(head.taskId)),
             },
             session: yield* sessionOf(threadId),
             attention: attention.map(callOf),

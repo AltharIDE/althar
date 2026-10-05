@@ -49,6 +49,9 @@ import type { TaskModel } from './useTask'
  * this view only arranges it.
  */
 
+/** A pull request's repository by its name alone: `web` for `meridian/web`. */
+const repositoryName = (change: ChangeSummary) => change.repository.slice(change.repository.lastIndexOf('/') + 1)
+
 export const text = {
   thread: 'Thread',
   noLead: 'No lead',
@@ -68,6 +71,8 @@ export const text = {
   showEarlier: 'Show',
   loadingEarlier: 'Showing…',
   change: (change: ChangeSummary) => `${change.short} ${change.prefix}${change.number}`,
+  /** In a task of several repositories, each pull request by its repository's name. */
+  changeIn: (change: ChangeSummary) => `${repositoryName(change)} ${change.short} ${change.prefix}${change.number}`,
   changePanel: (change: ChangeSummary) => (change.noun === 'merge request' ? 'Merge request' : 'Pull request'),
   draftNote: 'Its checks run on it; mark it ready when you are',
   readyNote: (host: string) => `Merge it on ${host} when you’re ready`,
@@ -75,6 +80,7 @@ export const text = {
   markReady: 'Mark ready for review',
   openChange: 'Open a pull request',
   push: (n: number) => (n === 1 ? 'Push 1 commit' : `Push ${n} commits`),
+  pushTo: (n: number, change: ChangeSummary) => `${text.push(n)} to ${repositoryName(change)}`,
   unpushed: (n: number, change: ChangeSummary) =>
     n === 1 ? `One commit isn’t on the ${change.noun} yet.` : `${n} commits aren’t on the ${change.noun} yet.`,
   openOn: (host: string) => `Open on ${host}`,
@@ -194,7 +200,8 @@ function ChangePanel({
 export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => void }) {
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState<Choice | null>(null)
-  const [showChange, setShowChange] = useState(false)
+  // The pull request open beside the thread, by its address.
+  const [showChange, setShowChange] = useState<string | null>(null)
   const known = useModels()
   const catalog = useMemo(() => catalogOf(known ?? [], model.agents), [known, model.agents])
   const files = model.snapshot?.task.files ?? []
@@ -245,7 +252,10 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
     else void (now ? model.sendNow(body) : model.send(body))
   }
 
-  const change = snapshot.task.changes[0] ?? null
+  const { changes: pullRequests } = snapshot.task
+  const change = pullRequests[0] ?? null
+  const shown = pullRequests.find((candidate) => candidate.url === showChange) ?? null
+  const several = pullRequests.length > 1
   const issue = snapshot.task.issue
   // Work that ended on its branch can still open its pull request, as the person says.
   const unpublished = snapshot.task.phase === 'ready' && change === null && snapshot.task.commits > 0
@@ -260,14 +270,27 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
       {files.length > 0 && (
         <ChromeButton icon="file" label={text.files(files.length)} expanded={changes.open} onClick={() => changes.show()} />
       )}
-      {change !== null && change.state === 'open' && change.unpushed > 0 && change.localHead !== null && (
-        <Button size="small" busy={model.pending} onClick={() => void model.push(change.localHead ?? '')}>
-          {text.push(change.unpushed)}
-        </Button>
+      {pullRequests.map((each) =>
+        each.state === 'open' && each.unpushed > 0 && each.localHead !== null ? (
+          <Button
+            key={`push-${each.url}`}
+            size="small"
+            busy={model.pending}
+            onClick={() => void model.push(each.localHead ?? '', each.url)}
+          >
+            {several ? text.pushTo(each.unpushed, each) : text.push(each.unpushed)}
+          </Button>
+        ) : null,
       )}
-      {change !== null && (
-        <ChromeButton icon="pr" label={text.change(change)} expanded={showChange} onClick={() => setShowChange((open) => !open)} />
-      )}
+      {pullRequests.map((each) => (
+        <ChromeButton
+          key={each.url}
+          icon="pr"
+          label={several ? text.changeIn(each) : text.change(each)}
+          expanded={showChange === each.url}
+          onClick={() => setShowChange((open) => (open === each.url ? null : each.url))}
+        />
+      ))}
     </>
   )
   const actions =
@@ -335,16 +358,16 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
         className={s.face}
         composer={composer}
         panel={
-          showChange && change !== null ? (
+          shown !== null ? (
             <ChangePanel
               snapshot={snapshot}
-              change={change}
+              change={shown}
               lead={lead}
               agentName={agentName}
               pending={model.pending}
-              onReady={() => void model.markReady()}
-              onPush={(head) => void model.push(head)}
-              onClose={() => setShowChange(false)}
+              onReady={() => void model.markReady(shown.url)}
+              onPush={(head) => void model.push(head, shown.url)}
+              onClose={() => setShowChange(null)}
               onOpenFile={changes.show}
             />
           ) : undefined

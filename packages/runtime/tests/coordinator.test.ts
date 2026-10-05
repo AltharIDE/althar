@@ -139,7 +139,9 @@ describe('the coordinator loop', () => {
         ['review', 'review'],
       )
       const [workspace] = yield* sql<{ path: string; baseCommit: string }>`SELECT path, base_commit FROM workspaces`
-      const copy = join(dirname(workspace?.path ?? ''), '.review', basename(workspace?.path ?? ''))
+      // Beside the task's folder, not in it: `<project>/.review/<task>/<repository>`.
+      const taskFolder = dirname(workspace?.path ?? '')
+      const copy = join(dirname(taskFolder), '.review', basename(taskFolder), basename(workspace?.path ?? ''))
       const head = (cwd: string) => execFileSync('git', ['rev-parse', 'HEAD'], { cwd }).toString().trim()
       assert.strictEqual(head(copy), snapshots.at(-1)?.commitSha)
       // Althar commits nothing on the lead's branch: what is there, the lead committed.
@@ -763,6 +765,10 @@ describe("the coordinator's tools", () => {
       const { projectId, threadId } = yield* opened
       const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
       assert.match(yield* callTool(access, 'project_overview', {}), /Tasks: 0 open/)
+      assert.match(
+        yield* callTool(access, 'project_overview', {}),
+        /Rules: Agents may do anything but these, which wait for the person: pushing to the default branch;/,
+      )
       assert.strictEqual(yield* callTool(access, 'list_tasks'), 'The project has no tasks yet.')
       assert.match(yield* callTool(access, 'draft_task', { title: 'Tidy the README', description: 'Short.' }), /^Drafted tidy-the-readme\./)
       assert.match(yield* callTool(access, 'list_tasks', {}), /tidy-the-readme: Tidy the README \(planned\)/)

@@ -18,6 +18,7 @@ import {
   pathsOf,
   type ProjectRuleSet,
   type RuleContext,
+  sayRules,
 } from '../src/rules'
 
 const worktree = '/work/meridian/retry/app'
@@ -505,6 +506,31 @@ describe('a project’s rules (ADR-013)', () => {
   })
 })
 
+describe('a project’s rules, as the coordinator is told them', () => {
+  it('says what waits for the person and what is never allowed, by the mode', () => {
+    assert.strictEqual(
+      sayRules(MVP_RULES),
+      "Agents may do anything but these, which wait for the person: pushing to the default branch; force pushes; pushing every branch, tags, or a pattern of branches; deleting branches that aren't the task's; deploying and publishing; writing outside the task's worktree.",
+    )
+    assert.strictEqual(
+      sayRules({ mode: 'rules', ask: [], never: ['deploy'], commands: [{ pattern: 'terraform *', decision: 'never' }] }),
+      'Agents may do anything. Never allowed: deploying and publishing; commands starting `terraform *`.',
+    )
+    assert.strictEqual(
+      sayRules({ mode: 'ask', ask: RULES, never: [], commands: [] }),
+      "Agents may read anything and change a task's own files; everything else waits for the person.",
+    )
+    assert.strictEqual(
+      sayRules({ mode: 'allow', ask: RULES, never: [], commands: [{ pattern: 'npm publish', decision: 'ask' }] }),
+      'Agents may do anything.',
+    )
+    assert.strictEqual(
+      sayRules({ mode: 'rules', ask: ['force-push'], never: [], commands: [{ pattern: 'npm publish', decision: 'ask' }] }),
+      'Agents may do anything but these, which wait for the person: force pushes; commands starting `npm publish`.',
+    )
+  })
+})
+
 describe('a project’s rules, after review of #24', () => {
   const rules = (project: Partial<ProjectRuleSet>) => ({ project: { ...MVP_RULES, ...project } })
   const verdictOf = (command: string, project: Partial<ProjectRuleSet>) => run(command, rules(project)).verdict
@@ -595,5 +621,34 @@ describe('a project’s rules, after review of #24', () => {
     ])
       assert.strictEqual(verdictOf(command, { commands }), 'deny', command)
     assert.strictEqual(verdictOf('npx prisma generate', { commands }), 'allow')
+  })
+})
+
+describe('a task of several repositories', () => {
+  // Its lead starts in the folder that holds its worktrees; it may write in any of them.
+  const folder = '/work/meridian/retry'
+  const several: RuleContext = {
+    ...context,
+    worktree: folder,
+    worktrees: [`${folder}/api`, `${folder}/web`],
+    defaultBranch: 'main',
+    defaultBranches: ['main', 'develop'],
+  }
+  const edit = (path: string) => decide(request({ kind: 'edit', title: `Edit ${path}`, paths: [path] }), several).verdict
+
+  it('lets it write in each of its worktrees, and asks about the folder that holds them', () => {
+    assert.strictEqual(edit(`${folder}/api/src/retry.ts`), 'allow')
+    assert.strictEqual(edit(`${folder}/web/src/retry.tsx`), 'allow')
+    assert.strictEqual(edit(`${folder}/notes.md`), 'ask')
+    assert.strictEqual(decide(request({ title: 'cd web && git commit -am retry' }), several).verdict, 'allow')
+  })
+
+  it('asks before a push to any of their default branches', () => {
+    assert.strictEqual(decide(request({ title: 'git -C web push origin develop' }), several).verdict, 'ask')
+    assert.strictEqual(decide(request({ title: 'git -C api push origin main' }), several).verdict, 'ask')
+    assert.strictEqual(
+      decide(request({ title: 'git -C api push origin althar/retry' }), { ...several, taskBranch: 'althar/retry' }).verdict,
+      'allow',
+    )
   })
 })

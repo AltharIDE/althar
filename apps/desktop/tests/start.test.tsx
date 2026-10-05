@@ -176,6 +176,116 @@ describe('the start', () => {
     expect(host.grantDropped).toHaveBeenCalledTimes(1)
   })
 
+  it('opens a folder of several repositories with the ones the person keeps, and others they add', async () => {
+    const onProject = vi.fn()
+    const found = (name: string, at: string) => ({ path: `${at}/${name}`, folder: null, name, branch: 'main', remote: null })
+    const readFolder = vi.fn(async (grant: string) =>
+      grant === 'grant_picked'
+        ? {
+            kind: 'folder' as const,
+            name: 'meridian',
+            repositories: [found('api', '/code/meridian'), found('docs', '/code/meridian'), found('web', '/code/meridian')],
+            project: null,
+          }
+        : { kind: 'repository' as const, name: 'tools', repositories: [found('tools', '/code')], project: null },
+    )
+    const { client } = fakeClient({ readFolder })
+    const pickFolder = vi.fn<() => Promise<string | null>>().mockResolvedValueOnce('grant_picked').mockResolvedValueOnce('grant_more')
+    withServices(<Start onProject={onProject} />, client, fakeHost({ pickFolder }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open a folder' }))
+    expect(await screen.findByText('Althar found 3 git repositories in meridian. Leave out any its tasks shouldn’t change.')).toBeTruthy()
+    expect(client.openProject).not.toHaveBeenCalled()
+    // Left out, and one added from elsewhere.
+    await userEvent.click(screen.getByRole('button', { name: 'Remove docs' }))
+    await userEvent.click(screen.getByRole('button', { name: /Choose folders/ }))
+    expect(await screen.findByText('tools')).toBeTruthy()
+    await userEvent.click(screen.getByRole('radio', { name: /Ask me/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Create project' }))
+    await waitFor(() => expect(onProject).toHaveBeenCalledTimes(1))
+    expect(client.openProject).toHaveBeenCalledWith('grant_picked', {
+      name: 'meridian',
+      repositories: [
+        { grant: 'grant_picked', path: '/code/meridian/api' },
+        { grant: 'grant_picked', path: '/code/meridian/web' },
+        { grant: 'grant_more', path: '/code/tools' },
+      ],
+    })
+    expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', permissions: 'ask' })
+  })
+
+  it('says what went wrong forming a project, keeps at least one repository, and goes back when cancelled', async () => {
+    const found = (name: string) => ({ path: `/code/meridian/${name}`, folder: null, name, branch: null, remote: 'git@github.com:m/a.git' })
+    const readFolder = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: 'folder' as const, name: 'meridian', repositories: [found('api'), found('web')], project: null })
+      .mockRejectedValueOnce(new ApiError({ reason: 'NotFound', message: 'That folder isn’t there any more.' }))
+      .mockResolvedValueOnce({
+        kind: 'inside' as const,
+        name: 'web',
+        repositories: [{ path: '/code/monorepo', folder: 'packages/web', name: 'monorepo', branch: 'main', remote: null }],
+        project: null,
+      })
+    const openProject = vi.fn(async () => Promise.reject(new ApiError({ reason: 'GitFailed', message: 'Git couldn’t read it.' })))
+    const { client } = fakeClient({ readFolder, openProject })
+    const pickFolder = vi
+      .fn<() => Promise<string | null>>()
+      .mockResolvedValueOnce('grant_picked')
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('grant_gone')
+      .mockResolvedValueOnce('grant_inside')
+    withServices(<Start onProject={vi.fn()} />, client, fakeHost({ pickFolder }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open a folder' }))
+    await screen.findByText('Althar found 2 git repositories in meridian. Leave out any its tasks shouldn’t change.')
+    // Choosing no folder adds nothing; one that's gone says so.
+    await userEvent.click(screen.getByRole('button', { name: /Choose folders/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Choose folders/ }))
+    expect(await screen.findByText('That folder isn’t there any more.')).toBeTruthy()
+    // A folder inside a repository isn't one of several: the repository itself is what's added.
+    await userEvent.click(screen.getByRole('button', { name: /Choose folders/ }))
+    expect(await screen.findByText('That’s a folder inside monorepo. Add monorepo itself.')).toBeTruthy()
+    expect(screen.queryByText('monorepo', { exact: true })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Create project' }))
+    expect(await screen.findByText('Git couldn’t read it.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Remove api' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Remove web' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Create project' }))
+    expect(await screen.findByText('Keep at least one repository.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByRole('heading', { name: 'Projects' })).toBeTruthy()
+  })
+
+  it('makes a project of the repositories kept, with the rules as they are by default', async () => {
+    const onProject = vi.fn()
+    const found = (name: string) => ({ path: `/code/meridian/${name}`, folder: null, name, branch: 'main', remote: null })
+    const readFolder = vi.fn(async () => ({
+      kind: 'folder' as const,
+      name: 'meridian',
+      repositories: [found('api'), found('web')],
+      project: null,
+    }))
+    const { client } = fakeClient({ readFolder })
+    withServices(<Start onProject={onProject} />, client, fakeHost())
+    await userEvent.click(await screen.findByRole('button', { name: 'Open a folder' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Create project' }))
+    await waitFor(() => expect(onProject).toHaveBeenCalledTimes(1))
+    expect(client.setProjectRules).not.toHaveBeenCalled()
+  })
+
+  it('opens a folder it read at once when it is a project already, or holds one repository', async () => {
+    const onProject = vi.fn()
+    const readFolder = vi.fn(async () => ({
+      kind: 'folder' as const,
+      name: 'meridian',
+      repositories: [{ path: '/code/meridian/api', folder: null, name: 'api', branch: 'main', remote: null }],
+      project: null,
+    }))
+    const { client } = fakeClient({ readFolder })
+    withServices(<Start onProject={onProject} />, client, fakeHost())
+    await userEvent.click(await screen.findByRole('button', { name: 'Open a folder' }))
+    await waitFor(() => expect(onProject).toHaveBeenCalledTimes(1))
+    expect(client.openProject).toHaveBeenCalledWith('grant_picked')
+  })
+
   it('shows the first screen when there is no project, and what went wrong', async () => {
     const failure = new ApiError({ reason: 'NotARepository', message: 'That folder is not in a git repository.' })
     const { client } = fakeClient({

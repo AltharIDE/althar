@@ -12,6 +12,12 @@ export class NotARepository extends Schema.TaggedError<NotARepository>()('NotARe
   path: Schema.String,
 }) {}
 
+/** A task in a project of several repositories that names none, or one the project doesn't have: `choices` are the ones it has. */
+export class RepositoriesNeeded extends Schema.TaggedError<RepositoriesNeeded>()('RepositoriesNeeded', {
+  unknown: Schema.Array(Schema.String),
+  choices: Schema.Array(Schema.String),
+}) {}
+
 /** Something the caller named does not exist. */
 export class NotFound extends Schema.TaggedError<NotFound>()('NotFound', {
   kind: Schema.String,

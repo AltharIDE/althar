@@ -78,7 +78,12 @@ One pull request each:
 
    - pushing is the person's: what the lead commits after the pull request
      opens waits for a Push button, which pushes up to the commit the person
-     saw.
+     saw;
+   - projects of several repositories, and of a folder inside one, asked for
+     on 2026-10-05: a folder's repositories are listed to keep or leave out, a
+     task names the ones it changes, and each is worked, published and pushed
+     on its own
+     ([01](../architecture/01-concepts-and-project-model.md)).
 
    Next:
    1. Local merging.

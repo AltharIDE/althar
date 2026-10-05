@@ -18,6 +18,7 @@ export const Ids = {
   policy: kind('pol', 'PolicyId'),
   repositoryBinding: kind('repo', 'RepositoryBindingId'),
   repositoryLocation: kind('loc', 'RepositoryLocationId'),
+  projectFolder: kind('pfo', 'ProjectFolderId'),
   task: kind('task', 'TaskId'),
   taskRequirement: kind('req', 'TaskRequirementId'),
   taskPlan: kind('plan', 'TaskPlanId'),

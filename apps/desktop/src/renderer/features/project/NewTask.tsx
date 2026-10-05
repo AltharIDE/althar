@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type { AgentStatus, IssueSummary, TaskEnd } from '@althar/contracts'
 import {
   Button,
+  CheckList,
   Field,
   FieldError,
   LinkButton,
@@ -46,6 +47,7 @@ export const text = {
   loadingIssues: 'Your issues…',
   issueOption: (issue: IssueSummary) => `${productName(issue.product)} ${issue.key} · ${issue.title}`,
   end: 'When the work is done',
+  repositories: 'Repositories it changes',
 }
 
 /** The endings, in the menu's order, with the kit's words. */
@@ -66,11 +68,14 @@ export function NewTask({
   starting,
   connected,
   defaultEnd = null,
+  repositories = [],
   listIssues,
   onStart,
   onClose,
 }: {
   agents: ReadonlyArray<AgentStatus>
+  /** The project's repositories, the first first: with several, the person ticks the ones the task changes. */
+  repositories?: ReadonlyArray<string>
   starting: boolean
   /** The repository's host is connected: the task can end with a pull request. */
   connected: boolean
@@ -89,6 +94,8 @@ export function NewTask({
   // Undefined until the person picks: another agent than the lead's. Null for no review.
   const [reviewer, setReviewer] = useState<Choice | null | undefined>(undefined)
   const [missing, setMissing] = useState(false)
+  // The first repository, until the person ticks others: a task changes at least one.
+  const [changes, setChanges] = useState<ReadonlyArray<string>>(repositories.slice(0, 1))
   const titleRef = useRef<HTMLInputElement>(null)
   const ids = { title: useId(), description: useId(), missing: useId() }
   const first = agents[0]
@@ -131,6 +138,7 @@ export function NewTask({
       reviewer: chosenReviewer,
       issue: issue === NONE ? null : issue,
       end: connected ? end : null,
+      repositories: repositories.length > 1 ? changes : null,
     })
   }
 
@@ -176,6 +184,18 @@ export function NewTask({
             value={description}
             onChange={(event) => setDescription(event.target.value)}
           />
+          {repositories.length > 1 && (
+            <>
+              <span>{text.repositories}</span>
+              <CheckList
+                label={text.repositories}
+                items={repositories.map((name) => ({ id: name, label: name }))}
+                value={changes}
+                onChange={setChanges}
+                keepOne
+              />
+            </>
+          )}
           {chosenLead !== null && (
             <>
               <span>{text.lead}</span>

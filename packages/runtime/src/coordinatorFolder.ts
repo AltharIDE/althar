@@ -20,7 +20,18 @@ import { Instance } from './Instance'
 
 export interface CoordinatorFolder {
   readonly folder: string
-  readonly repositories: ReadonlyArray<{ readonly name: string; readonly path: string; readonly base: string }>
+  /**
+   * Each repository's copy: `path` is where the project is in it, its root
+   * or the folder inside it the project is about (`within`), and `root` the
+   * copy's root.
+   */
+  readonly repositories: ReadonlyArray<{
+    readonly name: string
+    readonly path: string
+    readonly root: string
+    readonly within: string | null
+    readonly base: string
+  }>
 }
 
 /** The project's coordinator folder, made if it isn't there, and each repository fresh from its default branch. */
@@ -31,12 +42,12 @@ export const coordinatorFolder = (projectId: string) =>
     const config = yield* RuntimeConfig
     const [project] = yield* sql<{ slug: string }>`SELECT slug FROM projects WHERE id = ${projectId}`
     if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
-    const bindings = yield* sql<{ slug: string; name: string; base: string | null; repository: string }>`
-      SELECT b.slug, b.display_name AS name, b.default_base_ref AS base, l.path AS repository
+    const bindings = yield* sql<{ slug: string; name: string; base: string | null; within: string | null; repository: string }>`
+      SELECT b.slug, b.display_name AS name, b.default_base_ref AS base, b.folder AS within, l.path AS repository
       FROM repository_bindings b
       JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
       WHERE b.project_id = ${projectId} AND b.detached_at IS NULL
-      ORDER BY b.created_at`
+      ORDER BY b.created_at, b.rowid`
     const folder = join(config.worktreeRoot, project.slug, '.coordinator')
     mkdirSync(folder, { recursive: true })
     const repositories = yield* Effect.forEach(bindings, (binding) =>
@@ -52,7 +63,13 @@ export const coordinatorFolder = (projectId: string) =>
           yield* git(path, 'checkout', '--detach', '--force', commit)
           yield* git(path, 'clean', '-fdq')
         }
-        return { name: binding.name, path, base }
+        return {
+          name: binding.name,
+          path: binding.within === null ? path : join(path, binding.within),
+          root: path,
+          within: binding.within,
+          base,
+        }
       }),
     )
     return { folder, repositories } satisfies CoordinatorFolder

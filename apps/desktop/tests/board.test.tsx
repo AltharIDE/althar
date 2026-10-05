@@ -197,7 +197,7 @@ describe('the board', () => {
     await userEvent.click(within(dock).getByRole('button', { name: /Accept and merge/ }))
     await waitFor(() => expect(merge).toHaveBeenCalledTimes(2))
     // At the head the dock showed.
-    expect(merge).toHaveBeenLastCalledWith('t4', 'abc123')
+    expect(merge).toHaveBeenLastCalledWith('t4', 'abc123', 'https://github.com/meridian/api/pull/12')
     // Sent back, its lead, which stopped, starts again with the note as its first turn.
     await userEvent.click(within(dock).getByRole('button', { name: /Send back/ }))
     await userEvent.type(within(dock).getByRole('textbox'), 'Name it better.')
@@ -209,7 +209,10 @@ describe('the board', () => {
   })
 
   it('pushes what the lead committed since before the pull request can be accepted, up to what the dock showed', async () => {
-    const push = vi.fn(async () => {})
+    const push = vi
+      .fn<(taskId: string, head: string, url?: string) => Promise<void>>()
+      .mockRejectedValueOnce(new ApiError({ reason: 'ChangedSinceSeen', message: 'It changed since you looked. Look again.' }))
+      .mockResolvedValue(undefined)
     const later = board().tasks.map((work) =>
       work.taskId === 't4' && work.change !== null ? { ...work, change: { ...work.change, unpushed: 2, localHead: 'def456' } } : work,
     )
@@ -220,8 +223,12 @@ describe('the board', () => {
     const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
     expect(within(dock).getByText('2 commits aren’t on the pull request yet')).toBeTruthy()
     expect(within(dock).queryByRole('button', { name: /Accept and merge/ })).toBeNull()
+    // A push that didn't go through says why, and can be tried again.
     await userEvent.click(within(dock).getByRole('button', { name: 'Push' }))
-    await waitFor(() => expect(push).toHaveBeenCalledWith('t4', 'def456'))
+    expect(await within(dock).findByText('It changed since you looked. Look again.')).toBeTruthy()
+    await userEvent.click(within(dock).getByRole('button', { name: 'Push' }))
+    await waitFor(() => expect(push).toHaveBeenCalledTimes(2))
+    expect(push).toHaveBeenLastCalledWith('t4', 'def456', 'https://github.com/meridian/api/pull/12')
   })
 
   it('opens work ready on its branch to review its changes, and any task in its own window', async () => {

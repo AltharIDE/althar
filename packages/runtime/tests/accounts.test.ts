@@ -363,7 +363,10 @@ describe('accounts', () => {
         ['codex', usual?.id],
         ['codex', work.id],
       ])
-      assert.deepInclude(launches, { agentId: 'codex', env: { FAKE_HOME: workFolder } })
+      assert.deepInclude(
+        launches.map(({ agentId, env }) => ({ agentId, env })),
+        { agentId: 'codex', env: { FAKE_HOME: workFolder } },
+      )
       // The usual account is out until its reset; the agent isn't, while work can run.
       assert.isTrue((yield* limits.out('codex', project.projectId))._tag === 'None')
 
