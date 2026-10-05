@@ -1,0 +1,52 @@
+/* The hero's rolling name. Letters rise in out of a blur, staggered from the
+   left, and lift away the same way, staggered from the right so the end of
+   the old name clears first; the slot eases between widths underneath,
+   unclipped, so nothing shows a hard edge. */
+
+.line { white-space: nowrap; }
+.spoken {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+
+.nameMark { display: inline-block; width: 0.74em; height: 0.74em; margin-right: 0.14em; vertical-align: -0.04em; }
+
+.slot {
+  display: inline-grid;
+  vertical-align: baseline;
+  /* Leads the letters in, so a longer name has its room before it lands. */
+  transition: width 620ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.layer { grid-area: 1 / 1; justify-self: start; white-space: nowrap; }
+.layer[data-leaving] { pointer-events: none; }
+
+.letter { display: inline-block; }
+
+.layer[data-entering] .letter,
+.layer[data-entering] .nameMark {
+  animation: rise 760ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(240ms + var(--i, 0) * 30ms);
+}
+.layer[data-entering] .nameMark { --i: -1; animation-name: turnIn; }
+
+.layer[data-leaving] .letter,
+.layer[data-leaving] .nameMark {
+  animation: lift 380ms cubic-bezier(0.5, 0, 0.75, 0) both;
+  animation-delay: calc(var(--r, 0) * 16ms);
+}
+.layer[data-leaving] .nameMark { --r: 8; animation-name: turnOut; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(0.36em); filter: blur(12px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes lift {
+  to { opacity: 0; transform: translateY(-0.3em); filter: blur(10px); }
+}
+@keyframes turnIn {
+  from { opacity: 0; transform: scale(0.4) rotate(-40deg); filter: blur(8px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes turnOut {
+  to { opacity: 0; transform: scale(0.5) rotate(30deg); filter: blur(8px); }
+}

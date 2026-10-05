@@ -7,21 +7,24 @@
 .status[data-state='need'] { color: var(--signal); }
 .status[data-state='done'] { color: var(--ok); }
 
-.ag { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--t-2); white-space: nowrap; }
+.ag { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--t-3); white-space: nowrap; }
 .ag em { margin-right: 2px; font-style: normal; color: var(--t-4); }
+/* Two agents on a step stack, the second hung on its plus, so neighbours never run into each other. */
+.who .ag + .ag em { margin-left: -14px; width: 12px; margin-right: 0; }
 .sq { width: 10px; height: 10px; border-radius: 2px; background: var(--live); }
 .you { width: 14px; height: 14px; border-radius: 50%; background: var(--n-5); }
 
 /* ---- the plane: positions from --i, so it lays out without measuring ---- */
-.plane { position: relative; height: 222px; margin-top: 18px; }
+.plane { position: relative; height: 236px; margin-top: 18px; }
 .steps { margin: 0; padding: 0; list-style: none; }
 .steps li { position: absolute; top: 0; left: calc(var(--pad) + (100% - 2 * var(--pad)) * var(--i) / (var(--n) - 1)); width: 0; }
 .k { position: absolute; left: -80px; top: 64px; width: 160px; text-align: center; font-weight: 650; font-size: 15px; letter-spacing: -0.01em; transition: color 0.3s; }
 .rule { position: absolute; left: -80px; top: 44px; width: 160px; text-align: center; font: 600 9.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--live); opacity: 0; transition: opacity 0.4s; }
 [data-rule-shown] .rule { opacity: 1; }
 .dot { position: absolute; left: -11px; top: calc(var(--rail) - 11px); width: 22px; height: 22px; border-radius: 50%; background: var(--n-1); box-shadow: inset 0 0 0 2px var(--t-4); transition: background 0.3s, box-shadow 0.3s; }
-.who { position: absolute; left: -90px; top: 140px; width: 180px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 8px; }
-.out { position: absolute; left: -90px; top: 176px; width: 180px; text-align: center; font-size: 13px; font-weight: 500; color: var(--t-2); }
+.under { position: absolute; left: -64px; top: 136px; width: 128px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.who { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.out { min-height: 1.4em; text-align: center; font-size: 13px; font-weight: 600; color: var(--t-1); }
 
 [data-state='done'] .dot { background: var(--t-1); box-shadow: none; }
 [data-state='now'] .dot { background: var(--live); box-shadow: 0 0 0 7px var(--live-dim); }
@@ -57,17 +60,27 @@
 .time { width: 44px; flex: none; font: 500 12px var(--mono); color: var(--t-3); padding-top: 1px; }
 .replay { padding: 7px 12px; border: 0; border-radius: 7px; background: none; box-shadow: inset 0 0 0 1px var(--line-3); font: 600 13px var(--font); color: var(--t-1); cursor: pointer; }
 
-/* ---- narrow: the same steps as a list, top to bottom ---- */
+/* ---- narrow: the same steps top to bottom, on a vertical rail ---- */
 @media (max-width: 860px) {
   .card { padding: 18px 18px 20px; }
-  .plane { height: auto; }
+  .plane { height: auto; margin-top: 8px; }
   .rail, .arc { display: none; }
-  .steps li { position: relative; left: auto; width: auto; display: grid; grid-template-columns: 22px 1fr auto; gap: 2px 14px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .steps li { position: relative; left: auto; width: auto; display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 3px 16px; align-items: baseline; padding: 11px 0; }
+  /* the rail: a line through every dot, from the first to the last */
+  .steps li::before { content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px; background: var(--n-5); }
+  .steps li:first-child::before { top: 20px; }
+  .steps li:last-child::before { bottom: auto; height: 20px; }
+  .steps li[data-state='done']::before { background: var(--t-1); }
+  .under { display: contents; }
   .k, .rule, .dot, .who, .out { position: static; width: auto; text-align: left; }
-  .dot { grid-row: 1 / span 2; }
-  .k { grid-column: 2; }
-  .who { grid-column: 2; justify-content: flex-start; }
-  .out { grid-column: 3; grid-row: 1 / span 2; text-align: right; }
+  .dot { position: relative; left: auto; top: auto; grid-column: 1; grid-row: 1; align-self: center; width: 12px; height: 12px; }
+  [data-state='now'] .dot, [data-state='need'] .dot { box-shadow: 0 0 0 5px var(--live-dim); }
+  [data-state='need'] .dot { box-shadow: 0 0 0 5px var(--signal-dim); }
+  .k { grid-column: 2; grid-row: 1; }
+  .who { grid-column: 2; grid-row: 2; flex-direction: row; flex-wrap: wrap; gap: 2px 12px; }
+  .who .ag + .ag em { margin-left: 0; width: auto; margin-right: 2px; }
+  .out { grid-column: 3; grid-row: 1; min-height: 0; text-align: right; font-size: 12.5px; font-weight: 500; color: var(--t-2); }
   .rule { grid-column: 2; grid-row: 3; }
+  li:not([data-rule-shown]) .rule { display: none; }
   .head .lead { margin-left: 0; }
 }

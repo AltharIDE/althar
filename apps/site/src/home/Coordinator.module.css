@@ -6,9 +6,49 @@
 .me span { font-weight: 400; font-size: 13px; color: var(--t-3); }
 .sq { width: 10px; height: 10px; border-radius: 2px; background: var(--live); }
 
-.pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 7px; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line-3); font-size: 12.5px; font-weight: 550; white-space: nowrap; }
-
-.next { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 18px; border-radius: 10px; background: var(--paper); box-shadow: 0 0 0 1px var(--line-2); font-size: 13.5px; }
+/* Who runs a step: marks and names as text, stacked when there are two. */
+.who { display: flex; flex-direction: column; gap: 3px; }
+.ag { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 550; color: var(--t-1); white-space: nowrap; }
+.ag em { width: 0; margin-left: -12px; margin-right: 6px; font-style: normal; color: var(--t-4); }
 .n { font: 500 12px var(--mono); color: var(--t-3); }
-.then { font-size: 12px; color: var(--t-4); }
-.when { margin-left: auto; font-size: 12.5px; color: var(--t-3); }
+
+/* ---- the plan for 431 ---- */
+.plan { padding: 18px 20px 0; border-radius: 12px; background: var(--paper); box-shadow: 0 0 0 1px var(--line-2), 0 1px 2px rgba(20, 20, 28, 0.04); }
+.title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 15.5px; }
+.project { margin-left: auto; font: 500 11px var(--mono); letter-spacing: 0.04em; color: var(--t-3); }
+
+.steps { margin: 12px 0 0; padding: 0; list-style: none; counter-reset: none; }
+.steps li { display: grid; grid-template-columns: 22px minmax(0, 1fr) 150px 74px; gap: 0 14px; align-items: start; padding: 11px 0; border-top: 1px solid var(--line); }
+.i { padding-top: 2px; font: 500 12px var(--mono); color: var(--t-4); }
+.step { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.step b { font-size: 14.5px; font-weight: 650; letter-spacing: -0.01em; }
+.why { font-size: 12.5px; color: var(--t-3); }
+.tag { padding-top: 3px; text-align: right; font: 500 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
+
+/* The first step lights up once it starts. */
+.chat[data-started] .steps li[data-first] .i,
+.chat[data-started] .steps li[data-first] .step b { color: var(--live); }
+
+.foot { position: relative; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; margin: 0 -20px; padding: 13px 20px 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--t-3); }
+.left { color: var(--t-2); font-weight: 550; font-variant-numeric: tabular-nums; }
+.chat[data-started] .left { color: var(--live); }
+/* The countdown, as a hairline that runs along the bottom edge. */
+.wait { position: absolute; left: 0; bottom: 0; height: 2px; width: calc(var(--wait, 0) * 100%); border-radius: 0 0 0 12px; background: var(--live); }
+.chat[data-started] .wait { opacity: 0; transition: opacity 0.6s; }
+
+/* ---- the second task, one line ---- */
+.next { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 13px 20px; border-radius: 12px; background: var(--paper); box-shadow: 0 0 0 1px var(--line-2); font-size: 14px; }
+.then { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--t-4); }
+.when { margin-left: auto; font-size: 13px; color: var(--t-3); }
+
+@media (max-width: 560px) {
+  .plan { padding: 16px 16px 0; }
+  .foot { margin: 0 -16px; padding: 12px 16px 13px; }
+  .next { padding: 12px 16px; }
+  .steps li { grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px 10px; }
+  .steps li .who { grid-column: 2; grid-row: 2; flex-direction: row; flex-wrap: wrap; gap: 4px 14px; }
+  .ag em { width: auto; margin: 0 2px 0 0; }
+  .tag { grid-column: 3; grid-row: 1; }
+  .project { margin-left: 0; flex-basis: 100%; }
+  .when { margin-left: 0; flex-basis: 100%; }
+}

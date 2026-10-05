@@ -1,5 +1,3 @@
-import { Fragment } from 'react'
-
 import { AGENTS } from '../content/agents'
 import { COORDINATOR, HERO, LOOP, PLANS } from '../content/home'
 import { AgentMark } from '../shared/AgentMark'
@@ -8,6 +6,7 @@ import { Close, Get } from '../shared/Close'
 import { Coordinator } from './Coordinator'
 import s from './Home.module.css'
 import { Meters } from './Meters'
+import { NameSwap } from './NameSwap'
 import { TaskLoop } from './TaskLoop'
 import { Why } from './Why'
 
@@ -18,9 +17,6 @@ import { Why } from './Why'
  * cobalt, with a ticker from the shifts list), the coordinator that hands out
  * the work, one task's review loop, and how to get it.
  */
-
-/** The punctuation after a name in a list: "Claude, Codex and OpenCode." The "and" goes between the spans. */
-const listMark = (i: number, count: number) => (i === count - 1 ? '.' : i === count - 2 ? '' : ',')
 
 function Part({ no, label }: { no: string; label: string }) {
   return (
@@ -46,18 +42,7 @@ export function Home() {
             </p>
             <h1 className={s.h1}>
               <span className={s.dim}>{HERO.pay}</span>
-              <span>
-                {HERO.names.map((n, i) => (
-                  <Fragment key={n.agent}>
-                    <span className={s.name}>
-                      <AgentMark agent={n.agent} className={s.nameMark} />
-                      {n.word}
-                      {listMark(i, HERO.names.length)}
-                    </span>
-                    {i === HERO.names.length - 2 ? ' and ' : ' '}
-                  </Fragment>
-                ))}
-              </span>
+              <NameSwap names={HERO.names} nameClass={s.name} />
               <span>{HERO.use}</span>
             </h1>
             <div className={s.below}>

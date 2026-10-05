@@ -4,8 +4,10 @@
  * has no mark in @althar/ui, so it gets a plain one there.
  *
  * AGENTS is what Althar runs today, as packages/provider-adapters' registry
- * has it. Gemini is named on the page, in the "best right now" reel, but
- * Althar doesn't run it yet, so it isn't in AGENTS.
+ * has it. The rest speak the Agent Client Protocol too (natively, as listed
+ * at agentclientprotocol.com/overview/agents) and are named in the hero and
+ * the "best right now" reel, but Althar doesn't run them yet, so they aren't
+ * in AGENTS.
  */
 
 export enum Agent {
@@ -13,6 +15,11 @@ export enum Agent {
   Codex = 'codex',
   Gemini = 'gemini',
   OpenCode = 'opencode',
+  Copilot = 'copilot',
+  Cursor = 'cursor',
+  Qwen = 'qwen',
+  Kimi = 'kimi',
+  Mistral = 'mistral',
 }
 
 export interface AgentInfo {
@@ -35,6 +42,11 @@ const NAMED: Record<Agent, string> = {
   [Agent.Codex]: 'Codex',
   [Agent.Gemini]: 'Gemini',
   [Agent.OpenCode]: 'OpenCode',
+  [Agent.Copilot]: 'GitHub Copilot',
+  [Agent.Cursor]: 'Cursor',
+  [Agent.Qwen]: 'Qwen Code',
+  [Agent.Kimi]: 'Kimi CLI',
+  [Agent.Mistral]: 'Mistral Vibe',
 }
 
 export const agentName = (id: Agent): string => NAMED[id]

@@ -12,13 +12,24 @@ export const BRAND = 'Althar'
 
 export const HERO = {
   kicker: 'Open source · desktop app',
-  /** "You pay for Claude and Codex. Use them both at once." The names are drawn with their marks. Gemini joins them when Althar runs it. */
+  /**
+   * "You pay for Claude. Use them all at once.", with the name swapping through
+   * the agents that speak ACP, each drawn with its mark. With reduced motion
+   * it stands still on the first three, as a list.
+   */
   pay: 'You pay for',
   names: [
     { agent: Agent.Claude, word: 'Claude' },
     { agent: Agent.Codex, word: 'Codex' },
+    { agent: Agent.Gemini, word: 'Gemini' },
+    { agent: Agent.OpenCode, word: 'OpenCode' },
+    { agent: Agent.Copilot, word: 'Copilot' },
+    { agent: Agent.Cursor, word: 'Cursor' },
+    { agent: Agent.Qwen, word: 'Qwen' },
+    { agent: Agent.Kimi, word: 'Kimi' },
+    { agent: Agent.Mistral, word: 'Mistral' },
   ],
-  use: 'Use them both at once.',
+  use: 'Use them all at once.',
   lead: 'Althar runs Claude Code, Codex and OpenCode side by side, on the plans you already have. One hits its limit, the next takes over. One gets it wrong, another catches it.',
   fine: 'Free and open source. No account, and no API key of its own.',
 } as const

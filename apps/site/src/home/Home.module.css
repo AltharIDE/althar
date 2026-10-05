@@ -10,7 +10,6 @@
 .h1 > span { display: block; }
 .dim { color: rgba(255, 255, 255, 0.6); }
 .name { white-space: nowrap; }
-.nameMark { display: inline-block; width: 0.74em; height: 0.74em; margin-right: 0.14em; vertical-align: -0.04em; }
 .below { display: grid; grid-template-columns: 1fr minmax(0, 590px); gap: 72px; margin-top: 56px; align-items: start; }
 .heroLead { max-width: 470px; font-size: 19px; line-height: 1.55; color: rgba(255, 255, 255, 0.86); }
 .ctas { margin-top: 30px; }

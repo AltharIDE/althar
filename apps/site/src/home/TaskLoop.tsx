@@ -156,10 +156,12 @@ export function TaskLoop() {
               {n.rule && <span className={s.rule}>Added by your rule</span>}
               <span className={s.k}>{n.name}</span>
               <span className={s.dot} aria-hidden="true" />
-              <span className={s.who}>
-                <WhoRuns who={n.who} />
+              <span className={s.under}>
+                <span className={s.out} data-out />
+                <span className={s.who}>
+                  <WhoRuns who={n.who} />
+                </span>
               </span>
-              <span className={s.out} data-out />
             </li>
           ))}
         </ol>
