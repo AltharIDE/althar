@@ -96,6 +96,7 @@ The same holds for formatting: dates, durations, counts and file sizes arrive fo
   - green is only for additions and merges
   - `--danger` is only for deletions and failures
   - source colours, like `--linear`, are only for that source's mark
+  - project inks, `--project-*`, are only for a project's mark
 - Visual rules from the product voice apply. There are no side stripes, coloured shadows or badge pills, and there is no selling copy.
 - **Text meets contrast.** `--t-4` is for disabled text and decoration, never for information.
 - **Spacing between parts belongs to the layout, not the parts.** A part never sets its own top margin in a thread. Its root carries `data-rhythm` (the `Rhythm` enum in `src/lib/rhythm.ts`), and `Thread` and `Turn` space parts from it:
@@ -138,6 +139,7 @@ Plain semantic elements stay plain. A button is a `<button>`, and a list is a `<
 
 - **Icons are Iconoir** (`iconoir-react`, MIT). They are named by what they mean in Althar (`work`, `after`, `corner`), not by their drawing. `Icon` sets a stroke width that holds up at 11–14px.
 - **Marks are brands, drawn in ink.** `BrandMark` draws a `Brand` from `foundations/brands/brands.ts`. That file is generated from Lobe Icons (MIT) and Simple Icons (CC0). Brand colour is not used, apart from Linear's issue card.
+- **A project's mark is generated, never chosen from pictures.** `ProjectMark` draws a composition from a seed that survives renaming, in one of the project inks, so every project has a mark from the moment it exists.
 
 ### Shared building blocks
 

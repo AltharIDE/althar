@@ -45,6 +45,19 @@ const GROUPS: { title: string; swatches: Swatch[] }[] = [
       { name: '--linear', note: 'Linear’s mark, on its card only' },
     ],
   },
+  {
+    title: 'Projects',
+    swatches: [
+      { name: '--project-clay', note: 'a project’s mark, nothing else' },
+      { name: '--project-ochre', note: 'a project’s mark' },
+      { name: '--project-olive', note: 'a project’s mark' },
+      { name: '--project-moss', note: 'a project’s mark' },
+      { name: '--project-teal', note: 'a project’s mark' },
+      { name: '--project-slate', note: 'a project’s mark' },
+      { name: '--project-rose', note: 'a project’s mark' },
+      { name: '--project-umber', note: 'a project’s mark' },
+    ],
+  },
 ]
 
 function Colours() {

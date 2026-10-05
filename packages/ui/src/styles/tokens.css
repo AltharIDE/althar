@@ -147,4 +147,16 @@
      A source's own colour, for its mark and nothing else. */
   --linear: #5e6ad2;
   --linear-ink: #4b55b8;
+
+  /* ---- Projects --------------------------------------------------------------
+     A project's own ink, for its mark and nothing else. Muted, and clear of
+     cobalt and violet, which say what runs and what waits on you. */
+  --project-clay: #b4532a;
+  --project-ochre: #8a6d2f;
+  --project-olive: #6b7330;
+  --project-moss: #4f7a4a;
+  --project-teal: #2f6f7a;
+  --project-slate: #56616e;
+  --project-rose: #a24d5c;
+  --project-umber: #6e4b3a;
 }
