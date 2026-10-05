@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -109,6 +109,24 @@ describe('the client', () => {
     await client.close()
   })
 
+  it('reads a folder, opens the repositories kept in it, and names a pull request by its address', async () => {
+    const { client, grant } = await connected()
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+    const root = repository(folder)
+    const chosen = await grant(folder)
+    const reading = await client.readFolder(chosen)
+    expect([reading.kind, reading.repositories.map((found) => found.path)]).toEqual(['folder', [root]])
+    const project = await client.openProject(chosen, { name: 'Meridian', repositories: [{ grant: chosen, path: root }] })
+    expect([project.name, project.repositories]).toEqual(['Meridian', ['meridian']])
+    // Each action on a pull request can name which; a task without one hears there's none.
+    const task = await client.createTask({ projectId: project.id, title: 'Nothing' })
+    const elsewhere = 'https://github.com/meridian/web/pull/4'
+    await expect(client.markReady(task.id, elsewhere)).rejects.toThrow()
+    await expect(client.push(task.id, 'abc', elsewhere)).rejects.toThrow()
+    await expect(client.merge(task.id, 'abc', elsewhere)).rejects.toThrow()
+    await client.close()
+  })
+
   it('asks the coordinator for a task, holds, changes and starts its plan, and starts one the person planned', async () => {
     const { client, grant } = await connected()
     const project = await client.openProject(await grant(repository()))
@@ -163,6 +181,7 @@ describe('the client', () => {
           GetFileDiff: () => Effect.die('unused'),
           GetBoard: () => Effect.die('unused'),
           Merge: () => Effect.die('unused'),
+          ReadFolder: () => Effect.die('unused'),
           Push: () => Effect.die('unused'),
           ListProjects: () => Effect.die('unused'),
           OpenProject: () => Effect.die('unused'),

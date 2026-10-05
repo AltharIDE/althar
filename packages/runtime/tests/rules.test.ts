@@ -597,3 +597,32 @@ describe('a project’s rules, after review of #24', () => {
     assert.strictEqual(verdictOf('npx prisma generate', { commands }), 'allow')
   })
 })
+
+describe('a task of several repositories', () => {
+  // Its lead starts in the folder that holds its worktrees; it may write in any of them.
+  const folder = '/work/meridian/retry'
+  const several: RuleContext = {
+    ...context,
+    worktree: folder,
+    worktrees: [`${folder}/api`, `${folder}/web`],
+    defaultBranch: 'main',
+    defaultBranches: ['main', 'develop'],
+  }
+  const edit = (path: string) => decide(request({ kind: 'edit', title: `Edit ${path}`, paths: [path] }), several).verdict
+
+  it('lets it write in each of its worktrees, and asks about the folder that holds them', () => {
+    assert.strictEqual(edit(`${folder}/api/src/retry.ts`), 'allow')
+    assert.strictEqual(edit(`${folder}/web/src/retry.tsx`), 'allow')
+    assert.strictEqual(edit(`${folder}/notes.md`), 'ask')
+    assert.strictEqual(decide(request({ title: 'cd web && git commit -am retry' }), several).verdict, 'allow')
+  })
+
+  it('asks before a push to any of their default branches', () => {
+    assert.strictEqual(decide(request({ title: 'git -C web push origin develop' }), several).verdict, 'ask')
+    assert.strictEqual(decide(request({ title: 'git -C api push origin main' }), several).verdict, 'ask')
+    assert.strictEqual(
+      decide(request({ title: 'git -C api push origin althar/retry' }), { ...several, taskBranch: 'althar/retry' }).verdict,
+      'allow',
+    )
+  })
+})

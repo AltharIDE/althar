@@ -152,6 +152,7 @@ describe('the API', () => {
               Status: ({ recheck }) => Effect.succeed({ apiVersion: 1, appVersion: recheck === true ? 'rechecked' : 'cached', agents: [] }),
               ListProjects: () => Effect.succeed({ cursor: 0, projects: [] }),
               OpenProject: ({ grant }) => Effect.fail(new ApiError({ reason: 'NotFound', message: `No folder was chosen as ${grant}.` })),
+              ReadFolder: () => Effect.die('unused'),
               ListTasks: () => Effect.succeed({ cursor: 0, tasks: [] }),
               CreateTask: () => Effect.die('unused'),
               GetThread: () => Effect.die('unused'),

@@ -125,11 +125,16 @@ export interface Host {
  * only, or found nothing to propose; and the files the lead left uncommitted,
  * which weren't.
  */
-export type Published = (
+export type PublishedOne = (
   | { readonly kind: 'opened'; readonly change: ChangeSummary }
   | { readonly kind: 'pushed'; readonly branch: string }
   | { readonly kind: 'nothing' }
-) & { readonly left: ReadonlyArray<string> }
+  /** Left on its branch: in a task of several repositories, one on no code host Althar knows. */
+  | { readonly kind: 'branch' }
+) & { readonly left: ReadonlyArray<string>; readonly repository: string }
+
+/** What publishing did in each of the task's repositories, the project's first first. */
+export type Published = ReadonlyArray<PublishedOne>
 
 /** How long a pull request with nothing new counts as quiet, and how much less often a quiet one is asked. */
 const QUIET_AFTER = Duration.minutes(10)
@@ -218,15 +223,15 @@ export class Changes extends Context.Service<
      * person saw: theirs to do, after looking at what the lead committed. One
      * that isn't on the branch any more isn't pushed.
      */
-    push(taskId: string, head: string): Effect.Effect<{ readonly change: ChangeSummary }, unknown>
+    push(taskId: string, head: string, url?: string): Effect.Effect<{ readonly change: ChangeSummary }, unknown>
     /** Marks the task's draft pull request ready for review: the person's to do. */
-    markReady(taskId: string): Effect.Effect<void, unknown>
+    markReady(taskId: string, url?: string): Effect.Effect<void, unknown>
     /**
      * Merges the task's pull request at the head the person saw, because
      * they said to, marking a draft ready first; one that moved on since
      * isn't merged. Agents never merge.
      */
-    merge(taskId: string, head: string): Effect.Effect<void, unknown>
+    merge(taskId: string, head: string, url?: string): Effect.Effect<void, unknown>
     /** Replies on the task's pull request, in a comment's thread or its conversation, signed as from Althar and the agent that wrote it. */
     reply(
       taskId: string,
@@ -294,10 +299,20 @@ export class Changes extends Context.Service<
           listening: link.listening === 1,
         }))
 
-      /** The task's open change, and its host: what the lead's tools act on. */
-      const current = (taskId: string) =>
+      /**
+       * The task's open change, and its host: what the person's actions and the
+       * lead's tools act on. In a task of several repositories, the one at `url`;
+       * without it, the first.
+       */
+      const current = (taskId: string, url?: string) =>
         Effect.gen(function* () {
-          const links = yield* linksOf(taskId)
+          const all = yield* linksOf(taskId)
+          const links =
+            url === undefined
+              ? all
+              : yield* Effect.filter(all, (candidate) =>
+                  Effect.map(Effect.option(decodeSnapshot(candidate.snapshot)), (seen) => Option.isSome(seen) && seen.value.url === url),
+                )
           const link = links.find((candidate) => candidate.connectionId !== null) ?? links[0]
           if (link === undefined) return yield* new NotFound({ kind: 'pull request', id: taskId })
           if (link.connectionId === null) return yield* new NotConnected({ product: link.product, what: 'the task’s pull request' })
@@ -373,8 +388,9 @@ export class Changes extends Context.Service<
       }): Effect.Effect<Published, unknown, Store> =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [task] = yield* sql<{
+          const tasks = yield* sql<{
             title: string
+            name: string
             threadId: string
             workspaceId: string
             path: string
@@ -385,15 +401,52 @@ export class Changes extends Context.Service<
             remotes: string
             defaultBase: string | null
           }>`
-            SELECT k.title, t.id AS thread_id, w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.id AS binding_id,
+            SELECT k.title, b.display_name AS name, t.id AS thread_id, w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.id AS binding_id,
               b.remote_fingerprints AS remotes, b.default_base_ref AS default_base
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
             JOIN repository_bindings b ON b.id = w.binding_id
-            WHERE k.id = ${input.taskId}`
-          if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
+            WHERE k.id = ${input.taskId} ORDER BY b.created_at, b.rowid`
+          if (tasks.length === 0) return yield* new NotFound({ kind: 'task', id: input.taskId })
+          // Each repository on its own: one whose host isn't connected is said once the rest are done, for the person to connect and try again.
+          const done: Array<PublishedOne> = []
+          let unconnected: NotConnected | undefined
+          for (const task of tasks) {
+            const one = yield* Effect.exit(publishOne(input, task, tasks.length > 1))
+            if (one._tag === 'Success') done.push({ ...one.value, repository: task.name })
+            else {
+              const error = Cause.findErrorOption(one.cause)
+              if (Option.isSome(error) && error.value instanceof NotConnected) unconnected ??= error.value
+              else return yield* Effect.failCause(one.cause)
+            }
+          }
+          if (unconnected !== undefined) return yield* unconnected
+          return done
+        })
+
+      /** Publishes one of the task's repositories: pushes its branch, and opens or adopts its pull request where the ending says to. */
+      const publishOne = (
+        input: { readonly projectId: ProjectId; readonly taskId: string; readonly runId: string; readonly end: 'draft' | 'ready' | 'none' },
+        task: {
+          readonly title: string
+          readonly threadId: string
+          readonly workspaceId: string
+          readonly path: string
+          readonly branch: string
+          readonly baseCommit: string | null
+          readonly baseRef: string | null
+          readonly bindingId: string
+          readonly remotes: string
+          readonly defaultBase: string | null
+        },
+        several: boolean,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
           const remotes = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(task.remotes)
           const found = yield* connections.hostOf(remotes)
+          // Among several, one on no host Althar knows ends on its branch; alone, the task needed its host.
+          if (found === null && several) return { kind: 'branch', left: [] } as const
           if (found === null) return yield* new NotConnected({ product: 'github', what: remotes[0] ?? 'the repository' })
           const { host } = found
           const repository = yield* host.repository(found.path)
@@ -428,7 +481,8 @@ export class Changes extends Context.Service<
             subject: { type: 'task', id: input.taskId },
             target: `${host.product}:${found.path.join('/')}`,
             operation: 'open_change',
-            key: `open_change:${input.taskId}:${task.branch}`,
+            // One per repository: in a task of several, each opens its own; alone, the key it always had.
+            key: `open_change:${input.taskId}:${task.branch}${several ? `:${task.bindingId}` : ''}`,
             request: { title, source: task.branch, target, draft },
             retryable: true,
             perform: host.openChange(repository, { title, body, source: task.branch, target, draft }),
@@ -566,12 +620,17 @@ export class Changes extends Context.Service<
           yield* touchCard(link.taskId)
         })
 
-      const push = (taskId: string, head: string) =>
+      const push = (taskId: string, head: string, url?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { link, snapshot, host, repository } = yield* current(taskId)
+          const { link, snapshot, host, repository } = yield* current(taskId, url)
+          // The worktree of the repository this pull request is from; the task's first, where the record doesn't say.
           const [workspace] = yield* sql<{ path: string; branch: string }>`
-            SELECT path, branch FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId}`
+            SELECT w.path, w.branch FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+            ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${snapshot.url} LIMIT 1) DESC,
+              b.created_at, b.rowid
+            LIMIT 1`
           if (workspace === undefined) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
           // What the person saw, and nothing the lead committed after: one rewritten away since isn't pushed.
           if (!(yield* onHead(workspace.path, head))) return yield* new ChangedSinceSeen({ taskId })
@@ -583,9 +642,9 @@ export class Changes extends Context.Service<
           return { change: yield* summaryOf(link) }
         })
 
-      const markReady = (taskId: string) =>
+      const markReady = (taskId: string, url?: string) =>
         Effect.gen(function* () {
-          const { link, snapshot, host, repository } = yield* current(taskId)
+          const { link, snapshot, host, repository } = yield* current(taskId, url)
           if (!snapshot.draft || snapshot.state !== 'open') return
           const read = yield* host.change(repository, snapshot.number)
           const ready = yield* outward({
@@ -609,9 +668,9 @@ export class Changes extends Context.Service<
        * push now or while the host merges, it isn't merged, and the person
        * looks again. Read back at once, merged, its task settles.
        */
-      const merge = (taskId: string, head: string) =>
+      const merge = (taskId: string, head: string, url?: string) =>
         Effect.gen(function* () {
-          const { link, snapshot, host, repository } = yield* current(taskId)
+          const { link, snapshot, host, repository } = yield* current(taskId, url)
           if (snapshot.state !== 'open') return
           const read = yield* host.change(repository, snapshot.number)
           if (read.state === 'open') {
@@ -641,9 +700,12 @@ export class Changes extends Context.Service<
           if (now !== undefined) yield* poll(now)
         })
 
-      const reply = (taskId: string, input: { readonly body: string; readonly threadId: string | null; readonly by: string | null }) =>
+      const reply = (
+        taskId: string,
+        input: { readonly body: string; readonly threadId: string | null; readonly by: string | null; readonly url?: string },
+      ) =>
         Effect.gen(function* () {
-          const { link, snapshot, host, repository } = yield* current(taskId)
+          const { link, snapshot, host, repository } = yield* current(taskId, input.url)
           const digest = createHash('sha256')
             .update(`${input.threadId ?? ''}\0${input.body}`)
             .digest('hex')
@@ -694,9 +756,25 @@ export class Changes extends Context.Service<
         return said.member ? 'member' : 'outsider'
       }
 
+      /** Each of the task's pull requests, read as `readOne` reads one, one after another. */
       const read = (taskId: string) =>
         Effect.gen(function* () {
-          const { link, snapshot, host, repository, account } = yield* current(taskId)
+          const urls = yield* urlsOf(taskId)
+          if (urls.length <= 1) return yield* readOne(taskId)
+          return (yield* Effect.forEach(urls, (seen) => readOne(taskId, seen.url))).join('\n\n')
+        })
+
+      /** The task's pull requests as last seen, oldest first. */
+      const urlsOf = (taskId: string) =>
+        Effect.flatMap(linksOf(taskId), (links) =>
+          Effect.forEach(links, (link) =>
+            Effect.map(Effect.option(decodeSnapshot(link.snapshot)), (seen) => (Option.isSome(seen) ? [seen.value] : [])),
+          ),
+        ).pipe(Effect.map((seen) => seen.flat()))
+
+      const readOne = (taskId: string, url?: string) =>
+        Effect.gen(function* () {
+          const { link, snapshot, host, repository, account } = yield* current(taskId, url)
           const now = yield* host.change(repository, snapshot.number)
           const lines: Array<string> = [`${nameOf(snapshot)}, "${now.title}" (${standing(now)}): ${now.url}`]
           if (now.headSha !== null) {
@@ -957,7 +1035,11 @@ export class Changes extends Context.Service<
 
       /* ---- The lead's tools for its pull request ---- */
 
-      const Replied = Schema.Struct({ body: Schema.String, thread_id: Schema.optional(Schema.NullOr(Schema.String)) })
+      const Replied = Schema.Struct({
+        body: Schema.String,
+        thread_id: Schema.optional(Schema.NullOr(Schema.String)),
+        pull_request: Schema.optional(Schema.NullOr(Schema.Number)),
+      })
 
       /** A lead's tool: refusals reach it in words; anything else says to try again, and goes to the log. */
       const leadTool = (
@@ -1000,14 +1082,18 @@ export class Changes extends Context.Service<
       yield* toolServer.serve('lead', [
         leadTool(
           'read_pull_request',
-          "The task's pull request as it stands: its state, its checks (with the end of a failed check's log), and what people said on it, with each line comment's thread id.",
+          "The task's pull request as it stands, or each of them in a task of several repositories: its state, its checks (with the end of a failed check's log), and what people said on it, with each line comment's thread id.",
           { type: 'object', properties: {} },
           (taskId) => read(taskId),
         ),
         leadTool(
           'reply_on_pull_request',
-          "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. For answering what people said; a change to the code is a commit, which the person pushes.",
-          { type: 'object', properties: { body: { type: 'string' }, thread_id: { type: 'string' } }, required: ['body'] },
+          "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. In a task of several repositories, pull_request is the number of the one to reply on. For answering what people said; a change to the code is a commit, which the person pushes.",
+          {
+            type: 'object',
+            properties: { body: { type: 'string' }, thread_id: { type: 'string' }, pull_request: { type: 'number' } },
+            required: ['body'],
+          },
           (taskId, input, access) =>
             Effect.gen(function* () {
               const replied = yield* Schema.decodeUnknownEffect(Replied)(input).pipe(
@@ -1021,7 +1107,21 @@ export class Changes extends Context.Service<
                     Effect.map((entry) => entry.definition.name),
                     Effect.orElseSucceed(() => null),
                   )
-              const change = yield* locked(taskId)(reply(taskId, { body: replied.body, threadId: replied.thread_id ?? null, by }))
+              // Among several pull requests, the one it names.
+              const seen = yield* urlsOf(taskId)
+              const named = seen.find((candidate) => candidate.number === replied.pull_request)
+              if (seen.length > 1 && named === undefined)
+                return yield* new ToolRefused({
+                  message: `This task has several pull requests: ${seen.map(nameOf).join(', ')}. Say which with pull_request, its number.`,
+                })
+              const change = yield* locked(taskId)(
+                reply(taskId, {
+                  body: replied.body,
+                  threadId: replied.thread_id ?? null,
+                  by,
+                  ...(named === undefined ? {} : { url: named.url }),
+                }),
+              )
               return `Replied on ${nameOf(change)}.`
             }),
         ),
@@ -1029,10 +1129,10 @@ export class Changes extends Context.Service<
 
       return Changes.of({
         publish: (input) => provide(publish(input)),
-        push: (taskId, head) => provide(locked(taskId)(push(taskId, head))),
-        markReady: (taskId) => provide(locked(taskId)(markReady(taskId))),
+        push: (taskId, head, url) => provide(locked(taskId)(push(taskId, head, url))),
+        markReady: (taskId, url) => provide(locked(taskId)(markReady(taskId, url))),
         exclusive: (taskId, effect) => locked(taskId)(effect),
-        merge: (taskId, head) => provide(locked(taskId)(merge(taskId, head))),
+        merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),

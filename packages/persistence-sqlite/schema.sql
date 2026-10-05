@@ -128,7 +128,7 @@ CREATE TABLE repository_bindings (
   allowed_subpaths TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(allowed_subpaths)),
   default_base_ref TEXT,
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  detached_at TEXT CHECK (detached_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  detached_at TEXT CHECK (detached_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), folder TEXT,
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;
@@ -957,3 +957,14 @@ CREATE TABLE agent_accounts (
 CREATE UNIQUE INDEX agent_accounts_usual ON agent_accounts (device_id, agent_id) WHERE home IS NULL AND removed_at IS NULL;
 
 CREATE UNIQUE INDEX agent_accounts_by_home ON agent_accounts (device_id, home) WHERE home IS NOT NULL AND removed_at IS NULL;
+
+CREATE TABLE project_folders (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'pfo_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  device_id TEXT NOT NULL REFERENCES devices (id),
+  path TEXT NOT NULL,
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  UNIQUE (device_id, path)
+) STRICT;
+
+CREATE INDEX project_folders_by_project ON project_folders (project_id);

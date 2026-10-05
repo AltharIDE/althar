@@ -47,8 +47,8 @@ const fakeHomes = mkdtempSync(join(tmpdir(), 'althar-fake-homes-'))
 /** Lines the runtime would have opened in a terminal, such as an account's sign-in. */
 export const opened: Array<string> = []
 
-/** Every fake agent started, with the environment its account gave it: its home, or nothing for its usual folder. */
-export const launches: Array<{ readonly agentId: string; readonly env: Readonly<Record<string, string>> }> = []
+/** Every fake agent started, where it started, and with the environment its account gave it: its home, or nothing for its usual folder. */
+export const launches: Array<{ readonly agentId: string; readonly cwd: string; readonly env: Readonly<Record<string, string>> }> = []
 
 export const definition = (id: string, signedOut: ReadonlyArray<string> = [], perUse: ReadonlyArray<string> = []): AgentDefinition => ({
   id: id as AgentId,
@@ -97,7 +97,7 @@ export const fakeAgents = (
   const entry = (agentId: string): AgentEntry => ({
     definition: definition(agentId, signedOut, perUse),
     transport: (cwd, env = {}) => {
-      launches.push({ agentId, env })
+      launches.push({ agentId, cwd, env })
       return agentId === 'process'
         ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
         : agentId === 'missing'

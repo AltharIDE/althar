@@ -61,6 +61,8 @@ export interface NewProjectProps extends Omit<SourceMapProps, 'className' | 'tex
   permissions?: PermissionPolicy
   defaultPermissions?: PermissionPolicy
   onPermissionsChange?: (value: PermissionPolicy) => void
+  /** The choices offered, where a consumer offers fewer: only what it does. */
+  permissionOptions?: readonly PermissionPolicy[]
   onCreate: (project: { name: string; permissions: PermissionPolicy }) => void
   onCancel: () => void
   /** Making it is under way: Create shows it and ignores presses. */
@@ -80,6 +82,7 @@ export function NewProject({
   permissions: permissionsProp,
   defaultPermissions = PermissionPolicy.Lead,
   onPermissionsChange,
+  permissionOptions = PERMISSIONS,
   onCreate,
   onCancel,
   creating = false,
@@ -156,7 +159,11 @@ export function NewProject({
       </FormRow>
 
       <FormRow label={t.asks.label} note={t.asks.note}>
-        <Choices options={PERMISSIONS.map((value) => ({ value, ...t.permission[value] }))} value={permissions} onChange={setPermissions} />
+        <Choices
+          options={permissionOptions.map((value) => ({ value, ...t.permission[value] }))}
+          value={permissions}
+          onChange={setPermissions}
+        />
       </FormRow>
     </Panel>
   )

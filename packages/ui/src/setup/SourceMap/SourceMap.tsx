@@ -92,12 +92,12 @@ export const sourceMapText: SourceMapText = {
 
 export interface SourceMapProps {
   sources: readonly SourceEntry[]
-  /** The roles a source can play. */
-  roles: readonly SelectOption<string>[]
-  onRoleChange: (id: string, role: string) => void
+  /** The roles a source can play. Without them, no role is asked for. */
+  roles?: readonly SelectOption<string>[]
+  onRoleChange?: (id: string, role: string) => void
   /** For a source that is not on this device: clone it here, or map it later. */
-  onOriginChange: (id: string, origin: SourceOrigin) => void
-  onFindingChange: (id: string, finding: string, value: string) => void
+  onOriginChange?: (id: string, origin: SourceOrigin) => void
+  onFindingChange?: (id: string, finding: string, value: string) => void
   onRemove: (id: string) => void
   /** Opens the system's folder picker. Without it, no such button. */
   onChooseFolders?: () => void
@@ -161,7 +161,9 @@ function Source({ x, t, roles, onRoleChange, onOriginChange, onFindingChange, on
         <span className={s.where}>{x.where}</span>
       </span>
       <span className={s.end}>
-        {!x.reading && <Select label={t.role(x.name)} options={roles} value={x.role} onChange={(v) => onRoleChange(x.id, v)} />}
+        {!x.reading && roles !== undefined && roles.length > 0 && (
+          <Select label={t.role(x.name)} options={roles} value={x.role} onChange={(v) => onRoleChange?.(x.id, v)} />
+        )}
         <IconButton icon="close" size="small" label={t.remove(x.name)} onClick={() => onRemove(x.id)} />
       </span>
 
@@ -193,7 +195,7 @@ function Source({ x, t, roles, onRoleChange, onOriginChange, onFindingChange, on
                     { value: SourceOrigin.Later, label: t.later },
                   ]}
                   value={x.origin}
-                  onChange={(v) => onOriginChange(x.id, v)}
+                  onChange={(v) => onOriginChange?.(x.id, v)}
                 />
                 {x.origin === SourceOrigin.Later && <span>{t.laterNote}</span>}
               </span>
@@ -206,7 +208,7 @@ function Source({ x, t, roles, onRoleChange, onOriginChange, onFindingChange, on
                     label={f.choice.label}
                     options={f.choice.options}
                     value={f.choice.value}
-                    onChange={(v) => onFindingChange(x.id, f.id, v)}
+                    onChange={(v) => onFindingChange?.(x.id, f.id, v)}
                   />
                 )}
               </span>

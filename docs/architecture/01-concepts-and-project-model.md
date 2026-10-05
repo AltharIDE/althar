@@ -127,15 +127,27 @@ policy.
 
 Two entrances lead to the same model.
 
-### Open a repository
+### Open a folder
 
 This is the fast path:
 
 1. The user selects an existing folder or supplies one Git URL.
-2. Althar performs read-only inspection.
-3. It creates a project with one repository binding and, for a local folder,
-   one device-local repository location.
-4. It suggests a project name and makes **Add source** permanently available.
+2. Althar reads it, changing nothing. The folder is one of three things:
+   - **a repository:** the project has that one binding;
+   - **a folder inside a repository,** such as one package of a monorepo:
+     the binding is the whole repository, and names that folder. Agents
+     start there and the coordinator reads from there, but the rest of the
+     repository stays the task's to change, since monorepo work often spans
+     packages;
+   - **a folder holding repositories,** one level down and no further:
+     Althar lists them, all kept, and the person leaves out any its tasks
+     shouldn't change, or adds others from elsewhere. Hidden folders aren't
+     looked in.
+3. It creates the project with a binding per repository and, for local
+   folders, a device-local location for each. The device remembers the
+   folder it was opened at, so opening it again finds the project.
+4. It suggests a project name, the folder's, and makes **Add source**
+   permanently available.
 
 The fast path must not create a hidden “single repository project” subtype.
 
@@ -216,7 +228,18 @@ A `TaskRepositoryRequirement` records:
 - requested base-ref policy;
 - whether the binding is required or optional.
 
-“All repositories in the project” is never an implicit capability.
+“All repositories in the project” is never an implicit capability. In a
+project of several, the coordinator names a task's repositories when it
+drafts it, and New task has the person tick them; with one, it is that one.
+Its lead may still read the others where they are.
+
+The task's worktrees sit side by side in its folder, each on the task's
+branch, and its lead starts there: in the one worktree, or the folder in it
+the project is about, where there is one; in the task's folder, where there
+are several. Writing outside all of them asks. Each repository is published
+on its own: a pull request where its host is connected, its branch where
+it has none Althar knows. The task shows each pull request by its
+repository, and a file it changed by its repository's name.
 
 Run admission snapshots the task requirement revision. Later changes to a
 binding, task, role, or default branch do not rewrite historical intent.

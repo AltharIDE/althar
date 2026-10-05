@@ -79,10 +79,14 @@ export interface ProjectRuleSet {
 export const MVP_RULES: ProjectRuleSet = { mode: 'rules', ask: RULES, never: [], commands: [] }
 
 export interface RuleContext {
-  /** The task's worktree, where the agent works. */
+  /** Where the agent works: the task's worktree, a folder in it, or the task's folder that holds its worktrees. */
   readonly worktree: string
+  /** The task's worktrees, one per repository, where it may write; just `worktree` unless the task has several. */
+  readonly worktrees?: ReadonlyArray<string>
   /** The branch pushes to which always ask. */
   readonly defaultBranch: string
+  /** Every repository's default branch, where the task has several repositories. */
+  readonly defaultBranches?: ReadonlyArray<string>
   /** The task's branch, which the agent may push to and delete. */
   readonly taskBranch?: string
   /** The branch checked out in the worktree now, where a push without a destination goes. */
@@ -397,7 +401,7 @@ export const programOf = (text: string): string | undefined => {
 
 interface Places {
   readonly real: (path: string) => string
-  readonly worktree: string
+  readonly worktrees: ReadonlyArray<string>
   readonly scratch: ReadonlyArray<string>
 }
 
@@ -420,7 +424,7 @@ const places = (context: RuleContext): Places => {
   }
   return {
     real,
-    worktree: real(context.worktree),
+    worktrees: (context.worktrees ?? [context.worktree]).map(real),
     scratch: [...(context.scratch ?? [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr'])].map(real),
   }
 }
@@ -434,7 +438,8 @@ const within = (root: string, path: string) => {
 const locate = (where: Places, cwd: string, path: string) =>
   where.real(resolve(cwd, path.replace(/^~(?=$|\/)/, homedir()).replace(/^\$HOME(?=$|\/)/, homedir())))
 
-const outside = (where: Places, path: string) => !within(where.worktree, path) && !where.scratch.some((root) => within(root, path))
+const outside = (where: Places, path: string) =>
+  !where.worktrees.some((root) => within(root, path)) && !where.scratch.some((root) => within(root, path))
 
 // ---- Git -------------------------------------------------------------------
 
@@ -482,7 +487,7 @@ const PUSH_FLAGS_HARMLESS =
 
 /** What a push does that the rules keep for the person: every kind it is; none where it goes only where the task may push. */
 const pushKinds = (args: ReadonlyArray<string>, context: RuleContext): ReadonlyArray<Kept> => {
-  const main = context.defaultBranch
+  const mains = context.defaultBranches ?? [context.defaultBranch]
   const own = (branch: string) => branch === context.taskBranch
   const found: Array<Kept> = []
   const positional: Array<string> = []
@@ -544,7 +549,8 @@ const pushKinds = (args: ReadonlyArray<string>, context: RuleContext): ReadonlyA
     destinations.push({ branch: destination.replace(/^refs\/heads\//, ''), deletes: deleting || (colon !== -1 && source === '') })
   }
   for (const { branch, deletes } of destinations) {
-    if (branch === main) found.push(kept(deletes ? `Deleting ${main} always asks.` : `A push to ${main} always asks.`, 'default-branch'))
+    if (mains.includes(branch))
+      found.push(kept(deletes ? `Deleting ${branch} always asks.` : `A push to ${branch} always asks.`, 'default-branch'))
     else if (deletes && !own(branch)) found.push(kept(`Deleting ${branch}, which isn't this task's branch, always asks.`, 'delete-branch'))
   }
   return found

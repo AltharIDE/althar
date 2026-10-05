@@ -1,3 +1,5 @@
+import { dirname, join } from 'node:path'
+
 import { type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
 import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
 import {
@@ -54,7 +56,25 @@ export type Disposition = 'after_current' | 'interrupt_and_continue'
 export const AcceptedInput = Schema.Struct({ inputId: Schema.String, sequence: Schema.Int })
 export type AcceptedInput = typeof AcceptedInput.Type
 
-/** A task's thread: its lead works in the task's worktree, under the project rules. */
+/** One of a task's repositories, in its worktree here. */
+interface TaskRepository {
+  readonly name: string
+  readonly worktree: string
+  readonly branch: string
+  readonly baseRef: string
+  readonly baseCommit: string | null
+  readonly defaultBranch: string
+  /** The folder inside it the project is about, such as one package of a monorepo; null for all of it. */
+  readonly within: string | null
+}
+
+/**
+ * A task's thread: its lead works in the task's worktrees, one per repository
+ * it changes, under the project rules. `worktree`, `branch` and the rest are
+ * its first repository's; `cwd` is where the lead starts: that worktree (or
+ * the folder in it the project is about), or, with several, the task's
+ * folder that holds them side by side.
+ */
 interface TaskThread {
   readonly role: 'task'
   readonly threadId: string
@@ -67,6 +87,8 @@ interface TaskThread {
   readonly baseRef: string
   readonly baseCommit: string | null
   readonly defaultBranch: string
+  readonly repositories: ReadonlyArray<TaskRepository>
+  readonly cwd: string
 }
 
 /**
@@ -94,14 +116,22 @@ interface ReviewThread {
   readonly taskId: string
   readonly title: string
   readonly description: string
-  readonly worktree: string
-  readonly baseCommit: string | null
+  /** The copy of each repository's worktree it reads, and where it starts, as for the lead. */
+  readonly repositories: ReadonlyArray<TaskRepository>
+  readonly cwd: string
 }
 
 type ThreadContext = TaskThread | CoordinatorThread | ReviewThread
 
 /** Where a thread's agent works. */
-const cwdOf = (thread: ThreadContext) => (thread.role === 'coordinator' ? thread.folder.folder : thread.worktree)
+const cwdOf = (thread: ThreadContext) => (thread.role === 'coordinator' ? thread.folder.folder : thread.cwd)
+
+/** Where an agent starts among a task's repositories: in the one, or the folder in it the project is about; among several, the folder that holds them. */
+const startIn = (repositories: ReadonlyArray<{ readonly worktree: string; readonly within: string | null }>) => {
+  const [first] = repositories
+  if (first === undefined) return ''
+  return repositories.length === 1 ? join(first.worktree, first.within ?? '') : dirname(first.worktree)
+}
 
 /** A role's Althar tools. */
 const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
@@ -282,28 +312,43 @@ export class Sessions extends Context.Service<
               projectName: kind.projectName,
               folder: yield* coordinatorFolder(kind.projectId),
             } satisfies ThreadContext as ThreadContext
-          if (kind?.kind === 'step') {
-            const [step] = yield* sql<Omit<ReviewThread, 'role'>>`
-              SELECT t.id AS thread_id, t.project_id, t.task_id, k.title, k.description, w.path AS worktree, w.base_commit
-              FROM threads t
-              JOIN tasks k ON k.id = t.task_id
-              JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
-              WHERE t.id = ${threadId}`
-            // A reviewer reads a throwaway copy of the lead's work, not the worktree itself.
-            if (step !== undefined)
-              return { role: 'reviewer', ...step, worktree: reviewCopyOf(step.worktree) } satisfies ThreadContext as ThreadContext
-          }
-          const [row] = yield* sql<Omit<TaskThread, 'role'>>`
-            SELECT t.id AS thread_id, t.project_id, t.task_id, k.title, k.description, w.path AS worktree, w.branch,
-              w.base_ref, w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch
+          // The task's repositories, each in its worktree here, the first first.
+          const repositories = yield* sql<TaskRepository>`
+            SELECT b.display_name AS name, w.path AS worktree, w.branch, w.base_ref, w.base_commit,
+              coalesce(b.default_base_ref, w.base_ref) AS default_branch, b.folder AS within
             FROM threads t
-            JOIN tasks k ON k.id = t.task_id
             JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
             JOIN repository_bindings b ON b.id = w.binding_id
-            WHERE t.id = ${threadId}`
-          return row === undefined
-            ? yield* new NotFound({ kind: 'task thread with a ready worktree', id: threadId })
-            : ({ role: 'task', ...row } satisfies ThreadContext as ThreadContext)
+            WHERE t.id = ${threadId}
+            ORDER BY b.created_at, b.rowid`
+          const [task] = yield* sql<{ projectId: ProjectId; taskId: string; title: string; description: string }>`
+            SELECT t.project_id, t.task_id, k.title, k.description FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${threadId}`
+          const [first] = repositories
+          if (task === undefined || first === undefined)
+            return yield* new NotFound({ kind: 'task thread with a ready worktree', id: threadId })
+          // A reviewer reads a throwaway copy of each of the lead's worktrees, not the worktrees themselves.
+          if (kind?.kind === 'step') {
+            const copies = repositories.map((repository) => ({ ...repository, worktree: reviewCopyOf(repository.worktree) }))
+            return {
+              role: 'reviewer',
+              threadId,
+              ...task,
+              repositories: copies,
+              cwd: startIn(copies),
+            } satisfies ThreadContext as ThreadContext
+          }
+          return {
+            role: 'task',
+            threadId,
+            ...task,
+            worktree: first.worktree,
+            branch: first.branch,
+            baseRef: first.baseRef,
+            baseCommit: first.baseCommit,
+            defaultBranch: first.defaultBranch,
+            repositories,
+            cwd: startIn(repositories),
+          } satisfies ThreadContext as ThreadContext
         })
 
       const sessionFact = (thread: ThreadContext, sessionId: string, revision: number, type: string, payload: unknown = {}) =>
@@ -741,7 +786,16 @@ export class Sessions extends Context.Service<
             meanings: definition.permissions,
             rules:
               thread.role === 'task'
-                ? { role: 'task', context: { worktree: thread.worktree, defaultBranch: thread.defaultBranch, taskBranch: thread.branch } }
+                ? {
+                    role: 'task',
+                    context: {
+                      worktree: thread.cwd,
+                      worktrees: thread.repositories.map((repository) => repository.worktree),
+                      defaultBranch: thread.defaultBranch,
+                      defaultBranches: thread.repositories.map((repository) => repository.defaultBranch),
+                      taskBranch: thread.branch,
+                    },
+                  }
                 : { role: 'reader' },
           }
           // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
@@ -1102,7 +1156,9 @@ export class Sessions extends Context.Service<
           return [
             "You are reviewing another agent's change, in Althar. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
             `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
-            `The change is in ${thread.worktree}: a copy of the lead's work as it stood when this round began, which Althar throws away after; nothing you do there reaches the lead. See the change with \`git diff ${thread.baseCommit ?? 'HEAD~1'}\` there; new files are in it.`,
+            thread.repositories.length === 1
+              ? `The change is in ${thread.repositories[0]?.worktree ?? thread.cwd}: a copy of the lead's work as it stood when this round began, which Althar throws away after; nothing you do there reaches the lead. See the change with \`git diff ${thread.repositories[0]?.baseCommit ?? 'HEAD~1'}\` there; new files are in it.`
+              : `The change spans several repositories, each copied as the lead's work stood when this round began, side by side in ${thread.cwd}; Althar throws them away after, and nothing you do there reaches the lead. See each one's change with git diff there; new files are in it:\n${thread.repositories.map((repository) => `- ${repository.name}: ${repository.worktree}, \`git diff ${repository.baseCommit ?? 'HEAD~1'}\``).join('\n')}`,
             ...(summary === '' ? [] : [`The lead says:\n${summary}`]),
             "Look for what would make the change wrong or unsafe to merge: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Then call Althar's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), where it is, and what is wrong. With no findings worth fixing, the verdict is pass.",
             ...(yield* threadSoFar(thread.threadId)),
@@ -1122,15 +1178,32 @@ export class Sessions extends Context.Service<
               ? []
               : ((JSON.parse(plan.content) as { entries?: ReadonlyArray<{ content: string; status: string }> }).entries ?? [])
           const quiet = (effect: Effect.Effect<string, unknown>) => effect.pipe(Effect.orElseSucceed(() => ''))
-          const changed = thread.baseCommit === null ? '' : yield* quiet(git(thread.worktree, 'diff', '--stat', thread.baseCommit))
-          const status = yield* quiet(git(thread.worktree, 'status', '--short'))
           const cap = (text: string) => (text.length > 4_000 ? `${text.slice(0, 4_000)}\n…` : text)
+          const several = thread.repositories.length > 1
+          // Where each repository stands, by name where there are several.
+          const states = yield* Effect.forEach(thread.repositories, (repository) =>
+            Effect.gen(function* () {
+              const changed =
+                repository.baseCommit === null ? '' : yield* quiet(git(repository.worktree, 'diff', '--stat', repository.baseCommit))
+              const status = yield* quiet(git(repository.worktree, 'status', '--short'))
+              const named = (text: string) => (several && text !== '' ? `${repository.name}:\n${text}` : text)
+              return { changed: named(changed), status: named(status) }
+            }),
+          )
+          const changed = states.flatMap((state) => (state.changed === '' ? [] : [state.changed])).join('\n')
+          const status = states.flatMap((state) => (state.status === '' ? [] : [state.status])).join('\n')
+          const where = (repository: TaskRepository) =>
+            `${repository.worktree}, on the branch ${repository.branch}, which started from ${repository.baseRef}${repository.baseCommit === null ? '' : ` at ${repository.baseCommit.slice(0, 12)}`}${repository.within === null ? '' : `. The project is its folder ${repository.within}: start there, and change the rest of the repository where the task needs it`}`
           return [
             why.kind === 'start'
-              ? 'You are working on a task in a git worktree of its own. Althar keeps its record and answers your permission requests.'
-              : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same worktree. Its record so far is below.`,
+              ? several
+                ? 'You are working on a task across several repositories, each in a git worktree of its own. Althar keeps its record and answers your permission requests.'
+                : 'You are working on a task in a git worktree of its own. Althar keeps its record and answers your permission requests.'
+              : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
-            `The worktree is ${thread.worktree}, on the branch ${thread.branch}, which started from ${thread.baseRef}${thread.baseCommit === null ? '' : ` at ${thread.baseCommit.slice(0, 12)}`}.`,
+            several
+              ? `Its repositories are side by side in ${thread.cwd}, each with its own branch and history; commit in each one you change:\n${thread.repositories.map((repository) => `- ${repository.name}: ${where(repository)}.`).join('\n')}`
+              : `The worktree is ${thread.repositories[0] === undefined ? thread.worktree : where(thread.repositories[0])}.`,
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
             // Althar reaches the code host for the task (ADR-011).
@@ -1151,10 +1224,16 @@ export class Sessions extends Context.Service<
             `You are the coordinator of the project ${thread.projectName}, in Althar. You talk with the person about the project as a whole: you answer their questions about the code and the work, and you turn the changes they want into tasks. You never change anything yourself, not even a one-line fix: a change is always a task, which an agent, its lead, does in a worktree of its own.`,
             repositories.length === 0
               ? 'The project has no repositories yet.'
-              : `Your working folder holds read-only copies of the project's repositories, fresh from their default branches:\n${repositories.map((repository) => `- ${repository.name}: ${repository.path} (${repository.base})`).join('\n')}\nRead and search them to answer questions and to plan. Anything you write there is thrown away.`,
+              : `Your working folder holds read-only copies of the project's repositories, fresh from their default branches:\n${repositories
+                  .map((repository) =>
+                    repository.within === null
+                      ? `- ${repository.name}: ${repository.path} (${repository.base})`
+                      : `- ${repository.name}, its folder ${repository.within}: ${repository.path} (${repository.base}). That folder is what the project is about; the rest of the repository is in ${repository.root}.`,
+                  )
+                  .join('\n')}\nRead and search them to answer questions and to plan. Anything you write there is thrown away.`,
             [
               "To get a change made, use Althar's tools:",
-              '- draft_task, with a title that says what should change, in a line, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.',
+              `- draft_task, with a title that says what should change, in a line, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
               '- propose_plan, for the task you drafted: who implements it (its lead) and why, in a sentence, and who reviews it, or no review for something trivial. The reviewer only reads; the lead then settles what it finds. By default, review with an agent from a different provider. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
               '- list_tasks, read_task and read_thread, to see what is under way and how it went.',
               "- read_issue and find_issues, for the issues on the person's connected trackers and in the project's repository. When the person points at an issue, read it, and draft the task from it with its link or key as draft_task's issue.",

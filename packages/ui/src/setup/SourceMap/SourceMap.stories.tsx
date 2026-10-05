@@ -31,9 +31,9 @@ function Live(args: SourceMapProps) {
     <SourceMap
       {...args}
       sources={map.sources}
-      onRoleChange={(id, v) => (args.onRoleChange(id, v), map.onRoleChange(id, v))}
-      onOriginChange={(id, v) => (args.onOriginChange(id, v), map.onOriginChange(id, v))}
-      onFindingChange={(id, f, v) => (args.onFindingChange(id, f, v), map.onFindingChange(id, f, v))}
+      onRoleChange={(id, v) => (args.onRoleChange?.(id, v), map.onRoleChange(id, v))}
+      onOriginChange={(id, v) => (args.onOriginChange?.(id, v), map.onOriginChange(id, v))}
+      onFindingChange={(id, f, v) => (args.onFindingChange?.(id, f, v), map.onFindingChange(id, f, v))}
       onRemove={(id) => (args.onRemove(id), map.onRemove(id))}
       onAddUrl={args.onAddUrl && ((url) => (args.onAddUrl?.(url), map.onAddUrl(url)))}
     />

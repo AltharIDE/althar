@@ -262,6 +262,7 @@ export function ProjectView({
                       starting={model.starting}
                       connected={coordinator.host?.connected === true}
                       defaultEnd={model.end}
+                      repositories={model.project?.repositories ?? []}
                       listIssues={model.listIssues}
                       onClose={() => setPanel(null)}
                       onStart={(task) =>

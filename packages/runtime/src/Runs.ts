@@ -410,21 +410,34 @@ export class Runs extends Context.Service<
         })
 
       /** What a step that Althar does itself reported, in a line. */
-      const publishedSummary = (published: Published, end: TaskEnd) => {
-        const did = ((): string => {
-          switch (published.kind) {
-            case 'opened': {
-              const noun = published.change.words.noun
-              const name = `${noun} ${published.change.words.prefix}${published.change.number}`
-              return end === 'ready' || !published.change.draft ? `Opened ${name} for review.` : `Opened draft ${name}.`
-            }
-            case 'pushed':
-              return `Pushed ${published.branch}.`
-            case 'nothing':
-              return 'The branch has no commits to propose, so nothing was pushed.'
-          }
-        })()
-        return published.left.length === 0 ? did : `${did} Left out what the lead didn't commit: ${filesLine(published.left)}.`
+      /** What publishing did, in words: in each repository, by name where there are several. */
+      const publishedSummary = (published: Published, end: TaskEnd) =>
+        published
+          .map((one) => {
+            const did = ((): string => {
+              switch (one.kind) {
+                case 'opened': {
+                  const noun = one.change.words.noun
+                  const name = `${noun} ${one.change.words.prefix}${one.change.number}`
+                  return end === 'ready' || !one.change.draft ? `Opened ${name} for review.` : `Opened draft ${name}.`
+                }
+                case 'pushed':
+                  return `Pushed ${one.branch}.`
+                case 'nothing':
+                  return 'The branch has no commits to propose, so nothing was pushed.'
+                case 'branch':
+                  return "It isn't on a code host Althar knows, so it ends on its branch."
+              }
+            })()
+            const said = one.left.length === 0 ? did : `${did} Left out what the lead didn't commit: ${filesLine(one.left)}.`
+            return published.length > 1 ? `${one.repository}: ${said}` : said
+          })
+          .join('\n')
+
+      /** The pull request publishing opened, for the thread to show: the first, where it opened several. */
+      const openedOf = (published: Published) => {
+        const opened = published.find((one) => one.kind === 'opened')
+        return opened?.kind === 'opened' ? { change: opened.change } : {}
       }
 
       /** A task that ends on its branch says why, and how its pull request can still open. */
@@ -471,7 +484,7 @@ export class Runs extends Context.Service<
                 step: 'publish',
                 round: 0,
                 summary: publishedSummary(published, 'draft'),
-                ...(published.kind === 'opened' ? { change: published.change } : {}),
+                ...openedOf(published),
               },
             )
             yield* touchCard(taskId)
@@ -533,7 +546,7 @@ export class Runs extends Context.Service<
                 step: 'publish',
                 round: 0,
                 summary: publishedSummary(published.value, end),
-                ...(published.value.kind === 'opened' ? { change: published.value.change } : {}),
+                ...openedOf(published.value),
               })
             }),
           )
@@ -770,14 +783,28 @@ export class Runs extends Context.Service<
           return { nodeId, attemptId }
         })
 
+      /** The task's worktrees here, one per repository it changes, the project's first first. */
+      const worktreesOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql<{ id: string; path: string; name: string }>`
+            SELECT w.id, w.path, b.display_name AS name FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
+        })
+
+      /** What the task's worktrees hold, together: it changes when any of them does. */
+      const digestAll = (taskId: string) =>
+        Effect.map(
+          Effect.flatMap(worktreesOf(taskId), (worktrees) => Effect.forEach(worktrees, (worktree) => digestOf(worktree.path))),
+          (digests) => digests.join(' '),
+        )
+
       /** A round of review's copy, thread and session: its reviewer reads the work as it stands. */
       const reviewRound = (run: RunRow, round: number, settled: string | undefined, step: PlanStep, attemptId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          // The round reads a copy of the work as it stands now, and the record keeps which code that was (ADR-008).
-          const [workspace] = yield* sql<{ id: string; path: string }>`
-            SELECT id, path FROM workspaces WHERE task_id = ${run.taskId} AND device_id = ${instance.deviceId}`
-          if (workspace !== undefined) {
+          // The round reads a copy of the work as it stands now, in each repository, and the record keeps which code that was (ADR-008).
+          for (const workspace of yield* worktreesOf(run.taskId)) {
             const snapshot = yield* snapshotForReview(workspace.path, round)
             yield* sql`INSERT INTO workspace_snapshots ${sql.insert({
               id: yield* newId(Ids.workspaceSnapshot),
@@ -832,9 +859,7 @@ export class Runs extends Context.Service<
       const settle = (run: RunRow, round: number, findings: ReadonlyArray<Finding & { readonly id: string }>) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [workspace] = yield* sql<{ path: string }>`
-            SELECT path FROM workspaces WHERE task_id = ${run.taskId} AND device_id = ${instance.deviceId}`
-          const before = workspace === undefined ? '' : yield* digestOf(workspace.path)
+          const before = yield* digestAll(run.taskId)
           const { implement } = yield* stepsOf(run)
           const { attemptId } = yield* sql.withTransaction(admit(run, 'settle', round, implement ?? {}, { before }))
           const begun = yield* Effect.exit(
@@ -1171,9 +1196,13 @@ export class Runs extends Context.Service<
           const step = attempt.nodeKey === 'settle' ? 'settle' : 'implement'
           // A task that ends on its host pushes commits only: what isn't committed is the lead's to commit or clear away first.
           if (((yield* stepsOf(current)).end ?? (yield* changes.endFor(current.projectId))) !== null) {
-            const [workspace] = yield* sql<{ path: string }>`
-              SELECT path FROM workspaces WHERE task_id = ${current.taskId} AND device_id = ${instance.deviceId}`
-            const left = workspace === undefined ? [] : yield* uncommittedFiles(workspace.path)
+            const worktrees = yield* worktreesOf(current.taskId)
+            // In a task of several repositories, each file by the repository it's in.
+            const left = (yield* Effect.forEach(worktrees, (worktree) =>
+              Effect.map(uncommittedFiles(worktree.path), (files) =>
+                worktrees.length > 1 ? files.map((file) => `${worktree.name}/${file}`) : files,
+              ),
+            )).flat()
             if (left.length > 0)
               return yield* new ToolRefused({
                 message: `These aren't committed: ${filesLine(left)}. Althar pushes commits only, so commit what belongs to the task, delete the rest (scratch files, logs), and call finish_step again.`,
@@ -1196,10 +1225,8 @@ export class Runs extends Context.Service<
               : 'Althar has your summary. A review starts now; wait for its findings.'
           }
           // Another round only if settling changed the code, and rounds are left.
-          const [workspace] = yield* sql<{ path: string }>`
-            SELECT path FROM workspaces WHERE task_id = ${current.taskId} AND device_id = ${instance.deviceId}`
           const before = (JSON.parse(attempt.input) as { before?: string }).before ?? ''
-          const after = workspace === undefined ? before : yield* digestOf(workspace.path)
+          const after = yield* digestAll(current.taskId)
           if (after !== before && attempt.iteration + 1 < ROUNDS) {
             yield* review(current, attempt.iteration + 1, summary)
             return 'Althar has your summary. The review looks again.'

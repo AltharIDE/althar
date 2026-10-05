@@ -66,6 +66,31 @@ export const OpenedWithAQuestion: Story = {
   },
 }
 
+/**
+ * A folder holding several repositories, as Althar reads it today: each one
+ * found directly inside it, with no role asked for and nothing to decide.
+ * Removing one leaves it out; only the answers Althar gives are offered.
+ */
+export const AFolderOfRepositories: Story = {
+  render: (args) => <Live {...args} />,
+  args: {
+    defaultName: 'meridian',
+    sources: MERIDIAN_MAP.filter((x) => x.origin === ONE_REPOSITORY[0]?.origin).map((x) => ({ ...x, findings: [] })),
+    roles: [],
+    onAddUrl: undefined,
+    defaultPermissions: PermissionPolicy.Rules,
+    permissionOptions: [PermissionPolicy.Rules, PermissionPolicy.Ask, PermissionPolicy.AllowAll],
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.queryByRole('combobox', { name: /^Role of/ })).toBeNull()
+    await expect(c.queryByRole('radio', { name: /The agent in charge decides/ })).toBeNull()
+    await expect(c.getByRole('radio', { name: /Allow, except what you keep/ })).toBeChecked()
+    const [first] = c.getAllByRole('button', { name: /^Remove / })
+    if (first !== undefined) await userEvent.click(first)
+  },
+}
+
 /** Create waits while a repository is still being read. */
 export const StillReading: Story = { args: { sources: READING_MAP } }
 

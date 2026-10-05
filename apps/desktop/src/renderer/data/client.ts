@@ -13,6 +13,7 @@ import {
   type DomMessagePort,
   domPort,
   type FileDiff,
+  type FolderReading,
   type IssueList,
   type Product,
   type ProjectList,
@@ -50,8 +51,17 @@ export interface Client {
   /** The runtime's version and the agents on this Mac; `recheck` asks each agent again rather than trust the last minute's answer. */
   readonly status: (options?: { readonly recheck?: boolean }) => Promise<Status>
   readonly listProjects: () => Promise<ProjectList>
-  /** Opens the folder a grant names: one the person chose in the picker or dropped on the window. */
-  readonly openProject: (grant: string) => Promise<ProjectSummary>
+  /** What opening the folder a grant names would make, read without changing anything. */
+  readonly readFolder: (grant: string) => Promise<FolderReading>
+  /**
+   * Opens the folder a grant names: one the person chose in the picker or
+   * dropped on the window. A folder of several repositories opens with the
+   * ones the person kept, each by the grant of the folder it was found in.
+   */
+  readonly openProject: (
+    grant: string,
+    options?: { readonly name?: string; readonly repositories?: ReadonlyArray<{ readonly grant: string; readonly path: string }> },
+  ) => Promise<ProjectSummary>
   readonly listTasks: (projectId: string) => Promise<TaskList>
   readonly createTask: (input: {
     readonly projectId: string
@@ -98,6 +108,8 @@ export interface Client {
     /** The issue it comes from: its link or key. */
     readonly issue?: string
     readonly end?: TaskEnd | null
+    /** The project's repositories it changes, by name: needed only in a project of several. */
+    readonly repositories?: ReadonlyArray<string>
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
@@ -132,14 +144,14 @@ export interface Client {
   readonly signInAccount: (accountId: string) => Promise<{ readonly line: string; readonly opened: boolean }>
   /** The person's open issues, for a project. */
   readonly listIssues: (projectId: string) => Promise<IssueList>
-  /** Marks a task's draft pull request ready for review. */
-  readonly markReady: (taskId: string) => Promise<void>
+  /** Marks a task's draft pull request ready for review: in a task of several repositories, the one at `url`. */
+  readonly markReady: (taskId: string, url?: string) => Promise<void>
   /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */
   readonly openChange: (taskId: string) => Promise<void>
   /** Merges the task's pull request at the head the person saw, as they said to; a draft is marked ready first. */
-  readonly merge: (taskId: string, head: string) => Promise<void>
-  /** Pushes the task's branch to its pull request, up to the commit the person saw. */
-  readonly push: (taskId: string, head: string) => Promise<void>
+  readonly merge: (taskId: string, head: string, url?: string) => Promise<void>
+  /** Pushes the task's branch to its pull request, up to the commit the person saw; in a task of several repositories, the one at `url`. */
+  readonly push: (taskId: string, head: string, url?: string) => Promise<void>
   /** Asks a task's pull request for news now. */
   readonly refreshTask: (taskId: string) => Promise<void>
   /** The person's answer to a step that needs them. */
@@ -206,7 +218,16 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
   return {
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
-    openProject: (grant) => command((commandId) => api.OpenProject({ commandId, grant })),
+    readFolder: (grant) => settle(api.ReadFolder({ grant })),
+    openProject: (grant, options = {}) =>
+      command((commandId) =>
+        api.OpenProject({
+          commandId,
+          grant,
+          ...(options.name === undefined ? {} : { name: options.name }),
+          ...(options.repositories === undefined ? {} : { repositories: options.repositories }),
+        }),
+      ),
     listTasks: (projectId) => settle(api.ListTasks({ projectId })),
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
@@ -246,10 +267,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     findAccounts: (agentId) => settle(api.FindAccounts({ agentId })).then((list) => list.found),
     signInAccount: (accountId) => command((commandId) => api.SignInAccount({ commandId, accountId })),
     listIssues: (projectId) => settle(api.ListIssues({ projectId })),
-    markReady: (taskId) => command((commandId) => api.MarkReady({ commandId, taskId })),
+    markReady: (taskId, url) => command((commandId) => api.MarkReady({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
     openChange: (taskId) => command((commandId) => api.OpenChange({ commandId, taskId })),
-    merge: (taskId, head) => command((commandId) => api.Merge({ commandId, taskId, head })),
-    push: (taskId, head) => command((commandId) => api.Push({ commandId, taskId, head })),
+    merge: (taskId, head, url) => command((commandId) => api.Merge({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
+    push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     watch: (listener, since) => {

@@ -44,6 +44,8 @@ export interface NewTask {
   readonly issue: string | null
   /** What happens when the work is done; null where the repository's host isn't connected. */
   readonly end: TaskEnd | null
+  /** The project's repositories it changes, by name; null where the project has one. */
+  readonly repositories: ReadonlyArray<string> | null
 }
 
 export interface ProjectModel {
@@ -220,6 +222,7 @@ export const useProject = (projectId: string): ProjectModel => {
           ],
           ...(input.issue === null ? {} : { issue: input.issue }),
           end: input.end,
+          ...(input.repositories === null ? {} : { repositories: input.repositories }),
         })
       } catch (failure) {
         fail(failure)
