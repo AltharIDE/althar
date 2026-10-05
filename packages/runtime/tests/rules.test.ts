@@ -18,6 +18,7 @@ import {
   pathsOf,
   type ProjectRuleSet,
   type RuleContext,
+  sayRules,
 } from '../src/rules'
 
 const worktree = '/work/meridian/retry/app'
@@ -502,6 +503,31 @@ describe('a project’s rules (ADR-013)', () => {
     assert.isTrue(matchesPattern('git push * --force', ['git', 'push', 'origin', '--force']))
     assert.isFalse(matchesPattern('a.b', ['axb']))
     assert.isFalse(matchesPattern('kubectl apply', ['kubectl', 'get', 'pods']))
+  })
+})
+
+describe('a project’s rules, as the coordinator is told them', () => {
+  it('says what waits for the person and what is never allowed, by the mode', () => {
+    assert.strictEqual(
+      sayRules(MVP_RULES),
+      "Agents may do anything but these, which wait for the person: pushing to the default branch; force pushes; pushing every branch, tags, or a pattern of branches; deleting branches that aren't the task's; deploying and publishing; writing outside the task's worktree.",
+    )
+    assert.strictEqual(
+      sayRules({ mode: 'rules', ask: [], never: ['deploy'], commands: [{ pattern: 'terraform *', decision: 'never' }] }),
+      'Agents may do anything. Never allowed: deploying and publishing; commands starting `terraform *`.',
+    )
+    assert.strictEqual(
+      sayRules({ mode: 'ask', ask: RULES, never: [], commands: [] }),
+      "Agents may read anything and change a task's own files; everything else waits for the person.",
+    )
+    assert.strictEqual(
+      sayRules({ mode: 'allow', ask: RULES, never: [], commands: [{ pattern: 'npm publish', decision: 'ask' }] }),
+      'Agents may do anything.',
+    )
+    assert.strictEqual(
+      sayRules({ mode: 'rules', ask: ['force-push'], never: [], commands: [{ pattern: 'npm publish', decision: 'ask' }] }),
+      'Agents may do anything but these, which wait for the person: force pushes; commands starting `npm publish`.',
+    )
   })
 })
 

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
@@ -113,6 +113,11 @@ describe('opening a folder', () => {
       assert.deepStrictEqual((yield* projects.read(folder)).project, { id: opened.projectId, name: basename(folder) })
       // One of its repositories, opened alone, is a project of its own.
       assert.notStrictEqual((yield* open(join(folder, 'api'))).projectId, opened.projectId)
+      // Once archived, the project lets go of its folder: opened again, it's a new one.
+      yield* sql`UPDATE projects SET archived_at = '2026-10-05T00:00:00.000Z' WHERE id = ${opened.projectId}`
+      const afresh = yield* open(folder, [join(folder, 'api')])
+      assert.notStrictEqual(afresh.projectId, opened.projectId)
+      assert.deepStrictEqual((yield* projects.read(folder)).project, { id: afresh.projectId, name: basename(folder) })
       // Every one found, unless the person said which.
       const all = folderOf('one', 'two')
       const both = yield* open(all)
@@ -253,6 +258,39 @@ describe('a task of several repositories', () => {
     }).pipe(Effect.provide(withQueries(':memory:', {}, { connectors: fakeConnectors({ github }) })))
   })
 
+  it.live("ends each task by the repositories it changes, not by the project's first, and tells its lead where the others are", () => {
+    const github = makeFakeService()
+    github.addRepository(['meridian', 'api'])
+    github.addRepository(['meridian', 'web'])
+    // In one, the first repository is on no host and the second on GitHub; in the other, the other way about.
+    const localFirst = folderOf('api', 'web')
+    git(join(localFirst, 'web'), 'remote', 'add', 'origin', `${HOST}/meridian/web.git`)
+    const hostedFirst = folderOf('api', 'web')
+    git(join(hostedFirst, 'api'), 'remote', 'add', 'origin', `${HOST}/meridian/api.git`)
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const changes = yield* Changes
+      const sessions = yield* Sessions
+      yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+      const one = yield* open(localFirst)
+      const onWeb = yield* createTask(one.projectId, ['web'])
+      assert.strictEqual(yield* changes.endFor(one.projectId, onWeb.taskId), 'draft')
+      const two = yield* open(hostedFirst)
+      const alsoOnWeb = yield* createTask(two.projectId, ['web'])
+      assert.strictEqual(yield* changes.endFor(two.projectId, alsoOnWeb.taskId), null)
+      // Before a task says which, any of the project's on a connected host is enough.
+      assert.strictEqual(yield* changes.endFor(two.projectId), 'draft')
+
+      // The lead is told where the ones it doesn't change are.
+      yield* sessions.start({ threadId: onWeb.threadId, agentId: 'codex' })
+      assert.strictEqual(launches.at(-1)?.cwd, onWeb.worktree)
+      const [brief] = yield* until(turns(onWeb.threadId), (rows) => rows.length > 0)
+      assert.include(brief?.prompt ?? '', `The project's other repositories, to read but not change`)
+      assert.include(brief?.prompt ?? '', `api at ${join(localFirst, 'api')}.`)
+    }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))
+  })
+
   it.live('lets the coordinator name the ones a task changes, and says which there are', () =>
     Effect.gen(function* () {
       const opened = yield* open(folderOf('api', 'web'))
@@ -333,6 +371,10 @@ describe('a task of several repositories', () => {
         SELECT d.prompt FROM turn_deliveries d JOIN threads t ON t.id = d.thread_id WHERE t.task_id = ${task.taskId} AND t.kind = 'step'
         ORDER BY d.requested_at LIMIT 1`
       assert.include(review?.prompt ?? '', 'The change spans several repositories')
+      // Its copies are beside the task's folder, not in it, where the lead starts and could change them.
+      const taskFolder = dirname(worktrees[0]?.path ?? '')
+      assert.deepStrictEqual(readdirSync(taskFolder).toSorted(), ['api', 'web'])
+      assert.include(review?.prompt ?? '', join(dirname(taskFolder), '.review', basename(taskFolder), 'web'))
 
       // Each repository opened its own, not the first one's again.
       assert.lengthOf(github.changes, 2)
@@ -347,11 +389,22 @@ describe('a task of several repositories', () => {
       const read = yield* callTool(lead, 'read_pull_request', {})
       assert.include(read, `PR #${api?.number ?? 0}`)
       assert.include(read, `PR #${web?.number ?? 0}`)
-      assert.match(yield* callTool(lead, 'reply_on_pull_request', { body: 'Done.' }), /This task has several pull requests/)
+      // Numbers repeat across repositories, so the lead names one by its repository too.
+      assert.include(read, `web#${web?.number ?? 0}: `)
+      assert.include(
+        yield* callTool(lead, 'reply_on_pull_request', { body: 'Done.' }),
+        `This task has several pull requests: api#${api?.number ?? 0}, web#${web?.number ?? 0}.`,
+      )
+      assert.include(
+        yield* callTool(lead, 'reply_on_pull_request', { body: 'Done.', pull_request: `mobile#${web?.number ?? 0}` }),
+        'Say which with pull_request',
+      )
       assert.strictEqual(
-        yield* callTool(lead, 'reply_on_pull_request', { body: 'Done.', pull_request: web?.number ?? 0 }),
+        yield* callTool(lead, 'reply_on_pull_request', { body: 'Done.', pull_request: `web#${web?.number ?? 0}` }),
         `Replied on PR #${web?.number ?? 0}.`,
       )
+      assert.lengthOf(github.commentsOn(web?.number ?? 0), 1)
+      assert.lengthOf(github.commentsOn(api?.number ?? 0), 0)
       // The person marks one ready, and pushes what the lead committed in the other.
       yield* changes.markReady(task.taskId, web?.url ?? '')
       assert.deepStrictEqual(
@@ -362,6 +415,22 @@ describe('a task of several repositories', () => {
       yield* changes.push(task.taskId, git(worktrees[0]?.path ?? '', 'rev-parse', 'HEAD'), api?.url ?? '')
       assert.include(git(bares.api ?? '', 'log', '--format=%s', task.branch), 'More')
       assert.notInclude(git(bares.web ?? '', 'log', '--format=%s', task.branch), 'More')
+
+      // One merged isn't the task done: it says which is still open, and is done once that one is merged too.
+      const state = sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.taskId}`
+      const notices = Effect.map(queries.thread(task.threadId, { limit: 100 }), (thread) =>
+        thread.items.flatMap((item) =>
+          item.kind === 'notice' && item.content.title.startsWith('Not done yet') ? [item.content.title] : [],
+        ),
+      )
+      github.mergeByHand(api?.number ?? 0)
+      yield* changes.refresh(task.taskId)
+      const [notDone] = yield* until(notices, (found) => found.length === 1)
+      assert.strictEqual(notDone, `Not done yet: PR #${web?.number ?? 0} in web is still open.`)
+      assert.strictEqual((yield* state)[0]?.state, 'open')
+      github.mergeByHand(web?.number ?? 0)
+      yield* changes.refresh(task.taskId)
+      yield* until(state, (rows) => rows[0]?.state === 'done')
     }).pipe(Effect.provide(withQueries(':memory:', {}, { connectors: fakeConnectors({ github }) })))
   })
 })

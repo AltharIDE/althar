@@ -387,7 +387,7 @@ export const handlers = Api.toLayer(
                 reason: null,
                 actorId: instance.personId,
                 startsIn: Duration.zero,
-                end: end === undefined ? yield* pullRequests.endFor(projectId) : end,
+                end: end === undefined ? yield* pullRequests.endFor(projectId, created.taskId) : end,
               })
               yield* plans.start(planId, instance.personId)
               return yield* queries.task(created.taskId)

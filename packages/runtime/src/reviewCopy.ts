@@ -15,8 +15,15 @@ import { commitTree, git, treeOf } from './git'
  * record keeps, and the copy checks it out.
  */
 
-/** Where a task's reviews read: beside its worktree, `<task>/.review/<repository>`. */
-export const reviewCopyOf = (worktree: string) => join(dirname(worktree), '.review', basename(worktree))
+/**
+ * Where a task's reviews read: `<project>/.review/<task>/<repository>`,
+ * beside the task's folder rather than in it, so a lead that starts in its
+ * task's folder, as one of several repositories does, never finds them there.
+ */
+export const reviewCopyOf = (worktree: string) => {
+  const task = dirname(worktree)
+  return join(dirname(task), '.review', basename(task), basename(worktree))
+}
 
 /** Snapshots the worktree as it stands and makes the review copy hold it: the snapshot's commit and tree. */
 export const snapshotForReview = (worktree: string, round: number) =>

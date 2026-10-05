@@ -289,6 +289,9 @@ export class Projects extends Context.Service<
                 taken.map((row) => row.slug),
               )
               yield* sql`INSERT INTO projects ${sql.insert({ id: projectId, name, slug, createdByActorId: envelope.actorId, createdAt })}`
+              // An archived project lets go of its folder, so the folder can be opened afresh.
+              yield* sql`DELETE FROM project_folders WHERE device_id = ${instance.deviceId} AND path = ${path}
+                AND project_id IN (SELECT id FROM projects WHERE archived_at IS NOT NULL)`
               yield* sql`INSERT INTO project_folders ${sql.insert({
                 id: yield* newId(Ids.projectFolder),
                 projectId,

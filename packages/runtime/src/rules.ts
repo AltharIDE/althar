@@ -75,6 +75,22 @@ export interface ProjectRuleSet {
   readonly commands: ReadonlyArray<{ readonly pattern: string; readonly decision: 'ask' | 'never' }>
 }
 
+/** A project's rules in a few sentences, for an agent that plans work under them. */
+export const sayRules = (rules: ProjectRuleSet): string => {
+  const named = (decision: 'ask' | 'never') =>
+    rules.commands.flatMap((command) => (command.decision === decision ? [`commands starting \`${command.pattern}\``] : []))
+  const asks = [...rules.ask.map((id) => RULE_WORDS[id]), ...named('ask')]
+  const never = [...rules.never.map((id) => RULE_WORDS[id]), ...named('never')]
+  return [
+    rules.mode === 'ask'
+      ? "Agents may read anything and change a task's own files; everything else waits for the person."
+      : rules.mode === 'allow' || asks.length === 0
+        ? 'Agents may do anything.'
+        : `Agents may do anything but these, which wait for the person: ${asks.join('; ')}.`,
+    ...(never.length === 0 ? [] : [`Never allowed: ${never.join('; ')}.`]),
+  ].join(' ')
+}
+
 /** The MVP's rules, a project's first: everything allowed but every kind above, which asks. */
 export const MVP_RULES: ProjectRuleSet = { mode: 'rules', ask: RULES, never: [], commands: [] }
 

@@ -501,7 +501,7 @@ export class Runs extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           // A plan made while the repository's host wasn't connected opens its pull request if it is by now.
           // The plan's ending, else the project's, as when a plan is made: one made while the host wasn't connected opens its pull request if it is by now.
-          const end = (yield* stepsOf(run)).end ?? (yield* changes.endFor(run.projectId))
+          const end = (yield* stepsOf(run)).end ?? (yield* changes.endFor(run.projectId, run.taskId))
           if (end === null) {
             yield* onBranch(run)
             return yield* finish(run, 'succeeded')
@@ -1195,7 +1195,7 @@ export class Runs extends Context.Service<
             return yield* new ToolRefused({ message: 'No step is waiting on you, so Althar keeps no summary now.' })
           const step = attempt.nodeKey === 'settle' ? 'settle' : 'implement'
           // A task that ends on its host pushes commits only: what isn't committed is the lead's to commit or clear away first.
-          if (((yield* stepsOf(current)).end ?? (yield* changes.endFor(current.projectId))) !== null) {
+          if (((yield* stepsOf(current)).end ?? (yield* changes.endFor(current.projectId, current.taskId))) !== null) {
             const worktrees = yield* worktreesOf(current.taskId)
             // In a task of several repositories, each file by the repository it's in.
             const left = (yield* Effect.forEach(worktrees, (worktree) =>

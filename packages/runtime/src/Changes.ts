@@ -21,7 +21,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import { envelope } from './envelope'
 import { ChangedSinceSeen, NotFound } from './errors'
-import { commitOf, commitsAhead, onHead, pushTo, uncommittedFiles } from './git'
+import { commitOf, commitsAhead, gitOutcome, onHead, pushTo, uncommittedFiles } from './git'
 import { Instance } from './Instance'
 import { outward, reconcileOutward } from './outward'
 import {
@@ -252,8 +252,12 @@ export class Changes extends Context.Service<
      * branch. A project that wants a pull request where no host Althar
      * knows is named ends on its branch, as it always has.
      */
-    endFor(projectId: string): Effect.Effect<'draft' | 'ready' | 'none' | null, unknown>
-    /** The code host the project's repository is on, and whether Althar is connected to it; null where its remotes name none Althar knows. */
+    endFor(projectId: string, taskId?: string): Effect.Effect<'draft' | 'ready' | 'none' | null, unknown>
+    /**
+     * The code host the project's repositories are on, and whether Althar is
+     * connected to it: the first connected, else the first Althar knows; null
+     * where their remotes name none it knows.
+     */
     hostFor(projectId: string): Effect.Effect<Host | null>
   }
 >()('@althar/runtime/Changes') {
@@ -355,15 +359,34 @@ export class Changes extends Context.Service<
           })
         })
 
-      const hostFor = (projectId: string): Effect.Effect<Host | null, never, Store> =>
+      /** The hosts of a project's repositories, or of those a task changes, the first first: null for each on none Althar knows. */
+      const hostsFor = (projectId: string, taskId?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [binding] = yield* sql<{ remotes: string }>`
-            SELECT remote_fingerprints AS remotes FROM repository_bindings WHERE project_id = ${projectId} AND detached_at IS NULL ORDER BY created_at LIMIT 1`
-          const remotes =
-            binding === undefined
-              ? []
-              : Option.getOrElse(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(binding.remotes), () => [])
+          const bindings =
+            taskId === undefined
+              ? yield* sql<{ remotes: string }>`
+                  SELECT remote_fingerprints AS remotes FROM repository_bindings WHERE project_id = ${projectId} AND detached_at IS NULL
+                  ORDER BY created_at, rowid`
+              : yield* sql<{ remotes: string }>`
+                  SELECT b.remote_fingerprints AS remotes FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+                  WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
+          return yield* Effect.forEach(bindings, (binding) =>
+            hostOfRemotes(
+              Option.getOrElse(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(binding.remotes), () => []),
+            ),
+          )
+        })
+
+      const hostFor = (projectId: string): Effect.Effect<Host | null, never, Store> =>
+        Effect.map(
+          hostsFor(projectId),
+          (hosts) => hosts.find((host) => host?.connected === true) ?? hosts.find((host) => host !== null) ?? null,
+        ).pipe(Effect.orElseSucceed(() => null))
+
+      /** The host a repository's remotes are on, and whether Althar is connected to it; null where they name none it knows. */
+      const hostOfRemotes = (remotes: ReadonlyArray<string>): Effect.Effect<Host | null, never, Store> =>
+        Effect.gen(function* () {
           const connected = yield* connections.hostOf(remotes)
           if (connected !== null) {
             const { info } = yield* connections.adapters(connected.connectionId)
@@ -408,11 +431,13 @@ export class Changes extends Context.Service<
             JOIN repository_bindings b ON b.id = w.binding_id
             WHERE k.id = ${input.taskId} ORDER BY b.created_at, b.rowid`
           if (tasks.length === 0) return yield* new NotFound({ kind: 'task', id: input.taskId })
+          const [bound] = yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM repository_bindings WHERE project_id = ${input.projectId} AND detached_at IS NULL`
           // Each repository on its own: one whose host isn't connected is said once the rest are done, for the person to connect and try again.
           const done: Array<PublishedOne> = []
           let unconnected: NotConnected | undefined
           for (const task of tasks) {
-            const one = yield* Effect.exit(publishOne(input, task, tasks.length > 1))
+            const one = yield* Effect.exit(publishOne(input, task, { several: tasks.length > 1, ofSeveral: (bound?.n ?? 0) > 1 }))
             if (one._tag === 'Success') done.push({ ...one.value, repository: task.name })
             else {
               const error = Cause.findErrorOption(one.cause)
@@ -439,15 +464,20 @@ export class Changes extends Context.Service<
           readonly remotes: string
           readonly defaultBase: string | null
         },
-        several: boolean,
+        /** Whether the task changes several repositories, and whether its project has several. */
+        { several, ofSeveral }: { readonly several: boolean; readonly ofSeveral: boolean },
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const remotes = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(task.remotes)
           const found = yield* connections.hostOf(remotes)
-          // Among several, one on no host Althar knows ends on its branch; alone, the task needed its host.
-          if (found === null && several) return { kind: 'branch', left: [] } as const
-          if (found === null) return yield* new NotConnected({ product: 'github', what: remotes[0] ?? 'the repository' })
+          // In a project of several, one on no host Althar knows ends on its branch. A project of one needs its host, which may be
+          // one Althar can't tell by its address until it's connected; so does one on a host it knows but isn't connected to.
+          if (found === null) {
+            const known = yield* hostOfRemotes(remotes)
+            if (known === null && ofSeveral) return { kind: 'branch', left: [] } as const
+            return yield* new NotConnected({ product: known?.product ?? 'github', what: remotes[0] ?? 'the repository' })
+          }
           const { host } = found
           const repository = yield* host.repository(found.path)
           // Althar pushes what the lead committed, never what it left lying in the worktree.
@@ -756,12 +786,17 @@ export class Changes extends Context.Service<
         return said.member ? 'member' : 'outsider'
       }
 
+      /** A pull request by its repository and number, as the lead names one among several: web#3. */
+      const shortNameOf = (snapshot: Snapshot) => `${snapshot.repository.at(-1) ?? ''}${snapshot.words.prefix}${snapshot.number}`
+
       /** Each of the task's pull requests, read as `readOne` reads one, one after another. */
       const read = (taskId: string) =>
         Effect.gen(function* () {
           const urls = yield* urlsOf(taskId)
           if (urls.length <= 1) return yield* readOne(taskId)
-          return (yield* Effect.forEach(urls, (seen) => readOne(taskId, seen.url))).join('\n\n')
+          return (yield* Effect.forEach(urls, (seen) =>
+            Effect.map(readOne(taskId, seen.url), (read) => `${shortNameOf(seen)}: ${read}`),
+          )).join('\n\n')
         })
 
       /** The task's pull requests as last seen, oldest first. */
@@ -952,25 +987,62 @@ export class Changes extends Context.Service<
             polledAt: yield* timestamp,
             ...(settled ? { listening: 0 } : {}),
           })
-          if (after.state === 'merged') yield* taskDone(link)
+          if (after.state === 'merged') yield* settleIfDone(link.taskId)
           yield* tellLead(link, forLead)
           return happened
         })
 
-      /** A merged change settles its task. */
-      const taskDone = (link: LinkRow) =>
+      /**
+       * A task is done once each of its repositories is merged: its pull
+       * request merged, or, where it has none, its branch in its default branch
+       * here. A pull request closed without merging keeps it open, for the
+       * person. Not done yet, what is still open is said in the thread.
+       */
+      const settleIfDone = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${link.taskId}`
+          const [task] = yield* sql<{ state: string; projectId: ProjectId; threadId: string }>`
+            SELECT k.state, k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE k.id = ${taskId}`
           if (task?.state !== 'open') return
+          const links = yield* linksOf(taskId)
+          const open = (yield* Effect.forEach(links, (link) => Effect.option(decodeSnapshot(link.snapshot)))).flatMap((seen) =>
+            Option.isSome(seen) && seen.value.state !== 'merged'
+              ? [links.length > 1 ? `${nameOf(seen.value)} in ${seen.value.repository.at(-1) ?? ''}` : nameOf(seen.value)]
+              : [],
+          )
+          // A repository with no pull request is merged where its branch's head is in its default branch here.
+          const unmerged: Array<string> = []
+          const repositories = yield* sql<{ name: string; path: string; base: string; root: string; opened: number }>`
+            SELECT b.display_name AS name, w.path, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root,
+              EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
+            FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+            ORDER BY b.created_at, b.rowid`
+          for (const repository of repositories) {
+            if (repository.opened === 1) continue
+            const head = yield* commitOf(repository.path, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
+            const merged = yield* gitOutcome(repository.root, 'merge-base', '--is-ancestor', head, `refs/heads/${repository.base}`)
+            if (head === '' || merged.code !== 0) unmerged.push(repository.name)
+          }
+          if (open.length > 0 || unmerged.length > 0) {
+            yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: `Not done yet: ${[...open.map((name) => `${name} is still open`), ...unmerged.map((name) => `${name} isn't merged`)].join(', ')}.`,
+            })
+            return yield* touchCard(taskId)
+          }
           yield* sql.withTransaction(
             Effect.gen(function* () {
               const at = yield* timestamp
-              const revision = yield* change('tasks', link.taskId, { state: 'done', settledAt: at })
+              const revision = yield* change('tasks', taskId, { state: 'done', settledAt: at })
               yield* fact({
-                projectId: link.projectId,
+                projectId: task.projectId,
                 aggregateType: 'task',
-                aggregateId: link.taskId,
+                aggregateId: taskId,
                 revision,
                 type: 'task.done',
                 payload: { merged: true },
@@ -978,7 +1050,7 @@ export class Changes extends Context.Service<
               })
             }),
           )
-          yield* touchCard(link.taskId)
+          yield* touchCard(taskId)
         })
 
       // What an earlier launch was doing outside when it stopped is uncertain until read back or asked for again.
@@ -1038,7 +1110,7 @@ export class Changes extends Context.Service<
       const Replied = Schema.Struct({
         body: Schema.String,
         thread_id: Schema.optional(Schema.NullOr(Schema.String)),
-        pull_request: Schema.optional(Schema.NullOr(Schema.Number)),
+        pull_request: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
       })
 
       /** A lead's tool: refusals reach it in words; anything else says to try again, and goes to the log. */
@@ -1088,10 +1160,10 @@ export class Changes extends Context.Service<
         ),
         leadTool(
           'reply_on_pull_request',
-          "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. In a task of several repositories, pull_request is the number of the one to reply on. For answering what people said; a change to the code is a commit, which the person pushes.",
+          "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. In a task of several repositories, pull_request names the one to reply on, by its repository and number, as read_pull_request names it: web#3. For answering what people said; a change to the code is a commit, which the person pushes.",
           {
             type: 'object',
-            properties: { body: { type: 'string' }, thread_id: { type: 'string' }, pull_request: { type: 'number' } },
+            properties: { body: { type: 'string' }, thread_id: { type: 'string' }, pull_request: { type: 'string' } },
             required: ['body'],
           },
           (taskId, input, access) =>
@@ -1107,12 +1179,22 @@ export class Changes extends Context.Service<
                     Effect.map((entry) => entry.definition.name),
                     Effect.orElseSucceed(() => null),
                   )
-              // Among several pull requests, the one it names.
+              // Among several pull requests, the one it names, by repository and number: numbers repeat across repositories.
               const seen = yield* urlsOf(taskId)
-              const named = seen.find((candidate) => candidate.number === replied.pull_request)
-              if (seen.length > 1 && named === undefined)
+              const asked = replied.pull_request == null ? null : String(replied.pull_request).trim().toLowerCase()
+              const matching = seen.filter((candidate) => {
+                const short = `${candidate.repository.at(-1) ?? ''}${candidate.words.prefix}${candidate.number}`.toLowerCase()
+                return (
+                  asked === short ||
+                  asked === `${candidate.repository.join('/')}${candidate.words.prefix}${candidate.number}`.toLowerCase() ||
+                  asked === String(candidate.number) ||
+                  asked === `${candidate.words.prefix}${candidate.number}`
+                )
+              })
+              const [named] = matching
+              if (seen.length > 1 && (named === undefined || matching.length > 1))
                 return yield* new ToolRefused({
-                  message: `This task has several pull requests: ${seen.map(nameOf).join(', ')}. Say which with pull_request, its number.`,
+                  message: `This task has several pull requests: ${seen.map(shortNameOf).join(', ')}. Say which with pull_request, as one of those.`,
                 })
               const change = yield* locked(taskId)(
                 reply(taskId, {
@@ -1142,17 +1224,18 @@ export class Changes extends Context.Service<
             news(taskId),
             Effect.sync(() => wakeNow(taskId)),
           ),
-        endFor: (projectId) =>
+        // Worked out from the repositories the task changes, where it says which: one on a connected host opens a draft.
+        endFor: (projectId, taskId) =>
           provide(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
               const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
               if (project === undefined) return null
-              const host = yield* hostFor(projectId)
+              const hosts = yield* hostsFor(projectId, taskId)
               const wanted = (yield* (yield* Policies).current(project.id)).rules.end
               if (wanted === 'none') return wanted
-              if (wanted !== undefined) return host === null ? null : wanted
-              return host?.connected === true ? ('draft' as const) : null
+              if (wanted !== undefined) return hosts.some((host) => host !== null) ? wanted : null
+              return hosts.some((host) => host?.connected === true) ? ('draft' as const) : null
             }),
           ),
         hostFor: (projectId) => provide(hostFor(projectId)),

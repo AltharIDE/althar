@@ -194,6 +194,13 @@ export const useStart = (): StartModel => {
     if (grant === null) return
     try {
       const reading = await client.readFolder(grant)
+      // A folder inside a repository is a project of its own, not one of several: the repository itself is what's added.
+      const [inside] = reading.kind === 'inside' ? reading.repositories : []
+      if (inside !== undefined) {
+        setError(`That’s a folder inside ${inside.name}. Add ${inside.name} itself.`)
+        return
+      }
+      setError(null)
       setForming((now) =>
         now === null
           ? now

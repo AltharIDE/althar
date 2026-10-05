@@ -11,7 +11,9 @@ import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { Plans } from './Plans'
+import { Policies, ruleSetOf } from './Policies'
 import { Projects } from './Projects'
+import { sayRules } from './rules'
 import { envelope } from './envelope'
 import { type PlanStep } from './Runs'
 import { type Disposition, Sessions } from './Sessions'
@@ -55,6 +57,7 @@ type Store =
   | Crypto.Crypto
   | Changes
   | Issues
+  | Policies
 
 const Drafted = Schema.Struct({
   title: Schema.String,
@@ -202,7 +205,8 @@ export class Coordinator extends Context.Service<
           const repositories = yield* sql<{ name: string; base: string | null; within: string | null; path: string }>`
             SELECT b.display_name AS name, b.default_base_ref AS base, b.folder AS within, l.path FROM repository_bindings b
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE b.project_id = ${access.projectId} AND b.detached_at IS NULL`
+            WHERE b.project_id = ${access.projectId} AND b.detached_at IS NULL
+            ORDER BY b.created_at, b.rowid`
           const [counts] = yield* sql<{ open: number; drafts: number }>`
             SELECT sum(state = 'open') AS open, sum(state = 'draft') AS drafts FROM tasks WHERE project_id = ${access.projectId}`
           return [
@@ -214,7 +218,7 @@ export class Coordinator extends Context.Service<
               )
               .join('\n')}`,
             `Tasks: ${counts?.open ?? 0} open, ${counts?.drafts ?? 0} planned and not yet started.`,
-            "Rules: agents may do anything inside a task's worktree. Pushes to the default branch, force pushes, merges, deploys and writes outside the worktree wait for the person.",
+            `Rules: ${sayRules(ruleSetOf((yield* (yield* Policies).current(access.projectId as ProjectId)).rules))}`,
           ].join('\n\n')
         })
 
@@ -337,7 +341,7 @@ export class Coordinator extends Context.Service<
             steps,
             reason: proposed.lead.reason ?? null,
             actorId: instance.coordinatorId,
-            end: yield* changes.endFor(access.projectId),
+            end: yield* changes.endFor(access.projectId, task.id),
           })
           return `Planned ${task.slug}. It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again.`
         })

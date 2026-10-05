@@ -219,6 +219,12 @@ describe('the start', () => {
       .fn()
       .mockResolvedValueOnce({ kind: 'folder' as const, name: 'meridian', repositories: [found('api'), found('web')], project: null })
       .mockRejectedValueOnce(new ApiError({ reason: 'NotFound', message: 'That folder isn’t there any more.' }))
+      .mockResolvedValueOnce({
+        kind: 'inside' as const,
+        name: 'web',
+        repositories: [{ path: '/code/monorepo', folder: 'packages/web', name: 'monorepo', branch: 'main', remote: null }],
+        project: null,
+      })
     const openProject = vi.fn(async () => Promise.reject(new ApiError({ reason: 'GitFailed', message: 'Git couldn’t read it.' })))
     const { client } = fakeClient({ readFolder, openProject })
     const pickFolder = vi
@@ -226,6 +232,7 @@ describe('the start', () => {
       .mockResolvedValueOnce('grant_picked')
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce('grant_gone')
+      .mockResolvedValueOnce('grant_inside')
     withServices(<Start onProject={vi.fn()} />, client, fakeHost({ pickFolder }))
     await userEvent.click(await screen.findByRole('button', { name: 'Open a folder' }))
     await screen.findByText('Althar found 2 git repositories in meridian. Leave out any its tasks shouldn’t change.')
@@ -233,6 +240,10 @@ describe('the start', () => {
     await userEvent.click(screen.getByRole('button', { name: /Choose folders/ }))
     await userEvent.click(screen.getByRole('button', { name: /Choose folders/ }))
     expect(await screen.findByText('That folder isn’t there any more.')).toBeTruthy()
+    // A folder inside a repository isn't one of several: the repository itself is what's added.
+    await userEvent.click(screen.getByRole('button', { name: /Choose folders/ }))
+    expect(await screen.findByText('That’s a folder inside monorepo. Add monorepo itself.')).toBeTruthy()
+    expect(screen.queryByText('monorepo', { exact: true })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Create project' }))
     expect(await screen.findByText('Git couldn’t read it.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Remove api' }))

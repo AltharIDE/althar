@@ -720,7 +720,8 @@ export class Queries extends Context.Service<
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
                   },
             issue: issue === null ? null : { product: issue.product, key: issue.key, title: issue.title, url: issue.url },
-            change: changes[0] ?? null,
+            // The first still open, for the person to act on: one merged while another isn't leaves the other.
+            change: changes.find((candidate) => candidate.state === 'open') ?? changes[0] ?? null,
             step: task.step,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (planned.find((step) => step.key === 'implement')?.agentId || null),

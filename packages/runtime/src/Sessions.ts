@@ -1171,6 +1171,13 @@ export class Sessions extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // The project's repositories the task doesn't change, which it may read where the person keeps them.
+          const others = yield* sql<{ name: string; path: string }>`
+            SELECT b.display_name AS name, l.path FROM repository_bindings b
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE b.project_id = ${thread.projectId} AND b.detached_at IS NULL
+              AND b.id NOT IN (SELECT w.binding_id FROM workspaces w WHERE w.task_id = ${thread.taskId})
+            ORDER BY b.created_at, b.rowid`
           const [plan] = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${thread.threadId} AND kind = 'plan' ORDER BY sequence DESC LIMIT 1`
           const entries =
@@ -1204,6 +1211,11 @@ export class Sessions extends Context.Service<
             several
               ? `Its repositories are side by side in ${thread.cwd}, each with its own branch and history; commit in each one you change:\n${thread.repositories.map((repository) => `- ${repository.name}: ${where(repository)}.`).join('\n')}`
               : `The worktree is ${thread.repositories[0] === undefined ? thread.worktree : where(thread.repositories[0])}.`,
+            ...(others.length === 0
+              ? []
+              : [
+                  `The project's other repositories, to read but not change (they are the person's own checkouts, on whatever branch they left them): ${others.map((other) => `${other.name} at ${other.path}`).join(', ')}.`,
+                ]),
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
             // Althar reaches the code host for the task (ADR-011).
