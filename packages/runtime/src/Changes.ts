@@ -20,9 +20,10 @@ import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import { envelope } from './envelope'
-import { ChangedSinceSeen, NotFound } from './errors'
+import { CantMerge, ChangedSinceSeen, NotFound } from './errors'
 import { commitOf, commitsAhead, gitOutcome, onHead, pushTo, uncommittedFiles } from './git'
 import { Instance } from './Instance'
+import { applyMerge, planMerge } from './localMerge'
 import { outward, reconcileOutward } from './outward'
 import {
   answerHint,
@@ -232,6 +233,16 @@ export class Changes extends Context.Service<
      * isn't merged. Agents never merge.
      */
     merge(taskId: string, head: string, url?: string): Effect.Effect<void, unknown>
+    /**
+     * Merges the task's branch into each of its repositories' default
+     * branches on this Mac, up to the commit the person saw in each, where it
+     * has no pull request: all of them or none, and nothing pushed. Its task
+     * settles.
+     */
+    mergeHere(
+      taskId: string,
+      heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>,
+    ): Effect.Effect<ReadonlyArray<{ readonly repository: string; readonly branch: string; readonly already: boolean }>, unknown>
     /** Replies on the task's pull request, in a comment's thread or its conversation, signed as from Althar and the agent that wrote it. */
     reply(
       taskId: string,
@@ -730,6 +741,75 @@ export class Changes extends Context.Service<
           if (now !== undefined) yield* poll(now)
         })
 
+      const mergeHere = (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ state: string; title: string; projectId: ProjectId; threadId: string }>`
+            SELECT k.state, k.title, k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE k.id = ${taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+          const cant = (why: CantMerge['why'], detail = '') => new CantMerge({ taskId, why, detail })
+          if (task.state !== 'open') return yield* cant('settled')
+          if ((yield* linksOf(taskId)).length > 0) return yield* cant('pull_request')
+          const repositories = yield* sql<{ slug: string; name: string; base: string; root: string; worktree: string; branch: string }>`
+            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch
+            FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+            ORDER BY b.created_at, b.rowid`
+          const several = repositories.length > 1
+          const named = (repository: (typeof repositories)[number], what: string) => (several ? `${repository.name}: ${what}` : what)
+          // Worked out for every repository first: one that can't be merged stops them all.
+          const plans = yield* Effect.forEach(repositories, (repository) =>
+            Effect.gen(function* () {
+              const head = heads.find((seen) => seen.repository === repository.slug)?.head
+              if (head === undefined || !(yield* onHead(repository.worktree, head))) return yield* cant('changed')
+              const plan = yield* planMerge(repository.root, repository.base, head, `Merge ${repository.branch}\n\n${task.title}`)
+              return { repository, plan }
+            }),
+          )
+          const conflicts = plans.flatMap(({ repository, plan }) =>
+            plan.kind === 'conflicts' ? [named(repository, plan.files.join(', '))] : [],
+          )
+          if (conflicts.length > 0) return yield* cant('conflicts', conflicts.join('; '))
+          const missing = plans.find(({ plan }) => plan.kind === 'missing')
+          if (missing !== undefined) return yield* cant('missing', missing.repository.base)
+          const busy = plans.find(({ plan }) => plan.kind === 'busy')
+          if (busy !== undefined && busy.plan.kind === 'busy') return yield* cant('busy', busy.plan.checkout)
+          for (const { repository, plan } of plans) if (plan.kind === 'move') yield* applyMerge(repository.root, repository.base, plan)
+          const merged = plans.map(({ repository, plan }) => ({
+            repository: repository.name,
+            branch: repository.base,
+            already: plan.kind === 'already',
+          }))
+          yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: several
+              ? `Merged here: ${merged.map((one) => `${one.repository} into ${one.branch}`).join(', ')}.`
+              : `Merged into ${merged[0]?.branch ?? 'its default branch'} here.`,
+            description: 'On this Mac only: nothing was pushed.',
+          })
+          // Merged, its task is done, as a merged pull request's is.
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* change('tasks', taskId, { state: 'done', settledAt: yield* timestamp })
+              yield* fact({
+                projectId: task.projectId,
+                aggregateType: 'task',
+                aggregateId: taskId,
+                revision,
+                type: 'task.done',
+                payload: { merged: true, here: merged },
+                actorId: instance.personId,
+              })
+            }),
+          )
+          yield* touchCard(taskId)
+          return merged
+        })
+
       const reply = (
         taskId: string,
         input: { readonly body: string; readonly threadId: string | null; readonly by: string | null; readonly url?: string },
@@ -1215,6 +1295,7 @@ export class Changes extends Context.Service<
         markReady: (taskId, url) => provide(locked(taskId)(markReady(taskId, url))),
         exclusive: (taskId, effect) => locked(taskId)(effect),
         merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),
+        mergeHere: (taskId, heads) => provide(locked(taskId)(mergeHere(taskId, heads))),
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),

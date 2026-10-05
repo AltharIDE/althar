@@ -25,7 +25,7 @@ import { Coordinator } from './Coordinator'
 import { baseOf, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
-import { git, unpushedOf } from './git'
+import { commitOf, git, unpushedOf } from './git'
 import { commandIn } from './rules'
 import { Sessions } from './Sessions'
 
@@ -484,10 +484,29 @@ export class Queries extends Context.Service<
       const worktreesOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          return yield* sql<{ slug: string; path: string; baseRef: string | null; baseCommit: string | null }>`
-            SELECT b.slug, w.path, w.base_ref, w.base_commit FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+          return yield* sql<{
+            slug: string
+            name: string
+            defaultBranch: string
+            path: string
+            baseRef: string | null
+            baseCommit: string | null
+          }>`
+            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, w.base_ref, w.base_commit
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
         })
+
+      /** A task's repositories here, for merging it here: each one's default branch, and its branch's head as it stands. */
+      const hereOf = (taskId: string) =>
+        Effect.flatMap(worktreesOf(taskId), (worktrees) =>
+          Effect.forEach(worktrees, (worktree) =>
+            Effect.map(
+              existsSync(worktree.path) ? commitOf(worktree.path, 'HEAD').pipe(Effect.orElseSucceed(() => null)) : Effect.succeed(null),
+              (head) => ({ repository: worktree.slug, name: worktree.name, branch: worktree.defaultBranch, head }),
+            ),
+          ),
+        )
 
       /**
        * What a task changed across its repositories: in one, as `changedOf`
@@ -779,7 +798,8 @@ export class Queries extends Context.Service<
                       del: files.reduce((sum, file) => sum + file.del, 0),
                     }))
                   : null
-              const read = { ...card, state: row.state, createdAt: row.createdAt, settledAt: row.settledAt, changed }
+              const here = card.phase === 'ready' && card.change === null ? yield* hereOf(row.id) : []
+              const read = { ...card, state: row.state, createdAt: row.createdAt, settledAt: row.settledAt, changed, here }
               if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, read)
               return [read]
             }),
@@ -867,6 +887,7 @@ export class Queries extends Context.Service<
               ...(yield* Effect.map(cardFor(head.taskId), (card) => ({ phase: card?.phase ?? null, waits: card?.waits ?? null }))),
               ...(yield* linksOf(head.taskId)),
               ...(yield* changedOfTask(head.taskId)),
+              here: yield* hereOf(head.taskId),
             },
             session: yield* sessionOf(threadId),
             attention: attention.map(callOf),

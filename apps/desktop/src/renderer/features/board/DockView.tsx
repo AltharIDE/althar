@@ -6,6 +6,7 @@ import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, W
 import { useServices } from '../../data/services'
 import { modelInfo, waitsWords } from '../../shared/agents'
 import { checkOf } from '../../shared/checks'
+import { mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
 import { ago, clock } from '../../shared/time'
 import { PermissionCall } from '../task/PermissionCall'
@@ -208,7 +209,12 @@ export function DockView({
             {text.review}
           </ActionButton>
         )}
-        {/* Work that ended on its branch can still open its pull request, as the person says. */}
+        {/* Work that ended on its branch merges here, or can still open its pull request, as the person says. */}
+        {task.phase === 'ready' && change === null && task.here.length > 0 && (
+          <ActionButton icon="branch" disabled={model.merging === task.taskId} onClick={() => void model.mergeHere(task)}>
+            {mergeHereLabel(task.here)}
+          </ActionButton>
+        )}
         {task.phase === 'ready' && change === null && (
           <ActionButton icon="pr" disabled={model.opening === task.taskId} onClick={() => void model.openChange(task.taskId)}>
             {text.openChange}

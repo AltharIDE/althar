@@ -668,6 +668,16 @@ export const FileDiff = Schema.Struct({
 export type FileDiff = typeof FileDiff.Type
 
 /** A task's thread: its task and project, the agent working on it, the calls waiting on the person, and a page of its items. */
+/** One of a task's repositories on this Mac: the default branch merging here goes into, and the head of its branch as last read. */
+export const TaskRepositoryHere = Schema.Struct({
+  /** Its slug, which merging names it by. */
+  repository: Schema.String,
+  name: Schema.String,
+  branch: Schema.String,
+  head: Schema.NullOr(Schema.String),
+})
+export type TaskRepositoryHere = typeof TaskRepositoryHere.Type
+
 export const ThreadSnapshot = Schema.Struct({
   threadId: Schema.String,
   cursor: Cursor,
@@ -692,6 +702,8 @@ export const ThreadSnapshot = Schema.Struct({
     /** What it changed since it started, committed or not, file by file, and in how many commits; empty without a worktree here. */
     files: Schema.Array(ChangedFile),
     commits: Schema.Number,
+    /** Its repositories here, for merging it without a pull request. */
+    here: Schema.Array(TaskRepositoryHere),
   }),
   session: Schema.NullOr(SessionSummary),
   attention: Schema.Array(AttentionRequest),
@@ -710,6 +722,8 @@ export const BoardTask = Schema.Struct({
   settledAt: Schema.NullOr(Schema.String),
   /** What a ready task changed, when it has no pull request to say so: its files, and lines added and removed. */
   changed: Schema.NullOr(Schema.Struct({ files: Schema.Number, add: Schema.Number, del: Schema.Number })),
+  /** A ready task's repositories here, when it has no pull request: for merging it here. */
+  here: Schema.Array(TaskRepositoryHere),
 })
 export type BoardTask = typeof BoardTask.Type
 
@@ -986,6 +1000,16 @@ export const Api = RpcGroup.make(
    * since isn't merged. Agents never merge.
    */
   command('Merge', { taskId: Schema.String, head: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
+  /**
+   * Merges a task without a pull request into each of its repositories'
+   * default branches on this Mac, up to the commit the person saw in each:
+   * all or none, and nothing pushed. Its task settles.
+   */
+  command(
+    'MergeHere',
+    { taskId: Schema.String, heads: Schema.Array(Schema.Struct({ repository: Schema.String, head: Schema.String })) },
+    Schema.Void,
+  ),
   /** Pushes the task's branch to its open pull request, up to the commit the person saw. */
   command('Push', { taskId: Schema.String, head: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
   /** Asks the task's pull request for news now. */

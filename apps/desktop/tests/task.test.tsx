@@ -118,6 +118,24 @@ describe('a task', () => {
     await waitFor(() => expect(client.openChange).toHaveBeenCalledWith('t1'))
   })
 
+  it('merges work that ended on its branch here, up to the heads it showed', async () => {
+    const here = [
+      { repository: 'api', name: 'api', branch: 'main', head: 'abc111' },
+      { repository: 'web', name: 'web', branch: 'develop', head: 'def222' },
+    ]
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ session: null, task: { ...snapshot().task, phase: 'ready', commits: 2, here } })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge into each default branch' }))
+    await waitFor(() =>
+      expect(client.mergeHere).toHaveBeenCalledWith('t1', [
+        { repository: 'api', head: 'abc111' },
+        { repository: 'web', head: 'def222' },
+      ]),
+    )
+  })
+
   it('keeps the person’s pinned models in this window, and their default efforts in Althar', async () => {
     // The runtime keeps defaults: what is set is what the models say when read again.
     const kept = new Map<string, Array<{ model: string; effort: string }>>()

@@ -160,6 +160,7 @@ describe('the API', () => {
               GetBoard: () => Effect.die('unused'),
               Merge: () => Effect.die('unused'),
               Push: () => Effect.die('unused'),
+              MergeHere: () => Effect.die('unused'),
               SetEffort: () => Effect.die('unused'),
               GetModels: () => Effect.die('unused'),
               SetDefaultEffort: () => Effect.die('unused'),

@@ -306,6 +306,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     changes: [],
     files: [],
     commits: 0,
+    here: [],
   },
   session: {
     id: 's1',
@@ -379,6 +380,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [] })),
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
+    mergeHere: vi.fn(async () => {}),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
       file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
       lines: [

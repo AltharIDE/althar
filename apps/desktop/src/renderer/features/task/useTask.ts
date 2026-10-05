@@ -4,6 +4,7 @@ import { type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@a
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { caughtUp, mergeItems, newestReads, waiting } from '../../shared/items'
+import { headsOf } from '../../shared/mergeHere'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 import { useServices, useWatch } from '../../data/services'
@@ -51,6 +52,8 @@ export interface TaskModel {
   readonly markReady: (url?: string) => Promise<void>
   /** Opens the pull request of a task whose work ended on its branch. */
   readonly openChange: () => Promise<void>
+  /** Merges the task into its repositories' default branches here, up to the heads it showed; it has no pull request. */
+  readonly mergeHere: () => Promise<void>
   /** Pushes the task's branch to its pull request, up to the commit the person saw: the one at `url`, in a task of several. */
   readonly push: (head: string, url?: string) => Promise<void>
   readonly dismissError: () => void
@@ -194,6 +197,7 @@ export const useTask = (threadId: string): TaskModel => {
     answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
     markReady: (url) => act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id, url))),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id))),
+    mergeHere: () => act(async () => (snapshot === null ? undefined : client.mergeHere(snapshot.task.id, headsOf(snapshot.task.here)))),
     push: (head, url) => act(async () => (snapshot === null ? undefined : client.push(snapshot.task.id, head, url))),
     dismissError: () => setError(null),
   }

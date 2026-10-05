@@ -25,6 +25,7 @@ const task = (overrides: Partial<BoardTask> = {}): BoardTask => ({
   createdAt: '2026-10-01T09:00:00.000Z',
   settledAt: null,
   changed: null,
+  here: [],
   ...overrides,
 })
 
@@ -286,6 +287,33 @@ describe('the board', () => {
     await userEvent.click(within(dock).getByRole('button', { name: 'Open a pull request' }))
     await waitFor(() => expect(within(dock).queryByRole('alert')).toBeNull())
     expect(openChange).toHaveBeenLastCalledWith('t5')
+  })
+
+  it('merges work that ended on its branch here, and says when it can’t', async () => {
+    const mergeHere = vi
+      .fn<(taskId: string, heads: ReadonlyArray<{ repository: string; head: string }>) => Promise<void>>()
+      .mockRejectedValueOnce(
+        new ApiError({
+          reason: 'CantMerge',
+          message: 'It conflicts with the default branch, in README.md. Tell the lead to bring its branch up to date, then merge again.',
+        }),
+      )
+      .mockResolvedValue(undefined)
+    const here = [{ repository: 'meridian', name: 'meridian', branch: 'main', head: 'abc111' }]
+    const tasks = board().tasks.map((work) => (work.taskId === 't5' ? { ...work, here } : work))
+    const { client } = fakeClient({ mergeHere, getBoard: vi.fn(async () => board({ tasks })) })
+    withServices(<Project />, client)
+    await userEvent.keyboard('{Meta>}2{/Meta}')
+    await userEvent.click(await screen.findByRole('button', { name: 'Tidy the docs' }))
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Merge into main' }))
+    expect(await within(dock).findByRole('alert')).toHaveProperty(
+      'textContent',
+      'It conflicts with the default branch, in README.md. Tell the lead to bring its branch up to date, then merge again.',
+    )
+    await userEvent.click(within(dock).getByRole('button', { name: 'Merge into main' }))
+    await waitFor(() => expect(mergeHere).toHaveBeenCalledTimes(2))
+    expect(mergeHere).toHaveBeenLastCalledWith('t5', [{ repository: 'meridian', head: 'abc111' }])
   })
 
   it('is read again when something it shows changes, not for what is said in a thread', async () => {

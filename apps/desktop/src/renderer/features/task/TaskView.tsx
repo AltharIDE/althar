@@ -38,6 +38,7 @@ import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { PermissionCall } from './PermissionCall'
 import { StuckCall } from './StuckCall'
 import s from './Task.module.css'
+import { mergeHereLabel } from '../../shared/mergeHere'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
 
@@ -263,9 +264,14 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
   const changeButton = (
     <>
       {unpublished && (
-        <Button size="small" busy={model.pending} onClick={() => void model.openChange()}>
-          {text.openChange}
-        </Button>
+        <>
+          <Button size="small" busy={model.pending} onClick={() => void model.mergeHere()}>
+            {mergeHereLabel(snapshot.task.here)}
+          </Button>
+          <Button size="small" busy={model.pending} onClick={() => void model.openChange()}>
+            {text.openChange}
+          </Button>
+        </>
       )}
       {files.length > 0 && (
         <ChromeButton icon="file" label={text.files(files.length)} expanded={changes.open} onClick={() => changes.show()} />

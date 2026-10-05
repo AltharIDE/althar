@@ -206,6 +206,16 @@ service's model.
   says how many commits aren't on the pull request yet, and Push pushes up to
   the commit they saw, never one the lead made since. The lead has no tool to
   push.
+- **A task without a pull request merges here, as the person says.** Where
+  it ended on its branch (no host Althar knows, a host not connected, or
+  "push the branch only"), the person can merge it into each of its
+  repositories' default branches on this Mac, up to the commit they saw in
+  each. It is worked out for every repository first, without any working
+  tree, so a conflict anywhere merges nothing and says which files. The
+  default branch then moves: as a ref where nothing has it checked out, or by
+  a fast-forward in the working tree that has it, only while that has nothing
+  uncommitted; the person's own work is never touched. Nothing is pushed, and
+  the task settles.
 - **Merging is the person's.** The model has `merge`, and Althar calls it
   only when the person accepts the change (from the board, or the task),
   never on an agent's word: the rules refuse agents' merges. A draft is
