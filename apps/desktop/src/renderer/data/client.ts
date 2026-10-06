@@ -6,6 +6,7 @@ import {
   Api,
   ApiError,
   type BoardSnapshot,
+  type HomeSnapshot,
   clientProtocol,
   type ConnectionList,
   type ConnectionSummary,
@@ -76,6 +77,10 @@ export interface Client {
   readonly getFileDiff: (taskId: string, path: string) => Promise<FileDiff>
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   readonly getBoard: (projectId: string) => Promise<BoardSnapshot>
+  /** The home, across every project; what the loop did from `since`, else from when the person last left the home. */
+  readonly getHome: (since?: string) => Promise<HomeSnapshot>
+  /** The person left the home: what the loop does from now on is new to them. */
+  readonly leftHome: () => Promise<void>
   readonly startSession: (input: Start) => Promise<string>
   readonly switchAgent: (input: Start) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
@@ -236,6 +241,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
     getFileDiff: (taskId, path) => settle(api.GetFileDiff({ taskId, path })),
     getBoard: (projectId) => settle(api.GetBoard({ projectId })),
+    getHome: (since) => settle(api.GetHome(since === undefined ? {} : { since })),
+    leftHome: () => command((commandId) => api.LeftHome({ commandId })),
     startSession: (input) => command((commandId) => api.StartSession({ commandId, ...input })),
     switchAgent: (input) => command((commandId) => api.SwitchAgent({ commandId, ...input })),
     setModel: (input) => command((commandId) => api.SetModel({ commandId, ...input })),

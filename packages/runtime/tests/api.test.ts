@@ -128,6 +128,12 @@ describe('the API', () => {
           listed.projects.map((summary) => [summary.id, summary.tasks]),
           [[project.id, 1]],
         )
+        // The home has the project; left, it reads what the loop did from then.
+        const firstLook = yield* client.GetHome({})
+        assert.deepStrictEqual([firstLook.looked, firstLook.projects.map((summary) => summary.id)], [null, [project.id]])
+        yield* client.LeftHome({ commandId: commandId() })
+        assert.isNotNull((yield* client.GetHome({})).looked)
+        assert.strictEqual((yield* client.GetHome({ since: '2026-01-01T00:00:00.000Z' })).since, '2026-01-01T00:00:00.000Z')
         assert.deepStrictEqual(
           (yield* client.ListTasks({ projectId: project.id })).tasks.map((summary) => summary.title),
           ['Say hello'],

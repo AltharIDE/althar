@@ -98,10 +98,17 @@ export const Status = Schema.Struct({
 })
 export type Status = typeof Status.Type
 
+/** A project's ink: the colour its mark is drawn in, chosen when it was made and kept. */
+export const ProjectInk = Schema.Literals(['clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber'])
+export type ProjectInk = typeof ProjectInk.Type
+
 export const ProjectSummary = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   slug: Schema.String,
+  ink: ProjectInk,
+  /** When a task of it was last made or settled; null before it had one. */
+  lastWorkAt: Schema.NullOr(Schema.String),
   repository: Schema.NullOr(Schema.String),
   /** The repositories its tasks may change, by name, the first first. */
   repositories: Schema.Array(Schema.String),
@@ -744,6 +751,71 @@ export const BoardCall = Schema.Struct({
 })
 export type BoardCall = typeof BoardCall.Type
 
+/** A task on the home, from any project: running, stopped, waiting on a call, or ready to accept. */
+export const HomeTask = Schema.Struct({ ...BoardTask.fields, projectId: Schema.String })
+export type HomeTask = typeof HomeTask.Type
+
+/** A call on the home, from any project. */
+export const HomeCall = Schema.Struct({ ...BoardCall.fields, projectId: Schema.String })
+export type HomeCall = typeof HomeCall.Type
+
+/** The task something the loop did happened to. */
+const HomeEventTask = Schema.Struct({ id: Schema.String, threadId: Schema.String, slug: Schema.String, title: Schema.String })
+
+/**
+ * Something the loop did while the person was away, never something they
+ * did: a step ending, with its result; a usage limit or a step gone quiet
+ * that it dealt with; or permission asks answered within the projects'
+ * rules, counted across every project.
+ */
+export const HomeEvent = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal('step'),
+    id: Schema.String,
+    at: Schema.String,
+    projectId: Schema.String,
+    task: HomeEventTask,
+    result: StepResultItem.fields.content,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal('dealt'),
+    id: Schema.String,
+    at: Schema.String,
+    projectId: Schema.String,
+    task: HomeEventTask,
+    /** What it dealt with: an agent out of usage, or a step gone quiet. */
+    about: Schema.Literals(['limit', 'stall']),
+    title: Schema.String,
+    description: Schema.NullOr(Schema.String),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal('answered'),
+    id: Schema.String,
+    /** The first of them. */
+    at: Schema.String,
+    count: Schema.Number,
+  }),
+])
+export type HomeEvent = typeof HomeEvent.Type
+
+/**
+ * The home: every project, and across them, what waits on the person, what
+ * runs, and what the loop did since they last left the home here, newest
+ * first. Which section each goes in is the window's to say.
+ */
+export const HomeSnapshot = Schema.Struct({
+  cursor: Cursor,
+  /** When the person last left the home on this Mac; null before they ever did. */
+  looked: Schema.NullOr(Schema.String),
+  /** What the loop did is read from: when they last left the home, unless the window says. */
+  since: Schema.String,
+  tasks: Schema.Array(HomeTask),
+  calls: Schema.Array(HomeCall),
+  events: Schema.Array(HomeEvent),
+  projects: Schema.Array(ProjectSummary),
+})
+export type HomeSnapshot = typeof HomeSnapshot.Type
+
 /**
  * A project's board: every task it hasn't settled, and the most recently
  * settled, each with its card; and every call that waits on the person.
@@ -866,6 +938,10 @@ export const Api = RpcGroup.make(
   call('GetFileDiff', { taskId: Schema.String, path: Schema.String }, FileDiff),
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   call('GetBoard', { projectId: Schema.String }, BoardSnapshot),
+  /** The home, across every project; what the loop did, from `since` where the window says, else from when the person last left the home. */
+  call('GetHome', { since: Schema.optional(Schema.String) }, HomeSnapshot),
+  /** The person left the home: what the loop does from now on is new to them. */
+  command('LeftHome', {}, Schema.Void),
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
   /** The project's coordinator thread, made the first time it is asked for. */
   call('GetCoordinator', { projectId: Schema.String, before: Schema.optional(Schema.Int), limit }, CoordinatorSnapshot),

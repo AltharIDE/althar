@@ -34,6 +34,7 @@ import { Permissions } from './Permissions'
 import { Projects } from './Projects'
 import { Nudges } from './Nudges'
 import { Queries } from './Queries'
+import { timestamp } from './records'
 import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
 import { Plans } from './Plans'
@@ -284,6 +285,8 @@ export const handlers = Api.toLayer(
                 id: opened.projectId,
                 name: opened.name,
                 slug: opened.slug,
+                ink: 'clay' as const,
+                lastWorkAt: null,
                 repository: opened.repository,
                 repositories: [],
                 tasks: 0,
@@ -318,6 +321,13 @@ export const handlers = Api.toLayer(
       GetThreadItem: ({ threadId, itemId }) => api(queries.item(threadId, itemId)),
       GetFileDiff: ({ taskId, path }) => api(queries.fileDiff(taskId, path)),
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
+      GetHome: ({ since }) => api(queries.home(since)),
+      LeftHome: () =>
+        api(
+          Effect.gen(function* () {
+            yield* sql`UPDATE devices SET home_looked_at = ${yield* timestamp} WHERE id = ${instance.deviceId}`
+          }),
+        ),
       StartSession: ({ commandId, threadId, agentId, model, effort }) =>
         once(
           commandId,

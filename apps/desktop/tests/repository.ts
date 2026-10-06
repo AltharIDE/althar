@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-/** A git repository called `meridian` with one commit on `main`, in a folder of its own. */
-export const repository = (under = mkdtempSync(join(tmpdir(), 'althar-desktop-'))) => {
-  const path = join(under, 'meridian')
+/** A git repository called `meridian`, or as named, with one commit on `main`, in a folder of its own. */
+export const repository = (under = mkdtempSync(join(tmpdir(), 'althar-desktop-')), name = 'meridian') => {
+  const path = join(under, name)
   mkdirSync(path)
   const git = (...args: Array<string>) =>
     execFileSync('git', args, {
@@ -19,7 +19,7 @@ export const repository = (under = mkdtempSync(join(tmpdir(), 'althar-desktop-')
       },
     })
   git('init', '-q', '-b', 'main')
-  writeFileSync(join(path, 'README.md'), '# Meridian\n')
+  writeFileSync(join(path, 'README.md'), `# ${name}\n`)
   git('add', '.')
   git('commit', '-q', '-m', 'Start')
   return path

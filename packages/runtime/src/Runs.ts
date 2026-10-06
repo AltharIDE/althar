@@ -908,7 +908,7 @@ export class Runs extends Context.Service<
               threadId: run.threadId,
               agentId: wanted,
               ...(model == null ? {} : { model }),
-              ...(said === undefined ? {} : { said }),
+              ...(said === undefined ? {} : { said, about: 'limit' as const }),
             })
           if (said !== undefined) yield* sayOut(run.threadId, run.projectId, said)
           // The plan's lead, unless it is out of usage and the project moves on: the next free agent instead.
@@ -936,9 +936,9 @@ export class Runs extends Context.Service<
           return Option.isNone(yield* limits.out(agentId, projectId))
         })
 
-      /** Says in the task's thread what a usage limit did. */
+      /** Says in the task's thread what a usage limit did; the home reads it as the loop's doing. */
       const sayOut = (threadId: string, projectId: ProjectId, title: string) =>
-        addItem({ projectId, threadId }, 'notice', { source: 'runtime', severity: 'warning', title })
+        addItem({ projectId, threadId }, 'notice', { source: 'runtime', severity: 'warning', title, about: 'limit' })
 
       /**
        * A planned agent that is out of usage, where the project moves on: the
@@ -1064,6 +1064,7 @@ export class Runs extends Context.Service<
                 agentId: next,
                 ...(model === null ? {} : { model }),
                 said: outWords({ from, resetsAt, to: yield* limits.named(next, model, to) }),
+                about: 'limit',
               })
               return
             }

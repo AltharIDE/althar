@@ -91,6 +91,7 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
         source: 'runtime',
         severity: 'warning',
         title,
+        about: 'stall',
         ...(description === undefined ? {} : { description }),
       })
 
@@ -170,6 +171,7 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
                   action.why === 'ignored_stop'
                     ? `${place.name} didn't stop its turn when asked, so Althar started it afresh.`
                     : `${place.name} showed no sign of work again, so Althar started it afresh.`,
+                about: 'stall',
               }),
             )
             // One that can't start again leaves the person to decide.

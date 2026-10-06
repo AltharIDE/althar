@@ -265,6 +265,8 @@ export class Sessions extends Context.Service<
       readonly effort?: string
       /** What the thread says of the switch, in place of who switched to whom: why it happened. */
       readonly said?: string
+      /** What the loop dealt with by switching, for the home: an agent's usage limit, or a step gone quiet. */
+      readonly about?: 'limit' | 'stall'
     }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
     interrupt(threadId: string): Effect.Effect<void, NoSession>
@@ -1269,6 +1271,7 @@ export class Sessions extends Context.Service<
         readonly model?: string
         readonly effort?: string
         readonly said?: string
+        readonly about?: 'limit' | 'stall'
         readonly accountId?: string
       }) =>
         exclusive(
@@ -1293,6 +1296,7 @@ export class Sessions extends Context.Service<
               title:
                 input.said ??
                 (from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`),
+              ...(input.about === undefined ? {} : { about: input.about }),
             })
             const brief = yield* briefFor(thread, { kind: 'takeover', from })
             return yield* activate(connected, { text: brief, closing: 'Carry on with the task from where it stands.' })

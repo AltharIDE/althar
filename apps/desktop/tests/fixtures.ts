@@ -5,6 +5,7 @@ import type {
   ConnectionList,
   ConnectionSummary,
   CoordinatorSnapshot,
+  HomeSnapshot,
   ProjectRulesView,
   ProjectSummary,
   Status,
@@ -91,6 +92,8 @@ export const project: ProjectSummary = {
   id: 'p1',
   name: 'meridian',
   slug: 'meridian',
+  ink: 'teal',
+  lastWorkAt: '2026-10-05T09:00:00.000Z',
   repository: '/code/meridian',
   repositories: ['meridian'],
   tasks: 1,
@@ -211,6 +214,18 @@ export const items = {
 }
 
 type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
+
+/** The home with the one project, nothing running and nothing waiting, looked at the day before. */
+export const home = (overrides: Partial<HomeSnapshot> = {}): HomeSnapshot => ({
+  cursor: 1,
+  looked: '2026-10-06T18:00:00.000Z',
+  since: '2026-10-06T18:00:00.000Z',
+  tasks: [],
+  calls: [],
+  events: [],
+  projects: [project],
+  ...overrides,
+})
 
 /** A task's card as the coordinator's thread has it: planned by default, starting in 20 seconds. */
 export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent => ({
@@ -382,6 +397,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
     getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [] })),
+    getHome: vi.fn(async () => home()),
+    leftHome: vi.fn(async () => {}),
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
     mergeHere: vi.fn(async () => {}),

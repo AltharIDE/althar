@@ -59,7 +59,7 @@ CREATE TABLE devices (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'dev_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
   name TEXT NOT NULL,
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
-) STRICT;
+, home_looked_at TEXT CHECK (home_looked_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')) STRICT;
 
 CREATE TABLE actors (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'act_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
@@ -87,7 +87,7 @@ CREATE TABLE projects (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   archived_at TEXT CHECK (archived_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
-) STRICT;
+, ink TEXT NOT NULL DEFAULT 'clay' CHECK (ink IN ('clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber'))) STRICT;
 
 CREATE TABLE policies (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'pol_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),

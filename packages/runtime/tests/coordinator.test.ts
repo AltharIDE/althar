@@ -962,6 +962,8 @@ describe('a step whose agent stalls or goes round in circles', () => {
         severity: 'warning',
         title: 'Fake codex showed no sign of work again after Althar started it afresh, so Althar stopped it.',
         description: 'Start the lead again to carry on; it picks up from the thread.',
+        // The home reads it as something the loop dealt with.
+        about: 'stall',
       })
       yield* until(
         Effect.map(sessions.running(task.threadId), (running) => (running._tag === 'None' ? [running] : [])),

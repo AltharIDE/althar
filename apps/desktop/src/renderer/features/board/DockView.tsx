@@ -73,6 +73,7 @@ export const useHead = (threadId: string | null, version: number) => {
 }
 
 export function DockView({
+  label = text.label,
   target,
   model,
   agents,
@@ -82,6 +83,8 @@ export function DockView({
   onTask,
   onChanges,
 }: {
+  /** What the dock is called, for its landmark: beside the board, unless told. */
+  label?: string
   target: DockTarget
   model: BoardModel
   agents: ReadonlyArray<AgentStatus>
@@ -109,7 +112,7 @@ export function DockView({
     const stuck = call.stuck
     return (
       <Dock
-        label={text.label}
+        label={label}
         name={stuck === null ? boardText.approval : stuckText.step[stuck.step]}
         sub={`${call.taskTitle} · ${ago(call.createdAt, new Date(now))}`}
         call
@@ -140,7 +143,7 @@ export function DockView({
   if (task.phase === 'ready' && change !== null) {
     const brand = productBrand(change.product)
     return (
-      <Dock label={text.label} name={text.phase.ready} sub={sub} onClose={onClose}>
+      <Dock label={label} name={text.phase.ready} sub={sub} onClose={onClose}>
         <AcceptPeek
           title={task.title}
           {...(task.summary === null ? {} : { because: task.summary.split('\n')[0] ?? '' })}
@@ -186,7 +189,7 @@ export function DockView({
         ? boardText.startsIn(Math.ceil((new Date(task.plan.startsAt).getTime() - new Date(now).getTime()) / 1000))
         : null
   return (
-    <Dock label={text.label} name={text.phase[task.phase]} sub={sub} onClose={onClose}>
+    <Dock label={label} name={text.phase[task.phase]} sub={sub} onClose={onClose}>
       <WorkPeek
         title={task.title}
         {...(waiting !== null
