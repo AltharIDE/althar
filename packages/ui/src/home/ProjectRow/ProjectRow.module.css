@@ -95,3 +95,12 @@
   color: var(--t-3);
   white-space: nowrap;
 }
+/* What it is doing gives way, ending in an ellipsis; who is on it stays. */
+.doing {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.now > :last-child {
+  flex: none;
+}

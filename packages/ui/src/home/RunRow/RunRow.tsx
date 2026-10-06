@@ -27,7 +27,8 @@ export type RunRowProps = RootProps<
   'div',
   {
     project: ProjectRef
-    task: string
+    /** The task's number, where tasks have them; without one, the title alone names it. */
+    task?: string
     title: string
     status?: TaskStatus
     /** Its steps, by name, in order. */
@@ -78,10 +79,12 @@ export function RunRow({
         )}
         <span className={s.meta}>
           <ProjectWord project={project} />
-          <span className={s.ref}>
-            <VisuallyHidden>{t.task} </VisuallyHidden>
-            {task}
-          </span>
+          {task && (
+            <span className={s.ref}>
+              <VisuallyHidden>{t.task} </VisuallyHidden>
+              {task}
+            </span>
+          )}
           {note && <span className={status === TaskStatus.Yours ? s.noteYou : s.note}>{note}</span>}
         </span>
       </div>

@@ -36,9 +36,13 @@
   color: var(--signal);
 }
 .ref {
+  min-width: 0;
+  overflow: hidden;
   font: 500 11px/1 var(--mono);
   font-variant-numeric: tabular-nums;
   color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .at {
   margin-left: auto;

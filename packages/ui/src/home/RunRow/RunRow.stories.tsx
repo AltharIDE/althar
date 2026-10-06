@@ -44,6 +44,19 @@ export const LongTitle: Story = {
   },
 }
 
+/** Where tasks have no numbers, the title alone names it. */
+export const WithoutANumber: Story = { args: { task: undefined } }
+
+/** Long words beside the project give way to it: they end in an ellipsis, and nothing runs into its name. */
+export const LongNote: Story = {
+  args: {
+    task: undefined,
+    status: TaskStatus.Stopped,
+    note: 'No agent is working on it, since the lead stopped before the step was done',
+    elapsed: '6d 3h',
+  },
+}
+
 /** Nowhere to open it: the row is words. */
 export const WithoutOpening: Story = { args: { onOpen: undefined } }
 
@@ -61,6 +74,8 @@ export const AllStates: Story = {
         { state: 'hover', node: <RunRow {...args} /> },
         { state: 'focus', node: <RunRow {...args} /> },
         { state: 'long title', node: <RunRow {...args} {...LongTitle.args} /> },
+        { state: 'no number', node: <RunRow {...args} {...WithoutANumber.args} /> },
+        { state: 'long note', node: <RunRow {...args} {...LongNote.args} /> },
       ]}
     />
   ),

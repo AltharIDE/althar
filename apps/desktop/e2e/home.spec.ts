@@ -13,6 +13,9 @@ import { chooseFolder, launch } from './support'
  * the agents and connections.
  */
 
+/** A title as long as people write them, which the home's rows end in an ellipsis. */
+const LONG = 'Help me add a new feature to the world where I can show other players walking around, with their names over them'
+
 /** Plans a task in the open project with no review, as the person would, and starts it. */
 const startTask = async (page: Page, title: string, lead: string) => {
   await page.getByRole('button', { name: 'New task' }).click()
@@ -33,14 +36,14 @@ test('comes back to what runs and what waits across projects, with the projects 
     await chooseFolder(electronApp, meridian)
     await page.getByRole('button', { name: /Open a folder/ }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await startTask(page, 'Retry the checkout call', '[lead:wait]')
+    await startTask(page, LONG, '[lead:wait]')
     await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
     await page.getByRole('button', { name: 'Home' }).click()
 
     // The home has it running, and the project beside it.
     const projects = page.getByRole('complementary', { name: 'Projects' })
     await expect(projects.getByRole('button', { name: /meridian/ })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Retry the checkout call' })).toBeVisible()
+    await expect(page.getByRole('region', { name: /Running/ }).getByRole('button', { name: LONG })).toBeVisible()
 
     // Another project, opened from the home, with a task that is soon ready.
     await chooseFolder(electronApp, halyard)

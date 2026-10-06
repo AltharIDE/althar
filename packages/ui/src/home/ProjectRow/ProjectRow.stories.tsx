@@ -38,6 +38,16 @@ export const Quiet: Story = { args: strip(FERROUS_ROW) }
 /** Quiet, with nothing to say about when. */
 export const Idle: Story = { args: { ...strip(FERROUS_ROW), note: undefined } }
 
+/** Its lead task named by a long title: what it is doing ends in an ellipsis, and who is on it stays. */
+export const LongTask: Story = {
+  args: {
+    now: {
+      ...MERIDIAN_ROW.now!,
+      task: 'Help me add a new feature to the world where I can show other players walking around',
+    },
+  },
+}
+
 /** Nowhere to open it: the row is words. */
 export const WithoutOpening: Story = { args: { onOpen: undefined } }
 
@@ -50,6 +60,7 @@ export const AllStates: Story = {
         { state: 'running', node: <ProjectRow {...args} {...strip(TESSERA_ROW)} /> },
         { state: 'held and waiting', node: <ProjectRow {...args} {...strip(HALYARD_ROW)} moving={false} /> },
         { state: 'quiet', node: <ProjectRow {...args} {...strip(FERROUS_ROW)} /> },
+        { state: 'long task', node: <ProjectRow {...args} {...LongTask.args} /> },
         { state: 'hover', node: <ProjectRow {...args} /> },
         { state: 'focus', node: <ProjectRow {...args} /> },
         { state: 'pressed', node: <ProjectRow {...args} /> },

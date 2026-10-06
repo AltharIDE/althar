@@ -122,6 +122,9 @@ export const Current: Story = { args: { ...Permission.args, current: true } }
 /** Nowhere to open it: the title is words. */
 export const WithoutOpening: Story = { args: { ...Permission.args, onOpen: undefined } }
 
+/** Where tasks have no numbers, the title alone names the task. */
+export const WithoutANumber: Story = { args: { ...ReadyToAccept.args, task: undefined } }
+
 function Answerable() {
   const [answer, setAnswer] = useState<string | null>(null)
   if (answer)

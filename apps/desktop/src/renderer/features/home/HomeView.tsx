@@ -54,7 +54,9 @@ export const text = {
   allowed: (what: string) => `Allowed ${what}`,
   denied: (what: string) => `Didn’t allow ${what}`,
   answeredIn: (project: string) => `in ${project}`,
-  branch: (name: string) => `On its branch ${name}`,
+  /** A change on its branch alone, by its size. */
+  onBranch: 'On its branch',
+  branchSize: (files: number, add: number, del: number) => `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
   stopped: 'No agent is working on it',
   waiting: 'Waits on you',
   lastWork: (when: string) => `Last task ${when}`,
@@ -111,22 +113,16 @@ export const lineOf = (
     return { icon: 'lock', what: t.answered(event.count), detail: t.withinRules, at: t.since(clock(event.at, now)) }
   const project = projects.get(event.projectId)
   if (project === undefined) return undefined
-  const base = { project, task: event.task.slug, at: clock(event.at, now) }
-  if (event.kind === 'dealt')
-    return {
-      ...base,
-      icon: event.about === 'limit' ? 'agents' : 'clock',
-      what: event.title,
-      ...(event.description === null ? {} : { detail: event.description }),
-    }
+  // The task is named by its title, quieter, after what happened to it.
+  const said = (icon: IconName, what: string) => ({ project, icon, what, detail: event.task.title, at: clock(event.at, now) })
+  if (event.kind === 'dealt') return said(event.about === 'limit' ? 'agents' : 'clock', event.title)
   const { result } = event
-  const detail = firstLine(result.summary)
-  const said = (icon: IconName, what: string, quiet = detail) => ({ ...base, icon, what, ...(quiet === '' ? {} : { detail: quiet }) })
   switch (result.step) {
     case 'publish':
-      return result.change === null
-        ? said('pr', detail, '')
-        : said('pr', t.opened(result.change.noun, `${result.change.prefix}${result.change.number}`), event.task.title)
+      return said(
+        'pr',
+        result.change === null ? firstLine(result.summary) : t.opened(result.change.noun, `${result.change.prefix}${result.change.number}`),
+      )
     case 'implement':
       return said('file', t.implemented)
     case 'settle':
@@ -213,7 +209,6 @@ export function HomeView({
       const stuck = call.stuck
       const shared = {
         project,
-        task: call.taskSlug,
         at: ago(call.createdAt, new Date(now)),
         current: isOpen('call', call.id),
         onOpen: () => open({ kind: 'call', id: call.id }),
@@ -268,14 +263,15 @@ export function HomeView({
             <NeedCard
               kind={text.kind.ready}
               project={project}
-              task={task.slug}
               title={task.title}
               current={isOpen('task', task.taskId)}
               onOpen={() => open({ kind: 'task', id: task.taskId })}
               detail={
                 change === null ? (
-                  task.branch === null ? undefined : (
-                    text.branch(task.branch)
+                  task.changed === null ? (
+                    text.onBranch
+                  ) : (
+                    text.branchSize(task.changed.files, task.changed.add, task.changed.del)
                   )
                 ) : (
                   <NeedChange
@@ -324,7 +320,6 @@ export function HomeView({
       {
         id: task.taskId,
         project,
-        task: task.slug,
         title: task.title,
         status,
         steps,
@@ -352,7 +347,7 @@ export function HomeView({
       running: mine.filter((task) => task.phase !== 'ready').length,
       yours,
       moving: mine.some((task) => task.phase === 'running' && task.waits === null),
-      ...(step === undefined ? {} : { now: { step: step.steps[step.at] ?? '', task: step.on.slug, who: lead(step.on) } }),
+      ...(step === undefined ? {} : { now: { step: step.steps[step.at] ?? '', task: step.on.title, who: lead(step.on) } }),
       note: project.lastWorkAt === null ? text.noWork : text.lastWork(ago(project.lastWorkAt, new Date(now))),
       ...(index < 9 ? { kbd: `⌘${index + 1}` } : {}),
     }

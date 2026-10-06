@@ -106,10 +106,11 @@ const busy = () =>
       task({
         taskId: 't8',
         threadId: 'th8',
-        title: 'On its branch',
+        title: 'Ended on its branch',
         slug: 'branch',
         phase: 'ready',
         branch: 'althar/branch',
+        changed: { files: 3, add: 40, del: 12 },
         projectId: 'p2',
       }),
       task({ taskId: 't9', threadId: 'th9', title: 'Nowhere', slug: 'nowhere', phase: 'ready', branch: null, projectId: 'p2' }),
@@ -167,7 +168,10 @@ describe('the home', () => {
     const needs = await screen.findByRole('region', { name: /Needs you/ })
     expect(within(needs).getByText('npm publish')).toBeTruthy()
     expect(within(needs).getByText('Claude Code stopped before the step was done.')).toBeTruthy()
-    expect(within(needs).getByText('On its branch althar/branch')).toBeTruthy()
+    // A change on its branch says its size; tasks are named by their titles alone, never their slugs.
+    expect(within(needs).getByText('On its branch: 3 files, +40 −12')).toBeTruthy()
+    expect(within(needs).getByText('On its branch')).toBeTruthy()
+    expect(screen.queryByText(/althar\/branch|retry-the-call|name-it/)).toBeNull()
     // A change with its checks, the worst first.
     expect(within(needs).getByText('1 check failed')).toBeTruthy()
     expect(within(needs).getByText('No checks')).toBeTruthy()
@@ -329,7 +333,8 @@ describe('the home', () => {
     expect(lineOf(step({ step: 'review', verdict: 'changes_requested' }), projects, now)).toMatchObject({
       what: 'Review asked for changes',
     })
-    expect(lineOf(step({ summary: '' }), projects, now)).not.toHaveProperty('detail')
+    expect(lineOf(step({}), projects, now)).toMatchObject({ what: 'Implement finished', detail: 'Name it better' })
+    expect(lineOf(step({}), projects, now)).not.toHaveProperty('task')
     const dealt: HomeEvent = {
       kind: 'dealt',
       id: 'd',
@@ -340,7 +345,7 @@ describe('the home', () => {
       title: 'Went quiet.',
       description: 'Started afresh.',
     }
-    expect(lineOf(dealt, projects, now)).toMatchObject({ icon: 'clock', detail: 'Started afresh.' })
+    expect(lineOf(dealt, projects, now)).toMatchObject({ icon: 'clock', what: 'Went quiet.', detail: 'Name it better' })
     expect(lineOf({ ...dealt, projectId: 'gone' }, projects, now)).toBeUndefined()
     expect(lineOf({ kind: 'answered', id: 'a', at, count: 1 }, projects, now)).toMatchObject({ what: 'Answered 1 permission ask' })
   })

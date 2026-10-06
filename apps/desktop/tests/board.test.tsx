@@ -431,6 +431,7 @@ describe('every state the board shows', () => {
     expect(running('2026-10-01T09:59:30.000Z', NOW)).toBe('30s')
     expect(running('2026-10-01T09:54:00.000Z', NOW)).toBe('6m')
     expect(running('2026-10-01T07:56:00.000Z', NOW)).toBe('2h 4m')
+    expect(running('2026-09-25T06:56:00.000Z', NOW)).toBe('6d 3h')
   })
 
   it('holds a stuck call, waiting plans, settled work, and says why an answer didn’t go through', async () => {

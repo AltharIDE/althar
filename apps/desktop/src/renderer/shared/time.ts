@@ -34,12 +34,14 @@ export const took = (from: string, to: string): string => {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
-/** How long something has run, as a board's card says it: "40s", "6m", "1h 4m". */
+/** How long something has run, as a board's card says it: "40s", "6m", "1h 4m", "6d 3h". */
 export const running = (from: string, now: string): string => {
   const minutes = Math.floor(Math.max(0, new Date(now).getTime() - new Date(from).getTime()) / 60_000)
   if (minutes < 1) return took(from, now)
   if (minutes < 60) return `${minutes}m`
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ${minutes % 60}m`
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`
 }
 
 /** The time now, as an ISO string, again each second while `ticking`: for how long a running turn has worked. */

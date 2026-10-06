@@ -1,8 +1,9 @@
+/* A project's name is short and is how a line is placed: it keeps its width, and what follows it gives way. */
 .word {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 6px;
-  min-width: 0;
   font-weight: 500;
   color: var(--t-2);
   white-space: nowrap;
