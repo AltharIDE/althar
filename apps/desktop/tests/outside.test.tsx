@@ -345,7 +345,7 @@ describe('a task’s pull request', () => {
       ),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: '2 files' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^2 files/ }))
     const view = await screen.findByRole('dialog', { name: 'Changes' })
     expect(within(view).getByText('althar/retry into main')).toBeTruthy()
     // The first file, read from the runtime when you get to it.

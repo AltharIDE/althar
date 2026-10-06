@@ -879,9 +879,10 @@ export class Queries extends Context.Service<
             worktree: string | null
             baseRef: string | null
             baseCommit: string | null
+            settledAt: string | null
           }>`
             SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.slug, k.state,
-              w.branch, w.path AS worktree, w.base_ref, w.base_commit
+              k.settled_at, w.branch, w.path AS worktree, w.base_ref, w.base_commit
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE t.id = ${threadId} AND t.kind = 'task'`
@@ -902,7 +903,14 @@ export class Queries extends Context.Service<
               branch: head.branch,
               worktree: head.worktree,
               baseRef: head.baseRef,
-              ...(yield* Effect.map(cardFor(head.taskId), (card) => ({ phase: card?.phase ?? null, waits: card?.waits ?? null }))),
+              ...(yield* Effect.map(cardFor(head.taskId), (card) => ({
+                phase: card?.phase ?? null,
+                waits: card?.waits ?? null,
+                steps: card?.plan?.steps ?? [],
+                step: card?.step ?? null,
+                startedAt: card?.startedAt ?? null,
+              }))),
+              settledAt: head.settledAt,
               ...(yield* linksOf(head.taskId)),
               ...(yield* changedOfTask(head.taskId)),
               here: yield* hereOf(head.taskId),

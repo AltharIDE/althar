@@ -85,6 +85,15 @@ describe('an issue', () => {
       ])
       const snapshot = yield* queries.thread(ready?.threadId ?? '')
       assert.strictEqual(snapshot.task.issue?.status.category, 'todo')
+      // Its header has its plan's steps, done with them, and when it started; it hasn't settled.
+      assert.deepStrictEqual(
+        snapshot.task.steps.map((step) => step.key),
+        ['implement', 'review'],
+      )
+      assert.strictEqual(snapshot.task.step, null)
+      assert.strictEqual(snapshot.task.startedAt, ready?.startedAt)
+      assert.isNotNull(snapshot.task.startedAt)
+      assert.isNull(snapshot.task.settledAt)
     }).pipe(
       Effect.provide(
         Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github, linear: tracker }) }))),
