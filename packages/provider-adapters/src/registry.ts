@@ -5,7 +5,8 @@ import { dirname, join } from 'node:path'
  * Each agent is an entry here, not a code path (docs/architecture/03). The
  * modes and option ids were read from the agents themselves (scripts/probe.ts)
  * on 28 September 2026: claude-agent-acp 0.84.0, codex-acp 2.0.0 and OpenCode
- * 1.18.31. Probe again after upgrading any of them.
+ * 1.18.31; codex-acp again at 2.1.1 on 7 October 2026, unchanged but for a
+ * new model. Probe again after upgrading any of them.
  */
 
 export type AgentId = 'claude-code' | 'codex' | 'opencode'

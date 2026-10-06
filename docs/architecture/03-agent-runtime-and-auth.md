@@ -41,7 +41,8 @@ can move between them.
 
 What each agent reports was read from the agents themselves on 28 September
 2026, with `scripts/probe.ts` in `@althar/provider-adapters`: claude-agent-acp
-0.84.0, codex-acp 2.0.0 and OpenCode 1.18.31. All three expose their mode and
+0.84.0, codex-acp 2.0.0 and OpenCode 1.18.31. codex-acp 2.1.1, probed on
+7 October 2026, reports the same modes and options. All three expose their mode and
 model as session config options and can change both within a session; all
 three can load and resume sessions. Claude Code and Codex also advertise
 steering a turn in progress, as an extension in `_meta`. Probe again after

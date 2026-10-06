@@ -95,14 +95,19 @@ describe('the models each agent offers', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('are read from an agent’s latest session, with what it was set to', () =>
+  it.live('are read from an agent’s latest session until it is asked, with what it was set to', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
       const models = yield* Models
       const threadId = yield* thread
       yield* sessions.start({ threadId, agentId: 'codex', model: 'large', effort: 'high' })
       const codex = () => Effect.map(models.catalog, (all) => all.find((agent) => agent.agentId === 'codex'))
-      assert.deepStrictEqual(yield* codex(), { agentId: 'codex', ...OFFERED, model: 'large', effort: 'high', defaults: [], probing: false })
+      assert.deepStrictEqual(yield* codex(), { agentId: 'codex', ...OFFERED, model: 'large', effort: 'high', defaults: [], probing: true })
+      const [asked] = yield* until(
+        Effect.map(models.catalog, (all) => all.filter((agent) => agent.agentId === 'codex')),
+        (found) => found[0]?.probing === false,
+      )
+      assert.deepStrictEqual(asked, { agentId: 'codex', ...OFFERED, model: 'large', effort: 'high', defaults: [], probing: false })
       // Changed while it runs, it says what it is on now.
       yield* sessions.setModel({ threadId, model: 'small' })
       yield* sessions.setEffort({ threadId, effort: 'low' })
@@ -131,6 +136,39 @@ describe('the models each agent offers', () => {
         (found) => found[0]?.probing === false,
       )
       assert.deepStrictEqual(named, { agentId: 'codex', ...OFFERED, model: 'large', effort: 'high', defaults: [], probing: false })
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('are asked again each launch: a model the agent offers since its latest session is there', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const models = yield* Models
+      const sql = yield* SqlClient.SqlClient
+      const threadId = yield* thread
+      yield* sessions.start({ threadId, agentId: 'codex', model: 'small', effort: 'high' })
+      // As an older version of the agent recorded it: without its newest model.
+      const [row] = yield* sql<{ id: string; config: string }>`SELECT id, config FROM provider_sessions WHERE agent_id = 'codex'`
+      const config = JSON.parse(row?.config ?? '{}') as {
+        options: Array<{ category?: string; choices?: Array<{ value: string }>; values?: Array<string> }>
+      }
+      const older = {
+        ...config,
+        options: config.options.map((option) =>
+          option.category === 'model'
+            ? {
+                ...option,
+                values: option.values?.filter((value) => value !== 'large'),
+                choices: option.choices?.filter((choice) => choice.value !== 'large'),
+              }
+            : option,
+        ),
+      }
+      yield* sql`UPDATE provider_sessions SET config = ${JSON.stringify(older)} WHERE id = ${row?.id ?? ''}`
+      const codex = Effect.map(models.catalog, (all) => all.filter((agent) => agent.agentId === 'codex'))
+      const [first] = yield* codex
+      assert.deepStrictEqual([first?.probing, first?.models.map((model) => model.id)], [true, ['small']])
+      const [asked] = yield* until(codex, (found) => found[0]?.probing === false)
+      assert.deepStrictEqual([asked?.models.map((model) => model.id), asked?.model], [['small', 'large'], 'small'])
     }).pipe(Effect.provide(runtime())),
   )
 

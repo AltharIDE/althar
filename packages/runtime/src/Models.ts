@@ -19,13 +19,14 @@ import { SignIns } from './SignIns'
  * The models each agent offers, and how hard each can be asked to think, in
  * the agent's own names (docs/architecture/03: an agent's options are its
  * own). An agent says so in its session's settings: a select in the `model`
- * category, and one in `thought_level`. Althar reads them from the latest
- * session an agent had, and what it is on from what that session was last
- * set to. An agent it has never run, or whose latest session was kept before
- * Althar kept the names, it asks once a launch: it starts the agent in an
- * empty folder, in its read-only mode, reads the settings, and stops it,
- * recording nothing, as a sign-in check does. What can't be read is left
- * empty; a picker offers the agent's own default.
+ * category, and one in `thought_level`. What an agent offers changes with
+ * its version and with what its maker offers that day (Codex's list comes
+ * from OpenAI, by Codex's version), so Althar asks each agent once a launch:
+ * it starts the agent in an empty folder, in its read-only mode, reads the
+ * settings, and stops it, recording nothing, as a sign-in check does. Until
+ * it has said, the latest session it had says, and what it is on is always
+ * what that session was last set to. What can't be read is left empty; a
+ * picker offers the agent's own default.
  */
 
 export interface AgentModels {
@@ -183,12 +184,10 @@ export class Models extends Context.Service<
           const settings = latest === undefined ? [] : settingsIn(latest.config)
           const seen = modelsOf(definition, settings)
           const now = latest === undefined ? {} : { model: latest.model, effort: latest.effort }
-          // Settings kept before Althar kept their names say only ids: the agent is asked for its names.
-          const named = settings.some((option) => option.choices !== undefined)
-          if (seen.models.length > 0 && named) return { ...seen, ...now, defaults, probing: false }
+          // What it said when asked this launch is newer than any session: a model it offers since then is there.
           const asked = probed.get(definition.id)
           if (asked !== undefined) return { ...(asked ?? seen), ...now, defaults, probing: false }
-          // Not asked yet this launch: asked now, in the background, if it is signed in.
+          // Not asked yet this launch: asked now, in the background, if it is signed in; its latest session says until then.
           if (!probing.has(definition.id) && (yield* signIns.of(definition.id)) !== 'signed_out') {
             probing.add(definition.id)
             yield* Effect.forkIn(probe(entry), scope)
