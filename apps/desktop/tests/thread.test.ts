@@ -142,6 +142,23 @@ describe('work, folded', () => {
     expect(counts(blocksOf(source([items.tool(), items.thinks('Hm')]), new Map(), at)[0])).toEqual({ work: ['tool', 'thought'], said: [] })
   })
 
+  it('leaves out of the fold an error that ended a turn, and only one that ended it', () => {
+    const failed = items.notice({ severity: 'error', title: "OpenCode couldn't answer.", description: 'Endpoint is unavailable.' })
+    expect(counts(blocksOf(source([failed]), new Map(), at)[0])).toEqual({ work: [], said: ['notice'] })
+    expect(counts(blocksOf(source([items.says('Looking.'), items.tool(), failed]), new Map(), at)[0])).toEqual({
+      work: ['tool'],
+      said: ['message', 'notice'],
+    })
+    // Said after the error, the agent carried on: the error folds with the work.
+    expect(counts(blocksOf(source([items.tool(), failed, items.says('Done after all.')]), new Map(), at)[0])).toEqual({
+      work: ['tool', 'notice'],
+      said: ['message'],
+    })
+    // A warning that ends a turn folds as before.
+    const warned = items.notice({ severity: 'warning', title: 'Context is filling up' })
+    expect(counts(blocksOf(source([items.says('Hi.'), warned]), new Map(), at)[0])).toEqual({ work: ['notice'], said: ['message'] })
+  })
+
   it('folds a running turn too, saying how long it has worked so far and what it is doing now', () => {
     const thread = [
       items.you('Go'),
