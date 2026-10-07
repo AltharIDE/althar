@@ -8,6 +8,7 @@ import { ProjectInk, RuntimeState } from '@althar/ui'
 import { agentMarkOf, HomeView, lineOf, refOf } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
 import { SettingsView } from '../src/renderer/features/settings/SettingsView'
+import { useAppIcon } from '../src/renderer/features/settings/useAppIcon'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { agents, card, change, changed, fakeClient, fakeHost, home, project, usual } from './fixtures'
@@ -370,17 +371,58 @@ describe('the home', () => {
   })
 })
 
+function Settings({ onBack = () => {} }: { onBack?: () => void }) {
+  return <SettingsView model={useStart()} connections={useConnections()} appIcon={useAppIcon()} onBack={onBack} />
+}
+
 describe('settings', () => {
   it('goes back home by its crumb or Escape', async () => {
     const onBack = vi.fn()
-    function Settings() {
-      return <SettingsView model={useStart()} connections={useConnections()} onBack={onBack} />
-    }
     const { client } = fakeClient()
-    withServices(<Settings />, client)
+    withServices(<Settings onBack={onBack} />, client)
     await screen.findByRole('heading', { name: 'Agents on this Mac' })
     fireEvent.keyDown(window, { key: 'Escape' })
     await userEvent.click(screen.getByRole('button', { name: /Home/ }))
     expect(onBack).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the icon the app has, and gives it another', async () => {
+    const host = fakeHost({ appIcon: vi.fn(async () => 'paper') })
+    withServices(<Settings />, fakeClient().client, host)
+    const icons = await screen.findByRole('radiogroup', { name: 'App icon' })
+    expect(
+      within(icons)
+        .getAllByRole('radio')
+        .map((radio) => radio.textContent),
+    ).toEqual(['Cobalt', 'Cobalt, dark', 'Paper', 'Ink', 'Solid', 'Solid, dark'])
+    expect(within(icons).getByRole('radio', { name: 'Paper' }).getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(within(icons).getByRole('radio', { name: 'Ink' }))
+    expect(host.setAppIcon).toHaveBeenCalledWith('ink')
+    expect(within(icons).getByRole('radio', { name: 'Ink' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('starts on cobalt when the app has no icon it knows, and goes back when one can’t be kept', async () => {
+    const host = fakeHost({
+      appIcon: vi.fn(async () => 'neon'),
+      setAppIcon: vi.fn(async () => {
+        throw new Error('disk full')
+      }),
+    })
+    withServices(<Settings />, fakeClient().client, host)
+    const icons = await screen.findByRole('radiogroup', { name: 'App icon' })
+    expect(within(icons).getByRole('radio', { name: 'Cobalt' }).getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(within(icons).getByRole('radio', { name: 'Solid' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('That icon couldn’t be kept. Try again.')
+    expect(within(icons).getByRole('radio', { name: 'Cobalt' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('starts on cobalt when the main process can’t say', async () => {
+    const host = fakeHost({ appIcon: vi.fn(async () => Promise.reject(new Error('gone'))) })
+    withServices(<Settings />, fakeClient().client, host)
+    expect(
+      within(await screen.findByRole('radiogroup', { name: 'App icon' }))
+        .getByRole('radio', { name: 'Cobalt' })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
   })
 })

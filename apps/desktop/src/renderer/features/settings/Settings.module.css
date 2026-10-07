@@ -27,6 +27,19 @@
   gap: 12px;
 }
 
+/* A heading with a line under it on what the section does. */
+.titled {
+  display: grid;
+  gap: 4px;
+}
+.titled > * {
+  margin: 0;
+}
+
 .quiet {
   color: var(--t-3);
+}
+
+.failed {
+  color: var(--danger);
 }

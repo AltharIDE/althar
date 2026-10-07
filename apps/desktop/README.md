@@ -30,6 +30,7 @@ From `apps/desktop`:
 | --- | --- |
 | `bun run build` | Builds the main process, the runtime, the preload and the window into `dist/` |
 | `bun run build:package` | The same, without the end-to-end tests' hooks, as a packaged app will be built |
+| `bun run package` | Builds that and packages it as `out/dist/mac-arm64/Althar.app`, with Cobalt as its icon, signed ad hoc so it opens on the Mac that built it. About 850 MB, most of it Claude Code's and Codex's own binaries, which the agent adapters bring |
 | `bun run start` | Opens what was last built |
 | `bun run check` | Format, type-aware lint and type checks |
 | `bun run test` | The window's view models and views against a fake client, and its client against the real runtime |

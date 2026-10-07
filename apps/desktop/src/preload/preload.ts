@@ -3,7 +3,8 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 /*
  * The window's bridge to the main process, and nothing more: the port to the
  * runtime, handed on to the page, folders the person chose, by the picker or
- * a drop, each as a grant, and the thread a notification they clicked opens. The page never sees or sends a path. It gets no
+ * a drop, each as a grant, the thread a notification they clicked opens,
+ * and the icon they gave the app. The page never sees or sends a path. It gets no
  * Node, no file system, no shell.
  */
 
@@ -27,6 +28,8 @@ contextBridge.exposeInMainWorld('althar', {
     const path = webUtils.getPathForFile(file)
     return path === '' ? Promise.resolve(null) : ipcRenderer.invoke('althar:grant-dropped', path)
   },
+  appIcon: (): Promise<string> => ipcRenderer.invoke('althar:app-icon'),
+  setAppIcon: (icon: string): Promise<void> => ipcRenderer.invoke('althar:set-app-icon', icon),
   onOpen: (listener: (threadId: string) => void): (() => void) => {
     opening.add(listener)
     if (pending !== undefined) {

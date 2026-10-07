@@ -10,6 +10,7 @@ import { useConnections } from '../src/renderer/features/connections/useConnecti
 import { HomeView } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
 import { SettingsView } from '../src/renderer/features/settings/SettingsView'
+import { useAppIcon } from '../src/renderer/features/settings/useAppIcon'
 import { accountEntry, runtimeEntry, shortFolder, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { agents, changed, fakeClient, fakeHost, home, project, streamed, usual } from './fixtures'
@@ -25,7 +26,7 @@ function Start({ onProject }: { onProject: (id: string) => void }) {
 }
 
 function Settings({ onBack = vi.fn() }: { onBack?: () => void }) {
-  return <SettingsView model={useStart()} connections={useConnections()} onBack={onBack} />
+  return <SettingsView model={useStart()} connections={useConnections()} appIcon={useAppIcon()} onBack={onBack} />
 }
 
 describe('accounts in settings', () => {
