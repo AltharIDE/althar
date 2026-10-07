@@ -24,10 +24,10 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { Agents } from './Config'
 import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
-import { baseOf, changedFiles, fileDiff, type FileDiff } from './diffs'
-import { NotFound } from './errors'
+import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
+import { GitFailed, NotFound } from './errors'
 import { Instance } from './Instance'
-import { commitOf, git, gitOutcome, unpushedOf } from './git'
+import { commitsAhead, commitsOf, gitOutcome, indexStamp } from './git'
 import { commandIn } from './rules'
 import { Sessions } from './Sessions'
 
@@ -43,6 +43,41 @@ import { Sessions } from './Sessions'
 
 /** Session states in which a session is working on its thread. */
 const LIVE = ['starting', 'active', 'waiting_approval', 'cancelling']
+
+/** How many tasks, or cards, a screen reads at once: each may start git. */
+const AT_ONCE = 8
+
+/** A worktree on this device, and the task it is for: what is kept of it goes when its task leaves the screens. */
+interface Owner {
+  readonly path: string
+  readonly taskId: string
+  readonly projectId: string
+}
+
+/**
+ * One kind of fact about worktrees, by path, kept with what it follows from
+ * (its key): the same key, the same fact, without asking git; another, and it
+ * is worked out again. A failure isn't kept.
+ */
+const keeper = <A>(owners: Map<string, Owner>) => {
+  const kept = new Map<string, { readonly key: string; readonly value: A }>()
+  return {
+    of: <E>(owner: Owner, key: string, work: Effect.Effect<A, E>): Effect.Effect<A, E> =>
+      Effect.suspend(() => {
+        // A folder a later task reuses isn't taken for the earlier one's.
+        const whole = `${owner.taskId} ${key}`
+        const found = kept.get(owner.path)
+        if (found !== undefined && found.key === whole) return Effect.succeed(found.value)
+        return Effect.tap(work, (value) =>
+          Effect.sync(() => {
+            owners.set(owner.path, owner)
+            kept.set(owner.path, { key: whole, value })
+          }),
+        )
+      }),
+    drop: (path: string) => kept.delete(path),
+  }
+}
 
 export const parse = (json: string | null): unknown => {
   if (json === null) return null
@@ -487,19 +522,42 @@ export class Queries extends Context.Service<
           }
         })
 
-      /** What a task's branch changed since it started, file by file, read from git in its worktree; nothing without one. */
-      /** What a task changed, committed or not, and in how many commits, from where it meets its default branch; nothing without its worktree here. */
-      const changedOf = (worktree: string | null, baseRef: string | null, started: string | null) =>
-        worktree === null || started === null || !existsSync(worktree)
-          ? Effect.succeed({ files: [], commits: 0 })
-          : Effect.gen(function* () {
-              const base = yield* baseOf(worktree, baseRef, started)
-              const files = yield* changedFiles(worktree, base)
-              const commits = yield* git(worktree, 'rev-list', '--count', `${base}..HEAD`)
-              return { files, commits: Number(commits) || 0 }
-            }).pipe(Effect.orElseSucceed(() => ({ files: [], commits: 0 })))
+      /*
+       * What git said of each worktree on this device, kept while it looks the
+       * same, so a screen read again starts one git process a worktree rather
+       * than a dozen. A look is the commits of its head and of the refs it is
+       * read against, from one `cat-file`, and its index file's stamp. What
+       * follows from commits alone is kept by those commits, so it is never
+       * stale: where the branch meets its default branch and how many commits
+       * it has since, whether it is in its default branch, how many commits
+       * its pull request doesn't have. The files a task changed also hold what
+       * isn't committed: they are kept while the head, the index and the
+       * lead's tool calls are as they were. A file changed by hand, or by
+       * something left running, and not staged shows at the next commit,
+       * stage or tool call of the lead's, not before. Nothing that acts goes
+       * by what is kept: merging and pushing check again, in git, that the
+       * head the person saw is still the branch's.
+       */
+      const owners = new Map<string, Owner>()
+      /** Where a worktree's branch meets its default branch, and how many commits it has since: by its start, its head and the default branch's. */
+      const forksKept = keeper<{ readonly base: string; readonly commits: number }>(owners)
+      /** The files a task changed in a worktree: by where they are counted from, its head, its index and the lead's tool calls. */
+      const filesKept = keeper<ReadonlyArray<ChangedFile>>(owners)
+      /** Whether a worktree's head is in its default branch here: by both commits. */
+      const mergedKept = keeper<boolean>(owners)
+      /** How many commits a worktree's head has that its pull request doesn't: by both commits. */
+      const unpushedKept = keeper<number>(owners)
 
-      /** A task's worktrees on this device, one per repository it changes, the project's first first. */
+      /** Lets go of what is kept of the worktrees of tasks `gone` says the screens no longer show. */
+      const forget = (gone: (owner: Owner) => boolean) => {
+        for (const owner of owners.values())
+          if (gone(owner)) {
+            owners.delete(owner.path)
+            for (const facts of [forksKept, filesKept, mergedKept, unpushedKept]) facts.drop(owner.path)
+          }
+      }
+
+      /** A task's worktrees on this device, one per repository it changes, the project's first first: each with its repository's root here, and whether it has a pull request. */
       const worktreesOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -510,51 +568,120 @@ export class Queries extends Context.Service<
             path: string
             baseRef: string | null
             baseCommit: string | null
+            root: string | null
+            opened: number
+            taskId: string
+            projectId: string
           }>`
-            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, w.base_ref, w.base_commit
+            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, w.base_ref, w.base_commit,
+              l.path AS root, w.task_id, w.project_id,
+              EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
         })
 
-      /**
-       * A task's repositories that merge here, for its Merge button: those
-       * with no pull request whose branch isn't in their default branch here
-       * yet, each with its default branch and its branch's head as it stands.
-       * A task whose every repository has a pull request reads no git.
-       */
-      const hereOf = (taskId: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const rows = yield* sql<{ slug: string; name: string; defaultBranch: string; path: string; root: string | null }>`
-            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, l.path AS root
-            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-            LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
-              AND NOT EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL)
-            ORDER BY b.created_at, b.rowid`
-          const here = yield* Effect.forEach(rows, (row) =>
-            Effect.gen(function* () {
-              const head = existsSync(row.path) ? yield* commitOf(row.path, 'HEAD').pipe(Effect.orElseSucceed(() => null)) : null
-              const merged =
-                head !== null &&
-                row.root !== null &&
-                (yield* gitOutcome(row.root, 'merge-base', '--is-ancestor', head, `refs/heads/${row.defaultBranch}`)).code === 0
-              return merged ? [] : [{ repository: row.slug, name: row.name, branch: row.defaultBranch, head }]
-            }),
-          )
-          return here.flat()
-        })
+      const nothingChanged = { files: [], commits: 0 } as const satisfies {
+        readonly files: ReadonlyArray<ChangedFile>
+        readonly commits: number
+      }
+
+      /** A failure of git's that says nothing, so what failed isn't kept. */
+      const unclear = (cwd: string, args: ReadonlyArray<string>, code: number) =>
+        Effect.fail(new GitFailed({ args: [...args], cwd, stderr: `exit ${code}` }))
 
       /**
-       * What a task changed across its repositories: in one, as `changedOf`
-       * reads it; in several, each file under its repository's name, and the
-       * commits of all of them.
+       * Where a task's change starts, as `baseOf` has it: where its head meets
+       * its default branch, or where its worktree started when they never
+       * meet, or the default branch isn't known here.
        */
-      const changedOfTask = (taskId: string) =>
+      const forkOf = (cwd: string, head: string, base: string | null, started: string) => {
+        if (base === null) return Effect.succeed(started)
+        const args = ['merge-base', base, head]
+        return Effect.flatMap(gitOutcome(cwd, ...args), ({ code, stdout }) =>
+          code === 0 ? Effect.succeed(stdout) : code === 1 ? Effect.succeed(started) : unclear(cwd, args, code),
+        )
+      }
+
+      /** What a task changed in one worktree, committed or not, and in how many commits, from where its change starts; nothing, where git can't tell. */
+      const changedIn = (
+        owner: Owner,
+        look: { readonly head: string; readonly base: string | null; readonly index: string },
+        started: string,
+        calls: string,
+      ) =>
         Effect.gen(function* () {
+          const fork = yield* forksKept.of(
+            owner,
+            `${started} ${look.base} ${look.head}`,
+            Effect.gen(function* () {
+              const base = yield* forkOf(owner.path, look.head, look.base, started)
+              return { base, commits: yield* commitsAhead(owner.path, base, look.head) }
+            }),
+          )
+          const files = yield* filesKept.of(owner, `${fork.base} ${look.head} ${look.index} ${calls}`, changedFiles(owner.path, fork.base))
+          return { files, commits: fork.commits }
+        }).pipe(Effect.orElseSucceed(() => nothingChanged))
+
+      /** Whether a commit is in a branch's history; failing, so it isn't kept, where git can't tell. */
+      const inHistory = (cwd: string, commit: string, tip: string) => {
+        const args = ['merge-base', '--is-ancestor', commit, tip]
+        return Effect.flatMap(gitOutcome(cwd, ...args), ({ code }) =>
+          code === 0 || code === 1 ? Effect.succeed(code === 0) : unclear(cwd, args, code),
+        )
+      }
+
+      /**
+       * What git says of a task's worktrees, as its screens show it: what it
+       * changed, committed or not, and in how many commits, from where it
+       * meets its default branch; and its repositories that merge here, for
+       * its Merge button: those with no pull request whose branch isn't in
+       * their default branch here yet, each with its default branch and its
+       * branch's head as it stands. In several repositories, each file is
+       * named under its repository's, and the commits are all of theirs.
+       * Every worktree is read at the same time, and looked at once.
+       */
+      const gitOf = (taskId: string, wants: { readonly changed: boolean; readonly here: boolean }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
           const worktrees = yield* worktreesOf(taskId)
-          const each = yield* Effect.forEach(worktrees, (worktree) =>
-            Effect.map(changedOf(worktree.path, worktree.baseRef, worktree.baseCommit), (changed) => ({ worktree, changed })),
+          // The lead's tool calls, and how often they changed: how its edits that nobody staged show.
+          const [lead] = wants.changed
+            ? yield* sql<{ calls: string }>`
+                SELECT count(*) || ':' || coalesce(sum(revision), 0) AS calls FROM thread_items
+                WHERE thread_id = (SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task') AND kind = 'tool_call'`
+            : []
+          const each = yield* Effect.forEach(
+            worktrees,
+            (worktree) =>
+              Effect.gen(function* () {
+                const owner = { path: worktree.path, taskId: worktree.taskId, projectId: worktree.projectId }
+                const there = existsSync(worktree.path)
+                const branch = `refs/heads/${worktree.defaultBranch}`
+                const [[head = null, base = null, tip = null], index] = there
+                  ? yield* Effect.all([commitsOf(worktree.path, ['HEAD', worktree.baseRef ?? '', branch]), indexStamp(worktree.path)], {
+                      concurrency: 'unbounded',
+                    })
+                  : [[], '']
+                const merges = wants.here && worktree.opened === 0
+                const [changed, merged] = yield* Effect.all(
+                  [
+                    wants.changed && head !== null && worktree.baseCommit !== null
+                      ? changedIn(owner, { head, base, index }, worktree.baseCommit, lead?.calls ?? '')
+                      : Effect.succeed(nothingChanged),
+                    merges && head !== null && tip !== null && worktree.root !== null
+                      ? mergedKept.of(owner, `${head} ${tip}`, inHistory(worktree.root, head, tip)).pipe(Effect.orElseSucceed(() => false))
+                      : Effect.succeed(false),
+                  ],
+                  { concurrency: 'unbounded' },
+                )
+                return {
+                  worktree,
+                  changed,
+                  here: merges && !merged ? [{ repository: worktree.slug, name: worktree.name, branch: worktree.defaultBranch, head }] : [],
+                }
+              }),
+            { concurrency: 'unbounded' },
           )
           return {
             files: each.flatMap(({ worktree, changed }) =>
@@ -567,7 +694,31 @@ export class Queries extends Context.Service<
                 : changed.files,
             ),
             commits: each.reduce((sum, { changed }) => sum + changed.commits, 0),
+            here: each.flatMap(({ here }) => here),
           }
+        })
+
+      /**
+       * A worktree's head, and how many commits on it what was pushed doesn't
+       * have: what is still the person's to push. What was pushed is the first
+       * of `pushed` the worktree knows, such as the pull request's head, else
+       * the commit Althar last pushed. None, where it can't be told. The head
+       * and which of them it knows are one look; the count is kept by the two
+       * commits.
+       */
+      const unpushedOf = (owner: Owner, pushed: ReadonlyArray<string | null>) =>
+        Effect.gen(function* () {
+          const [localHead = null, ...known] = yield* commitsOf(owner.path, [
+            'HEAD',
+            ...pushed.filter((commit): commit is string => commit !== null),
+          ])
+          const from = known.find((commit): commit is string => commit !== null)
+          if (localHead === null || from === undefined) return { localHead, unpushed: 0 }
+          // Counted up to the head looked at, not HEAD again: the lead may commit in between.
+          const unpushed = yield* unpushedKept
+            .of(owner, `${from} ${localHead}`, commitsAhead(owner.path, from, localHead))
+            .pipe(Effect.orElseSucceed(() => 0))
+          return { localHead, unpushed }
         })
 
       /** One file a task changed, as a diff from its base to its worktree on this device; in several repositories, named under its repository's. */
@@ -656,8 +807,8 @@ export class Queries extends Context.Service<
                     ? Effect.succeed(change)
                     : Effect.gen(function* () {
                         // Its repository's worktree, as the record of the push says; the task's first, where it doesn't.
-                        const [here] = yield* sql<{ path: string; headCommit: string | null }>`
-                      SELECT w.path, (SELECT c.head_commit FROM repository_changes c WHERE c.pull_request_url = ${change.url}
+                        const [here] = yield* sql<{ path: string; taskId: string; projectId: string; headCommit: string | null }>`
+                      SELECT w.path, w.task_id, w.project_id, (SELECT c.head_commit FROM repository_changes c WHERE c.pull_request_url = ${change.url}
                           ORDER BY c.updated_at DESC LIMIT 1) AS head_commit
                       FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
                       WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
@@ -665,10 +816,11 @@ export class Queries extends Context.Service<
                         b.created_at, b.rowid
                       LIMIT 1`
                         if (here === undefined || !existsSync(here.path)) return change
-                        return { ...change, ...(yield* unpushedOf(here.path, [change.head, here.headCommit])) }
+                        return { ...change, ...(yield* unpushedOf(here, [change.head, here.headCommit])) }
                       }),
                 ),
               ),
+            { concurrency: 'unbounded' },
           )
           return { issue, changes }
         })
@@ -685,8 +837,8 @@ export class Queries extends Context.Service<
             : { id: row.id, sequence: row.sequence, agentId: null, createdAt: row.createdAt, kind: 'task', content },
         )
 
-      /** Where a task stands, read from it, its plan, its run and its sessions: what its card and its header show. */
-      const cardFor = (taskId: string) =>
+      /** Where a task stands, read from it, its plan, its run and its sessions: what its card and its header show. Its links, where they are read already. */
+      const cardFor = (taskId: string, links?: { readonly issue: IssueSummary | null; readonly changes: ReadonlyArray<ChangeSummary> }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
@@ -768,7 +920,7 @@ export class Queries extends Context.Service<
             }
           })
           const end = text(parameters, 'end')
-          const { issue, changes } = yield* linksOf(taskId)
+          const { issue, changes } = links ?? (yield* linksOf(taskId))
           return {
             taskId,
             threadId: task.threadId,
@@ -826,17 +978,17 @@ export class Queries extends Context.Service<
           if (settled !== undefined) return [settled]
           const card = yield* cardFor(row.id)
           if (card === undefined) return []
-          // Ready without a pull request, its size is its branch's, read from git.
+          // Ready, what merges here is read from git; without a pull request, so is its size: its branch's.
+          const said = card.phase === 'ready' ? yield* gitOf(row.id, { changed: card.change === null, here: true }) : null
           const changed =
-            card.phase === 'ready' && card.change === null
-              ? yield* Effect.map(changedOfTask(row.id), ({ files }) => ({
-                  files: files.length,
-                  add: files.reduce((sum, file) => sum + file.add, 0),
-                  del: files.reduce((sum, file) => sum + file.del, 0),
-                }))
+            said !== null && card.change === null
+              ? {
+                  files: said.files.length,
+                  add: said.files.reduce((sum, file) => sum + file.add, 0),
+                  del: said.files.reduce((sum, file) => sum + file.del, 0),
+                }
               : null
-          const here = card.phase === 'ready' ? yield* hereOf(row.id) : []
-          const read = { ...card, state: row.state, createdAt: row.createdAt, settledAt: row.settledAt, changed, here }
+          const read = { ...card, state: row.state, createdAt: row.createdAt, settledAt: row.settledAt, changed, here: said?.here ?? [] }
           if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, read)
           return [read]
         })
@@ -893,10 +1045,12 @@ export class Queries extends Context.Service<
               SELECT id FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')
               ORDER BY settled_at DESC LIMIT ${SETTLED_SHOWN}))
             ORDER BY k.created_at, k.id`
-          const tasks = yield* Effect.forEach(rows, onBoard)
+          const tasks = yield* Effect.forEach(rows, onBoard, { concurrency: AT_ONCE })
           // Only what the board still shows is kept.
           const shown = new Set(rows.map((row) => `${row.id}:${row.settledAt}`))
           for (const key of settledCards.keys()) if (!shown.has(key)) settledCards.delete(key)
+          const onIt = new Set(rows.map((row) => row.id))
+          forget((owner) => owner.projectId === projectId && !onIt.has(owner.taskId))
           const calls = yield* callsIn(projectId)
           return {
             cursor: at,
@@ -925,11 +1079,17 @@ export class Queries extends Context.Service<
           const rows = yield* sql<{ id: string; projectId: string; state: string; createdAt: string; settledAt: string | null }>`
             SELECT k.id, k.project_id, k.state, k.created_at, k.settled_at FROM tasks k JOIN projects p ON p.id = k.project_id
             WHERE p.archived_at IS NULL AND k.state = 'open' ORDER BY k.created_at, k.id`
-          const tasks = yield* Effect.forEach(rows, (row) =>
-            Effect.map(onBoard(row), (read) =>
-              read.flatMap((task) => (ON_HOME.includes(task.phase) ? [{ ...task, projectId: row.projectId }] : [])),
-            ),
+          const tasks = yield* Effect.forEach(
+            rows,
+            (row) =>
+              Effect.map(onBoard(row), (read) =>
+                read.flatMap((task) => (ON_HOME.includes(task.phase) ? [{ ...task, projectId: row.projectId }] : [])),
+              ),
+            { concurrency: AT_ONCE },
           )
+          // What is kept of a task's worktrees goes once it is settled: the home reads every open one.
+          const open = new Set(rows.map((row) => row.id))
+          forget((owner) => !open.has(owner.taskId))
           return {
             cursor: at,
             looked,
@@ -996,7 +1156,9 @@ export class Queries extends Context.Service<
             ...(page.before === undefined ? {} : { before: page.before }),
             limit: page.limit ?? PAGE,
           })
-          const shown = yield* Effect.forEach(items, (row) => (row.kind === 'task' ? cardOf(row) : Effect.succeed(itemOf(row))))
+          const shown = yield* Effect.forEach(items, (row) => (row.kind === 'task' ? cardOf(row) : Effect.succeed(itemOf(row))), {
+            concurrency: AT_ONCE,
+          })
           return { items: shown.flatMap((item) => (item === undefined ? [] : [item])), earlier }
         })
 
@@ -1025,6 +1187,7 @@ export class Queries extends Context.Service<
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE t.id = ${threadId} AND t.kind = 'task'`
           if (head === undefined) return yield* new NotFound({ kind: 'task thread', id: threadId })
+          // What the store says comes first, together, so it is as of the cursor; git after.
           const { items, earlier } = yield* pageOf(threadId, page)
           const attention = yield* sql<{ id: string; kind: string; payload: string; createdAt: string }>`
             SELECT id, kind, payload, created_at FROM attention_requests WHERE task_id = ${head.taskId} AND state = 'open' ORDER BY created_at`
@@ -1034,6 +1197,13 @@ export class Queries extends Context.Service<
             JOIN runs r ON r.id = e.run_id
             WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC LIMIT 1)
               AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1`
+          // Where it stands, from its card, which shows its links too: the header reads those with git, below.
+          const card = yield* cardFor(head.taskId, { issue: null, changes: [] })
+          const session = yield* sessionOf(threadId)
+          // Its links, whose open pull requests say what isn't pushed, and what git says of its worktrees, read at the same time.
+          const [links, said] = yield* Effect.all([linksOf(head.taskId), gitOf(head.taskId, { changed: true, here: true })], {
+            concurrency: 'unbounded',
+          })
           return {
             threadId,
             cursor: at,
@@ -1047,20 +1217,19 @@ export class Queries extends Context.Service<
               branch: head.branch,
               worktree: head.worktree,
               baseRef: head.baseRef,
-              ...(yield* Effect.map(cardFor(head.taskId), (card) => ({
-                phase: card?.phase ?? null,
-                waits: card?.waits ?? null,
-                steps: card?.plan?.steps ?? [],
-                step: card?.step ?? null,
-                startedAt: card?.startedAt ?? null,
-              }))),
+              phase: card?.phase ?? null,
+              waits: card?.waits ?? null,
+              steps: card?.plan?.steps ?? [],
+              step: card?.step ?? null,
+              startedAt: card?.startedAt ?? null,
               stepAt: onStep?.admittedAt ?? null,
               settledAt: head.settledAt,
-              ...(yield* linksOf(head.taskId)),
-              ...(yield* changedOfTask(head.taskId)),
-              here: yield* hereOf(head.taskId),
+              ...links,
+              files: said.files,
+              commits: said.commits,
+              here: said.here,
             },
-            session: yield* sessionOf(threadId),
+            session,
             attention: attention.map(callOf),
             items,
             earlier,
@@ -1087,16 +1256,20 @@ export class Queries extends Context.Service<
           const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${projectId}`
           if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
           const threadId = yield* coordinators.thread(projectId)
-          const { items, earlier } = yield* pageOf(threadId, page)
+          // Its cards, the agent on it, the one it would start on and the project's host, read at the same time.
+          const [{ items, earlier }, session, suggested, host] = yield* Effect.all(
+            [pageOf(threadId, page), sessionOf(threadId), coordinators.suggested(projectId), hostOf(projectId)],
+            { concurrency: 'unbounded' },
+          )
           return {
             threadId,
             cursor: at,
             project: { id: projectId, name: project.name },
-            session: yield* sessionOf(threadId),
-            suggested: yield* coordinators.suggested(projectId),
+            session,
+            suggested,
             items,
             earlier,
-            host: yield* hostOf(projectId),
+            host,
           } satisfies CoordinatorSnapshot
         })
 
