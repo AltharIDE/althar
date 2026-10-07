@@ -4,6 +4,7 @@ import { tabsStoreOf } from '../features/tabs/store'
 import { makeRouter } from '../router'
 import { connect } from './client'
 import { follow } from './feed'
+import { readModelsAhead } from './models'
 import { makeQueryClient, reads, recheckStatus } from './reads'
 import type { Host, Services } from './services'
 
@@ -11,7 +12,8 @@ import type { Host, Services } from './services'
  * The window opening: it connects to the runtime, reads the projects and
  * watches every change after that read, then reads what the place it opens
  * on shows, and, behind it, every open tab's, so going to any of them is
- * instant. Each agent is asked again, once a launch, without waiting for it.
+ * instant. Each agent is asked again, once a launch, and its models read,
+ * without waiting for either.
  */
 
 export const openWindow = async (port: DomMessagePort, host: Host) => {
@@ -24,6 +26,7 @@ export const openWindow = async (port: DomMessagePort, host: Host) => {
   const services: Services = { client, host, cache, feed }
   const router = makeRouter({ client, cache })
   void recheckStatus(client, cache).catch(() => undefined)
+  readModelsAhead(client)
   await router.load()
 
   const kept = tabsStoreOf(client).get().kept
