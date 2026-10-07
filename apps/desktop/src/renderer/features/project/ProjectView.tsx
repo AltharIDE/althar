@@ -20,6 +20,7 @@ import {
   ProjectHead,
 } from '@althar/ui'
 
+import { contextMeter } from '../../shared/ContextMeter'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
@@ -191,6 +192,7 @@ export function ProjectView({
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
+        meter={contextMeter(session)}
         picker={
           model.agents.length > 0 &&
           chosen !== null && (

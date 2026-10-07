@@ -487,6 +487,11 @@ describe('a task', () => {
       act(() => emit(streamed('reply', 'Found it, and a second call.')))
       act(() => emit(streamed('reply', 'Not this thread', 'other')))
       await screen.findByText('Found it, and a second call.')
+      // How full the lead's context is shows in the composer as it says, for this thread only.
+      expect(screen.queryByRole('button', { name: /^Context/ })).toBeNull()
+      act(() => emit({ _tag: 'Context', threadId: 'other', used: 190_000, size: 200_000 }))
+      act(() => emit({ _tag: 'Context', threadId: 'th1', used: 50_000, size: 200_000 }))
+      expect(await screen.findByRole('button', { name: 'Context 25% used' })).toBeTruthy()
 
       vi.mocked(client.getThreadItem).mockImplementation(async (_threadId, itemId) =>
         itemId === 'reply'

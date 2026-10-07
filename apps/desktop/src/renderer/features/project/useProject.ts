@@ -167,6 +167,16 @@ export const useProject = (projectId: string): ProjectModel => {
       )
       return
     }
+    // How full the coordinator's context is, as it says: kept on its session, which the composer shows.
+    if (event._tag === 'Context') {
+      if (event.threadId === threadId)
+        setCoordinator((current) =>
+          current.session === null
+            ? current
+            : { ...current, session: { ...current.session, context: { used: event.used, size: event.size } } },
+        )
+      return
+    }
     if (event.threadId === threadId) {
       if (event.aggregateType === 'thread_item') changed.current.items.add(event.aggregateId)
       else changed.current.head = true

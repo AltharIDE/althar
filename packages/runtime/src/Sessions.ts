@@ -156,6 +156,13 @@ interface Running {
   readonly revokeTools: Effect.Effect<void>
   turnRunning: boolean
   stopping: boolean
+  /** How full the agent's context is, in tokens, as it last said; null until it says (ACP's usage updates). */
+  context: { readonly used: number; readonly size: number } | null
+}
+
+/** Keeps what the agent last said of its context, from an event it streamed. */
+const heardContext = (running: Running, event: SessionEvent) => {
+  if (event._tag === 'ContextUsage') running.context = { used: event.used, size: event.size }
 }
 
 /** The account asked for, where one was. */
@@ -281,6 +288,8 @@ export class Sessions extends Context.Service<
         readonly turnRunning: boolean
         /** The agent's process, where it runs as one. */
         readonly pid: number | null
+        /** How full its context is, in tokens, as the agent last said; null until it says. */
+        readonly context: { readonly used: number; readonly size: number } | null
       }>
     >
   }
@@ -541,6 +550,7 @@ export class Sessions extends Context.Service<
           const streamed = yield* Stream.runForEach(running.agent.prompt(prompt), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
+              heardContext(running, event)
               yield* record(event)
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
               if (event._tag === 'AgentMessage' || event._tag === 'AgentThought') yield* stream
@@ -925,6 +935,7 @@ export class Sessions extends Context.Service<
             revokeTools,
             turnRunning: false,
             stopping: false,
+            context: null,
           }
           threads.set(thread.threadId, running)
           yield* Effect.forkIn(run(deliveries(running)), scope)
@@ -934,9 +945,10 @@ export class Sessions extends Context.Service<
             run(
               Stream.runForEach(agent.events, (event) =>
                 Effect.andThen(
-                  Effect.andThen(between.record(event), between.flush).pipe(
-                    Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause)),
-                  ),
+                  Effect.andThen(
+                    Effect.sync(() => heardContext(running, event)),
+                    Effect.andThen(between.record(event), between.flush),
+                  ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
                   live.publish({ _tag: 'Agent', threadId: thread.threadId, event }),
                 ),
               ),
@@ -1364,6 +1376,7 @@ export class Sessions extends Context.Service<
                   accountId: running.account.id,
                   turnRunning: running.turnRunning,
                   pid: running.connection.process?.pid ?? null,
+                  context: running.context,
                 })
           }),
       })

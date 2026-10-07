@@ -217,7 +217,7 @@ export const handlers = Api.toLayer(
         ),
       )
 
-    /* An agent's message or thought as far as it has streamed, before the store has all of it. */
+    /* An agent's message or thought as far as it has streamed, before the store has all of it; and how full its context is, as it says. */
     const streaming = Stream.unwrap(
       Effect.map(live.subscribe, (events) =>
         events.pipe(
@@ -231,7 +231,9 @@ export const handlers = Api.toLayer(
                   agentId: event.agentId,
                   text: event.text,
                 })
-              : Stream.empty,
+              : event._tag === 'Agent' && event.event._tag === 'ContextUsage'
+                ? Stream.make({ _tag: 'Context', threadId: event.threadId, used: event.event.used, size: event.event.size })
+                : Stream.empty,
           ),
         ),
       ),

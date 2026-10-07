@@ -38,7 +38,9 @@ describe('the window’s watch', () => {
     expect(watching).toEqual([7])
     const heard: Array<string> = []
     emit(changed('task', 't0'))
-    const stop = feed.listen((event) => heard.push(event._tag === 'Changed' ? event.aggregateId : event.itemId))
+    const stop = feed.listen((event) =>
+      heard.push(event._tag === 'Changed' ? event.aggregateId : event._tag === 'Streaming' ? event.itemId : event._tag),
+    )
     emit(changed('task', 't1'))
     emit(streamed('i1', 'Hi'))
     stop()

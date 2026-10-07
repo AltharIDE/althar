@@ -341,6 +341,9 @@ describe('sessions', () => {
       yield* ended(created.threadId, 2)
       const kinds = (yield* threadItems(created.threadId)).map((item) => item.kind)
       assert.includeMembers(kinds, ['plan', 'notice'])
+      // How full its context is, as it last said, is kept on the session while it runs.
+      const running = yield* (yield* Sessions).running(created.threadId)
+      assert.deepStrictEqual(Option.getOrUndefined(running)?.context, { used: 1200, size: 200_000 })
     }).pipe(Effect.provide(runtime())),
   )
 

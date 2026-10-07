@@ -147,6 +147,13 @@ export const useTask = (threadId: string): TaskModel => {
       return
     }
     if (event.threadId !== threadId) return
+    // How full the lead's context is, as it says: kept on its session, which the composer shows.
+    if (event._tag === 'Context')
+      return void setSnapshot((current) =>
+        current.session === null
+          ? current
+          : { ...current, session: { ...current.session, context: { used: event.used, size: event.size } } },
+      )
     if (event.aggregateType === 'thread_item') changed.current.items.add(event.aggregateId)
     else changed.current.head = true
     // A message delivered changes its input, not its item: read again what still shows as queued.

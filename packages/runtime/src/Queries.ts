@@ -519,6 +519,7 @@ export class Queries extends Context.Service<
             effort: session.effort,
             models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
             turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
+            context: Option.isSome(running) && running.value.sessionId === session.id ? running.value.context : null,
           }
         })
 

@@ -21,6 +21,7 @@ import {
 
 import { useModels } from '../../data/models'
 import { modelInfo, waitsWords } from '../../shared/agents'
+import { contextMeter } from '../../shared/ContextMeter'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
 import { catalogOf, type Choice, modelName, runningOn } from '../../shared/models'
@@ -295,6 +296,7 @@ export function TaskView({
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
         placeholder={busy ? text.placeholderBusy : text.placeholder(session?.agentName ?? agentName(chosen?.agentId ?? null))}
+        meter={contextMeter(session)}
         // Another agent's model hands the task to that agent.
         picker={
           model.agents.length > 0 &&

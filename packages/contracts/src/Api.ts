@@ -574,6 +574,10 @@ export const ThreadItem = Schema.Union([
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
+/** How full an agent's context is: the tokens in it, and how many it holds. */
+export const ContextUse = Schema.Struct({ used: Schema.Number, size: Schema.Number })
+export type ContextUse = typeof ContextUse.Type
+
 export const SessionSummary = Schema.Struct({
   id: Schema.String,
   agentId: Schema.String,
@@ -585,6 +589,8 @@ export const SessionSummary = Schema.Struct({
   /** The models the agent offers for this session. */
   models: Schema.Array(Schema.String),
   turnRunning: Schema.Boolean,
+  /** How full its context is, in tokens, as the agent last said while it runs; null until it says, or where it doesn't. */
+  context: Schema.NullOr(ContextUse),
 })
 export type SessionSummary = typeof SessionSummary.Type
 
@@ -870,8 +876,9 @@ export const PAGE = 100
  * store's change feed, with its cursor and, when it belongs to one, its
  * thread: a client reads again what shows it. `Streaming` is an agent's
  * message or thought as far as it has come, whole each time, before the store
- * has all of it: a client shows it in place of the item's text. It is not in
- * the feed, so it has no cursor.
+ * has all of it: a client shows it in place of the item's text. `Context` is
+ * how full the context of the agent on a thread is, as it last said. Neither
+ * is in the feed, so they have no cursor.
  */
 export const WatchEvent = Schema.Union([
   Schema.Struct({
@@ -891,6 +898,7 @@ export const WatchEvent = Schema.Union([
     agentId: Schema.String,
     text: Schema.String,
   }),
+  Schema.Struct({ _tag: Schema.Literal('Context'), threadId: Schema.String, ...ContextUse.fields }),
 ])
 export type WatchEvent = typeof WatchEvent.Type
 
