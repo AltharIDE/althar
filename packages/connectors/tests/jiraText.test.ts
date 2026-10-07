@@ -225,7 +225,7 @@ describe('ADF, read as Markdown', () => {
       lines(
         '| # | Constraint | Done |',
         '| --- | --- | --- |',
-        '| 1 | `@StartsWith` / a\\|b two lines | ✅  |',
+        '| 1 | `@StartsWith` / a\\|b two lines | ✅ |',
         '| 2 |  |  |',
         '|  |  |  |',
       ),
@@ -273,28 +273,29 @@ describe('ADF, read as Markdown', () => {
   })
 })
 
+/** KAFKA-21232's description, trimmed. */
+const KAFKA_21232 = [
+  '*Action points (dependencies version upgrades):*',
+  ' * Apache Ldap Api: 1.0.2 \\-\\-> -_*2.1.9*_- {color:#de350b}*2.0.2* {color}({_}version compatible with Apache DS {{2.0.0.AM26}}{_})',
+  ' * Apache directory server: 2.0.0-M24 --> 2.0.0.AM26',
+  '',
+  '*Rationale:*',
+  ' * Apache Ldap api:',
+  ' ** version -2.1.9 is published in September 2026.- 2.0.2 is published in May 2021.',
+  ' ** [https://directory.apache.org/api/migration-guide.html]',
+  ' ** note: single artefact ({*}org.apache.directory.server:apacheds-protocol-kerberos){*} latest version is {*}2.0.0.AM26{*}:',
+  ' *** [https://lists.apache.org/thread/7vkkn3bsd6w018j1pdcxbvdo2qx305fn] *[ANNOUNCE] Apache DS 2.0.0.AM27 released*',
+  '{quote}The Kerberos subsystem has been removed from the server, as Apache Kerby is already providing a maintained and updated Kerberos server.',
+  '{quote}',
+  ' *** !image-2026-10-06-16-45-13-900.png!',
+  '',
+  ' ',
+].join('\r\n')
+
 describe('wiki markup, read as Markdown', () => {
   it('the editor’s braced marks, colours, strikes and nested lists (KAFKA-21232)', () => {
     assert.strictEqual(
-      markdownOfWiki(
-        [
-          '*Action points (dependencies version upgrades):*',
-          ' * Apache Ldap Api: 1.0.2 \\-\\-> -_*2.1.9*_- {color:#de350b}*2.0.2* {color}({_}version compatible with Apache DS {{2.0.0.AM26}}{_})',
-          ' * Apache directory server: 2.0.0-M24 --> 2.0.0.AM26',
-          '',
-          '*Rationale:*',
-          ' * Apache Ldap api:',
-          ' ** version -2.1.9 is published in September 2026.- 2.0.2 is published in May 2021.',
-          ' ** [https://directory.apache.org/api/migration-guide.html]',
-          ' ** note: single artefact ({*}org.apache.directory.server:apacheds-protocol-kerberos){*} latest version is {*}2.0.0.AM26{*}:',
-          ' *** [https://lists.apache.org/thread/7vkkn3bsd6w018j1pdcxbvdo2qx305fn] *[ANNOUNCE] Apache DS 2.0.0.AM27 released*',
-          '{quote}The Kerberos subsystem has been removed from the server, as Apache Kerby is already providing a maintained and updated Kerberos server.',
-          '{quote}',
-          ' *** !image-2026-10-06-16-45-13-900.png!',
-          '',
-          ' ',
-        ].join('\r\n'),
-      ),
+      markdownOfWiki(KAFKA_21232),
       lines(
         '**Action points (dependencies version upgrades):**',
         '- Apache Ldap Api: 1.0.2 --> ~~_**2.1.9**_~~ **2.0.2** (_version compatible with Apache DS `2.0.0.AM26`_)',
@@ -817,6 +818,112 @@ describe('Markdown, written as wiki markup for Data Center', () => {
         '* a',
         'more of a',
       ),
+    )
+  })
+})
+
+describe('every direction, however odd the text', () => {
+  /** Well above what a description takes, well below what a search started again from each of many openers takes. */
+  const LIMIT = 200
+  const n = 50_000
+  /** Text that once made a converter search again from each of many openers, backtrack over a run, or nest without end. */
+  const odd: Readonly<Record<string, string>> = {
+    stars: '*'.repeat(n),
+    'stars and spaces': '*a '.repeat(n / 3),
+    dashes: '-a '.repeat(n / 3),
+    'a lone backtick': `\`${' x'.repeat(n / 2)}`,
+    'a padded code span': `\` ${'a '.repeat(n / 2)}b\``,
+    'backtick runs of every length': Array.from({ length: 300 }, (_, index) => '`'.repeat(index + 1)).join(' '),
+    brackets: '['.repeat(n),
+    'brackets and pipes': '[a|'.repeat(n / 3),
+    'mentions never closed': '[~a'.repeat(n / 3),
+    'links never closed': '[a]('.repeat(n / 4),
+    'autolinks never closed': '<http:'.repeat(n / 6),
+    'a code macro never closed': `{code:${'x'.repeat(n)}`,
+    'code macros never closed': '{code:a}'.repeat(n / 8),
+    'monospace never closed': '{{a'.repeat(n / 3),
+    'macros never closed': '{a:'.repeat(n / 3),
+    'every mark': '_*~'.repeat(n / 3),
+    'emphasis nested deep': `${'*_'.repeat(n / 4)}x${'_*'.repeat(n / 4)}`,
+    'quotes nested deep': '>'.repeat(n),
+    'lists nested deep': Array.from({ length: 300 }, (_, index) => `${' '.repeat(index)}- item`).join('\n'),
+    'a heading of spaces': `#${' '.repeat(n)}x`,
+    'spaces before a break': `${' '.repeat(n)}x\ny`,
+    'blank lines in a list': `- a${'\n'.repeat(n)}x`,
+    'breaks in a fence': `\`\`\`\nx${'\n'.repeat(n)}y\n\`\`\``,
+    fences: '```\nx\n```\n'.repeat(n / 10),
+    'a long table': '|a|b|\n'.repeat(n / 6),
+    'a long line': 'word '.repeat(n / 5),
+  }
+  /** A long ordinary document: real issues' text, and comments as Althar writes them, many times over. */
+  const ordinary = `${KAFKA_21232}\n\n${COMMENT}\n\n`.repeat(40)
+  /** ADF documents nested deeper and wider than any editor makes. */
+  const nest = (depth: number, wrap: (inner: AdfNode) => AdfNode) => {
+    let node: AdfNode = paragraph(text('deep'))
+    for (let level = 0; level < depth; level += 1) node = wrap(node)
+    return doc(node)
+  }
+  const documents: Readonly<Record<string, AdfNode>> = {
+    'lists nested deep': nest(20_000, (inner) => ({ type: 'bulletList', content: [item(inner)] })),
+    'quotes nested deep': nest(20_000, (inner) => ({ type: 'blockquote', content: [inner] })),
+    'marks on every letter': doc(paragraph(...Array.from({ length: 20_000 }, () => text('x', 'strong')))),
+    'an unknown node with many children': doc(paragraph({ type: 'unknown', content: Array.from({ length: 200_000 }, () => text('x')) })),
+    'backticks in code': doc(paragraph(text('` '.repeat(n), 'code'))),
+    'breaks in a code block': doc({ type: 'codeBlock', content: [text(`x${'\n'.repeat(n)}y`)] }),
+    'spaces in a cell': doc({
+      type: 'table',
+      content: [{ type: 'tableRow', content: [{ type: 'tableCell', content: [paragraph(text(`${' '.repeat(n)}x`))] }] }],
+    }),
+    'an ordinary document': adfOf(ordinary),
+  }
+  const took = (convert: () => unknown) => {
+    const started = performance.now()
+    convert()
+    return performance.now() - started
+  }
+
+  it('takes time in proportion to its length', () => {
+    for (const [name, value] of Object.entries({ ...odd, 'an ordinary document': ordinary })) {
+      const adf = adfOf(value)
+      assert.isBelow(
+        took(() => markdownOfWiki(value)),
+        LIMIT,
+        `wiki markup to Markdown: ${name}`,
+      )
+      assert.isBelow(
+        took(() => wikiOf(value)),
+        LIMIT,
+        `Markdown to wiki markup: ${name}`,
+      )
+      assert.isBelow(
+        took(() => adfOf(value)),
+        LIMIT,
+        `Markdown to ADF: ${name}`,
+      )
+      assert.isBelow(
+        took(() => markdownOfAdf(adf)),
+        LIMIT,
+        `ADF to Markdown: ${name}`,
+      )
+    }
+    for (const [name, value] of Object.entries(documents))
+      assert.isBelow(
+        took(() => markdownOfAdf(value)),
+        LIMIT,
+        `ADF to Markdown: ${name}`,
+      )
+  })
+
+  it('reads what is nested deeper than anything written by hand as text', () => {
+    // Sixteen quotes are read, the rest is a paragraph's text; ADF holds them as one quote.
+    assert.deepStrictEqual(adfOf('>'.repeat(40)).content, [{ type: 'blockquote', content: [paragraph(text('>'.repeat(24)))] }])
+    // Under the document, fifteen quotes, then the words of what is deeper.
+    assert.strictEqual(markdownOfAdf(nest(20, (node) => ({ type: 'blockquote', content: [node] }))), `${'> '.repeat(15)}deep`)
+    assert.strictEqual(
+      markdownOfAdf(
+        doc({ type: 'unknown', content: [{ type: 'unknown', content: [text('a'), { type: 'emoji', attrs: { text: '✅' } }] }] }),
+      ),
+      'a✅',
     )
   })
 })

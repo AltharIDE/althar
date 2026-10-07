@@ -8,6 +8,11 @@ import { Schema } from 'effect'
  * edition takes. Each covers what issues and Althar's comments hold:
  * paragraphs, headings, emphasis, code, links, lists, quotes, rules, tables
  * and mentions. Anything else keeps its text.
+ *
+ * Descriptions come from other people and run in the runtime's own process,
+ * so every converter takes time in proportion to its text, however odd the
+ * text: no search starts again from each of many openers, no pattern
+ * backtracks over a run of spaces, and nesting stops at DEEPEST levels.
  */
 
 // ---- The Atlassian Document Format ---------------------------------------
@@ -43,20 +48,40 @@ export interface AdfDoc {
   readonly content: ReadonlyArray<AdfNode>
 }
 
+/** How deep quotes, lists and emphasis nest before what is deeper is read as text. */
+const DEEPEST = 16
+
+/** The longest run of a character in text. */
+const longestRun = (text: string, char: string) => {
+  let longest = 0
+  let run = 0
+  for (const each of text) {
+    run = each === char ? run + 1 : 0
+    longest = Math.max(longest, run)
+  }
+  return longest
+}
+
+/** Text without the line breaks at its end. */
+const withoutTrailingBreaks = (text: string) => {
+  let end = text.length
+  while (end > 0 && text[end - 1] === '\n') end -= 1
+  return text.slice(0, end)
+}
+
 // ---- Markdown, as written here --------------------------------------------
 
 /** A code span, fenced by more backticks than the code holds in a row. */
 const codeSpan = (code: string) => {
-  const longest = Math.max(0, ...[...code.matchAll(/`+/g)].map((run) => run[0].length))
+  const longest = longestRun(code, '`')
   const fence = '`'.repeat(longest + 1)
   return longest === 0 ? `${fence}${code}${fence}` : `${fence} ${code} ${fence}`
 }
 
 /** A fenced code block, with its language when it has one. */
 const codeBlock = (code: string, language: string) => {
-  const longest = Math.max(2, ...[...code.matchAll(/`{3,}/g)].map((run) => run[0].length))
-  const fence = '`'.repeat(longest + 1)
-  return `${fence}${language}\n${code.replace(/\r\n?/g, '\n').replace(/\n+$/, '')}\n${fence}`
+  const fence = '`'.repeat(Math.max(2, longestRun(code, '`')) + 1)
+  return `${fence}${language}\n${withoutTrailingBreaks(code.replace(/\r\n?/g, '\n'))}\n${fence}`
 }
 
 /** Emphasis around text, with its spaces outside, where Markdown needs them. */
@@ -80,12 +105,21 @@ const quoted = (text: string) =>
     .map((line) => (line === '' ? '>' : `> ${line}`))
     .join('\n')
 
+/** A table cell's text on one line. */
+const oneLine = (cell: string) =>
+  cell
+    .split('\n')
+    .map((part) => part.trim())
+    .filter((part) => part !== '')
+    .join(' ')
+    .replace(/\|/g, '\\|')
+
 /** A table, its first row the header, as Markdown has to have one. */
 const table = (rows: ReadonlyArray<ReadonlyArray<string>>) => {
   if (rows.length === 0) return ''
-  const width = Math.max(...rows.map((row) => row.length))
+  const width = rows.reduce((widest, row) => Math.max(widest, row.length), 0)
   const line = (cells: ReadonlyArray<string>) =>
-    `| ${Array.from({ length: width }, (_, index) => (cells[index] ?? '').replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|')).join(' | ')} |`
+    `| ${Array.from({ length: width }, (_, index) => oneLine(cells[index] ?? '')).join(' | ')} |`
   const [head = [], ...body] = rows
   return [line(head), line(Array.from({ length: width }, () => '---')), ...body.map(line)].join('\n')
 }
@@ -110,9 +144,23 @@ const withMarks = (text: string, marks: ReadonlyArray<AdfMark>) => {
   return typeof href !== 'string' ? out : out === href ? `<${href}>` : `[${out}](${href})`
 }
 
-/** What a node Althar doesn't know has to say: its text, its label, its link, or its children's. */
-const textOf = (node: AdfNode): string =>
-  node.text ?? attr(node, 'text') ?? attr(node, 'shortName') ?? attr(node, 'url') ?? attr(node, 'alt') ?? inlineOf(node.content ?? [])
+/** A node's own words: its text, its label, its link. */
+const ownText = (node: AdfNode) => node.text ?? attr(node, 'text') ?? attr(node, 'shortName') ?? attr(node, 'url') ?? attr(node, 'alt')
+
+/** The words under nodes, however deep they go, walked without recursion. */
+const flatText = (nodes: ReadonlyArray<AdfNode>) => {
+  let out = ''
+  const left = nodes.toReversed()
+  for (let node = left.pop(); node !== undefined; node = left.pop()) {
+    const own = ownText(node)
+    if (own !== undefined) out += own
+    else for (const child of (node.content ?? []).toReversed()) left.push(child)
+  }
+  return out
+}
+
+/** What a node Althar doesn't know has to say: its own words, or its children's. */
+const textOf = (node: AdfNode): string => ownText(node) ?? flatText(node.content ?? [])
 
 const inlineOf = (nodes: ReadonlyArray<AdfNode>): string =>
   nodes
@@ -137,27 +185,32 @@ const inlineOf = (nodes: ReadonlyArray<AdfNode>): string =>
 const isList = (node: AdfNode) => node.type.endsWith('List')
 
 /** A list item's blocks, a list within it close under its first line. */
-const itemOf = (content: ReadonlyArray<AdfNode>) =>
+const itemOf = (content: ReadonlyArray<AdfNode>, depth: number) =>
   content.every((node) => INLINE.has(node.type))
     ? inlineOf(content)
     : content.reduce((text, node) => {
-        const block = blockOf(node)
+        const block = blockOf(node, depth)
         return block === '' ? text : text === '' ? block : `${text}${isList(node) ? '\n' : '\n\n'}${block}`
       }, '')
 
-const listOf = (items: ReadonlyArray<AdfNode>, marker: (index: number, item: AdfNode) => string) =>
+const listOf = (items: ReadonlyArray<AdfNode>, depth: number, marker: (index: number, item: AdfNode) => string) =>
   items
-    .map((item, index) => (isList(item) ? under('  ', blockOf(item)) : under(marker(index, item), itemOf(item.content ?? []))))
+    .map((item, index) =>
+      isList(item) ? under('  ', blockOf(item, depth)) : under(marker(index, item), itemOf(item.content ?? [], depth)),
+    )
     .join('\n')
 
-const blocksOf = (nodes: ReadonlyArray<AdfNode>): string =>
+const blocksOf = (nodes: ReadonlyArray<AdfNode>, depth: number): string =>
   nodes
-    .map(blockOf)
+    .map((node) => blockOf(node, depth))
     .filter((block) => block !== '')
     .join('\n\n')
 
-const blockOf = (node: AdfNode): string => {
+/** A block as Markdown; one nested deeper than anything written by hand is its words alone. */
+const blockOf = (node: AdfNode, depth: number): string => {
   const content = node.content ?? []
+  const deeper = depth + 1
+  if (depth >= DEEPEST) return flatText([node])
   switch (node.type) {
     case 'paragraph':
       return inlineOf(content)
@@ -166,31 +219,35 @@ const blockOf = (node: AdfNode): string => {
     case 'codeBlock':
       return codeBlock(content.map((child) => child.text ?? '').join(''), attr(node, 'language') ?? '')
     case 'blockquote':
-      return quoted(blocksOf(content))
+      return quoted(blocksOf(content, deeper))
     case 'bulletList':
-      return listOf(content, () => '- ')
+      return listOf(content, deeper, () => '- ')
     case 'orderedList': {
       const start = Number(attr(node, 'order')) || 1
-      return listOf(content, (index) => `${start + index}. `)
+      return listOf(content, deeper, (index) => `${start + index}. `)
     }
     case 'taskList':
     case 'decisionList':
-      return listOf(content, (_, item) => (attr(item, 'state') === 'DONE' || attr(item, 'state') === 'DECIDED' ? '- [x] ' : '- [ ] '))
+      return listOf(content, deeper, (_, item) =>
+        attr(item, 'state') === 'DONE' || attr(item, 'state') === 'DECIDED' ? '- [x] ' : '- [ ] ',
+      )
     case 'rule':
       return '---'
     case 'table':
-      return table(content.map((row) => (row.content ?? []).map((cell) => blocksOf(cell.content ?? []))))
+      return table(content.map((row) => (row.content ?? []).map((cell) => blocksOf(cell.content ?? [], deeper))))
     default: {
       if (content.every((child) => INLINE.has(child.type))) return textOf(node)
       // A panel, an expand, a layout: its blocks, under its title when it has one.
       const title = attr(node, 'title')
-      return [title === undefined || title === '' ? '' : `**${title}**`, blocksOf(content)].filter((part) => part !== '').join('\n\n')
+      return [title === undefined || title === '' ? '' : `**${title}**`, blocksOf(content, deeper)]
+        .filter((part) => part !== '')
+        .join('\n\n')
     }
   }
 }
 
 /** An ADF document as Markdown. */
-export const markdownOfAdf = (doc: AdfNode): string => blockOf(doc)
+export const markdownOfAdf = (doc: AdfNode): string => blockOf(doc, 0)
 
 // ---- Wiki markup to Markdown ----------------------------------------------
 
@@ -210,30 +267,53 @@ const LETTER = String.raw`\p{L}\p{N}`
 const BOLD = new RegExp(String.raw`(^|[^${LETTER}*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![${LETTER}*])`, 'gu')
 const STRUCK = new RegExp(String.raw`(^|[^${LETTER}-])-(?=[^\s-])([^-\n]*?[^\s-])-(?![${LETTER}-])`, 'gu')
 
-/** Wiki markup's bold and strikethrough, as Markdown has them; its italic is Markdown's already. */
+/**
+ * Wiki markup's bold and strikethrough, as Markdown has them; its italic is
+ * Markdown's already. Each try stops at the next mark or line's end, so a
+ * line full of marks costs no more than its length.
+ */
 const emphasis = (text: string) => text.replace(BOLD, '$1**$2**').replace(STRUCK, '$1~~$2~~')
 
 const WEB = /^(?:https?|mailto|ftp):/i
 
+/**
+ * Each `open … close` in a line, made into something else; the first that
+ * nothing closes ends the search, since nothing closes any after it either.
+ */
+const eachPair = (line: string, open: string, close: string, made: (inner: string) => string) => {
+  let out = ''
+  let from = 0
+  for (let start = line.indexOf(open); start !== -1; start = line.indexOf(open, from)) {
+    const end = line.indexOf(close, start + open.length + 1)
+    if (end === -1) break
+    out += `${line.slice(from, start)}${made(line.slice(start + open.length, end))}`
+    from = end + close.length
+  }
+  return out + line.slice(from)
+}
+
 /** A line of wiki markup as Markdown. */
 const wikiLine = (line: string, { keep }: Stash) =>
   emphasis(
-    line
+    eachPair(
       // The editor's empty braces and braced marks: {{{}Login{}}} is {{Login}}, {*}x{*} is *x*.
-      .replace(/\{\}/g, '')
-      .replace(/\{([*_\-+^~?])\}/g, '$1')
-      .replace(/\{\{(.+?)\}\}/g, (_, code: string) => keep(codeSpan(code)))
+      line.replace(/\{\}/g, '').replace(/\{([*_\-+^~?])\}/g, '$1'),
+      '{{',
+      '}}',
+      (code) => keep(codeSpan(code)),
+    )
       .replace(/\\([^\s\w])/g, (_, char: string) => keep(/[*_`~\\[\]]/.test(char) ? `\\${char}` : char))
       // A macro left in a line (a colour, a panel's edges) says nothing itself; a title it has is kept.
-      .replace(/\{\w+(?::([^}]*))?\}/g, (_, params: string | undefined) => {
+      // Neither its parameters nor a link's parts run past the next brace or bracket, so no try runs to the line's end.
+      .replace(/\{\w+(?::([^{}]*))?\}/g, (_, params: string | undefined) => {
         const title = /(?:^|\|)title=([^|]*)/.exec(params ?? '')?.[1]?.trim()
         return title === undefined || title === '' ? '' : keep(`**${title}**`)
       })
-      .replace(/\[~([^\]\s]+)\]/g, (_, user: string) => keep(`@${user}`))
-      .replace(/\[([^\]|\n]*)\|([^\]\n]+)\]/g, (_, label: string, target: string) =>
+      .replace(/\[~([^[\]\s]+)\]/g, (_, user: string) => keep(`@${user}`))
+      .replace(/\[([^[\]|\n]*)\|([^[\]\n]+)\]/g, (_, label: string, target: string) =>
         WEB.test(target.trim()) ? keep(`[${label.trim() === '' ? target.trim() : emphasis(label)}](${target.trim()})`) : label,
       )
-      .replace(/\[((?:https?|mailto|ftp):[^\]\s|]+)\]/gi, (_, url: string) => keep(`<${url}>`))
+      .replace(/\[((?:https?|mailto|ftp):[^[\]\s|]+)\]/gi, (_, url: string) => keep(`<${url}>`))
       // An attached image is its file's name: it can't be shown from here.
       .replace(/!([^!\s|]+\.[a-z0-9]+)(?:\|[^!\n]*)?!/gi, (_, name: string) => keep(name))
       .replace(/https?:\/\/[^\s\]|<>"]+/g, (url) => keep(url)),
@@ -251,7 +331,7 @@ interface Chunk {
   text: string
   /** Where a line that carries on an item lines up. */
   readonly indent: string
-  /** A table's rows, while it has more. */
+  /** A table's rows, made into one when all are in. */
   readonly rows?: Array<ReadonlyArray<string>>
 }
 
@@ -287,7 +367,6 @@ const wikiBlocks = (text: string, stash: Stash): string => {
         chunks.push(open)
       }
       rows.push(cells.map((cell) => cell.trim()))
-      open.text = table(rows)
     } else if (item !== null) {
       const markers = item[1] === '-' ? '*' : (item[1] ?? '*')
       // Nested under the item before it; with none (a quote came between), as deep as a list can start.
@@ -310,21 +389,35 @@ const wikiBlocks = (text: string, stash: Stash): string => {
     .map((chunk, index) => {
       const before = chunks[index - 1]
       const gap = before === undefined ? '' : chunk.kind === 'item' && before.kind !== 'block' ? '\n' : '\n\n'
-      return `${gap}${chunk.text}`
+      return `${gap}${chunk.rows === undefined ? chunk.text : table(chunk.rows)}`
     })
     .join('')
+}
+
+/** Code and noformat macros set aside as code blocks, each up to its own closing tag; one nothing closes stays as it is. */
+const withoutCode = (text: string, { keep }: Stash) => {
+  let out = ''
+  let from = 0
+  const unclosed = new Set<string>()
+  for (const open of text.matchAll(/\{(code|noformat)(?::([^{}]*))?\}/g)) {
+    const macro = open[1] ?? 'code'
+    if (open.index < from || unclosed.has(macro)) continue
+    const start = open.index + open[0].length
+    const end = text.indexOf(`{${macro}}`, start)
+    if (end === -1) unclosed.add(macro)
+    else {
+      const code = text.slice(start, end).replace(/^\n/, '').replace(/\n$/, '')
+      out += `${text.slice(from, open.index)}\n${keep(codeBlock(code, languageOf(open[2])))}\n`
+      from = end + macro.length + 2
+    }
+  }
+  return out + text.slice(from)
 }
 
 /** Wiki markup, Jira Data Center's text, as Markdown. */
 export const markdownOfWiki = (wiki: string): string => {
   const stash = makeStash()
-  const text = wiki
-    .replace(/\r\n?/g, '\n')
-    .replace(
-      /\{(code|noformat)(?::([^}]*))?\}\n?([\s\S]*?)\n?\{\1\}/g,
-      (_, _macro: string, params: string | undefined, code: string) => `\n${stash.keep(codeBlock(code, languageOf(params)))}\n`,
-    )
-  return stash.restore(wikiBlocks(text, stash))
+  return stash.restore(wikiBlocks(withoutCode(wiki.replace(/\r\n?/g, '\n'), stash), stash))
 }
 
 // ---- Markdown, read ---------------------------------------------------------
@@ -345,139 +438,208 @@ type Block =
   | { readonly kind: 'rule' }
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})\s*([^`\s]*)/
-const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/
+const HEADING = /^ {0,3}(#{1,6})(?:[ \t]|$)/
 const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
 const QUOTE = /^ {0,3}> ?(.*)$/
 const ITEM = /^( *)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?$/
+/** Links, read where they start: `<https://…>`, or a bare one. Neither runs past the next `<`, so no try runs to the end. */
+const AUTOLINK = /<((?:https?|mailto):[^\s<>]+)>/y
+const BARE_LINK = /https?:\/\/[^\s<]*[^\s<.,;:!?'")\]]/y
 
 const startsBlock = (line: string) => FENCE.test(line) || HEADING.test(line) || RULE.test(line) || QUOTE.test(line) || ITEM.test(line)
 const indentOf = (line: string) => /^ */.exec(line)?.[0].length ?? 0
 const isLetter = (char: string | undefined) => char !== undefined && /[\p{L}\p{N}]/u.test(char)
+const isSpace = (char: string | undefined) => char === undefined || /\s/.test(char)
 
-/** The index of the bracket that closes the one at `open`, or -1. */
-const closing = (text: string, open: number, left: string, right: string) => {
-  let depth = 0
-  for (let at = open; at < text.length; at += 1) {
+/** A heading's text: what follows its marks, without a closing run of them. */
+const headingText = (line: string, marks: number) => {
+  const text = line.trim().slice(marks).trim()
+  let end = text.length
+  while (end > 0 && text[end - 1] === '#') end -= 1
+  return end === 0 || text[end - 1] === ' ' || text[end - 1] === '\t' ? text.slice(0, end).trimEnd() : text
+}
+
+/** Each bracket that opens and the one that closes it, in one pass, as a stack pairs them. */
+const pairsOf = (text: string, left: string, right: string) => {
+  const pairs = new Map<number, number>()
+  const open: Array<number> = []
+  for (let at = 0; at < text.length; at += 1) {
     if (text[at] === '\\') at += 1
-    else if (text[at] === left) depth += 1
-    else if (text[at] === right && (depth -= 1) === 0) return at
+    else if (text[at] === left) open.push(at)
+    else if (text[at] === right) {
+      const start = open.pop()
+      if (start !== undefined) pairs.set(start, at)
+    }
   }
-  return -1
+  return pairs
 }
 
-/** Emphasis opened at `at`, if something closes it: `*`, `_`, `**`, `__` or `~~`. */
-const emphasisAt = (text: string, at: number) => {
-  const mark = text[at] ?? ''
-  const double = text[at + 1] === mark
-  if (mark === '~' && !double) return null
-  const delimiter = double ? mark + mark : mark
-  const first = text[at + delimiter.length]
-  if (first === undefined || /\s/.test(first) || (mark === '_' && isLetter(text[at - 1]))) return null
-  for (let close = at + delimiter.length + 1; close < text.length; close += 1) {
-    // Code spans are passed over whole; a lone mark passes over a double one, which is emphasis within.
-    if (text[close] === '`') close = Math.max(close, text.indexOf('`', close + 1))
-    else if (text.startsWith(delimiter, close) && !(!double && text[close + 1] === mark) && !/\s/.test(text[close - 1] ?? ' ')) {
-      if (mark === '_' && isLetter(text[close + delimiter.length])) continue
-      let end = close
-      while (double && text[end + delimiter.length] === mark) end += 1
-      const kind = mark === '~' ? 'strike' : double ? 'strong' : 'em'
-      return { kind, inner: text.slice(at + delimiter.length, end), next: end + delimiter.length } as const
-    } else if (!double && text[close] === mark && text[close + 1] === mark) close += 1
-  }
-  return null
+/** The run of a character starting at `at`, as long as it goes. */
+const runAt = (text: string, at: number) => {
+  let end = at
+  while (text[end] === text[at]) end += 1
+  return end - at
 }
 
-/** A paragraph's text; within a link's text (`linked`), nothing is a link again. */
-const parseInline = (text: string, linked = false): ReadonlyArray<Inline> => {
-  const out: Array<Inline> = []
-  let plain = ''
-  const flush = () => {
-    if (plain !== '') out.push({ kind: 'text', text: plain })
-    plain = ''
+/** Where each run of backticks starts, by its length, in order. */
+const runsOf = (text: string) => {
+  const runs = new Map<number, Array<number>>()
+  for (let at = text.indexOf('`'); at !== -1; at = text.indexOf('`', at + runAt(text, at))) {
+    const length = runAt(text, at)
+    const starts = runs.get(length)
+    if (starts === undefined) runs.set(length, [at])
+    else starts.push(at)
   }
-  let at = 0
-  while (at < text.length) {
-    const char = text[at] ?? ''
-    if (char === '\\' && /^[!-/:-@[-`{-~]$/.test(text[at + 1] ?? '')) {
-      plain += text[at + 1]
-      at += 2
-      continue
+  return runs
+}
+
+/**
+ * A paragraph's text, read in time in proportion to its length. What closes
+ * an opener is found without searching again from each of many: brackets are
+ * paired in one pass, code spans close at the next backtick run of their
+ * length, looked up, and each stretch of text read remembers which emphasis
+ * has nothing to close it, since a later opener of that kind would find
+ * nothing either.
+ */
+const makeReader = (text: string) => {
+  let runs: ReadonlyMap<number, ReadonlyArray<number>> | undefined
+  let brackets: ReadonlyMap<number, number> | undefined
+  let parens: ReadonlyMap<number, number> | undefined
+
+  /** Where a code span of `length` backticks, opened before `from`, closes: the next run of just as many, or -1. */
+  const spanEnd = (from: number, length: number) => {
+    runs ??= runsOf(text)
+    const starts = runs.get(length) ?? []
+    let low = 0
+    let high = starts.length
+    while (low < high) {
+      const middle = (low + high) >> 1
+      if ((starts[middle] ?? 0) < from) low = middle + 1
+      else high = middle
     }
-    if (char === '\n') {
-      // Every line of a paragraph keeps its own line: Jira shows them so, as GitHub does.
-      plain = plain.replace(/(?: +|\\)$/, '')
-      flush()
-      out.push({ kind: 'break' })
-      at += 1
-      continue
+    return starts[low] ?? -1
+  }
+
+  /** Emphasis opened at `at`, if something closes it before `to`: `*`, `_`, `**`, `__` or `~~`. */
+  const emphasisAt = (at: number, to: number, failed: Set<string>) => {
+    // What lies past the stretch being read isn't there for it.
+    const charAt = (index: number) => (index < to ? text[index] : undefined)
+    const mark = text[at] ?? ''
+    const double = charAt(at + 1) === mark
+    if (mark === '~' && !double) return null
+    const delimiter = double ? mark + mark : mark
+    if (failed.has(delimiter) || isSpace(charAt(at + delimiter.length)) || (mark === '_' && isLetter(text[at - 1]))) return null
+    for (let close = at + delimiter.length + 1; close < to; close += 1) {
+      // Code spans are passed over whole; a lone mark passes over a double one, which is emphasis within.
+      if (text[close] === '`') {
+        const length = runAt(text, close)
+        const end = spanEnd(close + length, length)
+        close = (end === -1 || end + length > to ? close : end) + length - 1
+      } else if (text.startsWith(delimiter, close) && !(!double && charAt(close + 1) === mark) && !isSpace(text[close - 1])) {
+        if (mark === '_' && isLetter(charAt(close + delimiter.length))) continue
+        let end = close
+        while (double && charAt(end + delimiter.length) === mark) end += 1
+        if (end + delimiter.length > to) break
+        const kind = mark === '~' ? 'strike' : double ? 'strong' : 'em'
+        return { kind, from: at + delimiter.length, to: end, next: end + delimiter.length } as const
+      } else if (!double && text[close] === mark && charAt(close + 1) === mark) close += 1
     }
-    if (char === '`') {
-      const run = /^`+/.exec(text.slice(at))?.[0] ?? '`'
-      let end = text.indexOf(run, at + run.length)
-      while (end !== -1 && text[end + run.length] === '`') end = text.indexOf(run, end + run.length + 1)
-      if (end === -1) {
-        plain += run
-        at += run.length
-        continue
-      }
-      const code = text.slice(at + run.length, end).replace(/\n/g, ' ')
-      flush()
-      out.push({ kind: 'code', text: /^ .*\S.* $/.test(code) ? code.slice(1, -1) : code })
-      at = end + run.length
-      continue
+    failed.add(delimiter)
+    return null
+  }
+
+  /** A link starting at `at`: `[text](href)`, `<https://…>`, or a bare one. */
+  const linkAt = (at: number, to: number, depth: number): { readonly link: Inline; readonly next: number } | undefined => {
+    const char = text[at]
+    if (char === '[') {
+      brackets ??= pairsOf(text, '[', ']')
+      const close = brackets.get(at) ?? -1
+      if (close === -1 || text[close + 1] !== '(') return undefined
+      parens ??= pairsOf(text, '(', ')')
+      const end = parens.get(close + 1) ?? -1
+      if (end === -1 || end >= to) return undefined
+      const target = text.slice(close + 2, end).trim()
+      const href = /^<([^>]*)>/.exec(target)?.[1] ?? target.split(/\s+/)[0] ?? ''
+      return { link: { kind: 'link', href, content: read(at + 1, close, true, depth + 1) }, next: end + 1 }
     }
-    if (char === '[' && !linked) {
-      const close = closing(text, at, '[', ']')
-      const end = close !== -1 && text[close + 1] === '(' ? closing(text, close + 1, '(', ')') : -1
-      if (end !== -1) {
-        const target = text.slice(close + 2, end).trim()
+    const pattern = char === '<' ? AUTOLINK : char === 'h' && !isLetter(text[at - 1]) ? BARE_LINK : undefined
+    if (pattern === undefined) return undefined
+    pattern.lastIndex = at
+    const match = pattern.exec(text)
+    if (match === null || at + match[0].length > to) return undefined
+    const href = match[1] ?? match[0]
+    return { link: { kind: 'link', href, content: [{ kind: 'text', text: href }] }, next: at + match[0].length }
+  }
+
+  /** The text from `from` to `to`; within a link's text (`linked`), nothing is a link again. */
+  const read = (from: number, to: number, linked: boolean, depth: number): ReadonlyArray<Inline> => {
+    const out: Array<Inline> = []
+    const failed = new Set<string>()
+    let plain = ''
+    const flush = () => {
+      if (plain !== '') out.push({ kind: 'text', text: plain })
+      plain = ''
+    }
+    let at = from
+    while (at < to) {
+      const char = text[at] ?? ''
+      const link = linked || (char !== '[' && char !== '<' && char !== 'h') ? undefined : linkAt(at, to, depth)
+      const found = depth < DEEPEST && (char === '*' || char === '_' || char === '~') ? emphasisAt(at, to, failed) : null
+      if (char === '\\' && at + 1 < to && /^[!-/:-@[-`{-~]$/.test(text[at + 1] ?? '')) {
+        plain += text[at + 1]
+        at += 2
+      } else if (char === '\n') {
+        // Every line of a paragraph keeps its own line: Jira shows them so, as GitHub does.
+        plain = plain.endsWith('\\') ? plain.slice(0, -1) : plain.trimEnd()
         flush()
-        out.push({
-          kind: 'link',
-          href: /^<([^>]*)>/.exec(target)?.[1] ?? target.split(/\s+/)[0] ?? '',
-          content: parseInline(text.slice(at + 1, close), true),
-        })
-        at = end + 1
-        continue
+        out.push({ kind: 'break' })
+        at += 1
+      } else if (char === '`') {
+        const length = runAt(text, at)
+        const end = spanEnd(at + length, length)
+        if (end === -1 || end + length > to) {
+          plain += '`'.repeat(length)
+          at += length
+        } else {
+          const code = text.slice(at + length, end).replace(/\n/g, ' ')
+          flush()
+          out.push({
+            kind: 'code',
+            text: code.length > 2 && code.startsWith(' ') && code.endsWith(' ') && code.trim() !== '' ? code.slice(1, -1) : code,
+          })
+          at = end + length
+        }
+      } else if (link !== undefined) {
+        flush()
+        out.push(link.link)
+        at = link.next
+      } else if (found !== null) {
+        flush()
+        out.push({ kind: found.kind, content: read(found.from, found.to, linked, depth + 1) })
+        at = found.next
+      } else {
+        plain += char
+        at += 1
       }
     }
-    // <https://…>, or a bare link.
-    const url = linked
-      ? undefined
-      : char === '<'
-        ? /^<((?:https?|mailto):[^\s>]+)>/.exec(text.slice(at))?.[1]
-        : char === 'h' && !isLetter(text[at - 1])
-          ? /^https?:\/\/[^\s<]*[^\s<.,;:!?'")\]]/.exec(text.slice(at))?.[0]
-          : undefined
-    if (url !== undefined) {
-      flush()
-      out.push({ kind: 'link', href: url, content: [{ kind: 'text', text: url }] })
-      at += char === '<' ? url.length + 2 : url.length
-      continue
-    }
-    const found = char === '*' || char === '_' || char === '~' ? emphasisAt(text, at) : null
-    if (found !== null) {
-      flush()
-      out.push({ kind: found.kind, content: parseInline(found.inner, linked) })
-      at = found.next
-      continue
-    }
-    plain += char
-    at += 1
+    flush()
+    return out
   }
-  flush()
-  return out
+
+  return read
 }
+
+const parseInline = (text: string): ReadonlyArray<Inline> => makeReader(text)(0, text.length, false, 0)
 
 /** A list from its first item on: its items' lines, without their markers and indents. */
-const parseList = (lines: ReadonlyArray<string>, from: number) => {
+const parseList = (lines: ReadonlyArray<string>, from: number, depth: number) => {
   const first = ITEM.exec(lines[from] ?? '')
   const indent = first?.[1]?.length ?? 0
   const ordered = /\d/.test(first?.[2] ?? '')
   const items: Array<Array<string>> = []
   let offset = 0
   let at = from
-  for (; at < lines.length; at += 1) {
+  while (at < lines.length) {
     const line = lines[at] ?? ''
     const item = ITEM.exec(line)
     if (item !== null && (item[1]?.length ?? 0) <= indent && !RULE.test(line)) {
@@ -485,24 +647,41 @@ const parseList = (lines: ReadonlyArray<string>, from: number) => {
       if (/\d/.test(item[2] ?? '') !== ordered) break
       offset = indent + (item[2]?.length ?? 1) + Math.min(item[3]?.length ?? 1, 4)
       items.push([item[4] ?? ''])
-      continue
-    }
-    if (line.trim() === '') {
-      const next = lines.slice(at + 1).find((later) => later.trim() !== '')
-      if (next === undefined || (indentOf(next) <= indent && !ITEM.test(next))) break
-      items.at(-1)?.push('')
-      continue
-    }
-    if (indentOf(line) > indent) items.at(-1)?.push(line.slice(Math.min(indentOf(line), offset)))
-    // A line that carries on the item's paragraph without its indent.
-    else if (!startsBlock(line) && (lines[at - 1] ?? '').trim() !== '') items.at(-1)?.push(line.trim())
-    else break
+      at += 1
+    } else if (line.trim() === '') {
+      // Blank lines carry on the list only when what follows them belongs to it.
+      let next = at
+      while (next < lines.length && (lines[next] ?? '').trim() === '') next += 1
+      const after = lines[next]
+      if (after === undefined || (indentOf(after) <= indent && !ITEM.test(after))) break
+      for (; at < next; at += 1) items.at(-1)?.push('')
+    } else if (indentOf(line) > indent) {
+      items.at(-1)?.push(line.slice(Math.min(indentOf(line), offset)))
+      at += 1
+    } else if (!startsBlock(line) && (lines[at - 1] ?? '').trim() !== '') {
+      // A line that carries on the item's paragraph without its indent.
+      items.at(-1)?.push(line.trim())
+      at += 1
+    } else break
   }
   const start = Number.parseInt(first?.[2] ?? '1', 10)
-  return { block: { kind: 'list', ordered, start: Number.isNaN(start) ? 1 : start, items: items.map(parseBlocks) } as const, next: at }
+  return {
+    block: {
+      kind: 'list',
+      ordered,
+      start: Number.isNaN(start) ? 1 : start,
+      items: items.map((lines) => parseBlocks(lines, depth + 1)),
+    } as const,
+    next: at,
+  }
 }
 
-const parseBlocks = (lines: ReadonlyArray<string>): ReadonlyArray<Block> => {
+const parseBlocks = (lines: ReadonlyArray<string>, depth = 0): ReadonlyArray<Block> => {
+  // Deeper than anything written by hand: the rest is text.
+  if (depth >= DEEPEST) {
+    const rest = lines.join('\n').trim()
+    return rest === '' ? [] : [{ kind: 'paragraph', content: parseInline(rest) }]
+  }
   const blocks: Array<Block> = []
   let at = 0
   while (at < lines.length) {
@@ -513,19 +692,13 @@ const parseBlocks = (lines: ReadonlyArray<string>): ReadonlyArray<Block> => {
     else if (fence !== null) {
       const marker = fence[1] ?? '```'
       const closes = (later: string) => later.trim().startsWith(marker) && later.trim().replaceAll(marker[0] ?? '`', '') === ''
-      const end = lines.findIndex((later, index) => index > at && closes(later))
-      const stop = end === -1 ? lines.length : end
-      blocks.push({
-        kind: 'code',
-        language: fence[2] ?? '',
-        text: lines
-          .slice(at + 1, stop)
-          .join('\n')
-          .replace(/\n+$/, ''),
-      })
-      at = stop + 1
+      let end = at + 1
+      while (end < lines.length && !closes(lines[end] ?? '')) end += 1
+      blocks.push({ kind: 'code', language: fence[2] ?? '', text: withoutTrailingBreaks(lines.slice(at + 1, end).join('\n')) })
+      at = end + 1
     } else if (heading !== null) {
-      blocks.push({ kind: 'heading', level: heading[1]?.length ?? 1, content: parseInline(heading[2] ?? '') })
+      const marks = heading[1]?.length ?? 1
+      blocks.push({ kind: 'heading', level: marks, content: parseInline(headingText(line, marks)) })
       at += 1
     } else if (RULE.test(line)) {
       blocks.push({ kind: 'rule' })
@@ -533,9 +706,9 @@ const parseBlocks = (lines: ReadonlyArray<string>): ReadonlyArray<Block> => {
     } else if (QUOTE.test(line)) {
       const quoted: Array<string> = []
       for (; at < lines.length && QUOTE.test(lines[at] ?? ''); at += 1) quoted.push(QUOTE.exec(lines[at] ?? '')?.[1] ?? '')
-      blocks.push({ kind: 'quote', blocks: parseBlocks(quoted) })
+      blocks.push({ kind: 'quote', blocks: parseBlocks(quoted, depth + 1) })
     } else if (ITEM.test(line)) {
-      const list = parseList(lines, at)
+      const list = parseList(lines, at, depth)
       blocks.push(list.block)
       at = list.next
     } else {

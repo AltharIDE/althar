@@ -39,6 +39,6 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 ## Gaps
 
 - **GitLab, Bitbucket and Trello** have no adapter yet; `products.ts` lists them, and nothing offers them.
-- **Jira's text** converts what issues and Althar's comments hold. Anything rarer (an attachment, a colour, a smart link's card) keeps its text, or its name, and no more.
+- **Jira's text** converts what issues and Althar's comments hold. Anything rarer (an attachment, a colour, a smart link's card) keeps its text, or its name, and no more. Quotes, lists and emphasis nested more than sixteen deep are read as text, so that converting takes time in proportion to the text, however odd it is.
 - **Pagination** stops at the first hundred: of comments since a cursor, of reviews, of checks.
 - **Webhooks** aren't here: listening polls until Althar has a cloud.
