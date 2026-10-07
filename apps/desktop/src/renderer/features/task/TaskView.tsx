@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
 
 import type { ThreadSnapshot } from '@althar/contracts'
 import {
-  BackCrumb,
   ChangeView,
   ChromeButton,
   Composer,
@@ -42,11 +41,12 @@ import type { TaskModel } from './useTask'
  * the person is while the work happens; and its outputs, what it changed,
  * where they decide whether to accept it. A ready task opens on its outputs,
  * anything else on the conversation, and the person switches with the
- * header's switch, or c and o. What the rules keep for the person arrives as
- * a call at the end of the thread. What it changed opens over the whole
- * window, file by file, from the header, its outputs, or ⌘D. Escape goes
- * back to the project. Everything drawn here is the kit's; this view only
- * arranges it.
+ * header's switch, or c and o. The project's bar is over it, so the way
+ * around the project is the one its own screen has. What the rules keep for
+ * the person arrives as a call at the end of the thread. What it changed
+ * opens over the whole window, file by file, from the header, its outputs,
+ * or ⌘D. Escape goes back to the project. Everything drawn here is the
+ * kit's; this view only arranges it.
  */
 
 /** The task's faces: its conversation, and what it made. */
@@ -70,7 +70,6 @@ export const text = {
   faces: { talk: 'Conversation', out: 'Outputs' } satisfies Record<Face, string>,
   facesKbd: { talk: 'c', out: 'o' } satisfies Record<Face, string>,
   nothingBuilt: 'Nothing is built yet, so there is nothing else to look at.',
-  back: 'esc',
   /** How long it has been on what it is doing now, or since it last changed. */
   since: {
     step: (step: string, took: string) => `${step} · ${took}`,
@@ -168,7 +167,17 @@ const typing = (event: KeyboardEvent) => {
 
 const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', efforts: [] }
 
-export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => void }) {
+export function TaskView({
+  model,
+  onBack,
+  nav,
+}: {
+  model: TaskModel
+  /** Back to the project, on Escape. */
+  onBack: () => void
+  /** The project's bar over it; a bare bar until the task says which project it is in. */
+  nav?: ReactNode
+}) {
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState<Choice | null>(null)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
@@ -212,7 +221,7 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
   if (snapshot === null) {
     return (
       <div className={s.window}>
-        <TitleBar lights="none">{null}</TitleBar>
+        {nav ?? <TitleBar lights="none">{null}</TitleBar>}
         <div className={s.loading}>{model.error === null ? <Spinner /> : <p role="alert">{model.error}</p>}</div>
       </div>
     )
@@ -296,12 +305,10 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
 
   return (
     <div className={s.window}>
-      <TitleBar lights="none">
-        <BackCrumb to={snapshot.project.name} kbd={text.back} onBack={onBack} task={snapshot.task.slug} title={snapshot.task.title} />
-      </TitleBar>
+      {nav ?? <TitleBar lights="none">{null}</TitleBar>}
       <div className={s.head}>
-        {/* What it made is laid out wider than a conversation, and the header with it. */}
-        <ThreadMeasure wide={shown === 'out'}>
+        {/* Both faces keep the conversation's width, so switching doesn't move the page. */}
+        <ThreadMeasure>
           <TaskHeader
             title={snapshot.task.title}
             status={status}
@@ -396,6 +403,7 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
       )}
       {changes.open && (
         <ChangeView
+          lights="space"
           branch={snapshot.task.branch ?? ''}
           {...(snapshot.task.baseRef === null ? {} : { base: snapshot.task.baseRef.replace(/^origin\//, '') })}
           files={files}

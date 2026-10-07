@@ -32,7 +32,10 @@ export const say = async (page: Page, words: string) => {
   await box.press('Enter')
 }
 
-/** A ready task opens on what it made: its conversation is the switch beside it. */
+/** A ready task opens on what it made: its conversation is the header's other face, not the project's view of that name. */
 export const toConversation = async (page: Page) => {
-  await page.getByRole('radio', { name: /Conversation/ }).click()
+  await page
+    .getByRole('radiogroup', { name: 'Face' })
+    .getByRole('radio', { name: /Conversation/ })
+    .click()
 }

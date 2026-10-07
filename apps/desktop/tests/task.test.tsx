@@ -60,7 +60,9 @@ describe('a task', () => {
     expect(screen.getByText('Codex')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Thought' }))
     expect(screen.getByText('Where is the call?')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: /meridian/ }))
+    // Escape, with nothing else open, goes back to the project.
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await userEvent.keyboard('{Escape}')
     expect(onBack).toHaveBeenCalled()
   })
 

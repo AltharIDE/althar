@@ -14,9 +14,10 @@ import s from './ProjectTabs.module.css'
 /*
  * The top of the window: a tab for the home, then one for each project the
  * person keeps open, so going from one project to another is one press.
- * Each project's tab carries its mark, which says whether work runs there
- * and whether anything waits on you, and how many calls wait; the home's
- * says how many wait across every project. The tab that has the window
+ * Each project's tab carries its mark, with the running arc while work runs
+ * there, and a violet dot after its name while anything there waits on you;
+ * the home's has the dot while anything waits in any project. How many is
+ * read out, not shown. The tab that has the window
  * joins the screen's own bar below it. A project's tab closes from its ×,
  * and the + opens one of the other projects, or a folder as a new one. On
  * macOS the system draws the traffic lights over its start, so it keeps
@@ -82,14 +83,12 @@ export type ProjectTabsProps = RootProps<
   }
 >
 
-/** How many wait, beside a tab's name, and read out after it. */
-function Count({ n, text }: { n: number; text: ProjectTabsText }) {
+/** Something waits on you: a violet dot beside a tab's name, and how many read out after it. */
+function Yours({ n, text }: { n: number; text: ProjectTabsText }) {
   if (n === 0) return null
   return (
     <>
-      <span className={s.count} aria-hidden="true">
-        {n}
-      </span>
+      <span className={s.yours} aria-hidden="true" />
       <VisuallyHidden>, {text.yours(n)}</VisuallyHidden>
     </>
   )
@@ -133,7 +132,7 @@ export function ProjectTabs({
             <button type="button" className={s.select} aria-current={current === null ? 'page' : undefined} onClick={() => onSelect(null)}>
               <Logo size={15} className={s.logo} />
               <span className={s.name}>{t.home}</span>
-              <Count n={yours} text={t} />
+              <Yours n={yours} text={t} />
             </button>
           </li>
           {tabs.map((tab) => (
@@ -144,10 +143,11 @@ export function ProjectTabs({
                 aria-current={tab.id === current ? 'page' : undefined}
                 onClick={() => onSelect(tab.id)}
               >
-                <ProjectMark seed={tab.seed} ink={tab.ink} size={15} running={tab.running} yours={tab.yours > 0} className={s.mark} />
+                {/* The dot after its name says what waits; the mark says only that work runs. */}
+                <ProjectMark seed={tab.seed} ink={tab.ink} size={15} running={tab.running} className={s.mark} />
                 <span className={s.name}>{tab.name}</span>
                 {tab.running && <VisuallyHidden>, {t.running}</VisuallyHidden>}
-                <Count n={tab.yours} text={t} />
+                <Yours n={tab.yours} text={t} />
               </button>
               <IconButton icon="close" label={t.close(tab.name)} size="small" className={s.close} onClick={() => onClose(tab.id)} />
             </li>
@@ -160,8 +160,8 @@ export function ProjectTabs({
                 {offered.map((other) => (
                   <MenuItem
                     key={other.id}
-                    lead={<ProjectMark seed={other.seed} ink={other.ink} size={15} running={other.running} yours={other.yours > 0} />}
-                    hint={other.yours > 0 ? <Count n={other.yours} text={t} /> : undefined}
+                    lead={<ProjectMark seed={other.seed} ink={other.ink} size={15} running={other.running} />}
+                    hint={other.yours > 0 ? <Yours n={other.yours} text={t} /> : undefined}
                     onSelect={() => onOpen?.(other.id)}
                   >
                     {other.name}

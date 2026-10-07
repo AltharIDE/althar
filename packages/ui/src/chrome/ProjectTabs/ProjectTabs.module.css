@@ -139,12 +139,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.count {
+.yours {
   flex: none;
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--signal);
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--signal);
 }
 
 .close {

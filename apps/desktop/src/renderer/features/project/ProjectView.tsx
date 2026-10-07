@@ -5,7 +5,6 @@ import type { BoardTask } from '@althar/contracts'
 import {
   ActionButton,
   ChangeView,
-  ChromeButton,
   Composer,
   Heading,
   LinkButton,
@@ -13,14 +12,11 @@ import {
   SidePanelBody,
   SidePanelTitle,
   Room,
-  RoomSwitch,
   Spinner,
   TaskFace,
   Thread,
   ThreadDivider,
   ThreadMeasure,
-  TitleBar,
-  WorkStatus,
 } from '@althar/ui'
 
 import { ModelChoice } from '../../shared/ModelChoice'
@@ -37,6 +33,7 @@ import { useChanges } from '../task/useChanges'
 import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
 import { NewTask } from './NewTask'
+import { nextRoom, ProjectBar } from './ProjectBar'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
 
@@ -51,10 +48,8 @@ import type { ProjectModel } from './useProject'
  */
 
 export const text = {
-  rules: 'Project rules',
   project: 'Project',
   conversation: 'Conversation',
-  newTask: 'New task',
   coordinator: 'Coordinator',
   empty: 'Ask the coordinator about the project, or say what should change.',
   placeholder: 'Tell the coordinator something',
@@ -74,15 +69,14 @@ export const text = {
   connect: (host: string) => `Connect ${host}`,
 }
 
-/** The views, in their order on the switch and their keys. */
-const ROOMS = [Room.Talk, Room.Board, Room.Both] as const
-
 export function ProjectView({
   model,
   board,
   connections,
   onTask,
   onRules,
+  room: opening = Room.Talk,
+  newTask = false,
 }: {
   model: ProjectModel
   board: BoardModel
@@ -90,8 +84,12 @@ export function ProjectView({
   onTask: (threadId: string) => void
   /** Opens the project's rules; without it, no way there. */
   onRules?: () => void
+  /** The view it opens on, as a task's bar chose it. */
+  room?: Room
+  /** It opens planning a new task, as a task's bar asked. */
+  newTask?: boolean
 }) {
-  const [room, setRoom] = useState<Room>(Room.Talk)
+  const [room, setRoom] = useState<Room>(newTask && opening === Room.Board ? Room.Both : opening)
   const [dock, setDock] = useState<DockTarget | null>(null)
   // A board task's changes, over the window: the task and the file to open on.
   const [reviewing, setReviewing] = useState<{ readonly task: BoardTask; readonly path?: string } | null>(null)
@@ -105,14 +103,18 @@ export function ProjectView({
   const lanes = board.board === null ? null : lanesOf(board.board)
   const yours = lanes === null ? 0 : yoursOf(lanes)
   const working = lanes === null ? 0 : lanes.running.filter((task) => task.phase !== 'stopped').length
-  // ⌘1, ⌘2 and ⌘3 change the view.
+  // b steps through the views, when nothing is being typed; ⌘ and a number belongs to the window's tabs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return
-      const chosen = ROOMS[Number(event.key) - 1]
-      if (chosen === undefined) return
+      if (event.key !== 'b' || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"], [role="dialog"]') !== null)
+      )
+        return
       event.preventDefault()
-      setRoom(chosen)
+      setRoom(nextRoom)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -120,7 +122,7 @@ export function ProjectView({
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState<Choice | null>(null)
   // What opens beside the conversation: a task you plan, or the connections.
-  const [panel, setPanel] = useState<'task' | 'connections' | null>(null)
+  const [panel, setPanel] = useState<'task' | 'connections' | null>(newTask ? 'task' : null)
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts.
   const now = useNow((model.coordinator?.session?.turnRunning ?? false) || (lanes?.next.some((task) => task.phase === 'planned') ?? false))
   const coordinator = model.coordinator
@@ -206,26 +208,19 @@ export function ProjectView({
 
   return (
     <div className={s.window}>
-      <TitleBar
-        lights="none"
-        end={
-          <>
-            <WorkStatus running={working} yours={yours} onYours={openYours} />
-            {onRules && <ChromeButton icon="gear" label={text.rules} compact onClick={onRules} />}
-            <ChromeButton
-              icon="plus"
-              label={text.newTask}
-              expanded={panel === 'task'}
-              onClick={() => {
-                if (room === Room.Board) setRoom(Room.Both)
-                setPanel('task')
-              }}
-            />
-          </>
-        }
-      >
-        <RoomSwitch value={room} onChange={setRoom} yours={yours} />
-      </TitleBar>
+      <ProjectBar
+        room={room}
+        onRoom={setRoom}
+        working={working}
+        yours={yours}
+        onYours={openYours}
+        {...(onRules === undefined ? {} : { onRules })}
+        newTask={panel === 'task'}
+        onNewTask={() => {
+          if (room === Room.Board) setRoom(Room.Both)
+          setPanel('task')
+        }}
+      />
       <div className={room === Room.Both ? `${s.rooms} ${s.both}` : s.rooms}>
         {talking && (
           <div className={s.talk}>
@@ -339,6 +334,7 @@ export function ProjectView({
       </div>
       {changes.open && reviewing !== null && reviewed !== null && (
         <ChangeView
+          lights="space"
           branch={reviewed.task.branch ?? ''}
           {...(reviewed.task.baseRef === null ? {} : { base: reviewed.task.baseRef.replace(/^origin\//, '') })}
           files={reviewed.task.files}

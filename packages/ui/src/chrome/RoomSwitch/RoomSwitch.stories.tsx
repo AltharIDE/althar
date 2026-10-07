@@ -22,6 +22,8 @@ export const Conversation: Story = {}
 /** On the board: the conversation has news, and the board has calls for you. */
 export const BoardWithNews: Story = { args: { value: Room.Board, news: true, yours: 4 } }
 export const Both: Story = { args: { value: Room.Both } }
+/** A task of the project has the window: none is on, and choosing one goes back to the project in it. */
+export const NoneWhileATaskHasTheWindow: Story = { args: { value: null, yours: 2 } }
 
 export const Switching: Story = {
   args: { yours: 4 },
@@ -45,6 +47,7 @@ export const AllStates: Story = {
         { state: 'conversation', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },
         { state: 'board, news and calls', node: <RoomSwitch value={Room.Board} onChange={() => {}} news yours={4} /> },
         { state: 'both', node: <RoomSwitch value={Room.Both} onChange={() => {}} yours={1} /> },
+        { state: 'none, a task has the window', node: <RoomSwitch value={null} onChange={() => {}} yours={2} /> },
         { state: 'hover', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },
         { state: 'focus', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },
         { state: 'pressed', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },

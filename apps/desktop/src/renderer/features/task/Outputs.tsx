@@ -191,7 +191,7 @@ export function Outputs({
   const unpublished = ready && first === undefined && task.commits > 0
   return (
     <div className={s.outputs}>
-      <ThreadMeasure wide className={s.outputsBody}>
+      <ThreadMeasure className={s.outputsBody}>
         {change}
         {here}
         {closed.map((one) => (

@@ -5,13 +5,15 @@ import { Segmented } from '../../primitives/Segmented/Segmented'
  * The project window's only navigation: the conversation, the board, or
  * both side by side. A dot says the conversation has news while you are on
  * the board, and a violet one that something on the board waits on you.
- * The shortcuts are the consumer's to bind; the switch names them.
+ * While one of the project's tasks has the window, none of them is on, and
+ * choosing one goes back to the project in it. The shortcuts are the
+ * consumer's to bind; the switch names them.
  */
 
 export interface RoomSwitchText {
   label: string
   room: Record<Room, string>
-  /** The shortcut, as the tooltip shows it: ⌘1. */
+  /** The shortcut, as the tooltip shows it: ⌘1; empty where there is none. */
   key: (n: number) => string
   news: string
   yours: (n: number) => string
@@ -41,7 +43,8 @@ function dotLabelOf(dot: 'new' | 'yours' | undefined, yours: number, t: RoomSwit
 }
 
 export interface RoomSwitchProps {
-  value: Room
+  /** The view on; null while a task of the project has the window. */
+  value: Room | null
   onChange: (room: Room) => void
   /** The conversation has something you haven't seen. */
   news?: boolean
@@ -64,7 +67,7 @@ export function RoomSwitch({ value, onChange, news, yours = 0, className, text }
         return {
           value: room,
           label: t.room[room],
-          tooltip: { label: t.room[room], kbd: t.key(i + 1) },
+          tooltip: { label: t.room[room], ...(t.key(i + 1) === '' ? {} : { kbd: t.key(i + 1) }) },
           dot,
           dotLabel: dotLabelOf(dot, yours, t),
         }

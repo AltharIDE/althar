@@ -22,6 +22,10 @@
 .dialog:focus {
   outline: none;
 }
+/* below the window's own top row, where the system draws its lights */
+.underLights {
+  top: 48px;
+}
 @keyframes in {
   from {
     opacity: 0;
@@ -175,6 +179,9 @@
   .dialog {
     inset: 0;
     border-radius: 0;
+  }
+  .underLights {
+    top: 40px;
   }
   .body {
     grid-template-columns: minmax(0, 1fr);

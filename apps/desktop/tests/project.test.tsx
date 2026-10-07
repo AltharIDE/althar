@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type CoordinatorSnapshot } from '@althar/contracts'
+import { Room } from '@althar/ui'
 
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
@@ -12,8 +13,17 @@ import { agents, card, changed, coordinatorSnapshot, fakeClient, items, status, 
 import { clock } from '../src/renderer/shared/time'
 import { withServices } from './render'
 
-function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
-  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onTask={onTask} />
+function Project({ onTask = vi.fn(), room, newTask }: { onTask?: (threadId: string) => void; room?: Room; newTask?: boolean }) {
+  return (
+    <ProjectView
+      model={useProject('p1')}
+      board={useBoard('p1')}
+      connections={useConnections()}
+      onTask={onTask}
+      {...(room === undefined ? {} : { room })}
+      {...(newTask === undefined ? {} : { newTask })}
+    />
+  )
 }
 
 const session = {
@@ -40,6 +50,30 @@ const talk = (overrides: Partial<CoordinatorSnapshot> = {}) =>
     ],
     ...overrides,
   })
+
+describe('the project’s bar', () => {
+  it('steps through the views by b, never while typing, and opens on the view or the new task a task’s bar asked for', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    const view = withServices(<Project />, client)
+    const checked = () => screen.getAllByRole('radio').find((radio) => radio.getAttribute('aria-checked') === 'true')?.textContent
+    await waitFor(() => expect(checked()).toMatch(/^Conversation/))
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await userEvent.keyboard('b')
+    expect(checked()).toMatch(/^Board/)
+    await userEvent.keyboard('b')
+    expect(checked()).toMatch(/^Both/)
+    await userEvent.keyboard('b')
+    expect(checked()).toMatch(/^Conversation/)
+    await userEvent.type(screen.getByRole('textbox', { name: /Tell the coordinator/ }), 'b')
+    expect(checked()).toMatch(/^Conversation/)
+    view.unmount()
+
+    withServices(<Project room={Room.Board} newTask />, client)
+    // Planning a task opens beside the conversation, so the board is shown with it.
+    await waitFor(() => expect(checked()).toMatch(/^Both/))
+    expect(await screen.findByRole('complementary', { name: 'New task' })).toBeTruthy()
+  })
+})
 
 describe('the Talk room', () => {
   it("shows the coordinator's thread with each task's card, folds its finished work, and opens a task", async () => {

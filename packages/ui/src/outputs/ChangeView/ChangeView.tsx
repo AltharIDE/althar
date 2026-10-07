@@ -90,6 +90,11 @@ export interface ChangeViewProps {
   view: FileView
   onRetry?: () => void
   onClose: () => void
+  /**
+   * space: the system draws its lights over the window's top row, as on
+   * macOS, so the view stays below that row; none: it may reach the top.
+   */
+  lights?: 'space' | 'none'
   text?: Partial<ChangeViewText>
 }
 
@@ -102,7 +107,7 @@ const split = (path: string) => {
 }
 
 /** A task's change over the whole window. A modal dialog: mount it to open it. */
-export function ChangeView({ branch, base, files, selected, onSelect, view, onRetry, onClose, text }: ChangeViewProps) {
+export function ChangeView({ branch, base, files, selected, onSelect, view, onRetry, onClose, lights = 'none', text }: ChangeViewProps) {
   const t = { ...changeViewText, ...text }
   const current = files.find((file) => file.path === selected) ?? files[0]
   const add = files.reduce((sum, file) => sum + file.add, 0)
@@ -139,7 +144,7 @@ export function ChangeView({ branch, base, files, selected, onSelect, view, onRe
         <Dialog.Overlay className={s.overlay} />
         <Dialog.Content
           ref={dialog}
-          className={cx('ch-root', s.dialog)}
+          className={cx('ch-root', s.dialog, lights === 'space' && s.underLights)}
           aria-describedby={undefined}
           onKeyDown={keys}
           // The view itself takes focus, where j and k work, rather than its close button.
