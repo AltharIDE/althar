@@ -314,7 +314,7 @@ describe('sessions', () => {
       )
       // The thread says why no answer came, in the agent's words.
       const notice = (yield* threadItems(created.threadId)).find((item) => item.kind === 'notice' && item.content.severity === 'error')
-      assert.deepInclude(notice?.content, { title: "Fake codex couldn't answer.", failure: 'auth_required' })
+      assert.deepInclude(notice?.content, { source: 'agent', title: "Fake codex couldn't answer.", failure: 'auth_required' })
       assert.isNotEmpty(notice?.content.description)
     }).pipe(Effect.provide(runtime())),
   )

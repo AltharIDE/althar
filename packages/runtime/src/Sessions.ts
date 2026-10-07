@@ -594,14 +594,14 @@ export class Sessions extends Context.Service<
             // Tried again shortly, rather than straight away.
             yield* Effect.forkIn(Effect.delay(Queue.offer(running.wake, undefined), Duration.seconds(1)), running.scope)
           }
-          // A prompt the agent failed leaves a line in the thread, or the person waits on an answer that isn't coming.
+          // A prompt the agent failed ends its turn with the agent's error, or the person waits on an answer that isn't coming.
           // A usage limit is said by what carries the work on.
           if (Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed' && errorClass !== 'usage_limit')
             yield* addItem(
               { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId },
               'notice',
               {
-                source: 'runtime',
+                source: 'agent',
                 severity: 'error',
                 title: `${running.entry.definition.name} couldn't answer.`,
                 description: failure.value.message,

@@ -249,8 +249,14 @@ export interface ThreadSource {
 
 /** A turn's work and what it said: all but its last message folds, and all of it before a step's result. */
 const splitOf = (parts: ReadonlyArray<Part>, beforeStep: boolean) => {
+  // A turn an error ended says so in the open: there's no answer to come.
+  const ending = parts.at(-1)
+  const failed = ending?.kind === 'notice' && ending.tone === 'error' ? parts.length - 1 : -1
   const last = beforeStep ? -1 : parts.findLastIndex((part) => part.kind === 'message')
-  return { work: parts.filter((_, index) => index !== last), said: last === -1 ? [] : parts.slice(last, last + 1) }
+  return {
+    work: parts.filter((_, index) => index !== last && index !== failed),
+    said: parts.filter((_, index) => index === last || index === failed),
+  }
 }
 
 /** What a running turn is doing, from the last thing it did. */
