@@ -28,7 +28,7 @@ export const ACCEPT = {
   title: 'Return 409 when a refund idempotency key is reused',
   because: 'Every check passed. Nothing merges until you accept it.',
   repo: PR.repo,
-  number: PR.number,
+  number: PR.number ?? 0,
   host: GITHUB,
   url: PR.url,
   lead: OPUS,

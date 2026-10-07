@@ -31,3 +31,11 @@ export const say = async (page: Page, words: string) => {
   await box.fill(words)
   await box.press('Enter')
 }
+
+/** A ready task opens on what it made: its conversation is the header's other face, not the project's view of that name. */
+export const toConversation = async (page: Page) => {
+  await page
+    .getByRole('radiogroup', { name: 'Face' })
+    .getByRole('radio', { name: /Conversation/ })
+    .click()
+}

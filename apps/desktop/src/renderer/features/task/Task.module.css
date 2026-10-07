@@ -55,3 +55,16 @@
   text-decoration-color: var(--line-3);
   text-underline-offset: 2px;
 }
+
+/* What the task made: the change set and what can be done with it, on the page, as wide as the header over it. */
+.outputs {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.outputsBody {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding-block: 24px 48px;
+}

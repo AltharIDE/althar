@@ -43,6 +43,10 @@ const restarts: Array<number> = []
 /** The profile and worktrees, as the command-line client has them, so both see the same projects. */
 const locations = () => ({ profile: defaultProfile(process.env, process.platform), worktrees: defaultWorktrees(process.env) })
 
+// A profile of its own, as the end-to-end tests give, keeps what its window remembers too, its tabs and pinned models, apart from the person's.
+const ownProfile = process.env.ALTHAR_PROFILE
+if (ownProfile !== undefined && ownProfile !== '') app.setPath('userData', join(ownProfile, 'window'))
+
 /** Grants the runtime has yet to confirm, by request. */
 const granting = new Map<string, (grant: string | null) => void>()
 

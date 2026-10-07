@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ProjectSummary } from '@althar/contracts'
 
-import { TabsFrame, useVisit } from '../src/renderer/features/tabs/TabsFrame'
+import { TabsFrame, useLastTask, useVisit } from '../src/renderer/features/tabs/TabsFrame'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
 import { changed, fakeClient, project } from './fixtures'
 import { withServices } from './render'
@@ -28,8 +28,19 @@ function Where() {
 }
 function Thread() {
   const { threadId } = threadRoute.useParams()
-  useVisit(threadId, THREADS[threadId])
+  useVisit(threadId, THREADS[threadId], `Task ${threadId}`)
   return <Where />
+}
+/* A project's screen names the task last opened in it, as its bar does. */
+function ProjectScreen() {
+  const { projectId } = projectRoute.useParams()
+  const last = useLastTask(projectId)
+  return (
+    <>
+      <Where />
+      <p data-testid="last">{last === null ? 'none' : `${last.title} (${last.threadId})`}</p>
+    </>
+  )
 }
 const rootRoute = createRootRoute({
   component: () => (
@@ -39,7 +50,7 @@ const rootRoute = createRootRoute({
   ),
 })
 const homeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', component: Where })
-const projectRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects/$projectId', component: Where })
+const projectRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects/$projectId', component: ProjectScreen })
 const rulesRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects/$projectId/rules', component: Where })
 const threadRoute = createRoute({ getParentRoute: () => rootRoute, path: '/threads/$threadId', component: Thread })
 
@@ -96,6 +107,7 @@ describe('the window’s tabs', () => {
     expect(keptFrom(window.localStorage.getItem('althar.tabs'))).toEqual({
       open: ['p1', 'p3', 'p2'],
       places: { p1: { kind: 'thread', threadId: 'th1' }, p2: { kind: 'project' } },
+      tasks: { p1: { threadId: 'th1', title: 'Task th1' } },
     })
   })
 
@@ -146,6 +158,29 @@ describe('the window’s tabs', () => {
     expect(client.listProjects).toHaveBeenCalledTimes(2)
   })
 
+  it('forget projects removed since, and open the busy ones when none of what was kept is left', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['gone', 'p2'], places: { gone: { kind: 'project' } } }))
+    windowAt('/')
+    await waitFor(() => expect(names()).toEqual(['Home, 2 calls wait on you', 'halyard']))
+    await waitFor(() => expect(keptFrom(window.localStorage.getItem('althar.tabs'))).toEqual({ open: ['p2'], places: {} }))
+  })
+
+  it('open the busy projects when none of the tabs kept is a project any more', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['gone', 'also-gone'], places: {} }))
+    windowAt('/')
+    await waitFor(() => expect(names()).toEqual(['Home, 2 calls wait on you', 'meridian, work running', 'tessera, 2 calls wait on you']))
+  })
+
+  it('remember the task last opened in each project, for its bar to go back to', async () => {
+    const { go } = windowAt('/projects/p1')
+    await waitFor(() => expect(screen.getByTestId('last').textContent).toBe('none'))
+    go('/threads/th1')
+    await waitFor(() => expect(tab('meridian').getAttribute('aria-current')).toBe('page'))
+    go('/projects/p1')
+    await waitFor(() => expect(screen.getByTestId('last').textContent).toBe('Task th1 (th1)'))
+    expect(keptFrom(window.localStorage.getItem('althar.tabs'))?.tasks).toEqual({ p1: { threadId: 'th1', title: 'Task th1' } })
+  })
+
   it('offer a folder from the +, on the home', async () => {
     const { router } = windowAt('/projects/p1', [project])
     await userEvent.click(await screen.findByRole('button', { name: 'Open a project' }))
@@ -194,5 +229,10 @@ describe('working out the tabs', () => {
       ),
     ).toEqual({ open: ['p1'], places: { p1: { kind: 'thread', threadId: 't' } } })
     expect(keptFrom(JSON.stringify({ open: [] }))).toEqual({ open: [], places: {} })
+    expect(keptFrom(JSON.stringify({ open: [], tasks: { p1: { threadId: 't', title: 'T' }, p2: { threadId: 3 } } }))).toEqual({
+      open: [],
+      places: {},
+      tasks: { p1: { threadId: 't', title: 'T' } },
+    })
   })
 })

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch, say } from './support'
+import { chooseFolder, launch, say, toConversation } from './support'
 
 /*
  * The app as someone uses it: open a folder as a project, start a task, and
@@ -45,8 +45,11 @@ test('opens a project, starts a task, and talks to its lead', async () => {
     // Its card shows in the Talk room, and opens the task.
     await page.getByRole('button', { name: /Open task/ }).click()
 
+    // Ready for you; it built nothing, so its conversation is all there is to see.
+    await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
+    await expect(page.getByText('Ready for you')).toBeVisible()
+    await expect(page.getByText('Nothing is built yet, so there is nothing else to look at.')).toBeVisible()
     // The lead is briefed first, and reports its step; its summary is what shows, its work folded above it.
-    await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call' })).toBeVisible()
     await expect(page.getByText('Did the task.')).toBeVisible()
 
     await say(page, 'hello')
@@ -106,7 +109,7 @@ test('opens a project, starts a task, and talks to its lead', async () => {
     expect(killed).toBe(true)
     await expect(page.getByText(/Althar restarted\. The lead stopped with it/)).toBeVisible({ timeout: 20_000 })
     // Its run passed, so the task is still ready, with no lead running.
-    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
+    await expect(page.getByText('Ready for you', { exact: true })).toBeVisible()
     // Nothing to press to start it: what the person says next starts it.
     await expect(page.getByRole('textbox', { name: /^Tell .+ something$/ })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Start the lead' })).toHaveCount(0)
@@ -143,8 +146,13 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await page.screenshot({ path: 'test-results/ready.png' })
 
     // In the task, the lead's work is folded under what each step reported.
+    // Ready, it opens on what it made: its branch, merged here as the person says, and the review it passed.
     await page.getByRole('button', { name: /Open task/ }).click()
-    await expect(page.getByRole('heading', { name: 'Add a retry' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Add a retry', level: 1 })).toBeVisible()
+    await expect(page.getByText('On its branch')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Merge into main' })).toBeVisible()
+    await page.screenshot({ path: 'test-results/outputs.png' })
+    await toConversation(page)
     await expect(page.getByText('Did the task.')).toBeVisible()
     await expect(page.getByText('The heading needs fixing.')).toBeVisible()
     await expect(page.getByText(/round 2/)).toBeVisible()
@@ -200,19 +208,19 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     const pushed = execFileSync('git', ['--git-dir', remote, 'branch', '--list'], { encoding: 'utf8' })
     expect(pushed).toMatch(/althar\//)
 
+    // Ready, it opens on its pull request: its files and checks, and marking it ready.
     await page.getByRole('button', { name: /Open task/ }).click()
-    await expect(page.getByText('Opened draft pull request #1.')).toBeVisible()
-    await page.getByRole('button', { name: 'PR #1' }).click()
     await expect(page.getByText('change.txt')).toBeVisible()
-    // A trial click waits for the panel to finish sliding in.
-    await page.getByRole('button', { name: 'Mark ready for review' }).click({ trial: true })
     await expect(page.getByText('None have run yet')).toBeVisible()
     await page.screenshot({ path: 'test-results/change.png', animations: 'disabled' })
 
-    // Marked ready here, it is ready on GitHub: merging it is the person's, there.
+    // Marked ready here, it is ready on GitHub, and accepting it is the person's.
     await page.getByRole('button', { name: 'Mark ready for review' }).click()
-    await expect(page.getByText('Merge it on GitHub when you’re ready')).toBeVisible()
+    await expect(page.getByText('Nothing merges until you accept it')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Accept and merge' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Mark ready for review' })).toHaveCount(0)
+    await toConversation(page)
+    await expect(page.getByText('Opened draft pull request #1.')).toBeVisible()
 
     // What it changed, file by file, read from its worktree: ⌘D opens it.
     await page.keyboard.press('Meta+d')
@@ -223,9 +231,8 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await page.keyboard.press('Escape')
     await expect(changes).toHaveCount(0)
 
-    // Back in the project, the board has it ready to accept; accepted from the dock, it is merged, and settles.
-    await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.keyboard.press('Meta+2')
+    // The project's bar is over the task: its board has it ready to accept; accepted from the dock, it is merged, and settles.
+    await page.getByRole('radio', { name: /^Board/ }).click()
     const work = page.getByRole('region', { name: 'The project’s work' })
     await expect(work.getByText('Ready to accept')).toBeVisible()
     await page.screenshot({ path: 'test-results/board.png', animations: 'disabled' })

@@ -29,8 +29,8 @@ export interface TabsModel {
   readonly open: (id: string) => void
   /** Asks for a folder to open as a new project, on the home. */
   readonly openFolder: () => void
-  /** A task was read: its project's tab has the window while it does. */
-  readonly visit: (threadId: string, projectId: string) => void
+  /** A task was read: its project's tab has the window while it does, and it is the task last opened there. */
+  readonly visit: (threadId: string, projectId: string, title?: string) => void
 }
 
 /** Changes that move what the tabs show: a project's name, its tasks and runs, who is working, what waits on you. */
@@ -60,17 +60,21 @@ export const useTabs = (): TabsModel => {
     if (event._tag === 'Changed' && SHOWN.has(event.aggregateType)) load()
   }, since)
 
-  // The first time, before anything was kept: the projects where something goes on.
-  useEffect(() => {
-    if (projects !== null) store.seed(firstOpen(projects))
-  }, [store, projects])
-
   const where = whereOf(pathname)
   const known = where.kind === 'home' ? null : where.kind === 'project' ? where.projectId : threads[where.threadId]
   // A task whose project isn't read yet keeps the tab that had the window.
   const [shown, setShown] = useState<string | null>(null)
   if (known !== undefined && known !== shown) setShown(known)
   const current = known === undefined ? shown : known
+
+  // The first time, before anything was kept, or once none of it is a project any more: the projects where something goes on.
+  // The one with the window stays, though a list read before it was made doesn't have it yet.
+  useEffect(() => {
+    if (projects === null) return
+    const ids = new Set(projects.map((project) => project.id))
+    if (current !== null) ids.add(current)
+    store.seed(firstOpen(projects), ids)
+  }, [store, projects, current])
 
   // Going into a project, or one of its tasks, gives it a tab and keeps where in it the window is.
   const seeded = kept !== null
