@@ -29,6 +29,10 @@
 .merged .status {
   color: var(--ok);
 }
+/* on its branch, it waits on you to merge it here once it can be accepted */
+.branch.asks .status {
+  color: var(--signal);
+}
 span.you {
   width: 7px;
   height: 7px;
@@ -46,7 +50,7 @@ span.you {
   color: var(--t-1);
   text-wrap: pretty;
 }
-.branch {
+.refs {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

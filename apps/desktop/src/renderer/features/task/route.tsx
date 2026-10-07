@@ -13,6 +13,8 @@ function Task() {
   useVisit(threadId, projectId)
   return (
     <TaskView
+      // Each task starts on its own face, with nothing typed.
+      key={threadId}
       model={model}
       onBack={() =>
         void (projectId === undefined ? navigate({ to: '/' }) : navigate({ to: '/projects/$projectId', params: { projectId } }))

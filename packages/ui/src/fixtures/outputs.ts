@@ -128,3 +128,17 @@ export const CHANGE_ONE_REPO: Data = {
     { id: 'integration', name: 'Integration', state: CheckState.Passed, detail: '12 passed' },
   ],
 }
+
+/** Work that ended on its branch, with no pull request: its repository's files, and the review it passed; it merges on this Mac. */
+export const CHANGE_BRANCH: Data = {
+  title: 'Return 409 when a refund idempotency key is reused',
+  branch: 'althar/return-409-on-reuse',
+  base: 'main',
+  lead: OPUS,
+  reviewers: [SONNET],
+  prs: [{ repo: 'meridian-api', files: PR_416[0]?.files ?? [] }],
+  state: ChangeState.Branch,
+  note: 'Its repository isn’t on a code host Althar knows · nothing was pushed',
+  commits: 2,
+  checks: [{ id: 'review', name: 'Review', state: CheckState.Passed, by: [SONNET], detail: 'passed on the second round' }],
+}

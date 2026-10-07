@@ -708,8 +708,9 @@ export const ThreadSnapshot = Schema.Struct({
     waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
-    /** The step it is on, by key, while it runs. */
+    /** The step it is on, by key, while it runs, and since when. */
     step: Schema.NullOr(Schema.String),
+    stepAt: Schema.NullOr(Schema.String),
     /** When its work started, and when it settled: how long it has run. */
     startedAt: Schema.NullOr(Schema.String),
     settledAt: Schema.NullOr(Schema.String),

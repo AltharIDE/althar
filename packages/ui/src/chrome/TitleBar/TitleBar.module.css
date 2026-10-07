@@ -16,16 +16,18 @@
 .bar :is(button, a, input, [role='radio']) {
   -webkit-app-region: no-drag;
 }
+/* as wide as macOS draws its lights, from 16px in */
 .lights {
   flex: none;
   display: flex;
-  gap: 8px;
-  width: 49px;
+  gap: 9px;
+  width: 62px;
   margin-right: 6px;
+  padding-left: 4px;
 }
 .lights i {
-  width: 11px;
-  height: 11px;
+  width: 12px;
+  height: 12px;
   border-radius: 99px;
   visibility: hidden;
 }

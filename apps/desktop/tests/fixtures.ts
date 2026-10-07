@@ -321,6 +321,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     waits: null,
     steps: [],
     step: null,
+    stepAt: null,
     startedAt: null,
     settledAt: null,
     issue: null,

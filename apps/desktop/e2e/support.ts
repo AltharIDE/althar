@@ -31,3 +31,8 @@ export const say = async (page: Page, words: string) => {
   await box.fill(words)
   await box.press('Enter')
 }
+
+/** A ready task opens on what it made: its conversation is the switch beside it. */
+export const toConversation = async (page: Page) => {
+  await page.getByRole('radio', { name: /Conversation/ }).click()
+}

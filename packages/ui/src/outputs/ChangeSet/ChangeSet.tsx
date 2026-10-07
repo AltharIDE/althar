@@ -21,13 +21,16 @@ import s from './ChangeSet.module.css'
  * merged in an order and never as one. Who led it and who reviewed it, the
  * files by how much they changed, and every check. When all of them pass it
  * is ready, and accepting it is yours: nothing merges before. Or send it
- * back with a note, and the lead picks the note up.
+ * back with a note, and the lead picks the note up. Work that ended on its
+ * branch, with no pull request, is the same change: its repositories in
+ * place of pull requests, merged on this Mac when you accept it.
  */
 
 export interface PullRequest {
   /** owner/name. */
   repo: string
-  number: number
+  /** None for a repository whose work stays on its branch. */
+  number?: number
   /** Where it lives on the code host; a link only when it is http or https. */
   url?: string
   files: readonly ChangedFile[]
@@ -44,6 +47,8 @@ export interface ChangeSetText {
   /** The same model led and reviewed it. */
   same: string
   prs: (n: number) => string
+  /** In place of pull requests, for work on its branch. */
+  repositories: (n: number) => string
   number: (n: number) => string
   /** The link to a pull request on its host: its words, then its full name. */
   onHost: (host: string) => string
@@ -55,6 +60,10 @@ export interface ChangeSetText {
   /** Before any check has started, as on a pull request just opened. */
   noChecks: string
   accept: (repos: number) => string
+  /** Accepting work on its branch: it merges into its base, on this Mac. */
+  mergeHere: (base: string) => string
+  /** Said beside that, where the order would be. */
+  here: string
   order: (numbers: readonly number[]) => string
   sendBack: string
   sendBackPlaceholder: string
@@ -63,13 +72,19 @@ export interface ChangeSetText {
 }
 
 export const changeSetText: ChangeSetText = {
-  state: { [ChangeState.Draft]: 'Draft', [ChangeState.Ready]: 'Ready to accept', [ChangeState.Merged]: 'Merged' },
+  state: {
+    [ChangeState.Draft]: 'Draft',
+    [ChangeState.Ready]: 'Ready to accept',
+    [ChangeState.Merged]: 'Merged',
+    [ChangeState.Branch]: 'On its branch',
+  },
   commits: (n) => (n === 1 ? '1 commit' : `${n} commits`),
   repos: (n) => `${n} repositories`,
   led: 'Led by',
   reviewed: 'Reviewed by',
   same: 'The same model led and reviewed this',
   prs: (n) => (n === 1 ? 'Pull request' : 'Pull requests'),
+  repositories: (n) => (n === 1 ? 'Repository' : 'Repositories'),
   number: (n) => `#${n}`,
   onHost: (host) => host,
   onHostLabel: (repo, n, host) => `Open ${repo} #${n} on ${host}`,
@@ -84,6 +99,8 @@ export const changeSetText: ChangeSetText = {
     return 'Accept and merge'
   },
   order: (numbers) => (numbers.length > 1 ? `In order: ${numbers.map((n) => `#${n}`).join(', then ')}` : 'Squashes into the base branch'),
+  mergeHere: (base) => `Merge into ${base}`,
+  here: 'On this Mac · nothing is pushed',
   sendBack: 'Send back',
   sendBackPlaceholder: 'What should change? The lead picks it up with this note',
   cancel: 'Cancel',
@@ -99,6 +116,8 @@ function Status({ state, t }: { state: ChangeState; t: ChangeSetText }) {
         return <span className={s.you} aria-hidden="true" />
       case ChangeState.Merged:
         return <Icon name="check" size={12} />
+      case ChangeState.Branch:
+        return <Icon name="branch" size={12} />
       default:
         return unreachable(state)
     }
@@ -113,8 +132,8 @@ function Status({ state, t }: { state: ChangeState; t: ChangeSetText }) {
 
 export interface ChangeSetProps {
   state: ChangeState
-  /** Where its pull requests live. */
-  host: CodeHost
+  /** Where its pull requests live; none for work on its branch. */
+  host?: CodeHost
   /** A line beside the state: Opens for review when verify passes. */
   note?: string
   title: string
@@ -182,10 +201,12 @@ export function ChangeSet({
   const del = files.reduce((n, f) => n + f.del, 0)
   const most = Math.max(1, ...files.map((f) => f.add + f.del))
   const same = reviewers.some((r) => r.id === lead.id)
-  const deciding = state === ChangeState.Ready && (onAccept !== undefined || onSendBack !== undefined)
+  const here = state === ChangeState.Branch
+  const deciding = (state === ChangeState.Ready || here) && (onAccept !== undefined || onSendBack !== undefined)
+  const numbers = prs.flatMap((p) => (p.number === undefined ? [] : [p.number]))
 
   return (
-    <article className={cx(s.change, s[state], className)} aria-labelledby={titleId}>
+    <article className={cx(s.change, s[state], deciding && s.asks, className)} aria-labelledby={titleId}>
       <div className={s.body}>
         <div className={s.statusLine}>
           <Status state={state} t={t} />
@@ -194,7 +215,7 @@ export function ChangeSet({
         <Heading level={headingLevel} id={titleId} className={s.title}>
           {title}
         </Heading>
-        <div className={s.branch}>
+        <div className={s.refs}>
           <span className={s.ref}>{branch}</span>
           <Icon name="arrow" size={11} />
           <span className={s.ref}>{base}</span>
@@ -221,9 +242,9 @@ export function ChangeSet({
       </div>
 
       <div className={s.grid}>
-        <section className={s.section} aria-label={t.prs(prs.length)}>
+        <section className={s.section} aria-label={here ? t.repositories(prs.length) : t.prs(prs.length)}>
           <header className={s.sub}>
-            <span>{t.prs(prs.length)}</span>
+            <span>{here ? t.repositories(prs.length) : t.prs(prs.length)}</span>
             <span className={s.count}>{prs.length}</span>
             <span className={s.sum}>
               <Delta add={add} del={del} />
@@ -232,17 +253,17 @@ export function ChangeSet({
           </header>
           {prs.map((p, i) => {
             const [owner, name] = p.repo.includes('/') ? p.repo.split('/') : ['', p.repo]
-            const link = safeHref(p.url)
+            const link = p.number === undefined || host === undefined ? undefined : safeHref(p.url)
             return (
-              <div key={`${p.repo}${p.number}`} className={s.pr}>
+              <div key={`${p.repo}${p.number ?? ''}`} className={s.pr}>
                 <div className={s.prHead}>
-                  {prs.length > 1 && <span className={s.order}>{i + 1}</span>}
-                  {host.brand && <BrandMark brand={host.brand} size={14} />}
+                  {prs.length > 1 && !here && <span className={s.order}>{i + 1}</span>}
+                  {host?.brand && p.number !== undefined && <BrandMark brand={host.brand} size={14} />}
                   <span className={s.repo}>
                     {owner && <span className={s.owner}>{owner} /</span>} {name}
                   </span>
-                  <span className={s.number}>{t.number(p.number)}</span>
-                  {link && (
+                  {p.number !== undefined && <span className={s.number}>{t.number(p.number)}</span>}
+                  {link && host && p.number !== undefined && (
                     <a
                       className={s.github}
                       href={link}
@@ -294,7 +315,7 @@ export function ChangeSet({
             <>
               {deciding && onAccept && (
                 <Button variant="signal" busy={accepting} onClick={onAccept}>
-                  {t.accept(prs.length)}
+                  {here ? t.mergeHere(base) : t.accept(prs.length)}
                 </Button>
               )}
               {deciding && onSendBack && (
@@ -302,7 +323,7 @@ export function ChangeSet({
                   {t.sendBack}
                 </Button>
               )}
-              {deciding && <span className={s.meta}>{t.order(prs.map((p) => p.number))}</span>}
+              {deciding && <span className={s.meta}>{here ? t.here : t.order(numbers)}</span>}
               {onReviewDiff && (
                 <Button variant={deciding ? 'quiet' : 'default'} kbd={diffKey} onClick={onReviewDiff} className={cx(deciding && s.push)}>
                   {t.diff}

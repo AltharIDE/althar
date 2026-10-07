@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { CHANGE_DRAFT, CHANGE_HELD, CHANGE_MERGED, CHANGE_ONE_REPO, CHANGE_READY } from '../../fixtures/outputs'
+import { CHANGE_BRANCH, CHANGE_DRAFT, CHANGE_HELD, CHANGE_MERGED, CHANGE_ONE_REPO, CHANGE_READY } from '../../fixtures/outputs'
 import { States, statesParameters } from '../../storybook/States'
 import { DiffStat } from '../../primitives/FileChanges/FileChanges'
 import { ChangeSet } from './ChangeSet'
@@ -31,6 +31,8 @@ export const NoChecksYet: Story = {
 /** A check waits on your call; the change waits with it. */
 export const Held: Story = { args: CHANGE_HELD }
 export const Merged: Story = { args: CHANGE_MERGED }
+/** Ended on its branch, with no pull request: accepting it merges it into main on this Mac. */
+export const OnItsBranch: Story = { args: { ...CHANGE_BRANCH, host: undefined } }
 /** One repository, and the lead reviewed its own work: the card says so. */
 export const OneRepositorySameReviewer: Story = { args: CHANGE_ONE_REPO }
 /** Without handlers there are no actions, and files are not links. */
@@ -86,6 +88,7 @@ export const AllStates: Story = {
         { state: 'draft', node: <ChangeSet {...args} {...CHANGE_DRAFT} /> },
         { state: 'held', node: <ChangeSet {...args} {...CHANGE_HELD} /> },
         { state: 'merged', node: <ChangeSet {...args} {...CHANGE_MERGED} /> },
+        { state: 'on its branch', node: <ChangeSet {...args} {...CHANGE_BRANCH} host={undefined} /> },
         { state: 'one repository, same reviewer', node: <ChangeSet {...args} {...CHANGE_ONE_REPO} /> },
         { state: 'read only', node: <ChangeSet {...args} {...ReadOnly.args} /> },
         { state: 'accepting', node: <ChangeSet {...args} accepting /> },

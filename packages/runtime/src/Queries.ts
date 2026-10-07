@@ -1017,6 +1017,12 @@ export class Queries extends Context.Service<
           const { items, earlier } = yield* pageOf(threadId, page)
           const attention = yield* sql<{ id: string; kind: string; payload: string; createdAt: string }>`
             SELECT id, kind, payload, created_at FROM attention_requests WHERE task_id = ${head.taskId} AND state = 'open' ORDER BY created_at`
+          // Since when the step it is on has run, or been held.
+          const [onStep] = yield* sql<{ admittedAt: string }>`
+            SELECT a.admitted_at FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+            JOIN runs r ON r.id = e.run_id
+            WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC LIMIT 1)
+              AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1`
           return {
             threadId,
             cursor: at,
@@ -1037,6 +1043,7 @@ export class Queries extends Context.Service<
                 step: card?.step ?? null,
                 startedAt: card?.startedAt ?? null,
               }))),
+              stepAt: onStep?.admittedAt ?? null,
               settledAt: head.settledAt,
               ...(yield* linksOf(head.taskId)),
               ...(yield* changedOfTask(head.taskId)),
