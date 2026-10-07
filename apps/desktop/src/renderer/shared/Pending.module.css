@@ -1,0 +1,43 @@
+.window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--n-2);
+}
+
+.thread {
+  flex: 1;
+  min-height: 0;
+  padding-top: 40px;
+  overflow: hidden;
+}
+
+/* As the home lays out its stream and the projects beside it. */
+.home {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 48px;
+  max-width: 1080px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 36px 32px;
+}
+.stream,
+.side,
+.page,
+.part {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.page {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 40px 32px;
+}
+
+.part {
+  padding: 20px;
+}

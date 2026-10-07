@@ -1,0 +1,37 @@
+.skeleton {
+  display: block;
+  flex: none;
+  max-width: 100%;
+  border-radius: var(--r-sm);
+  animation: breathe 1.6s var(--ease) infinite alternate;
+}
+.line {
+  height: 9px;
+  background: var(--track);
+}
+.block {
+  height: 36px;
+  border-radius: var(--r);
+  background: var(--track);
+}
+.sheet {
+  height: 88px;
+  border-radius: var(--r);
+  background: var(--n-1);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--lift-card);
+}
+@keyframes breathe {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}

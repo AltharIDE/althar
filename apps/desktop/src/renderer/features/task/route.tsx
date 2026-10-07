@@ -4,6 +4,7 @@ import { Room, TASK } from '@althar/ui'
 
 import { reads } from '../../data/reads'
 import { rootRoute } from '../../root'
+import { ThreadPending } from '../../shared/Pending'
 import { lanesOf, yoursOf } from '../board/lanes'
 import { useBoard } from '../board/useBoard'
 import { ProjectBar } from '../project/ProjectBar'
@@ -62,6 +63,7 @@ export const taskRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/threads/$threadId',
   component: Task,
+  pendingComponent: ThreadPending,
   remountDeps: ({ params }) => params.threadId,
   // The thread and the agents, then its project's board, for the bar over it.
   loader: async ({ context: { client, cache }, params: { threadId } }) => {

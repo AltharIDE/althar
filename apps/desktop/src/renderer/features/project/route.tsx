@@ -4,6 +4,7 @@ import { Room } from '@althar/ui'
 
 import { readFirst, reads } from '../../data/reads'
 import { rootRoute } from '../../root'
+import { ThreadPending } from '../../shared/Pending'
 import { useBoard } from '../board/useBoard'
 import { useLastTask } from '../tabs/TabsFrame'
 import { useConnections } from '../connections/useConnections'
@@ -47,6 +48,7 @@ export const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/projects/$projectId',
   component: Project,
+  pendingComponent: ThreadPending,
   // Another project is another screen, with nothing of this one's kept: what was typed, what was open.
   remountDeps: ({ params }) => params.projectId,
   loader: ({ context: { client, cache }, params: { projectId } }) => {

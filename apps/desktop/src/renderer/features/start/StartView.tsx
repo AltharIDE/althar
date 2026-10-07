@@ -1,20 +1,11 @@
 import { type DragEvent, type ReactNode, useEffect } from 'react'
 
 import type { AccountStatus, AgentStatus, ProjectSummary } from '@althar/contracts'
-import {
-  type AccountEntry,
-  Accounts,
-  Button,
-  PermissionPolicy,
-  type RuntimeEntry,
-  RuntimeState,
-  SourceOrigin,
-  Spinner,
-  TitleBar,
-} from '@althar/ui'
+import { type AccountEntry, Accounts, Button, PermissionPolicy, type RuntimeEntry, RuntimeState, SourceOrigin, TitleBar } from '@althar/ui'
 import { NewProject, Start } from '@althar/ui/screens'
 
 import { brandOf } from '../../shared/agents'
+import { HomePending } from '../../shared/Pending'
 import { clock } from '../../shared/time'
 import { text as rulesText } from '../rules/RulesView'
 import s from './Start.module.css'
@@ -205,15 +196,7 @@ export function StartView({
     )
   }
 
-  if (model.projects === null)
-    return (
-      <div className={s.window}>
-        <TitleBar lights="none">{null}</TitleBar>
-        <div className={`${s.scroll} ${s.loading}`}>
-          <Spinner />
-        </div>
-      </div>
-    )
+  if (model.projects === null) return <HomePending />
 
   return home()
 }

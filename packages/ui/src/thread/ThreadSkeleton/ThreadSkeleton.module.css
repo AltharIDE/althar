@@ -1,0 +1,17 @@
+/* Turns 30px apart, lines 14px apart inside one, as a thread spaces them. */
+.thread {
+  display: grid;
+  gap: 30px;
+  width: 100%;
+}
+.you {
+  display: flex;
+  justify-content: flex-end;
+}
+.bubble {
+  border-radius: 16px 16px 5px 16px;
+}
+.turn {
+  display: grid;
+  gap: 14px;
+}

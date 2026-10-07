@@ -8,7 +8,6 @@ import {
   Issue,
   LinkButton,
   type ModelInfo,
-  Spinner,
   TaskFace,
   TaskHeader,
   TaskMenu,
@@ -16,12 +15,14 @@ import {
   Thread,
   ThreadDivider,
   ThreadMeasure,
+  ThreadSkeleton,
   TitleBar,
 } from '@althar/ui'
 
 import { useModels } from '../../data/models'
 import { modelInfo, waitsWords } from '../../shared/agents'
 import { ModelChoice } from '../../shared/ModelChoice'
+import { pendingText } from '../../shared/Pending'
 import { catalogOf, type Choice, modelName, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { stepNames, stepText, trackFor } from '../../shared/steps'
@@ -222,7 +223,17 @@ export function TaskView({
     return (
       <div className={s.window}>
         {nav ?? <TitleBar lights="none">{null}</TitleBar>}
-        <div className={s.loading}>{model.error === null ? <Spinner /> : <p role="alert">{model.error}</p>}</div>
+        {model.error === null ? (
+          <div className={s.reading}>
+            <ThreadMeasure>
+              <ThreadSkeleton label={pendingText.thread} />
+            </ThreadMeasure>
+          </div>
+        ) : (
+          <div className={s.loading}>
+            <p role="alert">{model.error}</p>
+          </div>
+        )}
       </div>
     )
   }

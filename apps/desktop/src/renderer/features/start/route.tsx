@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 
 import { reads } from '../../data/reads'
 import { rootRoute } from '../../root'
+import { HomePending } from '../../shared/Pending'
 import { HomeView } from '../home/HomeView'
 import { useHome } from '../home/useHome'
 import { StartView } from './StartView'
@@ -48,6 +49,7 @@ export const startRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   component: Start,
+  pendingComponent: HomePending,
   // The projects and the agents, and, once there are projects, the home.
   loader: async ({ context: { client, cache } }) => {
     const read = reads(client)

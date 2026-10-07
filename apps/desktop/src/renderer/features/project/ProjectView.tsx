@@ -12,14 +12,15 @@ import {
   SidePanelBody,
   SidePanelTitle,
   Room,
-  Spinner,
   TaskFace,
   Thread,
   ThreadDivider,
   ThreadMeasure,
+  ThreadSkeleton,
 } from '@althar/ui'
 
 import { ModelChoice } from '../../shared/ModelChoice'
+import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
@@ -65,6 +66,7 @@ export const text = {
   loadingEarlier: 'Showing…',
   dismiss: 'Dismiss',
   boardFailed: 'Althar couldn’t read the board.',
+  boardReading: 'Reading the board',
   notConnected: (host: string) => `Althar isn't connected to ${host}, so tasks here end on their branch.`,
   connect: (host: string) => `Connect ${host}`,
 }
@@ -245,7 +247,17 @@ export function ProjectView({
               </ThreadMeasure>
             </div>
             {coordinator === null ? (
-              <div className={s.loading}>{model.error === null ? <Spinner /> : <p role="alert">{model.error}</p>}</div>
+              model.error === null ? (
+                <div className={s.reading}>
+                  <ThreadMeasure>
+                    <ThreadSkeleton label={pendingText.thread} />
+                  </ThreadMeasure>
+                </div>
+              ) : (
+                <div className={s.loading}>
+                  <p role="alert">{model.error}</p>
+                </div>
+              )
             ) : (
               <TaskFace
                 className={s.face}
@@ -311,9 +323,7 @@ export function ProjectView({
             {lanes !== null ? (
               <BoardView lanes={lanes} agents={model.agents} now={now} current={dock} onOpen={(target) => setDock(target)} />
             ) : board.error === null ? (
-              <div className={s.loading}>
-                <Spinner />
-              </div>
+              <PartPending label={text.boardReading} />
             ) : (
               <p className={s.failure} role="alert">
                 {text.boardFailed} {board.error}

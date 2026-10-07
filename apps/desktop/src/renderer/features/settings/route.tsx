@@ -2,6 +2,7 @@ import { createRoute, useNavigate } from '@tanstack/react-router'
 
 import { readFirst, reads } from '../../data/reads'
 import { rootRoute } from '../../root'
+import { PagePending } from '../../shared/Pending'
 import { useConnections } from '../connections/useConnections'
 import { useStart } from '../start/useStart'
 import { SettingsView } from './SettingsView'
@@ -17,6 +18,7 @@ export const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/settings',
   component: Settings,
+  pendingComponent: PagePending,
   loader: ({ context: { client, cache } }) => {
     const read = reads(client)
     return readFirst(cache.fetchQuery(read.status()), cache.fetchQuery(read.connections()), cache.fetchQuery(read.projects()))
