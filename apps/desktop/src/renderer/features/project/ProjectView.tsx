@@ -1,12 +1,10 @@
-import { useEffect, useState } from 'react'
-
-import type { BoardTask } from '@althar/contracts'
+import { type CSSProperties, useEffect, useState } from 'react'
 
 import {
   ActionButton,
-  ChangeView,
   Composer,
   LinkButton,
+  ResizeHandle,
   SidePanel,
   SidePanelBody,
   SidePanelTitle,
@@ -27,12 +25,11 @@ import { type Choice, runningOn } from '../../shared/models'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
-import { BoardView, type DockTarget } from '../board/BoardView'
-import { DockView, useHead } from '../board/DockView'
+import { BoardView } from '../board/BoardView'
 import { lanesOf, yoursOf } from '../board/lanes'
+import { firstNeedOf, needsOf } from '../board/needs'
 import type { BoardModel } from '../board/useBoard'
 import { ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
-import { useChanges } from '../task/useChanges'
 import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
 import { NewTask } from './NewTask'
@@ -42,11 +39,11 @@ import type { ProjectModel } from './useProject'
 
 /*
  * A project: the conversation with its coordinator, the board of its work,
- * or both side by side (⌘1, ⌘2, ⌘3). The coordinator answers questions
- * itself and turns changes into tasks; a task you plan yourself opens beside
- * the conversation. What you open from the board opens in the dock beside it,
- * to answer or accept there; a task's changes open over the window. The bar
- * says how much is running and how much needs you, and takes you to the
+ * or both side by side, the conversation as wide as the person drags it (b
+ * steps through them). The coordinator answers questions itself and turns
+ * changes into tasks; a task you plan yourself opens beside the conversation.
+ * What you open from the board opens its task. The bar says how much is
+ * running and how much needs you: pointed at, what it is; clicked, the
  * first of it.
  */
 
@@ -73,6 +70,7 @@ export const text = {
   connect: (host: string) => `Connect ${host}`,
   rules: 'Project rules',
   newTask: 'New task',
+  width: 'Width of the conversation',
   /** Where a project of several repositories is: how many, and their names. */
   repositories: (names: ReadonlyArray<string>) => `${names.length} repositories · ${names.join(', ')}`,
 }
@@ -84,6 +82,39 @@ export const whereOf = (project: { readonly repository: string | null; readonly 
   return project.repository?.replace(/^\/(?:Users|home)\/[^/]+(?=\/)/, '~') ?? undefined
 }
 
+/** How wide the conversation is beside the board, as the person last dragged it: this window's own, kept across launches. */
+const WIDTH = { key: 'althar.both', start: 560, min: 340, board: 480 } as const
+
+const storedWidth = (): number => {
+  try {
+    const kept = Number(window.localStorage.getItem(WIDTH.key))
+    return Number.isFinite(kept) && kept >= WIDTH.min ? kept : WIDTH.start
+  } catch {
+    return WIDTH.start
+  }
+}
+
+/** The conversation's width beside the board: dragged, kept, and never so wide the board has no room. */
+const useBothWidth = () => {
+  const [width, setWidth] = useState(storedWidth)
+  const [room, setRoom] = useState(() => window.innerWidth)
+  useEffect(() => {
+    const onResize = () => setRoom(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  const max = Math.max(WIDTH.min, room - WIDTH.board)
+  const keep = (next: number) => {
+    setWidth(next)
+    try {
+      window.localStorage.setItem(WIDTH.key, String(next))
+    } catch {
+      // Not kept; it still holds for this window.
+    }
+  }
+  return { width: Math.min(width, max), min: WIDTH.min, max, set: keep, reset: () => keep(WIDTH.start) }
+}
+
 export function ProjectView({
   model,
   board,
@@ -91,8 +122,8 @@ export function ProjectView({
   onTask,
   onRules,
   room: opening = Room.Talk,
+  onRoomChange,
   newTask = false,
-  lastTask = null,
 }: {
   model: ProjectModel
   board: BoardModel
@@ -100,24 +131,16 @@ export function ProjectView({
   onTask: (threadId: string) => void
   /** Opens the project's rules; without it, no way there. */
   onRules?: () => void
-  /** The view it opens on, as a task's bar chose it. */
+  /** The view it opens on: the one a task's bar chose, or the one the person was last on. */
   room?: Room
+  /** The view it is on, each time it changes, to be opened on again. */
+  onRoomChange?: (room: Room) => void
   /** It opens planning a new task, as a task's bar asked. */
   newTask?: boolean
-  /** The task last opened in it, for the bar's way back. */
-  lastTask?: { readonly title: string; readonly onOpen: () => void } | null
 }) {
   const [room, setRoom] = useState<Room>(newTask && opening === Room.Board ? Room.Both : opening)
-  const [dock, setDock] = useState<DockTarget | null>(null)
-  // A board task's changes, over the window: the task and the file to open on.
-  const [reviewing, setReviewing] = useState<{ readonly task: BoardTask; readonly path?: string } | null>(null)
-  const reviewed = useHead(reviewing?.task.threadId ?? null, board.board?.cursor ?? 0)
-  const changes = useChanges(reviewing?.task.taskId ?? null, reviewed?.task.files[0]?.path ?? null)
-  const { show: showChanges, close: closeChanges } = changes
-  useEffect(() => {
-    if (reviewing === null) return
-    showChanges(reviewing.path)
-  }, [reviewing, showChanges])
+  useEffect(() => onRoomChange?.(room), [room, onRoomChange])
+  const both = useBothWidth()
   const lanes = board.board === null ? null : lanesOf(board.board)
   const yours = lanes === null ? 0 : yoursOf(lanes)
   const working = lanes === null ? 0 : lanes.running.filter((task) => task.phase !== 'stopped').length
@@ -144,6 +167,7 @@ export function ProjectView({
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts.
   const now = useNow((model.coordinator?.session?.turnRunning ?? false) || (lanes?.next.some((task) => task.phase === 'planned') ?? false))
   const coordinator = model.coordinator
+  const host = coordinator?.host ?? null
   const session = coordinator?.session ?? null
   const suggested = coordinator?.suggested ?? null
   const busy = session?.turnRunning ?? false
@@ -180,6 +204,14 @@ export function ProjectView({
           {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
         </p>
       )}
+      {host !== null && !host.connected && (
+        <p className={s.host}>
+          {text.notConnected(host.name)}{' '}
+          <ActionButton size="small" onClick={() => setPanel('connections')}>
+            {text.connect(host.name)}
+          </ActionButton>
+        </p>
+      )}
       {session === null && model.agents.length === 0 && <p className={s.quiet}>{text.needsAgent}</p>}
       {session === null && suggested !== null && !suggested.available && chosen !== null && (
         <p className={s.quiet}>{text.signedOut(suggested.agentName, agentName(chosen.agentId))}</p>
@@ -212,27 +244,19 @@ export function ProjectView({
 
   const talking = room !== Room.Board
   const boarding = room !== Room.Talk
-  /** The first thing that waits on you, in the dock, beside the board. */
+  /** The first thing that waits on you, in its task. */
   const openYours = () => {
-    const first: DockTarget | null =
-      lanes?.calls[0] !== undefined
-        ? { kind: 'call', id: lanes.calls[0].id }
-        : lanes?.ready[0] !== undefined
-          ? { kind: 'task', id: lanes.ready[0].taskId }
-          : null
-    if (first === null) return
-    if (room === Room.Talk) setRoom(Room.Both)
-    setDock(first)
+    const first = lanes === null ? null : firstNeedOf(lanes)
+    if (first !== null) onTask(first)
   }
 
   return (
     <div className={s.window}>
       <ProjectBar
-        room={room}
-        onRoom={setRoom}
-        task={lastTask}
+        place={{ room, onRoom: setRoom }}
         working={lanes === null ? null : working}
         yours={lanes === null ? null : yours}
+        {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask) })}
         onYours={openYours}
         {...(onRules === undefined ? {} : { onRules })}
         newTask={panel === 'task'}
@@ -243,7 +267,7 @@ export function ProjectView({
       />
       <div className={room === Room.Both ? `${s.rooms} ${s.both}` : s.rooms}>
         {talking && (
-          <div className={s.talk}>
+          <div className={s.talk} style={room === Room.Both ? ({ '--talk-width': `${both.width}px` } as CSSProperties) : undefined}>
             <ProjectHead
               title={name}
               meta={whereOf(model.project)}
@@ -258,21 +282,14 @@ export function ProjectView({
                   <MenuItem icon="plus" onSelect={() => setPanel('task')}>
                     {text.newTask}
                   </MenuItem>
-                  {coordinator?.host != null && !coordinator.host.connected && (
+                  {host !== null && !host.connected && (
                     <MenuItem icon="plug" onSelect={() => setPanel('connections')}>
-                      {text.connect(coordinator.host.name)}
+                      {text.connect(host.name)}
                     </MenuItem>
                   )}
                 </>
               }
-            >
-              {coordinator?.host != null && !coordinator.host.connected && (
-                <p className={s.host}>
-                  {text.notConnected(coordinator.host.name)}{' '}
-                  <ActionButton onClick={() => setPanel('connections')}>{text.connect(coordinator.host.name)}</ActionButton>
-                </p>
-              )}
-            </ProjectHead>
+            />
             {coordinator === null ? (
               model.error === null ? (
                 <div className={s.reading}>
@@ -343,12 +360,15 @@ export function ProjectView({
                 </Thread>
               </TaskFace>
             )}
+            {room === Room.Both && (
+              <ResizeHandle value={both.width} min={both.min} max={both.max} onChange={both.set} onReset={both.reset} label={text.width} />
+            )}
           </div>
         )}
         {boarding && (
           <div className={s.board}>
             {lanes !== null ? (
-              <BoardView lanes={lanes} agents={model.agents} now={now} current={dock} onOpen={(target) => setDock(target)} />
+              <BoardView lanes={lanes} agents={model.agents} now={now} onOpen={onTask} />
             ) : board.error === null ? (
               <PartPending label={text.boardReading} />
             ) : (
@@ -358,37 +378,7 @@ export function ProjectView({
             )}
           </div>
         )}
-        {dock !== null && (
-          <div className={s.dock}>
-            <DockView
-              target={dock}
-              model={board}
-              agents={model.agents}
-              project={name}
-              now={now}
-              onClose={() => setDock(null)}
-              onTask={onTask}
-              onChanges={(task, path) => setReviewing({ task, ...(path === undefined ? {} : { path }) })}
-            />
-          </div>
-        )}
       </div>
-      {changes.open && reviewing !== null && reviewed !== null && (
-        <ChangeView
-          lights="space"
-          branch={reviewed.task.branch ?? ''}
-          {...(reviewed.task.baseRef === null ? {} : { base: reviewed.task.baseRef.replace(/^origin\//, '') })}
-          files={reviewed.task.files}
-          selected={changes.selected}
-          onSelect={changes.select}
-          view={changes.view}
-          onRetry={changes.retry}
-          onClose={() => {
-            closeChanges()
-            setReviewing(null)
-          }}
-        />
-      )}
     </div>
   )
 }

@@ -31,8 +31,8 @@ export interface TabsModel {
   readonly open: (id: string) => void
   /** Asks for a folder to open as a new project, on the home. */
   readonly openFolder: () => void
-  /** A task was read: its project's tab has the window while it does, and it is the task last opened there. */
-  readonly visit: (threadId: string, projectId: string, title?: string) => void
+  /** A task was read: its project's tab has the window while it does. */
+  readonly visit: (threadId: string, projectId: string) => void
 }
 
 export const useTabs = (): TabsModel => {

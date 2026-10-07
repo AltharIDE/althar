@@ -32,7 +32,7 @@ const taskIn = (threadId: string, projectId: string, title: string, phase: 'read
 beforeEach(() => window.localStorage.clear())
 
 describe('going from one task to another', () => {
-  it('reads the second afresh: its own face, and the way back to each in its own project', async () => {
+  it('reads the second afresh: its own face, and the way back to its own project', async () => {
     // The second answers only when the test says, so the window is seen in between.
     let answer: (snapshot: ThreadSnapshot) => void = () => undefined
     const second = new Promise<ThreadSnapshot>((resolve) => {
@@ -65,12 +65,12 @@ describe('going from one task to another', () => {
     // Under way, the second opens on its conversation, though the first had opened on its outputs.
     expect(await screen.findByRole('region', { name: 'Thread' })).toBeTruthy()
     expect(screen.queryByRole('article', { name: 'Running one' })).toBeNull()
-    // Each project goes back to its own task.
+    // Its bar goes back to its own project, and that project's tab to it, not to the first.
+    expect(await screen.findByRole('button', { name: 'Back to p2' })).toBeTruthy()
+    expect(screen.getByRole('navigation', { name: 'Where you are' }).textContent).toContain('Running one')
     await waitFor(() =>
-      expect(keptFrom(window.localStorage.getItem('althar.tabs'))?.tasks).toEqual({
-        p1: { threadId: 'tha', title: 'Ready one' },
-        p2: { threadId: 'thb', title: 'Running one' },
-      }),
+      expect(keptFrom(window.localStorage.getItem('althar.tabs'))?.places.p2).toEqual({ kind: 'thread', threadId: 'thb' }),
     )
+    expect(keptFrom(window.localStorage.getItem('althar.tabs'))?.places.p1).not.toEqual({ kind: 'thread', threadId: 'thb' })
   })
 })

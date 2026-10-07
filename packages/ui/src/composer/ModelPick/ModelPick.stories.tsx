@@ -128,6 +128,19 @@ export const HandingOver: Story = {
   },
 }
 
+/** Claude Code offers six efforts: they share the row without spilling. */
+const SIX = { ...OPUS, efforts: ['Default', 'Low', 'Medium', 'High', 'Extra high', 'Max'] }
+export const SixEfforts: Story = {
+  args: { model: SIX, pinned: [SIX], effort: 'High', defaultEffort: 'High', defaultOpen: true },
+  play: async () => {
+    const efforts = within(document.body).getByRole('radiogroup', { name: 'Effort' })
+    for (const option of within(efforts).getAllByRole('radio')) {
+      // Each label fits its own choice.
+      await expect(option.scrollWidth).toBeLessThanOrEqual(option.clientWidth)
+    }
+  },
+}
+
 /** Without onMakeDefault and onBrowse, the picker only picks. */
 export const PickOnly: Story = { args: { effort: 'Max', defaultOpen: true } }
 

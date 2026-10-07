@@ -45,9 +45,14 @@
   white-space: nowrap;
   color: var(--t-3);
 }
+/* gives way before the status does, so a narrow column cuts it short rather than the card */
 .at {
   margin-left: auto;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--t-3);
 }
 .title {

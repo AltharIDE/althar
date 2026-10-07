@@ -47,6 +47,13 @@
   font-size: 13.5px;
 }
 
+/* The prototype's menu button: full size, and darker under the pointer than the page it sits on. */
+.row .menu:hover:not(:disabled),
+.row .menu[aria-expanded='true'] {
+  background: var(--n-4);
+  color: var(--t-1);
+}
+
 /* Quiet, as the prototype has it; what it says is never the only way to know it. */
 .meta {
   margin: 0;

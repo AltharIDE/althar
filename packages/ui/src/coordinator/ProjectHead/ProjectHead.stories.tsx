@@ -37,11 +37,11 @@ export const Intent: Story = {}
 /** A project without an intent: its name, and where it is. */
 export const Named: Story = { args: { title: 'meridian', meta: '~/Projects/meridian' } }
 
-/** Beside the board, narrow. */
+/** Beside the board, narrow, on the conversation's raised column. */
 export const Side: Story = {
   decorators: [
     (Story) => (
-      <div style={{ width: 380 }}>
+      <div style={{ width: 380, background: 'var(--n-1)' }}>
         <Story />
       </div>
     ),
@@ -51,8 +51,3 @@ export const Side: Story = {
 
 /** With nothing to do from it: no menu. */
 export const NoMenu: Story = { args: { menu: undefined } }
-
-/** A notice under it, as when the project's code host isn't connected. */
-export const WithNotice: Story = {
-  args: { children: <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--t-2)' }}>GitHub isn’t connected.</p> },
-}

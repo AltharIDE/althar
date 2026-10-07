@@ -17,12 +17,12 @@ function Project({
   onTask = vi.fn(),
   room,
   newTask,
-  lastTask,
+  onRoomChange,
 }: {
   onTask?: (threadId: string) => void
   room?: Room
   newTask?: boolean
-  lastTask?: { title: string; onOpen: () => void }
+  onRoomChange?: (room: Room) => void
 }) {
   return (
     <ProjectView
@@ -32,7 +32,7 @@ function Project({
       onTask={onTask}
       {...(room === undefined ? {} : { room })}
       {...(newTask === undefined ? {} : { newTask })}
-      {...(lastTask === undefined ? {} : { lastTask })}
+      {...(onRoomChange === undefined ? {} : { onRoomChange })}
     />
   )
 }
@@ -86,13 +86,19 @@ describe('the project’s bar', () => {
     expect(await screen.findByRole('complementary', { name: 'New task' })).toBeTruthy()
   })
 
-  it('goes back to the task last opened, from after its views', async () => {
-    const onOpen = vi.fn()
+  it('says which view it is on, to open on it again, and has only its views to choose from', async () => {
+    const onRoomChange = vi.fn()
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
-    withServices(<Project lastTask={{ title: 'Make wand spells fire colorful heart particles', onOpen }} />, client)
-    const back = await screen.findByRole('radio', { name: /^Make wand spells fire color…/ })
-    await userEvent.click(back)
-    expect(onOpen).toHaveBeenCalled()
+    withServices(<Project room={Room.Both} onRoomChange={onRoomChange} />, client)
+    await waitFor(() => expect(onRoomChange).toHaveBeenLastCalledWith(Room.Both))
+    const views = screen.getByRole('radiogroup', { name: 'View' })
+    expect(
+      within(views)
+        .getAllByRole('radio')
+        .map((radio) => radio.textContent),
+    ).toEqual(['Conversation', 'Board', 'Both'])
+    await userEvent.click(within(views).getByRole('radio', { name: 'Board' }))
+    expect(onRoomChange).toHaveBeenLastCalledWith(Room.Board)
   })
 })
 

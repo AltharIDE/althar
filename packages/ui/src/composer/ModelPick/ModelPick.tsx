@@ -142,7 +142,8 @@ export function ModelPick({
     <Popover
       label={t.label(owner)}
       placement={placement}
-      width={272}
+      // Wide enough for the six efforts Claude Code offers, each on its own.
+      width={328}
       padded={false}
       open={isOpen}
       onOpenChange={setOpen}
@@ -222,7 +223,13 @@ export function ModelPick({
               </span>
             )}
           </div>
-          <Segmented label={t.effort} options={model.efforts.map((l) => ({ value: l, label: l }))} value={level} onChange={onEffort} />
+          <Segmented
+            label={t.effort}
+            options={model.efforts.map((l) => ({ value: l, label: l }))}
+            value={level}
+            onChange={onEffort}
+            className={s.efforts}
+          />
         </div>
       )}
 

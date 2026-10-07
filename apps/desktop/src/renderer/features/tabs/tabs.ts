@@ -1,5 +1,5 @@
 import type { ProjectSummary } from '@althar/contracts'
-import type { ProjectTab } from '@althar/ui'
+import { type ProjectTab, Room } from '@althar/ui'
 
 import { refOf } from '../home/HomeView'
 
@@ -20,17 +20,11 @@ export type Where =
   | { readonly kind: 'project'; readonly projectId: string; readonly place: Place }
   | { readonly kind: 'thread'; readonly threadId: string }
 
-/** A task, as its project's bar names it for going back to it. */
-export interface LastTask {
-  readonly threadId: string
-  readonly title: string
-}
-
-/** What a window keeps between launches: its projects' tabs in order, where in each it was, and the task last opened in each. */
+/** What a window keeps between launches: its projects' tabs in order, where in each it was, and the view each was last on. */
 export interface Kept {
   readonly open: ReadonlyArray<string>
   readonly places: Readonly<Record<string, Place>>
-  readonly tasks?: Readonly<Record<string, LastTask>>
+  readonly rooms?: Readonly<Record<string, Room>>
 }
 
 /** Where the window is, from its address. */
@@ -90,13 +84,7 @@ export const tabOf = (project: ProjectSummary): ProjectTab => {
   return { id: project.id, name, seed, ink, running: project.working > 0, yours: yoursIn(project) }
 }
 
-const isLastTask = (value: unknown): value is LastTask =>
-  typeof value === 'object' &&
-  value !== null &&
-  'threadId' in value &&
-  typeof value.threadId === 'string' &&
-  'title' in value &&
-  typeof value.title === 'string'
+const isRoom = (value: unknown): value is Room => Object.values(Room).some((room) => room === value)
 
 const isPlace = (value: unknown): value is Place => {
   if (typeof value !== 'object' || value === null || !('kind' in value)) return false
@@ -114,11 +102,10 @@ export const keptFrom = (raw: string | null): Kept | null => {
     const places: Record<string, Place> = {}
     if ('places' in parsed && typeof parsed.places === 'object' && parsed.places !== null)
       for (const [id, place] of Object.entries(parsed.places)) if (isPlace(place)) places[id] = place
-    const tasks: Record<string, LastTask> = {}
-    if ('tasks' in parsed && typeof parsed.tasks === 'object' && parsed.tasks !== null)
-      for (const [id, task] of Object.entries(parsed.tasks))
-        if (isLastTask(task)) tasks[id] = { threadId: task.threadId, title: task.title }
-    return Object.keys(tasks).length === 0 ? { open, places } : { open, places, tasks }
+    const rooms: Record<string, Room> = {}
+    if ('rooms' in parsed && typeof parsed.rooms === 'object' && parsed.rooms !== null)
+      for (const [id, room] of Object.entries(parsed.rooms)) if (isRoom(room)) rooms[id] = room
+    return Object.keys(rooms).length === 0 ? { open, places } : { open, places, rooms }
   } catch {
     return null
   }

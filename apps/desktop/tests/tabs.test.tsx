@@ -12,8 +12,9 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ProjectSummary } from '@althar/contracts'
+import { Room } from '@althar/ui'
 
-import { TabsFrame, useLastTask, useVisit } from '../src/renderer/features/tabs/TabsFrame'
+import { TabsFrame, useLastRoom, useVisit } from '../src/renderer/features/tabs/TabsFrame'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
 import { changed, fakeClient, project } from './fixtures'
 import { withServices } from './render'
@@ -28,17 +29,20 @@ function Where() {
 }
 function Thread() {
   const { threadId } = threadRoute.useParams()
-  useVisit(threadId, THREADS[threadId], `Task ${threadId}`)
+  useVisit(threadId, THREADS[threadId])
   return <Where />
 }
-/* A project's screen names the task last opened in it, as its bar does. */
+/* A project's screen names the view it was last on, as it opens on it, and changes view. */
 function ProjectScreen() {
   const { projectId } = projectRoute.useParams()
-  const last = useLastTask(projectId)
+  const [last, keep] = useLastRoom(projectId)
   return (
     <>
       <Where />
-      <p data-testid="last">{last === null ? 'none' : `${last.title} (${last.threadId})`}</p>
+      <p data-testid="last">{last ?? 'none'}</p>
+      <button type="button" onClick={() => keep(Room.Board)}>
+        To the board
+      </button>
     </>
   )
 }
@@ -107,7 +111,6 @@ describe('the window’s tabs', () => {
     expect(keptFrom(window.localStorage.getItem('althar.tabs'))).toEqual({
       open: ['p1', 'p3', 'p2'],
       places: { p1: { kind: 'thread', threadId: 'th1' }, p2: { kind: 'project' } },
-      tasks: { p1: { threadId: 'th1', title: 'Task th1' } },
     })
   })
 
@@ -171,14 +174,18 @@ describe('the window’s tabs', () => {
     await waitFor(() => expect(names()).toEqual(['Home, 2 calls wait on you', 'meridian, work running', 'tessera, 2 calls wait on you']))
   })
 
-  it('remember the task last opened in each project, for its bar to go back to', async () => {
+  it('remember the view each project was last on, to open on it again back from a task', async () => {
     const { go } = windowAt('/projects/p1')
     await waitFor(() => expect(screen.getByTestId('last').textContent).toBe('none'))
+    await userEvent.click(await screen.findByRole('button', { name: 'To the board' }))
     go('/threads/th1')
     await waitFor(() => expect(tab('meridian').getAttribute('aria-current')).toBe('page'))
     go('/projects/p1')
-    await waitFor(() => expect(screen.getByTestId('last').textContent).toBe('Task th1 (th1)'))
-    expect(keptFrom(window.localStorage.getItem('althar.tabs'))?.tasks).toEqual({ p1: { threadId: 'th1', title: 'Task th1' } })
+    await waitFor(() => expect(screen.getByTestId('last').textContent).toBe('board'))
+    expect(keptFrom(window.localStorage.getItem('althar.tabs'))?.rooms).toEqual({ p1: 'board' })
+    // Another project hasn't been on one.
+    go('/projects/p2')
+    await waitFor(() => expect(screen.getByTestId('last').textContent).toBe('none'))
   })
 
   it('offer a folder from the +, on the home', async () => {
@@ -229,10 +236,10 @@ describe('working out the tabs', () => {
       ),
     ).toEqual({ open: ['p1'], places: { p1: { kind: 'thread', threadId: 't' } } })
     expect(keptFrom(JSON.stringify({ open: [] }))).toEqual({ open: [], places: {} })
-    expect(keptFrom(JSON.stringify({ open: [], tasks: { p1: { threadId: 't', title: 'T' }, p2: { threadId: 3 } } }))).toEqual({
+    expect(keptFrom(JSON.stringify({ open: [], rooms: { p1: 'board', p2: 'kitchen', p3: 3 } }))).toEqual({
       open: [],
       places: {},
-      tasks: { p1: { threadId: 't', title: 'T' } },
+      rooms: { p1: 'board' },
     })
   })
 })

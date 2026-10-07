@@ -18,10 +18,13 @@
   min-width: 0;
 }
 
-/* Side by side, the conversation keeps a reading width and the board takes the rest. */
+/* Side by side, the conversation is as wide as it was dragged, raised off the page as in the prototype, and the board takes the rest. */
 .both .talk {
-  flex: 0 1 560px;
-  min-width: 380px;
+  --face-surface: var(--n-1);
+  position: relative;
+  flex: none;
+  width: var(--talk-width, 560px);
+  background: var(--n-1);
   border-right: 1px solid var(--line);
 }
 
@@ -33,23 +36,20 @@
   overflow: hidden;
   padding: 16px 0 0 16px;
 }
-
-.dock {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  width: min(420px, 40vw);
-  border-left: 1px solid var(--line);
+/* Beside the conversation, the lanes narrow before the board scrolls. */
+.both .board {
+  --lane-min: 186px;
 }
 
+/* The code host isn't connected: a quiet line over the composer, with the way to connect it. */
 .host {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
-  margin: 10px 0 0;
-  color: var(--t-2);
-  font-size: 12.5px;
+  gap: 2px 8px;
+  margin: 0;
+  color: var(--t-3);
+  font-size: 12px;
 }
 
 .face {

@@ -19,6 +19,30 @@ function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) 
   return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onTask={onTask} />
 }
 
+/** The dock on its own, as the home opens it: the board's tasks and calls, answered or accepted there. */
+function Docked({
+  target,
+  onTask = vi.fn(),
+  onChanges = vi.fn(),
+}: {
+  target: Parameters<typeof DockView>[0]['target']
+  onTask?: (threadId: string) => void
+  onChanges?: (task: BoardTask, path?: string) => void
+}) {
+  return (
+    <DockView
+      target={target}
+      model={useBoard('p1')}
+      agents={agents}
+      project="meridian"
+      now="2026-10-01T10:00:00.000Z"
+      onClose={vi.fn()}
+      onTask={onTask}
+      onChanges={onChanges}
+    />
+  )
+}
+
 const task = (overrides: Partial<BoardTask> = {}): BoardTask => ({
   ...card(),
   state: 'open',
@@ -151,17 +175,54 @@ describe('the board', () => {
     expect(screen.getByRole('button', { name: '3 need you' })).toBeTruthy()
   })
 
-  it('answers a call in the dock, from the bar or its card', async () => {
+  it('opens the first thing that needs you in its task, from the bar, and shows the rest when pointed at', async () => {
+    const onTask = vi.fn()
+    const { client } = fakeClient({ getBoard: vi.fn(async () => board()) })
+    withServices(<Project onTask={onTask} />, client)
+    // From the conversation, the bar opens the call's task: no view changes, and nothing opens beside the board.
+    await userEvent.click(await screen.findByRole('button', { name: '3 need you' }))
+    expect(onTask).toHaveBeenCalledWith('th3')
+    expect(screen.getByRole('radio', { name: 'Conversation', checked: true })).toBeTruthy()
+    expect(screen.queryByRole('complementary', { name: 'Beside the board' })).toBeNull()
+    // Pointed at, it says what each is, and each opens its own task.
+    await userEvent.hover(screen.getByRole('button', { name: '3 need you' }))
+    const needs = await screen.findByRole('list', { name: 'What needs you' })
+    const rows = within(needs).getAllByRole('button')
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringMatching(/^Approval.*Run make deployShip it$/),
+      'Ready to acceptRate-limit refundsPR #12',
+      'Ready to acceptTidy the docsalthar/tidy-the-docs',
+    ])
+    await userEvent.click(within(needs).getByRole('button', { name: /Tidy the docs/ }))
+    expect(onTask).toHaveBeenLastCalledWith('th5')
+  })
+
+  it('opens a card’s task, whatever lane it is in', async () => {
+    const onTask = vi.fn()
+    const { client } = fakeClient({ getBoard: vi.fn(async () => board()) })
+    withServices(<Project onTask={onTask} />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    for (const [title, thread] of [
+      ['Add a retry', 'th1'],
+      ['Fix the limit', 'th2'],
+      ['Run make deploy', 'th3'],
+      ['Rate-limit refunds', 'th4'],
+      ['Old work', 'th6'],
+    ] as const) {
+      await userEvent.click(await screen.findByRole('button', { name: new RegExp(title) }))
+      expect(onTask).toHaveBeenLastCalledWith(thread)
+    }
+    expect(screen.queryByRole('complementary', { name: 'Beside the board' })).toBeNull()
+  })
+
+  it('answers a call in the dock', async () => {
     const answer = vi.fn(async () => {})
     const { client } = fakeClient({ answer, getBoard: vi.fn(async () => board()) })
-    withServices(<Project />, client)
-    // From the conversation, the bar opens the first call beside the board.
-    await userEvent.click(await screen.findByRole('button', { name: '3 need you' }))
+    withServices(<Docked target={{ kind: 'call', id: 'a1' }} />, client)
     const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
     expect(within(dock).getByText(/^Ship it · /)).toBeTruthy()
     await userEvent.click(within(dock).getByRole('button', { name: /^Allow/ }))
     await waitFor(() => expect(answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'allow' }))
-    expect(screen.getByRole('radio', { name: 'Both', checked: true })).toBeTruthy()
   })
 
   it('accepts a pull request by merging it, or sends it back with a note, and says when the host won’t', async () => {
@@ -187,9 +248,7 @@ describe('the board', () => {
         }),
       ),
     })
-    withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Rate-limit refunds' }))
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
     const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
     expect(within(dock).getByText('Retried the call.')).toBeTruthy()
     expect(await within(dock).findByText('limit.ts')).toBeTruthy()
@@ -218,11 +277,9 @@ describe('the board', () => {
       work.taskId === 't4' && work.change !== null ? { ...work, change: { ...work.change, unpushed: 2, localHead: 'def456' } } : work,
     )
     const { client } = fakeClient({ push, getBoard: vi.fn(async () => board({ tasks: later })) })
-    withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Rate-limit refunds' }))
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
     const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
-    expect(within(dock).getByText('2 commits aren’t on the pull request yet')).toBeTruthy()
+    expect(await within(dock).findByText('2 commits aren’t on the pull request yet')).toBeTruthy()
     expect(within(dock).queryByRole('button', { name: /Accept and merge/ })).toBeNull()
     // A push that didn't go through says why, and can be tried again.
     await userEvent.click(within(dock).getByRole('button', { name: 'Push' }))
@@ -232,37 +289,14 @@ describe('the board', () => {
     expect(push).toHaveBeenLastCalledWith('t4', 'def456', 'https://github.com/meridian/api/pull/12')
   })
 
-  it('opens work ready on its branch to review its changes, and any task in its own window', async () => {
+  it('opens work ready on its branch to review its changes, and its task', async () => {
     const onTask = vi.fn()
-    const getFileDiff = vi.fn(async (_taskId: string, path: string) => ({
-      file: { path, from: null, status: 'modified' as const, add: 1, del: 0, binary: false, uncommitted: false },
-      lines: [{ kind: 'added' as const, new: 1, text: 'tidied' }],
-      truncated: false,
-    }))
-    const { client } = fakeClient({
-      getFileDiff,
-      getBoard: vi.fn(async () => board()),
-      getThread: vi.fn(async () =>
-        snapshot({
-          task: {
-            ...snapshot().task,
-            id: 't5',
-            branch: 'althar/tidy',
-            files: [{ path: 'docs/a.md', from: null, status: 'modified', add: 9, del: 4, binary: false, uncommitted: false }],
-          },
-        }),
-      ),
-    })
-    withServices(<Project onTask={onTask} />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: /^Board/ }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Tidy the docs' }))
+    const onChanges = vi.fn()
+    const { client } = fakeClient({ getBoard: vi.fn(async () => board()) })
+    withServices(<Docked target={{ kind: 'task', id: 't5' }} onTask={onTask} onChanges={onChanges} />, client)
     const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
     await userEvent.click(within(dock).getByRole('button', { name: 'Review the changes' }))
-    const view = await screen.findByRole('dialog', { name: 'Changes' })
-    expect(await within(view).findByText('tidied')).toBeTruthy()
-    expect(getFileDiff).toHaveBeenCalledWith('t5', 'docs/a.md')
-    await userEvent.keyboard('{Escape}')
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Changes' })).toBeNull())
+    expect(onChanges).toHaveBeenCalledWith(expect.objectContaining({ taskId: 't5' }))
     await userEvent.click(within(dock).getByRole('button', { name: 'Open the task' }))
     expect(onTask).toHaveBeenCalledWith('th5')
   })
@@ -275,9 +309,7 @@ describe('the board', () => {
       )
       .mockResolvedValue(undefined)
     const { client } = fakeClient({ openChange, getBoard: vi.fn(async () => board()) })
-    withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: /^Board/ }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Tidy the docs' }))
+    withServices(<Docked target={{ kind: 'task', id: 't5' }} />, client)
     const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
     await userEvent.click(within(dock).getByRole('button', { name: 'Open a pull request' }))
     expect(await within(dock).findByRole('alert')).toHaveProperty(
@@ -302,9 +334,7 @@ describe('the board', () => {
     const here = [{ repository: 'meridian', name: 'meridian', branch: 'main', head: 'abc111' }]
     const tasks = board().tasks.map((work) => (work.taskId === 't5' ? { ...work, here } : work))
     const { client } = fakeClient({ mergeHere, getBoard: vi.fn(async () => board({ tasks })) })
-    withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: /^Board/ }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Tidy the docs' }))
+    withServices(<Docked target={{ kind: 'task', id: 't5' }} />, client)
     const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
     await userEvent.click(within(dock).getByRole('button', { name: 'Merge into main' }))
     expect(await within(dock).findByRole('alert')).toHaveProperty(
@@ -321,9 +351,7 @@ describe('the board', () => {
     const here = [{ repository: 'tools', name: 'tools', branch: 'main', head: 'abc111' }]
     const tasks = board().tasks.map((work) => (work.taskId === 't4' ? { ...work, here } : work))
     const { client } = fakeClient({ mergeHere, getBoard: vi.fn(async () => board({ tasks })) })
-    withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Rate-limit refunds' }))
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
     const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
     expect(within(dock).getByRole('button', { name: /Accept and merge/ })).toBeTruthy()
     await userEvent.click(within(dock).getByRole('button', { name: 'Merge tools into main' }))
@@ -405,10 +433,7 @@ describe('every state the board shows', () => {
     expect(lanes.next.map((work) => work.taskId)).toEqual(['b', 'c', 'a'])
     expect(lanes.settled.map((work) => work.taskId)).toEqual(['h', 'g', 'i'])
     const onOpen = vi.fn()
-    withServices(
-      <BoardView lanes={lanes} agents={agents} now={NOW} current={{ kind: 'task', id: 'd' }} onOpen={onOpen} />,
-      fakeClient().client,
-    )
+    withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={onOpen} />, fakeClient().client)
     expect(screen.getByText('Held. Starts when you say')).toBeTruthy()
     expect(screen.getByText('Starting')).toBeTruthy()
     expect(screen.getByText('Starts in 20s')).toBeTruthy()
@@ -422,9 +447,7 @@ describe('every state the board shows', () => {
     expect(screen.getByText(/isn't connected to this repository's host/)).toBeTruthy()
     expect(screen.getByText('PR #12 closed')).toBeTruthy()
     expect(screen.getAllByText('althar/add-a-retry').length).toBeGreaterThan(0)
-    return userEvent
-      .click(screen.getByRole('button', { name: 'Held plan' }))
-      .then(() => expect(onOpen).toHaveBeenCalledWith({ kind: 'task', id: 'a' }))
+    return userEvent.click(screen.getByRole('button', { name: 'Held plan' })).then(() => expect(onOpen).toHaveBeenCalledWith('th1'))
   })
 
   it('says how long work has run', () => {
@@ -508,27 +531,25 @@ describe('every state the board shows', () => {
     const { client } = fakeClient({
       getBoard: vi.fn(async () => board({ tasks: [task({ taskId: 't9', phase: 'ready', change: runningChecks })], calls: [] })),
     })
-    withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Add a retry' }))
+    withServices(<Docked target={{ kind: 'task', id: 't9' }} />, client)
     expect(await screen.findByText('It can be accepted once its checks pass')).toBeTruthy()
   })
 })
 
 describe('the bar and the dock, on the rest of the board', () => {
   it('opens work ready to accept when no call waits, and starts a task from the board beside the conversation', async () => {
+    const onTask = vi.fn()
     const bare = change({ draft: false, additions: null, deletions: null, checks: null })
     const { client } = fakeClient({
-      getBoard: vi.fn(async () => board({ tasks: [task({ taskId: 't9', phase: 'ready', change: bare })], calls: [] })),
+      getBoard: vi.fn(async () => board({ tasks: [task({ taskId: 't9', threadId: 'th9', phase: 'ready', change: bare })], calls: [] })),
     })
-    withServices(<Project />, client)
+    withServices(<Project onTask={onTask} />, client)
     await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
     const work = await screen.findByRole('region', { name: 'The project’s work' })
     // A pull request its host said nothing about: no sizes, and no checks.
     expect(within(work).getByText('No checks ran')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: '1 needs you' }))
-    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
-    expect(within(dock).getByText('Ready')).toBeTruthy()
+    expect(onTask).toHaveBeenCalledWith('th9')
     // A task planned by hand opens beside the conversation, so the board makes room for it.
     await userEvent.click(screen.getByRole('button', { name: 'New task' }))
     expect(screen.getByRole('radio', { name: 'Both', checked: true })).toBeTruthy()
@@ -547,13 +568,11 @@ describe('the bar and the dock, on the rest of the board', () => {
         }),
       ),
     })
-    withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Running work' }))
-    let dock = await screen.findByRole('complementary', { name: 'Beside the board' })
-    expect(within(dock).getByText('Halfway.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Waiting work' }))
-    dock = await screen.findByRole('complementary', { name: 'Beside the board' })
-    expect(within(dock).getByText('Waiting work', { selector: 'h2' })).toBeTruthy()
+    const running = withServices(<Docked target={{ kind: 'task', id: 'r' }} />, client)
+    expect(await within(await screen.findByRole('complementary', { name: 'Beside the board' })).findByText('Halfway.')).toBeTruthy()
+    running.unmount()
+    withServices(<Docked target={{ kind: 'task', id: 'w' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    expect(await within(dock).findByText('Waiting work', { selector: 'h2' })).toBeTruthy()
   })
 })
