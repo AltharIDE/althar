@@ -300,6 +300,14 @@ describe('Jira Cloud', () => {
     }),
   )
 
+  it.effect('reads an issue by its key as typed, in lower case too', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue() }]])
+      assert.strictEqual((yield* tracker.issue(' hhh-20844 ')).ref, 'HHH-20844')
+      assert.strictEqual(sent[0]?.url, `${CLOUD}/issue/HHH-20844?${FIELDS}`)
+    }),
+  )
+
   it.effect('takes a site by its origin, whatever page of it was pasted', () =>
     Effect.gen(function* () {
       const board = `${SITE}/jira/software/projects/HHH/boards/3`

@@ -212,9 +212,10 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
     product,
     capabilities: { links: true },
     account,
+    // A key as typed (proj-123) is the key: Jira's keys are upper case.
     issue: (ref) =>
       Effect.map(
-        call((root) => http.json(IssueAnswer, 'GET', `${root}${issuePath(ref)}?fields=${FIELDS}`)),
+        call((root) => http.json(IssueAnswer, 'GET', `${root}${issuePath(ref.trim().toUpperCase())}?fields=${FIELDS}`)),
         issueOf,
       ),
     mine: (options = {}) => {
