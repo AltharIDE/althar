@@ -21,6 +21,7 @@ import {
   NoChangeToOpen,
   ModelUnchanged,
   NotARepository,
+  NotAnIssue,
   RepositoriesNeeded,
   NotFound,
   OutwardUncertain,
@@ -848,6 +849,10 @@ describe('words', () => {
     assert.strictEqual(
       said(new NotConnected({ product: 'linear', what: 'MER-1' })),
       "Althar isn't connected to Linear. Connect it, then try again.",
+    )
+    assert.strictEqual(
+      said(new NotAnIssue({ link: 'https://gitlab.com/meridian/api/-/merge_requests/3', what: 'merge request' })),
+      'That link is to a merge request, not an issue.',
     )
     assert.strictEqual(
       said(new OutwardUncertain({ operation: 'merge' })),

@@ -6,7 +6,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Connections, NotConnected } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
-import { NotFound } from '../src/errors'
+import { NotAnIssue, NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { Issues } from '../src/Issues'
 import { Projects } from '../src/Projects'
@@ -125,6 +125,10 @@ describe('an issue', () => {
       const unconnected = yield* Effect.flip(issues.read('https://meridian.atlassian.net/browse/PROJ-9'))
       assert.instanceOf(unconnected, NotConnected)
       assert.strictEqual(unconnected.product, 'jira_cloud')
+      // A pull request's link, given for an issue, says what it is.
+      const change = yield* Effect.flip(issues.read(`${HOST}/meridian/api/pull/12`))
+      assert.instanceOf(change, NotAnIssue)
+      assert.strictEqual(change.what, 'pull request')
       github.addIssue({ ref: 'meridian/api#13', title: 'Newer' })
       const mine = yield* issues.mine(projectId)
       // Newest change first, whichever tracker it is on (the two fakes' clocks tie on the others).
