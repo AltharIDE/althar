@@ -146,6 +146,19 @@ describe('the window’s tabs', () => {
     expect(client.listProjects).toHaveBeenCalledTimes(2)
   })
 
+  it('forget projects removed since, and open the busy ones when none of what was kept is left', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['gone', 'p2'], places: { gone: { kind: 'project' } } }))
+    windowAt('/')
+    await waitFor(() => expect(names()).toEqual(['Home, 2 calls wait on you', 'halyard']))
+    await waitFor(() => expect(keptFrom(window.localStorage.getItem('althar.tabs'))).toEqual({ open: ['p2'], places: {} }))
+  })
+
+  it('open the busy projects when none of the tabs kept is a project any more', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['gone', 'also-gone'], places: {} }))
+    windowAt('/')
+    await waitFor(() => expect(names()).toEqual(['Home, 2 calls wait on you', 'meridian, work running', 'tessera, 2 calls wait on you']))
+  })
+
   it('offer a folder from the +, on the home', async () => {
     const { router } = windowAt('/projects/p1', [project])
     await userEvent.click(await screen.findByRole('button', { name: 'Open a project' }))

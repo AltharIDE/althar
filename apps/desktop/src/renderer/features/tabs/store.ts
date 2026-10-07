@@ -21,8 +21,11 @@ export interface TabsState {
 export interface TabsStore {
   readonly subscribe: (listener: () => void) => () => void
   readonly get: () => TabsState
-  /** What opens before anything was kept; nothing once something was. */
-  readonly seed: (open: ReadonlyArray<string>) => void
+  /**
+   * What opens before anything was kept, or when none of what was kept is a
+   * project any more: projects removed since are forgotten.
+   */
+  readonly seed: (open: ReadonlyArray<string>, known: ReadonlySet<string>) => void
   readonly change: (next: (kept: Kept) => Kept) => void
   readonly visit: (threadId: string, projectId: string) => void
 }
@@ -60,8 +63,16 @@ const make = (): TabsStore => {
       return () => void listeners.delete(listener)
     },
     get: () => state,
-    seed: (open) => {
-      if (state.kept === null) keep({ open, places: {} })
+    seed: (open, known) => {
+      const { kept } = state
+      if (kept === null) return keep({ open, places: {} })
+      const left = kept.open.filter((id) => known.has(id))
+      if (left.length === kept.open.length) return
+      keep(
+        left.length === 0
+          ? { open, places: {} }
+          : { open: left, places: Object.fromEntries(Object.entries(kept.places).filter(([id]) => known.has(id))) },
+      )
     },
     change: (next) => {
       if (state.kept !== null) keep(next(state.kept))
