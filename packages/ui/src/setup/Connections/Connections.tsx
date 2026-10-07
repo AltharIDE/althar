@@ -34,8 +34,8 @@ export interface ServiceOption {
   selfHosted: boolean
   /** Its own sign-in, in the browser, is set up here. */
   browserSignIn: boolean
-  /** A pasted token goes with the account's email. */
-  tokenNeedsUser: boolean
+  /** What a pasted token goes with: the account's email, or the API key it was made for. */
+  tokenNeeds?: 'email' | 'key'
   /** Where a token is made, on the hosted service. */
   tokenHelp: string
   /** An example of its address, for a service connected by one: https://your-site.atlassian.net. */
@@ -65,6 +65,8 @@ export interface ServiceToken {
   instance?: string
   /** The account's email, where the service wants it with the token. */
   user?: string
+  /** The API key the token was made for, where the service wants it. */
+  key?: string
   token: string
 }
 
@@ -89,11 +91,13 @@ export interface ConnectionsText {
   instance: string
   instancePlaceholder: string
   user: string
+  key: string
   token: (service: string) => string
   makeToken: (service: string) => string
   tokenNote: string
   emptyToken: string
   emptyUser: string
+  emptyKey: string
   emptyInstance: string
 }
 
@@ -118,11 +122,13 @@ export const connectionsText: ConnectionsText = {
   instance: 'Server address',
   instancePlaceholder: 'https://git.example.com',
   user: 'Email',
+  key: 'API key',
   token: (service) => `${service} token`,
   makeToken: (service) => `Make one on ${service}`,
   tokenNote: 'Kept encrypted on this Mac, for Althar alone. It’s never shown again.',
   emptyToken: 'Paste the token first',
   emptyUser: 'Type the email the token belongs to',
+  emptyKey: 'Paste the API key the token was made for',
   emptyInstance: 'Type the server’s address',
 }
 
@@ -339,7 +345,11 @@ function SigningIn({
   }
 }
 
-/* The fields a token needs: the server's address for a company's own, the account's email where the service wants it, and the token. */
+/*
+ * The fields a token needs: the server's address for a company's own, what
+ * the service wants with the token (the account's email, or the API key it
+ * was made for), and the token.
+ */
 function TokenForm({
   service,
   server,
@@ -358,8 +368,11 @@ function TokenForm({
   onCancel: () => void
 }) {
   const [instance, setInstance] = useState('')
-  const [user, setUser] = useState('')
+  /* the account's email, or the API key, as the service wants */
+  const [paired, setPaired] = useState('')
   const [token, setToken] = useState('')
+  const needs = service.tokenNeeds
+  const emptyPaired = needs === 'email' ? t.emptyUser : t.emptyKey
   const [missing, setMissing] = useState<string | null>(null)
   const first = useRef<HTMLInputElement>(null)
   const errorId = useId()
@@ -369,15 +382,15 @@ function TokenForm({
     const empty =
       server && !instance.trim()
         ? t.emptyInstance
-        : service.tokenNeedsUser && !user.trim()
-          ? t.emptyUser
+        : needs !== undefined && !paired.trim()
+          ? emptyPaired
           : !token.trim()
             ? t.emptyToken
             : null
     if (empty !== null) return setMissing(empty)
     onSave({
       ...(server ? { instance: instance.trim() } : {}),
-      ...(service.tokenNeedsUser ? { user: user.trim() } : {}),
+      ...(needs === 'email' ? { user: paired.trim() } : needs === 'key' ? { key: paired.trim() } : {}),
       token: token.trim(),
     })
   }
@@ -411,18 +424,19 @@ function TokenForm({
           />
         </label>
       )}
-      {service.tokenNeedsUser && (
+      {needs !== undefined && (
         <label className={s.label}>
-          {t.user}
+          {needs === 'email' ? t.user : t.key}
           <Field
             {...(server ? {} : { ref: first })}
-            type="email"
+            type={needs === 'email' ? 'email' : 'text'}
             autoComplete="off"
             spellCheck={false}
-            value={user}
-            invalid={missing === t.emptyUser}
+            {...(needs === 'key' ? { className: s.mono } : {})}
+            value={paired}
+            invalid={missing === emptyPaired}
             onChange={(e) => {
-              setUser(e.target.value)
+              setPaired(e.target.value)
               setMissing(null)
             }}
             {...keys}
@@ -432,7 +446,7 @@ function TokenForm({
       <label className={s.label}>
         {t.token(service.name)}
         <Field
-          {...(server || service.tokenNeedsUser ? {} : { ref: first })}
+          {...(server || needs !== undefined ? {} : { ref: first })}
           type="password"
           autoComplete="off"
           spellCheck={false}

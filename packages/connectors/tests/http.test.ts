@@ -148,7 +148,10 @@ describe('a failed answer', () => {
     )
     assert.strictEqual(failureOf('github', 422, headers(), JSON.stringify({ errors: ['bad branch'] }), at).message, 'bad branch')
     assert.strictEqual(failureOf('linear', 400, headers(), JSON.stringify({ error: 'invalid_grant' }), at).message, 'invalid_grant')
-    assert.strictEqual(failureOf('github', 500, headers(), 'oops', at).message, '500')
+    // Trello says it in a line of plain words; a page says nothing worth keeping.
+    assert.strictEqual(failureOf('trello', 400, headers(), 'invalid token', at).message, 'invalid token')
+    assert.strictEqual(failureOf('github', 502, headers(), '<html><body>Bad gateway</body></html>', at).message, '502')
+    assert.strictEqual(failureOf('github', 500, headers(), 'oops\nat line 2', at).message, '500')
     assert.strictEqual(failureOf('github', 500, headers(), JSON.stringify({}), at).message, '500')
   })
 

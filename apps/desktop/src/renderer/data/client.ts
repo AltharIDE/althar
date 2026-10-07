@@ -130,6 +130,7 @@ export interface Client {
     readonly product: Product
     readonly webUrl?: string
     readonly user?: string
+    readonly key?: string
     readonly token: string
   }) => Promise<ConnectionSummary>
   readonly disconnect: (connectionId: string) => Promise<void>

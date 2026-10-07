@@ -9,7 +9,7 @@ describe('the products', () => {
   it('available now are the ones with an adapter', () => {
     assert.deepStrictEqual(
       available().map((info) => info.product),
-      ['github', 'linear'],
+      ['github', 'linear', 'trello'],
     )
   })
 
@@ -47,6 +47,20 @@ describe('the products', () => {
     }
     assert.strictEqual(products.linear.browser?.kind, 'pkce')
     assert.isNull(products.jira_cloud.browser)
+    // A token goes with the account's email for Atlassian's, with the API key it was made for on Trello, and alone elsewhere.
+    assert.deepStrictEqual(
+      Object.values(products).map((info) => [info.product, info.token.needs]),
+      [
+        ['github', null],
+        ['gitlab', null],
+        ['bitbucket_cloud', 'email'],
+        ['bitbucket_dc', null],
+        ['linear', null],
+        ['jira_cloud', 'email'],
+        ['jira_dc', null],
+        ['trello', 'key'],
+      ],
+    )
     for (const info of Object.values(products)) assert.match(info.token.help(info.hosted?.webUrl ?? 'https://example.com'), /^https:\/\//)
   })
 
@@ -63,6 +77,9 @@ describe('the products', () => {
     const linear = products.linear.make?.(options)
     assert.isUndefined(linear?.host)
     assert.strictEqual(linear?.tracker?.product, 'linear')
+    const trello = products.trello.make?.(options)
+    assert.isUndefined(trello?.host)
+    assert.strictEqual(trello?.tracker?.product, 'trello')
   })
 })
 
@@ -70,6 +87,7 @@ describe('a credential', () => {
   it('makes its header', () => {
     assert.strictEqual(authorizationOf({ kind: 'bearer', token: 't' }), 'Bearer t')
     assert.strictEqual(authorizationOf({ kind: 'key', token: 'k' }), 'k')
+    assert.strictEqual(authorizationOf({ kind: 'app', key: 'k', token: 't' }), 'OAuth oauth_consumer_key="k", oauth_token="t"')
     assert.strictEqual(
       authorizationOf({ kind: 'basic', user: 'you@meridian.dev', token: 't' }),
       `Basic ${Buffer.from('you@meridian.dev:t').toString('base64')}`,

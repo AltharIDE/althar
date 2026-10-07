@@ -3,6 +3,7 @@ import { makeGitHub } from './github'
 import { makeLinear } from './linear'
 import type { KnownHosts } from './links'
 import type { CodeHost, Product, Tracker } from './model'
+import { makeTrello } from './trello'
 
 /*
  * Every product Althar connects to: its name, where its hosted service
@@ -45,8 +46,15 @@ export interface ProductInfo {
         readonly scope: string
       }
     | null
-  /** A pasted token: how it is sent, whether it needs the account's email with it, and where the person makes one. */
-  readonly token: { readonly kind: Credential['kind']; readonly user: boolean; readonly help: (webUrl: string) => string }
+  /**
+   * A pasted token: how it is sent, what goes with it (the account's email,
+   * or the API key it was made for), and where the person makes one.
+   */
+  readonly token: {
+    readonly kind: Credential['kind']
+    readonly needs: 'email' | 'key' | null
+    readonly help: (webUrl: string) => string
+  }
   /** Its adapter, once built. */
   readonly make: ((options: AdapterOptions) => { readonly host?: CodeHost; readonly tracker?: Tracker }) | null
 }
@@ -67,7 +75,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
       codeUrl: (webUrl) => `${trimmed(webUrl)}/login/device/code`,
       tokenUrl: (webUrl) => `${trimmed(webUrl)}/login/oauth/access_token`,
     },
-    token: { kind: 'bearer', user: false, help: (webUrl) => `${trimmed(webUrl)}/settings/personal-access-tokens/new` },
+    token: { kind: 'bearer', needs: null, help: (webUrl) => `${trimmed(webUrl)}/settings/personal-access-tokens/new` },
     make: (options) => {
       const github = makeGitHub(options)
       return { host: github, tracker: github }
@@ -87,7 +95,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
       tokenUrl: (webUrl) => `${trimmed(webUrl)}/oauth/token`,
       scope: 'api',
     },
-    token: { kind: 'bearer', user: false, help: (webUrl) => `${trimmed(webUrl)}/-/user_settings/personal_access_tokens` },
+    token: { kind: 'bearer', needs: null, help: (webUrl) => `${trimmed(webUrl)}/-/user_settings/personal_access_tokens` },
     make: null,
   },
   bitbucket_cloud: {
@@ -99,7 +107,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     selfHosted: false,
     apiFor: () => 'https://api.bitbucket.org/2.0',
     browser: null,
-    token: { kind: 'basic', user: true, help: () => 'https://id.atlassian.com/manage-profile/security/api-tokens' },
+    token: { kind: 'basic', needs: 'email', help: () => 'https://id.atlassian.com/manage-profile/security/api-tokens' },
     make: null,
   },
   bitbucket_dc: {
@@ -111,7 +119,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     selfHosted: true,
     apiFor: (webUrl) => `${trimmed(webUrl)}/rest/api/latest`,
     browser: null,
-    token: { kind: 'bearer', user: false, help: (webUrl) => `${trimmed(webUrl)}/plugins/servlet/access-tokens/manage` },
+    token: { kind: 'bearer', needs: null, help: (webUrl) => `${trimmed(webUrl)}/plugins/servlet/access-tokens/manage` },
     make: null,
   },
   linear: {
@@ -128,7 +136,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
       tokenUrl: 'https://api.linear.app/oauth/token',
       scope: 'read,write',
     },
-    token: { kind: 'key', user: false, help: () => 'https://linear.app/settings/account/security' },
+    token: { kind: 'key', needs: null, help: () => 'https://linear.app/settings/account/security' },
     make: (options) => ({ tracker: makeLinear(options) }),
   },
   jira_cloud: {
@@ -140,7 +148,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     selfHosted: false,
     apiFor: (webUrl) => `${trimmed(webUrl)}/rest/api/3`,
     browser: null,
-    token: { kind: 'basic', user: true, help: () => 'https://id.atlassian.com/manage-profile/security/api-tokens' },
+    token: { kind: 'basic', needs: 'email', help: () => 'https://id.atlassian.com/manage-profile/security/api-tokens' },
     make: null,
   },
   jira_dc: {
@@ -154,7 +162,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     browser: null,
     token: {
       kind: 'bearer',
-      user: false,
+      needs: null,
       help: (webUrl) =>
         `${trimmed(webUrl)}/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens`,
     },
@@ -169,8 +177,9 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     selfHosted: false,
     apiFor: () => 'https://api.trello.com/1',
     browser: null,
-    token: { kind: 'key', user: false, help: () => 'https://trello.com/power-ups/admin' },
-    make: null,
+    // The person's own Power-Up key, with a token made for it, until Althar's Power-Up is registered.
+    token: { kind: 'app', needs: 'key', help: () => 'https://trello.com/power-ups/admin' },
+    make: (options) => ({ tracker: makeTrello(options) }),
   },
 }
 

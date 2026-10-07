@@ -49,7 +49,7 @@ const ErrorBody = Schema.Struct({
   errors: Schema.optional(Schema.Array(Schema.Unknown)),
 })
 
-/** What a service said went wrong, from its JSON body, or the status's own words. */
+/** What a service said went wrong, from its JSON body or a line of plain words (Trello's), or the status's own words. */
 const messageOf = (body: string, fallback: string): string => {
   try {
     const parsed = Schema.decodeUnknownSync(ErrorBody)(JSON.parse(body))
@@ -64,7 +64,9 @@ const messageOf = (body: string, fallback: string): string => {
     if (said !== '') return said.slice(0, MESSAGE_KEPT)
     if (typeof parsed.error === 'string') return parsed.error.slice(0, MESSAGE_KEPT)
   } catch {
-    // Not JSON: the status says it.
+    // Not JSON: a line of plain words is the service's own; a page, or nothing, and the status says it.
+    const said = body.trim()
+    if (said !== '' && !said.startsWith('<') && !said.includes('\n')) return said.slice(0, MESSAGE_KEPT)
   }
   return fallback
 }

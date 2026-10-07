@@ -29,7 +29,7 @@ export const servicesOf = (list: ConnectionList): ReadonlyArray<ServiceOption> =
       hostedUrl: product.hostedUrl,
       selfHosted: product.selfHosted,
       browserSignIn: product.browserSignIn,
-      tokenNeedsUser: product.tokenNeedsUser,
+      ...(product.tokenNeeds === null ? {} : { tokenNeeds: product.tokenNeeds }),
       tokenHelp: product.tokenHelp,
       ...(example === undefined ? {} : { instanceExample: example }),
     }

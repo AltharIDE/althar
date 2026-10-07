@@ -60,8 +60,8 @@ export const SignInEnded: Story = {
 export const PastingAToken: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    const [linear, jira] = c.getAllByRole('button', { name: 'Add a token' })
-    if (!linear || !jira) throw new Error('no token rows')
+    const [linear] = c.getAllByRole('button', { name: 'Add a token' })
+    if (!linear) throw new Error('no token rows')
     await userEvent.click(linear)
     const field = c.getByLabelText('Linear token')
     await expect(field).toHaveFocus()
@@ -93,6 +93,25 @@ export const ATokenWithItsEmail: Story = {
       user: 'you@meridian.dev',
       token: 'atl_0000',
     })
+  },
+}
+
+/** Trello's token is made for an API key, which goes with it: the key first, then the token. */
+export const ATokenWithItsKey: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const [, trello] = c.getAllByRole('button', { name: 'Add a token' })
+    if (!trello) throw new Error('no Trello row')
+    await userEvent.click(trello)
+    const key = c.getByLabelText('API key')
+    await expect(key).toHaveFocus()
+    await expect(key).toHaveAttribute('type', 'text')
+    await expect(c.queryByLabelText('Email')).not.toBeInTheDocument()
+    await userEvent.type(c.getByLabelText('Trello token'), 'ATTA0000{Enter}')
+    await expect(c.getByText('Paste the API key the token was made for')).toBeInTheDocument()
+    await userEvent.type(key, '0123abcd')
+    await userEvent.type(c.getByLabelText('Trello token'), '{Enter}')
+    await expect(args.onToken).toHaveBeenCalledWith('trello', { key: '0123abcd', token: 'ATTA0000' })
   },
 }
 

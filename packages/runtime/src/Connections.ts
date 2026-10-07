@@ -91,18 +91,28 @@ const Stored = Schema.Union([
     refreshToken: Schema.NullOr(Schema.String),
     expiresAt: Schema.NullOr(Schema.String),
   }),
-  Schema.Struct({ kind: Schema.Literal('token'), token: Schema.String, user: Schema.NullOr(Schema.String) }),
+  Schema.Struct({
+    kind: Schema.Literal('token'),
+    token: Schema.String,
+    user: Schema.NullOr(Schema.String),
+    // The API key the token was made for, where its product wants one (Trello's); none in those kept before.
+    key: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
 ])
 type Stored = typeof Stored.Type
 
 /**
  * The credential a kept secret makes: an OAuth token is sent as a bearer; a
- * pasted one as its product sends them (a bearer, a key as it is, or with the
- * account's email).
+ * pasted one as its product sends them (a bearer, a key as it is, with the
+ * account's email, or with the API key it was made for).
  */
 export const credentialFor = (kind: Credential['kind'], kept: Stored): Credential => {
   if (kept.kind === 'oauth') return { kind: 'bearer', token: kept.accessToken }
-  return kind === 'basic' ? { kind, user: kept.user ?? '', token: kept.token } : { kind, token: kept.token }
+  return kind === 'basic'
+    ? { kind, user: kept.user ?? '', token: kept.token }
+    : kind === 'app'
+      ? { kind, key: kept.key ?? '', token: kept.token }
+      : { kind, token: kept.token }
 }
 
 interface Row {
@@ -149,6 +159,7 @@ export class Connections extends Context.Service<
       readonly product: Product
       readonly webUrl?: string
       readonly user?: string
+      readonly key?: string
       readonly token: string
       readonly actorId: ActorId
     }): Effect.Effect<ConnectionInfo, unknown>
@@ -285,8 +296,10 @@ export class Connections extends Context.Service<
           )
         })
 
-      const keep = (name: string, value: TokenSet | { readonly token: string; readonly user: string | null }) =>
-        secrets.set(name, JSON.stringify('accessToken' in value ? { kind: 'oauth', ...value } : { kind: 'token', ...value }))
+      const keep = (
+        name: string,
+        value: TokenSet | { readonly token: string; readonly user: string | null; readonly key: string | null },
+      ) => secrets.set(name, JSON.stringify('accessToken' in value ? { kind: 'oauth', ...value } : { kind: 'token', ...value }))
 
       /** A service said the token is no good: the connection needs its person to sign in again. */
       const unauthorized = (connectionId: string) =>
@@ -357,7 +370,7 @@ export class Connections extends Context.Service<
         readonly product: Product
         readonly webUrl: string
         readonly auth: ConnectionInfo['auth']
-        readonly secret: TokenSet | { readonly token: string; readonly user: string | null }
+        readonly secret: TokenSet | { readonly token: string; readonly user: string | null; readonly key: string | null }
         readonly actorId: ActorId
       }) =>
         Effect.gen(function* () {
@@ -638,7 +651,7 @@ export class Connections extends Context.Service<
               product: input.product,
               webUrl: input.webUrl ?? infoOf(input.product)?.hosted?.webUrl ?? '',
               auth: 'token',
-              secret: { token: input.token.trim(), user: input.user?.trim() ?? null },
+              secret: { token: input.token.trim(), user: input.user?.trim() ?? null, key: input.key?.trim() ?? null },
               actorId: input.actorId,
             }),
           ),

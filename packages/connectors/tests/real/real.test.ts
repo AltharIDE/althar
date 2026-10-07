@@ -4,6 +4,7 @@ import { Effect } from 'effect'
 import type { Credential } from '../../src/credential'
 import { makeGitHub } from '../../src/github'
 import { makeLinear } from '../../src/linear'
+import { makeTrello } from '../../src/trello'
 import { hostContract, trackerContract } from '../contract'
 
 /*
@@ -17,6 +18,9 @@ import { hostContract, trackerContract } from '../contract'
  *   it, then closes it and deletes the branch.
  * - Linear: ALTHAR_LINEAR_KEY (a personal API key), ALTHAR_LINEAR_ISSUE
  *   (MER-231, an issue it may comment on and link to).
+ * - Trello: ALTHAR_TRELLO_KEY (a Power-Up's API key), ALTHAR_TRELLO_TOKEN
+ *   (a token made for it, with read and write), ALTHAR_TRELLO_CARD (a card's
+ *   short link, one it may comment on and attach a link to).
  */
 
 const env = (name: string) => process.env[name] ?? ''
@@ -72,5 +76,21 @@ describe.skipIf(linear === '' || linearIssue === '')('Linear', () => {
       credential: Effect.succeed({ kind: 'key', token: linear }),
     }),
     ref: linearIssue,
+  })
+})
+
+const trelloKey = env('ALTHAR_TRELLO_KEY')
+const trelloToken = env('ALTHAR_TRELLO_TOKEN')
+const trelloCard = env('ALTHAR_TRELLO_CARD')
+describe.skipIf(trelloKey === '' || trelloToken === '' || trelloCard === '')('Trello', () => {
+  trackerContract({
+    name: 'Trello',
+    tracker: makeTrello({
+      fetch,
+      apiUrl: 'https://api.trello.com/1',
+      webUrl: 'https://trello.com',
+      credential: Effect.succeed({ kind: 'app', key: trelloKey, token: trelloToken }),
+    }),
+    ref: trelloCard,
   })
 })

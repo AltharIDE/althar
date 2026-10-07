@@ -123,6 +123,23 @@ describe('connections', () => {
     await act(async () => void (await client.listConnections()))
   })
 
+  it('connects Trello with the API key its token was made for', async () => {
+    const trello = {
+      ...connectionList.products[1]!,
+      product: 'trello' as const,
+      name: 'Trello',
+      hostedUrl: 'https://trello.com',
+      tokenNeeds: 'key' as const,
+      tokenHelp: 'https://trello.com/power-ups/admin',
+    }
+    const { client } = fakeClient({ listConnections: vi.fn(async () => ({ ...connectionList, products: [trello] })) })
+    withServices(<Connections />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a token' }))
+    await userEvent.type(screen.getByLabelText('API key'), '0123abcd')
+    await userEvent.type(screen.getByLabelText('Trello token'), 'ATTA0000{Enter}')
+    await waitFor(() => expect(client.connectToken).toHaveBeenLastCalledWith({ product: 'trello', key: '0123abcd', token: 'ATTA0000' }))
+  })
+
   it('lists a connection on a company’s own server with its address, and one that needs signing in again', async () => {
     const { client } = fakeClient({
       listConnections: vi.fn(async () => ({
@@ -656,7 +673,7 @@ describe('what reaching outside says, in every case', () => {
       ...connectionList,
       products: [
         ...connectionList.products,
-        { ...connectionList.products[1]!, product: 'jira_cloud' as const, name: 'Jira', hostedUrl: null, tokenNeedsUser: true },
+        { ...connectionList.products[1]!, product: 'jira_cloud' as const, name: 'Jira', hostedUrl: null, tokenNeeds: 'email' as const },
         {
           ...connectionList.products[0]!,
           product: 'bitbucket_dc' as const,
@@ -667,11 +684,11 @@ describe('what reaching outside says, in every case', () => {
       ],
       connections: [{ ...githubConnection, webUrl: 'https://git.meridian.dev' }],
     }
-    expect(servicesOf(list).map((service) => [service.id, service.what, service.instanceExample])).toEqual([
-      ['github', 'Pull requests and issues', undefined],
-      ['linear', 'Issues', undefined],
-      ['jira_cloud', 'Issues', 'https://your-site.atlassian.net'],
-      ['bitbucket_dc', 'Pull requests', undefined],
+    expect(servicesOf(list).map((service) => [service.id, service.what, service.instanceExample, service.tokenNeeds])).toEqual([
+      ['github', 'Pull requests and issues', undefined, undefined],
+      ['linear', 'Issues', undefined, undefined],
+      ['jira_cloud', 'Issues', 'https://your-site.atlassian.net', 'email'],
+      ['bitbucket_dc', 'Pull requests', undefined, undefined],
     ])
     expect(connectionsOf(list)).toEqual([{ id: 'conn1', service: 'github', account: 'you', instance: 'https://git.meridian.dev' }])
   })

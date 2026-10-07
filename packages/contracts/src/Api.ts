@@ -237,8 +237,8 @@ export const ProductOption = Schema.Struct({
   selfHosted: Schema.Boolean,
   /** The service's own sign-in, in the browser, is set up here; otherwise a pasted token. */
   browserSignIn: Schema.Boolean,
-  /** A pasted token goes with the account's email. */
-  tokenNeedsUser: Schema.Boolean,
+  /** What a pasted token goes with: the account's email, or the API key it was made for. */
+  tokenNeeds: Schema.NullOr(Schema.Literals(['email', 'key'])),
   /** Where the person makes a token, on the hosted service. */
   tokenHelp: Schema.String,
 })
@@ -1024,10 +1024,16 @@ export const Api = RpcGroup.make(
   /** How a sign-in stands. */
   call('GetSignIn', { flowId: Schema.String }, SignInState),
   command('CancelSignIn', { flowId: Schema.String }, Schema.Void),
-  /** Connects with a token the person pasted, which goes to the keychain. */
+  /** Connects with a token the person pasted, and what goes with it, all of which goes to the keychain. */
   command(
     'ConnectToken',
-    { product: Product, webUrl: Schema.optional(Schema.String), user: Schema.optional(Schema.String), token: Schema.String },
+    {
+      product: Product,
+      webUrl: Schema.optional(Schema.String),
+      user: Schema.optional(Schema.String),
+      key: Schema.optional(Schema.String),
+      token: Schema.String,
+    },
     ConnectionSummary,
   ),
   command('Disconnect', { connectionId: Schema.String }, Schema.Void),
