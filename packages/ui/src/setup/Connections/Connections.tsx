@@ -412,6 +412,8 @@ function TokenForm({
   }
   const said = missing ?? error
   const pairedSaid = missing !== null && (missing === emptyPaired || missing === keyWrong)
+  /* the token's own fault, or the service's word on it: not what is said of the address, email or key */
+  const tokenSaid = Boolean(said) && !pairedSaid && missing !== t.emptyInstance
   const keys = {
     onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter') {
@@ -470,8 +472,8 @@ function TokenForm({
           spellCheck={false}
           className={s.mono}
           value={token}
-          invalid={Boolean(said)}
-          aria-describedby={said ? errorId : undefined}
+          invalid={tokenSaid}
+          aria-describedby={tokenSaid ? errorId : undefined}
           onChange={(e) => {
             setToken(e.target.value)
             setMissing(null)

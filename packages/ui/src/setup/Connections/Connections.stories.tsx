@@ -138,6 +138,8 @@ export const AKeyThatIsntOne: Story = {
     await userEvent.type(c.getByLabelText('Trello token'), 'ATTA0000{Enter}')
     await expect(c.getByText('That’s the Power-Up’s secret; paste its API key')).toBeInTheDocument()
     await expect(key).toHaveAttribute('aria-invalid', 'true')
+    // The key is wrong, not the token: only the key's field is marked.
+    await expect(c.getByLabelText('Trello token')).not.toHaveAttribute('aria-invalid', 'true')
     await userEvent.clear(key)
     await userEvent.type(key, KEY.slice(0, 31))
     await userEvent.type(c.getByLabelText('Trello token'), '{Enter}')
