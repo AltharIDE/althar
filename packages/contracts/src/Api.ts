@@ -241,6 +241,10 @@ export const ProductOption = Schema.Struct({
   tokenNeeds: Schema.NullOr(Schema.Literals(['email', 'key'])),
   /** Where the person makes a token, on the hosted service. */
   tokenHelp: Schema.String,
+  /** Where a token is made for the API key the person typed, with `{key}` where it goes. */
+  tokenHelpForKey: Schema.NullOr(Schema.String),
+  /** What a typed API key is checked against before it is sent: the first pattern it matches says what is wrong with it. */
+  keyChecks: Schema.Array(Schema.Struct({ pattern: Schema.String, says: Schema.String })),
 })
 export type ProductOption = typeof ProductOption.Type
 

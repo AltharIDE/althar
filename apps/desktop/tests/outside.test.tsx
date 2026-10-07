@@ -123,7 +123,7 @@ describe('connections', () => {
     await act(async () => void (await client.listConnections()))
   })
 
-  it('connects Trello with the API key its token was made for', async () => {
+  it('connects Trello with the API key its token was made for, offering a token for the key once it looks right', async () => {
     const trello = {
       ...connectionList.products[1]!,
       product: 'trello' as const,
@@ -131,13 +131,23 @@ describe('connections', () => {
       hostedUrl: 'https://trello.com',
       tokenNeeds: 'key' as const,
       tokenHelp: 'https://trello.com/power-ups/admin',
+      tokenHelpForKey: 'https://trello.com/1/authorize?response_type=token&key={key}',
+      keyChecks: [{ pattern: '^(?![0-9a-f]{32}$)', says: 'An API key is 32 characters' }],
     }
+    const key = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
     const { client } = fakeClient({ listConnections: vi.fn(async () => ({ ...connectionList, products: [trello] })) })
     withServices(<Connections />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Add a token' }))
-    await userEvent.type(screen.getByLabelText('API key'), '0123abcd')
+    await userEvent.type(screen.getByLabelText('API key'), key.slice(0, 8))
     await userEvent.type(screen.getByLabelText('Trello token'), 'ATTA0000{Enter}')
-    await waitFor(() => expect(client.connectToken).toHaveBeenLastCalledWith({ product: 'trello', key: '0123abcd', token: 'ATTA0000' }))
+    expect(await screen.findByText('An API key is 32 characters')).toBeTruthy()
+    expect(screen.queryByRole('link', { name: /Make a token for this key/ })).toBeNull()
+    await userEvent.type(screen.getByLabelText('API key'), key.slice(8))
+    expect(screen.getByRole('link', { name: /Make a token for this key/ }).getAttribute('href')).toBe(
+      `https://trello.com/1/authorize?response_type=token&key=${key}`,
+    )
+    await userEvent.type(screen.getByLabelText('Trello token'), '{Enter}')
+    await waitFor(() => expect(client.connectToken).toHaveBeenLastCalledWith({ product: 'trello', key, token: 'ATTA0000' }))
   })
 
   it('lists a connection on a company’s own server with its address, and one that needs signing in again', async () => {

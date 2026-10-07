@@ -38,6 +38,10 @@ export interface ServiceOption {
   tokenNeeds?: 'email' | 'key'
   /** Where a token is made, on the hosted service. */
   tokenHelp: string
+  /** Where a token is made for the API key typed, with `{key}` where it goes: offered once the key looks right. */
+  tokenHelpForKey?: string
+  /** What a typed API key is checked against before it is sent: the first pattern it matches says what is wrong with it. */
+  keyChecks?: readonly { pattern: string; says: string }[]
   /** An example of its address, for a service connected by one: https://your-site.atlassian.net. */
   instanceExample?: string
 }
@@ -94,6 +98,7 @@ export interface ConnectionsText {
   key: string
   token: (service: string) => string
   makeToken: (service: string) => string
+  makeTokenForKey: string
   tokenNote: string
   emptyToken: string
   emptyUser: string
@@ -125,6 +130,7 @@ export const connectionsText: ConnectionsText = {
   key: 'API key',
   token: (service) => `${service} token`,
   makeToken: (service) => `Make one on ${service}`,
+  makeTokenForKey: 'Make a token for this key',
   tokenNote: 'Kept encrypted on this Mac, for Althar alone. It’s never shown again.',
   emptyToken: 'Paste the token first',
   emptyUser: 'Type the email the token belongs to',
@@ -373,6 +379,14 @@ function TokenForm({
   const [token, setToken] = useState('')
   const needs = service.tokenNeeds
   const emptyPaired = needs === 'email' ? t.emptyUser : t.emptyKey
+  const typedKey = needs === 'key' ? paired.trim() : ''
+  /* what is wrong with the key typed, as the service checks it */
+  const keyWrong = typedKey === '' ? undefined : service.keyChecks?.find((check) => new RegExp(check.pattern).test(typedKey))?.says
+  /* where a token is made for the key typed, once it looks right */
+  const forKey =
+    typedKey === '' || keyWrong !== undefined || service.tokenHelpForKey === undefined
+      ? undefined
+      : service.tokenHelpForKey.replace('{key}', encodeURIComponent(typedKey))
   const [missing, setMissing] = useState<string | null>(null)
   const first = useRef<HTMLInputElement>(null)
   const errorId = useId()
@@ -384,9 +398,11 @@ function TokenForm({
         ? t.emptyInstance
         : needs !== undefined && !paired.trim()
           ? emptyPaired
-          : !token.trim()
-            ? t.emptyToken
-            : null
+          : keyWrong !== undefined
+            ? keyWrong
+            : !token.trim()
+              ? t.emptyToken
+              : null
     if (empty !== null) return setMissing(empty)
     onSave({
       ...(server ? { instance: instance.trim() } : {}),
@@ -395,6 +411,7 @@ function TokenForm({
     })
   }
   const said = missing ?? error
+  const pairedSaid = missing !== null && (missing === emptyPaired || missing === keyWrong)
   const keys = {
     onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter') {
@@ -434,7 +451,8 @@ function TokenForm({
             spellCheck={false}
             {...(needs === 'key' ? { className: s.mono } : {})}
             value={paired}
-            invalid={missing === emptyPaired}
+            invalid={pairedSaid}
+            aria-describedby={pairedSaid ? errorId : undefined}
             onChange={(e) => {
               setPaired(e.target.value)
               setMissing(null)
@@ -463,9 +481,9 @@ function TokenForm({
       </label>
       {said ? <FieldError id={errorId}>{said}</FieldError> : <p className={s.note}>{t.tokenNote}</p>}
       <div className={s.foot}>
-        {!server && service.tokenHelp && (
-          <a className={s.link} href={safeHref(service.tokenHelp)} target="_blank" rel="noreferrer">
-            {t.makeToken(service.name)}
+        {!server && (forKey !== undefined || service.tokenHelp) && (
+          <a className={s.link} href={safeHref(forKey ?? service.tokenHelp)} target="_blank" rel="noreferrer">
+            {forKey === undefined ? t.makeToken(service.name) : t.makeTokenForKey}
             <Icon name="external" size={12} />
           </a>
         )}

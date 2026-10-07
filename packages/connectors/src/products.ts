@@ -48,12 +48,17 @@ export interface ProductInfo {
     | null
   /**
    * A pasted token: how it is sent, what goes with it (the account's email,
-   * or the API key it was made for), and where the person makes one.
+   * or the API key it was made for), and where the person makes one. With an
+   * API key, where a token is made for the key typed (`{key}` in its place),
+   * and what the key is checked against before it is sent: the first pattern
+   * it matches says what is wrong with it.
    */
   readonly token: {
     readonly kind: Credential['kind']
     readonly needs: 'email' | 'key' | null
     readonly help: (webUrl: string) => string
+    readonly helpForKey?: string
+    readonly keyChecks?: ReadonlyArray<{ readonly pattern: string; readonly says: string }>
   }
   /** Its adapter, once built. */
   readonly make: ((options: AdapterOptions) => { readonly host?: CodeHost; readonly tracker?: Tracker }) | null
@@ -178,7 +183,18 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     apiFor: () => 'https://api.trello.com/1',
     browser: null,
     // The person's own Power-Up key, with a token made for it, until Althar's Power-Up is registered.
-    token: { kind: 'app', needs: 'key', help: () => 'https://trello.com/power-ups/admin' },
+    token: {
+      kind: 'app',
+      needs: 'key',
+      help: () => 'https://trello.com/power-ups/admin',
+      // Trello shows the token it makes there, to copy.
+      helpForKey: 'https://trello.com/1/authorize?expiration=never&name=Althar&scope=read,write&response_type=token&key={key}',
+      keyChecks: [
+        // A Power-Up's page shows its secret beside its key.
+        { pattern: '^[0-9a-fA-F]{64}$', says: 'That’s the Power-Up’s secret; paste its API key' },
+        { pattern: '^(?![0-9a-fA-F]{32}$)', says: 'An API key is 32 characters' },
+      ],
+    },
     make: (options) => ({ tracker: makeTrello(options) }),
   },
 }

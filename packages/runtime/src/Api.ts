@@ -453,6 +453,8 @@ export const handlers = Api.toLayer(
                   browserSignIn: info.browserSignIn,
                   tokenNeeds: info.token.needs,
                   tokenHelp: info.token.help(info.hosted?.webUrl ?? ''),
+                  tokenHelpForKey: info.token.helpForKey ?? null,
+                  keyChecks: info.token.keyChecks ?? [],
                 })),
             }
           }),

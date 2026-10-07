@@ -96,7 +96,12 @@ export const ATokenWithItsEmail: Story = {
   },
 }
 
-/** Trello's token is made for an API key, which goes with it: the key first, then the token. */
+const KEY = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
+
+/**
+ * Trello's token is made for an API key, which goes with it: the key first,
+ * then the token. Once the key looks right, the link makes a token for it.
+ */
 export const ATokenWithItsKey: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
@@ -107,11 +112,37 @@ export const ATokenWithItsKey: Story = {
     await expect(key).toHaveFocus()
     await expect(key).toHaveAttribute('type', 'text')
     await expect(c.queryByLabelText('Email')).not.toBeInTheDocument()
+    await expect(c.getByRole('link', { name: /Make one on Trello/ })).toHaveAttribute('href', 'https://trello.com/power-ups/admin')
     await userEvent.type(c.getByLabelText('Trello token'), 'ATTA0000{Enter}')
     await expect(c.getByText('Paste the API key the token was made for')).toBeInTheDocument()
-    await userEvent.type(key, '0123abcd')
+    await userEvent.type(key, KEY)
+    await expect(c.getByRole('link', { name: /Make a token for this key/ })).toHaveAttribute(
+      'href',
+      `https://trello.com/1/authorize?expiration=never&name=Althar&scope=read,write&response_type=token&key=${KEY}`,
+    )
     await userEvent.type(c.getByLabelText('Trello token'), '{Enter}')
-    await expect(args.onToken).toHaveBeenCalledWith('trello', { key: '0123abcd', token: 'ATTA0000' })
+    await expect(args.onToken).toHaveBeenCalledWith('trello', { key: KEY, token: 'ATTA0000' })
+  },
+}
+
+/** A key that isn't one says so, by the service's own checks: a Power-Up's secret pasted as its key, or a key cut short. No token link is offered for it. */
+export const AKeyThatIsntOne: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const [, trello] = c.getAllByRole('button', { name: 'Add a token' })
+    if (!trello) throw new Error('no Trello row')
+    await userEvent.click(trello)
+    const key = c.getByLabelText('API key')
+    await userEvent.type(key, `${KEY}${KEY}`)
+    await expect(c.queryByRole('link', { name: /Make a token for this key/ })).not.toBeInTheDocument()
+    await userEvent.type(c.getByLabelText('Trello token'), 'ATTA0000{Enter}')
+    await expect(c.getByText('That’s the Power-Up’s secret; paste its API key')).toBeInTheDocument()
+    await expect(key).toHaveAttribute('aria-invalid', 'true')
+    await userEvent.clear(key)
+    await userEvent.type(key, KEY.slice(0, 31))
+    await userEvent.type(c.getByLabelText('Trello token'), '{Enter}')
+    await expect(c.getByText('An API key is 32 characters')).toBeInTheDocument()
+    await expect(args.onToken).not.toHaveBeenCalled()
   },
 }
 

@@ -372,6 +372,8 @@ export const connectionList: ConnectionList = {
       browserSignIn: true,
       tokenNeeds: null,
       tokenHelp: 'https://github.com/settings/personal-access-tokens/new',
+      tokenHelpForKey: null,
+      keyChecks: [],
     },
     {
       product: 'linear',
@@ -383,6 +385,8 @@ export const connectionList: ConnectionList = {
       browserSignIn: false,
       tokenNeeds: null,
       tokenHelp: 'https://linear.app/settings/account/security',
+      tokenHelpForKey: null,
+      keyChecks: [],
     },
   ],
 }

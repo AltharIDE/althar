@@ -62,6 +62,17 @@ describe('the products', () => {
       ],
     )
     for (const info of Object.values(products)) assert.match(info.token.help(info.hosted?.webUrl ?? 'https://example.com'), /^https:\/\//)
+    // Trello makes a token for the key typed, and says when the key isn't one.
+    assert.strictEqual(
+      products.trello.token.helpForKey?.replace('{key}', 'k'),
+      'https://trello.com/1/authorize?expiration=never&name=Althar&scope=read,write&response_type=token&key=k',
+    )
+    const wrong = (key: string) => products.trello.token.keyChecks?.find((check) => new RegExp(check.pattern).test(key))?.says
+    const key = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
+    assert.isUndefined(wrong(key))
+    assert.strictEqual(wrong(`${key}${key}`), 'That’s the Power-Up’s secret; paste its API key')
+    assert.strictEqual(wrong(key.slice(1)), 'An API key is 32 characters')
+    assert.strictEqual(wrong(`${key.slice(1)}x`), 'An API key is 32 characters')
   })
 
   it('make their adapters', () => {

@@ -237,6 +237,11 @@ export const SERVICES: ServiceOption[] = [
     browserSignIn: false,
     tokenNeeds: 'key',
     tokenHelp: 'https://trello.com/power-ups/admin',
+    tokenHelpForKey: 'https://trello.com/1/authorize?expiration=never&name=Althar&scope=read,write&response_type=token&key={key}',
+    keyChecks: [
+      { pattern: '^[0-9a-fA-F]{64}$', says: 'That’s the Power-Up’s secret; paste its API key' },
+      { pattern: '^(?![0-9a-fA-F]{32}$)', says: 'An API key is 32 characters' },
+    ],
   },
   {
     id: 'jira_cloud',
