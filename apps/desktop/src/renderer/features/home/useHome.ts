@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 
 import type { BoardSnapshot, HomeSnapshot } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
 import { homeSince, keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { readHeadsAhead } from '../board/useBoard'
 import { type WorkActions, useWorkActions } from '../board/useWorkActions'
 
 /*
@@ -49,10 +50,13 @@ export const useHome = (): HomeModel => {
     }
   }, [client, cache])
 
+  const board = useMemo(() => (home === null ? null : { cursor: home.cursor, tasks: home.tasks, calls: home.calls }), [home])
+  useEffect(() => readHeadsAhead(client, cache, board), [client, cache, board])
+
   return {
     ...actions,
     error: actions.error ?? (read.error === null ? null : messageOf(read.error)),
     home,
-    board: home === null ? null : { cursor: home.cursor, tasks: home.tasks, calls: home.calls },
+    board,
   }
 }
