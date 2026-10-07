@@ -148,6 +148,21 @@ describe('a failed answer', () => {
     )
     assert.strictEqual(failureOf('github', 422, headers(), JSON.stringify({ errors: ['bad branch'] }), at).message, 'bad branch')
     assert.strictEqual(failureOf('linear', 400, headers(), JSON.stringify({ error: 'invalid_grant' }), at).message, 'invalid_grant')
+    // Jira's: its messages, or what it says of each field.
+    assert.strictEqual(
+      failureOf('jira_dc', 404, headers(), JSON.stringify({ errorMessages: ['Issue Does Not Exist'], errors: {} }), at).message,
+      'Issue Does Not Exist',
+    )
+    assert.strictEqual(
+      failureOf(
+        'jira_cloud',
+        400,
+        headers(),
+        JSON.stringify({ errorMessages: [], errors: { comment: 'Comment body can not be empty!' } }),
+        at,
+      ).message,
+      'Comment body can not be empty!',
+    )
     assert.strictEqual(failureOf('github', 500, headers(), 'oops', at).message, '500')
     assert.strictEqual(failureOf('github', 500, headers(), JSON.stringify({}), at).message, '500')
   })

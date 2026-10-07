@@ -14,6 +14,8 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 | `products.ts` | Every product: its name, hosted service, whether it runs self-hosted, how a person signs in, and its adapter once built |
 | `github.ts` | GitHub and GitHub Enterprise Server: a code host over REST (GraphQL where REST can't), and a tracker of its issues |
 | `linear.ts` | Linear, a tracker, over GraphQL |
+| `jira.ts` | Jira Cloud and Jira Data Center, a tracker each, over REST: version 3 on Cloud, version 2 on Data Center |
+| `jiraText.ts` | Jira's text to Markdown and back: Cloud's Atlassian Document Format, Data Center's wiki markup |
 | `http.ts` | Calls to a service's API: signed in per call, bounded in time, answers checked, failures classified, GETs cached by ETag |
 | `signIn.ts` | The device flow and OAuth with PKCE, and refreshing a token |
 | `links.ts` | Which host a git remote is on, and what a pasted link points at |
@@ -36,6 +38,7 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 
 ## Gaps
 
-- **GitLab, Jira, Bitbucket and Trello** have no adapter yet; `products.ts` lists them, and nothing offers them.
+- **GitLab, Bitbucket and Trello** have no adapter yet; `products.ts` lists them, and nothing offers them.
+- **Jira's text** converts what issues and Althar's comments hold. Anything rarer (an attachment, a colour, a smart link's card) keeps its text, or its name, and no more.
 - **Pagination** stops at the first hundred: of comments since a cursor, of reviews, of checks.
 - **Webhooks** aren't here: listening polls until Althar has a cloud.

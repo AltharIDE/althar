@@ -43,6 +43,14 @@ One pull request each:
      both take pasted tokens until they are.
 2. **GitLab,** hosted and self-managed, with its issues.
 3. **Jira,** Cloud and Data Center.
+   - Built on the `connectors/jira` branch: the tracker for both editions,
+     with Cloud's Atlassian Document Format and Data Center's wiki markup
+     read as Markdown and written back for comments. A Cloud token with
+     scopes goes through Atlassian's gateway.
+   - Reading issues checked against public instances (Hibernate's Jira
+     Cloud, Apache's Data Center), anonymously. Not yet run against real
+     accounts: commenting, linking and listing the person's own issues need
+     one.
 4. **Bitbucket,** Cloud and Data Center, and **Trello.**
 
 ## For now

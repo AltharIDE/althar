@@ -9,7 +9,7 @@ describe('the products', () => {
   it('available now are the ones with an adapter', () => {
     assert.deepStrictEqual(
       available().map((info) => info.product),
-      ['github', 'linear'],
+      ['github', 'linear', 'jira_cloud', 'jira_dc'],
     )
   })
 
@@ -63,6 +63,10 @@ describe('the products', () => {
     const linear = products.linear.make?.(options)
     assert.isUndefined(linear?.host)
     assert.strictEqual(linear?.tracker?.product, 'linear')
+    const jira = products.jira_cloud.make?.(options)
+    assert.isUndefined(jira?.host)
+    assert.strictEqual(jira?.tracker?.product, 'jira_cloud')
+    assert.strictEqual(products.jira_dc.make?.(options).tracker?.product, 'jira_dc')
   })
 })
 

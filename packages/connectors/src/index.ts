@@ -2,6 +2,7 @@ export { authorizationOf, type AdapterOptions, type Credential } from './credent
 export * from './errors'
 export { makeGitHub } from './github'
 export { type Fetch, makeHttp } from './http'
+export { makeJiraCloud, makeJiraDataCenter } from './jira'
 export { makeLinear } from './linear'
 export { HOSTED, type KnownHosts, type LinkRef, linksIn, parseLink, parseRemote, type RemoteRef } from './links'
 export * from './model'

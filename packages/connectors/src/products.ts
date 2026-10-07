@@ -1,5 +1,6 @@
 import type { AdapterOptions, Credential } from './credential'
 import { makeGitHub } from './github'
+import { makeJiraCloud, makeJiraDataCenter } from './jira'
 import { makeLinear } from './linear'
 import type { KnownHosts } from './links'
 import type { CodeHost, Product, Tracker } from './model'
@@ -141,7 +142,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     apiFor: (webUrl) => `${trimmed(webUrl)}/rest/api/3`,
     browser: null,
     token: { kind: 'basic', user: true, help: () => 'https://id.atlassian.com/manage-profile/security/api-tokens' },
-    make: null,
+    make: (options) => ({ tracker: makeJiraCloud(options) }),
   },
   jira_dc: {
     product: 'jira_dc',
@@ -158,7 +159,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
       help: (webUrl) =>
         `${trimmed(webUrl)}/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens`,
     },
-    make: null,
+    make: (options) => ({ tracker: makeJiraDataCenter(options) }),
   },
   trello: {
     product: 'trello',

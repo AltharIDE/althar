@@ -46,14 +46,16 @@ const MESSAGE_KEPT = 300
 const ErrorBody = Schema.Struct({
   message: Schema.optional(Schema.String),
   error: Schema.optional(Schema.Unknown),
-  errors: Schema.optional(Schema.Array(Schema.Unknown)),
+  // A list on GitHub and GraphQL; by field on Jira, beside its `errorMessages`.
+  errors: Schema.optional(Schema.Union([Schema.Array(Schema.Unknown), Schema.Record(Schema.String, Schema.Unknown)])),
+  errorMessages: Schema.optional(Schema.Array(Schema.String)),
 })
 
 /** What a service said went wrong, from its JSON body, or the status's own words. */
 const messageOf = (body: string, fallback: string): string => {
   try {
     const parsed = Schema.decodeUnknownSync(ErrorBody)(JSON.parse(body))
-    const first = parsed.errors?.[0]
+    const first = parsed.errorMessages?.[0] ?? (parsed.errors === undefined ? undefined : Object.values(parsed.errors)[0])
     const detail =
       typeof first === 'string'
         ? first
