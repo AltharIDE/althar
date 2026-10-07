@@ -148,23 +148,36 @@ const found: Issue = {
 
 describe('Trello', () => {
   it('reads a list’s name as a category', () => {
+    const lists: ReadonlyArray<readonly [string, ReturnType<typeof categoryOf>]> = [
+      ['Done', 'done'],
+      ['✅ Completed', 'done'],
+      ['Shipped this week', 'done'],
+      ['finished', 'done'],
+      ['Review done', 'done'],
+      ['Not done', 'todo'],
+      ['Undone', 'todo'],
+      ['Cancelled', 'cancelled'],
+      ['Canceled', 'cancelled'],
+      ["Won't do", 'cancelled'],
+      ['Won’t do', 'cancelled'],
+      ['Dropped', 'cancelled'],
+      ['Rejected', 'cancelled'],
+      ['Doing', 'started'],
+      ['In progress', 'started'],
+      ['In-Progress', 'started'],
+      ['Code review', 'started'],
+      ['In review', 'started'],
+      ['QA', 'started'],
+      ['Testing', 'started'],
+      ['Blocked', 'started'],
+      ['Backlog', 'backlog'],
+      ['Icebox', 'backlog'],
+      ['To Do', 'todo'],
+      ['Live (Oct-Dec 2018)', 'todo'],
+    ]
     assert.deepStrictEqual(
-      [
-        'Done',
-        '✅ Completed',
-        'Shipped this week',
-        'finished',
-        'Doing',
-        'In progress',
-        'In-Progress',
-        'Code review',
-        'Backlog',
-        'Icebox',
-        'To Do',
-        'Live (Oct-Dec 2018)',
-        'Review done',
-      ].map(categoryOf),
-      ['done', 'done', 'done', 'done', 'started', 'started', 'started', 'started', 'backlog', 'backlog', 'todo', 'todo', 'done'],
+      lists.map(([name]) => [name, categoryOf(name)]),
+      lists.map(([name, category]) => [name, category]),
     )
   })
 
@@ -247,7 +260,7 @@ describe('Trello', () => {
     }),
   )
 
-  it.effect('reads a card archived, or on an archived list or board, or with its due date complete, as done', () =>
+  it.effect('reads a card archived, or on an archived list or board, as done; a ticked due date only where its list says to do', () =>
     Effect.gen(function* () {
       const { tracker } = trello([
         // QG4i6vXe: archived, on an archived list called In Progress.
@@ -258,7 +271,9 @@ describe('Trello', () => {
         ],
         ['GET', /\/cards\/list0001\?/, { json: card({ list: { id: 'l1', name: 'Doing', closed: true } }) }],
         ['GET', /\/cards\/board001\?/, { json: card({ board: { id: 'b1', name: 'Old', closed: true } }) }],
-        ['GET', /\/cards\/due00001\?/, { json: card({ dueComplete: true, list: { id: 'l1', name: 'Doing' } }) }],
+        ['GET', /\/cards\/due00001\?/, { json: card({ dueComplete: true, list: { id: 'l1', name: 'Ideas' } }) }],
+        // A milestone ticked on a card still under way.
+        ['GET', /\/cards\/due00002\?/, { json: card({ dueComplete: true, list: { id: 'l1', name: 'Doing' } }) }],
         [
           'GET',
           /\/cards\/bare0001\?/,
@@ -276,6 +291,7 @@ describe('Trello', () => {
       for (const ref of ['QG4i6vXe', 'list0001', 'board001', 'due00001'])
         assert.strictEqual((yield* tracker.issue(ref)).status.category, 'done', ref)
       assert.deepStrictEqual((yield* tracker.issue('QG4i6vXe')).status, { name: 'In Progress', category: 'done' })
+      assert.deepStrictEqual((yield* tracker.issue('due00002')).status, { name: 'Doing', category: 'started' })
       const bare = yield* tracker.issue('bare0001')
       assert.deepStrictEqual([bare.body, bare.labels, bare.assignees, bare.status], ['', [], [], { name: 'Doing', category: 'started' }])
     }),
@@ -327,7 +343,7 @@ describe('Trello', () => {
     }),
   )
 
-  it.effect('leaves done cards out, keeps to a board when given one, and stops at the limit', () =>
+  it.effect('leaves done and cancelled cards out, keeps to a board when given one, and stops at the limit', () =>
     Effect.gen(function* () {
       const finished = {
         ...welcome,
@@ -338,7 +354,14 @@ describe('Trello', () => {
         idList: '67dc815dc97f33bd5ad9a8cf',
       }
       const ticked = { ...welcome, id: 'c6', shortLink: 'Due00001', dateLastActivity: '2026-10-02T00:00:00.000Z', dueComplete: true }
-      const { tracker } = trello([['GET', /\/members\/me\?/, { json: { ...member, cards: [...member.cards, finished, ticked] } }]])
+      // A list added to a Welcome Board, for a card no one will do.
+      const dropped = { ...welcome, id: 'c7', shortLink: 'Wont0001', dateLastActivity: '2026-10-03T00:00:00.000Z', idList: 'wontdo01' }
+      const boards = member.boards.map((board) =>
+        board.id === welcome.idBoard ? { ...board, lists: [...board.lists, { id: 'wontdo01', name: "Won't do", closed: false }] } : board,
+      )
+      const { tracker } = trello([
+        ['GET', /\/members\/me\?/, { json: { ...member, cards: [...member.cards, finished, ticked, dropped], boards } }],
+      ])
       assert.deepStrictEqual(
         (yield* tracker.mine()).map((issue) => issue.key),
         ['FUKG6oiY', 'XQYe3hhh'],

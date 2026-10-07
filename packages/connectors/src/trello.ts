@@ -50,12 +50,14 @@ const MEMBER_FIELDS = 'fullName,username'
 /**
  * A list's name as a category. A board's lists are its people's own, so
  * this reads the usual names and calls anything else to do. Order matters:
- * "Review done" is done.
+ * "Won't do" is cancelled, "Not done" to do, and "Review done" done.
  */
 export const categoryOf = (list: string): StatusCategory => {
   const name = list.toLowerCase()
+  if (/\b(cancell?ed|won['’]?t do|dropped|rejected)\b/.test(name)) return 'cancelled'
+  if (/\b(not|un)\s*done\b/.test(name)) return 'todo'
   if (/\b(done|complete|completed|finished|shipped)\b/.test(name)) return 'done'
-  if (/\b(doing|in[ -]progress|review)\b/.test(name)) return 'started'
+  if (/\b(doing|in[ -]progress|review|qa|testing|blocked)\b/.test(name)) return 'started'
   if (/\b(backlog|icebox)\b/.test(name)) return 'backlog'
   return 'todo'
 }
@@ -84,7 +86,18 @@ export const classified = (error: ConnectorFailed): ConnectorFailed => {
 
 const personOf = (member: Member): Person => ({ id: member.id, login: member.username, name: member.fullName ?? null, bot: false })
 
-/** A card, on its list and board. Archived (the card, its list or its board), or its due date marked complete, it is done. */
+/**
+ * A card's category. Archived (the card, its list or its board), it is done.
+ * A ticked due date is only a hint, since some tick a milestone on a card
+ * still under way: it says done only where the list's name says to do.
+ */
+const cardCategory = (card: Card, list: List, board: Board): StatusCategory => {
+  if (card.closed || list.closed === true || board.closed === true) return 'done'
+  const named = categoryOf(list.name)
+  return named === 'todo' && card.dueComplete === true ? 'done' : named
+}
+
+/** A card, on its list and board. */
 const issueOf = (card: Card, list: List, board: Board): Issue => ({
   id: card.id,
   ref: card.shortLink,
@@ -92,10 +105,7 @@ const issueOf = (card: Card, list: List, board: Board): Issue => ({
   title: card.name,
   body: card.desc ?? '',
   url: card.url,
-  status: {
-    name: list.name,
-    category: card.closed || list.closed === true || board.closed === true || card.dueComplete === true ? 'done' : categoryOf(list.name),
-  },
+  status: { name: list.name, category: cardCategory(card, list, board) },
   priority: null,
   assignees: (card.members ?? []).map(personOf),
   // A label with only a colour has no words to show.
@@ -137,7 +147,7 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
             (card) => issueOf(card, card.list, card.board),
           )
         : Effect.fail(new ConnectorFailed({ product, reason: 'not_found', message: `Not a Trello card: ${ref}` })),
-    // The cards the account is on, not archived, on an open board; those done left out, as other trackers' are.
+    // The cards the account is on, not archived, on an open board; those done or cancelled left out, as other trackers' are.
     mine: (options = {}) =>
       Effect.map(
         call(
@@ -154,7 +164,10 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
               return board === undefined || list === undefined ? [] : [issueOf(card, list, board)]
             })
             .filter(
-              (issue) => issue.status.category !== 'done' && (options.container === undefined || issue.container === options.container),
+              (issue) =>
+                issue.status.category !== 'done' &&
+                issue.status.category !== 'cancelled' &&
+                (options.container === undefined || issue.container === options.container),
             )
             .toSorted((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
             .slice(0, options.limit ?? 50)

@@ -38,6 +38,6 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 ## Gaps
 
 - **GitLab, Jira and Bitbucket** have no adapter yet; `products.ts` lists them, and nothing offers them.
-- **Trello's statuses** are read from its lists' names (Done, Doing, Backlog and the like). A board whose lists are named otherwise reads as to do until its lists can be mapped.
+- **Trello's statuses** are read from its lists' names (Done, Doing, Backlog, Won't do and the like). A board whose lists are named otherwise reads as to do until its lists can be mapped.
 - **Pagination** stops at the first hundred: of comments since a cursor, of reviews, of checks.
 - **Webhooks** aren't here: listening polls until Althar has a cloud.
