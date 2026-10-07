@@ -3,13 +3,13 @@ import { Effect } from 'effect'
 
 import { authorizationOf } from '../src/credential'
 import { HOSTED } from '../src/links'
-import { available, hostedOf, products } from '../src/products'
+import { addressOf, available, hostedOf, products } from '../src/products'
 
 describe('the products', () => {
   it('available now are the ones with an adapter', () => {
     assert.deepStrictEqual(
       available().map((info) => info.product),
-      ['github', 'gitlab', 'linear', 'trello'],
+      ['github', 'gitlab', 'linear', 'jira_cloud', 'jira_dc', 'trello'],
     )
   })
 
@@ -28,9 +28,20 @@ describe('the products', () => {
     assert.strictEqual(products.bitbucket_cloud.apiFor('https://bitbucket.org'), 'https://api.bitbucket.org/2.0')
     assert.strictEqual(products.bitbucket_dc.apiFor('https://git.meridian.dev'), 'https://git.meridian.dev/rest/api/latest')
     assert.strictEqual(products.jira_cloud.apiFor('https://meridian.atlassian.net'), 'https://meridian.atlassian.net/rest/api/3')
+    // A Jira Cloud site's API is at its origin, whatever page of it was pasted.
+    assert.strictEqual(
+      products.jira_cloud.apiFor('https://meridian.atlassian.net/jira/software/projects/PAY/boards/3'),
+      'https://meridian.atlassian.net/rest/api/3',
+    )
     assert.strictEqual(products.jira_dc.apiFor('https://jira.meridian.dev'), 'https://jira.meridian.dev/rest/api/2')
     assert.strictEqual(products.linear.apiFor('https://linear.app'), 'https://api.linear.app')
     assert.strictEqual(products.trello.apiFor('https://trello.com'), 'https://api.trello.com/1')
+  })
+
+  it('keep a connection’s address as typed, trimmed, or a Jira Cloud site by its origin', () => {
+    assert.strictEqual(addressOf(products.github, 'https://git.meridian.dev/'), 'https://git.meridian.dev')
+    assert.strictEqual(addressOf(products.jira_dc, 'https://issues.apache.org/jira/'), 'https://issues.apache.org/jira')
+    assert.strictEqual(addressOf(products.jira_cloud, 'https://meridian.atlassian.net/jira/your-work'), 'https://meridian.atlassian.net')
   })
 
   it('know where a person signs in, and makes a token', () => {
@@ -91,6 +102,10 @@ describe('the products', () => {
     const linear = products.linear.make?.(options)
     assert.isUndefined(linear?.host)
     assert.strictEqual(linear?.tracker?.product, 'linear')
+    const jira = products.jira_cloud.make?.(options)
+    assert.isUndefined(jira?.host)
+    assert.strictEqual(jira?.tracker?.product, 'jira_cloud')
+    assert.strictEqual(products.jira_dc.make?.(options).tracker?.product, 'jira_dc')
     const trello = products.trello.make?.(options)
     assert.isUndefined(trello?.host)
     assert.strictEqual(trello?.tracker?.product, 'trello')

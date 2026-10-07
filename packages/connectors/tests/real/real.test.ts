@@ -4,7 +4,9 @@ import { Effect } from 'effect'
 import type { Credential } from '../../src/credential'
 import { makeGitHub } from '../../src/github'
 import { makeGitLab } from '../../src/gitlab'
+import { makeJiraCloud, makeJiraDataCenter } from '../../src/jira'
 import { makeLinear } from '../../src/linear'
+import { products } from '../../src/products'
 import { makeTrello } from '../../src/trello'
 import { hostContract, trackerContract } from '../contract'
 
@@ -25,6 +27,12 @@ import { hostContract, trackerContract } from '../contract'
  *   deletes the branch.
  * - Linear: ALTHAR_LINEAR_KEY (a personal API key), ALTHAR_LINEAR_ISSUE
  *   (MER-231, an issue it may comment on and link to).
+ * - Jira Cloud: ALTHAR_JIRA_URL (the site, https://meridian.atlassian.net),
+ *   ALTHAR_JIRA_EMAIL and ALTHAR_JIRA_TOKEN (the account's email and an API
+ *   token, with or without scopes), ALTHAR_JIRA_ISSUE (PROJ-123, an issue it
+ *   may comment on and link to).
+ * - Jira Data Center: ALTHAR_JIRA_DC_URL (the instance), ALTHAR_JIRA_DC_TOKEN
+ *   (a personal access token), ALTHAR_JIRA_DC_ISSUE.
  * - Trello: ALTHAR_TRELLO_KEY (a Power-Up's API key), ALTHAR_TRELLO_TOKEN
  *   (a token made for it, with read and write), ALTHAR_TRELLO_CARD (a card's
  *   short link, one it may comment on and attach a link to).
@@ -122,6 +130,36 @@ describe.skipIf(linear === '' || linearIssue === '')('Linear', () => {
       credential: Effect.succeed({ kind: 'key', token: linear }),
     }),
     ref: linearIssue,
+  })
+})
+
+const jiraUrl = env('ALTHAR_JIRA_URL')
+const jiraIssue = env('ALTHAR_JIRA_ISSUE')
+describe.skipIf(jiraUrl === '' || env('ALTHAR_JIRA_TOKEN') === '' || jiraIssue === '')('Jira Cloud', () => {
+  trackerContract({
+    name: 'Jira Cloud',
+    tracker: makeJiraCloud({
+      fetch,
+      apiUrl: products.jira_cloud.apiFor(jiraUrl),
+      webUrl: jiraUrl,
+      credential: Effect.succeed({ kind: 'basic', user: env('ALTHAR_JIRA_EMAIL'), token: env('ALTHAR_JIRA_TOKEN') }),
+    }),
+    ref: jiraIssue,
+  })
+})
+
+const jiraDcUrl = env('ALTHAR_JIRA_DC_URL')
+const jiraDcIssue = env('ALTHAR_JIRA_DC_ISSUE')
+describe.skipIf(jiraDcUrl === '' || env('ALTHAR_JIRA_DC_TOKEN') === '' || jiraDcIssue === '')('Jira Data Center', () => {
+  trackerContract({
+    name: 'Jira Data Center',
+    tracker: makeJiraDataCenter({
+      fetch,
+      apiUrl: products.jira_dc.apiFor(jiraDcUrl),
+      webUrl: jiraDcUrl,
+      credential: Effect.succeed({ kind: 'bearer', token: env('ALTHAR_JIRA_DC_TOKEN') }),
+    }),
+    ref: jiraDcIssue,
   })
 })
 

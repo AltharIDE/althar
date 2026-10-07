@@ -169,6 +169,19 @@ describe('a failed answer', () => {
       body: JSON.stringify({ error: 'invalid_token', error_description: 'Token was revoked.' }),
       words: 'Token was revoked.',
     },
+    // Jira: its messages, or what it says of each field.
+    {
+      product: 'jira_dc',
+      status: 404,
+      body: JSON.stringify({ errorMessages: ['Issue Does Not Exist'], errors: {} }),
+      words: 'Issue Does Not Exist',
+    },
+    {
+      product: 'jira_cloud',
+      status: 400,
+      body: JSON.stringify({ errorMessages: [], errors: { comment: 'Comment body can not be empty!' } }),
+      words: 'Comment body can not be empty!',
+    },
     // Nothing worth keeping: the status says it.
     { product: 'gitlab', status: 400, body: JSON.stringify({ message: [7, null] }), words: '400' },
     // Trello: a line of plain words. A page, or more than a line, says nothing worth keeping.

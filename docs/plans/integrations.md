@@ -50,6 +50,14 @@ One pull request each:
      adapter. Not yet run against a real account; its reads were tried
      against public projects on gitlab.com.
 3. **Jira,** Cloud and Data Center.
+   - Built on the `connectors/jira` branch: the tracker for both editions,
+     with Cloud's Atlassian Document Format and Data Center's wiki markup
+     read as Markdown and written back for comments. A Cloud token with
+     scopes goes through Atlassian's gateway.
+   - Reading issues checked against public instances (Hibernate's Jira
+     Cloud, Apache's Data Center), anonymously. Not yet run against real
+     accounts: commenting, linking and listing the person's own issues need
+     one.
 4. **Bitbucket,** Cloud and Data Center, and **Trello.**
    - Trello is built on its own, ahead of Bitbucket (`connectors/trello`):
      a card's status is its list, and it takes the person's own Power-Up

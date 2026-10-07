@@ -1,6 +1,7 @@
 import type { AdapterOptions, Credential } from './credential'
 import { makeGitHub } from './github'
 import { makeGitLab } from './gitlab'
+import { makeJiraCloud, makeJiraDataCenter, siteOf } from './jira'
 import { makeLinear } from './linear'
 import type { KnownHosts } from './links'
 import type { CodeHost, Product, Tracker } from './model'
@@ -27,6 +28,8 @@ export interface ProductInfo {
   readonly selfHosted: boolean
   /** An instance's API root, from its address. */
   readonly apiFor: (webUrl: string) => string
+  /** The address a connection keeps, from what the person typed, where the product says more than trimming it. */
+  readonly address?: (typed: string) => string
   /**
    * The browser sign-in it gives a desktop app without a secret: a code the
    * person types on its page, or a page they approve that comes back here.
@@ -155,10 +158,12 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     tracker: true,
     hosted: null,
     selfHosted: false,
-    apiFor: (webUrl) => `${trimmed(webUrl)}/rest/api/3`,
+    apiFor: (webUrl) => `${siteOf(webUrl)}/rest/api/3`,
+    // A site is its origin, whatever page of it was pasted.
+    address: siteOf,
     browser: null,
     token: { kind: 'basic', needs: 'email', help: () => 'https://id.atlassian.com/manage-profile/security/api-tokens' },
-    make: null,
+    make: (options) => ({ tracker: makeJiraCloud(options) }),
   },
   jira_dc: {
     product: 'jira_dc',
@@ -175,7 +180,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
       help: (webUrl) =>
         `${trimmed(webUrl)}/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens`,
     },
-    make: null,
+    make: (options) => ({ tracker: makeJiraDataCenter(options) }),
   },
   trello: {
     product: 'trello',
@@ -202,6 +207,9 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     make: (options) => ({ tracker: makeTrello(options) }),
   },
 }
+
+/** The address a connection to a product keeps, from what the person typed: without a trailing slash, and as the product says. */
+export const addressOf = (info: ProductInfo, typed: string): string => info.address?.(typed) ?? trimmed(typed)
 
 /** The products Althar can connect to now: those with an adapter. */
 export const available = (): ReadonlyArray<ProductInfo> => Object.values(products).filter((info) => info.make !== null)

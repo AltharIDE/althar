@@ -153,6 +153,8 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
         return 'The pull request changed since you looked at it. Have another look before you accept it.'
       case 'NotConnected':
         return `Althar isn't connected to ${productOf(text(error, 'product'))}. Connect it, then try again.`
+      case 'NotAnIssue':
+        return `That link is to a ${text(error, 'what')}, not an issue.`
       case 'OutwardUncertain':
         return "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again."
       case 'ConnectorFailed':
@@ -216,6 +218,7 @@ export const expected = new Set([
   'CantMerge',
   'NoChangeToOpen',
   'NotConnected',
+  'NotAnIssue',
   'NotARepository',
   'RepositoriesNeeded',
   'NotFound',
