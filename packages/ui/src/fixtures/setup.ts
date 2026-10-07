@@ -205,7 +205,7 @@ export function useSourceMap(initial: readonly SourceEntry[]) {
   }
 }
 
-/* The code hosts and trackers a person can connect: GitHub signs in in the browser; Linear and Jira take a token here. */
+/* The code hosts and trackers a person can connect: GitHub signs in in the browser; Linear, Trello and Jira take a token here. */
 export const SERVICES: ServiceOption[] = [
   {
     id: 'github',
@@ -215,7 +215,6 @@ export const SERVICES: ServiceOption[] = [
     hostedUrl: 'https://github.com',
     selfHosted: true,
     browserSignIn: true,
-    tokenNeedsUser: false,
     tokenHelp: 'https://github.com/settings/personal-access-tokens/new',
   },
   {
@@ -226,8 +225,23 @@ export const SERVICES: ServiceOption[] = [
     hostedUrl: 'https://linear.app',
     selfHosted: false,
     browserSignIn: false,
-    tokenNeedsUser: false,
     tokenHelp: 'https://linear.app/settings/account/security',
+  },
+  {
+    id: 'trello',
+    name: 'Trello',
+    brand: Brand.Trello,
+    what: 'Issues',
+    hostedUrl: 'https://trello.com',
+    selfHosted: false,
+    browserSignIn: false,
+    tokenNeeds: 'key',
+    tokenHelp: 'https://trello.com/power-ups/admin',
+    tokenHelpForKey: 'https://trello.com/1/authorize?expiration=never&name=Althar&scope=read,write&response_type=token&key={key}',
+    keyChecks: [
+      { pattern: '^[0-9a-fA-F]{64}$', says: 'That’s the Power-Up’s secret; paste its API key' },
+      { pattern: '^(?![0-9a-fA-F]{32}$)', says: 'An API key is 32 characters' },
+    ],
   },
   {
     id: 'jira_cloud',
@@ -237,7 +251,7 @@ export const SERVICES: ServiceOption[] = [
     hostedUrl: null,
     selfHosted: false,
     browserSignIn: false,
-    tokenNeedsUser: true,
+    tokenNeeds: 'email',
     tokenHelp: 'https://id.atlassian.com/manage-profile/security/api-tokens',
     instanceExample: 'https://your-site.atlassian.net',
   },

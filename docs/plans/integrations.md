@@ -51,6 +51,9 @@ One pull request each:
      against public projects on gitlab.com.
 3. **Jira,** Cloud and Data Center.
 4. **Bitbucket,** Cloud and Data Center, and **Trello.**
+   - Trello is built on its own, ahead of Bitbucket (`connectors/trello`):
+     a card's status is its list, and it takes the person's own Power-Up
+     key with a token made for it.
 
 ## For now
 
@@ -62,7 +65,8 @@ One pull request each:
 - **The apps Althar signs in with** (its GitHub App, its Linear OAuth app,
   its GitLab application and its Trello Power-Up) are registered by the
   maintainers. Their public ids are build configuration. Until one is
-  registered, its service takes a pasted token.
+  registered, its service takes a pasted token; Trello's goes with the API
+  key of a Power-Up the person makes.
 
 ## Done when
 

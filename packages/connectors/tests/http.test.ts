@@ -171,7 +171,13 @@ describe('a failed answer', () => {
     },
     // Nothing worth keeping: the status says it.
     { product: 'gitlab', status: 400, body: JSON.stringify({ message: [7, null] }), words: '400' },
-    { product: 'github', status: 500, body: 'oops', words: '500' },
+    // Trello: a line of plain words. A page, or more than a line, says nothing worth keeping.
+    { product: 'trello', status: 400, body: 'invalid token', words: 'invalid token' },
+    { product: 'github', status: 502, body: '<html><body>Bad gateway</body></html>', words: '502' },
+    { product: 'github', status: 500, body: 'oops\nat line 2', words: '500' },
+    // JSON of a shape no service here uses is not words to show, nor its text.
+    { product: 'github', status: 500, body: JSON.stringify({ errors: 'odd' }), words: '500' },
+    { product: 'github', status: 500, body: JSON.stringify(['odd']), words: '500' },
     { product: 'github', status: 500, body: JSON.stringify({}), words: '500' },
   ]
   for (const { product, status, body, words } of said)

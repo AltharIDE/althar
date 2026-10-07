@@ -8,3 +8,4 @@ export { HOSTED, type KnownHosts, type LinkRef, linksIn, parseLink, parseRemote,
 export * from './model'
 export { available, hostedOf, type ProductInfo, products } from './products'
 export * from './signIn'
+export { makeTrello } from './trello'

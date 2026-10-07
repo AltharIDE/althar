@@ -1,4 +1,4 @@
-import { Clock, Duration, Effect, Schema } from 'effect'
+import { Clock, Duration, Effect, Option, Schema } from 'effect'
 
 import { ConnectorFailed } from './errors'
 import type { Product } from './model'
@@ -73,25 +73,30 @@ const wordsOf = (said: unknown): string => {
   return ''
 }
 
-/** What a service said went wrong, from its JSON body, or the status's own words. */
+/** What a service said went wrong, from its JSON body or a line of plain words (Trello's), or the status's own words. */
 const messageOf = (body: string, fallback: string): string => {
+  let json: unknown
   try {
-    const parsed = Schema.decodeUnknownSync(ErrorBody)(JSON.parse(body))
-    const first = parsed.errors?.[0]
-    const detail =
-      typeof first === 'string'
-        ? first
-        : typeof first === 'object' && first !== null && 'message' in first && typeof first.message === 'string'
-          ? first.message
-          : undefined
-    const said = [wordsOf(parsed.message), detail].filter((part) => part !== undefined && part !== '').join(': ')
-    if (said !== '') return said.slice(0, MESSAGE_KEPT)
-    if (parsed.error_description !== undefined) return parsed.error_description.slice(0, MESSAGE_KEPT)
-    if (typeof parsed.error === 'string') return parsed.error.slice(0, MESSAGE_KEPT)
+    json = JSON.parse(body)
   } catch {
-    // Not JSON: the status says it.
+    // Not JSON: a line of plain words is the service's own; a page, or nothing, and the status says it.
+    const said = body.trim()
+    return said !== '' && !said.startsWith('<') && !said.includes('\n') ? said.slice(0, MESSAGE_KEPT) : fallback
   }
-  return fallback
+  // JSON of another shape says nothing Althar can read: the status says it.
+  const parsed = Option.getOrUndefined(Schema.decodeUnknownOption(ErrorBody)(json))
+  if (parsed === undefined) return fallback
+  const first = parsed.errors?.[0]
+  const detail =
+    typeof first === 'string'
+      ? first
+      : typeof first === 'object' && first !== null && 'message' in first && typeof first.message === 'string'
+        ? first.message
+        : undefined
+  const said = [wordsOf(parsed.message), detail].filter((part) => part !== undefined && part !== '').join(': ')
+  if (said !== '') return said.slice(0, MESSAGE_KEPT)
+  if (parsed.error_description !== undefined) return parsed.error_description.slice(0, MESSAGE_KEPT)
+  return typeof parsed.error === 'string' ? parsed.error.slice(0, MESSAGE_KEPT) : fallback
 }
 
 /** When a rate-limited call may be tried again, from whichever header the service sends. */

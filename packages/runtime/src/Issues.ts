@@ -176,10 +176,10 @@ export class Issues extends Context.Service<
             const issue = yield* adapters.tracker.issue(`${host.path.join('/')}#${number}`)
             return { ...summaryOf(adapters.info.product, issue), body: issue.body, connectionId: host.connectionId }
           }
-          // MER-231: whichever tracker has it.
+          // MER-231, or a Trello card's short link: whichever tracker has it, each reading its own keys as typed.
           for (const { connectionId, product, tracker } of yield* connections.trackers) {
             if (product === 'github' || product === 'gitlab') continue
-            const issue = yield* tracker.issue(wanted.toUpperCase()).pipe(Effect.orElseSucceed(() => null))
+            const issue = yield* tracker.issue(wanted).pipe(Effect.orElseSucceed(() => null))
             if (issue !== null) return { ...summaryOf(product, issue), body: issue.body, connectionId }
           }
           return yield* new NotFound({ kind: 'issue', id: wanted })
