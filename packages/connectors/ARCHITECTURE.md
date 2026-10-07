@@ -13,9 +13,11 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 | `model.ts` | The two models: code host and tracker, their data and their capabilities |
 | `products.ts` | Every product: its name, hosted service, whether it runs self-hosted, how a person signs in, and its adapter once built |
 | `github.ts` | GitHub and GitHub Enterprise Server: a code host over REST (GraphQL where REST can't), and a tracker of its issues |
+| `gitlab.ts` | GitLab, on gitlab.com or a company's own server: a code host of merge requests over REST, and a tracker of its issues |
 | `linear.ts` | Linear, a tracker, over GraphQL |
 | `jira.ts` | Jira Cloud and Jira Data Center, a tracker each, over REST: version 3 on Cloud, version 2 on Data Center |
 | `jiraText.ts` | Jira's text to Markdown and back: Cloud's Atlassian Document Format, Data Center's wiki markup |
+| `trello.ts` | Trello, a tracker, over REST: a card by its short link, its list as its status |
 | `http.ts` | Calls to a service's API: signed in per call, bounded in time, answers checked, failures classified, GETs cached by ETag |
 | `signIn.ts` | The device flow and OAuth with PKCE, and refreshing a token |
 | `links.ts` | Which host a git remote is on, and what a pasted link points at |
@@ -27,8 +29,8 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 - **A service's own words reach the screen; its shapes don't.** Changes, checks, reviews, comments and issues are the model's; the adapter converts, including text to Markdown.
 - **Every answer is read through a schema.** An answer that doesn't fit fails as `invalid_response`, never as a wrong value downstream.
 - **Cheap "anything new?".** A GET can be cached by its ETag, so polling an unchanged pull request costs GitHub's rate limit nothing; activity reads from a cursor.
-- **No secret of Althar's.** Sign-in is the device flow or PKCE, which need none; anything else is a token the person pastes. Credentials are asked for per call and never logged.
-- **Idempotent where the service isn't.** Opening a change first finds one already open from its branch.
+- **No secret of Althar's.** Sign-in is the device flow or PKCE, which need none; anything else is a token the person pastes (on Trello, with their own Power-Up's API key). Credentials are asked for per call, never logged, and never put in a URL.
+- **Idempotent where the service isn't.** Opening a change first finds one already open from its branch; a link is attached to a Trello card once.
 
 ## Checks
 
@@ -38,7 +40,10 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 
 ## Gaps
 
-- **GitLab, Bitbucket and Trello** have no adapter yet; `products.ts` lists them, and nothing offers them.
+- **Bitbucket** has no adapter yet; `products.ts` lists it, and nothing offers it.
+- **GitLab's checks** are its own pipelines' jobs, and a child or downstream pipeline as one check: a status an outside CI posts to a commit isn't read.
+- **GitLab's issues** are open or closed: the statuses of its paid tiers aren't read.
+- **Trello's statuses** are read from its lists' names (Done, Doing, Backlog, Won't do and the like). A board whose lists are named otherwise reads as to do until its lists can be mapped.
 - **Jira's text** converts what issues and Althar's comments hold. Anything rarer (an attachment, a colour, a smart link's card) keeps its text, or its name, and no more. Quotes, lists and emphasis nested more than sixteen deep are read as text, so that converting takes time in proportion to the text, however odd it is.
 - **Pagination** stops at the first hundred: of comments since a cursor, of reviews, of checks.
 - **Webhooks** aren't here: listening polls until Althar has a cloud.

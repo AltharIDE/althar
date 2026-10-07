@@ -42,6 +42,13 @@ One pull request each:
      accounts: Althar's GitHub App and Linear app aren't registered, so
      both take pasted tokens until they are.
 2. **GitLab,** hosted and self-managed, with its issues.
+   - The adapter: merge requests, drafts by their title, merging at the head
+     the person saw, the head pipeline's jobs and their logs, threads and
+     approvals, and its issues. Who can write to a project is asked of its
+     members, since GitLab's comments don't say.
+   - Nothing else changed: the runtime and the app offer any product with an
+     adapter. Not yet run against a real account; its reads were tried
+     against public projects on gitlab.com.
 3. **Jira,** Cloud and Data Center.
    - Built on the `connectors/jira` branch: the tracker for both editions,
      with Cloud's Atlassian Document Format and Data Center's wiki markup
@@ -52,6 +59,9 @@ One pull request each:
      accounts: commenting, linking and listing the person's own issues need
      one.
 4. **Bitbucket,** Cloud and Data Center, and **Trello.**
+   - Trello is built on its own, ahead of Bitbucket (`connectors/trello`):
+     a card's status is its list, and it takes the person's own Power-Up
+     key with a token made for it.
 
 ## For now
 
@@ -63,7 +73,8 @@ One pull request each:
 - **The apps Althar signs in with** (its GitHub App, its Linear OAuth app,
   its GitLab application and its Trello Power-Up) are registered by the
   maintainers. Their public ids are build configuration. Until one is
-  registered, its service takes a pasted token.
+  registered, its service takes a pasted token; Trello's goes with the API
+  key of a Power-Up the person makes.
 
 ## Done when
 

@@ -1,6 +1,6 @@
 # @althar/connectors
 
-How Althar talks to code hosts and trackers ([docs/architecture/06](../../docs/architecture/06-integrations-and-skills.md), [ADR-011](../../docs/decisions/011-own-connectors-for-hosts-and-trackers.md)): a model for each, one adapter per product (GitHub, Linear and Jira so far), the sign-in flows that need no secret, and a fake service for tests. Written with [Effect](https://effect.website).
+How Althar talks to code hosts and trackers ([docs/architecture/06](../../docs/architecture/06-integrations-and-skills.md), [ADR-011](../../docs/decisions/011-own-connectors-for-hosts-and-trackers.md)): a model for each, one adapter per product (GitHub, GitLab, Jira, Linear and Trello so far), the sign-in flows that need no secret, and a fake service for tests. Written with [Effect](https://effect.website).
 
 ## Use it
 
@@ -24,7 +24,7 @@ const { comments, reviews, cursor } = yield* host.activity(repository, change.nu
 - **Opening a change adopts one already open from its branch,** so a retry, or a pull request opened some other way, never makes a second.
 - **Text is Markdown.** Jira Cloud's descriptions and comments are the Atlassian Document Format, Data Center's are wiki markup: an issue reads as Markdown from either, and a comment is written in whichever the edition takes.
 - **Every failure is a `ConnectorFailed` with a reason:** unauthorized, forbidden, not found, rate limited (with when to try again), unreachable, rejected, or an answer that couldn't be read.
-- **The credential is asked for on each call,** so a refreshed token is used, and it never leaves the adapter except as the header it makes. A Jira Cloud API token with scopes works only through Atlassian's gateway, not the site's own address; the adapter goes there when the site refuses one.
+- **The credential is asked for on each call,** so a refreshed token is used, and it never leaves the adapter except as the header it makes. Trello's is two things, both in that header: an API key (the person's own Power-Up's, until Althar's is registered) and a token made for it. A Jira Cloud API token with scopes works only through Atlassian's gateway, not the site's own address; the adapter goes there when the site refuses one.
 
 ## Work on it
 

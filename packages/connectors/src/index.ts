@@ -1,6 +1,7 @@
 export { authorizationOf, type AdapterOptions, type Credential } from './credential'
 export * from './errors'
 export { makeGitHub } from './github'
+export { makeGitLab } from './gitlab'
 export { type Fetch, makeHttp } from './http'
 export { makeJiraCloud, makeJiraDataCenter, siteOf } from './jira'
 export { makeLinear } from './linear'
@@ -8,3 +9,4 @@ export { HOSTED, type KnownHosts, type LinkRef, linksIn, parseLink, parseRemote,
 export * from './model'
 export { addressOf, available, hostedOf, type ProductInfo, products } from './products'
 export * from './signIn'
+export { makeTrello } from './trello'

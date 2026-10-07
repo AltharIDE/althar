@@ -701,9 +701,16 @@ describe('code hosts and trackers, through the API', () => {
           [
             ['github', false, true, 'https://github.com'],
             ['linear', false, false, 'https://linear.app'],
+            ['trello', false, false, 'https://trello.com'],
             ['jira_dc', false, true, null],
           ],
         )
+        // Trello's token goes with an API key: where a token is made for one, and what a key is checked against.
+        assert.deepInclude(offered.products[0], { tokenNeeds: null, tokenHelpForKey: null, keyChecks: [] })
+        const trello = offered.products.find((product) => product.product === 'trello')
+        assert.strictEqual(trello?.tokenNeeds, 'key')
+        assert.strictEqual(trello?.tokenHelpForKey, products.trello.token.helpForKey)
+        assert.deepStrictEqual(trello?.keyChecks, products.trello.token.keyChecks)
         assert.lengthOf(offered.connections, 0)
         // Without Althar's app registered, the browser sign-in isn't offered; a pasted token is.
         const unavailable = yield* Effect.flip(client.StartSignIn({ commandId: commandId(), product: 'github' }))

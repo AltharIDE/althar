@@ -370,8 +370,10 @@ export const connectionList: ConnectionList = {
       hostedUrl: 'https://github.com',
       selfHosted: true,
       browserSignIn: true,
-      tokenNeedsUser: false,
+      tokenNeeds: null,
       tokenHelp: 'https://github.com/settings/personal-access-tokens/new',
+      tokenHelpForKey: null,
+      keyChecks: [],
     },
     {
       product: 'linear',
@@ -381,8 +383,10 @@ export const connectionList: ConnectionList = {
       hostedUrl: 'https://linear.app',
       selfHosted: false,
       browserSignIn: false,
-      tokenNeedsUser: false,
+      tokenNeeds: null,
       tokenHelp: 'https://linear.app/settings/account/security',
+      tokenHelpForKey: null,
+      keyChecks: [],
     },
   ],
 }

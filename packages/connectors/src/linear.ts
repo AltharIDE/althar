@@ -81,6 +81,9 @@ const issueOf = (issue: LinearIssue): Issue => {
 
 const Success = Schema.Struct({ success: Schema.Boolean })
 
+/** A key as Linear writes it, however it was typed: mer-231 is MER-231. Anything else goes as it is. */
+const keyOf = (ref: string) => (/^[A-Z][A-Z0-9]*-\d+$/i.test(ref) ? ref.toUpperCase() : ref)
+
 export const makeLinear = (options: AdapterOptions): Tracker => {
   const product = 'linear' as const
   const url = `${options.apiUrl.replace(/\/+$/, '')}/graphql`
@@ -105,9 +108,7 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
           Schema.Struct({ issue: LinearIssue }),
           url,
           `query($id: String!) { issue(id: $id) { ...IssueFields } } ${IssueFields}`,
-          {
-            id: ref,
-          },
+          { id: keyOf(ref) },
         ),
         ({ issue }) => issueOf(issue),
       ),

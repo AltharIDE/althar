@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFile
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { type Fetch, products } from '@althar/connectors'
+import { type Fetch, type ProductInfo, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
@@ -58,6 +58,8 @@ const withGitHub = (
     readonly callbackPort?: number
     readonly linear?: ReturnType<typeof makeFakeService>
     readonly secrets?: Layer.Layer<Secrets>
+    /** Real adapters for other products, offered with GitHub's. */
+    readonly more?: ReadonlyArray<ProductInfo>
   } = {},
 ) =>
   Runtime.layer({
@@ -70,7 +72,11 @@ const withGitHub = (
     connectors: Layer.succeed(
       Connectors,
       Connectors.of({
-        products: [products.github, { ...products.linear, make: () => (more.linear === undefined ? {} : { tracker: more.linear }) }],
+        products: [
+          products.github,
+          { ...products.linear, make: () => (more.linear === undefined ? {} : { tracker: more.linear }) },
+          ...(more.more ?? []),
+        ],
         fetch,
         clientIds: { github: 'Iv1.althar', linear: 'lin-althar' },
         callbackPort: more.callbackPort ?? 0,
@@ -210,6 +216,35 @@ describe('a connection', () => {
     }).pipe(Effect.provide(withGitHub(fetch)))
   })
 
+  it.live('takes Trello’s token with the API key it was made for, and sends both in a header on every call', () => {
+    const { fetch, sent } = stub([
+      [
+        'GET',
+        'https://api.trello.com/1/members/me?fields=id,username,fullName',
+        { json: { id: 'm1', username: 'you', fullName: 'You Person' } },
+      ],
+    ])
+    const signed = 'OAuth oauth_consumer_key="0123abcd", oauth_token="ATTA0000"'
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const secrets = yield* Secrets
+      const connection = yield* connections.connectToken({
+        product: 'trello',
+        key: ' 0123abcd ',
+        token: 'ATTA0000',
+        actorId: instance.personId,
+      })
+      assert.deepInclude(connection, { product: 'trello', webUrl: 'https://trello.com', auth: 'token' })
+      assert.strictEqual(sent[0]?.authorization, signed)
+      assert.deepInclude(JSON.parse((yield* secrets.get(connection.id)) ?? '{}') as object, { token: 'ATTA0000', key: '0123abcd' })
+      const { tracker } = yield* connections.adapters(connection.id)
+      yield* tracker?.account ?? Effect.void
+      assert.strictEqual(sent.at(-1)?.authorization, signed)
+      assert.lengthOf(sent, 2)
+    }).pipe(Effect.provide(withGitHub(fetch, { more: [products.trello] })))
+  })
+
   it.live('needs signing in again when the service refuses its token', () => {
     let refused = false
     const { fetch } = stub([
@@ -272,12 +307,13 @@ describe('a connection', () => {
         [
           ['github', false],
           ['linear', false],
+          ['trello', false],
         ],
       )
       assert.instanceOf(yield* Effect.flip(connections.startSignIn({ product: 'github', actorId: instance.personId })), SignInUnavailable)
       // A product without an adapter can't be connected.
       assert.instanceOf(
-        yield* Effect.flip(connections.connectToken({ product: 'trello', token: 't', actorId: instance.personId })),
+        yield* Effect.flip(connections.connectToken({ product: 'bitbucket_cloud', token: 't', actorId: instance.personId })),
         NotConnected,
       )
       // The fake answers as any GitHub instance; the remote's host decides which connection reaches a repository.
@@ -346,6 +382,23 @@ describe('a Jira Cloud site', () => {
       ),
     )
   })
+})
+
+describe('the network code hosts are called over', () => {
+  it.effect('is the one the app gives, and Node’s without one', () =>
+    Effect.gen(function* () {
+      const app: Fetch = () => Promise.resolve(new Response('{}'))
+      const read = (layer: Layer.Layer<Connectors>) =>
+        Effect.provide(
+          Effect.gen(function* () {
+            return (yield* Connectors).fetch
+          }),
+          layer,
+        )
+      assert.strictEqual(yield* read(Connectors.live({}, app)), app)
+      assert.strictEqual(yield* read(Connectors.live()), globalThis.fetch)
+    }),
+  )
 })
 
 describe('where sign-ins are kept', () => {
