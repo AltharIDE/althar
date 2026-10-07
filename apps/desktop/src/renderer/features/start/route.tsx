@@ -1,6 +1,7 @@
 import { createRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect } from 'react'
 
+import { reads } from '../../data/reads'
 import { rootRoute } from '../../root'
 import { HomeView } from '../home/HomeView'
 import { useHome } from '../home/useHome'
@@ -47,5 +48,11 @@ export const startRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   component: Start,
+  // The projects and the agents, and, once there are projects, the home.
+  loader: async ({ context: { client, cache } }) => {
+    const read = reads(client)
+    const [listed] = await Promise.allSettled([cache.fetchQuery(read.projects()), cache.fetchQuery(read.status())])
+    if (listed.status === 'fulfilled' && listed.value.projects.length > 0) await cache.fetchQuery(read.home()).catch(() => undefined)
+  },
   validateSearch: (search: Record<string, unknown>): { readonly open?: 'folder' } => (search.open === 'folder' ? { open: 'folder' } : {}),
 })

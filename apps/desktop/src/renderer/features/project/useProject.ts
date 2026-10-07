@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   type AgentStatus,
@@ -13,6 +14,8 @@ import {
 } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
+import { CARDS } from '../../data/feed'
+import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
 import { caughtUp, mergeItems, newestReads, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
@@ -30,9 +33,6 @@ import type { Streamed } from '../../shared/thread'
 
 /** How long changes are gathered before they are read. */
 const GATHER = 25
-
-/** Changes elsewhere in the project that move what a card shows: who is working, what waits on you, a plan, a run. */
-const CARDS = new Set(['provider_session', 'attention_request', 'task_plan', 'run', 'task', 'workspace'])
 
 export interface NewTask {
   readonly title: string
@@ -84,13 +84,20 @@ export interface ProjectModel {
 }
 
 export const useProject = (projectId: string): ProjectModel => {
-  const { client } = useServices()
-  const [project, setProject] = useState<ProjectSummary | null>(null)
-  const [coordinator, setCoordinator] = useState<CoordinatorSnapshot | null>(null)
+  const { client, cache } = useServices()
+  const read = reads(client)
+  const listed = useQuery(read.projects())
+  const project = listed.data?.projects.find((candidate) => candidate.id === projectId) ?? null
+  const thread = useQuery(read.coordinator(projectId))
+  const coordinator = thread.data ?? null
+  const status = useQuery(read.status()).data
+  const agents = useMemo(() => status?.agents.filter((agent) => agent.signIn !== 'signed_out') ?? [], [status])
+  // The project's ending, which a task the person plans starts from.
+  const end = useQuery(read.rules(projectId)).data?.end ?? null
   const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
-  const [since, setSince] = useState<number | null>(null)
-  const [agents, setAgents] = useState<ReadonlyArray<AgentStatus>>([])
-  const [error, setError] = useState<string | null>(null)
+  const [failed, setError] = useState<string | null>(null)
+  const readFailure = thread.error ?? listed.error
+  const error = failed ?? (readFailure === null ? null : messageOf(readFailure))
   const [pending, setPending] = useState(false)
   const [starting, setStarting] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
@@ -99,12 +106,26 @@ export const useProject = (projectId: string): ProjectModel => {
   const changed = useRef({ head: false, cards: false, items: new Set<string>() })
   const threadId = coordinator?.threadId ?? null
 
+  /** Changes the coordinator's thread as the window keeps it; nothing before it is first read. */
+  const setCoordinator = useCallback(
+    (change: (current: CoordinatorSnapshot) => CoordinatorSnapshot) =>
+      cache.setQueryData<CoordinatorSnapshot>(keys.coordinator(projectId), (current) =>
+        current === undefined ? current : change(current),
+      ),
+    [cache, projectId],
+  )
+
+  useEffect(() => () => clearTimeout(timer.current), [])
+
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
 
-  const arrived = useCallback((items: ReadonlyArray<ThreadItem>) => {
-    setCoordinator((current) => (current === null ? current : { ...current, items: mergeItems(current.items, items) }))
-    setStreaming((current) => caughtUp(current, items))
-  }, [])
+  const arrived = useCallback(
+    (items: ReadonlyArray<ThreadItem>) => {
+      setCoordinator((current) => ({ ...current, items: mergeItems(current.items, items) }))
+      setStreaming((current) => caughtUp(current, items))
+    },
+    [setCoordinator],
+  )
 
   /** The thread's head again: the agent working, the one it would start on. Its items stay as they are. */
   const readHead = useCallback(
@@ -112,31 +133,14 @@ export const useProject = (projectId: string): ProjectModel => {
       newest(
         'head',
         client.getCoordinator(projectId, { limit: 0 }),
-        (head) => setCoordinator((current) => (current === null ? head : { ...head, items: current.items, earlier: current.earlier })),
+        (head) =>
+          cache.setQueryData<CoordinatorSnapshot>(keys.coordinator(projectId), (current) =>
+            current === undefined ? head : { ...head, items: current.items, earlier: current.earlier },
+          ),
         fail,
       ),
-    [client, projectId, newest, fail],
+    [client, cache, projectId, newest, fail],
   )
-
-  // The project's ending, which a task the person plans starts from.
-  const [end, setEnd] = useState<TaskEnd | null>(null)
-  useEffect(() => {
-    client.getProjectRules(projectId).then(
-      (rules) => setEnd(rules.end),
-      () => {},
-    )
-  }, [client, projectId])
-
-  useEffect(() => {
-    Promise.all([client.listProjects(), client.getCoordinator(projectId)]).then(([projects, first]) => {
-      setProject(projects.projects.find((candidate) => candidate.id === projectId) ?? null)
-      setCoordinator(first)
-      // Watching from the earlier of the two reads misses nothing either saw.
-      setSince(Math.min(projects.cursor, first.cursor))
-    }, fail)
-    client.status().then((status) => setAgents(status.agents.filter((agent) => agent.signIn !== 'signed_out')), fail)
-    return () => clearTimeout(timer.current)
-  }, [client, projectId, fail])
 
   /** Reads what the gathered changes touched. */
   const readChanged = useCallback(() => {
@@ -172,7 +176,7 @@ export const useProject = (projectId: string): ProjectModel => {
     else if (event.projectId === projectId && CARDS.has(event.aggregateType)) changed.current.cards = true
     else return
     timer.current ??= setTimeout(readChanged, GATHER)
-  }, since)
+  })
 
   const loadEarlier = useCallback(async () => {
     const first = coordinator?.items[0]
@@ -180,15 +184,13 @@ export const useProject = (projectId: string): ProjectModel => {
     setLoadingEarlier(true)
     try {
       const page = await client.getCoordinator(projectId, { before: first.sequence, limit: PAGE })
-      setCoordinator((current) =>
-        current === null ? current : { ...current, items: mergeItems(current.items, page.items), earlier: page.earlier },
-      )
+      setCoordinator((current) => ({ ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }))
     } catch (failure) {
       fail(failure)
     } finally {
       setLoadingEarlier(false)
     }
-  }, [client, projectId, coordinator, fail])
+  }, [client, projectId, coordinator, setCoordinator, fail])
 
   /** Runs an action, says what went wrong if it did, and reads the thread's head again. */
   const act = useCallback(

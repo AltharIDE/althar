@@ -1,13 +1,16 @@
+import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } from 'react'
 
 import type { WatchEvent } from '@althar/contracts'
 
 import type { Client } from './client'
+import type { Feed } from './feed'
 
 /*
- * What the view models reach through React: the runtime's client, and the
- * few things only the host can do, such as opening the folder picker. Tests
- * give fakes of both.
+ * What the view models reach through React: the runtime's client, the
+ * window's cache of what it read and its watch on what changes, and the few
+ * things only the host can do, such as opening the folder picker. Tests give
+ * fakes of the client and the host.
  */
 
 /**
@@ -27,12 +30,19 @@ export interface Host {
 export interface Services {
   readonly client: Client
   readonly host: Host
+  /** What the window has read, by key (`reads.ts`). */
+  readonly cache: QueryClient
+  readonly feed: Feed
 }
 
 const ServicesContext = createContext<Services | null>(null)
 
 export function ServicesProvider({ value, children }: { value: Services; children: ReactNode }) {
-  return <ServicesContext.Provider value={value}>{children}</ServicesContext.Provider>
+  return (
+    <ServicesContext.Provider value={value}>
+      <QueryClientProvider client={value.cache}>{children}</QueryClientProvider>
+    </ServicesContext.Provider>
+  )
 }
 
 export const useServices = (): Services => {
@@ -41,14 +51,9 @@ export const useServices = (): Services => {
   return services
 }
 
-/**
- * Calls `listener` with every change after `since`, the cursor of the view
- * model's first read, while the component is mounted. Until that read has
- * come back (`since` is null), it doesn't watch; after, it doesn't start
- * again when later reads move the cursor on.
- */
-export const useWatch = (listener: (event: WatchEvent) => void, since: number | null) => {
-  const { client } = useServices()
+/** Calls `listener` with every change the window hears while the component is mounted. */
+export const useWatch = (listener: (event: WatchEvent) => void) => {
+  const { feed } = useServices()
   const onEvent = useEffectEvent(listener)
-  useEffect(() => (since === null ? undefined : client.watch((event) => onEvent(event), since)), [client, since])
+  useEffect(() => feed.listen((event) => onEvent(event)), [feed])
 }

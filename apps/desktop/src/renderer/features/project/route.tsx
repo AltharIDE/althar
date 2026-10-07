@@ -2,6 +2,7 @@ import { createRoute, useNavigate } from '@tanstack/react-router'
 
 import { Room } from '@althar/ui'
 
+import { readFirst, reads } from '../../data/reads'
 import { rootRoute } from '../../root'
 import { useBoard } from '../board/useBoard'
 import { useLastTask } from '../tabs/TabsFrame'
@@ -46,6 +47,19 @@ export const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/projects/$projectId',
   component: Project,
+  // Another project is another screen, with nothing of this one's kept: what was typed, what was open.
+  remountDeps: ({ params }) => params.projectId,
+  loader: ({ context: { client, cache }, params: { projectId } }) => {
+    const read = reads(client)
+    return readFirst(
+      cache.fetchQuery(read.projects()),
+      cache.fetchQuery(read.coordinator(projectId)),
+      cache.fetchQuery(read.board(projectId)),
+      cache.fetchQuery(read.rules(projectId)),
+      cache.fetchQuery(read.status()),
+      cache.fetchQuery(read.connections()),
+    )
+  },
   validateSearch: (search: Record<string, unknown>): ProjectSearch => {
     const room = roomOf(search.room)
     return { ...(room === undefined ? {} : { room }), ...(search.new === 'task' ? { new: 'task' as const } : {}) }

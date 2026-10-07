@@ -2,6 +2,7 @@ import { createRoute, useNavigate } from '@tanstack/react-router'
 
 import { Room, TASK } from '@althar/ui'
 
+import { reads } from '../../data/reads'
 import { rootRoute } from '../../root'
 import { lanesOf, yoursOf } from '../board/lanes'
 import { useBoard } from '../board/useBoard'
@@ -57,4 +58,15 @@ function Task() {
 }
 
 /** A task, by its thread. */
-export const taskRoute = createRoute({ getParentRoute: () => rootRoute, path: '/threads/$threadId', component: Task })
+export const taskRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/threads/$threadId',
+  component: Task,
+  remountDeps: ({ params }) => params.threadId,
+  // The thread and the agents, then its project's board, for the bar over it.
+  loader: async ({ context: { client, cache }, params: { threadId } }) => {
+    const read = reads(client)
+    const [thread] = await Promise.allSettled([cache.fetchQuery(read.thread(threadId)), cache.fetchQuery(read.status())])
+    if (thread.status === 'fulfilled') await cache.fetchQuery(read.board(thread.value.project.id)).catch(() => undefined)
+  },
+})

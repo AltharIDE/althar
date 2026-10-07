@@ -482,8 +482,8 @@ describe('a task', () => {
       const { client, emit, watching } = fakeClient({ getThread: vi.fn(async () => thread()) })
       withServices(<Task />, client)
       await screen.findByText('it')
-      // It watches from the cursor its first read had.
-      expect(watching).toEqual([10])
+      // The window watches once, for every screen.
+      expect(watching).toHaveLength(1)
       act(() => emit(streamed('reply', 'Found it, and a second call.')))
       act(() => emit(streamed('reply', 'Not this thread', 'other')))
       await screen.findByText('Found it, and a second call.')
