@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useEffect } from 'react'
 
 import type { AgentStatus, BoardTask, ThreadSnapshot } from '@althar/contracts'
 import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, WorkPeek } from '@althar/ui'
@@ -70,6 +71,14 @@ export const useHead = (threadId: string | null, version: number) => {
   return head?.task.id === undefined || threadId === null ? null : head
 }
 
+/** Reads ahead the thread of what the dock shows, so opening its task from there is instant. */
+const useThreadAhead = (threadId: string | null) => {
+  const { client, cache } = useServices()
+  useEffect(() => {
+    if (threadId !== null) void cache.prefetchQuery(reads(client).thread(threadId))
+  }, [client, cache, threadId])
+}
+
 export function DockView({
   label = text.label,
   target,
@@ -97,6 +106,7 @@ export function DockView({
   const call = target.kind === 'call' ? board?.calls.find((candidate) => candidate.id === target.id) : undefined
   const task = target.kind === 'task' ? board?.tasks.find((candidate) => candidate.taskId === target.id) : undefined
   const head = useHead(task?.phase === 'ready' && task.change !== null ? task.threadId : null, board?.cursor ?? 0)
+  useThreadAhead(call?.threadId ?? task?.threadId ?? null)
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   const open = (threadId: string) => (
     <div className={s.actions}>
