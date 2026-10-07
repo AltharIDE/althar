@@ -29,7 +29,8 @@ flowchart LR
 - **Each page load gets a fresh port.** On `did-finish-load`, main makes a `MessageChannelMain`, sends one end to the runtime and the other to the page through the preload. The runtime serves the API over it on a fiber of its own, until the window closes its client or the port goes.
 - **The API is Effect RPC** (`@althar/contracts`): typed calls, typed errors (`ApiError`, in words), and one stream, `Watch`. Every message is checked against its schema on both sides.
 - **Commands carry the window's own ids.** The client makes one per command and, when the runtime gave no answer (rather than said no), tries once more under the same id; the runtime answers the retry from the first one's receipt.
-- **Reads say where the feed stood.** Each list and thread read returns the change-feed cursor it read at, and a view model watches from there, so nothing between the read and the watch is missed. A watch that breaks picks up from the last change it heard.
+- **The window opens behind its launch.** The launch (the kit's `Launch`) plays at once while the window connects, reads the projects, the place it opens on and every open tab, then opens onto them, whole. A reload, as after the runtime restarted, opens with a fade instead.
+- **The window watches once.** It watches the change feed from where its first read of the projects stood, for every screen (`data/feed.ts`), so nothing after that read is missed. A watch that breaks picks up from the last change it heard.
 - **What changes reaches the window two ways.** `Changed` comes from the store's change feed, with the thread it belongs to: a task's screen reads a changed item alone, and anything else about the thread reads the thread's head without its items. `Streaming` carries an agent's message or thought as far as it has come, at most every 50 ms, with its kind and agent: the thread shows it from its first words, before it has read the item, and in place of the stored text until the store catches up.
 - **A thread comes a page at a time:** the newest hundred items, and earlier pages when asked.
 - **Folders come from main, as grants.** The folder picker and dropped folders go through main, which tells the runtime the folder and hands the window a grant; the window opens a project by its grant and never names a path (07).
@@ -41,7 +42,7 @@ MVVM in feature folders ([ADR-010](../../docs/decisions/010-desktop-app-mvvm.md)
 
 | Folder | What it holds |
 | --- | --- |
-| `data/` | The client: Effect inside, plain promises and a subscription outside; the services view models reach through React; the models each agent offers, read once for the window |
+| `data/` | The client: Effect inside, plain promises and a subscription outside; the window's cache of what it read and its watch on the change feed ([ADR-014](../../docs/decisions/014-window-keeps-what-it-read.md)); opening the window; the services view models reach through React; the models each agent offers, read once for the window |
 | `features/start` | Where the window starts: the first screen with no project yet, a folder of several repositories before it is a project, and the home once there are projects; opening a folder by the button, ⌘N or a drop |
 | `features/home` | The home: across projects, what waits on you, what runs and what the loop did since you left, with the projects beside it and the agents' marks in the bar |
 | `features/settings` | The agents on this Mac with their accounts, and the code hosts and trackers |
@@ -49,14 +50,16 @@ MVVM in feature folders ([ADR-010](../../docs/decisions/010-desktop-app-mvvm.md)
 | `features/board` | A project's board: its lanes, the dock beside them, and what you answer, accept or send back from it |
 | `features/rules` | A project's rules (ADR-013): who answers, what always asks and what is never allowed, how a task ends, usage limits and accounts; each change saved at once |
 | `features/task` | A task's thread, the calls waiting on you, the composer, and what it changed |
-| `shared/` | A thread's items as blocks, drawn with the kit (finished work folded, steps' results under it); the model picker every conversation and plan step uses; how agents and times are drawn |
+| `shared/` | A thread's items as blocks, drawn with the kit (finished work folded, steps' results under it); the model picker every conversation and plan step uses; how agents and times are drawn; what a place shows while a slow read comes |
 
-Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view (`*View.tsx`) and its styles. `router.tsx` puts the routes together, with the place in the hash, since the page loads from a file.
+Each feature holds its route (`route.tsx`, with what it reads before it shows), its view model (`use*.ts`), its view (`*View.tsx`) and its styles. `router.tsx` puts the routes together, with the place in the hash, since the page loads from a file.
 
 ## Principles
 
 - **The kit draws; the app arranges.** Views compose `@althar/ui` and add layout and page margins, nothing that looks like a component of its own. When a view needs something the kit lacks, it goes into the kit, with its stories.
-- **The runtime owns the state.** View models hold what the runtime last said and what is streaming; they read again rather than patch.
+- **The runtime owns the state; the window keeps what it last said** ([ADR-014](../../docs/decisions/014-window-keeps-what-it-read.md)). View models read from the window's cache and hold what is streaming. A change reads again the whole reads it touches (the projects, the home, a board, the connections), on screen or not; a thread on screen reads what changed item by item, and one off screen is marked and read when next opened. Nothing goes out of date by age, and nothing is patched but a thread's items as they are read.
+- **A screen opens whole.** Its route reads what it shows first, from the cache when nothing changed, and the screen being left stays until then. A read slower than 150 ms shows the place's outline, never a spinner, for at least 300 ms; what hasn't been read is never drawn as empty.
+- **Each agent is asked again** once a launch, whenever the window comes back to the front, and as Settings opens. Everywhere else shows what the runtime last knew.
 - **The page is locked down** (07's renderer list). Sandboxed, context-isolated, no Node, a strict Content Security Policy, no new windows and no navigation away, no web permissions granted, and no paths. Links open in the person's browser, for `https:` and local `http:` only.
 - **Test hooks stay out of packaged builds.** `ALTHAR_FAKE_AGENTS` works only in a build made with `bun run build`; `bun run build:package` leaves the code out. It swaps in the fake agent, the connectors' fake GitHub, and secrets kept in memory, so the end-to-end tests never reach a network or the Keychain.
 - **Words on screen follow [the glossary](../../docs/glossary.md).**
