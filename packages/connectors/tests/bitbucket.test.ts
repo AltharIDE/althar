@@ -506,6 +506,33 @@ describe('Bitbucket Cloud as a code host', () => {
     yes ? { json: { type: 'workspace_membership', user } } : { status: 404, json: { type: 'error', error: { message: 'Not a member' } } },
   ]
 
+  it.effect('finds each reply’s thread even should an answer loop', () =>
+    Effect.gen(function* () {
+      const { host } = cloud([
+        [
+          'GET',
+          `${PR}/comments?pagelen=100`,
+          {
+            json: {
+              values: [
+                comment(1, mitch, '2025-08-21T09:08:55.320008+00:00', { parent: { id: 2 } }),
+                comment(2, mitch, '2025-08-21T09:09:55.320008+00:00', { parent: { id: 1 } }),
+              ],
+              pagelen: 100,
+            },
+          },
+        ],
+        ['GET', `${PR}/activity?pagelen=50`, { json: activity([]) }],
+        member(mitch, true),
+      ])
+      const said = yield* host.activity(ace, 552, null)
+      assert.deepStrictEqual(
+        said.comments.map((one) => one.id),
+        ['1', '2'],
+      )
+    }),
+  )
+
   it.effect('reads what was said since a cursor, each reply in its thread, and who of the workspace said it', () =>
     Effect.gen(function* () {
       const { host, sent } = cloud([

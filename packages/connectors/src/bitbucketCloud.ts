@@ -440,7 +440,13 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         const parents = new Map(every.map((comment) => [comment.id, comment.parent?.id]))
         const rootOf = (id: number) => {
           let at = id
-          for (let parent = parents.get(at); parent != null && parents.has(parent); parent = parents.get(at)) at = parent
+          // No deeper than there are comments, should an answer ever loop.
+          for (
+            let step = 0, parent = parents.get(at);
+            step < parents.size && parent != null && parents.has(parent);
+            step += 1, parent = parents.get(at)
+          )
+            at = parent
           return at
         }
         const fresh = every.filter((comment) => cursor === null || iso(comment.updated_on) >= cursor)
