@@ -16,7 +16,7 @@ import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
 import { withServices } from './render'
 
 function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
-  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onBack={vi.fn()} onTask={onTask} />
+  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onTask={onTask} />
 }
 
 const task = (overrides: Partial<BoardTask> = {}): BoardTask => ({

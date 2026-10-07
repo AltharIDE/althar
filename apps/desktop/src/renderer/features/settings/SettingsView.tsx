@@ -33,7 +33,7 @@ export function SettingsView({ model, connections, onBack }: { model: StartModel
 
   return (
     <div className={s.window}>
-      <TitleBar>
+      <TitleBar lights="none">
         <BackCrumb to={text.back} title={text.title} onBack={onBack} />
       </TitleBar>
       <main className={s.scroll}>

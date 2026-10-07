@@ -37,7 +37,7 @@ test('changes a project’s rules from its title bar, and keeps them', async () 
     await page.screenshot({ path: 'test-results/rules.png', animations: 'disabled', fullPage: true })
 
     // Back to the project and in again: as it was left.
-    await page.getByRole('button', { name: /meridian/ }).click()
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.getByRole('button', { name: 'Project rules' }).click()
     await expect(page.getByRole('group', { name: 'Always ask me' }).getByRole('checkbox', { name: 'Force pushes' })).not.toBeChecked()

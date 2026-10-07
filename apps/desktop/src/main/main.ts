@@ -187,7 +187,8 @@ const openWindow = () => {
     minHeight: 600,
     show: false,
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 17 },
+    // Centred in the window's tabs, 40 high.
+    trafficLightPosition: { x: 16, y: 14 },
     webPreferences: {
       preload: join(here, '../preload/preload.cjs'),
       sandbox: true,

@@ -34,7 +34,8 @@ say the right. When something new needs a name on screen, add it here first.
 | On screen | In the model | What it is |
 |---|---|---|
 | Call | attention request | Something only a person can decide. Violet. |
-| Needs you | attention requests addressed to you | The board lane and the count in the title bar. |
+| Needs you | attention requests addressed to you, and tasks ready to accept | The board lane, the count in the title bar, and the violet number on a project's tab (the home's tab counts every project). |
+| Tab | a project the window keeps open | One per project the person keeps open, at the top of the window, after the home's. It goes back to where in the project they last were. ⌘1 is the home, ⌘2 onwards the projects. |
 | Stuck | attention request at the end of the repair ladder | A task that can't finish without you. There is no Failed status. |
 | Queue, "Enter queues it; the lead reads it next" | `after_current` | What you write while the lead works. It waits for the lead's current turn to end. |
 | Send now | `interrupt_and_continue` | Stops the lead's turn to read your message, then it carries on with both. |

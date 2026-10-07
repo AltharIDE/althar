@@ -99,6 +99,8 @@ export const project: ProjectSummary = {
   tasks: 1,
   running: 1,
   waiting: 0,
+  working: 1,
+  ready: 0,
   usageLimit: 'move',
   rotateAccounts: false,
   onlyAccounts: null,

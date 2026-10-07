@@ -426,7 +426,7 @@ describe('a task’s pull request', () => {
 })
 
 function Project() {
-  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onBack={vi.fn()} onTask={vi.fn()} />
+  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onTask={vi.fn()} />
 }
 
 const issue: IssueSummary = {

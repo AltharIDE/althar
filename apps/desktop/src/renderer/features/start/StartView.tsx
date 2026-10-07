@@ -162,7 +162,7 @@ export function StartView({
     const { forming } = model
     return (
       <div className={s.window}>
-        <TitleBar>{null}</TitleBar>
+        <TitleBar lights="none">{null}</TitleBar>
         <div className={`${s.scroll} ${s.first}`}>
           <NewProject
             defaultName={forming.name}
@@ -196,7 +196,7 @@ export function StartView({
   if (first) {
     return (
       <div className={s.window} {...drop}>
-        <TitleBar>{null}</TitleBar>
+        <TitleBar lights="none">{null}</TitleBar>
         <div className={`${s.scroll} ${s.first}`}>
           <Start runtimes={runtimesOf(model)} onCreate={open} text={text.first} />
           <StartError model={model} />
@@ -208,7 +208,7 @@ export function StartView({
   if (model.projects === null)
     return (
       <div className={s.window}>
-        <TitleBar>{null}</TitleBar>
+        <TitleBar lights="none">{null}</TitleBar>
         <div className={`${s.scroll} ${s.loading}`}>
           <Spinner />
         </div>

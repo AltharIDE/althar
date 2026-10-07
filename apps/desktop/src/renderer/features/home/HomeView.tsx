@@ -9,7 +9,6 @@ import {
   Button,
   type IconName,
   IconButton,
-  Logo,
   NeedCard,
   NeedChange,
   NeedCommand,
@@ -169,14 +168,12 @@ export function HomeView({
   const waiting = calls.length + ready.length
 
   const openFolder = () => void start.openFolder().then((opened) => opened !== null && onProject(opened.id))
-  // ⌘N opens a folder, ⌘, the settings, and ⌘1 to ⌘9 the projects, in the list's order.
+  // ⌘N opens a folder, and ⌘, the settings. ⌘ and a number belongs to the window's tabs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return
-      const picked = /^[1-9]$/.test(event.key) ? projects[Number(event.key) - 1] : undefined
       if (event.key === 'n') openFolder()
       else if (event.key === ',') onSettings()
-      else if (picked !== undefined) onProject(picked.id)
       else return
       event.preventDefault()
     }
@@ -336,7 +333,7 @@ export function HomeView({
     return line === undefined ? [] : [{ ...line, id: event.id }]
   })
 
-  const list: ReadonlyArray<HomeProject> = projects.map((project, index) => {
+  const list: ReadonlyArray<HomeProject> = projects.map((project) => {
     const mine = tasks.filter((task) => task.projectId === project.id)
     const on = mine.find((task) => task.phase === 'running')
     const step = on === undefined ? undefined : { ...trackOf(on), on }
@@ -349,7 +346,6 @@ export function HomeView({
       moving: mine.some((task) => task.phase === 'running' && task.waits === null),
       ...(step === undefined ? {} : { now: { step: step.steps[step.at] ?? '', task: step.on.title, who: lead(step.on) } }),
       note: project.lastWorkAt === null ? text.noWork : text.lastWork(ago(project.lastWorkAt, new Date(now))),
-      ...(index < 9 ? { kbd: `⌘${index + 1}` } : {}),
     }
   })
 
@@ -388,6 +384,7 @@ export function HomeView({
   return (
     <div className={s.window} {...drop}>
       <TitleBar
+        lights="none"
         end={
           <>
             <AgentMarks agents={agents.map((agent) => agentMarkOf(agent, new Date(now)))} />
@@ -406,10 +403,7 @@ export function HomeView({
           </>
         }
       >
-        <span className={s.brand}>
-          <Logo size={15} />
-          Althar
-        </span>
+        {null}
       </TitleBar>
       {error !== null && (
         <p className={s.failure} role="alert">

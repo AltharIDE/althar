@@ -12,8 +12,8 @@ import { agents, card, changed, coordinatorSnapshot, fakeClient, items, status, 
 import { clock } from '../src/renderer/shared/time'
 import { withServices } from './render'
 
-function Project({ onBack = vi.fn(), onTask = vi.fn() }: { onBack?: () => void; onTask?: (threadId: string) => void }) {
-  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onBack={onBack} onTask={onTask} />
+function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
+  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onTask={onTask} />
 }
 
 const session = {
@@ -44,9 +44,8 @@ const talk = (overrides: Partial<CoordinatorSnapshot> = {}) =>
 describe('the Talk room', () => {
   it("shows the coordinator's thread with each task's card, folds its finished work, and opens a task", async () => {
     const onTask = vi.fn()
-    const onBack = vi.fn()
     const { client, watching } = fakeClient({ getCoordinator: vi.fn(async () => talk()) })
-    withServices(<Project onTask={onTask} onBack={onBack} />, client)
+    withServices(<Project onTask={onTask} />, client)
     await screen.findByRole('heading', { name: 'meridian', level: 1 })
     expect(screen.getByText('/code/meridian')).toBeTruthy()
     expect(screen.getByText('The call has no retry. I planned a task.')).toBeTruthy()
@@ -58,8 +57,6 @@ describe('the Talk room', () => {
     expect(screen.getByText(/^Starts in \d+s$/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Open task/ }))
     expect(onTask).toHaveBeenCalledWith('th2')
-    await userEvent.click(screen.getByRole('button', { name: /Home/ }))
-    expect(onBack).toHaveBeenCalled()
     // It watches from the earlier of its two reads; the connections, from theirs.
     await waitFor(() => expect(watching).toEqual(expect.arrayContaining([3, 2])))
   })
