@@ -192,7 +192,7 @@ service's model.
 | Verdict | Approved, changes requested, commented | Approved, requested changes | Approved, request changes | Approved, needs work | approved, changes requested, commented |
 | Threads | Review threads on lines, resolvable; conversation comments aren't | Discussions, resolvable | Top-level comments resolvable | Threads, resolvable; blocker comments | A thread: optional place in the diff, resolvable, resolved, comments |
 | Checks | Check runs and commit statuses; Actions logs | The head pipeline's jobs, with logs | Build statuses; Pipelines step logs | Build statuses; Code Insights reports | A check: name, state, link; logs as a capability |
-| Listening, polling | ETags (a "not modified" reply is free) | `updated_after` | `updated_on` | The pull request's activities | A cursor per thing listened to |
+| Listening, polling | ETags (a "not modified" reply is free) | ETags too; a merge request's threads are read whole, having no `updated_after` | `updated_on` | The pull request's activities | A cursor per thing listened to |
 
 - **Pushing is git,** with the connection's token, never the person's
   credential helper. Althar pushes what the lead committed and commits

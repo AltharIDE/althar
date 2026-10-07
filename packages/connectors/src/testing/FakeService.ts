@@ -247,7 +247,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       ),
     issue: (ref) =>
       Effect.andThen(called('issue'), () => {
-        const found = issues.get(ref)
+        // A key in any case, as Linear's adapter takes one.
+        const found = issues.get(/^[A-Z][A-Z0-9]*-\d+$/i.test(ref) ? ref.toUpperCase() : ref)
         return found === undefined ? Effect.fail(missing(`issue ${ref}`)) : Effect.succeed(found)
       }),
     mine: (mineOptions = {}) =>

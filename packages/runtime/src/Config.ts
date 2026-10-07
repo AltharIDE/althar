@@ -24,6 +24,12 @@ export interface RuntimeOptions {
   readonly listenEvery?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
+  /**
+   * How code hosts and trackers are called. The app gives its own network,
+   * which trusts the certificates and proxies the Mac does, as a company's
+   * own server needs; Node's `fetch` trusts only its bundled roots.
+   */
+  readonly fetch?: Fetch
   /** How long stopping an agent waits for it to end its turn before it stops its process: 10 seconds unless a test says otherwise. */
   readonly stopGrace?: Duration.Duration
   /** When a turn counts as stalled, and how much work goes on before the person is asked (`Stalls.ts`). */
@@ -144,6 +150,6 @@ export class Connectors extends Context.Service<
   }
 >()('@althar/runtime/Connectors') {
   /** The products with adapters, over the network. */
-  static readonly live = (clientIds: Partial<Record<Product, string>> = {}): Layer.Layer<Connectors> =>
-    Layer.succeed(Connectors, Connectors.of({ products: available(), fetch: globalThis.fetch, clientIds, callbackPort: 47821 }))
+  static readonly live = (clientIds: Partial<Record<Product, string>> = {}, fetch: Fetch = globalThis.fetch): Layer.Layer<Connectors> =>
+    Layer.succeed(Connectors, Connectors.of({ products: available(), fetch, clientIds, callbackPort: 47821 }))
 }

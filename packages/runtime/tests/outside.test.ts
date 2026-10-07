@@ -56,6 +56,8 @@ describe('a credential', () => {
       token: 't',
     })
     assert.deepStrictEqual(credentialFor('basic', { kind: 'token', token: 't', user: null }), { kind: 'basic', user: '', token: 't' })
+    assert.deepStrictEqual(credentialFor('app', { kind: 'token', token: 't', user: null, key: 'k' }), { kind: 'app', key: 'k', token: 't' })
+    assert.deepStrictEqual(credentialFor('app', { kind: 'token', token: 't', user: null }), { kind: 'app', key: '', token: 't' })
   })
 })
 

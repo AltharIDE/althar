@@ -237,10 +237,14 @@ export const ProductOption = Schema.Struct({
   selfHosted: Schema.Boolean,
   /** The service's own sign-in, in the browser, is set up here; otherwise a pasted token. */
   browserSignIn: Schema.Boolean,
-  /** A pasted token goes with the account's email. */
-  tokenNeedsUser: Schema.Boolean,
+  /** What a pasted token goes with: the account's email, or the API key it was made for. */
+  tokenNeeds: Schema.NullOr(Schema.Literals(['email', 'key'])),
   /** Where the person makes a token, on the hosted service. */
   tokenHelp: Schema.String,
+  /** Where a token is made for the API key the person typed, with `{key}` where it goes. */
+  tokenHelpForKey: Schema.NullOr(Schema.String),
+  /** What a typed API key is checked against before it is sent: the first pattern it matches says what is wrong with it. */
+  keyChecks: Schema.Array(Schema.Struct({ pattern: Schema.String, says: Schema.String })),
 })
 export type ProductOption = typeof ProductOption.Type
 
@@ -1024,10 +1028,16 @@ export const Api = RpcGroup.make(
   /** How a sign-in stands. */
   call('GetSignIn', { flowId: Schema.String }, SignInState),
   command('CancelSignIn', { flowId: Schema.String }, Schema.Void),
-  /** Connects with a token the person pasted, which goes to the keychain. */
+  /** Connects with a token the person pasted, and what goes with it, all of which goes to the keychain. */
   command(
     'ConnectToken',
-    { product: Product, webUrl: Schema.optional(Schema.String), user: Schema.optional(Schema.String), token: Schema.String },
+    {
+      product: Product,
+      webUrl: Schema.optional(Schema.String),
+      user: Schema.optional(Schema.String),
+      key: Schema.optional(Schema.String),
+      token: Schema.String,
+    },
     ConnectionSummary,
   ),
   command('Disconnect', { connectionId: Schema.String }, Schema.Void),

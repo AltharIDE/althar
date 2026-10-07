@@ -94,6 +94,12 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
   detail: Schema.String,
 }) {}
 
+/** A link given for an issue points at something else on its host: `what` is it, in the host's words ("pull request", "merge request"). */
+export class NotAnIssue extends Schema.TaggedError<NotAnIssue>()('NotAnIssue', {
+  link: Schema.String,
+  what: Schema.String,
+}) {}
+
 /** The pull request moved on since the person looked: accepting it would merge what they didn't see. */
 export class ChangedSinceSeen extends Schema.TaggedError<ChangedSinceSeen>()('ChangedSinceSeen', {
   taskId: Schema.String,

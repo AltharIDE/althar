@@ -124,7 +124,7 @@ export const fakeAgents = (
  * fake service, and sign-in endpoints answered by `fetch`, a stand-in.
  */
 export const fakeConnectors = (
-  services: { readonly github?: FakeService; readonly linear?: FakeService },
+  services: { readonly github?: FakeService; readonly linear?: FakeService; readonly trello?: FakeService },
   more: { readonly fetch?: Fetch; readonly clientIds?: Readonly<Record<string, string>>; readonly callbackPort?: number } = {},
 ) =>
   Layer.succeed(
@@ -136,6 +136,7 @@ export const fakeConnectors = (
           make: () => (services.github === undefined ? {} : { host: services.github, tracker: services.github }),
         },
         { ...products.linear, make: () => (services.linear === undefined ? {} : { tracker: services.linear }) },
+        { ...products.trello, make: () => (services.trello === undefined ? {} : { tracker: services.trello }) },
       ],
       fetch: more.fetch ?? (() => Promise.reject(new Error('No network in tests'))),
       clientIds: more.clientIds ?? {},
