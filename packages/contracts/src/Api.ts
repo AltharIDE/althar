@@ -326,6 +326,8 @@ export const ChangeSummary = Schema.Struct({
   short: Schema.String,
   prefix: Schema.String,
   repository: Schema.String,
+  /** Its repository's folder here, which its files' paths start with in a task of several; null where it isn't known. */
+  slug: Schema.NullOr(Schema.String),
   additions: Schema.NullOr(Schema.Number),
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),

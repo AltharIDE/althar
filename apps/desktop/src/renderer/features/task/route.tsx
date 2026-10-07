@@ -31,8 +31,8 @@ function TaskNav({ projectId, title }: { projectId: string; title: string }) {
   )
 }
 
-function Task() {
-  const { threadId } = taskRoute.useParams()
+/** One task's screen: everything it reads is its own, from the first render. */
+function TaskScreen({ threadId }: { threadId: string }) {
   const navigate = useNavigate()
   const model = useTask(threadId)
   const projectId = model.snapshot?.project.id
@@ -40,8 +40,6 @@ function Task() {
   useVisit(threadId, projectId, title)
   return (
     <TaskView
-      // Each task starts on its own face, with nothing typed.
-      key={threadId}
       model={model}
       {...(projectId === undefined || title === undefined ? {} : { nav: <TaskNav projectId={projectId} title={title} /> })}
       onBack={() =>
@@ -49,6 +47,13 @@ function Task() {
       }
     />
   )
+}
+
+function Task() {
+  const { threadId } = taskRoute.useParams()
+  // The router keeps this screen from one task to the next, so each task gets a screen of its own: nothing read for the
+  // one before, its face or which project it is in, carries over to it.
+  return <TaskScreen key={threadId} threadId={threadId} />
 }
 
 /** A task, by its thread. */

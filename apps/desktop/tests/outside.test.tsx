@@ -503,6 +503,67 @@ describe('a project, reaching outside', () => {
     expect(ready).toHaveBeenCalledWith('t1', 'https://github.com/meridian/web/pull/4')
   })
 
+  it('accepts its pull requests in turn, each at the head it showed, and stops at the first refused', async () => {
+    const api = change({ draft: false })
+    const web = change({
+      number: 4,
+      repository: 'meridian/web',
+      url: 'https://github.com/meridian/web/pull/4',
+      draft: false,
+      head: 'def456',
+    })
+    const ready = { ...snapshot().task, phase: 'ready' as const, changes: [api, web], commits: 2 }
+    // The first waits until the test says: the second isn't asked for meanwhile, and Accept stays busy.
+    let finish: () => void = () => undefined
+    const merge = vi.fn(
+      (_taskId: string, head: string) =>
+        new Promise<void>((resolve) => {
+          if (head === 'abc123') finish = resolve
+          else resolve()
+        }),
+    )
+    const { client } = fakeClient({ merge, getThread: vi.fn(async () => snapshot({ task: ready })) })
+    const view = withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge both' }))
+    await waitFor(() => expect(merge).toHaveBeenCalledTimes(1))
+    expect(merge).toHaveBeenLastCalledWith('t1', 'abc123', 'https://github.com/meridian/api/pull/12')
+    expect(screen.getByRole('button', { name: 'Accept and merge both' }).getAttribute('aria-busy')).toBe('true')
+    act(() => finish())
+    await waitFor(() => expect(merge).toHaveBeenLastCalledWith('t1', 'def456', 'https://github.com/meridian/web/pull/4'))
+    view.unmount()
+
+    // Refused, the first stops it there: the second waits, and the refusal is said.
+    const refused = vi.fn(async () => {
+      throw new ApiError({ reason: 'ChangedSinceSeen', message: 'It moved on since you looked.' })
+    })
+    const second = fakeClient({ merge: refused, getThread: vi.fn(async () => snapshot({ task: ready })) })
+    withServices(<Task />, second.client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge both' }))
+    expect(await screen.findByText(/It moved on since you looked/)).toBeTruthy()
+    expect(refused).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows each pull request’s files under its repository’s folder here, however the host names it', async () => {
+    const file = (path: string) => ({ path, from: null, status: 'modified' as const, add: 1, del: 0, binary: false, uncommitted: false })
+    const web = change({ number: 4, repository: 'meridian/Web', slug: 'web-app', url: 'https://github.com/meridian/Web/pull/4' })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: {
+            ...snapshot().task,
+            phase: 'ready',
+            changes: [change({ slug: 'api' }), web],
+            files: [file('api/src/limit.ts'), file('web-app/src/button.tsx')],
+            commits: 2,
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('button.tsx')).toBeTruthy()
+    expect(screen.getByText('limit.ts')).toBeTruthy()
+  })
+
   it('pushes what the lead committed since to the repository it was committed in', async () => {
     const push = vi.fn(async () => {})
     const web = change({

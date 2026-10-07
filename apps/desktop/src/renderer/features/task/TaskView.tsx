@@ -336,7 +336,7 @@ export function TaskView({
           agentName={agentName}
           pending={model.pending}
           error={model.error}
-          onMerge={(head, url) => void model.merge(head, url)}
+          onAccept={(changes) => void model.accept(changes)}
           onMergeHere={() => void model.mergeHere()}
           onOpenChange={() => void model.openChange()}
           onPush={(head, url) => void model.push(head, url)}

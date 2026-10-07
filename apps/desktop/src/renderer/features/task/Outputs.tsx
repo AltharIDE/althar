@@ -68,7 +68,7 @@ export function Outputs({
   agentName,
   pending,
   error,
-  onMerge,
+  onAccept,
   onMergeHere,
   onOpenChange,
   onPush,
@@ -81,8 +81,8 @@ export function Outputs({
   agentName: (id: string | null) => string
   pending: boolean
   error: string | null
-  /** Merges a pull request on its host, at the head shown. */
-  onMerge: (head: string, url: string) => void
+  /** Accepts its pull requests: each merged on its host in turn, at the head shown, stopping at the first refused. */
+  onAccept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => void
   onMergeHere: () => void
   onOpenChange: () => void
   onPush: (head: string, url: string) => void
@@ -123,7 +123,8 @@ export function Outputs({
             repo: one.repository,
             number: one.number,
             url: one.url,
-            files: filesIn(task.files, nameOf(one.repository), several),
+            // Under its repository's folder here, which needn't be named as the host names it.
+            files: filesIn(task.files, one.slug ?? nameOf(one.repository), several),
           }))
           const checks = [...reviews, ...open.flatMap((one) => (one.checks?.list ?? []).map(checkOf))]
           return (
@@ -136,8 +137,8 @@ export function Outputs({
               checks={checks}
               {...(ready && state === ChangeState.Ready
                 ? {
-                    // In order, each at the head shown: one that moved on since isn't merged unseen.
-                    onAccept: () => open.forEach((one) => one.state === 'open' && onMerge(one.head ?? '', one.url)),
+                    // In order, each at the head shown, so one that moved on since isn't merged unseen; the rest wait on a refusal.
+                    onAccept: () => onAccept(open.flatMap((one) => (one.state === 'open' ? [{ head: one.head ?? '', url: one.url }] : []))),
                     onSendBack,
                   }
                 : {})}

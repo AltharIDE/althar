@@ -226,6 +226,7 @@ describe('what screens read of a pull request and what arrived', () => {
       short: 'PR',
       prefix: '#',
       repository: 'meridian/api',
+      slug: null,
       additions: 10,
       deletions: 2,
       changedFiles: 3,

@@ -154,6 +154,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
     short: text(words, 'short') || 'PR',
     prefix: text(words, 'prefix') || '#',
     repository: Array.isArray(repository) ? repository.filter((part) => typeof part === 'string').join('/') : '',
+    slug: null,
     additions: number(value, 'additions'),
     deletions: number(value, 'deletions'),
     changedFiles: number(value, 'changedFiles'),
@@ -641,13 +642,21 @@ export class Queries extends Context.Service<
               const found = link.kind === 'change' ? changeOf(parse(link.snapshot), link.product, link.listening === 1) : null
               return found === null ? [] : [found]
             }),
-            // An open one says how far its repository's branch here is ahead of it: commits the person hasn't pushed yet.
-            (change) =>
-              change.state !== 'open'
-                ? Effect.succeed(change)
-                : Effect.gen(function* () {
-                    // Its repository's worktree, as the record of the push says; the task's first, where it doesn't.
-                    const [here] = yield* sql<{ path: string; headCommit: string | null }>`
+            // Each knows its repository's folder here, as the record of its push says; an open one, how far that branch is ahead
+            // of it: commits the person hasn't pushed yet.
+            (found) =>
+              Effect.gen(function* () {
+                const [binding] = yield* sql<{ slug: string }>`
+                  SELECT b.slug FROM repository_changes c JOIN repository_bindings b ON b.id = c.binding_id
+                  WHERE c.pull_request_url = ${found.url} ORDER BY c.updated_at DESC LIMIT 1`
+                return { ...found, slug: binding?.slug ?? null }
+              }).pipe(
+                Effect.flatMap((change) =>
+                  change.state !== 'open'
+                    ? Effect.succeed(change)
+                    : Effect.gen(function* () {
+                        // Its repository's worktree, as the record of the push says; the task's first, where it doesn't.
+                        const [here] = yield* sql<{ path: string; headCommit: string | null }>`
                       SELECT w.path, (SELECT c.head_commit FROM repository_changes c WHERE c.pull_request_url = ${change.url}
                           ORDER BY c.updated_at DESC LIMIT 1) AS head_commit
                       FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
@@ -655,9 +664,11 @@ export class Queries extends Context.Service<
                       ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${change.url} LIMIT 1) DESC,
                         b.created_at, b.rowid
                       LIMIT 1`
-                    if (here === undefined || !existsSync(here.path)) return change
-                    return { ...change, ...(yield* unpushedOf(here.path, [change.head, here.headCommit])) }
-                  }),
+                        if (here === undefined || !existsSync(here.path)) return change
+                        return { ...change, ...(yield* unpushedOf(here.path, [change.head, here.headCommit])) }
+                      }),
+                ),
+              ),
           )
           return { issue, changes }
         })

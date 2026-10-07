@@ -282,6 +282,7 @@ export const change = (overrides: Partial<ChangeSummary> = {}): ChangeSummary =>
   short: 'PR',
   prefix: '#',
   repository: 'meridian/api',
+  slug: null,
   additions: 12,
   deletions: 3,
   changedFiles: 2,
