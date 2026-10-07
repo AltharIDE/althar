@@ -2,8 +2,14 @@ import { describe } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import type { Credential } from '../../src/credential'
+import { makeBitbucketCloud } from '../../src/bitbucketCloud'
+import { makeBitbucketDataCenter } from '../../src/bitbucketDataCenter'
 import { makeGitHub } from '../../src/github'
+import { makeGitLab } from '../../src/gitlab'
+import { makeJiraCloud, makeJiraDataCenter } from '../../src/jira'
 import { makeLinear } from '../../src/linear'
+import { products } from '../../src/products'
+import { makeTrello } from '../../src/trello'
 import { hostContract, trackerContract } from '../contract'
 
 /*
@@ -15,8 +21,34 @@ import { hostContract, trackerContract } from '../contract'
  *   (owner/name, a scratch repository), ALTHAR_GITHUB_ISSUE (owner/name#12).
  *   It pushes a branch with one file, opens a draft pull request, comments on
  *   it, then closes it and deletes the branch.
+ * - GitLab: ALTHAR_GITLAB_TOKEN (a personal access token with `api`),
+ *   ALTHAR_GITLAB_REPO (group/project, a scratch project),
+ *   ALTHAR_GITLAB_ISSUE (group/project#12), and ALTHAR_GITLAB_URL for a
+ *   self-managed instance (gitlab.com otherwise). It makes a branch with one
+ *   file, opens a draft merge request, comments on it, then closes it and
+ *   deletes the branch.
+ * - Bitbucket Cloud: ALTHAR_BITBUCKET_EMAIL (the Atlassian account's),
+ *   ALTHAR_BITBUCKET_TOKEN (an API token with the scopes read:user,
+ *   read:workspace, read:repository, write:repository, read:pullrequest,
+ *   write:pullrequest and read:pipeline, all `:bitbucket`),
+ *   ALTHAR_BITBUCKET_REPO (workspace/repo, a scratch repository). It commits
+ *   one file to a new branch, opens a draft pull request, comments on it,
+ *   then declines it and deletes the branch.
+ * - Bitbucket Data Center: ALTHAR_BITBUCKET_DC_URL (the server's address),
+ *   ALTHAR_BITBUCKET_DC_TOKEN (an HTTP access token with repository write),
+ *   ALTHAR_BITBUCKET_DC_REPO (PROJECT/repo, a scratch repository). The same,
+ *   on a server of 8.18 or later, which has drafts.
  * - Linear: ALTHAR_LINEAR_KEY (a personal API key), ALTHAR_LINEAR_ISSUE
  *   (MER-231, an issue it may comment on and link to).
+ * - Jira Cloud: ALTHAR_JIRA_URL (the site, https://meridian.atlassian.net),
+ *   ALTHAR_JIRA_EMAIL and ALTHAR_JIRA_TOKEN (the account's email and an API
+ *   token, with or without scopes), ALTHAR_JIRA_ISSUE (PROJ-123, an issue it
+ *   may comment on and link to).
+ * - Jira Data Center: ALTHAR_JIRA_DC_URL (the instance), ALTHAR_JIRA_DC_TOKEN
+ *   (a personal access token), ALTHAR_JIRA_DC_ISSUE.
+ * - Trello: ALTHAR_TRELLO_KEY (a Power-Up's API key), ALTHAR_TRELLO_TOKEN
+ *   (a token made for it, with read and write), ALTHAR_TRELLO_CARD (a card's
+ *   short link, one it may comment on and attach a link to).
  */
 
 const env = (name: string) => process.env[name] ?? ''
@@ -60,6 +92,134 @@ describe.skipIf(github === '' || repo === '')('GitHub', () => {
   if (issue !== '') trackerContract({ name: 'GitHub', tracker: host, ref: issue })
 })
 
+const gitlab = env('ALTHAR_GITLAB_TOKEN')
+const gitlabRepo = env('ALTHAR_GITLAB_REPO')
+describe.skipIf(gitlab === '' || gitlabRepo === '')('GitLab', () => {
+  const webUrl = (env('ALTHAR_GITLAB_URL') || 'https://gitlab.com').replace(/\/+$/, '')
+  const credential = Effect.succeed<Credential>({ kind: 'bearer', token: gitlab })
+  const host = makeGitLab({ fetch, apiUrl: `${webUrl}/api/v4`, webUrl, credential })
+  const api = (method: string, path: string, body?: unknown) =>
+    Effect.promise(() =>
+      fetch(`${webUrl}/api/v4/projects/${encodeURIComponent(gitlabRepo)}${path}`, {
+        method,
+        headers: { authorization: `Bearer ${gitlab}`, 'content-type': 'application/json', 'user-agent': 'Althar' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }).then((response) => response.text()),
+    )
+  hostContract({
+    name: 'GitLab',
+    host,
+    path: gitlabRepo.split('/'),
+    branch: Effect.gen(function* () {
+      const branch = `althar/contract-${Date.now()}`
+      const repository = yield* host.repository(gitlabRepo.split('/'))
+      yield* api('POST', '/repository/branches', { branch, ref: repository.defaultBranch })
+      yield* api('POST', `/repository/files/${encodeURIComponent(`${branch.replace('/', '-')}.md`)}`, {
+        branch,
+        content: 'Opened by the Althar connectors contract.\n',
+        commit_message: 'Althar contract',
+      })
+      return branch
+    }),
+    cleanup: (change) =>
+      Effect.gen(function* () {
+        yield* api('PUT', `/merge_requests/${change.number}`, { state_event: 'close' })
+        yield* api('DELETE', `/repository/branches/${encodeURIComponent(change.source)}`)
+      }),
+  })
+  const issue = env('ALTHAR_GITLAB_ISSUE')
+  if (issue !== '') trackerContract({ name: 'GitLab', tracker: host, ref: issue })
+})
+
+const bitbucket = env('ALTHAR_BITBUCKET_TOKEN')
+const bitbucketEmail = env('ALTHAR_BITBUCKET_EMAIL')
+const bitbucketRepo = env('ALTHAR_BITBUCKET_REPO')
+describe.skipIf(bitbucket === '' || bitbucketEmail === '' || bitbucketRepo === '')('Bitbucket Cloud', () => {
+  const credential = Effect.succeed<Credential>({ kind: 'basic', user: bitbucketEmail, token: bitbucket })
+  const host = makeBitbucketCloud({ fetch, apiUrl: 'https://api.bitbucket.org/2.0', webUrl: 'https://bitbucket.org', credential })
+  const api = (method: string, path: string, body?: URLSearchParams) =>
+    Effect.promise(() =>
+      fetch(`https://api.bitbucket.org/2.0/repositories/${bitbucketRepo}${path}`, {
+        method,
+        headers: { authorization: `Basic ${Buffer.from(`${bitbucketEmail}:${bitbucket}`).toString('base64')}`, 'user-agent': 'Althar' },
+        ...(body === undefined ? {} : { body }),
+      }).then((response) => response.text()),
+    )
+  hostContract({
+    name: 'Bitbucket Cloud',
+    host,
+    path: bitbucketRepo.split('/'),
+    // A commit to a branch that doesn't exist yet makes it, from the main branch.
+    branch: Effect.gen(function* () {
+      const branch = `althar/contract-${Date.now()}`
+      yield* api(
+        'POST',
+        '/src',
+        new URLSearchParams({
+          [`/${branch.replace('/', '-')}.md`]: 'Opened by the Althar connectors contract.\n',
+          message: 'Althar contract',
+          branch,
+        }),
+      )
+      return branch
+    }),
+    cleanup: (change) =>
+      Effect.gen(function* () {
+        yield* api('POST', `/pullrequests/${change.number}/decline`)
+        yield* api('DELETE', `/refs/branches/${change.source}`)
+      }),
+  })
+})
+
+const bitbucketDc = env('ALTHAR_BITBUCKET_DC_TOKEN')
+const bitbucketDcRepo = env('ALTHAR_BITBUCKET_DC_REPO')
+const bitbucketDcUrl = env('ALTHAR_BITBUCKET_DC_URL').replace(/\/+$/, '')
+describe.skipIf(bitbucketDc === '' || bitbucketDcRepo === '' || bitbucketDcUrl === '')('Bitbucket Data Center', () => {
+  const credential = Effect.succeed<Credential>({ kind: 'bearer', token: bitbucketDc })
+  const host = makeBitbucketDataCenter({ fetch, apiUrl: `${bitbucketDcUrl}/rest/api/latest`, webUrl: bitbucketDcUrl, credential })
+  const [project = '', slug = ''] = bitbucketDcRepo.split('/')
+  const api = (method: string, path: string, body?: FormData | Record<string, unknown>) =>
+    Effect.promise(() =>
+      fetch(
+        `${bitbucketDcUrl}/rest/${path.startsWith('/branch-utils') ? path.slice(1) : `api/latest/projects/${project}/repos/${slug}${path}`}`,
+        {
+          method,
+          headers: {
+            authorization: `Bearer ${bitbucketDc}`,
+            'user-agent': 'Althar',
+            // Data Center refuses a form from anything it takes for a browser, unless told not to check.
+            'x-atlassian-token': 'no-check',
+            ...(body === undefined || body instanceof FormData ? {} : { 'content-type': 'application/json' }),
+          },
+          ...(body === undefined ? {} : { body: body instanceof FormData ? body : JSON.stringify(body) }),
+        },
+      ).then((response) => response.text()),
+    )
+  hostContract({
+    name: 'Bitbucket Data Center',
+    host,
+    path: [project, slug],
+    // Editing a file onto a new branch makes the branch, from the default one.
+    branch: Effect.gen(function* () {
+      const branch = `althar/contract-${Date.now()}`
+      const repository = yield* host.repository([project, slug])
+      const form = new FormData()
+      form.set('branch', branch)
+      form.set('sourceBranch', repository.defaultBranch)
+      form.set('content', 'Opened by the Althar connectors contract.\n')
+      form.set('message', 'Althar contract')
+      yield* api('PUT', `/browse/${branch.replace('/', '-')}.md`, form)
+      return branch
+    }),
+    cleanup: (change) =>
+      Effect.gen(function* () {
+        const now = JSON.parse(yield* api('GET', `/pull-requests/${change.number}`)) as { version: number }
+        yield* api('POST', `/pull-requests/${change.number}/decline?version=${now.version}`, {})
+        yield* api('DELETE', `/branch-utils/latest/projects/${project}/repos/${slug}/branches`, { name: `refs/heads/${change.source}` })
+      }),
+  })
+})
+
 const linear = env('ALTHAR_LINEAR_KEY')
 const linearIssue = env('ALTHAR_LINEAR_ISSUE')
 describe.skipIf(linear === '' || linearIssue === '')('Linear', () => {
@@ -72,5 +232,51 @@ describe.skipIf(linear === '' || linearIssue === '')('Linear', () => {
       credential: Effect.succeed({ kind: 'key', token: linear }),
     }),
     ref: linearIssue,
+  })
+})
+
+const jiraUrl = env('ALTHAR_JIRA_URL')
+const jiraIssue = env('ALTHAR_JIRA_ISSUE')
+describe.skipIf(jiraUrl === '' || env('ALTHAR_JIRA_TOKEN') === '' || jiraIssue === '')('Jira Cloud', () => {
+  trackerContract({
+    name: 'Jira Cloud',
+    tracker: makeJiraCloud({
+      fetch,
+      apiUrl: products.jira_cloud.apiFor(jiraUrl),
+      webUrl: jiraUrl,
+      credential: Effect.succeed({ kind: 'basic', user: env('ALTHAR_JIRA_EMAIL'), token: env('ALTHAR_JIRA_TOKEN') }),
+    }),
+    ref: jiraIssue,
+  })
+})
+
+const jiraDcUrl = env('ALTHAR_JIRA_DC_URL')
+const jiraDcIssue = env('ALTHAR_JIRA_DC_ISSUE')
+describe.skipIf(jiraDcUrl === '' || env('ALTHAR_JIRA_DC_TOKEN') === '' || jiraDcIssue === '')('Jira Data Center', () => {
+  trackerContract({
+    name: 'Jira Data Center',
+    tracker: makeJiraDataCenter({
+      fetch,
+      apiUrl: products.jira_dc.apiFor(jiraDcUrl),
+      webUrl: jiraDcUrl,
+      credential: Effect.succeed({ kind: 'bearer', token: env('ALTHAR_JIRA_DC_TOKEN') }),
+    }),
+    ref: jiraDcIssue,
+  })
+})
+
+const trelloKey = env('ALTHAR_TRELLO_KEY')
+const trelloToken = env('ALTHAR_TRELLO_TOKEN')
+const trelloCard = env('ALTHAR_TRELLO_CARD')
+describe.skipIf(trelloKey === '' || trelloToken === '' || trelloCard === '')('Trello', () => {
+  trackerContract({
+    name: 'Trello',
+    tracker: makeTrello({
+      fetch,
+      apiUrl: 'https://api.trello.com/1',
+      webUrl: 'https://trello.com',
+      credential: Effect.succeed({ kind: 'app', key: trelloKey, token: trelloToken }),
+    }),
+    ref: trelloCard,
   })
 })

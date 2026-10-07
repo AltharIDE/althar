@@ -491,6 +491,8 @@ export class Changes extends Context.Service<
           }
           const { host } = found
           const repository = yield* host.repository(found.path)
+          // The repository as its host names it, not as the remote spells it: Bitbucket Data Center's has `scm/` in front.
+          const path = repository.path
           // Althar pushes what the lead committed, never what it left lying in the worktree.
           const left = yield* uncommittedFiles(task.path)
           const base = task.baseCommit ?? task.baseRef ?? repository.defaultBranch
@@ -508,8 +510,11 @@ export class Changes extends Context.Service<
             connectionId: string | null
           }>`
             SELECT id, product, key, url, ref, connection_id FROM external_links WHERE task_id = ${input.taskId} AND kind = 'issue' LIMIT 1`
+          // A link's spelling of the repository may differ in case from the host's, which GitHub and GitLab don't mind.
           const sameHost =
-            issueLink !== undefined && issueLink.product === host.product && issueLink.ref.startsWith(`${found.path.join('/')}#`)
+            issueLink !== undefined &&
+            issueLink.product === host.product &&
+            issueLink.ref.toLowerCase().startsWith(`${path.join('/').toLowerCase()}#`)
           const title = issueLink === undefined || sameHost ? task.title : `${issueLink.key}: ${task.title}`
           const body = yield* bodyFor(
             input.taskId,
@@ -520,7 +525,7 @@ export class Changes extends Context.Service<
           const opened = yield* outward({
             projectId: input.projectId,
             subject: { type: 'task', id: input.taskId },
-            target: `${host.product}:${found.path.join('/')}`,
+            target: `${host.product}:${path.join('/')}`,
             operation: 'open_change',
             // One per repository: in a task of several, each opens its own; alone, the key it always had.
             key: `open_change:${input.taskId}:${task.branch}${several ? `:${task.bindingId}` : ''}`,
@@ -530,7 +535,7 @@ export class Changes extends Context.Service<
             encode: (answer) => answer,
             decode: (kept) => Option.getOrUndefined(Schema.decodeUnknownOption(ChangeRequest)(kept)),
           })
-          const snapshot = snapshotOf(opened, found.path, host.words, null)
+          const snapshot = snapshotOf(opened, path, host.words, null)
           const linkId = yield* sql.withTransaction(
             Effect.gen(function* () {
               const at = yield* timestamp
@@ -584,7 +589,7 @@ export class Changes extends Context.Service<
                   product: host.product,
                   kind: 'change',
                   externalId: opened.id,
-                  ref: `${found.path.join('/')}${host.words.prefix}${opened.number}`,
+                  ref: `${path.join('/')}${host.words.prefix}${opened.number}`,
                   key: `${host.words.prefix}${opened.number}`,
                   url: opened.url,
                   snapshot: JSON.stringify(snapshot),

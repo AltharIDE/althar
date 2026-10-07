@@ -23,7 +23,8 @@
   background: var(--paper);
   box-shadow: inset 0 0 0 1px var(--line-3);
 }
-.option:disabled {
+.option:disabled,
+.tile:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -47,4 +48,49 @@
   font-size: 12px;
   line-height: 1.45;
   color: var(--t-3);
+}
+
+/* Tiles: side by side, a picture over its title; the chosen one sits on paper, as a chosen row does. */
+.tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.tile {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: 88px;
+  padding: 10px 6px 8px;
+  border-radius: 10px;
+  text-align: center;
+  transition: background var(--fast) var(--ease);
+}
+.tile:hover:not(:disabled) {
+  background: var(--n-3);
+}
+.tile:active:not(:disabled) {
+  background: var(--n-4);
+}
+.tile[aria-checked='true'] {
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.tile .title {
+  font-weight: 500;
+  font-size: 12px;
+  line-height: 1.3;
+}
+.tile[aria-checked='true'] .title {
+  font-weight: 550;
+}
+.picture {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+}
+.picture > * {
+  max-width: 100%;
+  max-height: 100%;
 }

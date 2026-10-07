@@ -48,7 +48,7 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry),
     Layer.provideMerge(options.secrets ?? Secrets.none('Althar keeps sign-ins in the app; it can open them, and this can’t.')),
-    Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds)),
+    Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds, options.fetch)),
   )
   // Each project's rules; each agent's accounts, whether each is signed in, and which are out of usage until their reset (ADR-012).
   const able = Limits.layer.pipe(

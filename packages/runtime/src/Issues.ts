@@ -1,4 +1,4 @@
-import { type Issue, linksIn, type Product, type StatusCategory } from '@althar/connectors'
+import { type Issue, linksIn, parseLink, type Product, type StatusCategory } from '@althar/connectors'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
@@ -6,7 +6,7 @@ import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
 import { Connections, NotConnected } from './Connections'
-import { NotFound } from './errors'
+import { NotAnIssue, NotFound } from './errors'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
 import { updateItem } from './threads'
@@ -162,8 +162,11 @@ export class Issues extends Context.Service<
           const wanted = text.trim()
           if (/^https?:\/\//.test(wanted)) {
             const found = yield* connections.resolve(wanted)
-            if (found === null || found.ref.kind !== 'issue' || found.tracker === undefined)
-              return yield* new NotConnected({ product: 'linear', what: wanted })
+            // A link to a tracker not connected names it where its address can (a Jira Cloud site's does).
+            if (found === null) return yield* new NotConnected({ product: parseLink(wanted)?.product ?? 'linear', what: wanted })
+            // A pull request's link, given for an issue, says so in its host's words.
+            if (found.ref.kind !== 'issue') return yield* new NotAnIssue({ link: wanted, what: found.host?.words.noun ?? 'pull request' })
+            if (found.tracker === undefined) return yield* new NotConnected({ product: found.ref.product, what: wanted })
             const issue = yield* found.tracker.issue(found.ref.ref)
             return { ...summaryOf(found.ref.product, issue), body: issue.body, connectionId: found.connectionId }
           }
@@ -176,10 +179,10 @@ export class Issues extends Context.Service<
             const issue = yield* adapters.tracker.issue(`${host.path.join('/')}#${number}`)
             return { ...summaryOf(adapters.info.product, issue), body: issue.body, connectionId: host.connectionId }
           }
-          // MER-231: whichever tracker has it.
+          // MER-231, or a Trello card's short link: whichever tracker has it, each reading its own keys as typed.
           for (const { connectionId, product, tracker } of yield* connections.trackers) {
             if (product === 'github' || product === 'gitlab') continue
-            const issue = yield* tracker.issue(wanted.toUpperCase()).pipe(Effect.orElseSucceed(() => null))
+            const issue = yield* tracker.issue(wanted).pipe(Effect.orElseSucceed(() => null))
             if (issue !== null) return { ...summaryOf(product, issue), body: issue.body, connectionId }
           }
           return yield* new NotFound({ kind: 'issue', id: wanted })

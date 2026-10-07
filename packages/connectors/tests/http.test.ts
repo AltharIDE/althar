@@ -3,6 +3,7 @@ import { Effect, Exit, Schema } from 'effect'
 
 import { ConnectorFailed } from '../src/errors'
 import { failureOf, makeHttp } from '../src/http'
+import type { Product } from '../src/model'
 import { stubFetch } from './stub'
 
 const Thing = Schema.Struct({ name: Schema.String })
@@ -72,6 +73,18 @@ describe('a call to a service', () => {
     }),
   )
 
+  it.effect('reads an answer’s headers, which is all some answers say', () =>
+    Effect.gen(function* () {
+      const { fetch } = stubFetch([
+        ['GET', 'https://api.test/who', { json: {}, headers: { 'x-ausername': 'dana' } }],
+        ['GET', 'https://api.test/gone', { status: 404, text: '' }],
+      ])
+      const http = makeHttp({ product: 'bitbucket_dc', fetch, authorization: Effect.succeed('Bearer t') })
+      assert.strictEqual((yield* http.headers('https://api.test/who')).get('x-ausername'), 'dana')
+      assert.strictEqual(failure(yield* Effect.exit(http.headers('https://api.test/gone')))?.reason, 'not_found')
+    }),
+  )
+
   it.effect('says when the answer is not what was expected', () =>
     Effect.gen(function* () {
       const { fetch } = stubFetch([
@@ -135,42 +148,120 @@ describe('a failed answer', () => {
     assert.strictEqual(failureOf('github', 502, headers(), '', at).reason, 'unreachable')
   })
 
-  it('keeps what the service said', () => {
-    assert.strictEqual(
-      failureOf(
-        'github',
-        422,
-        headers(),
-        JSON.stringify({ message: 'Validation Failed', errors: [{ message: 'A pull request already exists' }] }),
-        at,
-      ).message,
-      'Validation Failed: A pull request already exists',
-    )
-    assert.strictEqual(failureOf('github', 422, headers(), JSON.stringify({ errors: ['bad branch'] }), at).message, 'bad branch')
-    assert.strictEqual(failureOf('linear', 400, headers(), JSON.stringify({ error: 'invalid_grant' }), at).message, 'invalid_grant')
-    assert.strictEqual(failureOf('github', 500, headers(), 'oops', at).message, '500')
-    assert.strictEqual(failureOf('github', 500, headers(), JSON.stringify({}), at).message, '500')
-  })
+  /**
+   * Each service's own failure, as it sends it, and the words Althar keeps:
+   * a row each, so that merging one connector's handling with another's can't
+   * quietly drop one. A new connector adds its rows here.
+   */
+  const said: ReadonlyArray<{ readonly product: Product; readonly status: number; readonly body: string; readonly words: string }> = [
+    {
+      product: 'github',
+      status: 422,
+      body: JSON.stringify({ message: 'Validation Failed', errors: [{ message: 'A pull request already exists' }] }),
+      words: 'Validation Failed: A pull request already exists',
+    },
+    { product: 'github', status: 422, body: JSON.stringify({ errors: ['bad branch'] }), words: 'bad branch' },
+    { product: 'linear', status: 400, body: JSON.stringify({ error: 'invalid_grant' }), words: 'invalid_grant' },
+    // GitLab: a list of messages, messages by field, and OAuth's description.
+    {
+      product: 'gitlab',
+      status: 409,
+      body: JSON.stringify({ message: ['Another open merge request already exists for this source branch: !4'] }),
+      words: 'Another open merge request already exists for this source branch: !4',
+    },
+    {
+      product: 'gitlab',
+      status: 400,
+      body: JSON.stringify({ message: { title: ["can't be blank"], base: ['Branch is missing'] } }),
+      words: "title can't be blank; Branch is missing",
+    },
+    {
+      product: 'gitlab',
+      status: 401,
+      body: JSON.stringify({ error: 'invalid_token', error_description: 'Token was revoked.' }),
+      words: 'Token was revoked.',
+    },
+    // Jira: its messages, or what it says of each field.
+    {
+      product: 'jira_dc',
+      status: 404,
+      body: JSON.stringify({ errorMessages: ['Issue Does Not Exist'], errors: {} }),
+      words: 'Issue Does Not Exist',
+    },
+    {
+      product: 'jira_cloud',
+      status: 400,
+      body: JSON.stringify({ errorMessages: [], errors: { comment: 'Comment body can not be empty!' } }),
+      words: 'Comment body can not be empty!',
+    },
+    // Bitbucket Cloud: a message, and what it is about, in words or, for missing scopes, as data.
+    {
+      product: 'bitbucket_cloud',
+      status: 404,
+      body: JSON.stringify({ error: { message: 'Not Found', detail: 'Log in step {1} does not exist.' } }),
+      words: 'Not Found: Log in step {1} does not exist.',
+    },
+    {
+      product: 'bitbucket_cloud',
+      status: 400,
+      body: JSON.stringify({ type: 'error', error: { message: 'There are no changes to be pulled' } }),
+      words: 'There are no changes to be pulled',
+    },
+    {
+      product: 'bitbucket_cloud',
+      status: 403,
+      body: JSON.stringify({
+        type: 'error',
+        error: {
+          message: 'Your credentials lack one or more required privilege scopes.',
+          detail: { granted: ['account'], required: ['workspace'] },
+        },
+      }),
+      words: 'Your credentials lack one or more required privilege scopes.',
+    },
+    { product: 'bitbucket_cloud', status: 400, body: JSON.stringify({ error: { message: '' } }), words: '400' },
+    // Nothing worth keeping: the status says it.
+    { product: 'gitlab', status: 400, body: JSON.stringify({ message: [7, null] }), words: '400' },
+    // Trello: a line of plain words. A page, or more than a line, says nothing worth keeping.
+    { product: 'trello', status: 400, body: 'invalid token', words: 'invalid token' },
+    { product: 'github', status: 502, body: '<html><body>Bad gateway</body></html>', words: '502' },
+    { product: 'github', status: 500, body: 'oops\nat line 2', words: '500' },
+    // JSON of a shape no service here uses is not words to show, nor its text.
+    { product: 'github', status: 500, body: JSON.stringify({ errors: 'odd' }), words: '500' },
+    { product: 'github', status: 500, body: JSON.stringify(['odd']), words: '500' },
+    { product: 'github', status: 500, body: JSON.stringify({}), words: '500' },
+  ]
+  for (const { product, status, body, words } of said)
+    it(`keeps what ${product} said in a ${status}: ${words}`, () => {
+      assert.strictEqual(failureOf(product, status, headers(), body, at).message, words)
+    })
 
-  it('is rate limited, with when to try again, by whichever header the service sends', () => {
-    const later = failureOf('github', 429, headers({ 'retry-after': '30' }), '', at)
-    assert.strictEqual(later.reason, 'rate_limited')
-    assert.strictEqual(later.retryAt, '2026-10-01T09:00:30.000Z')
-    const exhausted = failureOf(
-      'github',
-      403,
-      headers({ 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(at / 1000 + 60) }),
-      '',
-      at,
-    )
-    assert.strictEqual(exhausted.reason, 'rate_limited')
-    assert.strictEqual(exhausted.retryAt, '2026-10-01T09:01:00.000Z')
-    assert.strictEqual(
-      failureOf('linear', 429, headers({ 'x-ratelimit-requests-reset': String(at + 5000) }), '', at).retryAt,
-      '2026-10-01T09:00:05.000Z',
-    )
-    assert.isUndefined(failureOf('linear', 429, headers(), '', at).retryAt)
-  })
+  /** Each service's way of saying when to try again, a row each, as above. */
+  const resets: ReadonlyArray<{
+    readonly product: Product
+    readonly status: number
+    readonly sent: Record<string, string>
+    readonly retryAt: string | undefined
+  }> = [
+    { product: 'github', status: 429, sent: { 'retry-after': '30' }, retryAt: '2026-10-01T09:00:30.000Z' },
+    {
+      product: 'github',
+      status: 403,
+      sent: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(at / 1000 + 60) },
+      retryAt: '2026-10-01T09:01:00.000Z',
+    },
+    { product: 'linear', status: 429, sent: { 'x-ratelimit-requests-reset': String(at + 5000) }, retryAt: '2026-10-01T09:00:05.000Z' },
+    { product: 'gitlab', status: 429, sent: { 'ratelimit-reset': String(at / 1000 + 90) }, retryAt: '2026-10-01T09:01:30.000Z' },
+    // Bitbucket's is the seconds left, not a time.
+    { product: 'bitbucket_cloud', status: 429, sent: { 'x-ratelimit-reset': '2374' }, retryAt: '2026-10-01T09:39:34.000Z' },
+    { product: 'linear', status: 429, sent: {}, retryAt: undefined },
+  ]
+  for (const { product, status, sent, retryAt } of resets)
+    it(`is rate limited by ${product}'s ${Object.keys(sent).join(' and ') || 'bare'} ${status}, until ${retryAt ?? 'it says'}`, () => {
+      const failure = failureOf(product, status, headers(sent), '', at)
+      assert.strictEqual(failure.reason, 'rate_limited')
+      assert.strictEqual(failure.retryAt, retryAt)
+    })
 })
 
 describe('a GraphQL call', () => {

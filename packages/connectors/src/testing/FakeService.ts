@@ -137,7 +137,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     account: Effect.andThen(called('account'), Effect.succeed(account)),
     repository: (path) =>
       Effect.andThen(called('repository'), () => {
-        const found = repositories.get(path.join('/'))
+        // Found whatever the case, as GitHub and GitLab find them.
+        const found = repositories.get(path.join('/').toLowerCase())
         return found === undefined ? Effect.fail(missing(`repository ${path.join('/')}`)) : Effect.succeed(found)
       }),
     findChange: (repository, source) =>
@@ -246,7 +247,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       ),
     issue: (ref) =>
       Effect.andThen(called('issue'), () => {
-        const found = issues.get(ref)
+        // A key in any case, as Linear's adapter takes one.
+        const found = issues.get(/^[A-Z][A-Z0-9]*-\d+$/i.test(ref) ? ref.toUpperCase() : ref)
         return found === undefined ? Effect.fail(missing(`issue ${ref}`)) : Effect.succeed(found)
       }),
     mine: (mineOptions = {}) =>
@@ -279,7 +281,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         canPush: true,
         merges: ['squash', 'merge'],
       }
-      repositories.set(path.join('/'), repository)
+      repositories.set(path.join('/').toLowerCase(), repository)
       return repository
     },
     addIssue: (input) => {
