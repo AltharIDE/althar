@@ -73,6 +73,18 @@ describe('a call to a service', () => {
     }),
   )
 
+  it.effect('reads an answer’s headers, which is all some answers say', () =>
+    Effect.gen(function* () {
+      const { fetch } = stubFetch([
+        ['GET', 'https://api.test/who', { json: {}, headers: { 'x-ausername': 'dana' } }],
+        ['GET', 'https://api.test/gone', { status: 404, text: '' }],
+      ])
+      const http = makeHttp({ product: 'bitbucket_dc', fetch, authorization: Effect.succeed('Bearer t') })
+      assert.strictEqual((yield* http.headers('https://api.test/who')).get('x-ausername'), 'dana')
+      assert.strictEqual(failure(yield* Effect.exit(http.headers('https://api.test/gone')))?.reason, 'not_found')
+    }),
+  )
+
   it.effect('says when the answer is not what was expected', () =>
     Effect.gen(function* () {
       const { fetch } = stubFetch([
@@ -182,6 +194,32 @@ describe('a failed answer', () => {
       body: JSON.stringify({ errorMessages: [], errors: { comment: 'Comment body can not be empty!' } }),
       words: 'Comment body can not be empty!',
     },
+    // Bitbucket Cloud: a message, and what it is about, in words or, for missing scopes, as data.
+    {
+      product: 'bitbucket_cloud',
+      status: 404,
+      body: JSON.stringify({ error: { message: 'Not Found', detail: 'Log in step {1} does not exist.' } }),
+      words: 'Not Found: Log in step {1} does not exist.',
+    },
+    {
+      product: 'bitbucket_cloud',
+      status: 400,
+      body: JSON.stringify({ type: 'error', error: { message: 'There are no changes to be pulled' } }),
+      words: 'There are no changes to be pulled',
+    },
+    {
+      product: 'bitbucket_cloud',
+      status: 403,
+      body: JSON.stringify({
+        type: 'error',
+        error: {
+          message: 'Your credentials lack one or more required privilege scopes.',
+          detail: { granted: ['account'], required: ['workspace'] },
+        },
+      }),
+      words: 'Your credentials lack one or more required privilege scopes.',
+    },
+    { product: 'bitbucket_cloud', status: 400, body: JSON.stringify({ error: { message: '' } }), words: '400' },
     // Nothing worth keeping: the status says it.
     { product: 'gitlab', status: 400, body: JSON.stringify({ message: [7, null] }), words: '400' },
     // Trello: a line of plain words. A page, or more than a line, says nothing worth keeping.
@@ -214,6 +252,8 @@ describe('a failed answer', () => {
     },
     { product: 'linear', status: 429, sent: { 'x-ratelimit-requests-reset': String(at + 5000) }, retryAt: '2026-10-01T09:00:05.000Z' },
     { product: 'gitlab', status: 429, sent: { 'ratelimit-reset': String(at / 1000 + 90) }, retryAt: '2026-10-01T09:01:30.000Z' },
+    // Bitbucket's is the seconds left, not a time.
+    { product: 'bitbucket_cloud', status: 429, sent: { 'x-ratelimit-reset': '2374' }, retryAt: '2026-10-01T09:39:34.000Z' },
     { product: 'linear', status: 429, sent: {}, retryAt: undefined },
   ]
   for (const { product, status, sent, retryAt } of resets)

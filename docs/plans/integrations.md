@@ -62,6 +62,18 @@ One pull request each:
    - Trello is built on its own, ahead of Bitbucket (`connectors/trello`):
      a card's status is its list, and it takes the person's own Power-Up
      key with a token made for it.
+   - Bitbucket's adapters, one for each, as they are two APIs: pull requests
+     and drafts, merging the way the repository chose at the head the person
+     saw, the head's statuses and Pipelines' step logs, threads, approvals
+     and requested changes (Data Center's "needs work"), and on Cloud each
+     pull request's size. Who can write is asked: Data Center searches its
+     users by the repository's permission; Cloud tells only an admin, so its
+     workspace's members count.
+   - The runtime keeps a repository's path as its host names it, since a
+     Data Center remote has `scm/` in front. Not yet run against a real
+     account: Cloud's reads were tried against public repositories on
+     bitbucket.org; Data Center has no public instance, so its answers follow
+     its reference.
 
 ## For now
 

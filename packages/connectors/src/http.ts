@@ -31,6 +31,8 @@ export interface Http {
   cached<A>(schema: Schema.Codec<A, unknown>, url: string): Effect.Effect<A, ConnectorFailed>
   /** A call whose answer is text, such as a log. */
   text(url: string): Effect.Effect<string, ConnectorFailed>
+  /** A GET whose answer is its headers, such as who Bitbucket Data Center says is signed in. */
+  headers(url: string): Effect.Effect<Headers, ConnectorFailed>
   /** A GraphQL query or mutation; its `data` read by `schema`, its `errors` classified. */
   graphql<A>(
     schema: Schema.Codec<A, unknown>,
@@ -75,6 +77,9 @@ const wordsOf = (said: unknown): string => {
   return ''
 }
 
+/** Bitbucket Cloud's error: a message, and what it is about, in words or, for missing scopes, as data. */
+const NestedError = Schema.Struct({ message: Schema.String, detail: Schema.optional(Schema.Unknown) })
+
 /** What a service said went wrong, from its JSON body or a line of plain words (Trello's), or the status's own words. */
 const messageOf = (body: string, fallback: string): string => {
   let json: unknown
@@ -98,17 +103,23 @@ const messageOf = (body: string, fallback: string): string => {
   const said = [wordsOf(parsed.message), detail].filter((part) => part !== undefined && part !== '').join(': ')
   if (said !== '') return said.slice(0, MESSAGE_KEPT)
   if (parsed.error_description !== undefined) return parsed.error_description.slice(0, MESSAGE_KEPT)
-  return typeof parsed.error === 'string' ? parsed.error.slice(0, MESSAGE_KEPT) : fallback
+  if (typeof parsed.error === 'string') return parsed.error.slice(0, MESSAGE_KEPT)
+  const nested = Option.getOrUndefined(Schema.decodeUnknownOption(NestedError)(parsed.error))
+  const words = [nested?.message, typeof nested?.detail === 'string' ? nested.detail : '']
+    .filter((part) => part !== undefined && part !== '')
+    .join(': ')
+  return words === '' ? fallback : words.slice(0, MESSAGE_KEPT)
 }
 
 /** When a rate-limited call may be tried again, from whichever header the service sends. */
 const retryAtOf = (headers: Headers, now: number): string | undefined => {
   const after = Number(headers.get('retry-after'))
   if (headers.has('retry-after') && Number.isFinite(after)) return new Date(now + after * 1000).toISOString()
-  // GitHub's header, and GitLab's: the reset in seconds since the epoch.
+  // GitHub's and GitLab's reset is a time, in seconds since the epoch; Bitbucket's is the seconds left until it.
   const resetHeader = headers.has('x-ratelimit-reset') ? 'x-ratelimit-reset' : 'ratelimit-reset'
   const reset = Number(headers.get(resetHeader))
-  if (headers.has(resetHeader) && Number.isFinite(reset)) return new Date(reset * 1000).toISOString()
+  if (headers.has(resetHeader) && Number.isFinite(reset))
+    return new Date(reset < 1_000_000_000 ? now + reset * 1000 : reset * 1000).toISOString()
   const resetMs = Number(headers.get('x-ratelimit-requests-reset'))
   if (headers.has('x-ratelimit-requests-reset') && Number.isFinite(resetMs)) return new Date(resetMs).toISOString()
   return undefined
@@ -230,6 +241,11 @@ export const makeHttp = (options: HttpOptions): Http => {
       call('GET', url, { accept: '*/*' }).pipe(
         Effect.flatMap(success),
         Effect.map((answer) => answer.body),
+      ),
+    headers: (url) =>
+      call('GET', url, {}).pipe(
+        Effect.flatMap(success),
+        Effect.map((answer) => answer.headers),
       ),
     graphql: (schema, url, query, variables = {}) =>
       Effect.gen(function* () {
