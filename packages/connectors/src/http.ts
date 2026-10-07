@@ -51,8 +51,8 @@ const ErrorBody = Schema.Struct({
   errors: Schema.optional(Schema.Array(Schema.Unknown)),
 })
 
-/** Bitbucket Cloud's error: a message, and what it is about. */
-const NestedError = Schema.Struct({ message: Schema.String, detail: Schema.optional(Schema.NullOr(Schema.String)) })
+/** Bitbucket Cloud's error: a message, and what it is about, in words or, for missing scopes, as data. */
+const NestedError = Schema.Struct({ message: Schema.String, detail: Schema.optional(Schema.Unknown) })
 
 /** What a service said went wrong, from its JSON body, or the status's own words. */
 const messageOf = (body: string, fallback: string): string => {
@@ -69,7 +69,7 @@ const messageOf = (body: string, fallback: string): string => {
     if (said !== '') return said.slice(0, MESSAGE_KEPT)
     if (typeof parsed.error === 'string') return parsed.error.slice(0, MESSAGE_KEPT)
     const nested = Schema.decodeUnknownSync(NestedError)(parsed.error)
-    const words = [nested.message, nested.detail].filter((part) => part != null && part !== '').join(': ')
+    const words = [nested.message, typeof nested.detail === 'string' ? nested.detail : ''].filter((part) => part !== '').join(': ')
     if (words !== '') return words.slice(0, MESSAGE_KEPT)
   } catch {
     // Not JSON: the status says it.

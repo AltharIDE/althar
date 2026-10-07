@@ -50,7 +50,11 @@ const Permissions = Schema.Struct({
   values: Schema.Array(Schema.Struct({ permission: Schema.String, repository: Schema.Struct({ full_name: Schema.String }) })),
 })
 
-const Strategies = Schema.Struct({ merge_strategies: Schema.optional(Schema.Array(Schema.String)) })
+const Strategies = Schema.Struct({
+  merge_strategies: Schema.optional(Schema.Array(Schema.String)),
+  // The one the repository's admins chose.
+  default_merge_strategy: Schema.optional(Schema.NullOr(Schema.String)),
+})
 
 const PullAnswer = Schema.Struct({
   id: Schema.Number,
@@ -128,10 +132,13 @@ const ActivityAnswer = Schema.Struct({
 })
 type ActivityAnswer = typeof ActivityAnswer.Type
 
+/** A file the pull request changes, and by how many lines. */
+const Diffstat = Schema.Struct({ lines_added: Schema.optional(Schema.Number), lines_removed: Schema.optional(Schema.Number) })
+
 const Page = <A>(item: Schema.Codec<A, unknown>) =>
   Schema.Struct({ values: Schema.Array(item), next: Schema.optional(Schema.NullOr(Schema.String)) })
 
-/** How many pages of a hundred comments, or fifty entries of activity, are read. */
+/** How many pages of a hundred comments, fifty entries of activity, or five hundred files of a diff are read. */
 const PAGES = 10
 
 /** Bitbucket's strategies, in the order Althar prefers them, and the way each merges. */
@@ -145,14 +152,19 @@ const STRATEGIES: ReadonlyArray<readonly [string, MergeMethod]> = [
   ['fast_forward', 'rebase'],
 ]
 
-/** How a branch lets pull requests into it be merged, in the order Althar prefers. */
-export const mergesOf = (strategies: ReadonlyArray<string>): ReadonlyArray<MergeMethod> => [
-  ...new Set(STRATEGIES.filter(([strategy]) => strategies.includes(strategy)).map(([, method]) => method)),
+/** How a branch lets pull requests into it be merged: the way its repository chose first, then in the order Althar prefers. */
+export const mergesOf = (strategies: ReadonlyArray<string>, chosen?: string | null): ReadonlyArray<MergeMethod> => [
+  ...new Set(
+    [
+      ...STRATEGIES.filter(([strategy]) => strategy === chosen && strategies.includes(strategy)),
+      ...STRATEGIES.filter(([strategy]) => strategies.includes(strategy)),
+    ].map(([, method]) => method),
+  ),
 ]
 
-/** The strategy Althar merges with: the first it prefers that the branch allows. */
-export const strategyOf = (strategies: ReadonlyArray<string>): string | undefined =>
-  STRATEGIES.find(([strategy]) => strategies.includes(strategy))?.[0]
+/** The strategy Althar merges with: the one the repository chose, or else the first Althar prefers that the branch allows. */
+export const strategyOf = (strategies: ReadonlyArray<string>, chosen?: string | null): string | undefined =>
+  chosen != null && strategies.includes(chosen) ? chosen : STRATEGIES.find(([strategy]) => strategies.includes(strategy))?.[0]
 
 /** A commit status's state; anything Bitbucket adds later is neither a pass nor a failure. */
 export const statusState = (state: string): CheckState => {
@@ -189,7 +201,14 @@ const personOf = (user: User | null | undefined): Person =>
         bot: user.type === 'app_user',
       }
 
-const changeOf = (repository: Repository, pull: PullAnswer): ChangeRequest => ({
+/** What a pull request changes, from its diff's stat. */
+interface Size {
+  readonly additions: number
+  readonly deletions: number
+  readonly changedFiles: number
+}
+
+const changeOf = (repository: Repository, pull: PullAnswer, size: Size | null = null): ChangeRequest => ({
   // Numbers are only the repository's own, so the repository names it too.
   id: `${repository.id}:${pull.id}`,
   number: pull.id,
@@ -203,10 +222,10 @@ const changeOf = (repository: Repository, pull: PullAnswer): ChangeRequest => ({
   target: pull.destination.branch.name,
   headSha: pull.source.commit?.hash ?? null,
   author: pull.author == null ? null : personOf(pull.author),
-  // Bitbucket counts lines only file by file, in the diff's stat.
-  additions: null,
-  deletions: null,
-  changedFiles: null,
+  // Bitbucket counts lines only file by file, in the diff's stat, which only reading one pull request asks for.
+  additions: size?.additions ?? null,
+  deletions: size?.deletions ?? null,
+  changedFiles: size?.changedFiles ?? null,
   updatedAt: iso(pull.updated_on),
 })
 
@@ -232,6 +251,9 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
     return { id, login, name }
   })
 
+  /** A next page's address, only where it is still Bitbucket's API: the credential goes with it. */
+  const onApi = (next: string | null | undefined) => (next != null && next.startsWith(`${api}/`) ? next : null)
+
   /** Every page of a list, by its `next`, within a bound. */
   const all = <A>(item: Schema.Codec<A, unknown>, first: string) =>
     Effect.gen(function* () {
@@ -240,7 +262,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
       for (let page = 0; page < PAGES && url != null; page += 1) {
         const answer: { readonly values: ReadonlyArray<A>; readonly next?: string | null | undefined } = yield* http.cached(Page(item), url)
         found.push(...answer.values)
-        url = answer.next
+        url = onApi(answer.next)
       }
       return found
     })
@@ -258,10 +280,15 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
       (pulls) => (pulls.values[0] === undefined ? null : changeOf(repository, pulls.values[0])),
     )
 
+  /** Said once: membership couldn't be read, as without the token's `read:workspace` it can't. */
+  let membershipUnread = false
+
   /**
    * Whether someone is one of the repository's people: a member of its
    * workspace. Bitbucket tells only an admin who can write to a repository,
    * so membership, which only a group or a grant gives, stands in for it.
+   * Where it can't be read, everyone counts as an outsider: what they say
+   * still arrives, marked, and listening goes on.
    */
   const memberOf = (repository: Repository, uuid: string) =>
     http
@@ -271,6 +298,22 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         Effect.catchIf(
           (error) => error.reason === 'not_found',
           () => Effect.succeed(false),
+        ),
+        Effect.catchIf(
+          (error) => error.reason === 'forbidden',
+          (error) =>
+            membershipUnread
+              ? Effect.succeed(false)
+              : Effect.sync(() => {
+                  membershipUnread = true
+                }).pipe(
+                  Effect.andThen(
+                    Effect.logWarning(
+                      `Bitbucket wouldn't say who is in the workspace, so everyone counts as an outsider: ${error.message}`,
+                    ),
+                  ),
+                  Effect.as(false),
+                ),
         ),
       )
 
@@ -302,7 +345,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         }
         const last = answer.values.at(-1)
         const oldest = last?.approval?.date ?? last?.changes_requested?.date ?? last?.update?.date ?? last?.comment?.created_on
-        url = cursor !== null && oldest !== undefined && iso(oldest) < cursor ? null : answer.next
+        url = cursor !== null && oldest !== undefined && iso(oldest) < cursor ? null : onApi(answer.next)
       }
       return found.filter(({ said }) => cursor === null || iso(said.date) >= cursor)
     })
@@ -317,23 +360,23 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         const answer = yield* http.cached(RepositoryAnswer, repo(path.slice(0, 2)))
         const workspace = answer.full_name.split('/')[0] ?? ''
         // The account's own permission: asked by the repository's name, which Bitbucket can search by, and matched by its full one.
-        const permissions = yield* http.cached(
-          Permissions,
-          `${api}/user/workspaces/${encodeURIComponent(workspace)}/permissions/repositories?q=${encodeURIComponent(`repository.name = ${quoted(answer.name)}`)}`,
-        )
+        // Nothing waits on it, so a token that may not ask reads as one that can't push.
+        const permissions = yield* http
+          .cached(
+            Permissions,
+            `${api}/user/workspaces/${encodeURIComponent(workspace)}/permissions/repositories?q=${encodeURIComponent(`repository.name = ${quoted(answer.name)}`)}`,
+          )
+          .pipe(Effect.orElseSucceed(() => ({ values: [] })))
         const permission = permissions.values.find((found) => found.repository.full_name === answer.full_name)?.permission
         const main = answer.mainbranch?.name ?? 'main'
-        const strategies =
-          answer.mainbranch == null
-            ? []
-            : ((yield* http.cached(Strategies, branchOf(answer.full_name.split('/'), main))).merge_strategies ?? [])
+        const branch = answer.mainbranch == null ? {} : yield* http.cached(Strategies, branchOf(answer.full_name.split('/'), main))
         return {
           id: answer.uuid,
           path: answer.full_name.split('/'),
           defaultBranch: main,
           webUrl: answer.links.html.href,
           canPush: permission === 'write' || permission === 'admin',
-          merges: mergesOf(strategies),
+          merges: mergesOf(branch.merge_strategies ?? [], branch.default_merge_strategy),
         }
       }),
     findChange,
@@ -362,7 +405,21 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
             ),
           )
       }),
-    change: (repository, number) => Effect.map(http.cached(PullAnswer, pull(repository, number)), (answer) => changeOf(repository, answer)),
+    change: (repository, number) =>
+      Effect.gen(function* () {
+        const answer = yield* http.cached(PullAnswer, pull(repository, number))
+        // Its size, file by file; a diff Bitbucket won't count in time leaves it unsaid, not the pull request unread.
+        const files = yield* all(Diffstat, `${pull(repository, number)}/diffstat`).pipe(Effect.orElseSucceed(() => null))
+        const size =
+          files === null
+            ? null
+            : {
+                additions: files.reduce((sum, file) => sum + (file.lines_added ?? 0), 0),
+                deletions: files.reduce((sum, file) => sum + (file.lines_removed ?? 0), 0),
+                changedFiles: files.length,
+              }
+        return changeOf(repository, answer, size)
+      }),
     markReady: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
@@ -388,9 +445,8 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
             status: 409,
             message: `The pull request moved on to ${head} since ${change.headSha.slice(0, 12)} was seen`,
           })
-        const strategy = strategyOf(
-          (yield* http.cached(Strategies, branchOf(repository, now.destination.branch.name))).merge_strategies ?? [],
-        )
+        const branch = yield* http.cached(Strategies, branchOf(repository, now.destination.branch.name))
+        const strategy = strategyOf(branch.merge_strategies ?? [], branch.default_merge_strategy)
         // Refused, Bitbucket says why: a merge check, a conflict, a draft. One that takes long answers 202 and lands later.
         yield* http.json(
           Schema.Unknown,

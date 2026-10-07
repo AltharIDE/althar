@@ -1,5 +1,5 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Logger } from 'effect'
 
 import { iso, makeBitbucketCloud, mergesOf, statusState, strategyOf } from '../src/bitbucketCloud'
 import * as dc from '../src/bitbucketDataCenter'
@@ -25,7 +25,8 @@ const ace: Repository = {
   defaultBranch: 'master',
   webUrl: 'https://bitbucket.org/atlassian/atlassian-connect-express',
   canPush: true,
-  merges: ['squash', 'merge', 'rebase'],
+  // The repository's own choice, a merge commit, first.
+  merges: ['merge', 'squash', 'rebase'],
 }
 
 const cloud = (routes: ReadonlyArray<Route>, kind: 'basic' | 'bearer' = 'basic') => {
@@ -80,6 +81,7 @@ const pull = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
+// Recorded again on 7 October 2026, with the strategy the repository chose.
 const master = {
   name: 'master',
   type: 'branch',
@@ -137,17 +139,45 @@ describe('Bitbucket Cloud as a code host', () => {
       // Empty, it has no main branch to merge into yet; read only, it can't be pushed to.
       const empty = yield* host.repository(['meridian', 'empty'])
       assert.deepInclude(empty, { defaultBranch: 'main', canPush: false, merges: [] })
+      // A token that may not ask for its permission reads as one that can't push, and the repository is still read.
+      const unasked = cloud([
+        ['GET', ACE, { json: repository }],
+        [
+          'GET',
+          /\/permissions\/repositories/,
+          {
+            status: 403,
+            json: {
+              type: 'error',
+              error: {
+                message: 'Your credentials lack one or more required privilege scopes.',
+                detail: { granted: ['account'], required: ['repository'] },
+              },
+            },
+          },
+        ],
+        ['GET', `${ACE}/refs/branches/master`, { json: master }],
+      ])
+      assert.deepStrictEqual(yield* unasked.host.repository(['atlassian', 'atlassian-connect-express']), { ...ace, canPush: false })
     }),
   )
 
-  it('merges in Althar’s order of the ways a branch allows', () => {
+  it('merges the way the repository chose, or else in Althar’s order of the ways a branch allows', () => {
+    assert.deepStrictEqual(mergesOf(master.merge_strategies, master.default_merge_strategy), ['merge', 'squash', 'rebase'])
+    assert.deepStrictEqual(mergesOf(['squash', 'fast_forward'], 'fast_forward'), ['rebase', 'squash'])
+    // A choice the branch doesn't allow, or none, leaves Althar's order.
+    assert.deepStrictEqual(mergesOf(['squash'], 'merge_commit'), ['squash'])
     assert.deepStrictEqual(mergesOf(master.merge_strategies), ['squash', 'merge', 'rebase'])
-    assert.deepStrictEqual(mergesOf(['fast_forward', 'rebase_merge']), ['merge', 'rebase'])
+    assert.deepStrictEqual(mergesOf(['fast_forward', 'rebase_merge'], null), ['merge', 'rebase'])
     assert.deepStrictEqual(mergesOf([]), [])
+    assert.strictEqual(strategyOf(master.merge_strategies, master.default_merge_strategy), 'merge_commit')
+    assert.strictEqual(strategyOf(['squash'], 'merge_commit'), 'squash')
     assert.strictEqual(strategyOf(master.merge_strategies), 'squash')
     assert.strictEqual(strategyOf(['squash_fast_forward', 'merge_commit']), 'squash_fast_forward')
     assert.strictEqual(strategyOf(['fast_forward', 'rebase_fast_forward']), 'rebase_fast_forward')
     assert.isUndefined(strategyOf(['octopus']))
+    // One Bitbucket adds later is still the repository's to choose.
+    assert.strictEqual(strategyOf(['octopus'], 'octopus'), 'octopus')
   })
 
   it.effect('finds the open pull request from a branch of this repository, drafts too', () =>
@@ -260,6 +290,67 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
+  it.effect('reads a pull request’s size from its diff’s stat, every page, and leaves it unsaid when Bitbucket won’t count', () =>
+    Effect.gen(function* () {
+      // Recorded from pull request 552, whose stat Bitbucket answers at the comparison it redirects to.
+      const file = (path: string, added: number, removed: number, status = 'modified') => ({
+        type: 'diffstat',
+        status,
+        lines_added: added,
+        lines_removed: removed,
+        old: status === 'added' ? null : { path, type: 'commit_file' },
+        new: { path, type: 'commit_file' },
+      })
+      const second = `${ACE}/diffstat/atlassian/atlassian-connect-express:7f9d4e6279c8%0Dd00fcf783635?from_pullrequest_id=552&topic=true&page=2`
+      const { host, sent } = cloud([
+        ['GET', PR, { json: pull() }],
+        [
+          'GET',
+          `${PR}/diffstat`,
+          {
+            json: {
+              pagelen: 5,
+              values: [
+                file('lib/index.js', 2, 0),
+                file('lib/store/dynamodb.js', 80, 7),
+                file('lib/store/mongodb.js', 62, 22),
+                file('lib/store/redis.js', 44, 8),
+                file('lib/store/sequelize.js', 63, 6),
+              ],
+              page: 1,
+              size: 8,
+              next: second,
+            },
+          },
+        ],
+        [
+          'GET',
+          second,
+          {
+            json: {
+              pagelen: 5,
+              values: [file('lib/store/utils.js', 48, 1), file('lib/utils.js', 19, 0, 'added'), file('types/index.d.ts', 14, 0)],
+              page: 2,
+              size: 8,
+            },
+          },
+        ],
+      ])
+      assert.deepInclude(yield* host.change(ace, 552), { additions: 332, deletions: 44, changedFiles: 8 })
+      assert.lengthOf(sent, 3)
+      const uncounted = cloud([
+        ['GET', PR, { json: pull() }],
+        ['GET', `${PR}/diffstat`, { status: 555, json: { type: 'error', error: { message: 'Timed out' } } }],
+      ])
+      assert.deepInclude(yield* uncounted.host.change(ace, 552), { additions: null, deletions: null, changedFiles: null })
+      const binary = cloud([
+        ['GET', PR, { json: pull() }],
+        ['GET', `${PR}/diffstat`, { json: { values: [{ type: 'diffstat', status: 'modified', new: { path: 'logo.png' } }] } }],
+      ])
+      assert.deepInclude(yield* binary.host.change(ace, 552), { additions: 0, deletions: 0, changedFiles: 1 })
+    }),
+  )
+
   it.effect('marks a draft ready, sending back what it has so reviewers stay', () =>
     Effect.gen(function* () {
       const { host, sent } = cloud([
@@ -308,7 +399,15 @@ describe('Bitbucket Cloud as a code host', () => {
       // Git's forty characters name the same head as Bitbucket's twelve.
       const done = yield* host.merge(ace, { ...seen, headSha: '7f9d4e6279c8a1b2c3d4e5f60718293a4b5c6d7e' })
       assert.strictEqual(done.state, 'merged')
-      assert.deepStrictEqual(sent.find((request) => request.method === 'POST')?.body, { merge_strategy: 'squash' })
+      // The way the repository chose, not Althar's first.
+      assert.deepStrictEqual(sent.find((request) => request.method === 'POST')?.body, { merge_strategy: 'merge_commit' })
+      const unchosen = cloud([
+        ['GET', PR, { json: pull({ draft: false }) }],
+        ['GET', `${ACE}/refs/branches/master`, { json: { ...master, default_merge_strategy: null } }],
+        ['POST', `${PR}/merge`, { json: pull({ state: 'MERGED' }) }],
+      ])
+      yield* unchosen.host.merge(ace, { ...seen, headSha: null })
+      assert.deepStrictEqual(unchosen.sent.find((request) => request.method === 'POST')?.body, { merge_strategy: 'squash' })
     }),
   )
 
@@ -645,6 +744,68 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
+  it.effect('follows a next page only on Bitbucket’s API, where the credential may go', () =>
+    Effect.gen(function* () {
+      const { host, sent } = cloud([
+        [
+          'GET',
+          `${PR}/comments?pagelen=100`,
+          { json: { values: comments.slice(0, 1), next: 'https://bitbucket.example.com/2.0/comments?page=2' } },
+        ],
+        [
+          'GET',
+          `${PR}/activity?pagelen=50`,
+          { json: activity([approval(mitch, '2025-08-21T07:00:00.000000+00:00')], `${CLOUD}.example.com/activity?page=2`) },
+        ],
+        member(rovo, false),
+        member(mitch, true),
+      ])
+      const said = yield* host.activity(ace, 552, null)
+      assert.lengthOf(said.comments, 1)
+      assert.lengthOf(said.reviews, 1)
+      assert.isFalse(sent.some((request) => request.url.includes('example.com')))
+    }),
+  )
+
+  it.effect('counts everyone an outsider when the workspace’s members can’t be read, says so once, and goes on listening', () =>
+    Effect.gen(function* () {
+      const logged: Array<{ readonly level: string; readonly message: unknown }> = []
+      const logger = Logger.make(({ logLevel, message }) => logged.push({ level: logLevel, message }))
+      const scopes = {
+        status: 403,
+        json: {
+          type: 'error',
+          error: {
+            message: 'Your credentials lack one or more required privilege scopes.',
+            detail: { granted: [], required: ['workspace'] },
+          },
+        },
+      }
+      const { host, sent } = cloud([
+        ['GET', `${PR}/comments?pagelen=100`, { json: { values: comments.slice(1, 3) } }],
+        ['GET', `${PR}/activity?pagelen=50`, { json: activity([]) }],
+        ['GET', /\/members\//, scopes],
+      ])
+      const first = yield* host.activity(ace, 552, null).pipe(Effect.provide(Logger.layer([logger])))
+      assert.deepStrictEqual(
+        first.comments.map((one) => [one.author.login, one.member]),
+        [
+          ['Mitch McCue', false],
+          ['Vincent Nguyen', false],
+        ],
+      )
+      const again = yield* host.activity(ace, 552, null).pipe(Effect.provide(Logger.layer([logger])))
+      assert.lengthOf(again.comments, 2)
+      assert.lengthOf(
+        sent.filter((request) => request.url.includes('/members/')),
+        4,
+      )
+      const warnings = logged.filter((entry) => entry.level === 'Warn')
+      assert.lengthOf(warnings, 1)
+      assert.include(String(warnings[0]?.message), 'Your credentials lack one or more required privilege scopes.')
+    }),
+  )
+
   it.effect('replies in a thread, or in the conversation', () =>
     Effect.gen(function* () {
       const answer = comment(672900000, vincent, '2025-08-22T08:00:00.000000+00:00')
@@ -680,7 +841,8 @@ const prj: Repository = {
   defaultBranch: 'master',
   webUrl: `${SERVER}/projects/PRJ/repos/my-repo`,
   canPush: true,
-  merges: ['squash', 'merge'],
+  // The repository's own choice, a merge commit, first.
+  merges: ['merge', 'squash'],
 }
 
 const center = (routes: ReadonlyArray<Route>) => {
@@ -855,9 +1017,12 @@ describe('Bitbucket Data Center as a code host', () => {
     }),
   )
 
-  it('merges in Althar’s order of the ways the repository allows', () => {
+  it('merges the way the repository chose, or else in Althar’s order of the ways it allows', () => {
+    assert.deepStrictEqual(dc.mergesOf(['no-ff', 'ff', 'squash'], 'no-ff'), ['merge', 'squash'])
     assert.deepStrictEqual(dc.mergesOf(['no-ff', 'ff', 'squash']), ['squash', 'merge'])
-    assert.deepStrictEqual(dc.mergesOf(['ff-only', 'rebase-no-ff']), ['merge', 'rebase'])
+    assert.deepStrictEqual(dc.mergesOf(['ff-only', 'rebase-no-ff'], 'squash'), ['merge', 'rebase'])
+    assert.strictEqual(dc.strategyOf(['no-ff', 'squash'], 'no-ff'), 'no-ff')
+    assert.strictEqual(dc.strategyOf(['no-ff', 'squash'], 'ff-only'), 'squash')
     assert.strictEqual(dc.strategyOf(['ff', 'no-ff']), 'no-ff')
     assert.strictEqual(dc.strategyOf(['squash-ff-only', 'squash']), 'squash')
     assert.strictEqual(dc.strategyOf(['ff-only', 'rebase-ff-only']), 'rebase-ff-only')
@@ -993,27 +1158,37 @@ describe('Bitbucket Data Center as a code host', () => {
     }),
   )
 
-  const settings = {
+  const settings = (defaultStrategy?: object) => ({
     json: {
       mergeConfig: {
+        ...(defaultStrategy === undefined ? {} : { defaultStrategy }),
         strategies: [
           { id: 'no-ff', enabled: true },
           { id: 'squash', enabled: true },
         ],
       },
     },
-  }
+  })
 
   it.effect('merges the head it saw, at the version it read, in the first way the repository allows', () =>
     Effect.gen(function* () {
       const { host, sent } = center([
         ['GET', PULL, { json: pr({ draft: false }) }],
-        ['GET', `${MY}/settings/pull-requests`, settings],
+        ['GET', `${MY}/settings/pull-requests`, settings({ id: 'no-ff', enabled: true, flag: '--no-ff', name: 'Merge commit' })],
         ['POST', `${PULL}/merge?version=3`, { json: pr({ state: 'MERGED', version: 4 }) }],
       ])
       const merged = yield* host.merge(prj, yield* host.change(prj, 101))
       assert.strictEqual(merged.state, 'merged')
-      assert.deepStrictEqual(sent.find((request) => request.method === 'POST')?.body, { strategyId: 'squash' })
+      // The way the repository chose, not Althar's first.
+      assert.deepStrictEqual(sent.find((request) => request.method === 'POST')?.body, { strategyId: 'no-ff' })
+      // A choice that is off leaves Althar's order.
+      const off = center([
+        ['GET', PULL, { json: pr({ draft: false }) }],
+        ['GET', `${MY}/settings/pull-requests`, settings({ id: 'rebase-ff-only', enabled: false })],
+        ['POST', `${PULL}/merge?version=3`, { json: pr({ state: 'MERGED', version: 4 }) }],
+      ])
+      yield* off.host.merge(prj, yield* host.change(prj, 101))
+      assert.deepStrictEqual(off.sent.find((request) => request.method === 'POST')?.body, { strategyId: 'squash' })
       const moved = center([['GET', PULL, { json: pr({ fromRef: ref('feature-ABC-123', '0123456789abcdef0123456789abcdef01234567') }) }]])
       const error = yield* Effect.flip(
         moved.host.merge(prj, { ...merged, state: 'open', headSha: 'babecafebabecafebabecafebabecafebabecafe' }),
@@ -1038,7 +1213,7 @@ describe('Bitbucket Data Center as a code host', () => {
       assert.deepStrictEqual(outOfDate.sent.find((request) => request.method === 'POST')?.body, {})
       const vetoed = center([
         ['GET', PULL, { json: pr() }],
-        ['GET', `${MY}/settings/pull-requests`, settings],
+        ['GET', `${MY}/settings/pull-requests`, settings()],
         ['POST', `${PULL}/merge?version=3`, conflict('Merging the pull request has been vetoed.')],
         [
           'GET',
@@ -1062,7 +1237,7 @@ describe('Bitbucket Data Center as a code host', () => {
       assert.isUndefined(refused.status)
       const conflicted = center([
         ['GET', PULL, { json: pr() }],
-        ['GET', `${MY}/settings/pull-requests`, settings],
+        ['GET', `${MY}/settings/pull-requests`, settings()],
         ['POST', `${PULL}/merge?version=3`, conflict('The pull request has conflicts and cannot be merged.')],
         ['GET', `${PULL}/merge`, { json: { canMerge: false, conflicted: true, outcome: 'CONFLICTED' } }],
       ])
@@ -1205,6 +1380,58 @@ describe('Bitbucket Data Center as a code host', () => {
       assert.lengthOf(
         sent.filter((request) => request.url.includes('permission=REPO_WRITE')),
         3,
+      )
+    }),
+  )
+
+  it.effect('hears a reply since the cursor in a thread begun before the activities read, by finding its top-level comment', () =>
+    Effect.gen(function* () {
+      const replied = (id: number, comment: number, when: string) => ({
+        id,
+        createdDate: at(when),
+        user: tom,
+        action: 'COMMENTED',
+        commentAction: 'REPLIED',
+        comment: reply(comment, tom, at(when)),
+      })
+      // The thread's own ADDED activity is past the thousand read: only the replies to it are among them.
+      const recent = page([
+        replied(42, 31, '2026-10-01T10:40:00Z'),
+        replied(41, 33, '2026-10-01T10:35:00Z'),
+        replied(40, 29, '2026-10-01T10:30:00Z'),
+        replied(39, 25, '2026-10-01T09:00:00Z'),
+      ])
+      const top = {
+        ...reply(30, jane, at('2026-09-01T09:00:00Z'), [
+          reply(32, tom, at('2026-10-01T10:30:00Z'), [reply(31, tom, at('2026-10-01T10:40:00Z'))]),
+          reply(33, bot, at('2026-10-01T10:35:00Z')),
+        ]),
+        // The reference describes a path in parts; an answer gives it as text.
+        anchor: { line: 7, lineType: 'ADDED', fileType: 'TO', path: { components: ['src', 'limit.ts'], name: 'limit.ts' } },
+      }
+      const { host, sent } = center([
+        ['GET', `${PULL}/activities?limit=100&start=0`, { json: recent }],
+        ['GET', `${PULL}/comments/31`, { json: { ...reply(31, tom, at('2026-10-01T10:40:00Z')), parent: { id: 32 } } }],
+        ['GET', `${PULL}/comments/32`, { json: { ...reply(32, tom, at('2026-10-01T10:30:00Z')), parent: { id: 30 } } }],
+        ['GET', `${PULL}/comments/30`, { json: top }],
+        // A reply deleted since is passed over.
+        ['GET', `${PULL}/comments/29`, { status: 404, json: { errors: [{ message: 'Comment 29 does not exist.' }] } }],
+        writes(tom, [tom]),
+        writes(bot, []),
+      ])
+      const said = yield* host.activity(prj, 101, '2026-10-01T10:00:00.000Z')
+      assert.deepStrictEqual(
+        said.comments.map((one) => [one.id, one.author.login, one.threadId, one.path, one.line]),
+        [
+          ['32', 'tom', '30', 'src/limit.ts', 7],
+          ['33', 'bot-prj-1', '30', 'src/limit.ts', 7],
+          ['31', 'tom', '30', 'src/limit.ts', 7],
+        ],
+      )
+      // The thread is read once for its two replies, and a reply before the cursor isn't looked for.
+      assert.deepStrictEqual(
+        sent.filter((request) => request.url.includes('/comments/')).map((request) => request.url.slice(PULL.length)),
+        ['/comments/31', '/comments/32', '/comments/30', '/comments/29'],
       )
     }),
   )

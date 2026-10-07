@@ -182,6 +182,22 @@ describe('a failed answer', () => {
       'There are no changes to be pulled',
     )
     assert.strictEqual(failureOf('bitbucket_cloud', 400, headers(), JSON.stringify({ error: { message: '' } }), at).message, '400')
+    assert.strictEqual(
+      failureOf(
+        'bitbucket_cloud',
+        403,
+        headers(),
+        JSON.stringify({
+          type: 'error',
+          error: {
+            message: 'Your credentials lack one or more required privilege scopes.',
+            detail: { granted: ['account'], required: ['workspace'] },
+          },
+        }),
+        at,
+      ).message,
+      'Your credentials lack one or more required privilege scopes.',
+    )
     assert.strictEqual(failureOf('github', 500, headers(), 'oops', at).message, '500')
     assert.strictEqual(failureOf('github', 500, headers(), JSON.stringify({}), at).message, '500')
   })

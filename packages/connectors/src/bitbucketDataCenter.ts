@@ -44,13 +44,26 @@ const RepositoryAnswer = Schema.Struct({
   links: Schema.optional(Schema.Struct({ self: Schema.optional(Schema.Array(Schema.Struct({ href: Schema.String }))) })),
 })
 
+const Strategy = Schema.Struct({ id: Schema.String, enabled: Schema.optional(Schema.Boolean) })
+
 const Settings = Schema.Struct({
   mergeConfig: Schema.optional(
     Schema.Struct({
-      strategies: Schema.optional(Schema.Array(Schema.Struct({ id: Schema.String, enabled: Schema.optional(Schema.Boolean) }))),
+      // The one the repository's admins, or its project's, chose.
+      defaultStrategy: Schema.optional(Schema.NullOr(Strategy)),
+      strategies: Schema.optional(Schema.Array(Strategy)),
     }),
   ),
 })
+
+/** The strategies a repository has on, and the one it chose, if that is on. */
+const strategiesOf = (settings: typeof Settings.Type) => {
+  const chosen = settings.mergeConfig?.defaultStrategy
+  return {
+    enabled: (settings.mergeConfig?.strategies ?? []).filter((strategy) => strategy.enabled !== false).map((strategy) => strategy.id),
+    chosen: chosen?.enabled === false ? undefined : chosen?.id,
+  }
+}
 
 const RefAnswer = Schema.Struct({
   id: Schema.String,
@@ -91,12 +104,21 @@ const BuildAnswer = Schema.Struct({
   description: Schema.optional(Schema.NullOr(Schema.String)),
 })
 
+/** A place in the diff. Data Center's answers give its path as text; its reference describes it in parts, so either is read. */
+const Anchor = Schema.Struct({
+  path: Schema.optional(Schema.NullOr(Schema.Union([Schema.String, Schema.Struct({ components: Schema.Array(Schema.String) })]))),
+  line: Schema.optional(Schema.NullOr(Schema.Number)),
+})
+type Anchor = typeof Anchor.Type
+
 interface CommentAnswer {
   readonly id: number
   readonly text?: string | null | undefined
   readonly author: UserAnswer
   readonly updatedDate: number
   readonly pending?: boolean | undefined
+  readonly parent?: { readonly id: number } | null | undefined
+  readonly anchor?: Anchor | null | undefined
   readonly comments?: ReadonlyArray<CommentAnswer> | undefined
 }
 const CommentAnswer: Schema.Codec<CommentAnswer, unknown> = Schema.Struct({
@@ -106,6 +128,10 @@ const CommentAnswer: Schema.Codec<CommentAnswer, unknown> = Schema.Struct({
   updatedDate: Schema.Number,
   // A comment of a review not yet finished, which only its author sees.
   pending: Schema.optional(Schema.Boolean),
+  // A reply's: the comment it answers.
+  parent: Schema.optional(Schema.NullOr(Schema.Struct({ id: Schema.Number }))),
+  // A top-level comment's place in the diff, when it has one.
+  anchor: Schema.optional(Schema.NullOr(Anchor)),
   // Its replies, and theirs.
   comments: Schema.optional(Schema.Array(Schema.suspend((): Schema.Codec<CommentAnswer, unknown> => CommentAnswer))),
 })
@@ -124,11 +150,7 @@ const ActivityAnswer = Schema.Struct({
   user: UserAnswer,
   commentAction: Schema.optional(Schema.String),
   comment: Schema.optional(CommentAnswer),
-  commentAnchor: Schema.optional(
-    Schema.NullOr(
-      Schema.Struct({ path: Schema.optional(Schema.NullOr(Schema.String)), line: Schema.optional(Schema.NullOr(Schema.Number)) }),
-    ),
-  ),
+  commentAnchor: Schema.optional(Schema.NullOr(Anchor)),
 })
 
 const Page = <A>(item: Schema.Codec<A, unknown>) =>
@@ -140,6 +162,9 @@ const Page = <A>(item: Schema.Codec<A, unknown>) =>
 
 /** How many pages of a hundred activities, or build statuses, are read. */
 const PAGES = 10
+
+/** How far up from a reply its thread's top-level comment is looked for. */
+const DEPTH = 10
 
 /** Data Center's strategies, in the order Althar prefers them, and the way each merges. */
 const STRATEGIES: ReadonlyArray<readonly [string, MergeMethod]> = [
@@ -153,14 +178,25 @@ const STRATEGIES: ReadonlyArray<readonly [string, MergeMethod]> = [
   ['ff-only', 'rebase'],
 ]
 
-/** How the repository lets pull requests be merged, in the order Althar prefers. */
-export const mergesOf = (strategies: ReadonlyArray<string>): ReadonlyArray<MergeMethod> => [
-  ...new Set(STRATEGIES.filter(([strategy]) => strategies.includes(strategy)).map(([, method]) => method)),
+/** How the repository lets pull requests be merged: the way it chose first, then in the order Althar prefers. */
+export const mergesOf = (strategies: ReadonlyArray<string>, chosen?: string | null): ReadonlyArray<MergeMethod> => [
+  ...new Set(
+    [
+      ...STRATEGIES.filter(([strategy]) => strategy === chosen && strategies.includes(strategy)),
+      ...STRATEGIES.filter(([strategy]) => strategies.includes(strategy)),
+    ].map(([, method]) => method),
+  ),
 ]
 
-/** The strategy Althar merges with: the first it prefers that the repository allows. */
-export const strategyOf = (strategies: ReadonlyArray<string>): string | undefined =>
-  STRATEGIES.find(([strategy]) => strategies.includes(strategy))?.[0]
+/** The strategy Althar merges with: the one the repository chose, or else the first Althar prefers that it allows. */
+export const strategyOf = (strategies: ReadonlyArray<string>, chosen?: string | null): string | undefined =>
+  chosen != null && strategies.includes(chosen) ? chosen : STRATEGIES.find(([strategy]) => strategies.includes(strategy))?.[0]
+
+/** Where an anchor is: its file's path and its line. */
+const placeOf = (anchor: Anchor | null | undefined) => ({
+  path: anchor?.path == null ? null : typeof anchor.path === 'string' ? anchor.path : anchor.path.components.join('/'),
+  line: anchor?.line ?? null,
+})
 
 /** A build's state. */
 export const buildState = (state: string): CheckState => {
@@ -300,6 +336,20 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
       (users) => users.values.some((found) => found.id === user.id),
     )
 
+  /** A thread's top-level comment, with all its replies, from one of them: by its parents, within a bound. Null for one since deleted. */
+  const topOf = (repository: Repository, number: number, id: number) =>
+    Effect.gen(function* () {
+      const comment = (at: number) => http.json(CommentAnswer, 'GET', `${pull(repository, number)}/comments/${at}`)
+      let top = yield* comment(id)
+      for (let step = 0; step < DEPTH && top.parent != null; step += 1) top = yield* comment(top.parent.id)
+      return top
+    }).pipe(
+      Effect.catchIf(
+        (error) => error.reason === 'not_found',
+        () => Effect.succeed(null),
+      ),
+    )
+
   const commentOf = (repository: Repository, number: number, comment: CommentAnswer, thread: Thread, member: boolean): Comment => ({
     id: String(comment.id),
     author: personOf(comment.author),
@@ -329,17 +379,14 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
           Page(Schema.Struct({ id: Schema.Number })),
           `${api}/repos?projectkey=${encodeURIComponent(answer.project.key)}&name=${encodeURIComponent(answer.name)}&permission=REPO_WRITE&limit=100`,
         )
-        const settings = yield* http.cached(Settings, `${here}/settings/pull-requests`)
-        const enabled = (settings.mergeConfig?.strategies ?? [])
-          .filter((strategy) => strategy.enabled !== false)
-          .map((strategy) => strategy.id)
+        const { enabled, chosen } = strategiesOf(yield* http.cached(Settings, `${here}/settings/pull-requests`))
         return {
           id: String(answer.id),
           path: [answer.project.key, answer.slug],
           defaultBranch: branch.displayId,
           webUrl: answer.links?.self?.[0]?.href.replace(/\/browse\/?$/, '') ?? `${web}/projects/${answer.project.key}/repos/${answer.slug}`,
           canPush: writable.values.some((found) => found.id === answer.id),
-          merges: mergesOf(enabled),
+          merges: mergesOf(enabled, chosen),
         }
       }),
     findChange,
@@ -398,8 +445,8 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
             status: 409,
             message: `The pull request moved on to ${head.slice(0, 12)} since ${change.headSha.slice(0, 12)} was seen`,
           })
-        const settings = yield* http.cached(Settings, `${base(repository)}/settings/pull-requests`)
-        const strategy = strategyOf((settings.mergeConfig?.strategies ?? []).filter((one) => one.enabled !== false).map((one) => one.id))
+        const { enabled, chosen } = strategiesOf(yield* http.cached(Settings, `${base(repository)}/settings/pull-requests`))
+        const strategy = strategyOf(enabled, chosen)
         const merged = yield* http
           .json(PullAnswer, 'POST', `${url}/merge?version=${now.version}`, strategy === undefined ? {} : { strategyId: strategy })
           .pipe(
@@ -447,11 +494,23 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
         }
         for (const activity of activities)
           if (activity.action === 'COMMENTED' && activity.commentAction === 'ADDED' && activity.comment !== undefined)
-            walk(activity.comment, {
-              id: String(activity.comment.id),
-              path: activity.commentAnchor?.path ?? null,
-              line: activity.commentAnchor?.line ?? null,
-            })
+            walk(activity.comment, { id: String(activity.comment.id), ...placeOf(activity.commentAnchor) })
+        // A reply since the cursor in a thread begun before the activities read: its top-level comment is found from it, up.
+        const known = new Set(said.map(({ comment }) => comment.id))
+        for (const activity of activities)
+          if (
+            activity.action === 'COMMENTED' &&
+            activity.commentAction === 'REPLIED' &&
+            activity.comment !== undefined &&
+            !known.has(activity.comment.id) &&
+            (cursor === null || iso(activity.createdDate) >= cursor)
+          ) {
+            const top = yield* topOf(repository, number, activity.comment.id)
+            if (top === null) continue
+            const before = said.length
+            walk(top, { id: String(top.id), ...placeOf(top.anchor) })
+            for (const { comment } of said.slice(before)) known.add(comment.id)
+          }
         const fresh = said.filter(({ comment }) => cursor === null || iso(comment.updatedDate) >= cursor)
         const verdicts = activities.flatMap((activity) => {
           const verdict: Verdict | undefined =
