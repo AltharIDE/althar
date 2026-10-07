@@ -453,8 +453,10 @@ export const handlers = Api.toLayer(
                   hostedUrl: info.hosted?.webUrl ?? null,
                   selfHosted: info.selfHosted,
                   browserSignIn: info.browserSignIn,
-                  tokenNeedsUser: info.token.user,
+                  tokenNeeds: info.token.needs,
                   tokenHelp: info.token.help(info.hosted?.webUrl ?? ''),
+                  tokenHelpForKey: info.token.helpForKey ?? null,
+                  keyChecks: info.token.keyChecks ?? [],
                 })),
             }
           }),
@@ -463,7 +465,7 @@ export const handlers = Api.toLayer(
         once(commandId, api(connections.startSignIn({ product, actorId: instance.personId, ...(webUrl === undefined ? {} : { webUrl }) }))),
       GetSignIn: ({ flowId }) => api(connections.signIn(flowId)),
       CancelSignIn: ({ flowId }) => api(connections.cancelSignIn(flowId)),
-      ConnectToken: ({ commandId, product, webUrl, user, token }) =>
+      ConnectToken: ({ commandId, product, webUrl, user, key, token }) =>
         once(
           commandId,
           api(
@@ -474,6 +476,7 @@ export const handlers = Api.toLayer(
                 actorId: instance.personId,
                 ...(webUrl === undefined ? {} : { webUrl }),
                 ...(user === undefined ? {} : { user }),
+                ...(key === undefined ? {} : { key }),
               }),
               connectionOf,
             ),

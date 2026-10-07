@@ -108,6 +108,15 @@ describe('a pasted link', () => {
       path: ['PAY', 'api'],
       number: 8,
     })
+    const server = new Map([['meridian.dev', 'bitbucket_dc' as const]])
+    expect(parseLink('https://meridian.dev/bitbucket/projects/PAY/repos/api/pull-requests/9', server)).toMatchObject({
+      path: ['PAY', 'api'],
+      number: 9,
+    })
+    expect(parseLink('https://meridian.dev/users/dana/repos/scratch/pull-requests/2/diff', server)).toMatchObject({
+      path: ['~dana', 'scratch'],
+      number: 2,
+    })
     expect(parseLink('https://bitbucket.org/team/pull-requests/x')).toBeNull()
   })
 

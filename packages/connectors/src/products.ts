@@ -1,8 +1,13 @@
+import { makeBitbucketCloud } from './bitbucketCloud'
+import { makeBitbucketDataCenter } from './bitbucketDataCenter'
 import type { AdapterOptions, Credential } from './credential'
 import { makeGitHub } from './github'
+import { makeGitLab } from './gitlab'
+import { makeJiraCloud, makeJiraDataCenter, siteOf } from './jira'
 import { makeLinear } from './linear'
 import type { KnownHosts } from './links'
 import type { CodeHost, Product, Tracker } from './model'
+import { makeTrello } from './trello'
 
 /*
  * Every product Althar connects to: its name, where its hosted service
@@ -25,6 +30,8 @@ export interface ProductInfo {
   readonly selfHosted: boolean
   /** An instance's API root, from its address. */
   readonly apiFor: (webUrl: string) => string
+  /** The address a connection keeps, from what the person typed, where the product says more than trimming it. */
+  readonly address?: (typed: string) => string
   /**
    * The browser sign-in it gives a desktop app without a secret: a code the
    * person types on its page, or a page they approve that comes back here.
@@ -45,8 +52,20 @@ export interface ProductInfo {
         readonly scope: string
       }
     | null
-  /** A pasted token: how it is sent, whether it needs the account's email with it, and where the person makes one. */
-  readonly token: { readonly kind: Credential['kind']; readonly user: boolean; readonly help: (webUrl: string) => string }
+  /**
+   * A pasted token: how it is sent, what goes with it (the account's email,
+   * or the API key it was made for), and where the person makes one. With an
+   * API key, where a token is made for the key typed (`{key}` in its place),
+   * and what the key is checked against before it is sent: the first pattern
+   * it matches says what is wrong with it.
+   */
+  readonly token: {
+    readonly kind: Credential['kind']
+    readonly needs: 'email' | 'key' | null
+    readonly help: (webUrl: string) => string
+    readonly helpForKey?: string
+    readonly keyChecks?: ReadonlyArray<{ readonly pattern: string; readonly says: string }>
+  }
   /** Its adapter, once built. */
   readonly make: ((options: AdapterOptions) => { readonly host?: CodeHost; readonly tracker?: Tracker }) | null
 }
@@ -67,7 +86,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
       codeUrl: (webUrl) => `${trimmed(webUrl)}/login/device/code`,
       tokenUrl: (webUrl) => `${trimmed(webUrl)}/login/oauth/access_token`,
     },
-    token: { kind: 'bearer', user: false, help: (webUrl) => `${trimmed(webUrl)}/settings/personal-access-tokens/new` },
+    token: { kind: 'bearer', needs: null, help: (webUrl) => `${trimmed(webUrl)}/settings/personal-access-tokens/new` },
     make: (options) => {
       const github = makeGitHub(options)
       return { host: github, tracker: github }
@@ -87,8 +106,11 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
       tokenUrl: (webUrl) => `${trimmed(webUrl)}/oauth/token`,
       scope: 'api',
     },
-    token: { kind: 'bearer', user: false, help: (webUrl) => `${trimmed(webUrl)}/-/user_settings/personal_access_tokens` },
-    make: null,
+    token: { kind: 'bearer', needs: null, help: (webUrl) => `${trimmed(webUrl)}/-/user_settings/personal_access_tokens` },
+    make: (options) => {
+      const gitlab = makeGitLab(options)
+      return { host: gitlab, tracker: gitlab }
+    },
   },
   bitbucket_cloud: {
     product: 'bitbucket_cloud',
@@ -99,8 +121,8 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     selfHosted: false,
     apiFor: () => 'https://api.bitbucket.org/2.0',
     browser: null,
-    token: { kind: 'basic', user: true, help: () => 'https://id.atlassian.com/manage-profile/security/api-tokens' },
-    make: null,
+    token: { kind: 'basic', needs: 'email', help: () => 'https://id.atlassian.com/manage-profile/security/api-tokens' },
+    make: (options) => ({ host: makeBitbucketCloud(options) }),
   },
   bitbucket_dc: {
     product: 'bitbucket_dc',
@@ -111,8 +133,8 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     selfHosted: true,
     apiFor: (webUrl) => `${trimmed(webUrl)}/rest/api/latest`,
     browser: null,
-    token: { kind: 'bearer', user: false, help: (webUrl) => `${trimmed(webUrl)}/plugins/servlet/access-tokens/manage` },
-    make: null,
+    token: { kind: 'bearer', needs: null, help: (webUrl) => `${trimmed(webUrl)}/plugins/servlet/access-tokens/manage` },
+    make: (options) => ({ host: makeBitbucketDataCenter(options) }),
   },
   linear: {
     product: 'linear',
@@ -128,7 +150,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
       tokenUrl: 'https://api.linear.app/oauth/token',
       scope: 'read,write',
     },
-    token: { kind: 'key', user: false, help: () => 'https://linear.app/settings/account/security' },
+    token: { kind: 'key', needs: null, help: () => 'https://linear.app/settings/account/security' },
     make: (options) => ({ tracker: makeLinear(options) }),
   },
   jira_cloud: {
@@ -138,10 +160,12 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     tracker: true,
     hosted: null,
     selfHosted: false,
-    apiFor: (webUrl) => `${trimmed(webUrl)}/rest/api/3`,
+    apiFor: (webUrl) => `${siteOf(webUrl)}/rest/api/3`,
+    // A site is its origin, whatever page of it was pasted.
+    address: siteOf,
     browser: null,
-    token: { kind: 'basic', user: true, help: () => 'https://id.atlassian.com/manage-profile/security/api-tokens' },
-    make: null,
+    token: { kind: 'basic', needs: 'email', help: () => 'https://id.atlassian.com/manage-profile/security/api-tokens' },
+    make: (options) => ({ tracker: makeJiraCloud(options) }),
   },
   jira_dc: {
     product: 'jira_dc',
@@ -154,11 +178,11 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     browser: null,
     token: {
       kind: 'bearer',
-      user: false,
+      needs: null,
       help: (webUrl) =>
         `${trimmed(webUrl)}/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens`,
     },
-    make: null,
+    make: (options) => ({ tracker: makeJiraDataCenter(options) }),
   },
   trello: {
     product: 'trello',
@@ -169,10 +193,25 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     selfHosted: false,
     apiFor: () => 'https://api.trello.com/1',
     browser: null,
-    token: { kind: 'key', user: false, help: () => 'https://trello.com/power-ups/admin' },
-    make: null,
+    // The person's own Power-Up key, with a token made for it, until Althar's Power-Up is registered.
+    token: {
+      kind: 'app',
+      needs: 'key',
+      help: () => 'https://trello.com/power-ups/admin',
+      // Trello shows the token it makes there, to copy.
+      helpForKey: 'https://trello.com/1/authorize?expiration=never&name=Althar&scope=read,write&response_type=token&key={key}',
+      keyChecks: [
+        // A Power-Up's page shows its secret beside its key.
+        { pattern: '^[0-9a-fA-F]{64}$', says: 'That’s the Power-Up’s secret; paste its API key' },
+        { pattern: '^(?![0-9a-fA-F]{32}$)', says: 'An API key is 32 characters' },
+      ],
+    },
+    make: (options) => ({ tracker: makeTrello(options) }),
   },
 }
+
+/** The address a connection to a product keeps, from what the person typed: without a trailing slash, and as the product says. */
+export const addressOf = (info: ProductInfo, typed: string): string => info.address?.(typed) ?? trimmed(typed)
 
 /** The products Althar can connect to now: those with an adapter. */
 export const available = (): ReadonlyArray<ProductInfo> => Object.values(products).filter((info) => info.make !== null)

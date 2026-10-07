@@ -188,11 +188,11 @@ service's model.
 | Repository | `owner/name` | Nested groups, `a/b/c/project`, and a numeric id | `workspace/repo_slug` | `PROJECT/repo_slug` | A path of segments, plus the host's own id |
 | The change | Pull request #12 | Merge request !12 (`iid`, per project) | Pull request #12 | Pull request #12 | A number; the adapter gives the words |
 | Draft | Every repository. Marked ready over GraphQL only | `Draft:` in the title | A `draft` flag | 8.18 and later | Capability `drafts` |
-| State | open, closed, merged | opened, closed, merged, locked | open, merged, declined | open, merged, declined | open, merged, closed |
+| State | open, closed, merged | opened, closed, merged, locked | open, merged, declined, superseded | open, merged, declined | open, merged, closed |
 | Verdict | Approved, changes requested, commented | Approved, requested changes | Approved, request changes | Approved, needs work | approved, changes requested, commented |
 | Threads | Review threads on lines, resolvable; conversation comments aren't | Discussions, resolvable | Top-level comments resolvable | Threads, resolvable; blocker comments | A thread: optional place in the diff, resolvable, resolved, comments |
 | Checks | Check runs and commit statuses; Actions logs | The head pipeline's jobs, with logs | Build statuses; Pipelines step logs | Build statuses; Code Insights reports | A check: name, state, link; logs as a capability |
-| Listening, polling | ETags (a "not modified" reply is free) | `updated_after` | `updated_on` | The pull request's activities | A cursor per thing listened to |
+| Listening, polling | ETags (a "not modified" reply is free) | ETags too; a merge request's threads are read whole, having no `updated_after` | `updated_on` | The pull request's activities | A cursor per thing listened to |
 
 - **Pushing is git,** with the connection's token, never the person's
   credential helper. Althar pushes what the lead committed and commits

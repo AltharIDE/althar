@@ -124,11 +124,16 @@ export const parseLink = (link: string, hosts: KnownHosts = HOSTED): LinkRef | n
     }
     case 'bitbucket_cloud':
     case 'bitbucket_dc': {
-      // bitbucket.org/<workspace>/<repo>/pull-requests/12; Data Center: /projects/P/repos/r/pull-requests/12
+      // bitbucket.org/<workspace>/<repo>/pull-requests/12; Data Center: /projects/P/repos/r/pull-requests/12, perhaps under
+      // the server's own path, or a person's own repository at /users/name/repos/r, which goes by `~name`.
       const at = segments.indexOf('pull-requests')
       const n = Number(segments[at + 1])
       if (at < 2 || !Number.isInteger(n) || n <= 0) return null
-      const path = product === 'bitbucket_dc' && segments[0] === 'projects' ? [segments[1] ?? '', segments[3] ?? ''] : segments.slice(0, at)
+      const owner = segments[at - 4]
+      const path =
+        product === 'bitbucket_dc' && segments[at - 2] === 'repos' && (owner === 'projects' || owner === 'users')
+          ? [`${owner === 'users' ? '~' : ''}${segments[at - 3] ?? ''}`, segments[at - 1] ?? '']
+          : segments.slice(0, at)
       return { kind: 'change', product, host, path, number: n }
     }
   }

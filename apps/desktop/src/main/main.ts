@@ -5,12 +5,15 @@ import { join } from 'node:path'
 
 import { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
 
+import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
+
 import {
   app,
   BrowserWindow,
   dialog,
   ipcMain,
   MessageChannelMain,
+  nativeImage,
   Notification,
   safeStorage,
   session,
@@ -28,10 +31,12 @@ import {
  * from here, never from the window, which gets a grant for each. It seals and
  * opens the runtime's secrets, such as a code host's token, with Electron's
  * safeStorage, whose key the keychain keeps for this app alone: the runtime
- * keeps them sealed and never holds the key.
+ * keeps them sealed and never holds the key. It gives the Dock the icon the
+ * person chose.
  */
 
 const here = import.meta.dirname
+
 const SHUTDOWN_GRACE = 20_000
 /** Restarts allowed within a minute before a crashing runtime ends the app instead. */
 const RESTARTS_PER_MINUTE = 3
@@ -43,9 +48,18 @@ const restarts: Array<number> = []
 /** The profile and worktrees, as the command-line client has them, so both see the same projects. */
 const locations = () => ({ profile: defaultProfile(process.env, process.platform), worktrees: defaultWorktrees(process.env) })
 
-// A profile of its own, as the end-to-end tests give, keeps what its window remembers too, its tabs and pinned models, apart from the person's.
+/*
+ * Where the window keeps what it remembers, its tabs and pinned models. A
+ * profile of its own, as the end-to-end tests give, keeps it apart from the
+ * person's. Otherwise it stays in the folder it had before the app took its
+ * name, Althar (productName, which also names the keychain entry sign-ins
+ * are sealed with): Application Support/Althar is where a profile lives.
+ */
 const ownProfile = process.env.ALTHAR_PROFILE
-if (ownProfile !== undefined && ownProfile !== '') app.setPath('userData', join(ownProfile, 'window'))
+app.setPath(
+  'userData',
+  ownProfile !== undefined && ownProfile !== '' ? join(ownProfile, 'window') : join(app.getPath('appData'), '@althar', 'desktop'),
+)
 
 /** Grants the runtime has yet to confirm, by request. */
 const granting = new Map<string, (grant: string | null) => void>()
@@ -172,6 +186,29 @@ const connect = (window: BrowserWindow) => {
   window.webContents.postMessage('althar:port', null, [port2])
 }
 
+/**
+ * Shows the icon on the Dock, where there is one: while Althar runs, the Dock
+ * shows this rather than the app's own. A missing picture reads as an empty
+ * image, which would blank the Dock, so it fails instead.
+ */
+const showIcon = (icon: AppIcon) => {
+  const picture = nativeImage.createFromPath(join(here, '../../resources/icons', `${icon}.png`))
+  if (picture.isEmpty()) throw new Error(`Althar has no picture for the icon ${icon}.`)
+  app.dock?.setIcon(picture)
+}
+
+/** The chosen icon on the Dock at start; where its picture is gone, the default's; where that is too, the app's own. */
+const showChosenIcon = async () => {
+  const chosen = await readAppIcon(locations().profile)
+  for (const icon of [chosen, DEFAULT_APP_ICON]) {
+    try {
+      return showIcon(icon)
+    } catch {
+      // The next one.
+    }
+  }
+}
+
 /** Opens a link from the window in the person's browser: web pages only, never a file or another app's scheme. */
 const openOutside = (url: string) => {
   try {
@@ -240,11 +277,20 @@ ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   return found?.isDirectory() === true ? allowFolder(path) : null
 })
 
+// The icon the person chose, or null where there is no Dock to show one; and a new one, shown on the Dock, then kept. Anything else fails, and the window says so.
+ipcMain.handle('althar:app-icon', () => (app.dock === undefined ? null : readAppIcon(locations().profile)))
+ipcMain.handle('althar:set-app-icon', async (_event, icon: unknown) => {
+  if (!isAppIcon(icon)) throw new Error(`Althar has no icon ${String(icon)}.`)
+  showIcon(icon)
+  await writeAppIcon(locations().profile, icon)
+})
+
 void app.whenReady().then(() => {
   // The window asks for nothing: no notifications, camera, microphone or anything else a page can ask for.
   // Althar's own notifications come from here, as the runtime says something needs the person.
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, done) => done(false))
   session.defaultSession.setPermissionCheckHandler(() => false)
+  void showChosenIcon()
   startRuntime()
   openWindow()
   app.on('activate', () => {

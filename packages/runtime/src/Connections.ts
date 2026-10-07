@@ -2,6 +2,7 @@ import { createServer, type Server } from 'node:http'
 
 import {
   type Account,
+  addressOf,
   authorizeUrl,
   awaitDeviceFlow,
   type CodeHost,
@@ -91,18 +92,28 @@ const Stored = Schema.Union([
     refreshToken: Schema.NullOr(Schema.String),
     expiresAt: Schema.NullOr(Schema.String),
   }),
-  Schema.Struct({ kind: Schema.Literal('token'), token: Schema.String, user: Schema.NullOr(Schema.String) }),
+  Schema.Struct({
+    kind: Schema.Literal('token'),
+    token: Schema.String,
+    user: Schema.NullOr(Schema.String),
+    // The API key the token was made for, where its product wants one (Trello's); none in those kept before.
+    key: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
 ])
 type Stored = typeof Stored.Type
 
 /**
  * The credential a kept secret makes: an OAuth token is sent as a bearer; a
- * pasted one as its product sends them (a bearer, a key as it is, or with the
- * account's email).
+ * pasted one as its product sends them (a bearer, a key as it is, with the
+ * account's email, or with the API key it was made for).
  */
 export const credentialFor = (kind: Credential['kind'], kept: Stored): Credential => {
   if (kept.kind === 'oauth') return { kind: 'bearer', token: kept.accessToken }
-  return kind === 'basic' ? { kind, user: kept.user ?? '', token: kept.token } : { kind, token: kept.token }
+  return kind === 'basic'
+    ? { kind, user: kept.user ?? '', token: kept.token }
+    : kind === 'app'
+      ? { kind, key: kept.key ?? '', token: kept.token }
+      : { kind, token: kept.token }
 }
 
 interface Row {
@@ -122,8 +133,6 @@ interface Row {
 const RENEW_BEFORE = Duration.minutes(5)
 /** A browser sign-in waits this long for the person. */
 const BROWSER_WAIT = Duration.minutes(10)
-
-const trimmed = (url: string) => url.replace(/\/+$/, '')
 
 type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Secrets | Connectors
 
@@ -149,6 +158,7 @@ export class Connections extends Context.Service<
       readonly product: Product
       readonly webUrl?: string
       readonly user?: string
+      readonly key?: string
       readonly token: string
       readonly actorId: ActorId
     }): Effect.Effect<ConnectionInfo, unknown>
@@ -285,8 +295,10 @@ export class Connections extends Context.Service<
           )
         })
 
-      const keep = (name: string, value: TokenSet | { readonly token: string; readonly user: string | null }) =>
-        secrets.set(name, JSON.stringify('accessToken' in value ? { kind: 'oauth', ...value } : { kind: 'token', ...value }))
+      const keep = (
+        name: string,
+        value: TokenSet | { readonly token: string; readonly user: string | null; readonly key: string | null },
+      ) => secrets.set(name, JSON.stringify('accessToken' in value ? { kind: 'oauth', ...value } : { kind: 'token', ...value }))
 
       /** A service said the token is no good: the connection needs its person to sign in again. */
       const unauthorized = (connectionId: string) =>
@@ -357,7 +369,7 @@ export class Connections extends Context.Service<
         readonly product: Product
         readonly webUrl: string
         readonly auth: ConnectionInfo['auth']
-        readonly secret: TokenSet | { readonly token: string; readonly user: string | null }
+        readonly secret: TokenSet | { readonly token: string; readonly user: string | null; readonly key: string | null }
         readonly actorId: ActorId
       }) =>
         Effect.gen(function* () {
@@ -365,7 +377,8 @@ export class Connections extends Context.Service<
           const info = infoOf(input.product)
           if (info?.make == null)
             return yield* new NotConnected({ product: input.product, what: 'a product Althar has no adapter for yet' })
-          const webUrl = trimmed(input.webUrl)
+          // The address as the product keeps it: a Jira Cloud site by its origin, whatever page of it was pasted.
+          const webUrl = addressOf(info, input.webUrl)
           const apiUrl = info.apiFor(webUrl)
           const credential: Credential =
             'accessToken' in input.secret
@@ -502,7 +515,7 @@ export class Connections extends Context.Service<
         Effect.gen(function* () {
           const info = infoOf(input.product)
           const clientId = connectors.clientIds[input.product]
-          const webUrl = trimmed(input.webUrl ?? info?.hosted?.webUrl ?? '')
+          const webUrl = info === undefined ? '' : addressOf(info, input.webUrl ?? info.hosted?.webUrl ?? '')
           if (info?.browser == null || clientId === undefined || webUrl === '')
             return yield* new SignInUnavailable({ product: input.product })
           const flowId = yield* newId(Ids.command)
@@ -638,7 +651,7 @@ export class Connections extends Context.Service<
               product: input.product,
               webUrl: input.webUrl ?? infoOf(input.product)?.hosted?.webUrl ?? '',
               auth: 'token',
-              secret: { token: input.token.trim(), user: input.user?.trim() ?? null },
+              secret: { token: input.token.trim(), user: input.user?.trim() ?? null, key: input.key?.trim() ?? null },
               actorId: input.actorId,
             }),
           ),

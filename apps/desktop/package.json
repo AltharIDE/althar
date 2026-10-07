@@ -16,7 +16,8 @@
     "test": "vp test run",
     "test:coverage": "vp test run --coverage",
     "test:e2e": "bun run build && playwright test",
-    "verify": "bun run check && bun run test:coverage && bun run test:e2e"
+    "verify": "bun run check && bun run test:coverage && bun run test:e2e",
+    "package": "bun run build:package && node scripts/package.ts"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.84.0",
@@ -45,6 +46,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "@vitest/coverage-v8": "5.0.1",
     "electron": "44.5.0",
+    "electron-builder": "^26.15.3",
     "jsdom": "^30.1.1",
     "typescript": "^7.0.2",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
@@ -53,5 +55,6 @@
   },
   "engines": {
     "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
-  }
+  },
+  "productName": "Althar"
 }

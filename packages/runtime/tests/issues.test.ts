@@ -6,7 +6,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Connections, NotConnected } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
-import { NotFound } from '../src/errors'
+import { NotAnIssue, NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { Issues } from '../src/Issues'
 import { Projects } from '../src/Projects'
@@ -28,7 +28,7 @@ const linear = () => {
   return service
 }
 
-const connect = (product: 'github' | 'linear', webUrl?: string) =>
+const connect = (product: 'github' | 'linear' | 'trello', webUrl?: string) =>
   Effect.gen(function* () {
     const connections = yield* Connections
     const instance = yield* Instance
@@ -110,17 +110,31 @@ describe('an issue', () => {
     github.addRepository(['meridian', 'api'])
     github.addIssue({ ref: 'meridian/api#12', title: 'Refunds ignore the limit' })
     const tracker = linear()
+    const trello = makeFakeService({ product: 'trello' })
+    trello.addIssue({ ref: 'dRlAmgAi', title: 'Siri shortcuts', assigned: false })
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       yield* connect('linear')
+      yield* connect('trello')
       const { projectId } = yield* opened(working)
       const issues = yield* Issues
       assert.strictEqual((yield* issues.read(LINK)).key, 'MER-231')
       assert.strictEqual((yield* issues.read('mer-231')).title, 'Rate-limit refunds like charges')
+      // Each tracker reads its own keys as typed: a Trello card's short link is in its own case.
+      assert.strictEqual((yield* issues.read('dRlAmgAi')).product, 'trello')
+      assert.instanceOf(yield* Effect.flip(issues.read('DRLAMGAI')), NotFound)
       assert.strictEqual((yield* issues.read('#12', projectId)).title, 'Refunds ignore the limit')
       assert.strictEqual((yield* issues.read('12', projectId)).product, 'github')
       assert.instanceOf(yield* Effect.flip(issues.read('NOPE-1')), NotFound)
       assert.instanceOf(yield* Effect.flip(issues.read('https://linear.app/meridian/project/x')), NotConnected)
+      // A tracker not connected is named by its link.
+      const unconnected = yield* Effect.flip(issues.read('https://meridian.atlassian.net/browse/PROJ-9'))
+      assert.instanceOf(unconnected, NotConnected)
+      assert.strictEqual(unconnected.product, 'jira_cloud')
+      // A pull request's link, given for an issue, says what it is.
+      const change = yield* Effect.flip(issues.read(`${HOST}/meridian/api/pull/12`))
+      assert.instanceOf(change, NotAnIssue)
+      assert.strictEqual(change.what, 'pull request')
       github.addIssue({ ref: 'meridian/api#13', title: 'Newer' })
       const mine = yield* issues.mine(projectId)
       // Newest change first, whichever tracker it is on (the two fakes' clocks tie on the others).
@@ -135,7 +149,7 @@ describe('an issue', () => {
         (yield* issues.mine(projectId)).map((issue) => issue.key),
         ['#13', '#12'],
       )
-    }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ github, linear: tracker }) })))
+    }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ github, linear: tracker, trello }) })))
   })
 
   it.live('ties a task to it, once, and the coordinator reads and finds them', () => {

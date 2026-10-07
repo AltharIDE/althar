@@ -16,5 +16,5 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "tests", "e2e", "*.config.ts"]
+  "include": ["src", "tests", "e2e", "scripts", "*.config.ts"]
 }

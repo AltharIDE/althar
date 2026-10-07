@@ -59,7 +59,7 @@ describe('Linear', () => {
     }),
   )
 
-  it.effect('reads an issue by its identifier', () =>
+  it.effect('reads an issue by its identifier, in any case', () =>
     Effect.gen(function* () {
       const { tracker, sent } = linear([['POST', URL, { json: { data: { issue: issue() } } }]])
       assert.deepStrictEqual(yield* tracker.issue('MER-231'), {
@@ -77,6 +77,10 @@ describe('Linear', () => {
         updatedAt: '2026-10-01T08:00:00.000Z',
       })
       assert.deepStrictEqual(variablesOf(sent[0]), { id: 'MER-231' })
+      // A key as typed is Linear's own, upper-cased; anything else, such as a UUID, goes as it is.
+      yield* tracker.issue('mer-231')
+      yield* tracker.issue('5f1c2b3a-6d4e-4f00-8a11-0000000000e7')
+      assert.deepStrictEqual(sent.slice(1).map(variablesOf), [{ id: 'MER-231' }, { id: '5f1c2b3a-6d4e-4f00-8a11-0000000000e7' }])
     }),
   )
 

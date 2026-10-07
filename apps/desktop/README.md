@@ -30,12 +30,21 @@ From `apps/desktop`:
 | --- | --- |
 | `bun run build` | Builds the main process, the runtime, the preload and the window into `dist/` |
 | `bun run build:package` | The same, without the end-to-end tests' hooks, as a packaged app will be built |
+| `bun run package` | Builds that and packages it as `out/dist/mac-arm64/Althar.app`, with Cobalt as its icon, signed ad hoc so it opens on the Mac that built it. About 850 MB, most of it Claude Code's and Codex's own binaries, which the agent adapters bring |
 | `bun run start` | Opens what was last built |
 | `bun run check` | Format, type-aware lint and type checks |
 | `bun run test` | The window's view models and views against a fake client, and its client against the real runtime |
 | `bun run test:coverage` | The same, with the coverage gate: 90% of lines and branches |
 | `bun run test:e2e` | Builds the app and drives it with Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; and, with the fake GitHub, connecting it and a task ending in a draft pull request |
 | `bun run verify` | Check, coverage and the end-to-end tests, as CI runs them |
+
+### The packaged app: not done yet
+
+`bun run package` makes an app for the Mac that built it. Before one goes to anyone else:
+
+- **Signing and notarization.** A Developer ID build signs each nested executable on its own, with the hardened runtime, rather than with `--deep`: Electron's helpers, Codex's binary and Claude Code's. Claude Code's is a Bun executable, which needs the JIT entitlements under the hardened runtime.
+- **Running as Node.** The runtime starts the agent adapters on Althar's own binary as Node (`ELECTRON_RUN_AS_NODE`), so Electron's `runAsNode` fuse stays on, and any process can run code as Althar's signed identity, the one its keychain entry trusts. Before a signed build, the adapters run on a Node of their own (bundled, or a utility process bridging their stdio) and the fuse goes off. `NODE_OPTIONS` and the inspector's flags are off already.
+- **A download and updates:** a dmg or zip, and auto-update.
 
 To run the end-to-end test against a real agent, signed in on this machine (it uses a little of its usage):
 

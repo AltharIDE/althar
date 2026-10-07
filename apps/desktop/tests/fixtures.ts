@@ -371,8 +371,10 @@ export const connectionList: ConnectionList = {
       hostedUrl: 'https://github.com',
       selfHosted: true,
       browserSignIn: true,
-      tokenNeedsUser: false,
+      tokenNeeds: null,
       tokenHelp: 'https://github.com/settings/personal-access-tokens/new',
+      tokenHelpForKey: null,
+      keyChecks: [],
     },
     {
       product: 'linear',
@@ -382,8 +384,10 @@ export const connectionList: ConnectionList = {
       hostedUrl: 'https://linear.app',
       selfHosted: false,
       browserSignIn: false,
-      tokenNeedsUser: false,
+      tokenNeeds: null,
       tokenHelp: 'https://linear.app/settings/account/security',
+      tokenHelpForKey: null,
+      keyChecks: [],
     },
   ],
 }
@@ -475,6 +479,8 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   pickFolder: vi.fn(async () => 'grant_picked'),
   grantDropped: vi.fn(async () => 'grant_dropped'),
   onOpen: vi.fn(() => () => {}),
+  appIcon: vi.fn(async () => 'cobalt'),
+  setAppIcon: vi.fn(async () => {}),
   ...overrides,
 })
 

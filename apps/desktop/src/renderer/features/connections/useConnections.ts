@@ -105,6 +105,7 @@ export const useConnections = (): ConnectionsModel => {
           token: token.token,
           ...(token.instance === undefined ? {} : { webUrl: token.instance }),
           ...(token.user === undefined ? {} : { user: token.user }),
+          ...(token.key === undefined ? {} : { key: token.key }),
         })
         await load()
       } catch (failure) {
