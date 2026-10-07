@@ -32,7 +32,8 @@ import { ModelChoice } from '../../shared/ModelChoice'
 import { catalogOf, type Choice, modelName, runningOn } from '../../shared/models'
 import { checkOf } from '../../shared/checks'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
-import { ago, clock, useNow } from '../../shared/time'
+import { stepText, trackFor } from '../../shared/steps'
+import { ago, clock, running, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { PermissionCall } from './PermissionCall'
@@ -90,21 +91,43 @@ export const text = {
   diffKey: '⌘D',
 }
 
-/** Where a task stands, for its header: a step held for a usage limit says whom it waits for, and until when. */
+/**
+ * Where a task stands, for its header: the step it is on, by what it does
+ * there; a step held for a usage limit says whom it waits for, and until when.
+ */
 export const statusOf = (
   snapshot: ThreadSnapshot,
   agentName: (id: string) => string = (id) => id,
 ): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
-  const { waits } = snapshot.task
+  const { waits, phase, step } = snapshot.task
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
-  if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: text.working }
+  const doing = step === null ? undefined : stepText.now[step]
+  if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
   // A run that passed review is ready, whatever its lead is doing now.
-  if (snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled') return { status: TaskStatus.Done, state: text.ready }
+  if (phase === 'ready' || phase === 'settled') return { status: TaskStatus.Done, state: text.ready }
+  // On a step another agent takes, a review, while its lead waits.
+  if (phase === 'running' && doing !== undefined) return { status: TaskStatus.Running, state: doing }
   if (snapshot.session === null) return { status: TaskStatus.Stopped, state: text.stopped }
-  return snapshot.session.turnRunning
-    ? { status: TaskStatus.Running, state: text.working }
-    : { status: TaskStatus.Running, state: text.idle }
+  return { status: TaskStatus.Running, state: text.idle }
+}
+
+/** A task's clock runs while it is under way or waits on the person. */
+const ticking = (snapshot: ThreadSnapshot | null) =>
+  snapshot !== null && (snapshot.session?.turnRunning === true || snapshot.task.phase === 'running' || snapshot.task.phase === 'waiting')
+
+/**
+ * How long a task has run: from its start until now while its clock runs;
+ * once ready, until its last step reported; stopped, until the last thing it
+ * said; settled, until it settled. Null before it starts.
+ */
+export const elapsedOf = (snapshot: ThreadSnapshot, now: string): string | null => {
+  const { startedAt, settledAt, phase } = snapshot.task
+  if (startedAt === null) return null
+  if (settledAt !== null) return running(startedAt, settledAt)
+  if (ticking(snapshot)) return running(startedAt, now)
+  const last = phase === 'ready' ? snapshot.items.findLast((item) => item.kind === 'step_result') : snapshot.items.at(-1)
+  return running(startedAt, last?.createdAt ?? now)
 }
 
 const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', efforts: [] }
@@ -219,8 +242,8 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [show, files.length])
-  // A running turn says how long it has worked so far.
-  const now = useNow(model.snapshot?.session?.turnRunning ?? false)
+  // A running turn says how long it has worked so far, and a task under way how long it has run.
+  const now = useNow(ticking(model.snapshot))
   const snapshot = model.snapshot
   if (snapshot === null) {
     return (
@@ -239,6 +262,7 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
       ? noLead
       : modelInfo({ id: session.agentId, name: session.agentName }, modelName(catalog, session.agentId, session.model))
   const { status, state } = statusOf(snapshot, agentName)
+  const elapsed = elapsedOf(snapshot, now)
   const busy = session?.turnRunning ?? false
   // A stopped task picks up with the agent that last led it, when it still can.
   const last = snapshot.items.findLast((item) => item.agentId !== null)?.agentId
@@ -276,7 +300,13 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
         </Button>
       )}
       {files.length > 0 && (
-        <ChromeButton icon="file" label={text.files(files.length)} expanded={changes.open} onClick={() => changes.show()} />
+        <ChromeButton
+          icon="file"
+          label={text.files(files.length)}
+          kbd={text.diffKey}
+          expanded={changes.open}
+          onClick={() => changes.show()}
+        />
       )}
       {pullRequests.map((each) =>
         each.state === 'open' && each.unpushed > 0 && each.localHead !== null ? (
@@ -358,6 +388,8 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
             state={state}
             lead={lead}
             {...(snapshot.task.branch === null ? {} : { branch: snapshot.task.branch })}
+            {...(elapsed === null ? {} : { elapsed })}
+            steps={trackFor(snapshot.task.steps, snapshot.task.step, status === TaskStatus.Done)}
             actions={actions}
           />
         </ThreadMeasure>

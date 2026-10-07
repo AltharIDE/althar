@@ -695,6 +695,13 @@ export const ThreadSnapshot = Schema.Struct({
     phase: Schema.NullOr(TaskPhase),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
     waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
+    /** Its plan's steps, as its header's track shows them; empty without a plan. */
+    steps: Schema.Array(PlanStep),
+    /** The step it is on, by key, while it runs. */
+    step: Schema.NullOr(Schema.String),
+    /** When its work started, and when it settled: how long it has run. */
+    startedAt: Schema.NullOr(Schema.String),
+    settledAt: Schema.NullOr(Schema.String),
     /** The issue it came from. */
     issue: Schema.NullOr(IssueSummary),
     /** Its pull requests, as last seen. */

@@ -6,6 +6,7 @@ import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, Tas
 import { modelInfo, waitsWords } from '../../shared/agents'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
+import { stepIndex, stepNames, stepText } from '../../shared/steps'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
 
@@ -21,7 +22,7 @@ import type { TaskCardContent } from '../../shared/thread'
 export const COUNTDOWN = 25
 
 export const text = {
-  label: { implement: 'Implement', review: 'Review' } satisfies Record<PlanStep['key'], string>,
+  label: stepText.label,
   status: {
     [TaskStatus.Running]: 'Running',
     [TaskStatus.Yours]: 'Needs you',
@@ -29,12 +30,7 @@ export const text = {
     [TaskStatus.Paused]: 'Paused',
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
-  now: {
-    implement: 'Implementing',
-    review: 'Reviewing',
-    settle: 'Settling the review',
-    publish: 'Opening the pull request',
-  } as Readonly<Record<string, string>>,
+  now: stepText.now,
   task: (task: string, started: string) => (started === '' ? `Task ${task}` : `Task ${task} · ${started}`),
 }
 
@@ -136,9 +132,8 @@ function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; 
 export function Card({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
   if ((card.phase === 'planned' || card.phase === 'held') && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} />
-  const steps = (card.plan?.steps ?? []).filter((step) => !step.skipped).map((step) => text.label[step.key])
-  // Settling a review's findings is part of the review.
-  const at = card.step === null ? 0 : Math.max(0, steps.indexOf(text.label[card.step === 'implement' ? 'implement' : 'review']))
+  const steps = stepNames(card.plan?.steps ?? [])
+  const at = stepIndex(steps, card.step)
   const status = STATUS[card.phase]
   // A step held for a usage limit says what it waits for, rather than what it does.
   const now =

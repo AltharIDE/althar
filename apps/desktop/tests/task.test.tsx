@@ -6,7 +6,7 @@ import { ApiError, type StuckStep, type ThreadSnapshot } from '@althar/contracts
 import { TaskStatus } from '@althar/ui'
 
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
-import { statusOf, TaskView } from '../src/renderer/features/task/TaskView'
+import { elapsedOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { change, changed, fakeClient, items, models, snapshot, streamed } from './fixtures'
 import { clock } from '../src/renderer/shared/time'
@@ -61,6 +61,28 @@ describe('a task', () => {
     expect(screen.getByText('Where is the call?')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /meridian/ }))
     expect(onBack).toHaveBeenCalled()
+  })
+
+  it('shows its steps as a track, the one it is on by what it does, and how long it has run', async () => {
+    const steps = [
+      { key: 'implement' as const, agentId: 'claude-code', model: null, skipped: false },
+      { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+    ]
+    const startedAt = new Date(Date.now() - 64 * 60_000).toISOString()
+    const base = thread()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...base, task: { ...base.task, steps, step: 'review', startedAt } })),
+    })
+    withServices(<Task />, client)
+    // Its lead waits while another agent reviews.
+    expect(await screen.findByText('Reviewing')).toBeTruthy()
+    const track = screen.getByRole('list', { name: 'Steps' })
+    expect(
+      within(track)
+        .getAllByRole('listitem')
+        .map((step) => step.textContent),
+    ).toEqual(['Implement, done', 'Review, now'])
+    expect(screen.getByText(/1h 4m/)).toBeTruthy()
   })
 
   it('talks to its lead: sends, queues while it works, sends now, and interrupts', async () => {
@@ -569,5 +591,26 @@ describe('a task', () => {
         attention: [{ id: 'a', kind: 'permission', title: 't', reason: 'r', command: null, stuck: null, createdAt: '' }],
       }).state,
     ).toBe('Needs you')
+    // On a step, it says what it does there: while its lead works, and while another agent reviews.
+    expect(statusOf({ ...running(), task: { ...base.task, step: 'implement' } }).state).toBe('Implementing')
+    expect(statusOf({ ...base, task: { ...base.task, step: 'settle' } })).toEqual({
+      status: TaskStatus.Running,
+      state: 'Settling the review',
+    })
+  })
+
+  it('says how long it has run, until it stopped', () => {
+    const base = snapshot()
+    const at = (minutes: number) => new Date(Date.UTC(2026, 9, 7, 9, minutes)).toISOString()
+    const task = { ...base.task, startedAt: at(0) }
+    expect(elapsedOf(base, at(30))).toBeNull()
+    // Under way, until now.
+    expect(elapsedOf({ ...base, task }, at(6))).toBe('6m')
+    // Ready, until its last step reported; stopped, until the last thing said; settled, until it settled.
+    const said = { ...items.says('Done.'), createdAt: at(50) }
+    const reported = { ...items.step({ step: 'review' }), createdAt: at(40) }
+    expect(elapsedOf({ ...base, task: { ...task, phase: 'ready' }, items: [reported, said] }, at(59))).toBe('40m')
+    expect(elapsedOf({ ...base, task: { ...task, phase: 'stopped' }, items: [reported, said] }, at(59))).toBe('50m')
+    expect(elapsedOf({ ...base, task: { ...task, phase: 'settled', settledAt: at(20) } }, at(59))).toBe('20m')
   })
 })
