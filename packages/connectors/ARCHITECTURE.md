@@ -38,7 +38,7 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 ## Gaps
 
 - **Jira, Bitbucket and Trello** have no adapter yet; `products.ts` lists them, and nothing offers them.
-- **GitLab's checks** are its own pipelines' jobs: a status an outside CI posts to a commit isn't read, nor a downstream pipeline's jobs.
+- **GitLab's checks** are its own pipelines' jobs, and a child or downstream pipeline as one check: a status an outside CI posts to a commit isn't read.
 - **GitLab's issues** are open or closed: the statuses of its paid tiers aren't read.
 - **Pagination** stops at the first hundred: of comments since a cursor, of reviews, of checks.
 - **Webhooks** aren't here: listening polls until Althar has a cloud.
