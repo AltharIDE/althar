@@ -812,8 +812,12 @@ const CODE_LANGUAGES: ReadonlyMap<string, string> = new Map([
   ['csharp', 'c#'],
 ])
 
-/** Text as it is, where wiki markup would read a mark, a macro or a link. */
-const escapeWiki = (text: string) => text.replace(/[\\{}[\]*_]/g, '\\$&')
+/**
+ * Text as it is, where wiki markup would read a mark, an effect, a macro or
+ * a link: `~/a and ~/b` would be subscript, `--force` struck through, `a^b^`
+ * superscript. Each is escaped wherever it is, since `\~` shows as `~`.
+ */
+const escapeWiki = (text: string) => text.replace(/[\\{}[\]*_\-+^~?]/g, '\\$&')
 
 const wikiInline = (nodes: ReadonlyArray<Inline>): string =>
   nodes

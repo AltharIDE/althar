@@ -765,7 +765,7 @@ describe('Markdown, written as wiki markup for Data Center', () => {
       lines(
         'h2. Opened a draft pull request',
         '',
-        '*Althar* opened [PR #12|https://github.com/meridian/api/pull/12] for _MER-231_, -not- with {{rate\\_limit}}.',
+        '*Althar* opened [PR #12|https://github.com/meridian/api/pull/12] for _MER\\-231_, -not- with {{rate\\_limit}}.',
         'Second line, with [https://example.com/a_b].',
         '',
         '# First step',
@@ -789,6 +789,27 @@ describe('Markdown, written as wiki markup for Data Center', () => {
     assert.strictEqual(
       wikiOf('a {b} [c] *d* \\f a|b ~~e~~ [a|b](https://x.dev) [`c`](https://c.dev)'),
       'a \\{b\\} \\[c\\] _d_ \\\\f a|b -e- [a\\|b|https://x.dev] [{{c}}|https://c.dev]',
+    )
+  })
+
+  it('keeps an agent’s paths, flags and signs as they are, and its code as written', () => {
+    assert.strictEqual(
+      wikiOf(
+        lines(
+          'See ~/projects/api and ~/projects/web, run `git push --force-with-lease` or rm -rf build/, then a^b, ??x?? and C++ +1.',
+          '',
+          '```sh',
+          'cd ~/projects/api && git push --force',
+          '```',
+        ),
+      ),
+      lines(
+        'See \\~/projects/api and \\~/projects/web, run {{git push \\-\\-force\\-with\\-lease}} or rm \\-rf build/, then a\\^b, \\?\\?x\\?\\? and C\\+\\+ \\+1.',
+        '',
+        '{code:bash}',
+        'cd ~/projects/api && git push --force',
+        '{code}',
+      ),
     )
   })
 
