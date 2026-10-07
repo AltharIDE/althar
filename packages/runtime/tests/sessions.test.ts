@@ -312,6 +312,21 @@ describe('sessions', () => {
           ['completed', null],
         ],
       )
+      // The thread says why no answer came, in the agent's words.
+      const notice = (yield* threadItems(created.threadId)).find((item) => item.kind === 'notice' && item.content.severity === 'error')
+      assert.deepInclude(notice?.content, { title: "Fake codex couldn't answer.", failure: 'auth_required' })
+      assert.isNotEmpty(notice?.content.description)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('leaves a usage limit in a thrown error to what carries the work on', () =>
+    Effect.gen(function* () {
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      yield* say(created.threadId, scenarios.usageLimit)
+      yield* ended(created.threadId, 1)
+      const notices = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'notice' && item.content.severity === 'error')
+      assert.lengthOf(notices, 0)
     }).pipe(Effect.provide(runtime())),
   )
 
