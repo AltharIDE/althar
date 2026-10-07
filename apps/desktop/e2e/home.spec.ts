@@ -73,13 +73,18 @@ test('comes back to what runs and what waits across projects, with the projects 
     await expect(page.getByRole('heading', { name: 'Agents on this Mac' })).toBeVisible()
     await expect(page.getByText('Claude Code')).toBeVisible()
     await page.screenshot({ path: 'test-results/settings.png' })
+    // The icon is the Dock's, so where there is no Dock (Linux, as CI runs) there is none to choose.
     const icons = page.getByRole('radiogroup', { name: 'App icon' })
-    await expect(icons.getByRole('radio', { name: 'Cobalt', exact: true })).toBeChecked()
-    await icons.getByRole('radio', { name: 'Ink' }).click()
-    await expect(icons.getByRole('radio', { name: 'Ink' })).toBeChecked()
-    await expect.poll(() => readFileSync(join(home, 'profile', 'desktop.json'), 'utf8')).toContain('"icon": "ink"')
-    await icons.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: 'test-results/settings-icon.png' })
+    if (process.platform === 'darwin') {
+      await expect(icons.getByRole('radio', { name: 'Cobalt', exact: true })).toBeChecked()
+      await icons.getByRole('radio', { name: 'Ink' }).click()
+      await expect(icons.getByRole('radio', { name: 'Ink' })).toBeChecked()
+      await expect.poll(() => readFileSync(join(home, 'profile', 'desktop.json'), 'utf8')).toContain('"icon": "ink"')
+      await icons.scrollIntoViewIfNeeded()
+      await page.screenshot({ path: 'test-results/settings-icon.png' })
+    } else {
+      await expect(page.getByRole('heading', { name: 'App icon' })).toHaveCount(0)
+    }
     await tabs.getByRole('button', { name: /^Home/ }).click()
     await expect(projects.getByRole('button', { name: /meridian/ })).toBeVisible()
 
