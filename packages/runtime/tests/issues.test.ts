@@ -121,6 +121,10 @@ describe('an issue', () => {
       assert.strictEqual((yield* issues.read('12', projectId)).product, 'github')
       assert.instanceOf(yield* Effect.flip(issues.read('NOPE-1')), NotFound)
       assert.instanceOf(yield* Effect.flip(issues.read('https://linear.app/meridian/project/x')), NotConnected)
+      // A tracker not connected is named by its link.
+      const unconnected = yield* Effect.flip(issues.read('https://meridian.atlassian.net/browse/PROJ-9'))
+      assert.instanceOf(unconnected, NotConnected)
+      assert.strictEqual(unconnected.product, 'jira_cloud')
       github.addIssue({ ref: 'meridian/api#13', title: 'Newer' })
       const mine = yield* issues.mine(projectId)
       // Newest change first, whichever tracker it is on (the two fakes' clocks tie on the others).
