@@ -63,6 +63,16 @@ export const ChecksFailing: Story = { args: change({ passed: 2, failed: 1, runni
 /** Some checks still run. */
 export const ChecksRunning: Story = { args: change({ passed: 1, failed: 0, running: 2 }) }
 
+const { add: _add, del: _del, ...uncounted } = READY.change
+
+/** A host that doesn't count a change's lines: no size, rather than +0 −0. */
+export const LinesUncounted: Story = {
+  args: { ...ReadyToAccept.args, detail: <NeedChange {...uncounted} /> },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).queryByText('+0')).not.toBeInTheDocument()
+  },
+}
+
 /** No checks ran on it. */
 export const NoChecks: Story = { args: change({ passed: 0, failed: 0, running: 0 }) }
 

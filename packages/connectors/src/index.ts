@@ -1,6 +1,7 @@
 export { authorizationOf, type AdapterOptions, type Credential } from './credential'
 export * from './errors'
 export { makeGitHub } from './github'
+export { makeGitLab } from './gitlab'
 export { type Fetch, makeHttp } from './http'
 export { makeLinear } from './linear'
 export { HOSTED, type KnownHosts, type LinkRef, linksIn, parseLink, parseRemote, type RemoteRef } from './links'

@@ -175,8 +175,9 @@ export interface NeedChangeProps {
   /** The repository's name, without its owner. */
   repo: string
   number: number
-  add: number
-  del: number
+  /** Its lines added and deleted, where the host counts them: nothing is shown otherwise, as +0 −0 would say it's empty. */
+  add?: number
+  del?: number
   checks: CheckCounts
   lead: ModelInfo
   reviewer?: ModelInfo
@@ -220,7 +221,7 @@ export function NeedChange({ host, repo, number, add, del, checks, lead, reviewe
         {repo}
         <span className={s.ref}>{t.number(number)}</span>
       </span>
-      <Delta add={add} del={del} />
+      {add !== undefined && del !== undefined && <Delta add={add} del={del} />}
       <span className={s.sep} aria-hidden="true" />
       <Checks checks={checks} t={t} />
       <span className={s.sep} aria-hidden="true" />

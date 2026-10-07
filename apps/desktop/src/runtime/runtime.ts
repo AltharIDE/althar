@@ -3,9 +3,11 @@ import { mkdirSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 
+import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
 import { connection, databaseIn, Folders, Nudges, Secrets, SecretsUnavailable, services } from '@althar/runtime'
 import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Queue, Stream } from 'effect'
+import { net } from 'electron'
 import { openInTerminal } from './terminal'
 
 /*
@@ -82,6 +84,14 @@ const secrets = Secrets.sealed(join(profile, 'secrets'), {
   open: (sealed) => askMain('open', sealed),
 })
 
+/**
+ * Code hosts and trackers are called over the app's own network, Chromium's:
+ * it trusts the certificates in the Mac's keychain, as a company's own
+ * GitLab, Bitbucket or Jira often needs, and the Mac's proxy settings.
+ * Node's `fetch` knows neither.
+ */
+const appFetch: Fetch = (input, init) => net.fetch(input, init)
+
 const options = {
   database: databaseIn(profile),
   worktreeRoot: required('ALTHAR_WORKTREES'),
@@ -111,7 +121,9 @@ const program = Effect.gen(function* () {
           openTerminal: () => Effect.succeed(false),
         }
       : undefined
-  const context = yield* Layer.build(services(fake === undefined ? { ...options, clientIds, secrets } : { ...options, ...fake }))
+  const context = yield* Layer.build(
+    services(fake === undefined ? { ...options, clientIds, secrets, fetch: appFetch } : { ...options, ...fake }),
+  )
   isReady(context)
   // What needs the person goes to the main process, which notifies them and keeps the Dock's count.
   yield* Effect.forkScoped(

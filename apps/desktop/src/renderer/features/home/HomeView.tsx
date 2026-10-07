@@ -275,8 +275,7 @@ export function HomeView({
                     host={{ name: productName(change.product), ...(brand === undefined ? {} : { brand }) }}
                     repo={change.repository.slice(change.repository.lastIndexOf('/') + 1)}
                     number={change.number}
-                    add={change.additions ?? 0}
-                    del={change.deletions ?? 0}
+                    {...(change.additions === null || change.deletions === null ? {} : { add: change.additions, del: change.deletions })}
                     checks={{
                       passed: change.checks?.passed ?? 0,
                       failed: change.checks?.failed ?? 0,

@@ -3,6 +3,7 @@ import { Effect, Exit, Schema } from 'effect'
 
 import { ConnectorFailed } from '../src/errors'
 import { failureOf, makeHttp } from '../src/http'
+import type { Product } from '../src/model'
 import { stubFetch } from './stub'
 
 const Thing = Schema.Struct({ name: Schema.String })
@@ -135,42 +136,73 @@ describe('a failed answer', () => {
     assert.strictEqual(failureOf('github', 502, headers(), '', at).reason, 'unreachable')
   })
 
-  it('keeps what the service said', () => {
-    assert.strictEqual(
-      failureOf(
-        'github',
-        422,
-        headers(),
-        JSON.stringify({ message: 'Validation Failed', errors: [{ message: 'A pull request already exists' }] }),
-        at,
-      ).message,
-      'Validation Failed: A pull request already exists',
-    )
-    assert.strictEqual(failureOf('github', 422, headers(), JSON.stringify({ errors: ['bad branch'] }), at).message, 'bad branch')
-    assert.strictEqual(failureOf('linear', 400, headers(), JSON.stringify({ error: 'invalid_grant' }), at).message, 'invalid_grant')
-    assert.strictEqual(failureOf('github', 500, headers(), 'oops', at).message, '500')
-    assert.strictEqual(failureOf('github', 500, headers(), JSON.stringify({}), at).message, '500')
-  })
+  /**
+   * Each service's own failure, as it sends it, and the words Althar keeps:
+   * a row each, so that merging one connector's handling with another's can't
+   * quietly drop one. A new connector adds its rows here.
+   */
+  const said: ReadonlyArray<{ readonly product: Product; readonly status: number; readonly body: string; readonly words: string }> = [
+    {
+      product: 'github',
+      status: 422,
+      body: JSON.stringify({ message: 'Validation Failed', errors: [{ message: 'A pull request already exists' }] }),
+      words: 'Validation Failed: A pull request already exists',
+    },
+    { product: 'github', status: 422, body: JSON.stringify({ errors: ['bad branch'] }), words: 'bad branch' },
+    { product: 'linear', status: 400, body: JSON.stringify({ error: 'invalid_grant' }), words: 'invalid_grant' },
+    // GitLab: a list of messages, messages by field, and OAuth's description.
+    {
+      product: 'gitlab',
+      status: 409,
+      body: JSON.stringify({ message: ['Another open merge request already exists for this source branch: !4'] }),
+      words: 'Another open merge request already exists for this source branch: !4',
+    },
+    {
+      product: 'gitlab',
+      status: 400,
+      body: JSON.stringify({ message: { title: ["can't be blank"], base: ['Branch is missing'] } }),
+      words: "title can't be blank; Branch is missing",
+    },
+    {
+      product: 'gitlab',
+      status: 401,
+      body: JSON.stringify({ error: 'invalid_token', error_description: 'Token was revoked.' }),
+      words: 'Token was revoked.',
+    },
+    // Nothing worth keeping: the status says it.
+    { product: 'gitlab', status: 400, body: JSON.stringify({ message: [7, null] }), words: '400' },
+    { product: 'github', status: 500, body: 'oops', words: '500' },
+    { product: 'github', status: 500, body: JSON.stringify({}), words: '500' },
+  ]
+  for (const { product, status, body, words } of said)
+    it(`keeps what ${product} said in a ${status}: ${words}`, () => {
+      assert.strictEqual(failureOf(product, status, headers(), body, at).message, words)
+    })
 
-  it('is rate limited, with when to try again, by whichever header the service sends', () => {
-    const later = failureOf('github', 429, headers({ 'retry-after': '30' }), '', at)
-    assert.strictEqual(later.reason, 'rate_limited')
-    assert.strictEqual(later.retryAt, '2026-10-01T09:00:30.000Z')
-    const exhausted = failureOf(
-      'github',
-      403,
-      headers({ 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(at / 1000 + 60) }),
-      '',
-      at,
-    )
-    assert.strictEqual(exhausted.reason, 'rate_limited')
-    assert.strictEqual(exhausted.retryAt, '2026-10-01T09:01:00.000Z')
-    assert.strictEqual(
-      failureOf('linear', 429, headers({ 'x-ratelimit-requests-reset': String(at + 5000) }), '', at).retryAt,
-      '2026-10-01T09:00:05.000Z',
-    )
-    assert.isUndefined(failureOf('linear', 429, headers(), '', at).retryAt)
-  })
+  /** Each service's way of saying when to try again, a row each, as above. */
+  const resets: ReadonlyArray<{
+    readonly product: Product
+    readonly status: number
+    readonly sent: Record<string, string>
+    readonly retryAt: string | undefined
+  }> = [
+    { product: 'github', status: 429, sent: { 'retry-after': '30' }, retryAt: '2026-10-01T09:00:30.000Z' },
+    {
+      product: 'github',
+      status: 403,
+      sent: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(at / 1000 + 60) },
+      retryAt: '2026-10-01T09:01:00.000Z',
+    },
+    { product: 'linear', status: 429, sent: { 'x-ratelimit-requests-reset': String(at + 5000) }, retryAt: '2026-10-01T09:00:05.000Z' },
+    { product: 'gitlab', status: 429, sent: { 'ratelimit-reset': String(at / 1000 + 90) }, retryAt: '2026-10-01T09:01:30.000Z' },
+    { product: 'linear', status: 429, sent: {}, retryAt: undefined },
+  ]
+  for (const { product, status, sent, retryAt } of resets)
+    it(`is rate limited by ${product}'s ${Object.keys(sent).join(' and ') || 'bare'} ${status}, until ${retryAt ?? 'it says'}`, () => {
+      const failure = failureOf(product, status, headers(sent), '', at)
+      assert.strictEqual(failure.reason, 'rate_limited')
+      assert.strictEqual(failure.retryAt, retryAt)
+    })
 })
 
 describe('a GraphQL call', () => {

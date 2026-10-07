@@ -13,6 +13,7 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 | `model.ts` | The two models: code host and tracker, their data and their capabilities |
 | `products.ts` | Every product: its name, hosted service, whether it runs self-hosted, how a person signs in, and its adapter once built |
 | `github.ts` | GitHub and GitHub Enterprise Server: a code host over REST (GraphQL where REST can't), and a tracker of its issues |
+| `gitlab.ts` | GitLab, on gitlab.com or a company's own server: a code host of merge requests over REST, and a tracker of its issues |
 | `linear.ts` | Linear, a tracker, over GraphQL |
 | `http.ts` | Calls to a service's API: signed in per call, bounded in time, answers checked, failures classified, GETs cached by ETag |
 | `signIn.ts` | The device flow and OAuth with PKCE, and refreshing a token |
@@ -36,6 +37,8 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 
 ## Gaps
 
-- **GitLab, Jira, Bitbucket and Trello** have no adapter yet; `products.ts` lists them, and nothing offers them.
+- **Jira, Bitbucket and Trello** have no adapter yet; `products.ts` lists them, and nothing offers them.
+- **GitLab's checks** are its own pipelines' jobs, and a child or downstream pipeline as one check: a status an outside CI posts to a commit isn't read.
+- **GitLab's issues** are open or closed: the statuses of its paid tiers aren't read.
 - **Pagination** stops at the first hundred: of comments since a cursor, of reviews, of checks.
 - **Webhooks** aren't here: listening polls until Althar has a cloud.

@@ -1,5 +1,6 @@
 import type { AdapterOptions, Credential } from './credential'
 import { makeGitHub } from './github'
+import { makeGitLab } from './gitlab'
 import { makeLinear } from './linear'
 import type { KnownHosts } from './links'
 import type { CodeHost, Product, Tracker } from './model'
@@ -88,7 +89,10 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
       scope: 'api',
     },
     token: { kind: 'bearer', user: false, help: (webUrl) => `${trimmed(webUrl)}/-/user_settings/personal_access_tokens` },
-    make: null,
+    make: (options) => {
+      const gitlab = makeGitLab(options)
+      return { host: gitlab, tracker: gitlab }
+    },
   },
   bitbucket_cloud: {
     product: 'bitbucket_cloud',

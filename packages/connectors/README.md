@@ -1,6 +1,6 @@
 # @althar/connectors
 
-How Althar talks to code hosts and trackers ([docs/architecture/06](../../docs/architecture/06-integrations-and-skills.md), [ADR-011](../../docs/decisions/011-own-connectors-for-hosts-and-trackers.md)): a model for each, one adapter per product (GitHub and Linear so far), the sign-in flows that need no secret, and a fake service for tests. Written with [Effect](https://effect.website).
+How Althar talks to code hosts and trackers ([docs/architecture/06](../../docs/architecture/06-integrations-and-skills.md), [ADR-011](../../docs/decisions/011-own-connectors-for-hosts-and-trackers.md)): a model for each, one adapter per product (GitHub, GitLab and Linear so far), the sign-in flows that need no secret, and a fake service for tests. Written with [Effect](https://effect.website).
 
 ## Use it
 

@@ -170,8 +170,8 @@ export function BoardView({
                       {
                         repo: change.repository.slice(change.repository.lastIndexOf('/') + 1),
                         number: change.number,
-                        add: change.additions ?? 0,
-                        del: change.deletions ?? 0,
+                        // A host that doesn't count lines shows no size, rather than +0 −0.
+                        ...(change.additions === null || change.deletions === null ? {} : { add: change.additions, del: change.deletions }),
                       },
                     ],
                     host: { name: productName(change.product), ...(brand === undefined ? {} : { brand }) },
