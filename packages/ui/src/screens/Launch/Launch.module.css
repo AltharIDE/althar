@@ -1,0 +1,77 @@
+/*
+ * The launch: what it opens onto, under a veil the mark is drawn on. The
+ * veil's lines are hairlines at any zoom (their widths are set with the
+ * zoom); only the section is ink.
+ */
+
+.launch {
+  position: relative;
+  height: 100%;
+}
+
+.behind {
+  height: 100%;
+  will-change: transform, filter, opacity;
+}
+
+.veil {
+  /* What is being drawn is cobalt, and settles into ink (--settled, from 0 to 1). */
+  --drawn: color-mix(in oklab, var(--t-1) calc(var(--settled, 0) * 100%), var(--live));
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: var(--z-dialog);
+  display: block;
+  cursor: default;
+}
+
+.paper {
+  fill: var(--n-2);
+}
+
+.side,
+.circle,
+.scale,
+.major,
+.outline,
+.ring {
+  fill: none;
+}
+
+.side {
+  stroke: var(--drawn);
+  stroke-opacity: 0.26;
+}
+
+.circle {
+  stroke: var(--drawn);
+  stroke-opacity: 0.18;
+}
+
+.scale {
+  stroke: var(--drawn);
+  stroke-opacity: 0.2;
+}
+
+.major {
+  stroke: var(--drawn);
+  stroke-opacity: 0.42;
+}
+
+.ink {
+  fill: var(--t-1);
+}
+
+.outline {
+  stroke: var(--drawn);
+  stroke-linejoin: round;
+}
+
+.ring {
+  stroke: var(--live);
+}
+
+.point {
+  fill: var(--live);
+}

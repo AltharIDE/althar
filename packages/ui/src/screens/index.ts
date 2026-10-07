@@ -7,6 +7,7 @@
  */
 
 export * from './Welcome/Welcome'
+export * from './Launch/Launch'
 export * from './Start/Start'
 export * from './Home/Home'
 export * from './NewProject/NewProject'
