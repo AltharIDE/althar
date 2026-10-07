@@ -100,8 +100,9 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   comments and Althar's own replies (known by their receipts) don't
   reach it. Still open: whether the lead should start for them when none is
   running, how often a lead may be woken before it needs the person, and the
-  write-access check on GitLab, Bitbucket and Jira, whose comments don't
-  carry it as GitHub's do.
+  write-access check on Bitbucket and Jira, whose comments don't carry it as
+  GitHub's do. GitLab's adapter asks the project's members: the Developer
+  role and above can write.
   *Prototype:* task 431, "Listening".
 - [x] **How agents reach the hosts.** Settled on 1 October 2026: only through
   Althar. Althar pushes and opens pull requests as steps of the plan;

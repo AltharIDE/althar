@@ -345,6 +345,23 @@ describe('a connection', () => {
   })
 })
 
+describe('the network code hosts are called over', () => {
+  it.effect('is the one the app gives, and Node’s without one', () =>
+    Effect.gen(function* () {
+      const app: Fetch = () => Promise.resolve(new Response('{}'))
+      const read = (layer: Layer.Layer<Connectors>) =>
+        Effect.provide(
+          Effect.gen(function* () {
+            return (yield* Connectors).fetch
+          }),
+          layer,
+        )
+      assert.strictEqual(yield* read(Connectors.live({}, app)), app)
+      assert.strictEqual(yield* read(Connectors.live()), globalThis.fetch)
+    }),
+  )
+})
+
 describe('where sign-ins are kept', () => {
   /** A stand-in for the app's main process: it seals by reversing the bytes, and can be told to refuse. */
   const sealer = (refuse = false): Sealer => ({

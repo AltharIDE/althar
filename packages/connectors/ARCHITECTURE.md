@@ -13,6 +13,7 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 | `model.ts` | The two models: code host and tracker, their data and their capabilities |
 | `products.ts` | Every product: its name, hosted service, whether it runs self-hosted, how a person signs in, and its adapter once built |
 | `github.ts` | GitHub and GitHub Enterprise Server: a code host over REST (GraphQL where REST can't), and a tracker of its issues |
+| `gitlab.ts` | GitLab, on gitlab.com or a company's own server: a code host of merge requests over REST, and a tracker of its issues |
 | `linear.ts` | Linear, a tracker, over GraphQL |
 | `trello.ts` | Trello, a tracker, over REST: a card by its short link, its list as its status |
 | `http.ts` | Calls to a service's API: signed in per call, bounded in time, answers checked, failures classified, GETs cached by ETag |
@@ -37,7 +38,9 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 
 ## Gaps
 
-- **GitLab, Jira and Bitbucket** have no adapter yet; `products.ts` lists them, and nothing offers them.
+- **Jira and Bitbucket** have no adapter yet; `products.ts` lists them, and nothing offers them.
+- **GitLab's checks** are its own pipelines' jobs, and a child or downstream pipeline as one check: a status an outside CI posts to a commit isn't read.
+- **GitLab's issues** are open or closed: the statuses of its paid tiers aren't read.
 - **Trello's statuses** are read from its lists' names (Done, Doing, Backlog, Won't do and the like). A board whose lists are named otherwise reads as to do until its lists can be mapped.
 - **Pagination** stops at the first hundred: of comments since a cursor, of reviews, of checks.
 - **Webhooks** aren't here: listening polls until Althar has a cloud.

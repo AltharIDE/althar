@@ -1,4 +1,4 @@
-import { Clock, Duration, Effect, Schema } from 'effect'
+import { Clock, Duration, Effect, Option, Schema } from 'effect'
 
 import { ConnectorFailed } from './errors'
 import type { Product } from './model'
@@ -44,39 +44,69 @@ export interface Http {
 const MESSAGE_KEPT = 300
 
 const ErrorBody = Schema.Struct({
-  message: Schema.optional(Schema.String),
+  message: Schema.optional(Schema.Unknown),
   error: Schema.optional(Schema.Unknown),
+  error_description: Schema.optional(Schema.String),
   errors: Schema.optional(Schema.Array(Schema.Unknown)),
 })
 
+/**
+ * A message's words, however the service shapes it: a string, a list of
+ * them (GitLab's "already exists"), or lists by field (GitLab's validation
+ * errors, `{ title: ["can't be blank"] }`).
+ */
+const wordsOf = (said: unknown): string => {
+  if (typeof said === 'string') return said
+  if (Array.isArray(said))
+    return said
+      .map(wordsOf)
+      .filter((words) => words !== '')
+      .join('; ')
+  if (typeof said === 'object' && said !== null)
+    return Object.entries(said)
+      .map(([field, words]) => {
+        const text = wordsOf(words)
+        return text === '' ? '' : field === 'base' ? text : `${field} ${text}`
+      })
+      .filter((words) => words !== '')
+      .join('; ')
+  return ''
+}
+
 /** What a service said went wrong, from its JSON body or a line of plain words (Trello's), or the status's own words. */
 const messageOf = (body: string, fallback: string): string => {
+  let json: unknown
   try {
-    const parsed = Schema.decodeUnknownSync(ErrorBody)(JSON.parse(body))
-    const first = parsed.errors?.[0]
-    const detail =
-      typeof first === 'string'
-        ? first
-        : typeof first === 'object' && first !== null && 'message' in first && typeof first.message === 'string'
-          ? first.message
-          : undefined
-    const said = [parsed.message, detail].filter((part) => part !== undefined && part !== '').join(': ')
-    if (said !== '') return said.slice(0, MESSAGE_KEPT)
-    if (typeof parsed.error === 'string') return parsed.error.slice(0, MESSAGE_KEPT)
+    json = JSON.parse(body)
   } catch {
     // Not JSON: a line of plain words is the service's own; a page, or nothing, and the status says it.
     const said = body.trim()
-    if (said !== '' && !said.startsWith('<') && !said.includes('\n')) return said.slice(0, MESSAGE_KEPT)
+    return said !== '' && !said.startsWith('<') && !said.includes('\n') ? said.slice(0, MESSAGE_KEPT) : fallback
   }
-  return fallback
+  // JSON of another shape says nothing Althar can read: the status says it.
+  const parsed = Option.getOrUndefined(Schema.decodeUnknownOption(ErrorBody)(json))
+  if (parsed === undefined) return fallback
+  const first = parsed.errors?.[0]
+  const detail =
+    typeof first === 'string'
+      ? first
+      : typeof first === 'object' && first !== null && 'message' in first && typeof first.message === 'string'
+        ? first.message
+        : undefined
+  const said = [wordsOf(parsed.message), detail].filter((part) => part !== undefined && part !== '').join(': ')
+  if (said !== '') return said.slice(0, MESSAGE_KEPT)
+  if (parsed.error_description !== undefined) return parsed.error_description.slice(0, MESSAGE_KEPT)
+  return typeof parsed.error === 'string' ? parsed.error.slice(0, MESSAGE_KEPT) : fallback
 }
 
 /** When a rate-limited call may be tried again, from whichever header the service sends. */
 const retryAtOf = (headers: Headers, now: number): string | undefined => {
   const after = Number(headers.get('retry-after'))
   if (headers.has('retry-after') && Number.isFinite(after)) return new Date(now + after * 1000).toISOString()
-  const reset = Number(headers.get('x-ratelimit-reset'))
-  if (headers.has('x-ratelimit-reset') && Number.isFinite(reset)) return new Date(reset * 1000).toISOString()
+  // GitHub's header, and GitLab's: the reset in seconds since the epoch.
+  const resetHeader = headers.has('x-ratelimit-reset') ? 'x-ratelimit-reset' : 'ratelimit-reset'
+  const reset = Number(headers.get(resetHeader))
+  if (headers.has(resetHeader) && Number.isFinite(reset)) return new Date(reset * 1000).toISOString()
   const resetMs = Number(headers.get('x-ratelimit-requests-reset'))
   if (headers.has('x-ratelimit-requests-reset') && Number.isFinite(resetMs)) return new Date(resetMs).toISOString()
   return undefined
