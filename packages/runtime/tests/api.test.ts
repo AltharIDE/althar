@@ -700,6 +700,7 @@ describe('code hosts and trackers, through the API', () => {
           [
             ['github', false, true, 'https://github.com'],
             ['linear', false, false, 'https://linear.app'],
+            ['trello', false, false, 'https://trello.com'],
             ['jira_dc', false, true, null],
           ],
         )

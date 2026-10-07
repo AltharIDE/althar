@@ -307,6 +307,7 @@ describe('a connection', () => {
         [
           ['github', false],
           ['linear', false],
+          ['trello', false],
         ],
       )
       assert.instanceOf(yield* Effect.flip(connections.startSignIn({ product: 'github', actorId: instance.personId })), SignInUnavailable)
