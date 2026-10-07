@@ -109,12 +109,25 @@ const personOf = (user: User): Person =>
     ? { id: user.accountId, login: user.displayName ?? user.accountId, name: user.displayName ?? null, bot: user.accountType === 'app' }
     : { id: user.key ?? user.name, login: user.name, name: user.displayName ?? null, bot: false }
 
+/**
+ * A Jira Cloud site's address: its origin alone. A site has no path of its
+ * own, so a board's address pasted for it (`/jira/software/projects/PAY/
+ * boards/3`) is the same site. Data Center's servers do live under paths.
+ */
+export const siteOf = (webUrl: string): string => {
+  try {
+    return new URL(webUrl).origin
+  } catch {
+    return webUrl.replace(/\/+$/, '')
+  }
+}
+
 /** A JQL string, quoted. */
 const quoted = (text: string) => `"${text.replace(/["\\]/g, '\\$&')}"`
 
 const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
   const cloud = product === 'jira_cloud'
-  const site = options.webUrl.replace(/\/+$/, '')
+  const site = cloud ? siteOf(options.webUrl) : options.webUrl.replace(/\/+$/, '')
   const api = options.apiUrl.replace(/\/+$/, '')
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
 

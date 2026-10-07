@@ -2,8 +2,9 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import type { Credential } from '../src/credential'
-import { categoryOf, levelOf, makeJiraCloud, makeJiraDataCenter } from '../src/jira'
+import { categoryOf, levelOf, makeJiraCloud, makeJiraDataCenter, siteOf } from '../src/jira'
 import type { Issue } from '../src/model'
+import { products } from '../src/products'
 import { type Route, stubFetch } from './stub'
 
 /*
@@ -21,10 +22,10 @@ const DC = `${INSTANCE}/rest/api/2`
 const FIELDS = 'fields=summary,description,status,priority,assignee,labels,project,updated,resolution'
 const GATEWAY = 'https://api.atlassian.com/ex/jira/0aeb68bb-8040-48f1-9994-30e61701adb4/rest/api/3'
 
-const cloud = (routes: ReadonlyArray<Route>) => {
+const cloud = (routes: ReadonlyArray<Route>, webUrl = `${SITE}/`) => {
   const { fetch, sent } = stubFetch(routes)
   const credential = Effect.succeed<Credential>({ kind: 'basic', user: 'you@meridian.dev', token: 'ATATT3x' })
-  return { tracker: makeJiraCloud({ fetch, apiUrl: `${CLOUD}/`, webUrl: `${SITE}/`, credential }), sent }
+  return { tracker: makeJiraCloud({ fetch, apiUrl: products.jira_cloud.apiFor(webUrl), webUrl, credential }), sent }
 }
 
 const dataCenter = (routes: ReadonlyArray<Route>) => {
@@ -296,6 +297,27 @@ describe('Jira Cloud', () => {
         updatedAt: '2026-10-07T15:26:17.722Z',
       })
       assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('takes a site by its origin, whatever page of it was pasted', () =>
+    Effect.gen(function* () {
+      const board = `${SITE}/jira/software/projects/HHH/boards/3`
+      const { tracker, sent } = cloud(
+        [
+          ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { status: 401, text: '' }],
+          ['GET', `${SITE}/_edge/tenant_info`, { json: { cloudId: '0aeb68bb-8040-48f1-9994-30e61701adb4' } }],
+          ['GET', `${GATEWAY}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue() }],
+        ],
+        board,
+      )
+      assert.strictEqual((yield* tracker.issue('HHH-20844')).url, 'https://hibernate.atlassian.net/browse/HHH-20844')
+      assert.deepStrictEqual(
+        sent.map((request) => request.url),
+        [`${CLOUD}/issue/HHH-20844?${FIELDS}`, `${SITE}/_edge/tenant_info`, `${GATEWAY}/issue/HHH-20844?${FIELDS}`],
+      )
+      assert.strictEqual(siteOf(board), SITE)
+      assert.strictEqual(siteOf('hibernate.atlassian.net/'), 'hibernate.atlassian.net')
     }),
   )
 

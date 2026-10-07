@@ -2,6 +2,7 @@ import { createServer, type Server } from 'node:http'
 
 import {
   type Account,
+  addressOf,
   authorizeUrl,
   awaitDeviceFlow,
   type CodeHost,
@@ -122,8 +123,6 @@ interface Row {
 const RENEW_BEFORE = Duration.minutes(5)
 /** A browser sign-in waits this long for the person. */
 const BROWSER_WAIT = Duration.minutes(10)
-
-const trimmed = (url: string) => url.replace(/\/+$/, '')
 
 type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Secrets | Connectors
 
@@ -365,7 +364,8 @@ export class Connections extends Context.Service<
           const info = infoOf(input.product)
           if (info?.make == null)
             return yield* new NotConnected({ product: input.product, what: 'a product Althar has no adapter for yet' })
-          const webUrl = trimmed(input.webUrl)
+          // The address as the product keeps it: a Jira Cloud site by its origin, whatever page of it was pasted.
+          const webUrl = addressOf(info, input.webUrl)
           const apiUrl = info.apiFor(webUrl)
           const credential: Credential =
             'accessToken' in input.secret
@@ -502,7 +502,7 @@ export class Connections extends Context.Service<
         Effect.gen(function* () {
           const info = infoOf(input.product)
           const clientId = connectors.clientIds[input.product]
-          const webUrl = trimmed(input.webUrl ?? info?.hosted?.webUrl ?? '')
+          const webUrl = info === undefined ? '' : addressOf(info, input.webUrl ?? info.hosted?.webUrl ?? '')
           if (info?.browser == null || clientId === undefined || webUrl === '')
             return yield* new SignInUnavailable({ product: input.product })
           const flowId = yield* newId(Ids.command)

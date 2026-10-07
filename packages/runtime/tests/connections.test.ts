@@ -309,6 +309,45 @@ describe('a connection', () => {
   })
 })
 
+describe('a Jira Cloud site', () => {
+  it.live('is kept by its origin, whatever page of it was pasted', () => {
+    const jira = makeFakeService({ product: 'jira_cloud' })
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const connection = yield* connections.connectToken({
+        product: 'jira_cloud',
+        webUrl: 'https://meridian.atlassian.net/jira/software/projects/PAY/boards/3',
+        user: 'you@meridian.dev',
+        token: 't',
+        actorId: instance.personId,
+      })
+      assert.strictEqual(connection.webUrl, 'https://meridian.atlassian.net')
+      assert.strictEqual((yield* connections.resolve('https://meridian.atlassian.net/browse/PAY-1'))?.connectionId, connection.id)
+    }).pipe(
+      Effect.provide(
+        Runtime.layer({
+          database: ':memory:',
+          worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
+          appVersion: '0.0.0-test',
+          deviceName: 'Test Mac',
+          agents: fakeAgents(),
+          secrets: Secrets.memory(),
+          connectors: Layer.succeed(
+            Connectors,
+            Connectors.of({
+              products: [{ ...products.jira_cloud, make: () => ({ tracker: jira }) }],
+              fetch: () => Promise.reject(new Error('No network in tests')),
+              clientIds: {},
+              callbackPort: 0,
+            }),
+          ),
+        }),
+      ),
+    )
+  })
+})
+
 describe('where sign-ins are kept', () => {
   /** A stand-in for the app's main process: it seals by reversing the bytes, and can be told to refuse. */
   const sealer = (refuse = false): Sealer => ({
