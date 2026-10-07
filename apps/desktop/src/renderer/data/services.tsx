@@ -20,6 +20,10 @@ export interface Host {
   readonly pickFolder: (purpose?: 'project' | 'account') => Promise<string | null>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */
   readonly grantDropped: (file: File) => Promise<string | null>
+  /** The icon the person gave the app, by name (see `shared/appIcons`), or null where there is no Dock to show one. */
+  readonly appIcon: () => Promise<string | null>
+  /** Gives the app another icon, kept and shown on the Dock at once. */
+  readonly setAppIcon: (icon: string) => Promise<void>
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
   readonly onOpen: (listener: (threadId: string) => void) => () => void
 }
