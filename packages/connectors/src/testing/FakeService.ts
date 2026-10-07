@@ -137,7 +137,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     account: Effect.andThen(called('account'), Effect.succeed(account)),
     repository: (path) =>
       Effect.andThen(called('repository'), () => {
-        const found = repositories.get(path.join('/'))
+        // Found whatever the case, as GitHub and GitLab find them.
+        const found = repositories.get(path.join('/').toLowerCase())
         return found === undefined ? Effect.fail(missing(`repository ${path.join('/')}`)) : Effect.succeed(found)
       }),
     findChange: (repository, source) =>
@@ -279,7 +280,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         canPush: true,
         merges: ['squash', 'merge'],
       }
-      repositories.set(path.join('/'), repository)
+      repositories.set(path.join('/').toLowerCase(), repository)
       return repository
     },
     addIssue: (input) => {

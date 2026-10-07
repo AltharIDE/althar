@@ -510,7 +510,11 @@ export class Changes extends Context.Service<
             connectionId: string | null
           }>`
             SELECT id, product, key, url, ref, connection_id FROM external_links WHERE task_id = ${input.taskId} AND kind = 'issue' LIMIT 1`
-          const sameHost = issueLink !== undefined && issueLink.product === host.product && issueLink.ref.startsWith(`${path.join('/')}#`)
+          // A link's spelling of the repository may differ in case from the host's, which GitHub and GitLab don't mind.
+          const sameHost =
+            issueLink !== undefined &&
+            issueLink.product === host.product &&
+            issueLink.ref.toLowerCase().startsWith(`${path.join('/').toLowerCase()}#`)
           const title = issueLink === undefined || sameHost ? task.title : `${issueLink.key}: ${task.title}`
           const body = yield* bodyFor(
             input.taskId,

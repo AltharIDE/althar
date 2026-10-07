@@ -60,10 +60,11 @@ describe('a credential', () => {
 })
 
 describe('a task from an issue in its own repository', () => {
-  it.live('mentions it plainly in its pull request, which the host links by itself', () => {
+  /** A task from issue 12, in a repository the host spells as `spelled`, whose remote and link say `meridian/api`. */
+  const fromIssue = (spelled: ReadonlyArray<string>) => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
-    github.addRepository(['meridian', 'api'])
+    github.addRepository(spelled)
     github.addIssue({ ref: 'meridian/api#12', title: 'Refunds ignore the limit' })
     return Effect.gen(function* () {
       yield* connect('github', HOST)
@@ -84,8 +85,16 @@ describe('a task from an issue in its own repository', () => {
       assert.strictEqual(github.changes[0]?.title, 'Fix the limit')
       assert.include(github.changes[0]?.body, 'Issue: #12')
       assert.deepStrictEqual(github.linksOn('meridian/api#12'), [])
+      const sql = yield* SqlClient.SqlClient
+      return yield* sql<{ ref: string }>`SELECT ref FROM external_links WHERE kind = 'change'`
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
-  })
+  }
+
+  it.live('mentions it plainly in its pull request, which the host links by itself', () => fromIssue(['meridian', 'api']))
+
+  it.live('knows it as its own though the host spells the repository otherwise, and keeps the host’s spelling', () =>
+    Effect.map(fromIssue(['Meridian', 'API']), (links) => assert.deepStrictEqual(links, [{ ref: 'Meridian/API#1' }])),
+  )
 })
 
 describe('links', () => {
