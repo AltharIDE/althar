@@ -7,19 +7,111 @@
   @font-face { font-family: Mono; src: url(../node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2) format('woff2'); font-weight: 100 800; }
   * { box-sizing: border-box; margin: 0; }
   html, body { width: 1280px; height: 400px; overflow: hidden; }
-  body { background: #2b3bff; color: #f4f2ec; font-family: Inter; position: relative; padding: 36px 60px; }
-  .top { display: flex; justify-content: space-between; align-items: center; font: 500 17px Mono; letter-spacing: .03em; text-transform: uppercase; }
-  .top span { display: flex; align-items: center; gap: 8px; }
-  .top svg { width: 31px; height: 31px; margin: -4px 0; fill: #f4f2ec; }
-  h1 { margin-top: 22px; font-size: 40px; line-height: 1.1; letter-spacing: -.045em; font-weight: 700; }
-  h1 span { display: block; }
-  h1 .dim { color: rgba(244, 242, 236, .5); }
-  .mark { position: absolute; left: 50px; bottom: 0; font-size: 250px; font-weight: 800; letter-spacing: -.048em; line-height: 1; transform: translateY(.2em); white-space: nowrap; }
+  body { background: #efeadf; position: relative; }
+  canvas { position: absolute; inset: 0; width: 1280px; height: 400px; mix-blend-mode: multiply; }
+  .stock { mix-blend-mode: normal; }
 </style>
 <body>
-  <!-- The mark on cobalt drops its point: the bore shows the ground, as on the favicon. -->
-  <p class="top"><span><svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="M12.42 5.53A15.36 15.36 0 0 0 19.89 18.47L19.47 19.2A15.36 15.36 0 0 0 4.53 19.2L4.11 18.47A15.36 15.36 0 0 0 11.58 5.53ZM10.2 14.4a1.8 1.8 0 1 0 3.6 0a1.8 1.8 0 1 0-3.6 0Z"/></svg>Althar</span><span>The open project layer for agents</span></p>
-  <h1><span>The project should persist.</span><span class="dim">The agents should not have to.</span></h1>
-  <p class="mark">Althar</p>
+  <!-- Printed, not filled: two inks on paper stock, like a riso print. Cobalt lies in the paper with uneven cover and
+       sits a little off the black. The mark is the picture, as a halftone of the ruler's section lit from above.
+       It draws once its fonts have loaded and sets body[data-ready] when it's done. -->
+  <canvas class="stock"></canvas><canvas class="cobalt"></canvas><canvas class="black"></canvas>
+  <script>
+    const W = 1280, H = 400, S = 2 // drawn at 2×, the image's size
+    const STOCK = '#efeadf', COBALT = '#2b3bff', BLACK = '#1b1b20'
+    const SECTION = 'M12.42 5.53A15.36 15.36 0 0 0 19.89 18.47L19.47 19.2A15.36 15.36 0 0 0 4.53 19.2L4.11 18.47A15.36 15.36 0 0 0 11.58 5.53Z'
+    const BORE = 'M10.2 14.4a1.8 1.8 0 1 0 3.6 0a1.8 1.8 0 1 0-3.6 0Z'
+    const OFF = [1.6, -1.1] // how far the cobalt plate sits off the black
+    // the small mark in the bar: 26px, its base on the name's baseline (61)
+    const MARK = { x: 60, y: 61 - 19.2 * (26 / 24), s: 26 / 24 }
+
+    // seeded, so every run prints the same sheet
+    let seed = 5
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646
+    // smooth value noise, for how the ink lies on the paper
+    const lat = new Float32Array(257 * 257).map(() => rnd())
+    const vn = (x, y) => {
+      const xi = Math.floor(x) & 255, yi = Math.floor(y) & 255, xf = x - Math.floor(x), yf = y - Math.floor(y)
+      const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf), g = (i, j) => lat[(yi + j) * 257 + xi + i]
+      return g(0, 0) * (1 - u) * (1 - v) + g(1, 0) * u * (1 - v) + g(0, 1) * (1 - u) * v + g(1, 1) * u * v
+    }
+    const plate = (cls) => {
+      const c = document.querySelector(`canvas.${cls}`)
+      c.width = W * S; c.height = H * S
+      const x = c.getContext('2d'); x.scale(S, S)
+      return [c, x]
+    }
+    // ink cover: a slow drift in density, a fine tooth, and the odd speck where the drum skipped
+    const ink = (c, x, depth) => {
+      const img = x.getImageData(0, 0, c.width, c.height), d = img.data
+      for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+        if (!d[i + 3]) continue
+        const px = p % c.width, py = (p / c.width) | 0
+        let a = 0.84 + 0.16 * vn(px / 260, py / 260) - depth * vn(px / 2.1, py / 2.1)
+        if (rnd() < 0.012) a *= 0.35
+        d[i + 3] *= Math.max(0, Math.min(1, a))
+      }
+      x.putImageData(img, 0, 0)
+    }
+
+    // canvas text doesn't make the page fetch a face, so ask for each one first
+    Promise.all(['800 250px Inter', '700 40px Inter', '500 17px Mono'].map((f) => document.fonts.load(f))).then(() => {
+      // the stock: a fine tooth and a faint mottle
+      {
+        const [c, x] = plate('stock')
+        x.fillStyle = STOCK; x.fillRect(0, 0, W, H)
+        const img = x.getImageData(0, 0, c.width, c.height), d = img.data
+        for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+          const px = p % c.width, py = (p / c.width) | 0
+          const n = (rnd() - 0.5) * 12 + (vn(px / 140, py / 140) - 0.5) * 7
+          d[i] += n; d[i + 1] += n; d[i + 2] += n
+        }
+        x.putImageData(img, 0, 0)
+      }
+
+      // cobalt: the wordmark off the bottom, the second line, the section as a halftone, and the small mark's point
+      {
+        const [c, x] = plate('cobalt')
+        x.translate(...OFF)
+        x.fillStyle = COBALT
+        x.font = '800 250px Inter'; x.letterSpacing = '-12px'
+        x.fillText('Althar', 50, 424)
+        x.font = '700 40px Inter'; x.letterSpacing = '-1.8px'
+        x.fillText('The agents should not have to.', 58, 172)
+
+        const sc = 20, cx = 1062, ox = cx - 12 * sc, oy = 92 - 5.5 * sc
+        const shape = new Path2D(SECTION + BORE)
+        const probe = document.createElement('canvas').getContext('2d')
+        const cell = 5.4, ang = (15 * Math.PI) / 180, ca = Math.cos(ang), sa = Math.sin(ang)
+        for (let u = -120; u < 120; u++) for (let v = -120; v < 120; v++) {
+          const px = cx + (u * ca - v * sa) * cell, py = 240 + (u * sa + v * ca) * cell
+          const gx = (px - ox) / sc, gy = (py - oy) / sc
+          if (gx < 3 || gx > 21 || gy < 5 || gy > 20) continue
+          if (!probe.isPointInPath(shape, gx, gy, 'evenodd')) continue
+          // light from the upper left: the top tip pale, the base heavy, the faces darker toward their edges
+          const t = Math.min(1, Math.max(0.06, ((gy - 5.5) / 13.7) * 0.78 + (Math.abs(gx - 12) / 8) * 0.18 + ((gx - 12) / 8) * 0.1))
+          x.beginPath(); x.arc(px, py, (cell / 2) * Math.sqrt(t) * 1.08, 0, Math.PI * 2); x.fill()
+        }
+        x.beginPath(); x.arc(ox + 12 * sc, oy + 14.4 * sc, 1.05 * sc, 0, Math.PI * 2); x.fill()
+        x.beginPath(); x.arc(MARK.x + 12 * MARK.s, MARK.y + 14.4 * MARK.s, 1.05 * MARK.s, 0, Math.PI * 2); x.fill()
+        ink(c, x, 0.2)
+      }
+
+      // black: the bar, the small mark with its bore open, and the first line
+      {
+        const [c, x] = plate('black')
+        x.fillStyle = BLACK
+        x.font = '500 17px Mono'; x.letterSpacing = '0.5px'
+        x.fillText('ALTHAR', 96, 61)
+        x.textAlign = 'right'; x.fillText('THE OPEN PROJECT LAYER FOR AGENTS', 1220, 61); x.textAlign = 'left'
+        x.save(); x.translate(MARK.x, MARK.y); x.scale(MARK.s, MARK.s)
+        x.fill(new Path2D(SECTION + BORE), 'evenodd'); x.restore()
+        x.font = '700 40px Inter'; x.letterSpacing = '-1.8px'
+        x.fillText('The project should persist.', 58, 128)
+        ink(c, x, 0.14)
+      }
+      document.body.dataset.ready = '1'
+    })
+  </script>
 </body>
 </html>

@@ -72,7 +72,8 @@ try {
   await mkdir(docs, { recursive: true })
   const banner = await browser.newPage({ viewport: { width: 1280, height: 400 }, deviceScaleFactor: 2 })
   await banner.goto(pathToFileURL(resolve(root, 'scripts/readme-header.html')).href)
-  await banner.evaluate(() => document.fonts.ready)
+  /* it draws on canvases once its fonts are in, and says when it's done */
+  await banner.waitForFunction(() => document.body.dataset.ready === '1')
   const header = await banner.screenshot({ type: 'png' })
   await sharp(header).png({ compressionLevel: 9, palette: true, quality: 95 }).toFile(`${docs}/readme-header.png`)
 } finally {
