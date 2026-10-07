@@ -13,7 +13,17 @@ import { agents, card, changed, coordinatorSnapshot, fakeClient, items, status, 
 import { clock } from '../src/renderer/shared/time'
 import { withServices } from './render'
 
-function Project({ onTask = vi.fn(), room, newTask }: { onTask?: (threadId: string) => void; room?: Room; newTask?: boolean }) {
+function Project({
+  onTask = vi.fn(),
+  room,
+  newTask,
+  lastTask,
+}: {
+  onTask?: (threadId: string) => void
+  room?: Room
+  newTask?: boolean
+  lastTask?: { title: string; onOpen: () => void }
+}) {
   return (
     <ProjectView
       model={useProject('p1')}
@@ -22,6 +32,7 @@ function Project({ onTask = vi.fn(), room, newTask }: { onTask?: (threadId: stri
       onTask={onTask}
       {...(room === undefined ? {} : { room })}
       {...(newTask === undefined ? {} : { newTask })}
+      {...(lastTask === undefined ? {} : { lastTask })}
     />
   )
 }
@@ -72,6 +83,15 @@ describe('the project’s bar', () => {
     // Planning a task opens beside the conversation, so the board is shown with it.
     await waitFor(() => expect(checked()).toMatch(/^Both/))
     expect(await screen.findByRole('complementary', { name: 'New task' })).toBeTruthy()
+  })
+
+  it('goes back to the task last opened, from after its views', async () => {
+    const onOpen = vi.fn()
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    withServices(<Project lastTask={{ title: 'Make wand spells fire colorful heart particles', onOpen }} />, client)
+    const back = await screen.findByRole('radio', { name: /^Make wand spells fire color…/ })
+    await userEvent.click(back)
+    expect(onOpen).toHaveBeenCalled()
   })
 })
 

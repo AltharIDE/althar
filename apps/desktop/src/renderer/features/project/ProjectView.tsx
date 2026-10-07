@@ -77,6 +77,7 @@ export function ProjectView({
   onRules,
   room: opening = Room.Talk,
   newTask = false,
+  lastTask = null,
 }: {
   model: ProjectModel
   board: BoardModel
@@ -88,6 +89,8 @@ export function ProjectView({
   room?: Room
   /** It opens planning a new task, as a task's bar asked. */
   newTask?: boolean
+  /** The task last opened in it, for the bar's way back. */
+  lastTask?: { readonly title: string; readonly onOpen: () => void } | null
 }) {
   const [room, setRoom] = useState<Room>(newTask && opening === Room.Board ? Room.Both : opening)
   const [dock, setDock] = useState<DockTarget | null>(null)
@@ -211,8 +214,9 @@ export function ProjectView({
       <ProjectBar
         room={room}
         onRoom={setRoom}
-        working={working}
-        yours={yours}
+        task={lastTask}
+        working={lanes === null ? null : working}
+        yours={lanes === null ? null : yours}
         onYours={openYours}
         {...(onRules === undefined ? {} : { onRules })}
         newTask={panel === 'task'}

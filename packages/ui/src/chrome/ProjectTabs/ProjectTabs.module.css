@@ -56,17 +56,38 @@
   gap: 4px;
   height: 100%;
 }
+.pinned,
 .tabs {
   display: flex;
   align-items: flex-end;
   gap: 2px;
-  min-width: 0;
   height: 100%;
   margin: 0;
   padding: 0;
   list-style: none;
+}
+.pinned {
+  flex: none;
+}
+.tabs {
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
+  /* a tab scrolled into sight stops clear of the fading edge */
+  scroll-padding-inline: 32px;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+/* more tabs past an edge: that edge fades */
+.moreBefore {
+  mask-image: linear-gradient(to right, transparent, #000 28px);
+}
+.moreAfter {
+  mask-image: linear-gradient(to left, transparent, #000 28px);
+}
+.moreBefore.moreAfter {
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
 
 .tab {
@@ -78,11 +99,25 @@
   border-radius: 8px 8px 0 0;
   transition: background var(--fast) var(--ease);
 }
-/* each the same width, as a browser's are, giving way together down to a mark and a few letters */
+/* each the same width, as a browser's are, giving way together down to its mark; the one with the window keeps its name */
 .project {
   flex: 0 1 auto;
   width: 188px;
-  min-width: 92px;
+  min-width: 46px;
+  container-type: inline-size;
+}
+.project.current {
+  min-width: 136px;
+}
+@container (max-width: 84px) {
+  .project .name,
+  .project .close {
+    display: none;
+  }
+  .project .select {
+    justify-content: center;
+    padding: 0 8px;
+  }
 }
 .home {
   flex: none;

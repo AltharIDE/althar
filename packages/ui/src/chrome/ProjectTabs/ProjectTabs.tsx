@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Logo } from '../../foundations/Logo/Logo'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
@@ -19,7 +19,10 @@ import s from './ProjectTabs.module.css'
  * the home's has the dot while anything waits in any project. How many is
  * read out, not shown. The tab that has the window
  * joins the screen's own bar below it. A project's tab closes from its ×,
- * and the + opens one of the other projects, or a folder as a new one. On
+ * and the + opens one of the other projects, or a folder as a new one.
+ * However many are open, the home's tab stays put; the others give way
+ * together, down to their marks, and past that they scroll, by wheel too,
+ * fading at the side where more are, with a menu of them all. On
  * macOS the system draws the traffic lights over its start, so it keeps
  * their space, as the TitleBar does when it is the top.
  */
@@ -47,6 +50,8 @@ export interface ProjectTabsText {
   open: string
   others: string
   openFolder: string
+  /** The menu of every open project, when more are open than fit. */
+  all: string
 }
 
 export const projectTabsText: ProjectTabsText = {
@@ -58,6 +63,7 @@ export const projectTabsText: ProjectTabsText = {
   open: 'Open a project',
   others: 'Other projects',
   openFolder: 'Open a folder…',
+  all: 'All open projects',
 }
 
 export type ProjectTabsProps = RootProps<
@@ -111,7 +117,34 @@ export function ProjectTabs({
   const t = { ...projectTabsText, ...text }
   const offered = onOpen ? others : []
   const list = useRef<HTMLUListElement>(null)
-  // More open than fit, the strip scrolls: the tab with the window is kept in sight.
+  // Where the projects' tabs scroll to, when more are open than fit: more before, more after.
+  const [more, setMore] = useState({ before: false, after: false })
+  useEffect(() => {
+    const element = list.current
+    if (element === null) return
+    const measure = () => {
+      const before = element.scrollLeft > 1
+      const after = element.scrollLeft + element.clientWidth < element.scrollWidth - 1
+      setMore((was) => (was.before === before && was.after === after ? was : { before, after }))
+    }
+    // A wheel that turns up and down moves them across, as a trackpad does.
+    const wheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) || element.scrollWidth <= element.clientWidth) return
+      element.scrollLeft += event.deltaY
+      event.preventDefault()
+    }
+    measure()
+    element.addEventListener('scroll', measure, { passive: true })
+    element.addEventListener('wheel', wheel, { passive: false })
+    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    resized?.observe(element)
+    return () => {
+      element.removeEventListener('scroll', measure)
+      element.removeEventListener('wheel', wheel)
+      resized?.disconnect()
+    }
+  }, [tabs.length])
+  // The tab with the window is kept in sight.
   useEffect(() => {
     list.current
       ?.querySelector<HTMLElement>('[aria-current="page"]')
@@ -127,7 +160,7 @@ export function ProjectTabs({
         </span>
       )}
       <nav className={s.nav} aria-label={t.label}>
-        <ul className={s.tabs} ref={list}>
+        <ul className={s.pinned}>
           <li className={cx(s.tab, s.home, current === null && s.current)}>
             <button type="button" className={s.select} aria-current={current === null ? 'page' : undefined} onClick={() => onSelect(null)}>
               <Logo size={15} className={s.logo} />
@@ -135,6 +168,8 @@ export function ProjectTabs({
               <Yours n={yours} text={t} />
             </button>
           </li>
+        </ul>
+        <ul className={cx(s.tabs, more.before && s.moreBefore, more.after && s.moreAfter)} ref={list}>
           {tabs.map((tab) => (
             <li key={tab.id} className={cx(s.tab, s.project, tab.id === current && s.current)}>
               <button
@@ -153,6 +188,20 @@ export function ProjectTabs({
             </li>
           ))}
         </ul>
+        {(more.before || more.after) && (
+          <Menu label={t.all} align="end" width={260} trigger={<ChromeButton icon="list" label={t.all} compact className={s.plus} />}>
+            {tabs.map((tab) => (
+              <MenuItem
+                key={tab.id}
+                lead={<ProjectMark seed={tab.seed} ink={tab.ink} size={15} running={tab.running} />}
+                hint={tab.yours > 0 ? <Yours n={tab.yours} text={t} /> : undefined}
+                onSelect={() => onSelect(tab.id)}
+              >
+                {tab.name}
+              </MenuItem>
+            ))}
+          </Menu>
+        )}
         {(offered.length > 0 || onOpenFolder) && (
           <Menu label={t.open} align="start" width={260} trigger={<ChromeButton icon="plus" label={t.open} compact className={s.plus} />}>
             {offered.length > 0 && (

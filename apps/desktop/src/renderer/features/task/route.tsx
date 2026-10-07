@@ -1,6 +1,6 @@
 import { createRoute, useNavigate } from '@tanstack/react-router'
 
-import { Room } from '@althar/ui'
+import { Room, TASK } from '@althar/ui'
 
 import { rootRoute } from '../../root'
 import { lanesOf, yoursOf } from '../board/lanes'
@@ -10,8 +10,8 @@ import { useVisit } from '../tabs/TabsFrame'
 import { TaskView } from './TaskView'
 import { useTask } from './useTask'
 
-/** The project's bar over one of its tasks: no view on; each goes back to the project in it. */
-function TaskNav({ projectId }: { projectId: string }) {
+/** The project's bar over one of its tasks: the task on, after the views; each view goes back to the project in it. */
+function TaskNav({ projectId, title }: { projectId: string; title: string }) {
   const navigate = useNavigate()
   const board = useBoard(projectId)
   const lanes = board.board === null ? null : lanesOf(board.board)
@@ -19,10 +19,11 @@ function TaskNav({ projectId }: { projectId: string }) {
     void navigate({ to: '/projects/$projectId', params: { projectId }, search })
   return (
     <ProjectBar
-      room={null}
+      room={TASK}
+      task={{ title, onOpen: () => undefined }}
       onRoom={(room) => open({ room })}
-      working={lanes === null ? 0 : lanes.running.filter((task) => task.phase !== 'stopped').length}
-      yours={lanes === null ? 0 : yoursOf(lanes)}
+      working={lanes === null ? null : lanes.running.filter((task) => task.phase !== 'stopped').length}
+      yours={lanes === null ? null : yoursOf(lanes)}
       onYours={() => open({ room: Room.Both })}
       onRules={() => void navigate({ to: '/projects/$projectId/rules', params: { projectId } })}
       onNewTask={() => open({ new: 'task' })}
@@ -35,13 +36,14 @@ function Task() {
   const navigate = useNavigate()
   const model = useTask(threadId)
   const projectId = model.snapshot?.project.id
-  useVisit(threadId, projectId)
+  const title = model.snapshot?.task.title
+  useVisit(threadId, projectId, title)
   return (
     <TaskView
       // Each task starts on its own face, with nothing typed.
       key={threadId}
       model={model}
-      {...(projectId === undefined ? {} : { nav: <TaskNav projectId={projectId} /> })}
+      {...(projectId === undefined || title === undefined ? {} : { nav: <TaskNav projectId={projectId} title={title} /> })}
       onBack={() =>
         void (projectId === undefined ? navigate({ to: '/' }) : navigate({ to: '/projects/$projectId', params: { projectId } }))
       }

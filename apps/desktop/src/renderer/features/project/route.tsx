@@ -4,6 +4,7 @@ import { Room } from '@althar/ui'
 
 import { rootRoute } from '../../root'
 import { useBoard } from '../board/useBoard'
+import { useLastTask } from '../tabs/TabsFrame'
 import { useConnections } from '../connections/useConnections'
 import { ProjectView } from './ProjectView'
 import { useProject } from './useProject'
@@ -12,8 +13,14 @@ function Project() {
   const { projectId } = projectRoute.useParams()
   const { room, new: planning } = projectRoute.useSearch()
   const navigate = useNavigate()
+  const last = useLastTask(projectId)
   return (
     <ProjectView
+      lastTask={
+        last === null
+          ? null
+          : { title: last.title, onOpen: () => void navigate({ to: '/threads/$threadId', params: { threadId: last.threadId } }) }
+      }
       {...(room === undefined ? {} : { room })}
       newTask={planning === 'task'}
       model={useProject(projectId)}
