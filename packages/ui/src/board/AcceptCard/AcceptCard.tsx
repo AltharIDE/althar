@@ -18,8 +18,9 @@ export interface PullRequestBrief {
   /** The repository, without its owner: meridian-api. */
   repo: string
   number: number
-  add: number
-  del: number
+  /** Its lines added and deleted, where the host counts them. */
+  add?: number
+  del?: number
 }
 
 export interface AcceptCardText {
@@ -82,7 +83,7 @@ export function AcceptCard({ task, title, prs = [], host, branch, checks, at, cu
             {host?.brand && <BrandMark brand={host.brand} size={12} />}
             <span className={s.repo}>{pr.repo}</span>
             <span className={s.number}>{t.number(pr.number)}</span>
-            <Delta add={pr.add} del={pr.del} className={s.delta} />
+            {pr.add !== undefined && pr.del !== undefined && <Delta add={pr.add} del={pr.del} className={s.delta} />}
           </li>
         ))}
         {branch && (

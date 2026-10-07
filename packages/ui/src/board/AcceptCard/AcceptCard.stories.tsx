@@ -27,6 +27,17 @@ export const OnItsBranch: Story = {
     await expect(within(canvasElement).queryByText(/checks? passed/)).not.toBeInTheDocument()
   },
 }
+/** The pull requests, as a host that doesn't count their lines gives them. */
+const UNCOUNTED = (READY.prs ?? []).map(({ repo, number }) => ({ repo, number }))
+
+/** A host that doesn't count a pull request's lines: no size, rather than +0 −0. */
+export const LinesUncounted: Story = {
+  args: { prs: UNCOUNTED },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).queryByText('+0')).not.toBeInTheDocument()
+    await expect(within(canvasElement).getByText(UNCOUNTED[0]?.repo ?? '')).toBeInTheDocument()
+  },
+}
 /** A pull request no checks ran on. */
 export const NoChecks: Story = {
   args: { checks: 0 },
@@ -51,6 +62,7 @@ export const AllStates: Story = {
         { state: 'one repository', node: <AcceptCard {...args} /> },
         { state: 'two repositories', node: <AcceptCard {...args} {...READY_TWO_REPOS} /> },
         { state: 'current', node: <AcceptCard {...args} current /> },
+        { state: 'lines uncounted', node: <AcceptCard {...args} prs={UNCOUNTED} /> },
         { state: 'nothing opens it', node: <AcceptCard {...args} onOpen={undefined} /> },
         { state: 'hover', node: <AcceptCard {...args} /> },
         { state: 'focus', node: <AcceptCard {...args} /> },

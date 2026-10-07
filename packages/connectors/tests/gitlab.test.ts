@@ -1,7 +1,7 @@
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { jobState, makeGitLab, mergesOf, readyTitle } from '../src/gitlab'
+import { jobState, makeGitLab, mergesOf, readyTitle, verdictOf } from '../src/gitlab'
 import type { ChangeRequest, Issue, Repository } from '../src/model'
 import { type Route, stubFetch } from './stub'
 
@@ -172,7 +172,8 @@ describe('GitLab as a code host', () => {
         defaultBranch: 'trunk',
         webUrl: 'https://gitlab.com/meridian/payments/api',
         canPush: true,
-        merges: ['squash', 'merge'],
+        // Squashing allowed, off by default: the project's own way first.
+        merges: ['merge', 'squash'],
       })
       const outside = yield* host.repository(['gitlab-org', 'cli'])
       assert.deepStrictEqual([outside.canPush, outside.merges], [false, ['merge']])
@@ -184,7 +185,8 @@ describe('GitLab as a code host', () => {
 
   it('merges in the order Althar prefers, as the project allows', () => {
     assert.deepStrictEqual(mergesOf('merge', 'default_on'), ['squash', 'merge'])
-    assert.deepStrictEqual(mergesOf('rebase_merge', 'default_off'), ['squash', 'merge'])
+    assert.deepStrictEqual(mergesOf('rebase_merge', 'default_off'), ['merge', 'squash'])
+    assert.deepStrictEqual(mergesOf('ff', 'default_off'), ['rebase', 'squash'])
     assert.deepStrictEqual(mergesOf('ff', 'never'), ['rebase'])
     assert.deepStrictEqual(mergesOf('merge', 'always'), ['squash'])
     assert.deepStrictEqual(mergesOf(null, null), ['merge'])
@@ -279,14 +281,62 @@ describe('GitLab as a code host', () => {
     }),
   )
 
-  it.effect('marks a draft ready by taking the prefix off its title', () =>
+  it.effect('marks a draft ready by taking the prefix off its title as it is now', () =>
     Effect.gen(function* () {
       const { host, sent } = gitlab([
-        ['PUT', `${PROJECT}/merge_requests/12`, { json: request({ title: 'Rate-limit refunds', draft: false, work_in_progress: false }) }],
+        // Renamed on GitLab since Althar last read it.
+        ['GET', `${PROJECT}/merge_requests/12`, { json: request({ title: 'Draft: Rate-limit refunds and chargebacks' }) }],
+        [
+          'PUT',
+          `${PROJECT}/merge_requests/12`,
+          { json: request({ title: 'Rate-limit refunds and chargebacks', draft: false, work_in_progress: false }) },
+        ],
       ])
       const ready = yield* host.markReady(repository, change)
-      assert.isFalse(ready.draft)
-      assert.deepStrictEqual(sent[0]?.body, { title: 'Rate-limit refunds' })
+      assert.deepStrictEqual([ready.draft, ready.title], [false, 'Rate-limit refunds and chargebacks'])
+      assert.deepStrictEqual(sent[1]?.body, { title: 'Rate-limit refunds and chargebacks' })
+    }),
+  )
+
+  it.effect('leaves a merge request marked ready on GitLab as it is', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, { json: request({ title: 'Rate-limit refunds', draft: false, work_in_progress: false }) }],
+      ])
+      assert.isFalse((yield* host.markReady(repository, change)).draft)
+      assert.deepStrictEqual(
+        sent.map((request) => request.method),
+        ['GET'],
+      )
+    }),
+  )
+
+  it.effect('counts a merge request’s lines, asking again only when its head moves', () =>
+    Effect.gen(function* () {
+      const heads = ['abc', 'abc', 'def', 'ghi']
+      const sizes = [
+        // gitlab.com's answer for gitlab-org/cli!4015.
+        { json: { data: { project: { mergeRequest: { diffStatsSummary: { additions: 125, deletions: 7, fileCount: 2 } } } } } },
+        { json: { data: { project: { mergeRequest: { diffStatsSummary: { additions: 130, deletions: 9, fileCount: 3 } } } } } },
+        { json: { errors: [{ message: "Field 'diffStatsSummary' doesn't exist on type 'MergeRequest'" }] } },
+      ]
+      const { host, sent } = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, () => ({ json: request({ sha: heads.shift() }) })],
+        ['POST', 'https://gitlab.com/api/graphql', () => sizes.shift() ?? { status: 500 }],
+      ])
+      const first = yield* host.change(repository, 12)
+      assert.deepStrictEqual([first.additions, first.deletions, first.changedFiles], [125, 7, 2])
+      assert.deepStrictEqual((yield* host.change(repository, 12)).additions, 125)
+      assert.strictEqual(sent.filter((request) => request.method === 'POST').length, 1)
+      assert.deepStrictEqual((yield* host.change(repository, 12)).additions, 130)
+      assert.deepStrictEqual(sent.find((request) => request.method === 'POST')?.body, {
+        query:
+          'query($path: ID!, $iid: String!) { project(fullPath: $path) { mergeRequest(iid: $iid) { diffStatsSummary { additions deletions fileCount } } } }',
+        variables: { path: 'meridian/payments/api', iid: '12' },
+      })
+      // A server that can't say leaves the size unknown.
+      const unknown = yield* host.change(repository, 12)
+      assert.deepStrictEqual([unknown.additions, unknown.deletions], [null, null])
     }),
   )
 
@@ -302,13 +352,18 @@ describe('GitLab as a code host', () => {
 
   it.effect('says why it can’t merge, in GitLab’s words', () =>
     Effect.gen(function* () {
-      const statuses = ['ci_must_pass', 'something_new']
+      const statuses = ['ci_must_pass', 'need_rebase', 'something_new']
       const { host } = gitlab([
         ['PUT', `${PROJECT}/merge_requests/12/merge`, { status: 405, json: { message: '405 Method Not Allowed' } }],
         ['GET', `${PROJECT}/merge_requests/12`, () => ({ json: request({ detailed_merge_status: statuses.shift() }) })],
       ])
       const pipeline = yield* Effect.flip(host.merge(repository, change))
       assert.deepStrictEqual([pipeline.reason, pipeline.message], ['rejected', 'A CI/CD pipeline must succeed before merge.'])
+      // Nothing to press in Althar: it says where to do it.
+      assert.strictEqual(
+        (yield* Effect.flip(host.merge(repository, change))).message,
+        'The merge request must be rebased. Rebase it on GitLab, then accept it again.',
+      )
       assert.strictEqual((yield* Effect.flip(host.merge(repository, change))).message, '405 Method Not Allowed')
     }),
   )
@@ -367,6 +422,32 @@ describe('GitLab as a code host', () => {
             ],
           },
         ],
+        [
+          'GET',
+          `${PROJECT}/pipelines/2/bridges?per_page=100`,
+          {
+            json: [
+              {
+                id: 17007488990,
+                name: 'rspec:trigger',
+                stage: 'test',
+                status: 'success',
+                allow_failure: false,
+                web_url: 'https://gitlab.com/meridian/payments/api/-/jobs/17007488990',
+                downstream_pipeline: { id: 6, status: 'failed', web_url: 'https://gitlab.com/meridian/payments/api/-/pipelines/6' },
+              },
+              // Trimmed from gitlab-org/gitlab's: not started yet, so no downstream pipeline.
+              {
+                id: 17014290523,
+                name: 'rspec-ee:predictive:trigger',
+                status: 'created',
+                allow_failure: true,
+                web_url: 'https://gitlab.com/meridian/payments/api/-/jobs/17014290523',
+                downstream_pipeline: null,
+              },
+            ],
+          },
+        ],
       ])
       assert.deepStrictEqual(yield* host.checks(repository, 'abc'), [
         {
@@ -384,6 +465,21 @@ describe('GitLab as a code host', () => {
           summary: null,
         },
         { id: 'job:34675721:17007488981', name: 'deploy', state: 'skipped', url: null, summary: null },
+        // A child pipeline's failure is the trigger job's, whatever the trigger job says of itself.
+        {
+          id: 'bridge:34675721:17007488990',
+          name: 'rspec:trigger',
+          state: 'failed',
+          url: 'https://gitlab.com/meridian/payments/api/-/pipelines/6',
+          summary: null,
+        },
+        {
+          id: 'bridge:34675721:17014290523',
+          name: 'rspec-ee:predictive:trigger',
+          state: 'queued',
+          url: 'https://gitlab.com/meridian/payments/api/-/jobs/17014290523',
+          summary: null,
+        },
       ])
     }),
   )
@@ -403,6 +499,7 @@ describe('GitLab as a code host', () => {
           { json: request({ sha: 'abc', head_pipeline: { id: 7, project_id: 45049979, sha: 'merge-commit' } }) },
         ],
         ['GET', `${API}/projects/45049979/pipelines/7/jobs?per_page=100`, { json: [job(1, 'unit', 'running')] }],
+        ['GET', `${API}/projects/45049979/pipelines/7/bridges?per_page=100`, { json: [] }],
         ['GET', `${PROJECT}/repository/commits/def/merge_requests`, { json: [request({ sha: 'other' })] }],
       ])
       assert.deepStrictEqual(
@@ -525,6 +622,24 @@ describe('GitLab as a code host', () => {
       assert.deepStrictEqual([quiet.comments, quiet.reviews, quiet.cursor], [[], [], '2026-10-02T00:00:00.000Z'])
     }),
   )
+
+  it('reads a verdict from how its system note starts, and only from a system note', () => {
+    const said = (body: string, system = true) => note(1, user(6, 'reviewer'), body, '2026-10-01T09:00:00.000Z', { system })
+    assert.deepStrictEqual(
+      [
+        'approved this merge request',
+        'Approved this merge request',
+        'approved',
+        'requested changes',
+        'Requested changes on this merge request',
+        'unapproved this merge request',
+        'requested review from @reviewer',
+        'added 1 commit',
+      ].map((body) => verdictOf(said(body))),
+      ['approved', 'approved', 'approved', 'changes_requested', 'changes_requested', undefined, undefined, undefined],
+    )
+    assert.isUndefined(verdictOf(said('approved this merge request', false)))
+  })
 
   it.effect('reads every page of a busy merge request’s threads', () =>
     Effect.gen(function* () {

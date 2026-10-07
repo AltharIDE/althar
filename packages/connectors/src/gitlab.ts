@@ -110,6 +110,31 @@ const NoteAnswer = Schema.Struct({
 })
 type NoteAnswer = typeof NoteAnswer.Type
 
+/** A trigger job: it starts a child pipeline, or another project's, and its result is that pipeline's. */
+const BridgeAnswer = Schema.Struct({
+  id: Schema.Number,
+  name: Schema.String,
+  status: Schema.String,
+  allow_failure: Schema.optional(Schema.Boolean),
+  web_url: Schema.optional(Schema.NullOr(Schema.String)),
+  downstream_pipeline: Schema.optional(
+    Schema.NullOr(Schema.Struct({ status: Schema.String, web_url: Schema.optional(Schema.NullOr(Schema.String)) })),
+  ),
+})
+
+/** A merge request's size, from GitLab's GraphQL, which REST doesn't give without the whole diff. */
+const SizeAnswer = Schema.Struct({
+  project: Schema.NullOr(
+    Schema.Struct({
+      mergeRequest: Schema.NullOr(
+        Schema.Struct({
+          diffStatsSummary: Schema.NullOr(Schema.Struct({ additions: Schema.Number, deletions: Schema.Number, fileCount: Schema.Number })),
+        }),
+      ),
+    }),
+  ),
+})
+
 const Discussion = Schema.Struct({ id: Schema.String, individual_note: Schema.Boolean, notes: Schema.Array(NoteAnswer) })
 
 const IssueAnswer = Schema.Struct({
@@ -173,13 +198,25 @@ const changeOf = (request: MergeAnswer): ChangeRequest => ({
   updatedAt: request.updated_at,
 })
 
-/** How the project merges, in the order Althar prefers: squashed, where its squash setting allows, then its own method. */
+/**
+ * How the project merges, its own choice first: squashed where its squash
+ * setting requires it or squashes by default, its own method otherwise, and
+ * the other where a merge request may choose.
+ */
 export const mergesOf = (method: string | null | undefined, squash: string | null | undefined): ReadonlyArray<MergeMethod> => {
   // Fast-forward only rebases the branch onto its target; a semi-linear merge still makes a merge commit.
   const own: MergeMethod = method === 'ff' ? 'rebase' : 'merge'
-  if (squash === 'always') return ['squash']
-  if (squash === 'never') return [own]
-  return squash == null ? [own] : ['squash', own]
+  switch (squash) {
+    case 'always':
+      return ['squash']
+    case 'default_on':
+      return ['squash', own]
+    case 'default_off':
+      return [own, 'squash']
+    // Never, or not said to this account.
+    default:
+      return [own]
+  }
 }
 
 /** A job's state. A failure the pipeline allows doesn't hold the merge request up. */
@@ -211,19 +248,23 @@ const NOT_MERGEABLE: Readonly<Record<string, string>> = {
   discussions_not_resolved: 'All discussions must be resolved before merge.',
   draft_status: 'Can’t merge because the merge request is a draft.',
   merge_request_blocked: 'Blocked by another merge request.',
-  need_rebase: 'The merge request must be rebased.',
+  need_rebase: 'The merge request must be rebased. Rebase it on GitLab, then accept it again.',
   not_approved: 'Approval is required before merge.',
   not_open: 'The merge request must be open before merge.',
   requested_changes: 'The merge request has reviewers who have requested changes.',
 }
 
-/** The system notes that are a review's verdict. */
-const verdictOf = (note: NoteAnswer): Verdict | undefined =>
+/**
+ * The system notes that are a review's verdict, by how they start: "approved
+ * this merge request" and "requested changes" today, read loosely, as
+ * GitLab's wording has moved between versions. "unapproved" is no verdict.
+ */
+export const verdictOf = (note: NoteAnswer): Verdict | undefined =>
   !note.system
     ? undefined
-    : note.body === 'approved this merge request'
+    : /^approved\b/i.test(note.body)
       ? 'approved'
-      : note.body === 'requested changes'
+      : /^requested changes\b/i.test(note.body)
         ? 'changes_requested'
         : undefined
 
@@ -238,6 +279,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
   const api = options.apiUrl.replace(/\/+$/, '')
   const web = options.webUrl.replace(/\/+$/, '')
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
+  const graphqlUrl = `${api.replace(/\/v4$/, '')}/graphql`
   const project = (repository: Repository | ReadonlyArray<string>) =>
     `${api}/projects/${'path' in repository ? repository.id : encodeURIComponent(repository.join('/'))}`
 
@@ -258,6 +300,35 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     )
 
   const read = (repository: Repository, number: number) => http.json(MergeAnswer, 'GET', `${project(repository)}/merge_requests/${number}`)
+
+  /** Each merge request's size at the head it was counted at: counted again only when the head moves. */
+  const sizes = new Map<
+    string,
+    { readonly sha: string | null; readonly additions: number; readonly deletions: number; readonly files: number }
+  >()
+  const sizeOf = (repository: Repository, request: MergeAnswer) => {
+    const key = `${repository.id}!${request.iid}`
+    const known = sizes.get(key)
+    if (known !== undefined && known.sha === (request.sha ?? null)) return Effect.succeed(known)
+    return http
+      .graphql(
+        SizeAnswer,
+        graphqlUrl,
+        'query($path: ID!, $iid: String!) { project(fullPath: $path) { mergeRequest(iid: $iid) { diffStatsSummary { additions deletions fileCount } } } }',
+        { path: repository.path.join('/'), iid: String(request.iid) },
+      )
+      .pipe(
+        Effect.map((answer) => {
+          const stats = answer.project?.mergeRequest?.diffStatsSummary
+          if (stats == null) return null
+          const size = { sha: request.sha ?? null, additions: stats.additions, deletions: stats.deletions, files: stats.fileCount }
+          sizes.set(key, size)
+          return size
+        }),
+        // A server too old to say, or a query it refuses: the size stays unknown, and the merge request reads as before.
+        Effect.orElseSucceed(() => null),
+      )
+  }
 
   /** Whether someone can write to the project: a member, inherited or invited, with the Developer role or above. */
   const memberOf = (repository: Repository, user: User) =>
@@ -357,12 +428,23 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
               ),
           ),
         ),
-    change: (repository, number) => Effect.map(http.cached(MergeAnswer, `${project(repository)}/merge_requests/${number}`), changeOf),
+    change: (repository, number) =>
+      Effect.gen(function* () {
+        const request = yield* http.cached(MergeAnswer, `${project(repository)}/merge_requests/${number}`)
+        const size = yield* sizeOf(repository, request)
+        return size === null
+          ? changeOf(request)
+          : { ...changeOf(request), additions: size.additions, deletions: size.deletions, changedFiles: size.files }
+      }),
     markReady: (repository, change) =>
-      Effect.map(
-        http.json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}`, { title: readyTitle(change.title) }),
-        changeOf,
-      ),
+      Effect.gen(function* () {
+        // Its title as it is now, not as Althar last read it: a rename on GitLab since stays.
+        const now = yield* read(repository, change.number)
+        if (!(now.draft ?? now.work_in_progress ?? false)) return changeOf(now)
+        return changeOf(
+          yield* http.json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}`, { title: readyTitle(now.title) }),
+        )
+      }),
     merge: (repository, change) =>
       http
         .json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}/merge`, {
@@ -406,14 +488,29 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         if (pipeline == null) return []
         const where = String(pipeline.project_id ?? repository.id)
         const jobs = yield* http.cached(Schema.Array(JobAnswer), `${api}/projects/${where}/pipelines/${pipeline.id}/jobs?per_page=100`)
-        return jobs.map((job): Check => ({
-          // The job's project and id: where its log is.
-          id: `job:${where}:${job.id}`,
-          name: job.name,
-          state: jobState(job.status, job.allow_failure === true),
-          url: job.web_url ?? null,
-          summary: job.failure_reason ?? null,
-        }))
+        // A child pipeline, or another project's, is started by a trigger job that the jobs leave out: its result is one check.
+        const bridges = yield* http.cached(
+          Schema.Array(BridgeAnswer),
+          `${api}/projects/${where}/pipelines/${pipeline.id}/bridges?per_page=100`,
+        )
+        return [
+          ...jobs.map((job): Check => ({
+            // The job's project and id: where its log is.
+            id: `job:${where}:${job.id}`,
+            name: job.name,
+            state: jobState(job.status, job.allow_failure === true),
+            url: job.web_url ?? null,
+            summary: job.failure_reason ?? null,
+          })),
+          ...bridges.map((bridge): Check => ({
+            // No log of its own: the downstream pipeline's jobs have theirs.
+            id: `bridge:${where}:${bridge.id}`,
+            name: bridge.name,
+            state: jobState(bridge.downstream_pipeline?.status ?? bridge.status, bridge.allow_failure === true),
+            url: bridge.downstream_pipeline?.web_url ?? bridge.web_url ?? null,
+            summary: null,
+          })),
+        ]
       }),
     checkLog: (repository, check) => {
       const match = /^job:(\d+):(\d+)$/.exec(check.id)
