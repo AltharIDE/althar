@@ -1,20 +1,35 @@
 import { createRoute, useNavigate } from '@tanstack/react-router'
 
 import { rootRoute } from '../../root'
-import { useConnections } from '../connections/useConnections'
+import { HomeView } from '../home/HomeView'
+import { useHome } from '../home/useHome'
 import { StartView } from './StartView'
-import { useStart } from './useStart'
+import { type StartModel, useStart } from './useStart'
 
-function Start() {
+function Home({ start }: { start: StartModel }) {
   const navigate = useNavigate()
   return (
-    <StartView
-      model={useStart()}
-      connections={useConnections()}
+    <HomeView
+      model={useHome()}
+      start={start}
       onProject={(projectId) => void navigate({ to: '/projects/$projectId', params: { projectId } })}
+      onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
+      onSettings={() => void navigate({ to: '/settings' })}
     />
   )
 }
 
-/** The start: the agents on this Mac, and the projects. */
+function Start() {
+  const navigate = useNavigate()
+  const start = useStart()
+  return (
+    <StartView
+      model={start}
+      onProject={(projectId) => void navigate({ to: '/projects/$projectId', params: { projectId } })}
+      home={() => <Home start={start} />}
+    />
+  )
+}
+
+/** Where the window starts: the first screen with no project yet, the home once there are. */
 export const startRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', component: Start })

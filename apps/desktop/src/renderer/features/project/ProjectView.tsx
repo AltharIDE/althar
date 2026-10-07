@@ -53,7 +53,7 @@ import type { ProjectModel } from './useProject'
 
 export const text = {
   rules: 'Project rules',
-  back: 'Projects',
+  back: 'Home',
   project: 'Project',
   conversation: 'Conversation',
   newTask: 'New task',

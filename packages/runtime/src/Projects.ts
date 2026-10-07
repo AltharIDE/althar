@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, realpathSync } from 'node:fs'
 import { basename, join, relative } from 'node:path'
 
+import { ProjectInk } from '@althar/contracts'
 import { type CommandEnvelope, Ids, newId, type ProjectId, type TaskId, type ThreadId } from '@althar/domain'
 import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
 import { Context, Crypto, Effect, Layer, Option, Schema } from 'effect'
@@ -124,6 +125,22 @@ export const CreatedTask = Schema.Struct({
   branch: Schema.String,
 })
 export type CreatedTask = typeof CreatedTask.Type
+
+/**
+ * A new project's ink, the colour its mark is drawn in: the first, from where
+ * its id points, that no other project has, while one is free. It is chosen
+ * once, when the project is made, and kept: worked out again, it would change
+ * as other projects come and go.
+ */
+export const inkFor = (seed: string, taken: ReadonlyArray<string>): ProjectInk => {
+  const inks = ProjectInk.literals
+  // FNV-1a: the same seed always starts at the same ink.
+  let hash = 0x811c9dc5
+  for (let index = 0; index < seed.length; index++) hash = Math.imul(hash ^ seed.charCodeAt(index), 0x01000193) >>> 0
+  const start = hash % inks.length
+  const free = [...inks.slice(start), ...inks.slice(0, start)].find((ink) => !taken.includes(ink))
+  return free ?? inks[start] ?? 'clay'
+}
 
 /** A slug from a name: lowercase letters, digits and dashes. */
 export const slugify = (name: string, fallback: string) => {
@@ -288,7 +305,12 @@ export class Projects extends Context.Service<
                 slugify(name, 'project'),
                 taken.map((row) => row.slug),
               )
-              yield* sql`INSERT INTO projects ${sql.insert({ id: projectId, name, slug, createdByActorId: envelope.actorId, createdAt })}`
+              const inks = yield* sql<{ ink: string }>`SELECT ink FROM projects WHERE archived_at IS NULL`
+              const ink = inkFor(
+                projectId,
+                inks.map((row) => row.ink),
+              )
+              yield* sql`INSERT INTO projects ${sql.insert({ id: projectId, name, slug, ink, createdByActorId: envelope.actorId, createdAt })}`
               // An archived project lets go of its folder, so the folder can be opened afresh.
               yield* sql`DELETE FROM project_folders WHERE device_id = ${instance.deviceId} AND path = ${path}
                 AND project_id IN (SELECT id FROM projects WHERE archived_at IS NOT NULL)`

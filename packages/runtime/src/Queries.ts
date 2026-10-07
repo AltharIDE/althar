@@ -5,6 +5,8 @@ import {
   type ChangeSummary,
   ChecksSummary,
   type CoordinatorSnapshot,
+  type HomeEvent,
+  type HomeSnapshot,
   type IssueSummary,
   PAGE,
   Unfurl,
@@ -335,6 +337,8 @@ export class Queries extends Context.Service<
     fileDiff(taskId: string, path: string): Effect.Effect<FileDiff, unknown>
     /** A project's board: its tasks, by card, and the calls that wait on the person. */
     board(projectId: string): Effect.Effect<BoardSnapshot, unknown>
+    /** The home: every project, and across them what waits on the person, what runs, and what the loop did since `since` or they last left it. */
+    home(since?: string): Effect.Effect<HomeSnapshot, unknown>
     /** The project's coordinator thread, with the newest `limit` items before `before`. */
     coordinator(
       projectId: string,
@@ -370,7 +374,9 @@ export class Queries extends Context.Service<
             readonly repositories: string
           }
         >`
-          SELECT p.id, p.name, p.slug,
+          SELECT p.id, p.name, p.slug, p.ink,
+            (SELECT max(at) FROM (SELECT created_at AS at FROM tasks WHERE project_id = p.id
+              UNION ALL SELECT settled_at FROM tasks WHERE project_id = p.id AND settled_at IS NOT NULL)) AS last_work_at,
             coalesce(
               (SELECT f.path FROM project_folders f WHERE f.project_id = p.id AND f.device_id = ${instance.deviceId}),
               (SELECT l.path FROM repository_bindings b JOIN repository_locations l ON l.binding_id = b.id
@@ -778,8 +784,71 @@ export class Queries extends Context.Service<
 
       /** How many settled tasks the board shows: the most recent. */
       const SETTLED_SHOWN = 30
+      /** How far back the home reads what the loop did, before the person has ever left it here. */
+      const FIRST_LOOK = 24 * 60 * 60 * 1000
+      /** The most of what the loop did the home reads. */
+      const EVENTS = 50
       /* Settled work doesn't change, so its card is worked out once, by when it settled. */
       const settledCards = new Map<string, BoardSnapshot['tasks'][number]>()
+
+      /** A task as the board shows it: its card, and, ready, what it changed and what of it merges here. None where it has no card. */
+      const onBoard = (row: {
+        readonly id: string
+        readonly state: string
+        readonly createdAt: string
+        readonly settledAt: string | null
+      }) =>
+        Effect.gen(function* () {
+          const settled = row.settledAt === null ? undefined : settledCards.get(`${row.id}:${row.settledAt}`)
+          if (settled !== undefined) return [settled]
+          const card = yield* cardFor(row.id)
+          if (card === undefined) return []
+          // Ready without a pull request, its size is its branch's, read from git.
+          const changed =
+            card.phase === 'ready' && card.change === null
+              ? yield* Effect.map(changedOfTask(row.id), ({ files }) => ({
+                  files: files.length,
+                  add: files.reduce((sum, file) => sum + file.add, 0),
+                  del: files.reduce((sum, file) => sum + file.del, 0),
+                }))
+              : null
+          const here = card.phase === 'ready' ? yield* hereOf(row.id) : []
+          const read = { ...card, state: row.state, createdAt: row.createdAt, settledAt: row.settledAt, changed, here }
+          if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, read)
+          return [read]
+        })
+
+      /** The calls that wait on the person, in one project or every one, oldest first, each with its task. */
+      const callsIn = (projectId: string | null) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const calls = yield* sql<{
+            id: string
+            kind: string
+            payload: string
+            createdAt: string
+            projectId: string
+            taskId: string
+            threadId: string
+            taskTitle: string
+            taskSlug: string
+          }>`
+            SELECT a.id, a.kind, a.payload, a.created_at, a.project_id, k.id AS task_id, t.id AS thread_id, k.title AS task_title, k.slug AS task_slug
+            FROM attention_requests a JOIN tasks k ON k.id = a.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            JOIN projects p ON p.id = a.project_id
+            WHERE ${projectId === null ? sql`p.archived_at IS NULL` : sql`a.project_id = ${projectId}`} AND a.state = 'open'
+            ORDER BY a.created_at, a.id`
+          return calls.map((call) => ({
+            projectId: call.projectId,
+            call: {
+              ...callOf(call),
+              taskId: call.taskId,
+              threadId: call.threadId,
+              taskTitle: call.taskTitle,
+              taskSlug: call.taskSlug,
+            },
+          }))
+        })
 
       /** A project's board: its tasks, each as its card, and every call that waits on the person. */
       const board = (projectId: string) =>
@@ -801,54 +870,100 @@ export class Queries extends Context.Service<
               SELECT id FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')
               ORDER BY settled_at DESC LIMIT ${SETTLED_SHOWN}))
             ORDER BY k.created_at, k.id`
-          const tasks = yield* Effect.forEach(rows, (row) =>
-            Effect.gen(function* () {
-              const settled = row.settledAt === null ? undefined : settledCards.get(`${row.id}:${row.settledAt}`)
-              if (settled !== undefined) return [settled]
-              const card = yield* cardFor(row.id)
-              if (card === undefined) return []
-              // Ready without a pull request, its size is its branch's, read from git.
-              const changed =
-                card.phase === 'ready' && card.change === null
-                  ? yield* Effect.map(changedOfTask(row.id), ({ files }) => ({
-                      files: files.length,
-                      add: files.reduce((sum, file) => sum + file.add, 0),
-                      del: files.reduce((sum, file) => sum + file.del, 0),
-                    }))
-                  : null
-              const here = card.phase === 'ready' ? yield* hereOf(row.id) : []
-              const read = { ...card, state: row.state, createdAt: row.createdAt, settledAt: row.settledAt, changed, here }
-              if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, read)
-              return [read]
-            }),
-          )
+          const tasks = yield* Effect.forEach(rows, onBoard)
           // Only what the board still shows is kept.
           const shown = new Set(rows.map((row) => `${row.id}:${row.settledAt}`))
           for (const key of settledCards.keys()) if (!shown.has(key)) settledCards.delete(key)
-          const calls = yield* sql<{
-            id: string
-            kind: string
-            payload: string
-            createdAt: string
-            taskId: string
-            threadId: string
-            taskTitle: string
-            taskSlug: string
-          }>`
-            SELECT a.id, a.kind, a.payload, a.created_at, k.id AS task_id, t.id AS thread_id, k.title AS task_title, k.slug AS task_slug
-            FROM attention_requests a JOIN tasks k ON k.id = a.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-            WHERE a.project_id = ${projectId} AND a.state = 'open' ORDER BY a.created_at, a.id`
+          const calls = yield* callsIn(projectId)
           return {
             cursor: at,
             tasks: tasks.flat(),
-            calls: calls.map((call) => ({
-              ...callOf(call),
-              taskId: call.taskId,
-              threadId: call.threadId,
-              taskTitle: call.taskTitle,
-              taskSlug: call.taskSlug,
-            })),
+            calls: calls.map((one) => one.call),
           } satisfies BoardSnapshot
+        })
+
+      /** The phases the home shows a task in: running, stopped or waiting on a call, and ready to accept. */
+      const ON_HOME: ReadonlyArray<TaskPhase> = ['running', 'waiting', 'stopped', 'ready']
+
+      /**
+       * The home: every project, and across them what waits on the person,
+       * what runs, and what the loop did since `since`, or since they last left
+       * the home here, or, before they ever did, over the last day.
+       */
+      const home = (since?: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const at = yield* cursor
+          const [device] = yield* sql<{
+            looked: string | null
+          }>`SELECT home_looked_at AS looked FROM devices WHERE id = ${instance.deviceId}`
+          const looked = device?.looked ?? null
+          const from = since ?? looked ?? new Date(Date.now() - FIRST_LOOK).toISOString()
+          const rows = yield* sql<{ id: string; projectId: string; state: string; createdAt: string; settledAt: string | null }>`
+            SELECT k.id, k.project_id, k.state, k.created_at, k.settled_at FROM tasks k JOIN projects p ON p.id = k.project_id
+            WHERE p.archived_at IS NULL AND k.state = 'open' ORDER BY k.created_at, k.id`
+          const tasks = yield* Effect.forEach(rows, (row) =>
+            Effect.map(onBoard(row), (read) =>
+              read.flatMap((task) => (ON_HOME.includes(task.phase) ? [{ ...task, projectId: row.projectId }] : [])),
+            ),
+          )
+          return {
+            cursor: at,
+            looked,
+            since: from,
+            tasks: tasks.flat(),
+            calls: (yield* callsIn(null)).map((one) => ({ ...one.call, projectId: one.projectId })),
+            events: yield* eventsSince(from),
+            projects: (yield* projects).projects,
+          } satisfies HomeSnapshot
+        })
+
+      /**
+       * What the loop did since `from`, newest first, never what the person
+       * did: each step's result, each usage limit and quiet step it dealt with,
+       * and the permission asks the projects' rules answered, counted.
+       */
+      const eventsSince = (from: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const items = yield* sql<{
+            id: string
+            sequence: number
+            kind: string
+            content: string
+            createdAt: string
+            projectId: string
+            taskId: string
+            threadId: string
+            slug: string
+            title: string
+          }>`
+            SELECT i.id, i.sequence, i.kind, i.content, i.created_at, i.project_id, k.id AS task_id, t.id AS thread_id, k.slug, k.title
+            FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind = 'task' JOIN tasks k ON k.id = t.task_id
+            JOIN projects p ON p.id = i.project_id
+            WHERE p.archived_at IS NULL AND i.created_at > ${from}
+              AND (i.kind = 'step_result' OR (i.kind = 'notice' AND json_extract(i.content, '$.about') IN ('limit', 'stall')))
+            ORDER BY i.created_at DESC, i.sequence DESC LIMIT ${EVENTS}`
+          const events: Array<HomeEvent> = items.flatMap((row): ReadonlyArray<HomeEvent> => {
+            const base = {
+              id: row.id,
+              at: row.createdAt,
+              projectId: row.projectId,
+              task: { id: row.taskId, threadId: row.threadId, slug: row.slug, title: row.title },
+            }
+            const item = itemOf({ ...row, agentId: null, inputState: null, disposition: null, decision: null })
+            if (item?.kind === 'step_result') return [{ ...base, kind: 'step', result: item.content }]
+            if (item?.kind !== 'notice') return []
+            const about = text(JSON.parse(row.content), 'about') === 'stall' ? 'stall' : 'limit'
+            return [{ ...base, kind: 'dealt', about, title: item.content.title, description: item.content.description }]
+          })
+          // Answered by the rules, not by the person: counted, from the first.
+          const [answered] = yield* sql<{ count: number; first: string | null }>`
+            SELECT count(*) AS count, min(d.decided_at) AS first FROM decisions d JOIN projects p ON p.id = d.project_id
+            WHERE p.archived_at IS NULL AND d.decided_by_actor_id = ${instance.systemId} AND d.decided_at > ${from}`
+          if (answered !== undefined && answered.count > 0 && answered.first !== null)
+            events.push({ kind: 'answered', id: `answered:${from}`, at: answered.first, count: answered.count })
+          return events
         })
 
       /** A page of a thread's items, as screens show them. */
@@ -1004,6 +1119,7 @@ export class Queries extends Context.Service<
         thread: (threadId, page) => run(thread(threadId, page)),
         fileDiff: (taskId, path) => run(diffOf(taskId, path)),
         board: (projectId) => run(board(projectId)),
+        home: (since) => run(home(since)),
         item: (threadId, itemId) => run(item(threadId, itemId)),
         coordinator: (projectId, page) => run(coordinator(projectId, page)),
         changesSince: (after, limit) => run(changesSince(after, limit)),

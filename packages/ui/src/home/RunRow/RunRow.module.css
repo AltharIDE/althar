@@ -65,6 +65,7 @@
   white-space: nowrap;
 }
 .ref {
+  flex: none;
   font: 500 11px/1 var(--mono);
   font-variant-numeric: tabular-nums;
 }
@@ -97,6 +98,7 @@
 }
 .elapsed {
   text-align: right;
+  white-space: nowrap;
   font: 500 11.5px/1 var(--mono);
   font-variant-numeric: tabular-nums;
   color: var(--t-3);

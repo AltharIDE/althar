@@ -42,7 +42,9 @@ MVVM in feature folders ([ADR-010](../../docs/decisions/010-desktop-app-mvvm.md)
 | Folder | What it holds |
 | --- | --- |
 | `data/` | The client: Effect inside, plain promises and a subscription outside; the services view models reach through React; the models each agent offers, read once for the window |
-| `features/start` | The agents on this Mac with their accounts, and the projects; opening a folder by the button, ⌘N or a drop |
+| `features/start` | Where the window starts: the first screen with no project yet, a folder of several repositories before it is a project, and the home once there are projects; opening a folder by the button, ⌘N or a drop |
+| `features/home` | The home: across projects, what waits on you, what runs and what the loop did since you left, with the projects beside it and the agents' marks in the bar |
+| `features/settings` | The agents on this Mac with their accounts, and the code hosts and trackers |
 | `features/project` | A project's window: the coordinator's thread with each task's card (its plan before it starts, then where it stands), the agent the coordinator runs on, and a task you plan yourself, beside it |
 | `features/board` | A project's board: its lanes, the dock beside them, and what you answer, accept or send back from it |
 | `features/rules` | A project's rules (ADR-013): who answers, what always asks and what is never allowed, how a task ends, usage limits and accounts; each change saved at once |
@@ -63,19 +65,21 @@ Each feature holds its route (`route.tsx`), its view model (`use*.ts`), its view
 - **Work folds; results stand.** A turn's work (its tool calls, thoughts, plan, and what it said on the way) folds under how long it worked; only its last message stays open, and nothing when a step's result follows, since the step's summary is what the person reads. While a turn runs, the fold says how long it has worked so far and what it is doing now.
 - **A step that needs you is a call in the task.** It says what went wrong and what Althar tried, with the kit's `Stuck`: tell the lead, hand the step to another agent, or abandon it; for a review, review again or go on without it.
 - **A project is a conversation, a board, or both** (⌘1–3). The board reads every task's card and every call in one go (`GetBoard`) and reads again when something it shows changes: a task, plan, run, step, session, turn, call, pull request or worktree, not what is said in a thread. What you open from it goes in the dock beside it: a call is answered there as in its task, work ready to accept is merged at the head the dock showed, or sent back to its lead, and a task's changes open over the window. The bar says how much runs and how much needs you, and opens the first of it.
+- **The home is where you come back to** (`GetHome`). It reads every project's work that runs, waits on you or is ready, every call, and what the loop did, in one go, and reads again when any of it changes. What the loop did is read from when you last left the home on this Mac, the runtime told as the home goes (`LeftHome`), and from that one moment for as long as the home is open, so nothing goes while you look. A permission is answered on its card; the rest open in the dock, in the projects' place, as on a board. A project is drawn with its mark, in the ink it was given when it was made. The bar has each agent's mark, saying only when one is out or signed out, and Settings (⌘,); ⌘1 to ⌘9 open the projects in their order.
 - **The runtime keeps a plan's clock.** A plan card counts down to the time the runtime starts it, seen or not, then says it is starting; the runtime starts it, not the window. Holding, changing and starting it now go to the runtime, and the card shows what comes back.
 
 ## Checks
 
 - `bun run check`: format, type-aware lint and type checks.
 - `bun run test:coverage`: view models and views with Testing Library against a fake client; the client against the real runtime over a `MessageChannel`, with the fake agent. Gated at 90% of lines and branches; the entry and the routes are left to the end-to-end tests.
-- `bun run test:e2e`: the built app under Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; the coordinator planning a task that is implemented, reviewed, settled and ready; and connecting GitHub with a token, a planned task ending in a draft pull request that is pushed and opened, marking it ready, and reading what it changed. `e2e/real.spec.ts` runs a real agent when asked.
+- `bun run test:e2e`: the built app under Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; the home across two projects, its dock, and settings; the coordinator planning a task that is implemented, reviewed, settled and ready; and connecting GitHub with a token, a planned task ending in a draft pull request that is pushed and opened, marking it ready, and reading what it changed. `e2e/real.spec.ts` runs a real agent when asked.
 
 ## Gaps
 
 - **Findings are shown, not answered.** A review's findings are left to the lead, which settles them; the kit's answers to them aren't wired up.
 - **Views are tested with Testing Library,** not with Storybook stories fed view-model output as ADR-010 says; the app has no Storybook of its own yet.
 - **Tasks have no numbers.** The kit's headers show a task's number; the app shows the title alone.
-- **An answered call disappears** once the thread is read again, rather than folding to a line saying what was said.
+- **An answered call disappears** once the thread is read again, rather than folding to a line saying what was said. On the home, a permission answered on its card folds to a line until you leave.
+- **The home has no sign-in card yet.** An agent that is signed out shows in the bar, in violet; signing it in is in Settings.
 - **A packaged app started from the Finder** gets a short `PATH`, so agents on the user's own `PATH` (OpenCode, Claude's status check) may not be found. Development runs from a terminal and inherits its `PATH`.
 - **No packaging, signing or updates yet.** The bundled adapters run on Electron's own binary as Node, so a signed app has to keep the RunAsNode fuse on; see the open questions.

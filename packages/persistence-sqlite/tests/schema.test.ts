@@ -145,6 +145,33 @@ describe('schema', () => {
     ),
   )
 
+  it.effect('gives the projects made before inks had one an ink each, in the order they were made', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const before = migrations.findIndex((migration) => migration.key === '0011_home')
+        const made = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const actor = `act_${'0'.repeat(32)}`
+          yield* sql.unsafe(
+            `INSERT INTO actors (id, kind, display_name, created_at) VALUES ('${actor}', 'person', 'You', '2026-09-28T20:34:23.123Z')`,
+          )
+          // Nine projects, the last two made in the same millisecond: the ninth starts the inks again.
+          for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9])
+            yield* sql.unsafe(
+              `INSERT INTO projects (id, name, slug, created_by_actor_id, created_at) VALUES ('proj_${String(n).padStart(32, '0')}', 'P${n}', 'p${n}', '${actor}', '2026-09-28T20:34:2${Math.min(n, 8)}.000Z')`,
+            )
+        })
+        yield* Effect.provide(made, Layer.fresh(Database.layer({ filename, migrations: migrations.slice(0, before) })))
+        const inks = Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ ink: string }>`SELECT ink FROM projects ORDER BY created_at, rowid`)
+        const after = yield* Effect.provide(inks, Layer.fresh(Database.layer({ filename })))
+        assert.deepStrictEqual(
+          after.map((row) => row.ink),
+          ['clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber', 'clay'],
+        )
+      }),
+    ),
+  )
+
   it.effect('refuses to open a database whose rows point at nothing', () =>
     withFile((filename) =>
       Effect.gen(function* () {

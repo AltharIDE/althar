@@ -86,7 +86,13 @@ One pull request each:
      ([01](../architecture/01-concepts-and-project-model.md));
    - local merging, for a task that ended on its branch: into each of its
      repositories' default branches here, all or none, nothing pushed
-     ([06](../architecture/06-integrations-and-skills.md)).
+     ([06](../architecture/06-integrations-and-skills.md));
+   - the home, asked for on 2026-10-06, as the kit's Screens/Home has it:
+     across projects, what waits on you (permissions answered on their cards,
+     the rest in the dock), what runs, and what the loop did since you last
+     left; the projects beside it, each with the ink it was given when it was
+     made. The agents and their accounts, and the connections, moved to
+     Settings (⌘,). Not yet: a card for an agent that is signed out.
 
    Next:
    1. The lead answers permission requests: the "lead decides" mode.

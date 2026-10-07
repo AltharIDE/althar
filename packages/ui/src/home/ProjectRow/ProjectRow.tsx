@@ -87,7 +87,7 @@ export function ProjectRow({ project, running, yours, moving = running > 0, now,
       )}
       {now && (
         <span className={s.now}>
-          {t.now(now.step, now.task)}
+          <span className={s.doing}>{t.now(now.step, now.task)}</span>
           <Model model={now.who} short />
         </span>
       )}

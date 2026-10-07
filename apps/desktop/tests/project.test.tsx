@@ -58,7 +58,7 @@ describe('the Talk room', () => {
     expect(screen.getByText(/^Starts in \d+s$/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Open task/ }))
     expect(onTask).toHaveBeenCalledWith('th2')
-    await userEvent.click(screen.getByRole('button', { name: /Projects/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Home/ }))
     expect(onBack).toHaveBeenCalled()
     // It watches from the earlier of its two reads; the connections, from theirs.
     await waitFor(() => expect(watching).toEqual(expect.arrayContaining([3, 2])))

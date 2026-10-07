@@ -6,17 +6,29 @@ import { ApiError } from '@althar/contracts'
 import { RuntimeState } from '@althar/ui'
 
 import { useServices } from '../src/renderer/data/services'
-import { accountEntry, runtimeEntry, shortFolder, StartView } from '../src/renderer/features/start/StartView'
-import { useStart } from '../src/renderer/features/start/useStart'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
-import { agents, changed, fakeClient, fakeHost, project, streamed, usual } from './fixtures'
+import { HomeView } from '../src/renderer/features/home/HomeView'
+import { useHome } from '../src/renderer/features/home/useHome'
+import { SettingsView } from '../src/renderer/features/settings/SettingsView'
+import { accountEntry, runtimeEntry, shortFolder, StartView } from '../src/renderer/features/start/StartView'
+import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
+import { agents, changed, fakeClient, fakeHost, home, project, streamed, usual } from './fixtures'
 import { withServices } from './render'
 
-function Start({ onProject }: { onProject: (id: string) => void }) {
-  return <StartView model={useStart()} connections={useConnections()} onProject={onProject} />
+function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
+  return <HomeView model={useHome()} start={start} onProject={onProject} onTask={vi.fn()} onSettings={vi.fn()} />
 }
 
-describe('accounts on the start', () => {
+function Start({ onProject }: { onProject: (id: string) => void }) {
+  const start = useStart()
+  return <StartView model={start} onProject={onProject} home={() => <Home start={start} onProject={onProject} />} />
+}
+
+function Settings({ onBack = vi.fn() }: { onBack?: () => void }) {
+  return <SettingsView model={useStart()} connections={useConnections()} onBack={onBack} />
+}
+
+describe('accounts in settings', () => {
   it('says where each account signs in and how it stands', () => {
     const now = new Date('2026-10-03T12:00:00')
     expect(shortFolder('/Users/me/.codex-work')).toBe('~/.codex-work')
@@ -51,7 +63,7 @@ describe('accounts on the start', () => {
       })),
     })
     const host = fakeHost({ pickFolder: vi.fn(async () => 'grant_chosen') })
-    withServices(<Start onProject={vi.fn()} />, client, host)
+    withServices(<Settings />, client, host)
     await screen.findByText('work')
 
     // A folder codex-profiles made, found by its name.
@@ -95,7 +107,7 @@ describe('accounts on the start', () => {
         ],
       })),
     })
-    withServices(<Start onProject={vi.fn()} />, client)
+    withServices(<Settings />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'More for x' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: /Remove/ }))
     expect((await screen.findByRole('alert')).textContent).toContain('couldn’t sign this account out')
@@ -118,7 +130,7 @@ describe('accounts on the start', () => {
         ],
       })),
     })
-    withServices(<Start onProject={vi.fn()} />, client)
+    withServices(<Settings />, client)
     // The code hosts' rows sign in too: this one is the account's.
     await userEvent.click(within(await screen.findByRole('list', { name: 'Codex accounts' })).getByRole('button', { name: 'Sign in' }))
     expect((await screen.findByRole('alert')).textContent).toBe(
@@ -128,35 +140,32 @@ describe('accounts on the start', () => {
 })
 
 describe('the start', () => {
-  it('lists the agents on this Mac, and the projects, and opens one', async () => {
+  it('shows the home once there are projects, and opens one', async () => {
     const onProject = vi.fn()
     const { client, emit, watching } = fakeClient()
     withServices(<Start onProject={onProject} />, client)
-    await screen.findByText('meridian')
-    expect(screen.getByText('/code/meridian')).toBeTruthy()
-    expect(screen.getByText('1 task · 1 working')).toBeTruthy()
-    await screen.findByText('Claude Code')
-    await userEvent.click(screen.getByText('meridian'))
+    const projects = await screen.findByRole('complementary', { name: 'Projects' })
+    await userEvent.click(await within(projects).findByRole('button', { name: /meridian/ }))
     expect(onProject).toHaveBeenCalledWith('p1')
 
     // A change to a project reads the list again; a change to anything else doesn't.
-    // It watches from the list's cursor, and asks each agent again, since this is where sign-in shows.
-    await waitFor(() => expect(watching).toEqual(expect.arrayContaining([3, 2])))
+    // It asks each agent again, since the bar shows how each is signed in.
+    await waitFor(() => expect(watching).toEqual(expect.arrayContaining([3, 1])))
     expect(client.status).toHaveBeenCalledWith({ recheck: true })
     emit(changed('task', 't1'))
     emit(changed('thread_item', 'i1'))
     emit(streamed('i1', 'Hi'))
     await waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(2))
-    // A later read doesn't start the watch again: one for the projects, one for the connections.
+    // A later read doesn't start the watch again: one for the projects, one for the home.
     expect(watching).toHaveLength(2)
   })
 
   it('opens a folder as a project: from the button, from ⌘N, and dropped on the window', async () => {
     const onProject = vi.fn()
-    const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects: [{ ...project, running: 0, waiting: 2 }] })) })
+    const { client } = fakeClient({ getHome: vi.fn(async () => home({ projects: [{ ...project, running: 0, waiting: 2 }] })) })
     const host = fakeHost()
     const view = withServices(<Start onProject={onProject} />, client, host)
-    await screen.findByText('1 task · 2 calls wait on you')
+    await screen.findByRole('complementary', { name: 'Projects' })
     await userEvent.click(screen.getByRole('button', { name: 'Open a folder' }))
     await waitFor(() => expect(onProject).toHaveBeenCalledTimes(1))
     expect(client.openProject).toHaveBeenCalledWith('grant_picked')
@@ -298,10 +307,14 @@ describe('the start', () => {
     await screen.findByText('Your first project')
     await userEvent.click(screen.getByRole('button', { name: /Open a folder/ }))
     await screen.findByText('That folder is not in a git repository.')
+    // ⌘N opens a folder here too.
+    fireEvent.keyDown(window, { key: 'n', metaKey: true })
+    await waitFor(() => expect(client.openProject).toHaveBeenCalledTimes(2))
     // Something dropped that is not a file on disk opens nothing.
+    fireEvent.dragOver(view.container.firstElementChild as Element)
     fireEvent.drop(view.container.firstElementChild as Element, { dataTransfer: { files: [new File([], 'x')] } })
     await waitFor(() => expect(host.grantDropped).toHaveBeenCalled())
-    expect(client.openProject).toHaveBeenCalledTimes(1)
+    expect(client.openProject).toHaveBeenCalledTimes(2)
     expect(onProject).not.toHaveBeenCalled()
   })
 
@@ -313,8 +326,7 @@ describe('the start', () => {
     const host = fakeHost({ pickFolder: vi.fn(async () => null) })
     withServices(<Start onProject={vi.fn()} />, client, host)
     await screen.findAllByText("Althar's runtime didn't answer. If it keeps happening, restart Althar.")
-    expect(screen.getByText('Looking at the agents on this Mac…')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Open a folder' }))
+    await userEvent.click(screen.getByRole('button', { name: /Open a folder/ }))
     expect(client.openProject).not.toHaveBeenCalled()
   })
 

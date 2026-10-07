@@ -1,0 +1,32 @@
+.window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--n-2);
+}
+
+/* The bar stays; what is under it scrolls, with the scrollbar at the window's edge. */
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.page {
+  display: grid;
+  align-content: start;
+  gap: 40px;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 40px 64px;
+}
+
+.section {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.quiet {
+  color: var(--t-3);
+}
