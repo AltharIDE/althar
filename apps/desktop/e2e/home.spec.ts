@@ -31,6 +31,7 @@ test('comes back to what runs and what waits across projects, with the projects 
   const meridian = repository(home, 'meridian')
   const halyard = repository(home, 'halyard')
   const { electronApp, page } = await launch(home)
+  const tabs = page.getByRole('navigation', { name: 'Projects' })
   try {
     // A task that keeps working in one project.
     await chooseFolder(electronApp, meridian)
@@ -38,7 +39,7 @@ test('comes back to what runs and what waits across projects, with the projects 
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await startTask(page, LONG, '[lead:wait]')
     await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
-    await page.getByRole('button', { name: 'Home' }).click()
+    await tabs.getByRole('button', { name: /^Home/ }).click()
 
     // The home has it running, and the project beside it.
     const projects = page.getByRole('complementary', { name: 'Projects' })
@@ -51,7 +52,7 @@ test('comes back to what runs and what waits across projects, with the projects 
     await expect(page.getByRole('heading', { name: 'halyard', level: 1 })).toBeVisible()
     await startTask(page, 'Name the limits better', '[lead:finish] [lead:edit]')
     await expect(page.getByText('Ready', { exact: true }).first()).toBeVisible()
-    await page.getByRole('button', { name: 'Home' }).click()
+    await tabs.getByRole('button', { name: /^Home/ }).click()
 
     // Ready to accept is what needs you; what the lead did shows since you looked.
     await expect(page.getByRole('heading', { name: 'Name the limits better', level: 3 })).toBeVisible()
@@ -72,12 +73,14 @@ test('comes back to what runs and what waits across projects, with the projects 
     await expect(page.getByRole('heading', { name: 'Agents on this Mac' })).toBeVisible()
     await expect(page.getByText('Claude Code')).toBeVisible()
     await page.screenshot({ path: 'test-results/settings.png' })
-    await page.getByRole('button', { name: 'Home' }).click()
+    await tabs.getByRole('button', { name: /^Home/ }).click()
     await expect(projects.getByRole('button', { name: /meridian/ })).toBeVisible()
 
-    // ⌘1 opens the first project.
+    // ⌘2 opens the first project's tab, ⌘1 the home's.
+    await page.keyboard.press('Meta+2')
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.keyboard.press('Meta+1')
-    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    await expect(projects.getByRole('button', { name: /meridian/ })).toBeVisible()
   } finally {
     await electronApp.close()
   }

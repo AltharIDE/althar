@@ -1,0 +1,10 @@
+/* The tabs at the top, the screen filling the rest; the screen scrolls, the window doesn't. */
+.frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.screen {
+  flex: 1;
+  min-height: 0;
+}

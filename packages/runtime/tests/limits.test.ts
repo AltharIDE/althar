@@ -194,6 +194,12 @@ describe('an agent out of usage', () => {
       yield* start
       const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(10))
       assert.strictEqual(held?.waits?.until, new Date(Math.ceil(back / 1000) * 1000).toISOString())
+      // Held for the reset, it is still under way: its project's tab says so.
+      const queries = yield* Queries
+      assert.deepInclude(
+        (yield* queries.projects).projects.find((project) => project.id === projectId),
+        { working: 1, ready: 0 },
+      )
     }).pipe(
       Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } }, codex: { outOfUsage: { until: back } } }, ['opencode'])),
     )

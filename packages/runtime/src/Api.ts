@@ -292,6 +292,8 @@ export const handlers = Api.toLayer(
                 tasks: 0,
                 running: 0,
                 waiting: 0,
+                working: 0,
+                ready: 0,
                 usageLimit: 'move' as const,
                 rotateAccounts: false,
                 onlyAccounts: null,

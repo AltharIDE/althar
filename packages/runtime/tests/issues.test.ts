@@ -94,6 +94,9 @@ describe('an issue', () => {
       assert.strictEqual(snapshot.task.startedAt, ready?.startedAt)
       assert.isNotNull(snapshot.task.startedAt)
       assert.isNull(snapshot.task.settledAt)
+      // Its project counts it as ready for the person, and nothing under way.
+      const [listed] = (yield* queries.projects).projects
+      assert.deepInclude(listed, { working: 0, ready: 1, waiting: 0 })
     }).pipe(
       Effect.provide(
         Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github, linear: tracker }) }))),

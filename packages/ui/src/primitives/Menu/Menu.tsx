@@ -133,12 +133,14 @@ function useItemIds(hint: ReactNode, description: ReactNode) {
 
 export interface MenuItemProps extends ItemBase {
   icon?: IconName
+  /** Something before the label in place of an icon, like a project's mark. */
+  lead?: ReactNode
   /** danger: the item ends or throws away something, like abandoning a task. */
   tone?: 'default' | 'danger'
   onSelect: () => void
 }
 
-export function MenuItem({ icon, tone = 'default', children, hint, description, kbd, disabled, keepOpen, onSelect }: MenuItemProps) {
+export function MenuItem({ icon, lead, tone = 'default', children, hint, description, kbd, disabled, keepOpen, onSelect }: MenuItemProps) {
   const { ids, aria } = useItemIds(hint, description)
   return (
     <M.Item
@@ -150,11 +152,7 @@ export function MenuItem({ icon, tone = 'default', children, hint, description, 
         onSelect()
       }}
     >
-      {icon && (
-        <span className={s.lead}>
-          <Icon name={icon} size={13} />
-        </span>
-      )}
+      {(lead != null || icon) && <span className={s.lead}>{lead ?? (icon && <Icon name={icon} size={13} />)}</span>}
       <Parts hint={hint} description={description} kbd={kbd} ids={ids}>
         {children}
       </Parts>

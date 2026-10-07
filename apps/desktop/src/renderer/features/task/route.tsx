@@ -1,6 +1,7 @@
 import { createRoute, useNavigate } from '@tanstack/react-router'
 
 import { rootRoute } from '../../root'
+import { useVisit } from '../tabs/TabsFrame'
 import { TaskView } from './TaskView'
 import { useTask } from './useTask'
 
@@ -9,6 +10,7 @@ function Task() {
   const navigate = useNavigate()
   const model = useTask(threadId)
   const projectId = model.snapshot?.project.id
+  useVisit(threadId, projectId)
   return (
     <TaskView
       model={model}

@@ -11,16 +11,6 @@
   min-height: 0;
 }
 
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--t-1);
-}
-
 .failure {
   margin: 0;
   padding: 8px 20px;

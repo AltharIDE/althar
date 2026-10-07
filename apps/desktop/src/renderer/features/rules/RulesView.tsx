@@ -102,7 +102,7 @@ export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => 
   const { rules } = model
   return (
     <div className={s.window}>
-      <TitleBar>
+      <TitleBar lights="none">
         <BackCrumb to={model.project ?? text.back} onBack={onBack} />
       </TitleBar>
       <main className={s.scroll}>

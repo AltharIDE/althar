@@ -117,6 +117,10 @@ export const ProjectSummary = Schema.Struct({
   running: Schema.Number,
   /** Questions waiting on the person. */
   waiting: Schema.Number,
+  /** Tasks under way: a step running, or held until an agent's usage limit resets. */
+  working: Schema.Number,
+  /** Tasks ready for the person: their run passed, and nothing of theirs waits or starts. */
+  ready: Schema.Number,
   /** When an agent reaches its usage limit: its work moves on to the next free agent, or waits for the reset. */
   usageLimit: Schema.Literals(['move', 'wait']),
   /** Whether work moves on to an agent's next account here when one runs out (ADR-012): off unless the person turned it on. */

@@ -259,7 +259,7 @@ describe('the home', () => {
     expect(onProject).toHaveBeenCalledWith('p2')
   })
 
-  it('opens a project by ⌘ and its place, settings by ⌘, and reads again when work changes from where it first read', async () => {
+  it('leaves ⌘ and a number to the window’s tabs, opens settings by ⌘, and reads again when work changes from where it first read', async () => {
     const onProject = vi.fn()
     const onSettings = vi.fn()
     const getHome = vi.fn(async () => home({ looked: '2026-10-07T08:00:00.000Z', projects: [project, halyard] }))
@@ -267,11 +267,8 @@ describe('the home', () => {
     const view = withServices(<Home onProject={onProject} onSettings={onSettings} />, client)
     await screen.findByRole('button', { name: /halyard/ })
     fireEvent.keyDown(window, { key: '2', metaKey: true })
-    expect(onProject).toHaveBeenCalledWith('p2')
-    fireEvent.keyDown(window, { key: '9', metaKey: true })
     fireEvent.keyDown(window, { key: 'x', metaKey: true })
-    fireEvent.keyDown(window, { key: '1' })
-    expect(onProject).toHaveBeenCalledTimes(1)
+    expect(onProject).not.toHaveBeenCalled()
     fireEvent.keyDown(window, { key: ',', metaKey: true })
     expect(onSettings).toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: 'Settings' }))

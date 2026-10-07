@@ -4,7 +4,6 @@ import type { BoardTask } from '@althar/contracts'
 
 import {
   ActionButton,
-  BackCrumb,
   ChangeView,
   ChromeButton,
   Composer,
@@ -53,7 +52,6 @@ import type { ProjectModel } from './useProject'
 
 export const text = {
   rules: 'Project rules',
-  back: 'Home',
   project: 'Project',
   conversation: 'Conversation',
   newTask: 'New task',
@@ -83,14 +81,12 @@ export function ProjectView({
   model,
   board,
   connections,
-  onBack,
   onTask,
   onRules,
 }: {
   model: ProjectModel
   board: BoardModel
   connections: ConnectionsModel
-  onBack: () => void
   onTask: (threadId: string) => void
   /** Opens the project's rules; without it, no way there. */
   onRules?: () => void
@@ -211,6 +207,7 @@ export function ProjectView({
   return (
     <div className={s.window}>
       <TitleBar
+        lights="none"
         end={
           <>
             <WorkStatus running={working} yours={yours} onYours={openYours} />
@@ -227,7 +224,6 @@ export function ProjectView({
           </>
         }
       >
-        <BackCrumb to={text.back} onBack={onBack} {...(model.project === null ? {} : { title: model.project.name })} />
         <RoomSwitch value={room} onChange={setRoom} yours={yours} />
       </TitleBar>
       <div className={room === Room.Both ? `${s.rooms} ${s.both}` : s.rooms}>

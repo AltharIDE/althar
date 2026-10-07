@@ -1,0 +1,174 @@
+/* The strip sits on the window's chrome; the tab that has the window is the
+   bar below it, so the two read as one sheet. */
+.strip {
+  position: relative;
+  z-index: var(--z-float);
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+  height: 40px;
+  padding: 0 10px 0 12px;
+  background: var(--chrome);
+  box-shadow: inset 0 -1px var(--line-2);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+/* what can be pressed is not a drag handle */
+.strip :is(button, a) {
+  -webkit-app-region: no-drag;
+}
+.lights {
+  flex: none;
+  align-self: center;
+  display: flex;
+  gap: 8px;
+  width: 49px;
+  margin-right: 10px;
+}
+.lights i {
+  width: 11px;
+  height: 11px;
+  border-radius: 99px;
+  visibility: hidden;
+}
+.drawn i {
+  visibility: visible;
+  background: var(--traffic);
+  transition: background var(--base) var(--ease);
+}
+.strip:hover .drawn i:nth-child(1) {
+  background: #e0685c;
+}
+.strip:hover .drawn i:nth-child(2) {
+  background: #dfa53f;
+}
+.strip:hover .drawn i:nth-child(3) {
+  background: #62b04f;
+}
+
+.nav {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 100%;
+}
+.tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 32px;
+  border-radius: 8px 8px 0 0;
+  transition: background var(--fast) var(--ease);
+}
+/* each the same width, as a browser's are, giving way together down to a mark and a few letters */
+.project {
+  flex: 0 1 auto;
+  width: 188px;
+  min-width: 92px;
+}
+.home {
+  flex: none;
+}
+.tab:not(.current):hover {
+  background: var(--n-2);
+}
+/* the tab with the window is the bar below's own sheet, joined to it over the strip's line */
+.current {
+  z-index: 1;
+  height: 33px;
+  margin-bottom: -1px;
+  background: var(--n-1);
+  box-shadow:
+    inset 1px 0 var(--line-2),
+    inset -1px 0 var(--line-2),
+    inset 0 1px var(--line-2);
+}
+
+.select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 100%;
+  padding: 0 12px 0 11px;
+  border-radius: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t-2);
+  text-align: left;
+}
+.current .select {
+  color: var(--t-1);
+}
+/* room for the × that shows over the end of a project's tab */
+.project .select {
+  padding-right: 30px;
+}
+.mark,
+.logo {
+  flex: none;
+}
+.logo {
+  color: var(--t-2);
+}
+.current .logo {
+  color: var(--t-1);
+}
+.name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.count {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--signal);
+}
+
+.close {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  margin-top: -12px;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.tab:hover .close,
+.current .close,
+.close:focus-visible {
+  opacity: 1;
+}
+
+.plus {
+  flex: none;
+  align-self: center;
+  margin-top: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawn i,
+  .tab,
+  .close {
+    transition: none;
+  }
+}

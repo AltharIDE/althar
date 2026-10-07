@@ -248,7 +248,7 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
   if (snapshot === null) {
     return (
       <div className={s.window}>
-        <TitleBar>{null}</TitleBar>
+        <TitleBar lights="none">{null}</TitleBar>
         <div className={s.loading}>{model.error === null ? <Spinner /> : <p role="alert">{model.error}</p>}</div>
       </div>
     )
@@ -377,7 +377,7 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
 
   return (
     <div className={s.window}>
-      <TitleBar>
+      <TitleBar lights="none">
         <BackCrumb to={snapshot.project.name} onBack={onBack} task={snapshot.task.slug} title={snapshot.task.title} />
       </TitleBar>
       <div className={s.head}>
