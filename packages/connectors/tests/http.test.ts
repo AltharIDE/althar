@@ -148,6 +148,26 @@ describe('a failed answer', () => {
     )
     assert.strictEqual(failureOf('github', 422, headers(), JSON.stringify({ errors: ['bad branch'] }), at).message, 'bad branch')
     assert.strictEqual(failureOf('linear', 400, headers(), JSON.stringify({ error: 'invalid_grant' }), at).message, 'invalid_grant')
+    assert.strictEqual(
+      failureOf(
+        'gitlab',
+        409,
+        headers(),
+        JSON.stringify({ message: ['Another open merge request already exists for this source branch: !4'] }),
+        at,
+      ).message,
+      'Another open merge request already exists for this source branch: !4',
+    )
+    assert.strictEqual(
+      failureOf('gitlab', 400, headers(), JSON.stringify({ message: { title: ["can't be blank"], base: ['Branch is missing'] } }), at)
+        .message,
+      "title can't be blank; Branch is missing",
+    )
+    assert.strictEqual(
+      failureOf('gitlab', 401, headers(), JSON.stringify({ error: 'invalid_token', error_description: 'Token was revoked.' }), at).message,
+      'Token was revoked.',
+    )
+    assert.strictEqual(failureOf('gitlab', 400, headers(), JSON.stringify({ message: [7, null] }), at).message, '400')
     assert.strictEqual(failureOf('github', 500, headers(), 'oops', at).message, '500')
     assert.strictEqual(failureOf('github', 500, headers(), JSON.stringify({}), at).message, '500')
   })
@@ -168,6 +188,10 @@ describe('a failed answer', () => {
     assert.strictEqual(
       failureOf('linear', 429, headers({ 'x-ratelimit-requests-reset': String(at + 5000) }), '', at).retryAt,
       '2026-10-01T09:00:05.000Z',
+    )
+    assert.strictEqual(
+      failureOf('gitlab', 429, headers({ 'ratelimit-reset': String(at / 1000 + 90) }), '', at).retryAt,
+      '2026-10-01T09:01:30.000Z',
     )
     assert.isUndefined(failureOf('linear', 429, headers(), '', at).retryAt)
   })

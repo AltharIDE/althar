@@ -3,6 +3,7 @@ import { Effect } from 'effect'
 
 import type { Credential } from '../../src/credential'
 import { makeGitHub } from '../../src/github'
+import { makeGitLab } from '../../src/gitlab'
 import { makeLinear } from '../../src/linear'
 import { hostContract, trackerContract } from '../contract'
 
@@ -15,6 +16,12 @@ import { hostContract, trackerContract } from '../contract'
  *   (owner/name, a scratch repository), ALTHAR_GITHUB_ISSUE (owner/name#12).
  *   It pushes a branch with one file, opens a draft pull request, comments on
  *   it, then closes it and deletes the branch.
+ * - GitLab: ALTHAR_GITLAB_TOKEN (a personal access token with `api`),
+ *   ALTHAR_GITLAB_REPO (group/project, a scratch project),
+ *   ALTHAR_GITLAB_ISSUE (group/project#12), and ALTHAR_GITLAB_URL for a
+ *   self-managed instance (gitlab.com otherwise). It makes a branch with one
+ *   file, opens a draft merge request, comments on it, then closes it and
+ *   deletes the branch.
  * - Linear: ALTHAR_LINEAR_KEY (a personal API key), ALTHAR_LINEAR_ISSUE
  *   (MER-231, an issue it may comment on and link to).
  */
@@ -58,6 +65,45 @@ describe.skipIf(github === '' || repo === '')('GitHub', () => {
   })
   const issue = env('ALTHAR_GITHUB_ISSUE')
   if (issue !== '') trackerContract({ name: 'GitHub', tracker: host, ref: issue })
+})
+
+const gitlab = env('ALTHAR_GITLAB_TOKEN')
+const gitlabRepo = env('ALTHAR_GITLAB_REPO')
+describe.skipIf(gitlab === '' || gitlabRepo === '')('GitLab', () => {
+  const webUrl = (env('ALTHAR_GITLAB_URL') || 'https://gitlab.com').replace(/\/+$/, '')
+  const credential = Effect.succeed<Credential>({ kind: 'bearer', token: gitlab })
+  const host = makeGitLab({ fetch, apiUrl: `${webUrl}/api/v4`, webUrl, credential })
+  const api = (method: string, path: string, body?: unknown) =>
+    Effect.promise(() =>
+      fetch(`${webUrl}/api/v4/projects/${encodeURIComponent(gitlabRepo)}${path}`, {
+        method,
+        headers: { authorization: `Bearer ${gitlab}`, 'content-type': 'application/json', 'user-agent': 'Althar' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }).then((response) => response.text()),
+    )
+  hostContract({
+    name: 'GitLab',
+    host,
+    path: gitlabRepo.split('/'),
+    branch: Effect.gen(function* () {
+      const branch = `althar/contract-${Date.now()}`
+      const repository = yield* host.repository(gitlabRepo.split('/'))
+      yield* api('POST', '/repository/branches', { branch, ref: repository.defaultBranch })
+      yield* api('POST', `/repository/files/${encodeURIComponent(`${branch.replace('/', '-')}.md`)}`, {
+        branch,
+        content: 'Opened by the Althar connectors contract.\n',
+        commit_message: 'Althar contract',
+      })
+      return branch
+    }),
+    cleanup: (change) =>
+      Effect.gen(function* () {
+        yield* api('PUT', `/merge_requests/${change.number}`, { state_event: 'close' })
+        yield* api('DELETE', `/repository/branches/${encodeURIComponent(change.source)}`)
+      }),
+  })
+  const issue = env('ALTHAR_GITLAB_ISSUE')
+  if (issue !== '') trackerContract({ name: 'GitLab', tracker: host, ref: issue })
 })
 
 const linear = env('ALTHAR_LINEAR_KEY')

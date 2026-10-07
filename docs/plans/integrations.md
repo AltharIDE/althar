@@ -42,6 +42,13 @@ One pull request each:
      accounts: Althar's GitHub App and Linear app aren't registered, so
      both take pasted tokens until they are.
 2. **GitLab,** hosted and self-managed, with its issues.
+   - The adapter: merge requests, drafts by their title, merging at the head
+     the person saw, the head pipeline's jobs and their logs, threads and
+     approvals, and its issues. Who can write to a project is asked of its
+     members, since GitLab's comments don't say.
+   - Nothing else changed: the runtime and the app offer any product with an
+     adapter. Not yet run against a real account; its reads were tried
+     against public projects on gitlab.com.
 3. **Jira,** Cloud and Data Center.
 4. **Bitbucket,** Cloud and Data Center, and **Trello.**
 
