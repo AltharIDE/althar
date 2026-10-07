@@ -31,6 +31,8 @@ export interface Http {
   cached<A>(schema: Schema.Codec<A, unknown>, url: string): Effect.Effect<A, ConnectorFailed>
   /** A call whose answer is text, such as a log. */
   text(url: string): Effect.Effect<string, ConnectorFailed>
+  /** A GET whose answer is its headers, such as who Bitbucket Data Center says is signed in. */
+  headers(url: string): Effect.Effect<Headers, ConnectorFailed>
   /** A GraphQL query or mutation; its `data` read by `schema`, its `errors` classified. */
   graphql<A>(
     schema: Schema.Codec<A, unknown>,
@@ -49,6 +51,9 @@ const ErrorBody = Schema.Struct({
   errors: Schema.optional(Schema.Array(Schema.Unknown)),
 })
 
+/** Bitbucket Cloud's error: a message, and what it is about. */
+const NestedError = Schema.Struct({ message: Schema.String, detail: Schema.optional(Schema.NullOr(Schema.String)) })
+
 /** What a service said went wrong, from its JSON body, or the status's own words. */
 const messageOf = (body: string, fallback: string): string => {
   try {
@@ -63,6 +68,9 @@ const messageOf = (body: string, fallback: string): string => {
     const said = [parsed.message, detail].filter((part) => part !== undefined && part !== '').join(': ')
     if (said !== '') return said.slice(0, MESSAGE_KEPT)
     if (typeof parsed.error === 'string') return parsed.error.slice(0, MESSAGE_KEPT)
+    const nested = Schema.decodeUnknownSync(NestedError)(parsed.error)
+    const words = [nested.message, nested.detail].filter((part) => part != null && part !== '').join(': ')
+    if (words !== '') return words.slice(0, MESSAGE_KEPT)
   } catch {
     // Not JSON: the status says it.
   }
@@ -74,7 +82,9 @@ const retryAtOf = (headers: Headers, now: number): string | undefined => {
   const after = Number(headers.get('retry-after'))
   if (headers.has('retry-after') && Number.isFinite(after)) return new Date(now + after * 1000).toISOString()
   const reset = Number(headers.get('x-ratelimit-reset'))
-  if (headers.has('x-ratelimit-reset') && Number.isFinite(reset)) return new Date(reset * 1000).toISOString()
+  // GitHub's reset is a time, in seconds since the epoch; Bitbucket's is the seconds left until it.
+  if (headers.has('x-ratelimit-reset') && Number.isFinite(reset))
+    return new Date(reset < 1_000_000_000 ? now + reset * 1000 : reset * 1000).toISOString()
   const resetMs = Number(headers.get('x-ratelimit-requests-reset'))
   if (headers.has('x-ratelimit-requests-reset') && Number.isFinite(resetMs)) return new Date(resetMs).toISOString()
   return undefined
@@ -196,6 +206,11 @@ export const makeHttp = (options: HttpOptions): Http => {
       call('GET', url, { accept: '*/*' }).pipe(
         Effect.flatMap(success),
         Effect.map((answer) => answer.body),
+      ),
+    headers: (url) =>
+      call('GET', url, {}).pipe(
+        Effect.flatMap(success),
+        Effect.map((answer) => answer.headers),
       ),
     graphql: (schema, url, query, variables = {}) =>
       Effect.gen(function* () {

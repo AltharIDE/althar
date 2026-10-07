@@ -72,6 +72,18 @@ describe('a call to a service', () => {
     }),
   )
 
+  it.effect('reads an answer’s headers, which is all some answers say', () =>
+    Effect.gen(function* () {
+      const { fetch } = stubFetch([
+        ['GET', 'https://api.test/who', { json: {}, headers: { 'x-ausername': 'dana' } }],
+        ['GET', 'https://api.test/gone', { status: 404, text: '' }],
+      ])
+      const http = makeHttp({ product: 'bitbucket_dc', fetch, authorization: Effect.succeed('Bearer t') })
+      assert.strictEqual((yield* http.headers('https://api.test/who')).get('x-ausername'), 'dana')
+      assert.strictEqual(failure(yield* Effect.exit(http.headers('https://api.test/gone')))?.reason, 'not_found')
+    }),
+  )
+
   it.effect('says when the answer is not what was expected', () =>
     Effect.gen(function* () {
       const { fetch } = stubFetch([
@@ -148,6 +160,28 @@ describe('a failed answer', () => {
     )
     assert.strictEqual(failureOf('github', 422, headers(), JSON.stringify({ errors: ['bad branch'] }), at).message, 'bad branch')
     assert.strictEqual(failureOf('linear', 400, headers(), JSON.stringify({ error: 'invalid_grant' }), at).message, 'invalid_grant')
+    // Bitbucket Cloud's: a message, and what it is about.
+    assert.strictEqual(
+      failureOf(
+        'bitbucket_cloud',
+        404,
+        headers(),
+        JSON.stringify({ error: { message: 'Not Found', detail: 'Log in step {1} does not exist.' } }),
+        at,
+      ).message,
+      'Not Found: Log in step {1} does not exist.',
+    )
+    assert.strictEqual(
+      failureOf(
+        'bitbucket_cloud',
+        400,
+        headers(),
+        JSON.stringify({ type: 'error', error: { message: 'There are no changes to be pulled' } }),
+        at,
+      ).message,
+      'There are no changes to be pulled',
+    )
+    assert.strictEqual(failureOf('bitbucket_cloud', 400, headers(), JSON.stringify({ error: { message: '' } }), at).message, '400')
     assert.strictEqual(failureOf('github', 500, headers(), 'oops', at).message, '500')
     assert.strictEqual(failureOf('github', 500, headers(), JSON.stringify({}), at).message, '500')
   })
@@ -168,6 +202,11 @@ describe('a failed answer', () => {
     assert.strictEqual(
       failureOf('linear', 429, headers({ 'x-ratelimit-requests-reset': String(at + 5000) }), '', at).retryAt,
       '2026-10-01T09:00:05.000Z',
+    )
+    // Bitbucket's reset is the seconds left, not a time.
+    assert.strictEqual(
+      failureOf('bitbucket_cloud', 429, headers({ 'x-ratelimit-reset': '2374' }), '', at).retryAt,
+      '2026-10-01T09:39:34.000Z',
     )
     assert.isUndefined(failureOf('linear', 429, headers(), '', at).retryAt)
   })

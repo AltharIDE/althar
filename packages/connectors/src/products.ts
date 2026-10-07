@@ -1,3 +1,5 @@
+import { makeBitbucketCloud } from './bitbucketCloud'
+import { makeBitbucketDataCenter } from './bitbucketDataCenter'
 import type { AdapterOptions, Credential } from './credential'
 import { makeGitHub } from './github'
 import { makeLinear } from './linear'
@@ -100,7 +102,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     apiFor: () => 'https://api.bitbucket.org/2.0',
     browser: null,
     token: { kind: 'basic', user: true, help: () => 'https://id.atlassian.com/manage-profile/security/api-tokens' },
-    make: null,
+    make: (options) => ({ host: makeBitbucketCloud(options) }),
   },
   bitbucket_dc: {
     product: 'bitbucket_dc',
@@ -112,7 +114,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     apiFor: (webUrl) => `${trimmed(webUrl)}/rest/api/latest`,
     browser: null,
     token: { kind: 'bearer', user: false, help: (webUrl) => `${trimmed(webUrl)}/plugins/servlet/access-tokens/manage` },
-    make: null,
+    make: (options) => ({ host: makeBitbucketDataCenter(options) }),
   },
   linear: {
     product: 'linear',

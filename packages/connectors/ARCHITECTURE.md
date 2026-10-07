@@ -13,6 +13,8 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 | `model.ts` | The two models: code host and tracker, their data and their capabilities |
 | `products.ts` | Every product: its name, hosted service, whether it runs self-hosted, how a person signs in, and its adapter once built |
 | `github.ts` | GitHub and GitHub Enterprise Server: a code host over REST (GraphQL where REST can't), and a tracker of its issues |
+| `bitbucketCloud.ts` | Bitbucket Cloud: a code host of pull requests over REST, with Pipelines' step logs |
+| `bitbucketDataCenter.ts` | Bitbucket Data Center, on a company's own server: a code host of pull requests over REST |
 | `linear.ts` | Linear, a tracker, over GraphQL |
 | `http.ts` | Calls to a service's API: signed in per call, bounded in time, answers checked, failures classified, GETs cached by ETag |
 | `signIn.ts` | The device flow and OAuth with PKCE, and refreshing a token |
@@ -36,6 +38,12 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 
 ## Gaps
 
-- **GitLab, Jira, Bitbucket and Trello** have no adapter yet; `products.ts` lists them, and nothing offers them.
-- **Pagination** stops at the first hundred: of comments since a cursor, of reviews, of checks.
+- **GitLab, Jira and Trello** have no adapter yet; `products.ts` lists them, and nothing offers them.
+- **Bitbucket Cloud merges what the branch holds:** its API takes no head to merge at, so the adapter checks the head the person saw just before, and a push in the moment between would be merged. Data Center's pull request version closes that gap.
+- **Bitbucket Cloud's write access** is membership of the repository's workspace: Bitbucket tells only an admin who can write to a repository.
+- **Bitbucket Data Center's checks** are build statuses, from the list Data Center deprecated in 7.14 and still serves, as nothing else lists a commit's. Code Insights reports aren't read, and a build's log is its build server's.
+- **Bitbucket Data Center before 8.18** has no drafts: a draft opens ready.
+- **Listening to Bitbucket Cloud** asks several things a turn, each by ETag; whether an unchanged answer counts against its hourly limit isn't documented.
+- **A Bitbucket Cloud API token is made with scopes** (`read:user`, `read:workspace`, `read:repository`, `write:repository`, `read:pullrequest`, `write:pullrequest` and `read:pipeline`, all `:bitbucket`); the Connections panel links to where it is made but doesn't list them.
+- **Pagination** stops at the first hundred on GitHub: of comments since a cursor, of reviews, of checks. Bitbucket reads ten pages of comments and activity, and Cloud the first hundred statuses.
 - **Webhooks** aren't here: listening polls until Althar has a cloud.

@@ -9,7 +9,7 @@ describe('the products', () => {
   it('available now are the ones with an adapter', () => {
     assert.deepStrictEqual(
       available().map((info) => info.product),
-      ['github', 'linear'],
+      ['github', 'bitbucket_cloud', 'bitbucket_dc', 'linear'],
     )
   })
 
@@ -60,6 +60,11 @@ describe('the products', () => {
     const github = products.github.make?.(options)
     assert.strictEqual(github?.host?.product, 'github')
     assert.strictEqual(github?.tracker?.product, 'github')
+    for (const product of ['bitbucket_cloud', 'bitbucket_dc'] as const) {
+      const bitbucket = products[product].make?.(options)
+      assert.strictEqual(bitbucket?.host?.product, product)
+      assert.isUndefined(bitbucket?.tracker)
+    }
     const linear = products.linear.make?.(options)
     assert.isUndefined(linear?.host)
     assert.strictEqual(linear?.tracker?.product, 'linear')

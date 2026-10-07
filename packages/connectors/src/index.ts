@@ -1,3 +1,5 @@
+export { makeBitbucketCloud } from './bitbucketCloud'
+export { makeBitbucketDataCenter } from './bitbucketDataCenter'
 export { authorizationOf, type AdapterOptions, type Credential } from './credential'
 export * from './errors'
 export { makeGitHub } from './github'
