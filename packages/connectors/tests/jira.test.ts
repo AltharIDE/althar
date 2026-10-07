@@ -470,17 +470,54 @@ describe('Jira Cloud', () => {
     }),
   )
 
-  it.effect('keeps to the gateway once it answers, even with a failure of another kind', () =>
+  it.effect('keeps to the gateway once it judges a request, as not found or not allowed', () =>
     Effect.gen(function* () {
-      const { tracker, sent } = cloud([
-        ['GET', `${CLOUD}/issue/HHH-2?${FIELDS}`, { status: 401, text: '' }],
-        ['GET', `${SITE}/_edge/tenant_info`, { json: { cloudId: '0aeb68bb-8040-48f1-9994-30e61701adb4' } }],
-        ['GET', `${GATEWAY}/issue/HHH-2?${FIELDS}`, { status: 404, json: { errorMessages: ['Issue does not exist'], errors: {} } }],
-        ['GET', `${GATEWAY}/myself`, { json: { accountId: 'a1' } }],
-      ])
-      assert.strictEqual((yield* Effect.flip(tracker.issue('HHH-2'))).reason, 'not_found')
-      yield* tracker.account
-      assert.strictEqual(sent.at(-1)?.url, `${GATEWAY}/myself`)
+      for (const [status, reason] of [
+        [404, 'not_found'],
+        [403, 'forbidden'],
+      ] as const) {
+        const { tracker, sent } = cloud([
+          ['GET', `${CLOUD}/issue/HHH-2?${FIELDS}`, { status: 401, text: '' }],
+          ['GET', `${SITE}/_edge/tenant_info`, { json: { cloudId: '0aeb68bb-8040-48f1-9994-30e61701adb4' } }],
+          ['GET', `${GATEWAY}/issue/HHH-2?${FIELDS}`, { status, json: { errorMessages: ['Issue does not exist'], errors: {} } }],
+          ['GET', `${GATEWAY}/myself`, { json: { accountId: 'a1' } }],
+        ])
+        assert.strictEqual((yield* Effect.flip(tracker.issue('HHH-2'))).reason, reason)
+        yield* tracker.account
+        assert.strictEqual(sent.at(-1)?.url, `${GATEWAY}/myself`)
+      }
+    }),
+  )
+
+  it.effect('asks the site first again when the gateway couldn’t say, and keeps the gateway once it answers', () =>
+    Effect.gen(function* () {
+      for (const [once, reason] of [
+        [{ status: 503, text: '' }, 'unreachable'],
+        [{ status: 429, headers: { 'retry-after': '30' }, json: { message: 'Too many requests' } }, 'rate_limited'],
+      ] as const) {
+        let asked = 0
+        const { tracker, sent } = cloud([
+          ['GET', `${CLOUD}/myself`, { status: 401, text: '' }],
+          ['GET', `${SITE}/_edge/tenant_info`, { json: { cloudId: '0aeb68bb-8040-48f1-9994-30e61701adb4' } }],
+          ['GET', `${GATEWAY}/myself`, () => ((asked += 1) === 1 ? once : { json: { accountId: 'a1', displayName: 'You Person' } })],
+        ])
+        // The gateway's own failure, not the site's refusal: the token may well be good there.
+        assert.strictEqual((yield* Effect.flip(tracker.account)).reason, reason)
+        assert.strictEqual((yield* tracker.account).login, 'You Person')
+        yield* tracker.account
+        assert.deepStrictEqual(
+          sent.map((request) => request.url),
+          [
+            `${CLOUD}/myself`,
+            `${SITE}/_edge/tenant_info`,
+            `${GATEWAY}/myself`,
+            `${CLOUD}/myself`,
+            `${SITE}/_edge/tenant_info`,
+            `${GATEWAY}/myself`,
+            `${GATEWAY}/myself`,
+          ],
+        )
+      }
     }),
   )
 

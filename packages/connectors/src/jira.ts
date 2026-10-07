@@ -135,8 +135,11 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
    * An API token with scopes works only through Atlassian's gateway,
    * api.atlassian.com/ex/jira/<cloud id>, never at the site's own address,
    * and nothing in the token says which kind it is. So a call the site
-   * refuses as unauthorized is asked there once, and the gateway kept if it
-   * answers. Data Center has no gateway.
+   * refuses as unauthorized is asked there once. The gateway is kept when it
+   * takes the token: it answers, or judges the request (not found, or not
+   * allowed). A failure that says nothing of the token (unreachable, too many
+   * calls) leaves the site to be tried first again next time. Data Center
+   * has no gateway.
    */
   let root = api
   const gateway = Effect.map(
@@ -160,9 +163,10 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
                   Effect.mapError(() => refused),
                   Effect.flatMap((other) =>
                     request(other).pipe(
-                      // Any answer but "unauthorized" says the token belongs there.
                       Effect.tap(() => keep(other)),
-                      Effect.tapError((error) => (error.reason === 'unauthorized' ? Effect.void : keep(other))),
+                      Effect.tapError((error) =>
+                        error.reason === 'not_found' || error.reason === 'forbidden' ? keep(other) : Effect.void,
+                      ),
                       // Refused there too: so does the site's.
                       Effect.mapError((error) => (error.reason === 'unauthorized' ? refused : error)),
                     ),
