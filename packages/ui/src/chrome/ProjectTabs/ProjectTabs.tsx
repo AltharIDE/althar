@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Logo } from '../../foundations/Logo/Logo'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
@@ -14,11 +14,15 @@ import s from './ProjectTabs.module.css'
 /*
  * The top of the window: a tab for the home, then one for each project the
  * person keeps open, so going from one project to another is one press.
- * Each project's tab carries its mark, which says whether work runs there
- * and whether anything waits on you, and how many calls wait; the home's
- * says how many wait across every project. The tab that has the window
+ * Each project's tab carries its mark, with the running arc while work runs
+ * there, and a violet dot after its name while anything there waits on you;
+ * the home's has the dot while anything waits in any project. How many is
+ * read out, not shown. The tab that has the window
  * joins the screen's own bar below it. A project's tab closes from its ×,
- * and the + opens one of the other projects, or a folder as a new one. On
+ * and the + opens one of the other projects, or a folder as a new one.
+ * However many are open, the home's tab stays put; the others give way
+ * together, down to their marks, and past that they scroll, by wheel too,
+ * fading at the side where more are, with a menu of them all. On
  * macOS the system draws the traffic lights over its start, so it keeps
  * their space, as the TitleBar does when it is the top.
  */
@@ -46,6 +50,8 @@ export interface ProjectTabsText {
   open: string
   others: string
   openFolder: string
+  /** The menu of every open project, when more are open than fit. */
+  all: string
 }
 
 export const projectTabsText: ProjectTabsText = {
@@ -57,6 +63,7 @@ export const projectTabsText: ProjectTabsText = {
   open: 'Open a project',
   others: 'Other projects',
   openFolder: 'Open a folder…',
+  all: 'All open projects',
 }
 
 export type ProjectTabsProps = RootProps<
@@ -82,14 +89,12 @@ export type ProjectTabsProps = RootProps<
   }
 >
 
-/** How many wait, beside a tab's name, and read out after it. */
-function Count({ n, text }: { n: number; text: ProjectTabsText }) {
+/** Something waits on you: a violet dot beside a tab's name, and how many read out after it. */
+function Yours({ n, text }: { n: number; text: ProjectTabsText }) {
   if (n === 0) return null
   return (
     <>
-      <span className={s.count} aria-hidden="true">
-        {n}
-      </span>
+      <span className={s.yours} aria-hidden="true" />
       <VisuallyHidden>, {text.yours(n)}</VisuallyHidden>
     </>
   )
@@ -112,7 +117,34 @@ export function ProjectTabs({
   const t = { ...projectTabsText, ...text }
   const offered = onOpen ? others : []
   const list = useRef<HTMLUListElement>(null)
-  // More open than fit, the strip scrolls: the tab with the window is kept in sight.
+  // Where the projects' tabs scroll to, when more are open than fit: more before, more after.
+  const [more, setMore] = useState({ before: false, after: false })
+  useEffect(() => {
+    const element = list.current
+    if (element === null) return
+    const measure = () => {
+      const before = element.scrollLeft > 1
+      const after = element.scrollLeft + element.clientWidth < element.scrollWidth - 1
+      setMore((was) => (was.before === before && was.after === after ? was : { before, after }))
+    }
+    // A wheel that turns up and down moves them across, as a trackpad does.
+    const wheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) || element.scrollWidth <= element.clientWidth) return
+      element.scrollLeft += event.deltaY
+      event.preventDefault()
+    }
+    measure()
+    element.addEventListener('scroll', measure, { passive: true })
+    element.addEventListener('wheel', wheel, { passive: false })
+    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    resized?.observe(element)
+    return () => {
+      element.removeEventListener('scroll', measure)
+      element.removeEventListener('wheel', wheel)
+      resized?.disconnect()
+    }
+  }, [tabs.length])
+  // The tab with the window is kept in sight.
   useEffect(() => {
     list.current
       ?.querySelector<HTMLElement>('[aria-current="page"]')
@@ -128,14 +160,16 @@ export function ProjectTabs({
         </span>
       )}
       <nav className={s.nav} aria-label={t.label}>
-        <ul className={s.tabs} ref={list}>
+        <ul className={s.pinned}>
           <li className={cx(s.tab, s.home, current === null && s.current)}>
             <button type="button" className={s.select} aria-current={current === null ? 'page' : undefined} onClick={() => onSelect(null)}>
               <Logo size={15} className={s.logo} />
               <span className={s.name}>{t.home}</span>
-              <Count n={yours} text={t} />
+              <Yours n={yours} text={t} />
             </button>
           </li>
+        </ul>
+        <ul className={cx(s.tabs, more.before && s.moreBefore, more.after && s.moreAfter)} ref={list}>
           {tabs.map((tab) => (
             <li key={tab.id} className={cx(s.tab, s.project, tab.id === current && s.current)}>
               <button
@@ -144,15 +178,30 @@ export function ProjectTabs({
                 aria-current={tab.id === current ? 'page' : undefined}
                 onClick={() => onSelect(tab.id)}
               >
-                <ProjectMark seed={tab.seed} ink={tab.ink} size={15} running={tab.running} yours={tab.yours > 0} className={s.mark} />
+                {/* The dot after its name says what waits; the mark says only that work runs. */}
+                <ProjectMark seed={tab.seed} ink={tab.ink} size={15} running={tab.running} className={s.mark} />
                 <span className={s.name}>{tab.name}</span>
                 {tab.running && <VisuallyHidden>, {t.running}</VisuallyHidden>}
-                <Count n={tab.yours} text={t} />
+                <Yours n={tab.yours} text={t} />
               </button>
               <IconButton icon="close" label={t.close(tab.name)} size="small" className={s.close} onClick={() => onClose(tab.id)} />
             </li>
           ))}
         </ul>
+        {(more.before || more.after) && (
+          <Menu label={t.all} align="end" width={260} trigger={<ChromeButton icon="list" label={t.all} compact className={s.plus} />}>
+            {tabs.map((tab) => (
+              <MenuItem
+                key={tab.id}
+                lead={<ProjectMark seed={tab.seed} ink={tab.ink} size={15} running={tab.running} />}
+                hint={tab.yours > 0 ? <Yours n={tab.yours} text={t} /> : undefined}
+                onSelect={() => onSelect(tab.id)}
+              >
+                {tab.name}
+              </MenuItem>
+            ))}
+          </Menu>
+        )}
         {(offered.length > 0 || onOpenFolder) && (
           <Menu label={t.open} align="start" width={260} trigger={<ChromeButton icon="plus" label={t.open} compact className={s.plus} />}>
             {offered.length > 0 && (
@@ -160,8 +209,8 @@ export function ProjectTabs({
                 {offered.map((other) => (
                   <MenuItem
                     key={other.id}
-                    lead={<ProjectMark seed={other.seed} ink={other.ink} size={15} running={other.running} yours={other.yours > 0} />}
-                    hint={other.yours > 0 ? <Count n={other.yours} text={t} /> : undefined}
+                    lead={<ProjectMark seed={other.seed} ink={other.ink} size={15} running={other.running} />}
+                    hint={other.yours > 0 ? <Yours n={other.yours} text={t} /> : undefined}
                     onSelect={() => onOpen?.(other.id)}
                   >
                     {other.name}

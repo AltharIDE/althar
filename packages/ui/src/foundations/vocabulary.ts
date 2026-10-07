@@ -360,6 +360,8 @@ export enum ChangeState {
   /** Every check passed; waiting for you to accept it. */
   Ready = 'ready',
   Merged = 'merged',
+  /** Ended on its branch, with no pull request: it merges on this Mac when you accept it. */
+  Branch = 'branch',
 }
 
 /** One check on a change. */

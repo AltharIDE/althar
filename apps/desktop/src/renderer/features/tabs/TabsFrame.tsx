@@ -1,8 +1,10 @@
-import { createContext, type ReactNode, useContext, useEffect } from 'react'
+import { createContext, type ReactNode, useContext, useEffect, useSyncExternalStore } from 'react'
 
 import { ProjectTabs } from '@althar/ui'
 
-import { beside, byNumber } from './tabs'
+import { useServices } from '../../data/services'
+import { tabsStoreOf } from './store'
+import { beside, byNumber, type LastTask } from './tabs'
 import s from './Tabs.module.css'
 import { useTabs } from './useTabs'
 
@@ -14,14 +16,25 @@ import { useTabs } from './useTabs'
  * system's lights to them.
  */
 
-const VisitContext = createContext<(threadId: string, projectId: string) => void>(() => undefined)
+const VisitContext = createContext<(threadId: string, projectId: string, title?: string) => void>(() => undefined)
 
-/** A task screen says which project its thread is in, once it has read it, so that project's tab has the window. */
-export const useVisit = (threadId: string, projectId: string | undefined) => {
+/**
+ * A task screen says which project its thread is in, once it has read it,
+ * so that project's tab has the window; and that it is the task last opened
+ * there, for the project's bar to go back to.
+ */
+export const useVisit = (threadId: string, projectId: string | undefined, title?: string) => {
   const visit = useContext(VisitContext)
   useEffect(() => {
-    if (projectId !== undefined) visit(threadId, projectId)
-  }, [visit, threadId, projectId])
+    if (projectId !== undefined) visit(threadId, projectId, title)
+  }, [visit, threadId, projectId, title])
+}
+
+/** The task last opened in a project, for its bar's way back; null before one was. */
+export const useLastTask = (projectId: string): LastTask | null => {
+  const store = tabsStoreOf(useServices().client)
+  const { kept } = useSyncExternalStore(store.subscribe, store.get)
+  return kept?.tasks?.[projectId] ?? null
 }
 
 export function TabsFrame({ children }: { children: ReactNode }) {

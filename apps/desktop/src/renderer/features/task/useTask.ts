@@ -54,6 +54,12 @@ export interface TaskModel {
   readonly openChange: () => Promise<void>
   /** Merges the task into its repositories' default branches here, up to the heads it showed; it has no pull request. */
   readonly mergeHere: () => Promise<void>
+  /**
+   * Accepts its pull requests: merges each on its host in turn, at the head
+   * the person saw, and stops at the first that is refused, so the rest
+   * wait; pending throughout.
+   */
+  readonly accept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => Promise<void>
   /** Pushes the task's branch to its pull request, up to the commit the person saw: the one at `url`, in a task of several. */
   readonly push: (head: string, url?: string) => Promise<void>
   readonly dismissError: () => void
@@ -198,6 +204,11 @@ export const useTask = (threadId: string): TaskModel => {
     markReady: (url) => act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id, url))),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id))),
     mergeHere: () => act(async () => (snapshot === null ? undefined : client.mergeHere(snapshot.task.id, headsOf(snapshot.task.here)))),
+    accept: (changes) =>
+      act(async () => {
+        if (snapshot === null) return
+        for (const change of changes) await client.merge(snapshot.task.id, change.head, change.url)
+      }),
     push: (head, url) => act(async () => (snapshot === null ? undefined : client.push(snapshot.task.id, head, url))),
     dismissError: () => setError(null),
   }

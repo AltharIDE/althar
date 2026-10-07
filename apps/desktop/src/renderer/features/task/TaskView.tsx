@@ -1,20 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
 
-import type { ChangeSummary, ThreadSnapshot } from '@althar/contracts'
+import type { ThreadSnapshot } from '@althar/contracts'
 import {
-  BackCrumb,
-  Button,
-  ChangeSet,
-  ChangeState,
   ChangeView,
   ChromeButton,
   Composer,
   Issue,
   LinkButton,
   type ModelInfo,
-  SidePanel,
-  SidePanelBody,
-  SidePanelTitle,
   Spinner,
   TaskFace,
   TaskHeader,
@@ -30,29 +23,34 @@ import { useModels } from '../../data/models'
 import { modelInfo, waitsWords } from '../../shared/agents'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { catalogOf, type Choice, modelName, runningOn } from '../../shared/models'
-import { checkOf } from '../../shared/checks'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
-import { stepText, trackFor } from '../../shared/steps'
+import { stepNames, stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { PermissionCall } from './PermissionCall'
 import { StuckCall } from './StuckCall'
+import { hasOutputs, Outputs } from './Outputs'
 import s from './Task.module.css'
-import { mergeHereLabel } from '../../shared/mergeHere'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
 
 /*
- * A task: its header, its thread, and the composer that talks to its lead.
- * What the rules keep for the person arrives as a call at the end of the
- * thread. What it changed opens over the whole window, file by file, from
- * its header, its pull request, or ⌘D. Everything drawn here is the kit's;
- * this view only arranges it.
+ * A task, with two faces under its header, as in the prototype: the
+ * conversation, its thread and the composer that talks to its lead, where
+ * the person is while the work happens; and its outputs, what it changed,
+ * where they decide whether to accept it. A ready task opens on its outputs,
+ * anything else on the conversation, and the person switches with the
+ * header's switch, or c and o. The project's bar is over it, so the way
+ * around the project is the one its own screen has. What the rules keep for
+ * the person arrives as a call at the end of the thread. What it changed
+ * opens over the whole window, file by file, from the header, its outputs,
+ * or ⌘D. Escape goes back to the project. Everything drawn here is the
+ * kit's; this view only arranges it.
  */
 
-/** A pull request's repository by its name alone: `web` for `meridian/web`. */
-const repositoryName = (change: ChangeSummary) => change.repository.slice(change.repository.lastIndexOf('/') + 1)
+/** The task's faces: its conversation, and what it made. */
+type Face = 'talk' | 'out'
 
 export const text = {
   thread: 'Thread',
@@ -65,27 +63,25 @@ export const text = {
   handOver: 'Hand it over',
   working: 'Working',
   needsYou: 'Needs you',
-  ready: 'Ready',
+  ready: 'Ready for you',
+  done: 'Done',
   idle: 'Idle',
   stopped: 'Stopped',
+  faces: { talk: 'Conversation', out: 'Outputs' } satisfies Record<Face, string>,
+  facesKbd: { talk: 'c', out: 'o' } satisfies Record<Face, string>,
+  nothingBuilt: 'Nothing is built yet, so there is nothing else to look at.',
+  /** How long it has been on what it is doing now, or since it last changed. */
+  since: {
+    step: (step: string, took: string) => `${step} · ${took}`,
+    waiting: (took: string) => `waiting · ${took}`,
+    ready: (ago: string) => `ready · ${ago}`,
+    done: (ago: string) => `done · ${ago}`,
+    stopped: (ago: string) => `stopped · ${ago}`,
+  },
   dismiss: 'Dismiss',
   earlier: 'Earlier in this task',
   showEarlier: 'Show',
   loadingEarlier: 'Showing…',
-  change: (change: ChangeSummary) => `${change.short} ${change.prefix}${change.number}`,
-  /** In a task of several repositories, each pull request by its repository's name. */
-  changeIn: (change: ChangeSummary) => `${repositoryName(change)} ${change.short} ${change.prefix}${change.number}`,
-  changePanel: (change: ChangeSummary) => (change.noun === 'merge request' ? 'Merge request' : 'Pull request'),
-  draftNote: 'Its checks run on it; mark it ready when you are',
-  readyNote: (host: string) => `Merge it on ${host} when you’re ready`,
-  closed: (change: ChangeSummary, host: string) => `${text.change(change)} was closed on ${host}.`,
-  markReady: 'Mark ready for review',
-  openChange: 'Open a pull request',
-  push: (n: number) => (n === 1 ? 'Push 1 commit' : `Push ${n} commits`),
-  pushTo: (n: number, change: ChangeSummary) => `${text.push(n)} to ${repositoryName(change)}`,
-  unpushed: (n: number, change: ChangeSummary) =>
-    n === 1 ? `One commit isn’t on the ${change.noun} yet.` : `${n} commits aren’t on the ${change.noun} yet.`,
-  openOn: (host: string) => `Open on ${host}`,
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
   diffKey: '⌘D',
@@ -93,7 +89,8 @@ export const text = {
 
 /**
  * Where a task stands, for its header: the step it is on, by what it does
- * there; a step held for a usage limit says whom it waits for, and until when.
+ * there; a step held for a usage limit says whom it waits for, and until when;
+ * ready, it waits on the person to accept it.
  */
 export const statusOf = (
   snapshot: ThreadSnapshot,
@@ -104,8 +101,9 @@ export const statusOf = (
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
   const doing = step === null ? undefined : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
-  // A run that passed review is ready, whatever its lead is doing now.
-  if (phase === 'ready' || phase === 'settled') return { status: TaskStatus.Done, state: text.ready }
+  // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
+  if (phase === 'ready') return { status: TaskStatus.Yours, state: text.ready }
+  if (phase === 'settled') return { status: TaskStatus.Done, state: text.done }
   // On a step another agent takes, a review, while its lead waits.
   if (phase === 'running' && doing !== undefined) return { status: TaskStatus.Running, state: doing }
   if (snapshot.session === null) return { status: TaskStatus.Stopped, state: text.stopped }
@@ -130,102 +128,62 @@ export const elapsedOf = (snapshot: ThreadSnapshot, now: string): string | null 
   return running(startedAt, last?.createdAt ?? now)
 }
 
-const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', efforts: [] }
+/**
+ * Since when a task has been where it stands, for its header's facts: on its
+ * step, how long; waiting on the person, how long; ready, done or stopped,
+ * how long ago. Nothing for a lead that is idle between steps, or held for a
+ * usage limit, which its state already says.
+ */
+export const sinceOf = (snapshot: ThreadSnapshot, now: string): string | null => {
+  const { phase, step, stepAt, settledAt, waits } = snapshot.task
+  const [call] = snapshot.attention
+  if (call !== undefined) return text.since.waiting(running(call.createdAt, now))
+  if (waits !== null) return null
+  if (phase === 'settled') return settledAt === null ? null : text.since.done(ago(settledAt, new Date(now)))
+  if (phase === 'ready') {
+    const reported = snapshot.items.findLast((item) => item.kind === 'step_result')
+    return reported === undefined ? null : text.since.ready(ago(reported.createdAt, new Date(now)))
+  }
+  if (phase === 'stopped') {
+    const last = snapshot.items.at(-1)
+    return last === undefined ? null : text.since.stopped(ago(last.createdAt, new Date(now)))
+  }
+  if (step === null || stepAt === null) return null
+  // By the step's name, as its track says it: settling a review is part of the review.
+  const [name] = stepNames([{ key: step === 'implement' ? 'implement' : 'review', agentId: '', model: null, skipped: false }])
+  return name === undefined ? null : text.since.step(name.toLowerCase(), running(stepAt, now))
+}
 
-/** A task's pull request beside its thread: the kit's change set, and what the person can do with it here. */
-function ChangePanel({
-  snapshot,
-  change,
-  lead,
-  agentName,
-  onReady,
-  onPush,
-  onClose,
-  onOpenFile,
-  pending,
-}: {
-  snapshot: ThreadSnapshot
-  change: ChangeSummary
-  lead: ModelInfo
-  agentName: (id: string | null) => string
-  onReady: () => void
-  /** Pushes what the lead committed since, up to the commit shown. */
-  onPush: (head: string) => void
-  onClose: () => void
-  /** Opens what the task changed over the whole window, on a file or the first. */
-  onOpenFile: (path?: string) => void
-  pending: boolean
-}) {
-  const host = productName(change.product)
-  const reviewers = [
-    ...new Set(
-      snapshot.items.flatMap((item) =>
-        item.kind === 'step_result' && item.content.step === 'review' && item.content.agentId !== null ? [item.content.agentId] : [],
-      ),
-    ),
-  ].map((id) => modelInfo({ id, name: agentName(id) }, null))
-  const state = change.state === 'merged' ? ChangeState.Merged : change.draft ? ChangeState.Draft : ChangeState.Ready
+/** Whether a key is meant for a field: one pressed in a text box, or with a modifier. */
+const typing = (event: KeyboardEvent) => {
+  const target = event.target
   return (
-    <SidePanel label={text.changePanel(change)} head={<SidePanelTitle>{text.changePanel(change)}</SidePanelTitle>} onClose={onClose}>
-      <SidePanelBody>
-        {change.state === 'closed' ? (
-          <p className={s.quiet}>{text.closed(change, host)}</p>
-        ) : (
-          <ChangeSet
-            state={state}
-            host={{ name: host, brand: productBrand(change.product) }}
-            {...(state === ChangeState.Draft
-              ? { note: text.draftNote }
-              : state === ChangeState.Ready
-                ? { note: text.readyNote(host) }
-                : {})}
-            title={change.title}
-            branch={snapshot.task.branch ?? ''}
-            base={(snapshot.task.baseRef ?? '').replace(/^origin\//, '')}
-            commits={snapshot.task.commits}
-            lead={lead}
-            reviewers={reviewers}
-            prs={[{ repo: change.repository, number: change.number, url: change.url, files: snapshot.task.files }]}
-            checks={(change.checks?.list ?? []).map(checkOf)}
-            onOpenFile={onOpenFile}
-            onReviewDiff={() => onOpenFile()}
-            diffKey={text.diffKey}
-            headingLevel={3}
-            text={{
-              number: (n) => `${change.prefix}${n}`,
-              prs: () => text.changePanel(change),
-              onHostLabel: (repo, n, on) => `Open ${repo} ${change.prefix}${n} on ${on}`,
-            }}
-          />
-        )}
-        {change.state === 'open' && change.unpushed > 0 && change.localHead !== null && (
-          <p className={s.quiet}>{text.unpushed(change.unpushed, change)}</p>
-        )}
-        <div className={s.changeActions}>
-          {change.state === 'open' && change.unpushed > 0 && change.localHead !== null && (
-            <Button variant="signal" busy={pending} onClick={() => onPush(change.localHead ?? '')}>
-              {text.push(change.unpushed)}
-            </Button>
-          )}
-          {change.state === 'open' && change.draft && (
-            <Button variant="signal" busy={pending} onClick={onReady}>
-              {text.markReady}
-            </Button>
-          )}
-          <a className={s.external} href={change.url} target="_blank" rel="noreferrer">
-            {text.openOn(host)}
-          </a>
-        </div>
-      </SidePanelBody>
-    </SidePanel>
+    event.metaKey ||
+    event.ctrlKey ||
+    event.altKey ||
+    (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]') !== null))
   )
 }
 
-export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => void }) {
+const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', efforts: [] }
+
+export function TaskView({
+  model,
+  onBack,
+  nav,
+}: {
+  model: TaskModel
+  /** Back to the project, on Escape. */
+  onBack: () => void
+  /** The project's bar over it; a bare bar until the task says which project it is in. */
+  nav?: ReactNode
+}) {
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState<Choice | null>(null)
-  // The pull request open beside the thread, by its address.
-  const [showChange, setShowChange] = useState<string | null>(null)
+  // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
+  const [face, setFace] = useState<Face | null>(null)
+  if (face === null && model.snapshot !== null)
+    setFace(model.snapshot.task.phase === 'ready' && hasOutputs(model.snapshot) ? 'out' : 'talk')
   const known = useModels()
   const catalog = useMemo(() => catalogOf(known ?? [], model.agents), [known, model.agents])
   const files = model.snapshot?.task.files ?? []
@@ -242,13 +200,28 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [show, files.length])
+  // c and o switch the faces, and Escape goes back to the project: never while typing, or with something else open.
+  const outputs = model.snapshot !== null && hasOutputs(model.snapshot)
+  const open = changes.open
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || typing(event) || open) return
+      if (event.key === 'Escape' && event.target === document.body) onBack()
+      else if (outputs && event.key === text.facesKbd.talk) setFace('talk')
+      else if (outputs && event.key === text.facesKbd.out) setFace('out')
+      else return
+      event.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onBack, outputs, open])
   // A running turn says how long it has worked so far, and a task under way how long it has run.
   const now = useNow(ticking(model.snapshot))
   const snapshot = model.snapshot
   if (snapshot === null) {
     return (
       <div className={s.window}>
-        <TitleBar lights="none">{null}</TitleBar>
+        {nav ?? <TitleBar lights="none">{null}</TitleBar>}
         <div className={s.loading}>{model.error === null ? <Spinner /> : <p role="alert">{model.error}</p>}</div>
       </div>
     )
@@ -263,6 +236,8 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
       : modelInfo({ id: session.agentId, name: session.agentName }, modelName(catalog, session.agentId, session.model))
   const { status, state } = statusOf(snapshot, agentName)
   const elapsed = elapsedOf(snapshot, now)
+  const since = sinceOf(snapshot, now)
+  const shown: Face = outputs ? (face ?? 'talk') : 'talk'
   const busy = session?.turnRunning ?? false
   // A stopped task picks up with the agent that last led it, when it still can.
   const last = snapshot.items.findLast((item) => item.agentId !== null)?.agentId
@@ -277,28 +252,10 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
     else void (now ? model.sendNow(body) : model.send(body))
   }
 
-  const { changes: pullRequests } = snapshot.task
-  const change = pullRequests[0] ?? null
-  const shown = pullRequests.find((candidate) => candidate.url === showChange) ?? null
-  const several = pullRequests.length > 1
   const issue = snapshot.task.issue
-  const ready = snapshot.task.phase === 'ready'
-  // Work that ended on its branch merges here, beside any pull request of the rest, or can still open its pull request.
-  const mergeable = ready && snapshot.task.here.length > 0
-  const unpublished = ready && change === null && snapshot.task.commits > 0
-  // Its pull request opens beside the thread.
-  const changeButton = (
+  // What it changed opens over the window; what else it can do is in its menu.
+  const actions = (
     <>
-      {mergeable && (
-        <Button size="small" busy={model.pending} onClick={() => void model.mergeHere()}>
-          {mergeHereLabel(snapshot.task.here, change !== null)}
-        </Button>
-      )}
-      {unpublished && (
-        <Button size="small" busy={model.pending} onClick={() => void model.openChange()}>
-          {text.openChange}
-        </Button>
-      )}
       {files.length > 0 && (
         <ChromeButton
           icon="file"
@@ -308,38 +265,9 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
           onClick={() => changes.show()}
         />
       )}
-      {pullRequests.map((each) =>
-        each.state === 'open' && each.unpushed > 0 && each.localHead !== null ? (
-          <Button
-            key={`push-${each.url}`}
-            size="small"
-            busy={model.pending}
-            onClick={() => void model.push(each.localHead ?? '', each.url)}
-          >
-            {several ? text.pushTo(each.unpushed, each) : text.push(each.unpushed)}
-          </Button>
-        ) : null,
-      )}
-      {pullRequests.map((each) => (
-        <ChromeButton
-          key={each.url}
-          icon="pr"
-          label={several ? text.changeIn(each) : text.change(each)}
-          expanded={showChange === each.url}
-          onClick={() => setShowChange((open) => (open === each.url ? null : each.url))}
-        />
-      ))}
+      {session !== null && <TaskMenu status={status} onStop={() => void model.stop()} />}
     </>
   )
-  const actions =
-    session === null ? (
-      changeButton
-    ) : (
-      <>
-        {changeButton}
-        <TaskMenu status={status} onStop={() => void model.stop()} />
-      </>
-    )
 
   const composer = (
     <div className={s.composer}>
@@ -377,10 +305,9 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
 
   return (
     <div className={s.window}>
-      <TitleBar lights="none">
-        <BackCrumb to={snapshot.project.name} onBack={onBack} task={snapshot.task.slug} title={snapshot.task.title} />
-      </TitleBar>
+      {nav ?? <TitleBar lights="none">{null}</TitleBar>}
       <div className={s.head}>
+        {/* Both faces keep the conversation's width, so switching doesn't move the page. */}
         <ThreadMeasure>
           <TaskHeader
             title={snapshot.task.title}
@@ -388,86 +315,95 @@ export function TaskView({ model, onBack }: { model: TaskModel; onBack: () => vo
             state={state}
             lead={lead}
             {...(snapshot.task.branch === null ? {} : { branch: snapshot.task.branch })}
+            {...(since === null ? {} : { since })}
             {...(elapsed === null ? {} : { elapsed })}
-            steps={trackFor(snapshot.task.steps, snapshot.task.step, status === TaskStatus.Done)}
+            steps={trackFor(snapshot.task.steps, snapshot.task.step, snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled')}
+            {...(outputs
+              ? {
+                  faces: (['talk', 'out'] as const).map((value) => ({ value, label: text.faces[value], kbd: text.facesKbd[value] })),
+                  face: shown,
+                  onFace: setFace,
+                }
+              : { facesNote: text.nothingBuilt })}
             actions={actions}
           />
         </ThreadMeasure>
       </div>
-      <TaskFace
-        className={s.face}
-        composer={composer}
-        panel={
-          shown !== null ? (
-            <ChangePanel
-              snapshot={snapshot}
-              change={shown}
-              lead={lead}
-              agentName={agentName}
-              pending={model.pending}
-              onReady={() => void model.markReady(shown.url)}
-              onPush={(head) => void model.push(head, shown.url)}
-              onClose={() => setShowChange(null)}
-              onOpenFile={changes.show}
-            />
-          ) : undefined
-        }
-      >
-        <Thread label={text.thread} busy={busy}>
-          {issue !== null && !snapshot.earlier && (
-            <div className={s.issue}>
-              <Issue
-                mark={productBrand(issue.product)}
-                source={productName(issue.product)}
-                id={issue.key}
-                tone={issue.product === 'linear' ? 'linear' : 'plain'}
-                title={issue.title}
-                href={issue.url}
-                status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
-                {...(issue.priority === null || issue.priority.level === 'none'
-                  ? {}
-                  : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
-                {...(issue.container === null ? {} : { meta: issue.container })}
-              />
-            </div>
-          )}
-          {snapshot.earlier && (
-            <ThreadDivider
-              icon="up"
-              action={model.loadingEarlier ? text.loadingEarlier : text.showEarlier}
-              onAction={() => void model.loadEarlier()}
-            >
-              {text.earlier}
-            </ThreadDivider>
-          )}
-          <ThreadBlocks
-            blocks={blocksOf(
-              { items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree },
-              model.streaming,
-              (iso) => ago(iso),
-              now,
+      {shown === 'out' ? (
+        <Outputs
+          snapshot={snapshot}
+          lead={lead}
+          agentName={agentName}
+          pending={model.pending}
+          error={model.error}
+          onAccept={(changes) => void model.accept(changes)}
+          onMergeHere={() => void model.mergeHere()}
+          onOpenChange={() => void model.openChange()}
+          onPush={(head, url) => void model.push(head, url)}
+          onMarkReady={(url) => void model.markReady(url)}
+          // Sending it back is a note to its lead, which starts it again if it stopped.
+          onSendBack={(note) => send(note, false)}
+          onOpenFile={changes.show}
+        />
+      ) : (
+        <TaskFace className={s.face} composer={composer}>
+          <Thread label={text.thread} busy={busy}>
+            {issue !== null && !snapshot.earlier && (
+              <div className={s.issue}>
+                <Issue
+                  mark={productBrand(issue.product)}
+                  source={productName(issue.product)}
+                  id={issue.key}
+                  tone={issue.product === 'linear' ? 'linear' : 'plain'}
+                  title={issue.title}
+                  href={issue.url}
+                  status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
+                  {...(issue.priority === null || issue.priority.level === 'none'
+                    ? {}
+                    : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
+                  {...(issue.container === null ? {} : { meta: issue.container })}
+                />
+              </div>
             )}
-            agentName={agentName}
-            onPassOn={(words) => void model.send(words)}
-          />
-          {snapshot.attention.map((request) =>
-            request.kind === 'stuck' && request.stuck !== null ? (
-              <StuckCall
-                key={request.id}
-                request={request}
-                stuck={request.stuck}
-                agents={model.agents}
-                agentName={agentName}
-                onAnswer={(attentionId, answer) => void model.answerStuck(attentionId, answer)}
-              />
-            ) : (
-              <PermissionCall key={request.id} request={request} project={snapshot.project.name} onAnswer={model.answer} />
-            ),
-          )}
-        </Thread>
-      </TaskFace>
+            {snapshot.earlier && (
+              <ThreadDivider
+                icon="up"
+                action={model.loadingEarlier ? text.loadingEarlier : text.showEarlier}
+                onAction={() => void model.loadEarlier()}
+              >
+                {text.earlier}
+              </ThreadDivider>
+            )}
+            <ThreadBlocks
+              blocks={blocksOf(
+                { items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree },
+                model.streaming,
+                (iso) => ago(iso),
+                now,
+              )}
+              agentName={agentName}
+              onPassOn={(words) => void model.send(words)}
+            />
+            {snapshot.attention.map((request) =>
+              request.kind === 'stuck' && request.stuck !== null ? (
+                <StuckCall
+                  key={request.id}
+                  request={request}
+                  stuck={request.stuck}
+                  agents={model.agents}
+                  agentName={agentName}
+                  onAnswer={(attentionId, answer) => void model.answerStuck(attentionId, answer)}
+                />
+              ) : (
+                <PermissionCall key={request.id} request={request} project={snapshot.project.name} onAnswer={model.answer} />
+              ),
+            )}
+          </Thread>
+        </TaskFace>
+      )}
       {changes.open && (
         <ChangeView
+          lights="space"
           branch={snapshot.task.branch ?? ''}
           {...(snapshot.task.baseRef === null ? {} : { base: snapshot.task.baseRef.replace(/^origin\//, '') })}
           files={files}

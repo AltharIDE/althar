@@ -26,7 +26,8 @@ export interface SegmentedProps<V extends string> {
   /** What is being chosen. Leave it out inside a FormRow, which names it. */
   label?: string
   options: readonly SegmentedOption<V>[]
-  value: V
+  /** The one on; null for none yet, where something else has the place the choice is about. */
+  value: V | null
   onChange: (value: V) => void
   id?: string
   className?: string
@@ -43,7 +44,7 @@ export function Segmented<V extends string>({ label, options, value, onChange, i
     <RadioGroup.Root
       id={id}
       {...name}
-      value={value}
+      value={value ?? ''}
       onValueChange={(v) => {
         const picked = options.find((o) => o.value === v)
         if (picked) onChange(picked.value)

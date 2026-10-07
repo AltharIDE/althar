@@ -36,6 +36,13 @@ const MANY: ProjectTab[] = [
   })),
 ]
 
+/* Twenty open, a few with work or calls: more than any window holds at full width. */
+const TWENTY: ProjectTab[] = Array.from({ length: 20 }, (_, i) => {
+  const base = ALL[i % ALL.length] ?? ALL[0]!
+  const id = i < ALL.length ? base.id : `${base.id}-${i}`
+  return { ...base, id, seed: id, name: i < ALL.length ? base.name : `${base.name} ${i}`, running: i % 5 === 1, yours: i % 7 === 3 ? 1 : 0 }
+})
+
 /* The strip at the top of a window, with the screen's own bar below it, as the app puts them. */
 function Window({ initial, current: start = 'meridian', ...props }: Partial<ProjectTabsProps> & { initial?: readonly ProjectTab[] }) {
   const [open, setOpen] = useState<readonly ProjectTab[]>(initial ?? ALL.slice(0, 3))
@@ -89,6 +96,8 @@ export const InAProject: Story = {}
 export const AtHome: Story = { args: { current: null } }
 /** More open than fit: each tab gives way down to its mark and a few letters, and the strip scrolls. */
 export const ManyOpen: Story = { args: { initial: MANY, current: 'billing-web' } }
+/** Twenty open: every tab gives way down to its mark, and the strip scrolls, by wheel too. */
+export const TwentyOpen: Story = { args: { initial: TWENTY, current: 'tessera-14' } }
 /** Nothing open yet but the home. */
 export const OnlyHome: Story = { args: { initial: [], current: null } }
 /** Every project open: the + only opens a folder. */

@@ -326,6 +326,8 @@ export const ChangeSummary = Schema.Struct({
   short: Schema.String,
   prefix: Schema.String,
   repository: Schema.String,
+  /** Its repository's folder here, which its files' paths start with in a task of several; null where it isn't known. */
+  slug: Schema.NullOr(Schema.String),
   additions: Schema.NullOr(Schema.Number),
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),
@@ -708,8 +710,9 @@ export const ThreadSnapshot = Schema.Struct({
     waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
-    /** The step it is on, by key, while it runs. */
+    /** The step it is on, by key, while it runs, and since when. */
     step: Schema.NullOr(Schema.String),
+    stepAt: Schema.NullOr(Schema.String),
     /** When its work started, and when it settled: how long it has run. */
     startedAt: Schema.NullOr(Schema.String),
     settledAt: Schema.NullOr(Schema.String),

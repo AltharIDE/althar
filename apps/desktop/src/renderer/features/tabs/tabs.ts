@@ -20,10 +20,17 @@ export type Where =
   | { readonly kind: 'project'; readonly projectId: string; readonly place: Place }
   | { readonly kind: 'thread'; readonly threadId: string }
 
-/** What a window keeps between launches: its projects' tabs in order, and where in each it was. */
+/** A task, as its project's bar names it for going back to it. */
+export interface LastTask {
+  readonly threadId: string
+  readonly title: string
+}
+
+/** What a window keeps between launches: its projects' tabs in order, where in each it was, and the task last opened in each. */
 export interface Kept {
   readonly open: ReadonlyArray<string>
   readonly places: Readonly<Record<string, Place>>
+  readonly tasks?: Readonly<Record<string, LastTask>>
 }
 
 /** Where the window is, from its address. */
@@ -83,6 +90,14 @@ export const tabOf = (project: ProjectSummary): ProjectTab => {
   return { id: project.id, name, seed, ink, running: project.working > 0, yours: yoursIn(project) }
 }
 
+const isLastTask = (value: unknown): value is LastTask =>
+  typeof value === 'object' &&
+  value !== null &&
+  'threadId' in value &&
+  typeof value.threadId === 'string' &&
+  'title' in value &&
+  typeof value.title === 'string'
+
 const isPlace = (value: unknown): value is Place => {
   if (typeof value !== 'object' || value === null || !('kind' in value)) return false
   if (value.kind === 'project' || value.kind === 'rules') return true
@@ -99,7 +114,11 @@ export const keptFrom = (raw: string | null): Kept | null => {
     const places: Record<string, Place> = {}
     if ('places' in parsed && typeof parsed.places === 'object' && parsed.places !== null)
       for (const [id, place] of Object.entries(parsed.places)) if (isPlace(place)) places[id] = place
-    return { open, places }
+    const tasks: Record<string, LastTask> = {}
+    if ('tasks' in parsed && typeof parsed.tasks === 'object' && parsed.tasks !== null)
+      for (const [id, task] of Object.entries(parsed.tasks))
+        if (isLastTask(task)) tasks[id] = { threadId: task.threadId, title: task.title }
+    return Object.keys(tasks).length === 0 ? { open, places } : { open, places, tasks }
   } catch {
     return null
   }

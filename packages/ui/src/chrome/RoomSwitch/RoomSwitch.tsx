@@ -1,17 +1,20 @@
 import { Room } from '../../foundations/vocabulary'
-import { Segmented } from '../../primitives/Segmented/Segmented'
+import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segmented'
 
 /*
  * The project window's only navigation: the conversation, the board, or
  * both side by side. A dot says the conversation has news while you are on
  * the board, and a violet one that something on the board waits on you.
- * The shortcuts are the consumer's to bind; the switch names them.
+ * While one of the project's tasks has the window, none of them is on, and
+ * choosing one goes back to the project in it. The task last opened can sit
+ * after them, by its title, as the way back to it, on while it has the
+ * window. The shortcuts are the consumer's to bind; the switch names them.
  */
 
 export interface RoomSwitchText {
   label: string
   room: Record<Room, string>
-  /** The shortcut, as the tooltip shows it: ⌘1. */
+  /** The shortcut, as the tooltip shows it: ⌘1; empty where there is none. */
   key: (n: number) => string
   news: string
   yours: (n: number) => string
@@ -40,9 +43,19 @@ function dotLabelOf(dot: 'new' | 'yours' | undefined, yours: number, t: RoomSwit
   return undefined
 }
 
+/** The task last opened, as the switch's last choice. */
+export const TASK = 'task'
+
+/** A title cut to what a choice holds, and whether it was. */
+const shortOf = (title: string, most = 28) =>
+  title.length <= most ? { label: title, cut: false } : { label: `${title.slice(0, most - 1).trimEnd()}…`, cut: true }
+
 export interface RoomSwitchProps {
-  value: Room
+  /** The view on, or the task when it has the window; null while another task of the project has it. */
+  value: Room | typeof TASK | null
   onChange: (room: Room) => void
+  /** The project's task last opened: its title, and going back to it. */
+  task?: { readonly title: string; readonly onOpen: () => void }
   /** The conversation has something you haven't seen. */
   news?: boolean
   /** How many calls on the board wait on you. */
@@ -51,24 +64,30 @@ export interface RoomSwitchProps {
   text?: Partial<RoomSwitchText>
 }
 
-export function RoomSwitch({ value, onChange, news, yours = 0, className, text }: RoomSwitchProps) {
+export function RoomSwitch({ value, onChange, task, news, yours = 0, className, text }: RoomSwitchProps) {
   const t = { ...roomSwitchText, ...text }
+  const views: SegmentedOption<Room | typeof TASK>[] = ROOMS.map((room, i) => {
+    const dot = dotOf(room, news, yours)
+    return {
+      value: room,
+      label: t.room[room],
+      tooltip: { label: t.room[room], ...(t.key(i + 1) === '' ? {} : { kbd: t.key(i + 1) }) },
+      dot,
+      dotLabel: dotLabelOf(dot, yours, t),
+    }
+  })
+  const short = task === undefined ? null : shortOf(task.title)
+  const last: SegmentedOption<Room | typeof TASK>[] =
+    task === undefined || short === null
+      ? []
+      : [{ value: TASK, label: short.label, ...(short.cut ? { tooltip: { label: task.title } } : {}) }]
   return (
     <Segmented
       label={t.label}
-      value={value}
-      onChange={onChange}
+      value={value === TASK && task === undefined ? null : value}
+      onChange={(chosen) => (chosen === TASK ? task?.onOpen() : onChange(chosen))}
       className={className}
-      options={ROOMS.map((room, i) => {
-        const dot = dotOf(room, news, yours)
-        return {
-          value: room,
-          label: t.room[room],
-          tooltip: { label: t.room[room], kbd: t.key(i + 1) },
-          dot,
-          dotLabel: dotLabelOf(dot, yours, t),
-        }
-      })}
+      options={[...views, ...last]}
     />
   )
 }

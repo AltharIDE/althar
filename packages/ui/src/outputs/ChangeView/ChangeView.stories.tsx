@@ -93,3 +93,7 @@ export const CutShort: Story = { args: at('src/refunds/router.ts', { state: 'rea
 export const Nothing: Story = { args: { files: [], selected: null, view: { state: 'ready', lines: [] } } }
 /** On a phone-width window, the files sit above the diff. */
 export const Narrow: Story = { globals: { viewport: { value: 'mobile1' } } }
+/** In the app on macOS: the system's lights sit over the window's top row, so the view stays below it. */
+export const UnderTheLights: Story = { args: { lights: 'space' } }
+/** Narrow, under the lights: the whole window but its top row. */
+export const NarrowUnderTheLights: Story = { args: { lights: 'space' }, globals: { viewport: { value: 'mobile1' } } }

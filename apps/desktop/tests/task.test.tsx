@@ -6,9 +6,10 @@ import { ApiError, type StuckStep, type ThreadSnapshot } from '@althar/contracts
 import { TaskStatus } from '@althar/ui'
 
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
-import { elapsedOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
+import { elapsedOf, sinceOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { change, changed, fakeClient, items, models, snapshot, streamed } from './fixtures'
+import type { ChangedFile } from '@althar/contracts'
 import { clock } from '../src/renderer/shared/time'
 import { withServices } from './render'
 
@@ -59,7 +60,9 @@ describe('a task', () => {
     expect(screen.getByText('Codex')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Thought' }))
     expect(screen.getByText('Where is the call?')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: /meridian/ }))
+    // Escape, with nothing else open, goes back to the project.
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await userEvent.keyboard('{Escape}')
     expect(onBack).toHaveBeenCalled()
   })
 
@@ -83,6 +86,66 @@ describe('a task', () => {
         .map((step) => step.textContent),
     ).toEqual(['Implement, done', 'Review, now'])
     expect(screen.getByText(/1h 4m/)).toBeTruthy()
+  })
+
+  it('opens on its outputs once ready, switches faces by c and o, and goes back on Escape', async () => {
+    const onBack = vi.fn()
+    const file: ChangedFile = { path: 'src/checkout.ts', from: null, status: 'modified', add: 4, del: 1, binary: false, uncommitted: false }
+    const here = [{ repository: 'meridian', name: 'meridian', branch: 'main', head: 'abc111' }]
+    const base = thread({ session: null })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...base, task: { ...base.task, phase: 'ready' as const, files: [file], commits: 1, here } })),
+    })
+    withServices(<Task onBack={onBack} />, client)
+    // What it made, on its branch: merged here, as the person says.
+    const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(outputs.getByText('On its branch')).toBeTruthy()
+    expect(outputs.getByText('checkout.ts')).toBeTruthy()
+    expect(screen.getByText('Ready for you')).toBeTruthy()
+    await userEvent.click(outputs.getByRole('button', { name: 'Merge into main' }))
+    await waitFor(() => expect(client.mergeHere).toHaveBeenCalledWith('t1', [{ repository: 'meridian', head: 'abc111' }]))
+    // c for the conversation, o for the outputs; not while typing.
+    await userEvent.keyboard('c')
+    expect(await screen.findByRole('region', { name: 'Thread' })).toBeTruthy()
+    expect(screen.queryByRole('article', { name: 'Add a retry' })).toBeNull()
+    await userEvent.type(screen.getByRole('textbox'), 'o')
+    expect(screen.queryByRole('article', { name: 'Add a retry' })).toBeNull()
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await userEvent.keyboard('o')
+    expect(await screen.findByRole('article', { name: 'Add a retry' })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    expect(onBack).toHaveBeenCalled()
+  })
+
+  it('stays on the conversation the person is reading when the task becomes ready', async () => {
+    const file: ChangedFile = { path: 'src/checkout.ts', from: null, status: 'modified', add: 4, del: 1, binary: false, uncommitted: false }
+    const base = thread()
+    const getThread = vi.fn(async () => ({ ...base, task: { ...base.task, files: [file] } }))
+    const { client, emit } = fakeClient({ getThread })
+    withServices(<Task />, client)
+    expect(await screen.findByRole('region', { name: 'Thread' })).toBeTruthy()
+    getThread.mockResolvedValue({ ...base, task: { ...base.task, files: [file], phase: 'ready' as const } })
+    emit(changed('task', 't1', 'th1'))
+    expect(await screen.findByText('Ready for you')).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Thread' })).toBeTruthy()
+    expect(screen.queryByRole('article', { name: 'Add a retry' })).toBeNull()
+  })
+
+  it('accepts a ready pull request at the head it showed, or sends it back as a note to its lead', async () => {
+    const base = thread()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({
+        ...base,
+        task: { ...base.task, phase: 'ready' as const, changes: [change({ draft: false })], commits: 2 },
+      })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge' }))
+    await waitFor(() => expect(client.merge).toHaveBeenCalledWith('t1', 'abc123', 'https://github.com/meridian/api/pull/12'))
+    await userEvent.click(screen.getByRole('button', { name: 'Send back' }))
+    await userEvent.type(screen.getByRole('textbox', { name: /What should change/ }), 'Name the retry')
+    await userEvent.click(screen.getByRole('button', { name: 'Send back' }))
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ body: 'Name the retry' })))
   })
 
   it('talks to its lead: sends, queues while it works, sends now, and interrupts', async () => {
@@ -583,7 +646,9 @@ describe('a task', () => {
     })
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
     expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })
-    expect(statusOf({ ...base, task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Done, state: 'Ready' })
+    // Ready, accepting it is the person's; settled, it is done.
+    expect(statusOf({ ...base, task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Yours, state: 'Ready for you' })
+    expect(statusOf({ ...base, task: { ...base.task, phase: 'settled' } })).toEqual({ status: TaskStatus.Done, state: 'Done' })
     expect(statusOf({ ...running(), task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Running, state: 'Working' })
     expect(
       statusOf({
@@ -597,6 +662,24 @@ describe('a task', () => {
       status: TaskStatus.Running,
       state: 'Settling the review',
     })
+  })
+
+  it('says since when it has been where it stands', () => {
+    const base = snapshot()
+    const at = (minutes: number) => new Date(Date.UTC(2026, 9, 7, 9, minutes)).toISOString()
+    const on = (step: string) => ({ ...base, task: { ...base.task, step, stepAt: at(0) } })
+    expect(sinceOf(on('implement'), at(6))).toBe('implement · 6m')
+    // Settling the review's findings is part of the review.
+    expect(sinceOf(on('settle'), at(6))).toBe('review · 6m')
+    expect(sinceOf(base, at(6))).toBeNull()
+    const call = { id: 'a', kind: 'permission' as const, title: 't', reason: 'r', command: null, stuck: null, createdAt: at(3) }
+    expect(sinceOf({ ...on('implement'), attention: [call] }, at(6))).toBe('waiting · 3m')
+    expect(sinceOf({ ...on('implement'), task: { ...on('implement').task, waits: { agentId: 'codex', until: at(60) } } }, at(6))).toBeNull()
+    const reported = { ...items.step({ step: 'review' }), createdAt: new Date(Date.now() - 4 * 60_000).toISOString() }
+    const now = new Date().toISOString()
+    expect(sinceOf({ ...base, task: { ...base.task, phase: 'ready' }, items: [reported] }, now)).toBe('ready · 4m ago')
+    expect(sinceOf({ ...base, task: { ...base.task, phase: 'stopped' }, items: [reported] }, now)).toBe('stopped · 4m ago')
+    expect(sinceOf({ ...base, task: { ...base.task, phase: 'settled', settledAt: reported.createdAt } }, now)).toBe('done · 4m ago')
   })
 
   it('says how long it has run, until it stopped', () => {

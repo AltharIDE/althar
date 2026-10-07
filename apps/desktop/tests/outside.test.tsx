@@ -244,7 +244,7 @@ function Task() {
 }
 
 describe('a task’s pull request', () => {
-  it('opens beside the thread, with its checks and files, and is marked ready there; the issue heads the thread', async () => {
+  it('shows on its outputs, with its checks, its review and files, and is marked ready there; the issue heads the thread', async () => {
     const ready = vi.fn(async () => {})
     const { client } = fakeClient({
       markReady: ready,
@@ -272,22 +272,25 @@ describe('a task’s pull request', () => {
       ),
     })
     withServices(<Task />, client)
-    expect(await screen.findByText('Rate-limit refunds like charges')).toBeTruthy()
+    // Ready, it opens on what it made.
+    const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
     // Opening a task with a pull request asks its host for news.
     await waitFor(() => expect(client.refreshTask).toHaveBeenCalledWith('t1'))
-    await userEvent.click(screen.getByRole('button', { name: 'PR #12' }))
-    const panel = await screen.findByRole('complementary', { name: 'Pull request' })
-    expect(within(panel).getByText('limit.ts')).toBeTruthy()
-    expect(within(panel).getByText('test')).toBeTruthy()
-    expect(within(panel).getByText('Its checks run on it; mark it ready when you are')).toBeTruthy()
-    expect(within(panel).getByRole('link', { name: 'Open on GitHub' }).getAttribute('href')).toBe('https://github.com/meridian/api/pull/12')
-    await userEvent.click(within(panel).getByRole('button', { name: 'Mark ready for review' }))
+    expect(outputs.getByText('limit.ts')).toBeTruthy()
+    expect(outputs.getByText('test')).toBeTruthy()
+    expect(outputs.getByText('Review')).toBeTruthy()
+    expect(outputs.getByText('Holds.')).toBeTruthy()
+    expect(outputs.getByText('Its checks run on it; mark it ready when you are')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Open on GitHub' }).getAttribute('href')).toBe('https://github.com/meridian/api/pull/12')
+    await userEvent.click(screen.getByRole('button', { name: 'Mark ready for review' }))
     expect(ready).toHaveBeenCalledWith('t1', 'https://github.com/meridian/api/pull/12')
-    await userEvent.click(within(panel).getByRole('button', { name: 'Close the panel' }))
-    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Pull request' })).toBeNull())
+    // The conversation is a switch away, and the issue heads it.
+    await userEvent.click(screen.getByRole('radio', { name: /Conversation/ }))
+    expect(await screen.findByText('Rate-limit refunds like charges')).toBeTruthy()
+    expect(screen.queryByRole('article', { name: 'Add a retry' })).toBeNull()
   })
 
-  it('pushes what the lead committed since, from the header or the panel, up to what it showed', async () => {
+  it('pushes what the lead committed since, from its outputs, up to what it showed', async () => {
     const push = vi.fn(async () => {})
     const { client } = fakeClient({
       push,
@@ -298,16 +301,12 @@ describe('a task’s pull request', () => {
       ),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Push 2 commits' }))
+    expect(await screen.findByText('2 commits aren’t on the pull request yet.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Push 2 commits' }))
     await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456', 'https://github.com/meridian/api/pull/12'))
-    await userEvent.click(screen.getByRole('button', { name: 'PR #12' }))
-    const panel = await screen.findByRole('complementary', { name: 'Pull request' })
-    expect(within(panel).getByText('2 commits aren’t on the pull request yet.')).toBeTruthy()
-    await userEvent.click(within(panel).getByRole('button', { name: 'Push 2 commits' }))
-    await waitFor(() => expect(push).toHaveBeenCalledTimes(2))
   })
 
-  it('shows what it changed, file by file, from its header, its pull request, or ⌘D', async () => {
+  it('shows what it changed, file by file, from its header, its outputs, or ⌘D', async () => {
     const file = (path: string, more: Partial<ThreadSnapshot['task']['files'][number]> = {}) => ({
       path,
       from: null,
@@ -361,10 +360,9 @@ describe('a task’s pull request', () => {
     await waitFor(() => expect(getFileDiff).toHaveBeenCalledTimes(3))
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Changes' })).toBeNull())
-    // From its pull request, on a file; and with ⌘D, not a bare D, which speech or typing could set off.
-    await userEvent.click(screen.getByRole('button', { name: 'PR #12' }))
-    const panel = await screen.findByRole('complementary', { name: 'Pull request' })
-    await userEvent.click(within(panel).getByRole('button', { name: 'Open the diff of src/limit.ts' }))
+    // From its outputs, on a file; and with ⌘D, not a bare D, which speech or typing could set off.
+    await userEvent.keyboard('o')
+    await userEvent.click(await screen.findByRole('button', { name: 'Open the diff of src/limit.ts' }))
     expect(await screen.findByRole('dialog', { name: 'Changes' })).toBeTruthy()
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Changes' })).toBeNull())
@@ -374,9 +372,9 @@ describe('a task’s pull request', () => {
     expect(await screen.findByRole('dialog', { name: 'Changes' })).toBeTruthy()
   })
 
-  it('says it is ready to merge on its host, merged, or closed', async () => {
+  it('says on its outputs that it is ready to accept, merged, or closed', async () => {
     for (const [shown, words] of [
-      [change({ draft: false }), 'Merge it on GitHub when you’re ready'],
+      [change({ draft: false }), 'Nothing merges until you accept it'],
       [change({ state: 'merged', draft: false, checks: null }), 'Merged'],
       [
         change({ state: 'closed', draft: false, noun: 'merge request', short: 'MR', prefix: '!', product: 'gitlab' }),
@@ -385,7 +383,7 @@ describe('a task’s pull request', () => {
     ] as const) {
       const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ task: { ...snapshot().task, changes: [shown] } })) })
       const view = withServices(<Task />, client)
-      await userEvent.click(await screen.findByRole('button', { name: `${shown.short} ${shown.prefix}12` }))
+      await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
       expect((await screen.findAllByText(words)).length).toBeGreaterThan(0)
       view.unmount()
     }
@@ -500,11 +498,70 @@ describe('a project, reaching outside', () => {
       getThread: vi.fn(async () => snapshot({ task: { ...snapshot().task, phase: 'ready', changes: [change(), web] } })),
     })
     withServices(<Task />, client)
-    expect(await screen.findByRole('button', { name: 'api PR #12' })).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'web PR #4' }))
-    const panel = await screen.findByRole('complementary', { name: 'Pull request' })
-    await userEvent.click(within(panel).getByRole('button', { name: 'Mark ready for review' }))
+    expect(await screen.findByRole('link', { name: 'Open on GitHub · api' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Mark web ready for review' }))
     expect(ready).toHaveBeenCalledWith('t1', 'https://github.com/meridian/web/pull/4')
+  })
+
+  it('accepts its pull requests in turn, each at the head it showed, and stops at the first refused', async () => {
+    const api = change({ draft: false })
+    const web = change({
+      number: 4,
+      repository: 'meridian/web',
+      url: 'https://github.com/meridian/web/pull/4',
+      draft: false,
+      head: 'def456',
+    })
+    const ready = { ...snapshot().task, phase: 'ready' as const, changes: [api, web], commits: 2 }
+    // The first waits until the test says: the second isn't asked for meanwhile, and Accept stays busy.
+    let finish: () => void = () => undefined
+    const merge = vi.fn(
+      (_taskId: string, head: string) =>
+        new Promise<void>((resolve) => {
+          if (head === 'abc123') finish = resolve
+          else resolve()
+        }),
+    )
+    const { client } = fakeClient({ merge, getThread: vi.fn(async () => snapshot({ task: ready })) })
+    const view = withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge both' }))
+    await waitFor(() => expect(merge).toHaveBeenCalledTimes(1))
+    expect(merge).toHaveBeenLastCalledWith('t1', 'abc123', 'https://github.com/meridian/api/pull/12')
+    expect(screen.getByRole('button', { name: 'Accept and merge both' }).getAttribute('aria-busy')).toBe('true')
+    act(() => finish())
+    await waitFor(() => expect(merge).toHaveBeenLastCalledWith('t1', 'def456', 'https://github.com/meridian/web/pull/4'))
+    view.unmount()
+
+    // Refused, the first stops it there: the second waits, and the refusal is said.
+    const refused = vi.fn(async () => {
+      throw new ApiError({ reason: 'ChangedSinceSeen', message: 'It moved on since you looked.' })
+    })
+    const second = fakeClient({ merge: refused, getThread: vi.fn(async () => snapshot({ task: ready })) })
+    withServices(<Task />, second.client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge both' }))
+    expect(await screen.findByText(/It moved on since you looked/)).toBeTruthy()
+    expect(refused).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows each pull request’s files under its repository’s folder here, however the host names it', async () => {
+    const file = (path: string) => ({ path, from: null, status: 'modified' as const, add: 1, del: 0, binary: false, uncommitted: false })
+    const web = change({ number: 4, repository: 'meridian/Web', slug: 'web-app', url: 'https://github.com/meridian/Web/pull/4' })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: {
+            ...snapshot().task,
+            phase: 'ready',
+            changes: [change({ slug: 'api' }), web],
+            files: [file('api/src/limit.ts'), file('web-app/src/button.tsx')],
+            commits: 2,
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('button.tsx')).toBeTruthy()
+    expect(screen.getByText('limit.ts')).toBeTruthy()
   })
 
   it('pushes what the lead committed since to the repository it was committed in', async () => {
@@ -523,6 +580,7 @@ describe('a project, reaching outside', () => {
       ),
     })
     withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
     expect(await screen.findByRole('button', { name: 'Push 2 commits to api' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Push 1 commit to web' }))
     await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456', 'https://github.com/meridian/web/pull/4'))
