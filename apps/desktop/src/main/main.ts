@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
 
-import { type AppIcon, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
+import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 
 import {
   app,
@@ -186,8 +186,28 @@ const connect = (window: BrowserWindow) => {
   window.webContents.postMessage('althar:port', null, [port2])
 }
 
-/** Shows the icon on the Dock, where there is one: while Althar runs, the Dock shows this rather than the app's own. */
-const showIcon = (icon: AppIcon) => app.dock?.setIcon(nativeImage.createFromPath(join(here, '../../resources/icons', `${icon}.png`)))
+/**
+ * Shows the icon on the Dock, where there is one: while Althar runs, the Dock
+ * shows this rather than the app's own. A missing picture reads as an empty
+ * image, which would blank the Dock, so it fails instead.
+ */
+const showIcon = (icon: AppIcon) => {
+  const picture = nativeImage.createFromPath(join(here, '../../resources/icons', `${icon}.png`))
+  if (picture.isEmpty()) throw new Error(`Althar has no picture for the icon ${icon}.`)
+  app.dock?.setIcon(picture)
+}
+
+/** The chosen icon on the Dock at start; where its picture is gone, the default's; where that is too, the app's own. */
+const showChosenIcon = async () => {
+  const chosen = await readAppIcon(locations().profile)
+  for (const icon of [chosen, DEFAULT_APP_ICON]) {
+    try {
+      return showIcon(icon)
+    } catch {
+      // The next one.
+    }
+  }
+}
 
 /** Opens a link from the window in the person's browser: web pages only, never a file or another app's scheme. */
 const openOutside = (url: string) => {
@@ -255,12 +275,12 @@ ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   return found?.isDirectory() === true ? allowFolder(path) : null
 })
 
-// The icon the person chose, and a new one: kept in the profile, and shown on the Dock at once.
-ipcMain.handle('althar:app-icon', () => readAppIcon(locations().profile))
+// The icon the person chose, or null where there is no Dock to show one; and a new one, shown on the Dock, then kept. Anything else fails, and the window says so.
+ipcMain.handle('althar:app-icon', () => (app.dock === undefined ? null : readAppIcon(locations().profile)))
 ipcMain.handle('althar:set-app-icon', async (_event, icon: unknown) => {
-  if (!isAppIcon(icon)) return
-  await writeAppIcon(locations().profile, icon)
+  if (!isAppIcon(icon)) throw new Error(`Althar has no icon ${String(icon)}.`)
   showIcon(icon)
+  await writeAppIcon(locations().profile, icon)
 })
 
 void app.whenReady().then(() => {
@@ -268,7 +288,7 @@ void app.whenReady().then(() => {
   // Althar's own notifications come from here, as the runtime says something needs the person.
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, done) => done(false))
   session.defaultSession.setPermissionCheckHandler(() => false)
-  void readAppIcon(locations().profile).then(showIcon)
+  void showChosenIcon()
   startRuntime()
   openWindow()
   app.on('activate', () => {

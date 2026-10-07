@@ -28,7 +28,7 @@ contextBridge.exposeInMainWorld('althar', {
     const path = webUtils.getPathForFile(file)
     return path === '' ? Promise.resolve(null) : ipcRenderer.invoke('althar:grant-dropped', path)
   },
-  appIcon: (): Promise<string> => ipcRenderer.invoke('althar:app-icon'),
+  appIcon: (): Promise<string | null> => ipcRenderer.invoke('althar:app-icon'),
   setAppIcon: (icon: string): Promise<void> => ipcRenderer.invoke('althar:set-app-icon', icon),
   onOpen: (listener: (threadId: string) => void): (() => void) => {
     opening.add(listener)

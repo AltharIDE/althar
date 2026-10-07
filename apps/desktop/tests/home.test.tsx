@@ -416,6 +416,40 @@ describe('settings', () => {
     expect(within(icons).getByRole('radio', { name: 'Cobalt' }).getAttribute('aria-checked')).toBe('true')
   })
 
+  it('offers no icon where there is no Dock to show one', async () => {
+    withServices(<Settings />, fakeClient().client, fakeHost({ appIcon: vi.fn(async () => null) }))
+    await screen.findByRole('heading', { name: 'Agents on this Mac' })
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'App icon' })).toBeNull())
+    expect(screen.queryByRole('radiogroup', { name: 'App icon' })).toBeNull()
+  })
+
+  it('lets only the latest choice go back, to the last icon kept', async () => {
+    const answers: Array<{ resolve: () => void; reject: (error: Error) => void }> = []
+    const host = fakeHost({
+      setAppIcon: vi.fn(() => new Promise<void>((resolve, reject) => void answers.push({ resolve, reject }))),
+    })
+    withServices(<Settings />, fakeClient().client, host)
+    const icons = await screen.findByRole('radiogroup', { name: 'App icon' })
+    const checked = () =>
+      within(icons)
+        .getAllByRole('radio')
+        .find((radio) => radio.getAttribute('aria-checked') === 'true')?.textContent
+
+    // Ink, then Paper before Ink is kept: Paper is kept, and Ink failing after says nothing.
+    await userEvent.click(within(icons).getByRole('radio', { name: 'Ink' }))
+    await userEvent.click(within(icons).getByRole('radio', { name: 'Paper' }))
+    await act(async () => answers[1]!.resolve())
+    await act(async () => answers[0]!.reject(new Error('late')))
+    expect(checked()).toBe('Paper')
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    // Solid, which can't be kept: Paper, the last kept, comes back.
+    await userEvent.click(within(icons).getByRole('radio', { name: 'Solid' }))
+    await act(async () => answers[2]!.reject(new Error('no picture')))
+    expect(checked()).toBe('Paper')
+    expect((await screen.findByRole('alert')).textContent).toBe('That icon couldn’t be kept. Try again.')
+  })
+
   it('starts on cobalt when the main process can’t say', async () => {
     const host = fakeHost({ appIcon: vi.fn(async () => Promise.reject(new Error('gone'))) })
     withServices(<Settings />, fakeClient().client, host)

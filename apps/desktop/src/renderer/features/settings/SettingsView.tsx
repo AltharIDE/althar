@@ -70,14 +70,14 @@ export function SettingsView({
             </Heading>
             <ConnectionsView model={connections} />
           </section>
-          <section aria-labelledby="icon" className={s.section}>
-            <div className={s.titled}>
-              <Heading level={2} id="icon">
-                {text.icon}
-              </Heading>
-              <p className={s.quiet}>{text.iconNote}</p>
-            </div>
-            {appIcon.icon !== null && (
+          {appIcon.icon !== null && (
+            <section aria-labelledby="icon" className={s.section}>
+              <div className={s.titled}>
+                <Heading level={2} id="icon">
+                  {text.icon}
+                </Heading>
+                <p className={s.quiet}>{text.iconNote}</p>
+              </div>
               <Choices
                 label={text.icon}
                 layout="tiles"
@@ -85,13 +85,13 @@ export function SettingsView({
                 value={appIcon.icon}
                 onChange={appIcon.choose}
               />
-            )}
-            {appIcon.failed && (
-              <p role="alert" className={s.failed}>
-                {text.iconFailed}
-              </p>
-            )}
-          </section>
+              {appIcon.failed && (
+                <p role="alert" className={s.failed}>
+                  {text.iconFailed}
+                </p>
+              )}
+            </section>
+          )}
         </div>
       </main>
     </div>

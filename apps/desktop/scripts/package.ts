@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 
@@ -10,10 +10,12 @@ import { build } from 'electron-builder'
  * `bun run build:package` (so without the end-to-end tests' hooks). The
  * bundles hold everything but the agent adapters, which run as processes of
  * their own and are found in node_modules, so the app is staged with the
- * bundles, the icons, and a flat install of the adapters alone. Electron
- * comes from the copy already installed, at the version the app is tested
- * on. There is no Developer ID yet: the app is signed ad hoc, which runs on
- * the Mac that built it.
+ * bundles, the icons, and a flat install of the adapters alone, with the
+ * packages that carry the agents' own binaries pinned to the versions the
+ * workspace runs, so the app ships what dev and CI tested. Electron comes
+ * from the copy already installed, at the version the app is tested on.
+ * There is no Developer ID yet: the app is signed ad hoc, which runs on the
+ * Mac that built it.
  */
 
 const desktop = join(import.meta.dirname, '..')
@@ -28,6 +30,28 @@ const own = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
 
 /** The packages the runtime starts as processes, at the versions the app depends on. */
 const ADAPTERS = ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']
+
+/** The packages that carry the agents' binaries, by the adapter that brings each; their platform packages are pinned by them. */
+const BINARIES: Record<string, string> = {
+  '@openai/codex': '@agentclientprotocol/codex-acp',
+  '@anthropic-ai/claude-agent-sdk': '@agentclientprotocol/claude-agent-acp',
+}
+
+const require = createRequire(import.meta.url)
+const versionAt = (path: string) => (JSON.parse(readFileSync(path, 'utf8')) as { readonly version: string }).version
+
+/**
+ * A package's version as the workspace has it, found from the adapter that
+ * depends on it, as Node would find it: what dev and CI run. By the folders
+ * Node looks in, since not every package lets its package.json be resolved.
+ */
+const installed = (name: string, adapter: string) => {
+  const folders = createRequire(require.resolve(`${adapter}/package.json`)).resolve.paths(name) ?? []
+  const found = folders.map((folder) => join(folder, name, 'package.json')).find((path) => existsSync(path))
+  if (found === undefined) throw new Error(`The workspace has no ${name} for ${adapter}`)
+  return versionAt(found)
+}
+const pinned = Object.fromEntries(Object.entries(BINARIES).map(([name, adapter]) => [name, installed(name, adapter)]))
 
 rmSync(out, { recursive: true, force: true })
 mkdirSync(stage, { recursive: true })
@@ -44,6 +68,7 @@ writeFileSync(
       type: 'module',
       main: 'dist/main/main.js',
       dependencies: Object.fromEntries(ADAPTERS.map((name) => [name, own.dependencies[name]])),
+      overrides: pinned,
     },
     null,
     2,
@@ -51,8 +76,11 @@ writeFileSync(
 )
 // npm, for a flat node_modules the adapters' own lookups find their way through.
 execFileSync('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock'], { cwd: stage, stdio: 'inherit' })
+for (const [name, version] of Object.entries(pinned)) {
+  const staged = versionAt(join(stage, 'node_modules', name, 'package.json'))
+  if (staged !== version) throw new Error(`The package has ${name} ${staged}, but the workspace runs ${version}`)
+}
 
-const require = createRequire(import.meta.url)
 const electron = dirname(require.resolve('electron/package.json'))
 const electronVersion = readFileSync(join(electron, 'dist', 'version'), 'utf8').trim()
 
@@ -69,6 +97,12 @@ await build({
     asar: false,
     npmRebuild: false,
     nodeGypRebuild: false,
+    /*
+     * Nothing may steer Althar's binary through NODE_OPTIONS or the inspector:
+     * the adapters use neither. Running as Node stays on, since that is how
+     * the runtime starts them (see the README's "The packaged app: not done yet").
+     */
+    electronFuses: { enableNodeOptionsEnvironmentVariable: false, enableNodeCliInspectArguments: false },
     files: ['**/*'],
     mac: {
       target: [{ target: 'dir' }],
