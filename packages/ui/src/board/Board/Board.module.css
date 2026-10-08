@@ -1,8 +1,11 @@
-/* The board: lanes side by side, each on the page, each scrolling on its own. */
+/* The board: lanes side by side, each on the page, each scrolling on its own.
+   Centred while they fit; when they don't, they start at the left edge and
+   scroll, rather than spilling off it where no scroll reaches. A narrow
+   board (beside the conversation) sets --lane-min, as the prototype does. */
 .board {
   display: grid;
-  grid-template-columns: repeat(4, minmax(260px, 460px));
-  justify-content: center;
+  grid-template-columns: repeat(4, minmax(var(--lane-min, 260px), 460px));
+  justify-content: safe center;
   height: 100%;
   min-height: 0;
   overflow-x: auto;

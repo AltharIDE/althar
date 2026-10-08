@@ -6,7 +6,7 @@ import { readFirst, reads } from '../../data/reads'
 import { rootRoute } from '../../root'
 import { ThreadPending } from '../../shared/Pending'
 import { useBoard } from '../board/useBoard'
-import { useLastTask } from '../tabs/TabsFrame'
+import { useLastRoom } from '../tabs/TabsFrame'
 import { useConnections } from '../connections/useConnections'
 import { ProjectView } from './ProjectView'
 import { useProject } from './useProject'
@@ -15,15 +15,13 @@ function Project() {
   const { projectId } = projectRoute.useParams()
   const { room, new: planning } = projectRoute.useSearch()
   const navigate = useNavigate()
-  const last = useLastTask(projectId)
+  // The view it was last on, unless a task's bar asked for one.
+  const [last, keepRoom] = useLastRoom(projectId)
+  const opening = room ?? last
   return (
     <ProjectView
-      lastTask={
-        last === null
-          ? null
-          : { title: last.title, onOpen: () => void navigate({ to: '/threads/$threadId', params: { threadId: last.threadId } }) }
-      }
-      {...(room === undefined ? {} : { room })}
+      {...(opening === null ? {} : { room: opening })}
+      onRoomChange={keepRoom}
       newTask={planning === 'task'}
       model={useProject(projectId)}
       board={useBoard(projectId)}

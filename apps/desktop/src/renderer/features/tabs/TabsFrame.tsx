@@ -1,10 +1,10 @@
-import { createContext, type ReactNode, useContext, useEffect, useSyncExternalStore } from 'react'
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useSyncExternalStore } from 'react'
 
-import { ProjectTabs } from '@althar/ui'
+import { ProjectTabs, type Room } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { tabsStoreOf } from './store'
-import { beside, byNumber, type LastTask } from './tabs'
+import { beside, byNumber } from './tabs'
 import s from './Tabs.module.css'
 import { useTabs } from './useTabs'
 
@@ -16,25 +16,26 @@ import { useTabs } from './useTabs'
  * system's lights to them.
  */
 
-const VisitContext = createContext<(threadId: string, projectId: string, title?: string) => void>(() => undefined)
+const VisitContext = createContext<(threadId: string, projectId: string) => void>(() => undefined)
 
-/**
- * A task screen says which project its thread is in, once it has read it,
- * so that project's tab has the window; and that it is the task last opened
- * there, for the project's bar to go back to.
- */
-export const useVisit = (threadId: string, projectId: string | undefined, title?: string) => {
+/** A task screen says which project its thread is in, once it has read it, so that project's tab has the window. */
+export const useVisit = (threadId: string, projectId: string | undefined) => {
   const visit = useContext(VisitContext)
   useEffect(() => {
-    if (projectId !== undefined) visit(threadId, projectId, title)
-  }, [visit, threadId, projectId, title])
+    if (projectId !== undefined) visit(threadId, projectId)
+  }, [visit, threadId, projectId])
 }
 
-/** The task last opened in a project, for its bar's way back; null before one was. */
-export const useLastTask = (projectId: string): LastTask | null => {
+/**
+ * The view a project was last on (null before it was on one), and the way
+ * to keep the one it is on now: it opens on it again, from its tab or back
+ * from one of its tasks.
+ */
+export const useLastRoom = (projectId: string): readonly [Room | null, (room: Room) => void] => {
   const store = tabsStoreOf(useServices().client)
-  const { kept } = useSyncExternalStore(store.subscribe, store.get)
-  return kept?.tasks?.[projectId] ?? null
+  const { kept, pending } = useSyncExternalStore(store.subscribe, store.get)
+  const keep = useCallback((room: Room) => store.view(projectId, room), [store, projectId])
+  return [kept?.rooms?.[projectId] ?? pending[projectId] ?? null, keep]
 }
 
 export function TabsFrame({ children }: { children: ReactNode }) {

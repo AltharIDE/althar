@@ -1,41 +1,44 @@
-import { ChromeButton, Room, RoomSwitch, type TASK, TitleBar, WorkStatus } from '@althar/ui'
+import { BackCrumb, ChromeButton, Room, RoomSwitch, TitleBar, type WorkNeed, WorkStatus } from '@althar/ui'
 
 /*
  * A project's bar, under the window's tabs: its views, how much runs and
- * what waits on the person, its rules, and a new task. The project's own
- * screen and each of its tasks have it, so the way around a project is the
- * same wherever in it the person is; on a task, no view is on, and choosing
- * one goes back to the project in it. The task last opened sits after the
- * views, by its title, so going back to it from the board is one press. The
- * views have no shortcut of their own: ⌘ and a number belongs to the tabs,
- * and b steps through the views.
+ * what waits on the person (pointed at, what it is; clicked, the first of
+ * it), its rules, and a new task. The project's own screen and each of its
+ * tasks have it. On a task, the views give way to the way back, as in the
+ * prototype: the project, with Escape, then which task this is; back goes
+ * to the view the person was on. The views have no shortcut of their own:
+ * ⌘ and a number belongs to the tabs, and b steps through the views.
  */
 
 export const text = {
   rules: 'Project rules',
   newTask: 'New task',
+  backKey: 'esc',
 }
 
+/** What the bar starts with: the project's views, or, on a task, the way back to them. */
+export type BarPlace =
+  | { readonly room: Room; readonly onRoom: (room: Room) => void }
+  | { readonly back: { readonly project: string; readonly task: string; readonly onBack: () => void } }
+
 export function ProjectBar({
-  room,
-  onRoom,
-  task,
+  place,
   working,
   yours,
+  needs,
   onYours,
   onRules,
   onNewTask,
   newTask = false,
 }: {
-  /** The view on, or the task last opened while it has the window. */
-  room: Room | typeof TASK | null
-  onRoom: (room: Room) => void
-  /** The task last opened in the project, for going back to it. */
-  task?: { readonly title: string; readonly onOpen: () => void } | null
+  place: BarPlace
   /** How many run and wait; null until the board is read, when nothing is said. */
   working: number | null
   yours: number | null
-  onYours: () => void
+  /** What waits on the person, each opening its task, for the count's preview. */
+  needs?: ReadonlyArray<WorkNeed>
+  /** Opens the first thing that needs the person; without it, the count only says how many. */
+  onYours?: () => void
   /** Opens the project's rules; without it, no way there. */
   onRules?: () => void
   onNewTask: () => void
@@ -47,13 +50,24 @@ export function ProjectBar({
       lights="none"
       end={
         <>
-          {working !== null && yours !== null && <WorkStatus running={working} yours={yours} onYours={onYours} />}
+          {working !== null && yours !== null && (
+            <WorkStatus
+              running={working}
+              yours={yours}
+              {...(onYours === undefined ? {} : { onYours })}
+              {...(needs === undefined ? {} : { needs })}
+            />
+          )}
           {onRules && <ChromeButton icon="gear" label={text.rules} compact onClick={onRules} />}
           <ChromeButton icon="plus" label={text.newTask} expanded={newTask} onClick={onNewTask} />
         </>
       }
     >
-      <RoomSwitch value={room} onChange={onRoom} {...(task == null ? {} : { task })} yours={yours ?? 0} text={{ key: () => '' }} />
+      {'back' in place ? (
+        <BackCrumb to={place.back.project} kbd={text.backKey} title={place.back.task} onBack={place.back.onBack} />
+      ) : (
+        <RoomSwitch value={place.room} onChange={place.onRoom} text={{ key: () => '' }} />
+      )}
     </TitleBar>
   )
 }

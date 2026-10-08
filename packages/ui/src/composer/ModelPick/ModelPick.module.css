@@ -118,6 +118,11 @@
   visibility: visible;
 }
 
+/* the efforts, closer together, so as many as a runtime offers share the row */
+.efforts [role='radio'] {
+  padding: 0 6px;
+}
+
 .section {
   display: flex;
   flex-direction: column;

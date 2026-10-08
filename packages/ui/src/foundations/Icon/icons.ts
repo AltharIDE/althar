@@ -24,7 +24,6 @@ import {
   LongArrowDownLeft,
   MediaImage,
   Microphone,
-  MoreHoriz,
   NavArrowDown,
   NavArrowRight,
   OpenNewWindow,
@@ -46,7 +45,7 @@ import {
   Tools,
   Xmark,
 } from 'iconoir-react'
-import type { ComponentType, SVGProps } from 'react'
+import { type ComponentType, createElement, type SVGProps } from 'react'
 
 /*
  * One icon set, one optical weight: Iconoir (MIT), outlined, round caps. The
@@ -54,6 +53,19 @@ import type { ComponentType, SVGProps } from 'react'
  * component asks for `pr` and this table decides the drawing. Icons are
  * decoration: whatever holds one names itself.
  */
+/* Three dots, as the prototype draws them. Iconoir's are pinpricks at 14px,
+   which read as two faint marks beside a title. */
+const dot = (cx: number) => createElement('circle', { key: cx, cx, cy: 12, r: 1.5, fill: 'currentColor' })
+function MoreDots(props: SVGProps<SVGSVGElement>) {
+  return createElement(
+    'svg',
+    { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeLinecap: 'round', ...props },
+    dot(5.5),
+    dot(12),
+    dot(18.5),
+  )
+}
+
 export const ICONS = {
   work: TaskList,
   knowledge: Book,
@@ -76,7 +88,7 @@ export const ICONS = {
   /** Stop, as on a media control. */
   square: Square,
   pencil: EditPencil,
-  more: MoreHoriz,
+  more: MoreDots,
   gear: Settings,
   file: Page,
   folder: Folder,

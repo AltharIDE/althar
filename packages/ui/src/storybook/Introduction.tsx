@@ -156,7 +156,7 @@ export function Specimen() {
       <TitleBar lights="drawn" className={s.bar} end={<WorkStatus running={3} yours={1} onYours={() => setRoom(Room.Board)} />}>
         <ProjectSwitcher current={MERIDIAN} projects={PROJECTS} onPick={() => {}} />
         <span className={s.rooms}>
-          <RoomSwitch value={room} onChange={setRoom} yours={1} />
+          <RoomSwitch value={room} onChange={setRoom} />
         </span>
       </TitleBar>
       <div className={s.thread}>

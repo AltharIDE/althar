@@ -1,34 +1,51 @@
 import { createRoute, useNavigate } from '@tanstack/react-router'
 
-import { Room, TASK } from '@althar/ui'
+import type { AgentStatus } from '@althar/contracts'
 
 import { reads } from '../../data/reads'
 import { rootRoute } from '../../root'
 import { ThreadPending } from '../../shared/Pending'
 import { lanesOf, yoursOf } from '../board/lanes'
+import { firstNeedOf, needsOf } from '../board/needs'
 import { useBoard } from '../board/useBoard'
 import { ProjectBar } from '../project/ProjectBar'
 import { useVisit } from '../tabs/TabsFrame'
 import { TaskView } from './TaskView'
 import { useTask } from './useTask'
 
-/** The project's bar over one of its tasks: the task on, after the views; each view goes back to the project in it. */
-function TaskNav({ projectId, title }: { projectId: string; title: string }) {
+/** The project's bar over one of its tasks: the way back to the project, on the view it was on, and which task this is. */
+function TaskNav({
+  threadId,
+  projectId,
+  project,
+  title,
+  agents,
+  onBack,
+}: {
+  /** The task on screen: listed among what needs the person, but not opened again. */
+  threadId: string
+  projectId: string
+  project: string
+  title: string
+  agents: ReadonlyArray<AgentStatus>
+  onBack: () => void
+}) {
   const navigate = useNavigate()
   const board = useBoard(projectId)
   const lanes = board.board === null ? null : lanesOf(board.board)
-  const open = (search: { readonly room?: Room; readonly new?: 'task' }) =>
-    void navigate({ to: '/projects/$projectId', params: { projectId }, search })
+  const openTask = (threadId: string) => void navigate({ to: '/threads/$threadId', params: { threadId } })
+  const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
+  // The first that isn't this task: with nothing else, the count only says how many.
+  const first = lanes === null ? null : firstNeedOf(lanes, threadId)
   return (
     <ProjectBar
-      room={TASK}
-      task={{ title, onOpen: () => undefined }}
-      onRoom={(room) => open({ room })}
+      place={{ back: { project, task: title, onBack } }}
       working={lanes === null ? null : lanes.running.filter((task) => task.phase !== 'stopped').length}
       yours={lanes === null ? null : yoursOf(lanes)}
-      onYours={() => open({ room: Room.Both })}
+      {...(lanes === null ? {} : { needs: needsOf(lanes, name, openTask, threadId) })}
+      {...(first === null ? {} : { onYours: () => openTask(first) })}
       onRules={() => void navigate({ to: '/projects/$projectId/rules', params: { projectId } })}
-      onNewTask={() => open({ new: 'task' })}
+      onNewTask={() => void navigate({ to: '/projects/$projectId', params: { projectId }, search: { new: 'task' } })}
     />
   )
 }
@@ -37,16 +54,30 @@ function TaskNav({ projectId, title }: { projectId: string; title: string }) {
 function TaskScreen({ threadId }: { threadId: string }) {
   const navigate = useNavigate()
   const model = useTask(threadId)
-  const projectId = model.snapshot?.project.id
+  const project = model.snapshot?.project
   const title = model.snapshot?.task.title
-  useVisit(threadId, projectId, title)
+  useVisit(threadId, project?.id)
+  // Back to the project, which opens on the view it was last on.
+  const back = () =>
+    void (project === undefined ? navigate({ to: '/' }) : navigate({ to: '/projects/$projectId', params: { projectId: project.id } }))
   return (
     <TaskView
       model={model}
-      {...(projectId === undefined || title === undefined ? {} : { nav: <TaskNav projectId={projectId} title={title} /> })}
-      onBack={() =>
-        void (projectId === undefined ? navigate({ to: '/' }) : navigate({ to: '/projects/$projectId', params: { projectId } }))
-      }
+      {...(project === undefined || title === undefined
+        ? {}
+        : {
+            nav: (
+              <TaskNav
+                threadId={threadId}
+                projectId={project.id}
+                project={project.name}
+                title={title}
+                agents={model.agents}
+                onBack={back}
+              />
+            ),
+          })}
+      onBack={back}
     />
   )
 }

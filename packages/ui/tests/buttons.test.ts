@@ -21,6 +21,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/SinceRow/SinceRow.tsx': 'what happened, stretched over its row',
   'home/ProjectRow/ProjectRow.tsx': 'a project’s row, which opens the project',
   'chrome/ProjectTabs/ProjectTabs.tsx': 'a tab, whose shape joins the bar below it',
+  'chrome/WorkStatus/WorkStatus.tsx': 'a row of what needs you, in the count’s preview',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',
