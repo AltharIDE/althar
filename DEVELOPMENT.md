@@ -42,6 +42,7 @@ Each app and package has its own README with its own commands.
 | [`packages/contracts`](packages/contracts) | `@althar/contracts`: the API between the runtime and its clients, and the transport it runs over |
 | [`apps/desktop`](apps/desktop) | `@althar/desktop`: the desktop app, Electron with the runtime in a utility process |
 | [`apps/cli`](apps/cli) | `@althar/cli`: a command-line client for the runtime, which runs a task with a real agent in a terminal |
+| [`brand`](brand) | `@althar/brand`: the mark, lockups, avatars, banners and screenshots, ready to use, and the code that draws them |
 | [`docs/architecture`](docs/architecture) | The working architecture: a local-first desktop app, with seams for a later cloud |
 | [`docs/decisions`](docs/decisions) | Architecture decisions, one per file |
 | [`docs/glossary.md`](docs/glossary.md) | The words the interface uses, beside the words the architecture uses |

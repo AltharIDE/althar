@@ -46,7 +46,7 @@ function ProjectBar({ compact = false, lights = 'drawn' as const }: { compact?: 
     >
       <ProjectSwitcher current={MERIDIAN} projects={PROJECTS} onPick={fn()} onRename={fn()} onNew={fn()} />
       <Elsewhere projects={PROJECTS.slice(1)} onPick={fn()} onMore={fn()} />
-      <RoomSwitch value={room} onChange={setRoom} news={room === Room.Board} yours={4} />
+      <RoomSwitch value={room} onChange={setRoom} news={room === Room.Board} />
     </TitleBar>
   )
 }

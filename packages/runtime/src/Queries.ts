@@ -62,12 +62,13 @@ interface Owner {
 const keeper = <A>(owners: Map<string, Owner>) => {
   const kept = new Map<string, { readonly key: string; readonly value: A }>()
   return {
-    of: <E>(owner: Owner, key: string, work: Effect.Effect<A, E>): Effect.Effect<A, E> =>
+    /** What is kept for `key`, else `work`, kept; `fresh` does the work whatever is kept, and keeps it. */
+    of: <E>(owner: Owner, key: string, work: Effect.Effect<A, E>, fresh = false): Effect.Effect<A, E> =>
       Effect.suspend(() => {
         // A folder a later task reuses isn't taken for the earlier one's.
         const whole = `${owner.taskId} ${key}`
         const found = kept.get(owner.path)
-        if (found !== undefined && found.key === whole) return Effect.succeed(found.value)
+        if (!fresh && found !== undefined && found.key === whole) return Effect.succeed(found.value)
         return Effect.tap(work, (value) =>
           Effect.sync(() => {
             owners.set(owner.path, owner)
@@ -363,10 +364,10 @@ export class Queries extends Context.Service<
     projects: Effect.Effect<ProjectList, SqlError.SqlError>
     tasks(projectId: string): Effect.Effect<TaskList, SqlError.SqlError>
     task(taskId: string): Effect.Effect<TaskSummary, SqlError.SqlError | NotFound>
-    /** The thread, with the newest `limit` items before `before`. */
+    /** The thread, with the newest `limit` items before `before`; `fresh` reads the files its task changed from git, whatever is kept. */
     thread(
       threadId: string,
-      page?: { readonly before?: number; readonly limit?: number },
+      page?: { readonly before?: number; readonly limit?: number; readonly fresh?: boolean },
     ): Effect.Effect<ThreadSnapshot, SqlError.SqlError | NotFound>
     item(threadId: string, itemId: string): Effect.Effect<ThreadItem, SqlError.SqlError | NotFound>
     /** One file a task changed, as a diff from its base to its worktree; only a file it changed. */
@@ -535,7 +536,9 @@ export class Queries extends Context.Service<
        * isn't committed: they are kept while the head, the index and the
        * lead's tool calls are as they were. A file changed by hand, or by
        * something left running, and not staged shows at the next commit,
-       * stage or tool call of the lead's, not before. Nothing that acts goes
+       * stage or tool call of the lead's, or when the person looks at the
+       * task's changes: its screen reads them fresh as it opens, and as its
+       * outputs or changes are shown (`fresh`). Nothing that acts goes
        * by what is kept: merging and pushing check again, in git, that the
        * head the person saw is still the branch's.
        */
@@ -610,6 +613,7 @@ export class Queries extends Context.Service<
         look: { readonly head: string; readonly base: string | null; readonly index: string },
         started: string,
         calls: string,
+        fresh: boolean,
       ) =>
         Effect.gen(function* () {
           const fork = yield* forksKept.of(
@@ -620,7 +624,12 @@ export class Queries extends Context.Service<
               return { base, commits: yield* commitsAhead(owner.path, base, look.head) }
             }),
           )
-          const files = yield* filesKept.of(owner, `${fork.base} ${look.head} ${look.index} ${calls}`, changedFiles(owner.path, fork.base))
+          const files = yield* filesKept.of(
+            owner,
+            `${fork.base} ${look.head} ${look.index} ${calls}`,
+            changedFiles(owner.path, fork.base),
+            fresh,
+          )
           return { files, commits: fork.commits }
         }).pipe(Effect.orElseSucceed(() => nothingChanged))
 
@@ -642,7 +651,7 @@ export class Queries extends Context.Service<
        * named under its repository's, and the commits are all of theirs.
        * Every worktree is read at the same time, and looked at once.
        */
-      const gitOf = (taskId: string, wants: { readonly changed: boolean; readonly here: boolean }) =>
+      const gitOf = (taskId: string, wants: { readonly changed: boolean; readonly here: boolean; readonly fresh?: boolean }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const worktrees = yield* worktreesOf(taskId)
@@ -668,7 +677,7 @@ export class Queries extends Context.Service<
                 const [changed, merged] = yield* Effect.all(
                   [
                     wants.changed && head !== null && worktree.baseCommit !== null
-                      ? changedIn(owner, { head, base, index }, worktree.baseCommit, lead?.calls ?? '')
+                      ? changedIn(owner, { head, base, index }, worktree.baseCommit, lead?.calls ?? '', wants.fresh === true)
                       : Effect.succeed(nothingChanged),
                     merges && head !== null && tip !== null && worktree.root !== null
                       ? mergedKept.of(owner, `${head} ${tip}`, inHistory(worktree.root, head, tip)).pipe(Effect.orElseSucceed(() => false))
@@ -1163,7 +1172,8 @@ export class Queries extends Context.Service<
           return { items: shown.flatMap((item) => (item === undefined ? [] : [item])), earlier }
         })
 
-      const thread = (threadId: string, page: { readonly before?: number; readonly limit?: number } = {}) =>
+      /** A task's thread: its head, and a page of its items; `fresh` reads the files it changed from git, whatever is kept. */
+      const thread = (threadId: string, page: { readonly before?: number; readonly limit?: number; readonly fresh?: boolean } = {}) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const at = yield* cursor
@@ -1202,9 +1212,12 @@ export class Queries extends Context.Service<
           const card = yield* cardFor(head.taskId, { issue: null, changes: [] })
           const session = yield* sessionOf(threadId)
           // Its links, whose open pull requests say what isn't pushed, and what git says of its worktrees, read at the same time.
-          const [links, said] = yield* Effect.all([linksOf(head.taskId), gitOf(head.taskId, { changed: true, here: true })], {
-            concurrency: 'unbounded',
-          })
+          const [links, said] = yield* Effect.all(
+            [linksOf(head.taskId), gitOf(head.taskId, { changed: true, here: true, fresh: page.fresh === true })],
+            {
+              concurrency: 'unbounded',
+            },
+          )
           return {
             threadId,
             cursor: at,

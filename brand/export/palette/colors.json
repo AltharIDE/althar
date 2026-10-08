@@ -1,0 +1,30 @@
+{
+  "cobalt": {
+    "hex": "#2b3bff",
+    "role": "Althar's own colour: the work running right now. The ground of the app icon."
+  },
+  "cobalt-on-ink": {
+    "hex": "#5563ff",
+    "role": "Cobalt lifted to read on ink: the mark's point on a dark ground."
+  },
+  "violet": {
+    "hex": "#7a3ff0",
+    "role": "This needs a person. Never decoration, and never part of the mark."
+  },
+  "ink": {
+    "hex": "#141417",
+    "role": "Text, and the mark on paper."
+  },
+  "paper": {
+    "hex": "#f4f2ec",
+    "role": "The page, and the mark on cobalt or ink."
+  },
+  "print-stock": {
+    "hex": "#efeadf",
+    "role": "The paper the printed banners are made on."
+  },
+  "print-black": {
+    "hex": "#1b1b20",
+    "role": "The black ink of the printed banners."
+  }
+}

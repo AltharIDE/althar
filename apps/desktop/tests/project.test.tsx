@@ -9,7 +9,7 @@ import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
-import { agents, card, changed, coordinatorSnapshot, fakeClient, items, status, streamed } from './fixtures'
+import { agents, card, changed, coordinatorSnapshot, efforts, fakeClient, items, models, status, streamed } from './fixtures'
 import { clock } from '../src/renderer/shared/time'
 import { withServices } from './render'
 
@@ -17,12 +17,12 @@ function Project({
   onTask = vi.fn(),
   room,
   newTask,
-  lastTask,
+  onRoomChange,
 }: {
   onTask?: (threadId: string) => void
   room?: Room
   newTask?: boolean
-  lastTask?: { title: string; onOpen: () => void }
+  onRoomChange?: (room: Room) => void
 }) {
   return (
     <ProjectView
@@ -32,7 +32,7 @@ function Project({
       onTask={onTask}
       {...(room === undefined ? {} : { room })}
       {...(newTask === undefined ? {} : { newTask })}
-      {...(lastTask === undefined ? {} : { lastTask })}
+      {...(onRoomChange === undefined ? {} : { onRoomChange })}
     />
   )
 }
@@ -86,13 +86,19 @@ describe('the project’s bar', () => {
     expect(await screen.findByRole('complementary', { name: 'New task' })).toBeTruthy()
   })
 
-  it('goes back to the task last opened, from after its views', async () => {
-    const onOpen = vi.fn()
+  it('says which view it is on, to open on it again, and has only its views to choose from', async () => {
+    const onRoomChange = vi.fn()
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
-    withServices(<Project lastTask={{ title: 'Make wand spells fire colorful heart particles', onOpen }} />, client)
-    const back = await screen.findByRole('radio', { name: /^Make wand spells fire color…/ })
-    await userEvent.click(back)
-    expect(onOpen).toHaveBeenCalled()
+    withServices(<Project room={Room.Both} onRoomChange={onRoomChange} />, client)
+    await waitFor(() => expect(onRoomChange).toHaveBeenLastCalledWith(Room.Both))
+    const views = screen.getByRole('radiogroup', { name: 'View' })
+    expect(
+      within(views)
+        .getAllByRole('radio')
+        .map((radio) => radio.textContent),
+    ).toEqual(['Conversation', 'Board', 'Both'])
+    await userEvent.click(within(views).getByRole('radio', { name: 'Board' }))
+    expect(onRoomChange).toHaveBeenLastCalledWith(Room.Board)
   })
 })
 
@@ -216,6 +222,33 @@ describe('the Talk room', () => {
       expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'codex', model: 'gpt-5.2-codex', effort: 'low' }),
     )
     expect(client.send).toHaveBeenLastCalledWith({ threadId: 'thc', body: 'And a test', disposition: 'after_current' })
+  })
+
+  it('keeps the effort picked on another of the agent’s models only where that model offers it', async () => {
+    const sonnetLowOrMedium = models.map((offered) =>
+      offered.agentId === 'claude-code'
+        ? {
+            ...offered,
+            models: offered.models.map((model) => (model.id === 'sonnet' ? { ...model, efforts: efforts('Low', 'Medium') } : model)),
+          }
+        : offered,
+    )
+    const { client } = fakeClient({ getModels: vi.fn(async () => sonnetLowOrMedium) })
+    withServices(<Project />, client)
+    const use = async (from: string, model: string) => {
+      await userEvent.click(await screen.findByRole('button', { name: from }))
+      await userEvent.click(screen.getByRole('button', { name: /All models/ }))
+      await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: `Use ${model}` }))
+    }
+    await userEvent.click(await screen.findByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'High' }))
+    await userEvent.keyboard('{Escape}')
+    await use('Coordinator: Claude Code default High', 'Opus')
+    // Sonnet has no High: it starts at its own.
+    await use('Coordinator: Opus High', 'Sonnet')
+    expect(await screen.findByRole('button', { name: 'Coordinator: Sonnet Medium' })).toBeTruthy()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Tell the coordinator something' }), 'Hello{Enter}')
+    await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code', model: 'sonnet' }))
   })
 
   it("says when the agent it last ran on isn't signed in, and starts it on one that is", async () => {

@@ -50,19 +50,19 @@ describe('the models every agent offers', () => {
 
   it('say whose a shared name is, keep a provider apart, put back a family a name leaves out, and carry the maker’s mark', () => {
     const opencode: AgentStatus = { id: 'opencode', name: 'OpenCode', signIn: 'signed_in', login: 'opencode auth login', accounts: [] }
+    const plain = (id: string, name: string) => ({ id, name, description: null, efforts: [], effort: null })
     const offered: AgentModels = {
       agentId: 'opencode',
       models: [
-        { id: 'anthropic/opus', name: 'Opus', description: null },
-        { id: 'qwen/qwen3-coder', name: 'qwen/Qwen3 Coder', description: null },
-        { id: 'local', name: 'My own', description: null },
-        { id: 'opencode/big-pickle', name: 'OpenCode Zen/Big Pickle', description: null },
-        { id: 'other/big-pickle', name: 'Other / Big Pickle', description: null },
-        { id: 'openai/gpt-6-sol', name: 'OpenAI/6 Sol', description: null },
-        { id: 'gemini-3-pro', name: '3 Pro', description: null },
-        { id: 'v2', name: '2', description: null },
+        plain('anthropic/opus', 'Opus'),
+        plain('qwen/qwen3-coder', 'qwen/Qwen3 Coder'),
+        { ...plain('local', 'My own'), efforts: [{ id: 'xhigh', name: 'Xhigh' }] },
+        plain('opencode/big-pickle', 'OpenCode Zen/Big Pickle'),
+        plain('other/big-pickle', 'Other / Big Pickle'),
+        plain('openai/gpt-6-sol', 'OpenAI/6 Sol'),
+        plain('gemini-3-pro', '3 Pro'),
+        plain('v2', '2'),
       ],
-      efforts: [{ id: 'xhigh', name: 'Xhigh' }],
       model: null,
       effort: null,
       defaults: [],
@@ -82,12 +82,10 @@ describe('the models every agent offers', () => {
       'Gemini 3 Pro',
       '2',
     ])
-    // Effort levels an agent runs together are written apart.
-    expect([named('opencode:local')?.efforts, effortName(both, 'opencode', 'xhigh'), effortId(both, 'opencode', 'Extra high')]).toEqual([
-      ['Extra high'],
-      'Extra high',
-      'xhigh',
-    ])
+    // Each model has effort levels of its own, and some none; levels an agent runs together are written apart.
+    expect([named('opencode:local')?.efforts, named('opencode:v2')?.efforts]).toEqual([['Extra high'], []])
+    expect([effortName(both, 'opencode:local', 'xhigh'), effortId(both, 'opencode:local', 'Extra high')]).toEqual(['Extra high', 'xhigh'])
+    expect([effortName(both, 'opencode:v2', 'xhigh'), effortId(both, 'opencode:v2', 'Extra high')]).toEqual([null, 'Extra high'])
     expect(both.runtimes.at(-1)).toEqual({ id: 'opencode', name: 'OpenCode', how: 'signed in' })
     expect([makerOf('opencode', 'gemini-3-pro'), makerOf('opencode', 'o4-mini'), makerOf('codex', 'whatever')]).toEqual([
       Brand.Google,
@@ -122,13 +120,17 @@ describe('the models every agent offers', () => {
     expect(defaultPins(catalog)).toEqual(['claude-code:default', 'codex:gpt-5.2-codex'])
     expect([modelName(catalog, 'claude-code', 'sonnet'), modelName(catalog, 'claude-code', 'default')]).toEqual(['Sonnet', null])
     expect([modelName(catalog, 'codex', 'gpt-4.1'), modelName(catalog, 'codex', null)]).toEqual(['gpt-4.1', null])
-    const sol = catalogOf([{ ...models[1]!, models: [{ id: 'gpt-6-sol', name: '6 Sol', description: null }] }], signedIn)
+    const sol = catalogOf(
+      [{ ...models[1]!, models: [{ id: 'gpt-6-sol', name: '6 Sol', description: null, efforts: [], effort: null }] }],
+      signedIn,
+    )
     expect(modelName(sol, 'codex', 'gpt-6-sol')).toBe('GPT-6 Sol')
-    expect([effortName(catalog, 'codex', 'extra-high'), effortName(catalog, 'codex', null)]).toEqual(['Extra high', null])
-    expect([effortId(catalog, 'codex', 'Extra high'), effortId(catalog, 'opencode', 'Deep')]).toEqual(['extra-high', 'Deep'])
+    // An agent's own default has the efforts of the model it is on.
+    expect([effortName(catalog, 'codex:', 'extra-high'), effortName(catalog, 'codex:gpt-5.2', null)]).toEqual(['Extra high', null])
+    expect([effortId(catalog, 'codex:gpt-5.2', 'Extra high'), effortId(catalog, 'opencode:', 'Deep')]).toEqual(['extra-high', 'Deep'])
   })
 
-  it('carry the person’s default effort for each model, or else what its agent is on', () => {
+  it('carry the person’s default effort for each model, or else the one it starts at', () => {
     const kept = catalogOf(
       models.map((offered) =>
         offered.agentId === 'codex' ? { ...offered, defaults: [{ model: 'gpt-5.2', effort: 'extra-high' }] } : offered,
@@ -141,6 +143,17 @@ describe('the models every agent offers', () => {
       'Extra high',
       'Medium',
     ])
+    // Until the one it starts at is known, what its agent is on, for the model it is on only.
+    const seen = catalogOf(
+      models.map((offered) =>
+        offered.agentId === 'codex'
+          ? { ...offered, effort: 'high', models: offered.models.map((model) => ({ ...model, effort: null })) }
+          : offered,
+      ),
+      signedIn,
+    )
+    const on = (id: string) => seen.models.find((model) => model.id === id)!
+    expect([defaultEffortOf(seen, on('codex:gpt-5.2-codex')), defaultEffortOf(seen, on('codex:gpt-5.2'))]).toEqual(['High', null])
   })
 })
 
@@ -216,7 +229,9 @@ describe('reading the models', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
       const asked = models.map((agent) =>
-        agent.agentId === 'opencode' ? { ...agent, models: [{ id: 'm', name: 'M', description: null }], probing: false } : agent,
+        agent.agentId === 'opencode'
+          ? { ...agent, models: [{ id: 'm', name: 'M', description: null, efforts: [], effort: null }], probing: false }
+          : agent,
       )
       const getModels = vi.fn().mockResolvedValueOnce(models).mockResolvedValue(asked)
       const { client } = fakeClient({ getModels })

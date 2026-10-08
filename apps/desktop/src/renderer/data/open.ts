@@ -11,9 +11,11 @@ import type { Host, Services } from './services'
 /*
  * The window opening: it connects to the runtime, reads the projects and
  * watches every change after that read, then reads what the place it opens
- * on shows, and, behind it, every open tab's, so going to any of them is
- * instant. Each agent is asked again, once a launch, and its models read,
- * without waiting for either.
+ * on shows, and opens. Every other open tab's place is read once it has
+ * opened, so going to any of them is instant without the launch waiting on
+ * the slowest; one clicked before its read is done joins that read. Each
+ * agent is asked again, once a launch, and its models read, without waiting
+ * for either.
  */
 
 export const openWindow = async (port: DomMessagePort, host: Host) => {
@@ -31,14 +33,15 @@ export const openWindow = async (port: DomMessagePort, host: Host) => {
 
   const kept = tabsStoreOf(client).get().kept
   const known = new Set(listed?.projects.map((project) => project.id) ?? [])
-  const ahead = (kept?.open ?? [])
-    .filter((projectId) => known.has(projectId))
-    .map((projectId) => {
-      const place = kept?.places[projectId]
-      return place?.kind === 'thread'
-        ? router.preloadRoute({ to: '/threads/$threadId', params: { threadId: place.threadId } })
-        : router.preloadRoute({ to: '/projects/$projectId', params: { projectId } })
-    })
-  await Promise.allSettled(ahead)
+  const readAhead = () =>
+    (kept?.open ?? [])
+      .filter((projectId) => known.has(projectId))
+      .map((projectId) => {
+        const place = kept?.places[projectId]
+        return place?.kind === 'thread'
+          ? router.preloadRoute({ to: '/threads/$threadId', params: { threadId: place.threadId } })
+          : router.preloadRoute({ to: '/projects/$projectId', params: { projectId } })
+      })
+  setTimeout(() => void Promise.allSettled(readAhead()), 0)
   return { services, router }
 }

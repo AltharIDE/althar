@@ -32,3 +32,97 @@
   color: var(--signal);
   white-space: nowrap;
 }
+
+/* What needs you, while the count is pointed at: each a way into its own. */
+.preview {
+  z-index: var(--z-popover);
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  max-height: min(420px, var(--radix-popover-content-available-height));
+  overflow-y: auto;
+  padding: 5px;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  box-shadow: var(--lift-pop);
+  text-align: left;
+  animation: pop var(--fast) var(--ease);
+}
+.preview[data-side='top'] {
+  --from: 3px;
+}
+.preview[data-side='bottom'] {
+  --from: -3px;
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(var(--from, 0));
+  }
+}
+
+.needs {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.need {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 9px 9px;
+  border-radius: 6px;
+  text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.need:hover:not(.here) {
+  background: var(--n-2);
+}
+/* already on screen: said, not offered */
+.here .title {
+  color: var(--t-2);
+}
+.need:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: -2px;
+}
+
+.needHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.kind {
+  font-size: 11px;
+  font-weight: 520;
+  color: var(--signal);
+}
+.at {
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 520;
+  line-height: 1.4;
+  color: var(--t-1);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.meta {
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -1,11 +1,13 @@
+import type { Room } from '@althar/ui'
+
 import type { Client } from '../../data/client'
-import { type Kept, keptFrom, type LastTask, type Place } from './tabs'
+import { type Kept, keptFrom, type Place } from './tabs'
 
 /*
- * What the window's tabs keep: which projects have one, in order, and where
- * in each the window last was, in this window's storage, so they are there
- * at the next launch; and, for this launch only, which project each task
- * read is in. One store a client, so every part of the window sees the same
+ * What the window's tabs keep: which projects have one, in order, where in
+ * each the window last was, and which view each was last on, in this
+ * window's storage, so they are there at the next launch; and, for this
+ * launch only, which project each task read is in. One store a client, so every part of the window sees the same
  * tabs, and a test's window starts afresh.
  */
 
@@ -16,8 +18,8 @@ export interface TabsState {
   readonly kept: Kept | null
   /** Each task read, by its thread: its project. */
   readonly threads: Readonly<Record<string, string>>
-  /** Tasks opened before anything was kept, each project's last: kept once something is. */
-  readonly pending: Readonly<Record<string, LastTask>>
+  /** Views chosen before anything was kept, each project's last: kept once something is. */
+  readonly pending: Readonly<Record<string, Room>>
 }
 
 export interface TabsStore {
@@ -29,8 +31,10 @@ export interface TabsStore {
    */
   readonly seed: (open: ReadonlyArray<string>, known: ReadonlySet<string>) => void
   readonly change: (next: (kept: Kept) => Kept) => void
-  /** A task was read: which project it is in, and, kept, that it is the one last opened there. */
-  readonly visit: (threadId: string, projectId: string, title?: string) => void
+  /** A task was read: which project it is in. */
+  readonly visit: (threadId: string, projectId: string) => void
+  /** A project is on a view: it opens on it again, from a tab or back from a task. */
+  readonly view: (projectId: string, room: Room) => void
 }
 
 const read = (): Kept | null => {
@@ -68,27 +72,26 @@ const make = (): TabsStore => {
     get: () => state,
     seed: (open, known) => {
       const { kept, pending } = state
-      if (kept === null) return keep(Object.keys(pending).length === 0 ? { open, places: {} } : { open, places: {}, tasks: pending })
+      if (kept === null) return keep(Object.keys(pending).length === 0 ? { open, places: {} } : { open, places: {}, rooms: pending })
       const left = kept.open.filter((id) => known.has(id))
       if (left.length === kept.open.length) return
-      const still = Object.entries(kept.tasks ?? {}).filter(([id]) => known.has(id))
-      const tasks = still.length === 0 ? {} : { tasks: Object.fromEntries(still) }
+      const still = Object.entries(kept.rooms ?? {}).filter(([id]) => known.has(id))
+      const rooms = still.length === 0 ? {} : { rooms: Object.fromEntries(still) }
       keep(
         left.length === 0
-          ? { open, places: {}, ...tasks }
-          : { open: left, places: Object.fromEntries(Object.entries(kept.places).filter(([id]) => known.has(id))), ...tasks },
+          ? { open, places: {}, ...rooms }
+          : { open: left, places: Object.fromEntries(Object.entries(kept.places).filter(([id]) => known.has(id))), ...rooms },
       )
     },
     change: (next) => {
       if (state.kept !== null) keep(next(state.kept))
     },
-    visit: (threadId, projectId, title) => {
+    visit: (threadId, projectId) => {
       if (state.threads[threadId] !== projectId) set({ ...state, threads: { ...state.threads, [threadId]: projectId } })
-      if (title === undefined) return
-      const task = { threadId, title }
-      if (state.kept === null) return set({ ...state, pending: { ...state.pending, [projectId]: task } })
-      const last = state.kept.tasks?.[projectId]
-      if (last?.threadId !== threadId || last.title !== title) keep(lastOpened(projectId, task)(state.kept))
+    },
+    view: (projectId, room) => {
+      if (state.kept === null) return set({ ...state, pending: { ...state.pending, [projectId]: room } })
+      if (state.kept.rooms?.[projectId] !== room) keep(viewed(projectId, room)(state.kept))
     },
   }
 }
@@ -112,10 +115,10 @@ export const arrived =
     places: { ...kept.places, [projectId]: place },
   })
 
-/** The task last opened in a project, for its bar's way back. */
-export const lastOpened =
-  (projectId: string, task: LastTask) =>
-  (kept: Kept): Kept => ({ ...kept, tasks: { ...kept.tasks, [projectId]: task } })
+/** The view a project was last on, to open on again. */
+export const viewed =
+  (projectId: string, room: Room) =>
+  (kept: Kept): Kept => ({ ...kept, rooms: { ...kept.rooms, [projectId]: room } })
 
 /** A tab closes, and forgets where it was. */
 export const closed =

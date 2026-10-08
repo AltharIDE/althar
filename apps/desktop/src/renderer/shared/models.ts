@@ -11,10 +11,11 @@ import type { Client, Start } from '../data/client'
  * together, since two agents may name theirs alike. It carries its maker's
  * mark, found from its name, or the agent's maker where the name says
  * nothing. An agent whose models aren't known yet is one entry: its own
- * default. A model's default effort is the person's, kept by the runtime,
- * which starts every session on it there. Pins are only how this window
- * lists models, so they stay in its storage; until the person pins one, each
- * agent's current model is pinned.
+ * default. Each model has effort levels of its own, and some none. A model's
+ * default effort is the person's, kept by the runtime, which starts every
+ * session on it there, or else the one it starts at by itself. Pins are only
+ * how this window lists models, so they stay in its storage; until the
+ * person pins one, each agent's current model is pinned.
  */
 
 /** Who runs a conversation: an agent, its model, how hard it thinks. Null is the agent's own. */
@@ -91,12 +92,11 @@ export const catalogOf = (known: ReadonlyArray<AgentModels>, agents: ReadonlyArr
   const byId = new Map(known.map((offered) => [offered.agentId, offered]))
   const entries = agents.flatMap((agent) => {
     const offered = byId.get(agent.id)
-    const efforts = (offered?.efforts ?? []).map((effort) => effortWord(effort.name))
     const models = offered?.models ?? []
     if (models.length === 0) {
       const mark = makerOf(agent.id, '')
       const name = text.agentDefault(agent.name)
-      const info: ModelInfo = { id: keyOf(agent.id, null), name, short: name, runtime: agent.id, efforts, ...(mark ? { mark } : {}) }
+      const info: ModelInfo = { id: keyOf(agent.id, null), name, short: name, runtime: agent.id, efforts: [], ...(mark ? { mark } : {}) }
       return [{ info, by: agent.name }]
     }
     return models.map((model) => {
@@ -107,7 +107,7 @@ export const catalogOf = (known: ReadonlyArray<AgentModels>, agents: ReadonlyArr
         name,
         short: name,
         runtime: agent.id,
-        efforts,
+        efforts: model.efforts.map((effort) => effortWord(effort.name)),
         ...(mark ? { mark } : {}),
         ...(model.description === null ? {} : { note: model.description }),
       }
@@ -154,19 +154,38 @@ export const modelName = (catalog: Catalog, agentId: string, model: string | nul
   return /^default\b/i.test(offered.name) ? null : nameOf('', offered).name
 }
 
-/** An effort's name, as the agent says it, from its id. */
-export const effortName = (catalog: Catalog, agentId: string, effort: string | null): string | null => {
-  const name = catalog.agents.get(agentId)?.efforts.find((offered) => offered.id === effort)?.name
+/** A model as its agent offers it, by its key: the agent's own default is the model it is on. */
+const offeredOf = (catalog: Catalog, key: string) => {
+  const { agentId, model } = choiceOf(key)
+  const agent = catalog.agents.get(agentId)
+  const id = model ?? agent?.model ?? null
+  return { agent, model: agent?.models.find((offered) => offered.id === id) }
+}
+
+/** Whether a model, by its key, offers an effort, by its id. */
+export const offersEffort = (catalog: Catalog, key: string, effort: string | null): boolean =>
+  offeredOf(catalog, key).model?.efforts.some((offered) => offered.id === effort) ?? false
+
+/** An effort's name, as the agent says it, from its id, among a model's, by its key. */
+export const effortName = (catalog: Catalog, key: string, effort: string | null): string | null => {
+  const name = offeredOf(catalog, key).model?.efforts.find((offered) => offered.id === effort)?.name
   return name === undefined ? null : effortWord(name)
 }
 
-/** An effort's id, from the name the kit shows. */
-export const effortId = (catalog: Catalog, agentId: string, name: string): string =>
-  catalog.agents.get(agentId)?.efforts.find((offered) => effortWord(offered.name) === name)?.id ?? name
+/** An effort's id, from the name the kit shows, among a model's, by its key. */
+export const effortId = (catalog: Catalog, key: string, name: string): string =>
+  offeredOf(catalog, key).model?.efforts.find((offered) => effortWord(offered.name) === name)?.id ?? name
 
-/** A model's default effort, in the words the picker shows: the person's, or else what its agent is on. */
-export const defaultEffortOf = (catalog: Catalog, info: ModelInfo): string | null =>
-  effortName(catalog, info.runtime, catalog.defaults.get(info.id) ?? catalog.agents.get(info.runtime)?.effort ?? null)
+/**
+ * A model's default effort, in the words the picker shows: the person's, or
+ * else the one it starts at by itself; until that is known, what its agent is
+ * on, for the model it is on.
+ */
+export const defaultEffortOf = (catalog: Catalog, info: ModelInfo): string | null => {
+  const { agent, model } = offeredOf(catalog, info.id)
+  const on = model !== undefined && model.id === agent?.model ? agent.effort : null
+  return effortName(catalog, info.id, catalog.defaults.get(info.id) ?? model?.effort ?? on)
+}
 
 /** Until the person pins a model: each agent's current one. */
 export const defaultPins = (catalog: Catalog): ReadonlyArray<string> =>

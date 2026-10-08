@@ -52,7 +52,7 @@ test('hands the task to the next free agent when its lead is out of usage', asyn
   }
 })
 
-test('waits for the reset where no other agent is free, and says so on its card, the board and the dock', async () => {
+test('waits for the reset where no other agent is free, and says so on its card, the board and the task', async () => {
   const { electronApp, page } = await startTask('claude-code:3600,codex:3600')
   try {
     // Althar learns an agent is out when it tries it: Claude Code first, then Codex, which it waits for.
@@ -62,10 +62,6 @@ test('waits for the reset where no other agent is free, and says so on its card,
     await expect(page.getByText(/^Waits for Codex, back at /)).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-waits-board.png', animations: 'disabled' })
     await page.getByRole('button', { name: 'Add a retry to the checkout call' }).click()
-    const dock = page.getByRole('complementary', { name: 'Beside the board' })
-    await expect(dock.getByText(/^Waits for Codex, back at /)).toBeVisible()
-    await page.screenshot({ path: 'test-results/limit-waits-dock.png', animations: 'disabled' })
-    await dock.getByRole('button', { name: 'Open the task' }).click()
     await expect(page.getByText(/^Claude Code reached its usage limit, until .+\. Codex takes over\.$/)).toBeVisible()
     await expect(page.getByText(/^Codex reached its usage limit, until .+\. The step waits until then\.$/)).toBeVisible()
     // Its header says so too, rather than that it is idle.

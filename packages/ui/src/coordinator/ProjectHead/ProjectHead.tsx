@@ -9,8 +9,9 @@ import s from './ProjectHead.module.css'
 /*
  * The head of a project's conversation, over the thread in its column: what
  * the project is (its intent, or its name), a quiet line under it, and the
- * project's menu beside them. The title is the screen's heading. `side` is
- * the narrow head of the conversation beside the board.
+ * project's menu beside them, as the prototype has it: two lines, nothing
+ * under them. The title is the screen's heading. `side` is the narrow head of
+ * the conversation beside the board, on its raised column.
  */
 
 export interface ProjectHeadText {
@@ -32,13 +33,11 @@ export type ProjectHeadProps = RootProps<
     menu?: ReactNode
     /** Beside the board, in a narrow column. */
     side?: boolean
-    /** Under the title and the menu, inside the head: a notice about the project. */
-    children?: ReactNode
     text?: Partial<ProjectHeadText>
   }
 >
 
-export function ProjectHead({ title, meta, menu, side = false, children, text, className, ...rest }: ProjectHeadProps) {
+export function ProjectHead({ title, meta, menu, side = false, text, className, ...rest }: ProjectHeadProps) {
   const t = { ...projectHeadText, ...text }
   return (
     <header className={cx(s.head, side && s.side, className)} {...rest}>
@@ -49,12 +48,16 @@ export function ProjectHead({ title, meta, menu, side = false, children, text, c
             {meta != null && <p className={s.meta}>{meta}</p>}
           </div>
           {menu != null && (
-            <Menu label={t.menu(title)} align="end" width={220} trigger={<IconButton icon="more" label={t.menu(title)} size="small" />}>
+            <Menu
+              label={t.menu(title)}
+              align="end"
+              width={220}
+              trigger={<IconButton icon="more" label={t.menu(title)} className={s.menu} />}
+            >
               {menu}
             </Menu>
           )}
         </div>
-        {children}
       </div>
     </header>
   )

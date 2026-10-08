@@ -6,7 +6,9 @@ import { dirname, join } from 'node:path'
  * modes and option ids were read from the agents themselves (scripts/probe.ts)
  * on 28 September 2026: claude-agent-acp 0.84.0, codex-acp 2.0.0 and OpenCode
  * 1.18.31; codex-acp again at 2.1.1 on 7 October 2026, unchanged but for a
- * new model. Probe again after upgrading any of them.
+ * new model; OpenCode's effort on 8 October 2026, which it offers only once
+ * a session is on a model that has levels. Probe again after upgrading any
+ * of them.
  */
 
 export type AgentId = 'claude-code' | 'codex' | 'opencode'
@@ -55,8 +57,12 @@ export interface AgentDefinition {
    * that asks, with Althar's rules denying every write.
    */
   readonly modes: { readonly ask: string; readonly readOnly: string; readonly reader: string }
-  /** The ids of its session config options. */
-  readonly options: { readonly mode: string; readonly model: string; readonly effort?: string }
+  /**
+   * The ids of its session config options. `ownEffort` is the effort level
+   * that leaves a model at its own default, for an agent that otherwise puts
+   * a session on a model's first level: Althar sets it where nothing chose one.
+   */
+  readonly options: { readonly mode: string; readonly model: string; readonly effort?: string; readonly ownEffort?: string }
   /**
    * The agent's own sign-in (docs/architecture/03: the official tool owns it).
    * Althar runs the documented status command and reads its output; it
@@ -306,7 +312,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       inheritEnv: ['OPENCODE_CONFIG_DIR'],
     }),
     modes: { ask: 'build', readOnly: 'plan', reader: 'build' },
-    options: { mode: 'mode', model: 'model' },
+    /*
+     * Its efforts are a model's variants, so each model has its own, and
+     * some none. Put on a model, a session takes its first variant, such as
+     * None for GPT-6 Luna, where OpenCode's own app takes its default.
+     */
+    options: { mode: 'mode', model: 'model', effort: 'effort', ownEffort: 'default' },
     signIn: {
       status: () => ({ command: 'opencode', args: ['auth', 'list'] }),
       /* OpenCode runs its free models without signing in, so no credentials means "can't tell", not "signed out". */
@@ -333,7 +344,6 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { once: 'once' } },
     knownGaps: [
-      'No effort option.',
       'Provider rate limits come back as errors; API keys have no plan windows.',
       'Carrying on after a rejection relies on an experimental setting, continue_loop_on_deny.',
     ],

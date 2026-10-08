@@ -2,7 +2,7 @@ import { QueryClient, queryOptions } from '@tanstack/react-query'
 
 import type { CoordinatorSnapshot, ThreadSnapshot } from '@althar/contracts'
 
-import { mergeItems } from '../shared/items'
+import { mergeItems, settled } from '../shared/items'
 import type { Client } from './client'
 
 /*
@@ -27,23 +27,34 @@ export const keys = {
   connections: ['connections'] as const,
 }
 
-/** The window's cache: nothing goes stale by itself, and a failed read isn't tried again on its own. */
+/**
+ * The window's cache: nothing goes stale by itself, and a failed read isn't
+ * tried again on its own. A read marked out of date is read again when a
+ * screen first shows it (`refetchOnMount`): that is what catches a thread
+ * up on a change heard after its route read it but before its screen
+ * listened, since a screen starts showing a read and listening in the same
+ * moment, after it paints.
+ */
 export const makeQueryClient = () =>
   new QueryClient({
     defaultOptions: {
-      queries: { staleTime: Infinity, retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false },
+      queries: { staleTime: Infinity, retry: false, refetchOnMount: true, refetchOnWindowFocus: false, refetchOnReconnect: false },
     },
   })
 
 /**
  * A thread read again keeps the earlier pages already read, as long as the
- * new page meets them; one that doesn't (many items came since) starts over
- * from the new page.
+ * new page meets them and nothing in them could have moved since: a tool
+ * call still running, a message still queued, a task not yet settled. One
+ * that doesn't meet them (many items came since), or whose earlier pages
+ * hold something unsettled, starts over from the new page, and "Show
+ * earlier" reads the rest again.
  */
 export const continued = <S extends ThreadSnapshot | CoordinatorSnapshot>(was: S | undefined, fresh: S): S => {
   const first = fresh.items[0]
   const last = was?.items.at(-1)
   if (was === undefined || first === undefined || last === undefined || first.sequence > last.sequence + 1) return fresh
+  if (was.items.some((item) => item.sequence < first.sequence && !settled(item))) return fresh
   return { ...fresh, items: mergeItems(was.items, fresh.items), earlier: was.earlier }
 }
 

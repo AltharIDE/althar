@@ -7,12 +7,13 @@ import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, W
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { modelInfo, waitsWords } from '../../shared/agents'
+import { callKindOf } from '../../shared/calls'
 import { checkOf } from '../../shared/checks'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
 import { ago, clock } from '../../shared/time'
 import { PermissionCall } from '../task/PermissionCall'
-import { StuckCall, text as stuckText } from '../task/StuckCall'
+import { StuckCall } from '../task/StuckCall'
 import { text as boardText, type DockTarget, trackOf } from './BoardView'
 import s from './Board.module.css'
 import type { BoardModel } from './useBoard'
@@ -119,13 +120,7 @@ export function DockView({
   if (call !== undefined) {
     const stuck = call.stuck
     return (
-      <Dock
-        label={label}
-        name={stuck === null ? boardText.approval : stuckText.step[stuck.step]}
-        sub={`${call.taskTitle} · ${ago(call.createdAt, new Date(now))}`}
-        call
-        onClose={onClose}
-      >
+      <Dock label={label} name={callKindOf(call)} sub={`${call.taskTitle} · ${ago(call.createdAt, new Date(now))}`} call onClose={onClose}>
         {stuck === null ? (
           <PermissionCall request={call} project={project} onAnswer={model.answer} />
         ) : (

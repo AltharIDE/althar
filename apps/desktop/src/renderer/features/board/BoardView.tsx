@@ -15,6 +15,7 @@ import {
 } from '@althar/ui'
 
 import { modelInfo, waitsWords } from '../../shared/agents'
+import { kindWords } from '../../shared/calls'
 import { productBrand, productName } from '../../shared/products'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -22,8 +23,8 @@ import { type Lanes } from './lanes'
 
 /*
  * The project's work, as the kit's board lays it out: up next, running,
- * needs you, settled. Each card opens in the dock beside it, where it can be
- * answered or accepted without leaving.
+ * needs you, settled. Each card opens its task, where a call is answered and
+ * work is accepted.
  */
 
 export const text = {
@@ -40,7 +41,6 @@ export const text = {
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   stopped: 'No agent is working on it',
-  approval: 'Approval',
   allow: 'Allow',
   deny: 'Don’t allow',
   merged: (name: string) => `${name} merged`,
@@ -48,7 +48,7 @@ export const text = {
   abandoned: 'Abandoned',
 }
 
-/** What the dock holds: a task, by its id, or a call. */
+/** What the home's dock holds: a task, by its id, or a call. */
 export type DockTarget = { readonly kind: 'task'; readonly id: string } | { readonly kind: 'call'; readonly id: string }
 
 /** A task's steps as its card's track names them, and the one it is on. */
@@ -74,21 +74,17 @@ export function BoardView({
   lanes,
   agents,
   now,
-  current,
   onOpen,
 }: {
   lanes: Lanes
   agents: ReadonlyArray<AgentStatus>
   /** The time now, for countdowns and how long work has run. */
   now: string
-  current: DockTarget | null
-  onOpen: (target: DockTarget) => void
+  /** Opens a task, by its thread. */
+  onOpen: (threadId: string) => void
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   const lead = (task: BoardTask) => modelInfo({ id: task.lead ?? 'agent', name: name(task.lead) }, null)
-  const on = (target: DockTarget) => current?.kind === target.kind && current.id === target.id
-  const task = (id: string): DockTarget => ({ kind: 'task', id })
-  const call = (id: string): DockTarget => ({ kind: 'call', id })
 
   return (
     <Board label={text.label}>
@@ -106,8 +102,7 @@ export function BoardView({
                 reason={
                   startsAt === null ? text.held : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
                 }
-                current={on(task(work.taskId))}
-                onOpen={() => onOpen(task(work.taskId))}
+                onOpen={() => onOpen(work.threadId)}
                 text={{ task: unnamed }}
               />
             )
@@ -136,8 +131,7 @@ export function BoardView({
                   : steps.length === 1
                     ? { note: '' }
                     : {})}
-              current={on(task(work.taskId))}
-              onOpen={() => onOpen(task(work.taskId))}
+              onOpen={() => onOpen(work.threadId)}
               text={{ status: text.status, task: unnamed }}
             />
           )
@@ -146,12 +140,7 @@ export function BoardView({
 
       <BoardColumn lane={BoardLane.Yours} count={lanes.calls.length + lanes.ready.length}>
         {lanes.calls.map((waiting) => (
-          <CallCard
-            key={waiting.id}
-            {...callCardOf(waiting, name)}
-            current={on(call(waiting.id))}
-            onOpen={() => onOpen(call(waiting.id))}
-          />
+          <CallCard key={waiting.id} {...callCardOf(waiting, name)} onOpen={() => onOpen(waiting.threadId)} />
         ))}
         {lanes.ready.map((work) => {
           const change = work.change
@@ -177,8 +166,7 @@ export function BoardView({
                     host: { name: productName(change.product), ...(brand === undefined ? {} : { brand }) },
                     checks: change.checks?.passed ?? 0,
                   })}
-              current={on(task(work.taskId))}
-              onOpen={() => onOpen(task(work.taskId))}
+              onOpen={() => onOpen(work.threadId)}
               text={{ task: unnamed, ...(change === null ? {} : { number: (n: number) => `${change.prefix}${n}` }) }}
             />
           )
@@ -203,8 +191,7 @@ export function BoardView({
                     : { meta: work.branch }
                   : { meta: change?.state === 'merged' ? text.merged(named) : text.closed(named) })}
                 at={work.settledAt === null ? '' : ago(work.settledAt, new Date(now))}
-                current={on(task(work.taskId))}
-                onOpen={() => onOpen(task(work.taskId))}
+                onOpen={() => onOpen(work.threadId)}
                 text={{ task: unnamed }}
               />
             )
@@ -216,11 +203,11 @@ export function BoardView({
 }
 
 /** A call as its card on the board says it: a step that needs the person, or an approval. */
-const callCardOf = (waiting: BoardCall, name: (id: string | null) => string) => {
+export const callCardOf = (waiting: BoardCall, name: (id: string | null) => string) => {
   if (waiting.stuck !== null) {
     const stuck = waiting.stuck
     return {
-      kind: stuckText.step[stuck.step],
+      kind: kindWords.stuck,
       title:
         stuck.step === 'publish' && stuck.why !== 'not_connected'
           ? stuckText.publishing(stuck)
@@ -231,7 +218,7 @@ const callCardOf = (waiting: BoardCall, name: (id: string | null) => string) => 
     }
   }
   return {
-    kind: text.approval,
+    kind: kindWords.permission,
     title: waiting.title,
     because: waiting.reason,
     options: [text.allow, text.deny],

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { AgentDefinition } from '@althar/provider-adapters'
-import { fakeAgent, fakeAgentMain } from '@althar/provider-adapters/testing'
+import { fakeAgent, fakeAgentMain, type FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -17,16 +17,27 @@ import { Secrets } from '../src/Secrets'
 import { Sessions } from '../src/Sessions'
 import { definition, fakeConnectors, items, repository, runtime, until } from './support'
 
-/** What the fake agent offers: two models, and three efforts. */
+const EFFORTS = [
+  { id: 'low', name: 'Low' },
+  { id: 'medium', name: 'Medium' },
+  { id: 'high', name: 'High' },
+]
+const SMALL = { id: 'small', name: 'Small', description: 'Quick, for small things' }
+const LARGE = { id: 'large', name: 'Large', description: 'The most capable' }
+
+/** What the fake agent offers, once asked: two models, each with three efforts, starting at medium. */
 const OFFERED = {
   models: [
-    { id: 'small', name: 'Small', description: 'Quick, for small things' },
-    { id: 'large', name: 'Large', description: 'The most capable' },
+    { ...SMALL, efforts: EFFORTS, effort: 'medium' },
+    { ...LARGE, efforts: EFFORTS, effort: 'medium' },
   ],
-  efforts: [
-    { id: 'low', name: 'Low' },
-    { id: 'medium', name: 'Medium' },
-    { id: 'high', name: 'High' },
+}
+
+/** What a session on the large model says: its efforts, and only the models of the others. */
+const SEEN_ON_LARGE = {
+  models: [
+    { ...SMALL, efforts: [], effort: null },
+    { ...LARGE, efforts: EFFORTS, effort: null },
   ],
 }
 
@@ -43,7 +54,7 @@ const thread = Effect.gen(function* () {
 })
 
 /** A runtime with these agents: `process` runs as a real process, and `missing` can't be started. */
-const withAgents = (ids: ReadonlyArray<string>, define: (agentId: string) => AgentDefinition) =>
+const withAgents = (ids: ReadonlyArray<string>, define: (agentId: string) => AgentDefinition, fake: FakeAgentOptions = {}) =>
   Runtime.layer({
     database: ':memory:',
     worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
@@ -59,13 +70,19 @@ const withAgents = (ids: ReadonlyArray<string>, define: (agentId: string) => Age
               ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
               : agentId === 'missing'
                 ? { _tag: 'Process', spec: { command: 'althar-no-such-agent', args: [] }, cwd }
-                : { _tag: 'InProcess', agent: fakeAgent() },
+                : { _tag: 'InProcess', agent: fakeAgent(fake) },
         })),
       ),
     ),
     secrets: Secrets.memory(),
     connectors: fakeConnectors({}),
   })
+
+/** OpenCode's entry, as far as effort goes: it names the level that leaves a model at its own. */
+const openCodeLike = (agentId: string): AgentDefinition => {
+  const defined = definition(agentId)
+  return agentId === 'opencode' ? { ...defined, options: { ...defined.options, ownEffort: 'default' } } : defined
+}
 
 describe('the models each agent offers', () => {
   it.live('are asked of an agent never run, once, in the background, then known', () =>
@@ -102,7 +119,14 @@ describe('the models each agent offers', () => {
       const threadId = yield* thread
       yield* sessions.start({ threadId, agentId: 'codex', model: 'large', effort: 'high' })
       const codex = () => Effect.map(models.catalog, (all) => all.find((agent) => agent.agentId === 'codex'))
-      assert.deepStrictEqual(yield* codex(), { agentId: 'codex', ...OFFERED, model: 'large', effort: 'high', defaults: [], probing: true })
+      assert.deepStrictEqual(yield* codex(), {
+        agentId: 'codex',
+        ...SEEN_ON_LARGE,
+        model: 'large',
+        effort: 'high',
+        defaults: [],
+        probing: true,
+      })
       const [asked] = yield* until(
         Effect.map(models.catalog, (all) => all.filter((agent) => agent.agentId === 'codex')),
         (found) => found[0]?.probing === false,
@@ -223,12 +247,21 @@ describe('the models each agent offers', () => {
       { id: 'effort', name: 'Effort', category: 'thought_level', type: 'select', currentValue: true, values: [], choices: [] },
     ])
     assert.deepStrictEqual(read.models, [
-      { id: 'small', name: 'small', description: null },
-      { id: 'large', name: 'large', description: null },
+      { id: 'small', name: 'small', description: null, efforts: [], effort: null },
+      { id: 'large', name: 'large', description: null, efforts: [], effort: null },
     ])
     assert.deepStrictEqual([read.model, read.effort], ['large', null])
     // An agent that names no effort option has its thought level found by category.
     const unnamed = modelsOf({ ...definition('opencode'), options: { mode: 'mode', model: 'model' } }, [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'm',
+        values: ['m'],
+        choices: [{ value: 'm', name: 'M' }],
+      },
       {
         id: 'level',
         name: 'Level',
@@ -239,8 +272,47 @@ describe('the models each agent offers', () => {
         choices: [{ value: 'deep', name: 'Deep' }],
       },
     ])
-    assert.deepStrictEqual(unnamed.efforts, [{ id: 'deep', name: 'Deep' }])
+    assert.deepStrictEqual(unnamed.models[0]?.efforts, [{ id: 'deep', name: 'Deep' }])
   })
+
+  it.live('are read of a model the agent fails to be put on once, as Claude Code does now and then', () =>
+    Effect.gen(function* () {
+      const models = yield* Models
+      yield* models.catalog
+      const [asked] = yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
+      assert.deepStrictEqual(asked?.models, OFFERED.models)
+    }).pipe(Effect.provide(withAgents(['codex'], (agentId) => definition(agentId), { failsOnce: ['large'] }))),
+  )
+
+  it.live('have efforts of their own, as the agent says once a session is on each, and some none', () =>
+    Effect.gen(function* () {
+      const models = yield* Models
+      yield* models.catalog
+      const known = yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
+      const levels = (...ids: ReadonlyArray<string>) => ids.map((id) => ({ id, name: id.charAt(0).toUpperCase() + id.slice(1) }))
+      const offered = (agentId: string) =>
+        known.find((agent) => agent.agentId === agentId)?.models.map((model) => [model.id, model.efforts, model.effort])
+      // Put on a model, OpenCode takes its first level; Althar puts it on the model's own, `default`, where it names that.
+      assert.deepStrictEqual(offered('opencode'), [
+        ['small', [], null],
+        ['large', levels('low', 'high', 'default'), 'default'],
+        ['huge', levels('high', 'max', 'default'), 'default'],
+      ])
+      assert.deepStrictEqual(offered('codex'), [
+        ['small', [], null],
+        ['large', levels('low', 'high', 'default'), 'low'],
+        ['huge', levels('high', 'max', 'default'), 'high'],
+      ])
+      // What it is on is the model it started on, not the last one it was put on.
+      assert.deepStrictEqual(
+        known.map((agent) => [agent.agentId, agent.model, agent.effort]),
+        [
+          ['codex', 'small', null],
+          ['opencode', 'small', null],
+        ],
+      )
+    }).pipe(Effect.provide(withAgents(['codex', 'opencode'], openCodeLike, { variants: true }))),
+  )
 })
 
 describe('how hard an agent thinks', () => {
@@ -317,6 +389,35 @@ describe('how hard an agent thinks', () => {
         }),
       ),
     ),
+  )
+
+  it.live('starts at the model’s own where the agent would start it at its first, and is kept across models that offer it', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const models = yield* Models
+      const sql = yield* SqlClient.SqlClient
+      const effortOf = (threadId: string) =>
+        Effect.map(
+          sql<{ effort: string | null }>`SELECT effort FROM provider_sessions WHERE thread_id = ${threadId}`,
+          (rows) => rows[0]?.effort,
+        )
+      // A model without levels has none to set; one with levels starts at its own, not its first.
+      const plain = yield* thread
+      yield* sessions.start({ threadId: plain, agentId: 'opencode' })
+      const large = yield* thread
+      yield* sessions.start({ threadId: large, agentId: 'opencode', model: 'large' })
+      assert.deepStrictEqual([yield* effortOf(plain), yield* effortOf(large)], [null, 'default'])
+      assert.instanceOf(yield* Effect.flip(sessions.setEffort({ threadId: plain, effort: 'high' })), EffortUnchanged)
+      // Put on another model, it keeps an effort that model offers, though the agent would move it to its first.
+      yield* sessions.setModel({ threadId: large, model: 'huge' })
+      assert.strictEqual(yield* effortOf(large), 'default')
+      // One the model doesn't offer gives way to the person's default for it, or else its own.
+      yield* sessions.setEffort({ threadId: large, effort: 'max' })
+      yield* models.setDefaultEffort({ agentId: 'opencode', model: 'large', effort: 'high' })
+      yield* sessions.setModel({ threadId: large, model: 'large' })
+      yield* sessions.setModel({ threadId: plain, model: 'huge' })
+      assert.deepStrictEqual([yield* effortOf(large), yield* effortOf(plain)], ['high', 'default'])
+    }).pipe(Effect.provide(withAgents(['opencode'], openCodeLike, { variants: true }))),
   )
 
   it.live('stays at the agent’s own when the effort asked for isn’t offered', () =>
