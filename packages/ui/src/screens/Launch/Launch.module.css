@@ -1,7 +1,8 @@
 /*
- * The launch: a veil of paper with the light and the mark on it, and what it
- * opens onto over the veil, hidden until it opens, rising in over both. What
- * draws them sets their transforms, opacities and softness.
+ * The launch: what it opens onto, drawn from the start, under a veil of
+ * paper with the light and the mark on it. Opening, the paper goes and what
+ * is behind arrives under the light as it sinks. What draws them sets their
+ * transforms, opacities and softness.
  */
 
 .launch {
@@ -12,22 +13,21 @@
 
 .behind {
   position: relative;
-  z-index: 1;
+  z-index: 0;
   height: 100%;
-}
-/* Until it opens: there, laid out, and not yet seen. */
-.waiting {
-  opacity: 0;
-  will-change: transform, filter, opacity;
 }
 
 .veil {
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: 1;
   overflow: hidden;
-  background: var(--n-2);
   cursor: default;
+}
+.paper {
+  position: absolute;
+  inset: 0;
+  background: var(--n-2);
 }
 
 /* The light stands off the bottom, a little wider than the window, so its edges are never seen to end. */
@@ -38,14 +38,13 @@
   bottom: -4%;
   height: 100%;
 }
+/* Each column is a small picture, soft already, stretched to its place: cheap to move. */
 .column {
   position: absolute;
   bottom: 0;
   height: 100%;
-  border-radius: 50% 50% 0 0 / 22% 22% 0 0;
   transform: scaleY(0);
   transform-origin: 50% 100%;
-  filter: blur(22px);
   will-change: transform;
 }
 /* Grain only where the light is. */
@@ -53,11 +52,8 @@
   position: absolute;
   inset: 0;
   opacity: 0;
-  mix-blend-mode: soft-light;
+  background-size: 128px 128px;
   mask-image: radial-gradient(ellipse 52% 62% at 50% 100%, #000 25%, transparent 78%);
-}
-.grain svg {
-  display: block;
 }
 
 .mark {

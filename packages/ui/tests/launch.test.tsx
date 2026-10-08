@@ -1,9 +1,9 @@
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { Launch } from '../src/screens/Launch/Launch'
-import { COLUMN_COUNT, COLUMNS, jitter, toneOf } from '../src/screens/Launch/light'
-import { AT, behindAt, lightAt, markAt, SET, spring } from '../src/screens/Launch/timeline'
+import { arrive, Launch } from '../src/screens/Launch/Launch'
+import { COLUMN_COUNT, COLUMNS, drawColumn, drawGrain, jitter, PICTURE, toneOf } from '../src/screens/Launch/light'
+import { arrivalOf, AT, lightAt, markAt, SET, spring, springEasing } from '../src/screens/Launch/timeline'
 
 /*
  * The launch: the light it rises in, when each part moves, and the window
@@ -20,9 +20,41 @@ describe('the light', () => {
     expect(middle.height).toBeGreaterThan(edge.height * 2)
     expect(middle.width).toBeGreaterThan(edge.width)
     expect(toneOf(0)[0]).toBe('#2b3bff')
-    expect(middle.background).toContain('#2b3bff')
-    expect(edge.background).toContain(toneOf(1)[0])
+    expect(middle.tones[0]).toBe('#2b3bff')
+    expect(edge.tones).toEqual(toneOf(1))
     expect(toneOf(1)[0]).not.toBe(toneOf(0.5)[0])
+  })
+
+  it('draws each column once, soft, rounded at the top and past the bottom, and grain as faint specks', () => {
+    const calls: Array<string> = []
+    const gradient = { addColorStop: (at: number, colour: string) => void calls.push(`stop ${at} ${colour}`) }
+    const context = new Proxy(
+      { filter: '', fillStyle: '' as unknown, createLinearGradient: () => gradient },
+      {
+        get: (target, name) =>
+          name in target
+            ? target[name as keyof typeof target]
+            : (...args: Array<unknown>) => void calls.push(`${String(name)} ${args.join(' ')}`),
+      },
+    ) as unknown as CanvasRenderingContext2D
+    drawColumn(context, COLUMNS[Math.floor(COLUMN_COUNT / 2)]!)
+    expect(context.filter).toBe(`blur(${PICTURE.blur}px)`)
+    expect(calls).toContain('stop 0 #2b3bff')
+    expect(calls.some((call) => call.startsWith('ellipse'))).toBe(true)
+    expect(
+      calls.some((call) => call.startsWith(`moveTo ${(PICTURE.width - PICTURE.column) / 2} ${PICTURE.height + PICTURE.blur * 3}`)),
+    ).toBe(true)
+    expect(calls.at(-1)).toBe('fill ')
+
+    const data = new Uint8ClampedArray(4 * 4 * 4)
+    const put = vi.fn()
+    let n = 0
+    drawGrain({ createImageData: () => ({ data }), putImageData: put } as unknown as CanvasRenderingContext2D, 4, () =>
+      n++ % 2 === 0 ? 0.2 : 0.9,
+    )
+    expect(put).toHaveBeenCalledOnce()
+    expect(data[0]).toBe(0)
+    expect(data[3]).toBeLessThanOrEqual(22)
   })
 
   it('is uneven the same way every time', () => {
@@ -74,7 +106,7 @@ describe('when each part of the launch moves', () => {
     expect(mark.bloom).toBeGreaterThan(0.35)
   })
 
-  it('sinks the light from the edges in, takes the mark into a blur, and raises what it opens onto into place', () => {
+  it('sinks the light from the edges in and takes the mark into a blur', () => {
     const open = 2000
     const early = lightAt(open + 100, open)
     expect(early.columns[0]!.height).toBeLessThan(lightAt(open + 100, null).columns[0]!.height)
@@ -86,12 +118,23 @@ describe('when each part of the launch moves', () => {
     expect(gone.shown).toBe(0)
     expect(gone.up).toBe(10)
     expect(gone.blur).toBeGreaterThan(10)
-    expect(behindAt(0)).toEqual({ rise: 28, blur: 8, scale: 0.985, strength: 0 })
-    const settled = behindAt(AT.through)
-    expect(settled.strength).toBe(1)
-    expect(settled.rise).toBeCloseTo(0, 1)
-    expect(settled.blur).toBeLessThan(0.05)
-    expect(settled.scale).toBeCloseTo(1, 3)
+    // The veil is gone by the time it goes.
+    expect(AT.through).toBeGreaterThanOrEqual(AT.open.fade.start + AT.open.fade.length)
+    expect(AT.through).toBeGreaterThanOrEqual(AT.open.paper.start + AT.open.paper.length)
+  })
+
+  it('has what it opens onto arrive top to bottom, then across, each on a spring the compositor can play', () => {
+    expect(arrivalOf(0, 0)).toBe(AT.open.arrive.start)
+    expect(arrivalOf(0.5, 0)).toBeGreaterThan(arrivalOf(0.1, 0))
+    expect(arrivalOf(0.1, 0.8)).toBeGreaterThan(arrivalOf(0.1, 0))
+    expect(arrivalOf(2, 2)).toBe(AT.open.arrive.start + AT.open.arrive.down + AT.open.arrive.across)
+    const { easing, duration } = springEasing(0.62, 0.8)
+    expect(easing).toMatch(/^linear\(0, /)
+    expect(easing).toMatch(/, 1\)$/)
+    const values = easing.slice('linear('.length, -1).split(', ').map(Number)
+    expect(Math.max(...values)).toBeGreaterThan(1)
+    expect(duration).toBeGreaterThan(500)
+    expect(duration).toBeLessThan(1200)
   })
 
   it('brings the point out of the light in the bore without a bounce: it never grows past its size', () => {
@@ -115,7 +158,7 @@ describe('the launch', () => {
     vi.unstubAllGlobals()
   })
 
-  it('draws what it opens onto under it, hidden and inert, and opens once the mark is up and what is behind is ready', () => {
+  it('draws what it opens onto under its veil, inert, and opens once the mark is up and what is behind is ready', () => {
     const onDone = vi.fn()
     const { rerender, container } = render(
       <Launch ready={false} onDone={onDone}>
@@ -127,20 +170,43 @@ describe('the launch', () => {
     act(() => void vi.advanceTimersByTime(AT.set + 1000))
     // Up, but what is behind isn't ready: it holds, the light standing.
     expect(onDone).not.toHaveBeenCalled()
+    // Drawn all along, under the veil: nothing to paint for the first time as it opens.
     const behind = container.querySelector<HTMLElement>('[inert]')!
-    expect(behind.style.opacity).toBe('')
+    expect(behind.getAttribute('style')).toBeNull()
     rerender(
       <Launch ready onDone={onDone}>
         <button type="button">Behind</button>
       </Launch>,
     )
-    act(() => void vi.advanceTimersByTime(400))
-    expect(Number(behind.style.opacity)).toBeGreaterThan(0)
-    act(() => void vi.advanceTimersByTime(AT.through))
+    act(() => void vi.advanceTimersByTime(AT.through + AT.settle + 100))
     expect(onDone).toHaveBeenCalledOnce()
     expect(container.querySelector('[inert]')).toBeNull()
     expect(container.querySelector('svg')).toBeNull()
     expect(screen.getByRole('button', { name: 'Behind' })).toBeTruthy()
+  })
+
+  it('has the pieces of what it opens onto arrive, later the further down they sit, and leaves those below the window', () => {
+    const animate = vi.fn()
+    const at =
+      (top: number, left = 0) =>
+      () =>
+        ({ top, left, height: 40, width: 200, right: left + 200, bottom: top + 40, x: left, y: top }) as DOMRect
+    const within = document.createElement('div')
+    within.getBoundingClientRect = () => ({ top: 0, left: 0, width: 1000, height: 800 }) as DOMRect
+    within.innerHTML = '<header data-arrive></header><ul data-arrive-each><li></li><li></li><li></li></ul><p>not marked</p>'
+    const [header, first, second, below] = within.querySelectorAll<HTMLElement>('header, li')
+    header!.getBoundingClientRect = at(10)
+    first!.getBoundingClientRect = at(100)
+    second!.getBoundingClientRect = at(400, 600)
+    below!.getBoundingClientRect = at(900)
+    for (const piece of [header, first, second, below]) piece!.animate = animate
+    arrive(within)
+    // Two animations each, the move and the fade, for the three that can be seen.
+    expect(animate).toHaveBeenCalledTimes(6)
+    const delays = animate.mock.calls.filter((_, i) => i % 2 === 0).map(([, options]) => (options as KeyframeAnimationOptions).delay)
+    expect(delays).toEqual([arrivalOf(10 / 800, 0), arrivalOf(100 / 800, 0), arrivalOf(400 / 800, 0.6)])
+    expect((animate.mock.calls[0]![1] as KeyframeAnimationOptions).fill).toBe('backwards')
+    expect((animate.mock.calls[0]![1] as KeyframeAnimationOptions).easing).toMatch(/^linear\(/)
   })
 
   it('skips to the mark set on a click', () => {
@@ -164,7 +230,7 @@ describe('the launch', () => {
   it('opens at once, with the mark set and a fade, when asked to be quick', () => {
     const onDone = vi.fn()
     render(<Launch ready quick onDone={onDone} />)
-    act(() => void vi.advanceTimersByTime(AT.quick.hold + AT.quick.fade + 100))
+    act(() => void vi.advanceTimersByTime(AT.quick.hold + AT.settle + AT.quick.fade + 100))
     expect(onDone).toHaveBeenCalledOnce()
   })
 
@@ -172,7 +238,7 @@ describe('the launch', () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), media: query }) as MediaQueryList)
     const onDone = vi.fn()
     render(<Launch ready onDone={onDone} />)
-    act(() => void vi.advanceTimersByTime(AT.quick.hold + AT.quick.fade + 100))
+    act(() => void vi.advanceTimersByTime(AT.quick.hold + AT.settle + AT.quick.fade + 100))
     expect(onDone).toHaveBeenCalledOnce()
   })
 })

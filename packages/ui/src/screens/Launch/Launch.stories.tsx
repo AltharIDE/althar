@@ -4,11 +4,29 @@ import { useEffect, useState } from 'react'
 import { Button } from '../../primitives/Button/Button'
 import { Launch } from './Launch'
 
-/* What the launch opens onto here: a page of the window, standing in for the app. */
+/* What the launch opens onto here: a page of the window, standing in for the app, whose cards arrive one by one. */
+const CARDS = ['Ready to accept', 'Running', 'Running', 'Since you looked']
+
 function Behind() {
   return (
-    <div style={{ height: '100%', display: 'grid', placeItems: 'center', background: 'var(--n-2)' }}>
-      <div style={{ font: '500 15px/1.5 var(--font)', color: 'var(--t-2)' }}>What the window opens onto</div>
+    <div style={{ height: '100%', padding: '72px 0', background: 'var(--n-2)' }}>
+      <div data-arrive-each style={{ display: 'grid', gap: 10, width: 'min(560px, 90%)', margin: '0 auto' }}>
+        {CARDS.map((card, i) => (
+          <div
+            key={i}
+            style={{
+              padding: '16px 18px',
+              borderRadius: 'var(--r)',
+              background: 'var(--n-1)',
+              boxShadow: 'var(--lift-card)',
+              font: '500 13px/1.5 var(--font)',
+              color: 'var(--t-2)',
+            }}
+          >
+            {card}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

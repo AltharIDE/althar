@@ -15,7 +15,7 @@ export interface Column {
   /** How tall it stands once up, as a share of the light's height. */
   readonly height: number
   /** Bottom to top: its colour, paler as it goes up, and gone at its top. */
-  readonly background: string
+  readonly tones: readonly [string, string, string]
 }
 
 export const COLUMN_COUNT = 23
@@ -41,13 +41,54 @@ export const jitter = (i: number) => {
 export const COLUMNS: ReadonlyArray<Column> = Array.from({ length: COLUMN_COUNT }, (_, i) => {
   const u = i / (COLUMN_COUNT - 1)
   const d = Math.abs(u - 0.5) * 2
-  const [low, middle, high] = toneOf(d)
   return {
     i,
     d,
     left: u * 100,
     width: 8.5 - 2 * d,
     height: (0.2 + 0.46 * Math.exp(-d * d * 3.2)) * (0.8 + 0.2 * jitter(i)),
-    background: `linear-gradient(to top, ${low} 0%, ${middle} 34%, ${high} 66%, rgba(255, 255, 255, 0) 100%)`,
+    tones: toneOf(d),
   }
 })
+
+/** A column's picture: how many px wide and high, how wide the column itself is in it, and how soft. */
+export const PICTURE = { width: 64, height: 256, column: 30, blur: 5 } as const
+
+/**
+ * Draws a column once, soft already, small: the window stretches it to the
+ * column's place. Blurring it once here, not on every frame, keeps the light
+ * cheap to show while it moves. Its picture is wider than the column by the
+ * blur's reach either side.
+ */
+export const drawColumn = (context: CanvasRenderingContext2D, column: Column) => {
+  const { width, height, column: inner, blur } = PICTURE
+  const left = (width - inner) / 2
+  const cap = height * 0.22
+  const [low, middle, high] = column.tones
+  const fill = context.createLinearGradient(0, height, 0, 0)
+  fill.addColorStop(0, low)
+  fill.addColorStop(0.34, middle)
+  fill.addColorStop(0.66, high)
+  fill.addColorStop(1, 'rgba(255, 255, 255, 0)')
+  context.clearRect(0, 0, width, height)
+  context.filter = `blur(${blur}px)`
+  context.fillStyle = fill
+  context.beginPath()
+  // Past the bottom, so the blur doesn't lift it off the floor; round at the top.
+  context.moveTo(left, height + blur * 3)
+  context.lineTo(left, cap)
+  context.ellipse(left + inner / 2, cap, inner / 2, cap, 0, Math.PI, 0)
+  context.lineTo(left + inner, height + blur * 3)
+  context.closePath()
+  context.fill()
+}
+
+/** A tile of fine grain, drawn once, faint dark and light specks, for over the light. */
+export const drawGrain = (context: CanvasRenderingContext2D, size: number, random: () => number = Math.random) => {
+  const image = context.createImageData(size, size)
+  for (let i = 0; i < size * size; i++) {
+    const v = random() < 0.5 ? 0 : 255
+    image.data.set([v, v, v, Math.round(random() * 22)], i * 4)
+  }
+  context.putImageData(image, 0, 0)
+}

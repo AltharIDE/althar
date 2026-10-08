@@ -21,6 +21,9 @@ import s from './Home.module.css'
  * that needs reading opens in the dock, which takes the projects' place.
  * There is no composer here: every coordinator belongs to a project, so you
  * talk to one in its project. The window's bar is the consumer's.
+ *
+ * As the window opens, each card and row arrives on its own, top to bottom
+ * (`data-arrive-each`, see screens/Launch).
  */
 
 export interface HomeText {
@@ -97,11 +100,15 @@ export function Home({
         </Heading>
         <div className={s.column}>
           <HomeSection lane={HomeLane.Yours} count={waiting}>
-            {Children.toArray(needs).length > 0 && <div className={s.cards}>{needs}</div>}
+            {Children.toArray(needs).length > 0 && (
+              <div className={s.cards} data-arrive-each>
+                {needs}
+              </div>
+            )}
           </HomeSection>
           <HomeSection lane={HomeLane.Running} count={running.length}>
             {running.length > 0 && (
-              <ul className={s.rows}>
+              <ul className={s.rows} data-arrive-each>
                 {running.map(({ id, ...run }) => (
                   <li key={id}>
                     <RunRow {...run} current={current === id} {...(onOpenTask ? { onOpen: () => onOpenTask(id) } : {})} />
@@ -112,7 +119,7 @@ export function Home({
           </HomeSection>
           <HomeSection lane={HomeLane.Since} count={since.length} when={looked}>
             {since.length > 0 && (
-              <ul className={s.events}>
+              <ul className={s.events} data-arrive-each>
                 {since.map(({ id, ...event }) => (
                   <li key={id}>
                     <SinceRow {...event} {...(onOpenEvent ? { onOpen: () => onOpenEvent(id) } : {})} />
@@ -128,13 +135,13 @@ export function Home({
         <div className={s.dock}>{dock}</div>
       ) : (
         <aside className={s.projects} aria-labelledby={projectsId}>
-          <header className={s.projectsHead}>
+          <header className={s.projectsHead} data-arrive>
             <Heading level={2} id={projectsId} className={s.projectsTitle}>
               {t.projects}
             </Heading>
             {onOpenFolder && <IconButton icon="plus" label={t.openFolder} kbd={t.openFolderKbd} size="small" onClick={onOpenFolder} />}
           </header>
-          <ul className={s.list}>
+          <ul className={s.list} data-arrive-each>
             {projects.map(({ id, ...project }) => (
               <li key={id}>
                 <ProjectRow {...project} {...(onOpenProject ? { onOpen: () => onOpenProject(id) } : {})} />

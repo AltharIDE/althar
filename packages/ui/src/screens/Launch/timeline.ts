@@ -8,9 +8,12 @@ import { COLUMNS } from './light'
  * spring, and sways a little while it stands (light.ts). The mark comes up
  * out of it: low, soft and in the light's own pale cobalt at first, then
  * clear of it, sharp and in ink, its foot and lower edge still catching the
- * light. The point is set in the bore last. Once what it opens onto is ready,
- * the light sinks back from the edges in, the mark goes into a blur, and
- * what it opens onto rises in over both on a spring.
+ * light. Last, the bore fills with light, which draws in to the point.
+ *
+ * Once what it opens onto is ready, and has been drawn under the veil, the
+ * light sinks back from the edges in, the mark goes into a blur, the veil's
+ * paper goes, and what it opens onto arrives piece by piece, top to bottom,
+ * each on a spring.
  */
 
 /** Milliseconds: from the start, or (`open`) from when the opening began. */
@@ -24,6 +27,8 @@ export const AT = {
   point: { start: 1000, length: 340 },
   /** The earliest it opens: the mark is up, and the point all but set. */
   set: 1240,
+  /** How long what it opens onto is ready before it opens, so it is drawn under the veil first. */
+  settle: 120,
   open: {
     /** The light sinks, the edges at once and the middle `spread` later, each over `sink`; then it is gone over `fade`. */
     spread: 140,
@@ -31,11 +36,18 @@ export const AT = {
     fade: { start: 360, length: 520 },
     /** The mark goes into a blur. */
     mark: { start: 60, length: 460 },
-    /** What it opens onto rises in, on its spring. */
-    behind: { start: 200, response: 0.62, damping: 0.8 },
+    /** The veil's paper goes, and what is behind shows through it. */
+    paper: { start: 120, length: 320 },
+    /**
+     * What is behind arrives: its pieces from `rise` px below, the first at
+     * `start`, the rest later by where they sit, down the window over
+     * `down` and across it over `across`; each fades in over `fade` and
+     * settles on its spring.
+     */
+    arrive: { start: 140, down: 320, across: 120, rise: 24, scale: 0.985, fade: 340, response: 0.62, damping: 0.8 },
   },
-  /** How long opening takes, until what it opened onto has settled. */
-  through: 1200,
+  /** How long the veil stays once it opens: the light, the mark and the paper are gone. */
+  through: 900,
   /** Opening at once, as after a reload or with motion reduced: how long the mark stays, and how long it fades. */
   quick: { hold: 160, fade: 220 },
 } as const
@@ -137,21 +149,20 @@ export const markAt = (t: number, open: number | null, reach: number): Mark => {
 /** The mark set, as it shows when the launch opens at once. */
 export const SET: Mark = { shown: 1, blur: 0, scale: 1, drop: 0, up: 0, clear: 1, lit: 0, rim: 0, point: 1, bloom: 0, focus: 0.62 }
 
-/** What it opens onto, `since` ms after the opening began: how far below its place (px), how soft (px), its size, how strongly it shows. */
-export interface Behind {
-  readonly rise: number
-  readonly blur: number
-  readonly scale: number
-  readonly strength: number
+/** When a piece of what it opens onto starts to arrive, after the opening began, by where it sits (0 to 1, down and across the window). */
+export const arrivalOf = (down: number, across: number) => {
+  const { arrive } = AT.open
+  return Math.round(arrive.start + clamp(down) * arrive.down + clamp(across) * arrive.across)
 }
 
-export const behindAt = (since: number): Behind => {
-  const { start, response, damping } = AT.open.behind
-  const settled = spring(since - start, response, damping)
-  return {
-    rise: (1 - settled) * 28,
-    blur: Math.max(0, 1 - settled) * 8,
-    scale: lerp(0.985, 1, settled),
-    strength: clamp((since - start) / (response * 520)),
-  }
+/**
+ * A spring as a CSS easing, for an animation the compositor runs: the spring
+ * sampled until it has settled, and how long that takes in ms.
+ */
+export const springEasing = (response: number, damping: number, points = 48) => {
+  const w = (2 * Math.PI) / response
+  // Settled once its swing is a thousandth of the way.
+  const duration = Math.round((Math.log(1000) / (Math.min(damping, 1) * w)) * 1000)
+  const values = Array.from({ length: points + 1 }, (_, i) => (i === points ? 1 : spring((duration * i) / points, response, damping)))
+  return { easing: `linear(${values.map((v) => Number(v.toFixed(4))).join(', ')})`, duration }
 }
