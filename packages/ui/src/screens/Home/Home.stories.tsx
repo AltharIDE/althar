@@ -6,6 +6,8 @@ import { TitleBar } from '../../chrome/TitleBar/TitleBar'
 import { WorkStatus } from '../../chrome/WorkStatus/WorkStatus'
 import {
   DECISION,
+  HALYARD,
+  MERIDIAN,
   PROJECT_LIST,
   PROJECTS_QUIET,
   PUBLISH,
@@ -16,6 +18,7 @@ import {
   SINCE,
   SINCE_QUIET,
   STUCK,
+  TESSERA,
 } from '../../fixtures/home'
 import { Logo } from '../../foundations/Logo/Logo'
 import { TaskStatus } from '../../foundations/vocabulary'
@@ -24,7 +27,7 @@ import { AskAnswered, AskNote } from '../../primitives/Ask/Ask'
 import { Button } from '../../primitives/Button/Button'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { States } from '../../storybook/States'
-import { Home, type HomeProps } from './Home'
+import { Home, type HomeProject, type HomeProps } from './Home'
 import s from './Home.stories.module.css'
 
 const meta = {
@@ -40,6 +43,7 @@ const meta = {
     onOpenTask: fn(),
     onOpenEvent: fn(),
     onOpenProject: fn(),
+    onTalk: fn(),
     onOpenFolder: fn(),
   },
 } satisfies Meta<typeof Home>
@@ -289,6 +293,72 @@ export const WithoutOpeningAFolder: Story = {
   args: { onOpenFolder: undefined, waiting: 0, running: RUNNING_QUIET, since: SINCE_QUIET, projects: PROJECTS_QUIET },
 }
 
+/* ---- at rest: nothing waits on you and nothing is in progress ---- */
+
+const fresh = (id: string, project: typeof MERIDIAN): HomeProject => ({
+  id,
+  project,
+  running: 0,
+  yours: 0,
+  note: 'No tasks yet',
+  fresh: true,
+})
+
+function Resting(args: HomeProps) {
+  return (
+    <Window running={0} waiting={0}>
+      <Home {...args} waiting={0} running={[]} />
+    </Window>
+  )
+}
+
+/** One project, opened today, with no task yet: Althar's light at the foot, the mark over it, and the way to its coordinator. */
+export const AtRestNewProject: Story = {
+  args: { since: [], projects: [fresh('meridian', MERIDIAN)] },
+  render: (args) => <Resting {...args} />,
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Talk to Meridian’s coordinator' }))
+    await expect(args.onTalk).toHaveBeenCalledWith('meridian')
+  },
+}
+
+/** Two projects, neither with a task yet: a way to each one's coordinator. */
+export const AtRestNewProjects: Story = {
+  args: { since: [], projects: [fresh('meridian', MERIDIAN), fresh('halyard', HALYARD)] },
+  render: (args) => <Resting {...args} />,
+}
+
+/** Projects that have had work, and nothing going on: all quiet, with the last few things the loop did. */
+export const AtRestAllQuiet: Story = {
+  args: {
+    since: SINCE_QUIET.slice(0, 3),
+    looked: '3 h ago',
+    projects: PROJECTS_QUIET.map((project) => ({ ...project, running: 0, now: undefined, note: project.note ?? 'Last task at 18:40' })),
+  },
+  render: (args) => <Resting {...args} />,
+}
+
+function WorkComing(args: HomeProps) {
+  const [working, setWorking] = useState(false)
+  return (
+    <Window running={working ? 1 : 0} waiting={0}>
+      <div className={s.toggle}>
+        <Button size="small" onClick={() => setWorking((now) => !now)}>
+          {working ? 'Settle the task' : 'Start a task'}
+        </Button>
+      </div>
+      <Home {...args} waiting={0} since={[]} running={working ? RUNNING_QUIET.map((run) => ({ ...run, project: TESSERA })) : []} />
+    </Window>
+  )
+}
+
+/** When work comes the light lies down, as it does at the launch, and the stream arrives in its place; when it is done, the home rests again. */
+export const AtRestWorkComes: Story = {
+  args: { projects: [fresh('tessera', TESSERA)] },
+  render: (args) => <WorkComing {...args} />,
+}
+
 export const AllStates: Story = {
   render: (args) => (
     <States
@@ -309,6 +379,14 @@ export const AllStates: Story = {
               <Window running={1} waiting={0}>
                 <Home {...args} {...Quiet.args} waiting={0} />
               </Window>
+            </div>
+          ),
+        },
+        {
+          state: 'at rest',
+          node: (
+            <div className={s.cell}>
+              <Resting {...args} {...AtRestNewProject.args} />
             </div>
           ),
         },

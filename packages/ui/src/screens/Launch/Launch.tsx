@@ -1,9 +1,10 @@
 import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 
 import { cx } from '../../lib/cx'
+import { reducedMotion } from '../../lib/motion'
 import type { RootProps } from '../../lib/props'
-import { BORE, DOTS, PARTICLES } from './halftone'
-import { COLUMNS, drawColumn, drawGrain, PICTURE } from './light'
+import { BORE, DOTS, PARTICLES } from '../../foundations/HalftoneMark/halftone'
+import { COLUMNS, drawColumn, drawGrain, PICTURE } from '../../foundations/Light/columns'
 import { arrivalOf, AT, clamp, dotAt, lightAt, particleAt, pointAt, SETTLED, type Speck, springEasing } from './timeline'
 import s from './Launch.module.css'
 
@@ -84,8 +85,6 @@ const placeIn = (width: number, height: number) => ({
   x: width / 2,
   y: height * 0.43,
 })
-
-const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
 
 export function Launch({ ready, quick = false, onDone, children, className, ...rest }: LaunchProps) {
   const [done, setDone] = useState(false)

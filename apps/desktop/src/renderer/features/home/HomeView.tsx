@@ -125,12 +125,15 @@ export function HomeView({
   model,
   start,
   onProject,
+  onTalk,
   onTask,
   onSettings,
 }: {
   model: HomeModel
   start: StartModel
   onProject: (projectId: string) => void
+  /** Open a project's conversation with its coordinator. */
+  onTalk: (projectId: string) => void
   onTask: (threadId: string) => void
   onSettings: () => void
 }) {
@@ -323,6 +326,7 @@ export function HomeView({
       moving: mine.some((task) => task.phase === 'running' && task.waits === null),
       ...(step === undefined ? {} : { now: { step: step.steps[step.at] ?? '', task: step.on.title, who: lead(step.on) } }),
       note: project.lastWorkAt === null ? text.noWork : text.lastWork(ago(project.lastWorkAt, new Date(now))),
+      fresh: project.lastWorkAt === null,
     }
   })
 
@@ -391,6 +395,7 @@ export function HomeView({
               onTask(event.task.threadId)
             }}
             onOpenProject={onProject}
+            onTalk={onTalk}
             onOpenFolder={openFolder}
           />
         )}
