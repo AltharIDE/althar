@@ -156,10 +156,20 @@ const busy = () =>
 
 function Home({
   onProject = vi.fn(),
+  onTalk = vi.fn(),
   onTask = vi.fn(),
   onSettings = vi.fn(),
-}: Partial<Record<'onProject' | 'onTask' | 'onSettings', (id: string) => void>>) {
-  return <HomeView model={useHome()} start={useStart()} onProject={onProject} onTask={onTask} onSettings={() => onSettings('settings')} />
+}: Partial<Record<'onProject' | 'onTalk' | 'onTask' | 'onSettings', (id: string) => void>>) {
+  return (
+    <HomeView
+      model={useHome()}
+      start={useStart()}
+      onProject={onProject}
+      onTalk={onTalk}
+      onTask={onTask}
+      onSettings={() => onSettings('settings')}
+    />
+  )
 }
 
 describe('the home', () => {
@@ -268,7 +278,7 @@ describe('the home', () => {
     const getHome = vi.fn(async () => home({ looked: '2026-10-07T08:00:00.000Z', projects: [project, halyard] }))
     const { client, emit } = fakeClient({ getHome })
     const view = withServices(<Home onProject={onProject} onSettings={onSettings} />, client)
-    await screen.findByRole('button', { name: /halyard/ })
+    await within(await screen.findByRole('complementary', { name: 'Projects' })).findByRole('button', { name: /halyard/ })
     fireEvent.keyDown(window, { key: '2', metaKey: true })
     fireEvent.keyDown(window, { key: 'x', metaKey: true })
     expect(onProject).not.toHaveBeenCalled()
@@ -286,6 +296,24 @@ describe('the home', () => {
     view.unmount()
     expect(client.leftHome).toHaveBeenCalled()
     act(() => void window.dispatchEvent(new Event('pagehide')))
+  })
+
+  it('rests when nothing waits and nothing is in progress, and offers a new project’s coordinator', async () => {
+    const onTalk = vi.fn()
+    const { client } = fakeClient({ getHome: vi.fn(async () => home({ projects: [halyard] })) })
+    withServices(<Home onTalk={onTalk} />, client)
+    expect(await screen.findByRole('heading', { name: 'Nothing in halyard yet' })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: /In progress/ })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Talk to halyard’s coordinator' }))
+    expect(onTalk).toHaveBeenCalledWith('p2')
+    expect(within(screen.getByRole('complementary', { name: 'Projects' })).getByText('No tasks yet')).toBeTruthy()
+  })
+
+  it('is all quiet once its projects have had work', async () => {
+    const { client } = fakeClient({ getHome: vi.fn(async () => home()) })
+    withServices(<Home />, client)
+    expect(await screen.findByRole('heading', { name: 'All quiet' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Talk to/ })).toBeNull()
   })
 
   it('says what went wrong opening a folder, and opens one dropped', async () => {

@@ -8,6 +8,7 @@
   "scripts": {
     "export": "bun scripts/export.ts",
     "export:banners": "bun scripts/export.ts banners",
+    "export:wallpapers": "bun scripts/export.ts wallpapers",
     "export:screenshots": "bun scripts/screenshots.ts",
     "check": "vp check",
     "fix": "vp check --fix",

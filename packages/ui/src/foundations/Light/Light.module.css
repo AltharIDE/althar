@@ -1,0 +1,26 @@
+/* A little wider than what holds it, and off its bottom, so its edges are never seen to end. */
+.light {
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  bottom: -4%;
+  height: 100%;
+  pointer-events: none;
+}
+/* Each column is a small picture, soft already, stretched to its place: cheap to move. */
+.column {
+  position: absolute;
+  bottom: 0;
+  height: 100%;
+  transform: scaleY(0);
+  transform-origin: 50% 100%;
+  will-change: transform, opacity;
+}
+/* Grain only where the light is. */
+.grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.9;
+  background-size: 128px 128px;
+  mask-image: radial-gradient(ellipse 52% 40% at 50% 100%, #000 25%, transparent 78%);
+}

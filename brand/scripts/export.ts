@@ -1,7 +1,8 @@
 /* Writes the pack to export/. Run after changing anything that draws it:
      bun run export                         everything but the screenshots
      bun run export:banners [name ...]      just the banners, or just those named
-   The banners and screenshots need a browser; the rest is drawn from the code in src/. */
+     bun run export:wallpapers              just the wallpapers
+   The banners, wallpapers and screenshots need a browser; the rest is drawn from the code in src/. */
 
 import { copyFile, readFile, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -44,6 +45,12 @@ if (only === undefined || only === 'banners') {
     await clear('banner', 'avatar/avatar-printed-1024.png', 'avatar/avatar-printed-400.png', 'avatar/avatar-printed-128.png')
   const { exportBanners } = await import('./banners')
   await exportBanners(names)
+}
+
+if (only === undefined || only === 'wallpapers') {
+  await clear('wallpaper')
+  const { exportWallpapers } = await import('./wallpapers')
+  await exportWallpapers()
 }
 
 console.warn('export: done')

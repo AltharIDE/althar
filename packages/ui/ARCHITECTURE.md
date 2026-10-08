@@ -10,14 +10,14 @@ This package holds Althar's interface components: the primitives (buttons, menus
 
 | Layer | What it holds |
 | --- | --- |
-| `foundations` | Tokens, icons, brand marks, project marks, `Model`, and the domain vocabularies. |
+| `foundations` | Tokens, icons, brand marks, project marks, `Model`, Althar's light and its halftone mark, and the domain vocabularies. |
 | `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), and Ask, which every part that asks a person shares. |
 | `thread` | What appears in a conversation: turns, tool calls, steps, permissions, questions, Stuck, documents. |
 | `composer` | What writes into a conversation: Composer, ModelPick, ContextRing, Listening, Running. |
 | `coordinator` | What the coordinator shows about tasks: Issue, TaskLaunch, TaskCard, TaskMark, TaskHeld. |
 | `board` | The project's work in lanes: Board, BoardColumn, and a card or row for each lane. |
 | `dock` | What opens beside the board: Dock and a peek for each kind of card. |
-| `home` | Work across every project, as the home shows it: HomeSection, NeedCard, RunRow, SinceRow, ProjectRow, ProjectWord; and the home in small at the edge of the screen: Island, EdgeSheet, EdgeRow. |
+| `home` | Work across every project, as the home shows it: HomeSection, HomeRest, NeedCard, RunRow, SinceRow, ProjectRow, ProjectWord; and the home in small at the edge of the screen: Island, EdgeSheet, EdgeRow. |
 | `outputs` | What a task made: ChangeSet, ArtifactCard. |
 | `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu. |
 | `setup` | What comes before a project: Runtimes, ConnectAgent, SourceMap. |

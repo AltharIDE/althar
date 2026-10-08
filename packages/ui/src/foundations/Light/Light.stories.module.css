@@ -1,0 +1,11 @@
+.stage {
+  position: relative;
+  height: 520px;
+  overflow: hidden;
+  background: var(--n-2);
+}
+.row {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+}

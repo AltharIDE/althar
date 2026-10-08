@@ -30,3 +30,10 @@
   position: relative;
   height: 100%;
 }
+/* the story's own control, outside the home */
+.toggle {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: var(--z-float);
+}

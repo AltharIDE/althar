@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { drawnFrom } from '../src/aurora'
 import { catalog } from '../src/catalog'
 import { BORE, SECTION } from '../src/geometry'
 import { COBALT, INK, PAPER, VIOLET } from '../src/palette'
@@ -11,7 +12,8 @@ import { COBALT, INK, PAPER, VIOLET } from '../src/palette'
  * What the pack keeps in step with the rest of the repository. The mark is
  * drawn in places that can't import it (another package's component, a
  * favicon, a card's HTML); the colours are the interface's; the app icons are
- * the desktop app's; export/ is what the code draws. Each of these goes wrong
+ * the desktop app's; export/ is what the code draws, and the wallpapers what
+ * the launch draws. Each of these goes wrong
  * silently when one side changes alone.
  */
 
@@ -52,6 +54,10 @@ describe('the pack and the repository', () => {
     for (const name of ['cobalt', 'cobalt-dark', 'paper', 'ink', 'solid', 'solid-dark']) {
       expect(read(`brand/export/app-icon/${name}.svg`), name).toBe(read(`apps/desktop/resources/icons/${name}.svg`))
     }
+  })
+
+  it('has the wallpapers as the launch and their page draw them now: after changing either, run bun run export:wallpapers', () => {
+    expect(JSON.parse(read('brand/wallpapers/drawn-from.json'))).toEqual(drawnFrom())
   })
 
   it('has every drawing as the code draws it: after changing one, run bun run export', async () => {

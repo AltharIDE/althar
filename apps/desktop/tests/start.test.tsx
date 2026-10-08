@@ -19,7 +19,7 @@ import { agents, changed, fakeClient, fakeHost, home, project, streamed, usual }
 import { withServices } from './render'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
-  return <HomeView model={useHome()} start={start} onProject={onProject} onTask={vi.fn()} onSettings={vi.fn()} />
+  return <HomeView model={useHome()} start={start} onProject={onProject} onTalk={vi.fn()} onTask={vi.fn()} onSettings={vi.fn()} />
 }
 
 function Start({ onProject }: { onProject: (id: string) => void }) {
