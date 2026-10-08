@@ -71,6 +71,8 @@ const MergeAnswer = Schema.Struct({
   work_in_progress: Schema.optional(Schema.Boolean),
   source_branch: Schema.String,
   target_branch: Schema.String,
+  /** The project the branch is on: a fork's, for a merge request from one. */
+  source_project_id: Schema.optional(Schema.Number),
   sha: Schema.optional(Schema.NullOr(Schema.String)),
   author: Schema.optional(Schema.NullOr(User)),
   // A string, and "1000+" past a thousand files; said only when one merge request is read.
@@ -289,14 +291,19 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     name: user.name ?? null,
   }))
 
-  const findChange = (repository: Repository, source: string) =>
+  const findChange = (repository: Repository, source: string, from?: Repository) =>
     Effect.map(
       http.json(
         Schema.Array(MergeAnswer),
         'GET',
         `${project(repository)}/merge_requests?state=opened&source_branch=${encodeURIComponent(source)}`,
       ),
-      (requests) => (requests[0] === undefined ? null : changeOf(requests[0])),
+      (requests) => {
+        // A fork's branch of the same name isn't this one: the project it is on says whose it is.
+        const on = (from ?? repository).id
+        const found = requests.find((request) => request.source_project_id === undefined || String(request.source_project_id) === on)
+        return found === undefined ? null : changeOf(found)
+      },
     )
 
   const read = (repository: Repository, number: number) => http.json(MergeAnswer, 'GET', `${project(repository)}/merge_requests/${number}`)
@@ -411,9 +418,11 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     findChange,
     openChange: (repository, change) =>
       http
-        .json(MergeAnswer, 'POST', `${project(repository)}/merge_requests`, {
+        // From a fork, the merge request is made on the fork, into the project it was forked from.
+        .json(MergeAnswer, 'POST', `${project(change.from ?? repository)}/merge_requests`, {
           source_branch: change.source,
           target_branch: change.target,
+          ...(change.from === undefined ? {} : { target_project_id: Number(repository.id) }),
           title: change.draft ? `Draft: ${readyTitle(change.title)}` : change.title,
           description: change.body,
         })
@@ -423,7 +432,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           Effect.catchIf(
             (error) => error.reason === 'rejected' && /already exists/i.test(error.message),
             (error) =>
-              Effect.flatMap(findChange(repository, change.source), (found) =>
+              Effect.flatMap(findChange(repository, change.source, change.from), (found) =>
                 found === null ? Effect.fail(error) : Effect.succeed(found),
               ),
           ),

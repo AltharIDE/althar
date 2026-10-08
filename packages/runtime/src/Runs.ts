@@ -1090,6 +1090,9 @@ export class Runs extends Context.Service<
           const executionId = yield* newId(Ids.workflowExecution)
           yield* sql.withTransaction(
             Effect.gen(function* () {
+              // Checked where the run is written: a project removed meanwhile gets no run.
+              const [live] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${plan.projectId} AND archived_at IS NULL`
+              if (live === undefined) return yield* new NotFound({ kind: 'project', id: plan.projectId })
               const at = yield* timestamp
               const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${plan.taskId}`
               if (task?.state === 'draft') {

@@ -175,6 +175,20 @@ describe('GitHub as a code host', () => {
     }),
   )
 
+  it.effect('opens one from a fork’s branch into the repository it was forked from, and finds it by the fork’s owner', () =>
+    Effect.gen(function* () {
+      const fork: Repository = { ...repository, id: '9', path: ['you', 'api'], webUrl: 'https://github.com/you/api' }
+      const { host, sent } = github([
+        ['POST', `${REPO}/pulls`, { status: 201, json: pull() }],
+        ['GET', /\/repos\/meridian\/api\/pulls\?state=open&head=you%3Aalthar%2Fmer-231$/, { json: [pull()] }],
+      ])
+      const change = { title: 'Rate-limit refunds', body: '', source: 'althar/mer-231', target: 'main', draft: false, from: fork }
+      assert.strictEqual((yield* host.openChange(repository, change)).number, 12)
+      assert.strictEqual((sent[0]?.body as { head: string } | undefined)?.head, 'you:althar/mer-231')
+      assert.strictEqual((yield* host.findChange(repository, 'althar/mer-231', fork))?.number, 12)
+    }),
+  )
+
   it.effect('fails to open when GitHub refuses for another reason, or the one it says exists is gone', () =>
     Effect.gen(function* () {
       const { host } = github([

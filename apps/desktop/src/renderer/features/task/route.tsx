@@ -9,6 +9,8 @@ import { lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
 import { useBoard } from '../board/useBoard'
 import { ProjectBar } from '../project/ProjectBar'
+import { ProjectDialogs, ProjectMenu } from '../project/ProjectMenu'
+import { useProjectMenu } from '../project/useProjectMenu'
 import { useVisit } from '../tabs/TabsFrame'
 import { TaskView } from './TaskView'
 import { useTask } from './useTask'
@@ -37,16 +39,27 @@ function TaskNav({
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   // The first that isn't this task: with nothing else, the count only says how many.
   const first = lanes === null ? null : firstNeedOf(lanes, threadId)
+  // Removed, the project and its tasks are gone: back to the home.
+  const menu = useProjectMenu(projectId, () => void navigate({ to: '/' }))
   return (
-    <ProjectBar
-      place={{ back: { project, task: title, onBack } }}
-      working={lanes === null ? null : lanes.running.filter((task) => task.phase !== 'stopped').length}
-      yours={lanes === null ? null : yoursOf(lanes)}
-      {...(lanes === null ? {} : { needs: needsOf(lanes, name, openTask, threadId) })}
-      {...(first === null ? {} : { onYours: () => openTask(first) })}
-      onRules={() => void navigate({ to: '/projects/$projectId/rules', params: { projectId } })}
-      onNewTask={() => void navigate({ to: '/projects/$projectId', params: { projectId }, search: { new: 'task' } })}
-    />
+    <>
+      <ProjectBar
+        place={{ back: { project, task: title, onBack } }}
+        working={lanes === null ? null : lanes.running.filter((task) => task.phase !== 'stopped').length}
+        yours={lanes === null ? null : yoursOf(lanes)}
+        {...(lanes === null ? {} : { needs: needsOf(lanes, name, openTask, threadId) })}
+        {...(first === null ? {} : { onYours: () => openTask(first) })}
+        menu={
+          <ProjectMenu
+            model={menu}
+            onRepositories={() => void navigate({ to: '/projects/$projectId/repositories', params: { projectId } })}
+            onRules={() => void navigate({ to: '/projects/$projectId/rules', params: { projectId } })}
+          />
+        }
+        onNewTask={() => void navigate({ to: '/projects/$projectId', params: { projectId }, search: { new: 'task' } })}
+      />
+      <ProjectDialogs model={menu} />
+    </>
   )
 }
 

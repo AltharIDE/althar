@@ -1,6 +1,6 @@
 import { hashKey, type QueryClient, type QueryKey } from '@tanstack/react-query'
 
-import type { CoordinatorSnapshot, WatchEvent } from '@althar/contracts'
+import type { CoordinatorSnapshot, ThreadSnapshot, WatchEvent } from '@althar/contracts'
 
 import type { Client } from './client'
 import { keys } from './reads'
@@ -57,6 +57,9 @@ export const HOME_SHOWN = new Set(['decision'])
 /** What changes the projects as listed: a name, their tasks and runs, who is working, what waits on you. */
 export const PROJECTS = new Set(['project', 'task', 'run', 'provider_session', 'attention_request'])
 
+/** What changes a project's repositories as listed: the project itself, and its tasks, which count the ones they change. */
+export const REPOSITORIES = new Set(['project', 'task'])
+
 /** Changes elsewhere in a project that move what a card in its coordinator's thread shows. */
 export const CARDS = new Set(['provider_session', 'attention_request', 'task_plan', 'run', 'task', 'workspace'])
 
@@ -80,10 +83,22 @@ const wholeReads = (event: Changed): ReadonlyArray<Due> => [
   ...(HOME.has(event.aggregateType) ? [{ key: keys.home, offScreen: !HOME_SHOWN.has(event.aggregateType) }] : []),
   ...(event.projectId !== null && BOARD.has(event.aggregateType) ? [{ key: keys.board(event.projectId), offScreen: true }] : []),
   ...(event.aggregateType === 'connection' ? [{ key: keys.connections, offScreen: true }] : []),
+  // Its repositories, and how many tasks under way change each, only while they show.
+  ...(event.projectId !== null && REPOSITORIES.has(event.aggregateType)
+    ? [{ key: keys.repositories(event.projectId), offScreen: false }]
+    : []),
 ]
 
-/** The threads in the cache a change moves: its own, and a coordinator's whose cards or head it changes. */
+/** The threads in the cache a change moves: its own, a coordinator's whose cards or head it changes, and, renamed, every one of its project's. */
 const threadReads = (cache: QueryClient, event: Changed): ReadonlyArray<QueryKey> => {
+  const renamed =
+    event.aggregateType === 'project'
+      ? cache
+          .getQueryCache()
+          .findAll({ queryKey: ['thread'] })
+          .filter((query) => (query.state.data as ThreadSnapshot | undefined)?.project.id === event.projectId)
+          .map((query) => query.queryKey)
+      : []
   const coordinators = cache
     .getQueryCache()
     .findAll({ queryKey: ['coordinator'] })
@@ -92,11 +107,11 @@ const threadReads = (cache: QueryClient, event: Changed): ReadonlyArray<QueryKey
       return (
         data?.threadId === event.threadId ||
         event.aggregateType === 'connection' ||
-        (event.projectId === query.queryKey[1] && CARDS.has(event.aggregateType))
+        (event.projectId === query.queryKey[1] && (CARDS.has(event.aggregateType) || event.aggregateType === 'project'))
       )
     })
     .map((query) => query.queryKey)
-  return [...(event.threadId === null ? [] : [keys.thread(event.threadId)]), ...coordinators]
+  return [...(event.threadId === null ? [] : [keys.thread(event.threadId)]), ...coordinators, ...renamed]
 }
 
 const isThread = (key: QueryKey) => key[0] === 'thread' || key[0] === 'coordinator'
@@ -144,10 +159,12 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
         due.set(hash, { key: read.key, offScreen: read.offScreen || (due.get(hash)?.offScreen ?? false) })
       }
       if (due.size > 0) timer ??= setTimeout(readDue, GATHER)
+      // A thread on screen reads its own changes item by item; a project's new name it reads again whole, at once.
+      const renamed = event.aggregateType === 'project'
       for (const queryKey of threadReads(cache, event)) {
         if (cache.getQueryState(queryKey) === undefined) continue
         touched.set(hashKey(queryKey), heardSoFar)
-        void cache.invalidateQueries({ queryKey, exact: true, refetchType: 'none' })
+        void cache.invalidateQueries({ queryKey, exact: true, refetchType: renamed ? 'active' : 'none' })
       }
     }
     for (const listener of listeners) listener(event)

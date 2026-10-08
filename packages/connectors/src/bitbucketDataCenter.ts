@@ -312,12 +312,13 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
   const within = (repository: Repository, ref: typeof RefAnswer.Type) =>
     ref.repository.project.key.toLowerCase() === (repository.path[0] ?? '').toLowerCase() && ref.repository.slug === repository.path[1]
 
-  const findChange = (repository: Repository, source: string) =>
+  const findChange = (repository: Repository, source: string, from?: Repository) =>
     Effect.map(
       http.json(
         Page(PullAnswer),
         'GET',
-        `${base(repository)}/pull-requests?at=${encodeURIComponent(`refs/heads/${source}`)}&direction=OUTGOING&state=OPEN`,
+        // Outgoing from the repository the branch is on: a fork's, for one into the repository it was forked from.
+        `${base(from ?? repository)}/pull-requests?at=${encodeURIComponent(`refs/heads/${source}`)}&direction=OUTGOING&state=OPEN`,
       ),
       (pulls) => {
         // Outgoing includes one from this branch to a fork's parent; only one into this repository counts.
@@ -393,14 +394,15 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
     openChange: (repository, change) =>
       Effect.gen(function* () {
         // One already open from the branch is the one: adopted, not duplicated.
-        const open = yield* findChange(repository, change.source)
+        const open = yield* findChange(repository, change.source, change.from)
         if (open !== null) return open
         const at = { slug: repository.path[1], project: { key: repository.path[0] } }
+        const on = change.from === undefined ? at : { slug: change.from.path[1], project: { key: change.from.path[0] } }
         return yield* http
           .json(PullAnswer, 'POST', `${base(repository)}/pull-requests`, {
             title: change.title,
             description: change.body,
-            fromRef: { id: `refs/heads/${change.source}`, repository: at },
+            fromRef: { id: `refs/heads/${change.source}`, repository: on },
             toRef: { id: `refs/heads/${change.target}`, repository: at },
             // A server older than 8.18 opens it ready.
             draft: change.draft,
@@ -411,7 +413,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
             Effect.catchIf(
               (error) => error.reason === 'rejected',
               (error) =>
-                Effect.flatMap(findChange(repository, change.source), (found) =>
+                Effect.flatMap(findChange(repository, change.source, change.from), (found) =>
                   found === null ? Effect.fail(error) : Effect.succeed(found),
                 ),
             ),

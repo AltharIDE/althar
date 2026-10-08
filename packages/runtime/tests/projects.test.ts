@@ -8,7 +8,8 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { NotARepository, NotFound } from '../src/errors'
-import { Projects, slugify } from '../src/Projects'
+import { forkOf } from '../src/forks'
+import { Projects, roleFor, slugify } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { repository, runtime } from './support'
 
@@ -113,6 +114,30 @@ describe('projects', () => {
     assert.strictEqual(slugify('  Café Déjà Vu  ', 'x'), 'cafe-deja-vu')
     assert.strictEqual(slugify('!!!', 'task'), 'task')
     assert.strictEqual(slugify('a'.repeat(60), 'x').length, 48)
+  })
+
+  it('suggests a repository’s role from its name, and other where the name says nothing', () => {
+    assert.deepStrictEqual(['meridian-api', 'meridian-web', 'infra', 'docs', 'payments-sdk', 'refunds'].map(roleFor), [
+      'service',
+      'frontend',
+      'infrastructure',
+      'docs',
+      'library',
+      'other',
+    ])
+  })
+
+  it('tells a fork by an upstream beside its origin, on the same host, naming another repository', () => {
+    const origin = { name: 'origin', url: 'git@github.com:you/web.git' }
+    assert.deepStrictEqual(forkOf([origin, { name: 'upstream', url: 'https://github.com/meridian/web.git' }]), {
+      fork: { url: 'git@github.com:you/web.git', path: ['you', 'web'] },
+      upstream: { url: 'https://github.com/meridian/web.git', path: ['meridian', 'web'] },
+    })
+    assert.isNull(forkOf([origin]))
+    assert.isNull(forkOf([{ name: 'upstream', url: 'https://github.com/meridian/web.git' }]))
+    assert.isNull(forkOf([origin, { name: 'upstream', url: 'https://gitlab.com/meridian/web.git' }]))
+    assert.isNull(forkOf([origin, { name: 'upstream', url: 'https://github.com/You/Web' }]))
+    assert.isNull(forkOf([origin, { name: 'upstream', url: '/srv/git/web' }]))
   })
 
   describe('worktrees', () => {

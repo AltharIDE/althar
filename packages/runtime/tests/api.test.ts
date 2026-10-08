@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
@@ -500,6 +500,237 @@ describe('project rules, through the API', () => {
         assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
         const missing = yield* Effect.flip(client.GetProjectRules({ projectId: 'proj_missing' }))
         assert.strictEqual(missing.reason, 'NotFound')
+      }),
+    ),
+  )
+})
+
+/** A folder holding a repository for each name, each with one commit, and each remote given as `name=url`. */
+const folderWith = (repositories: Readonly<Record<string, ReadonlyArray<string>>>) => {
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+  for (const [name, remotes] of Object.entries(repositories)) {
+    const path = join(folder, name)
+    mkdirSync(path)
+    const git = (...args: Array<string>) => execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd: path })
+    git('init', '-q', '-b', 'main')
+    writeFileSync(join(path, 'README.md'), `# ${name}\n`)
+    git('add', '.')
+    git('commit', '-q', '-m', 'Start')
+    for (const remote of remotes) git('remote', 'add', ...remote.split('='))
+  }
+  return folder
+}
+
+/** Every file under a folder, with what it holds, and what git says of each repository in it: how the person left it. */
+const asLeft = (folder: string) =>
+  readdirSync(folder, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name))
+    .toSorted((a, b) => a.localeCompare(b))
+    .map((path) => `${path}:${readFileSync(path).toString('hex')}`)
+    .join('\n')
+
+describe('a project’s menu, through the API', () => {
+  it.live('renames a project, and adds, leaves out and changes its repositories', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const folder = folderWith({ 'meridian-api': [], 'meridian-web': [] })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folder) })
+        const named = (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)
+
+        // Renamed, it keeps its slug, and so its worktrees' folders, and its ink.
+        yield* client.RenameProject({ commandId: commandId(), projectId: project.id, name: '  Refunds v2 ' })
+        const renamed = (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)
+        assert.deepStrictEqual([renamed?.name, renamed?.slug, renamed?.ink], ['Refunds v2', named?.slug, named?.ink])
+        assert.strictEqual(
+          (yield* Effect.flip(client.RenameProject({ commandId: commandId(), projectId: project.id, name: ' ' }))).message,
+          'Give the project a name.',
+        )
+
+        // Each repository has a role, suggested by its name, which the person can change.
+        const read = yield* client.GetRepositories({ projectId: project.id })
+        assert.deepStrictEqual(
+          read.map((repository) => [repository.name, repository.role, repository.branch, repository.fork, repository.tasks]),
+          [
+            ['meridian-api', 'service', 'main', null, 0],
+            ['meridian-web', 'frontend', 'main', null, 0],
+          ],
+        )
+        const [api, web] = read
+        yield* client.SetRepository({ commandId: commandId(), projectId: project.id, repositoryId: api?.id ?? '', role: 'library' })
+        assert.strictEqual((yield* client.GetRepositories({ projectId: project.id }))[0]?.role, 'library')
+        // Only a fork has somewhere else for its pull requests to go.
+        assert.strictEqual(
+          (yield* Effect.flip(
+            client.SetRepository({ commandId: commandId(), projectId: project.id, repositoryId: api?.id ?? '', changeTarget: 'upstream' }),
+          )).reason,
+          'ProjectRefused',
+        )
+
+        // A task made with a repository keeps it when it is left out; new tasks can't name it.
+        const task = yield* client.CreateTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Restyle',
+          repositories: ['meridian-web'],
+        })
+        yield* client.LeaveOutRepository({ commandId: commandId(), projectId: project.id, repositoryId: web?.id ?? '' })
+        assert.deepStrictEqual(
+          (yield* client.GetRepositories({ projectId: project.id })).map((repository) => repository.name),
+          ['meridian-api'],
+        )
+        assert.deepStrictEqual((yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.repositories, [
+          'meridian-api',
+        ])
+        assert.strictEqual(
+          (yield* Effect.flip(
+            client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Again', repositories: ['meridian-web'] }),
+          )).reason,
+          'RepositoriesNeeded',
+        )
+        assert.strictEqual((yield* client.GetThread({ threadId: task.threadId })).task.branch, 'althar/restyle')
+        // The last one stays: a task needs somewhere to work.
+        assert.strictEqual(
+          (yield* Effect.flip(client.LeaveOutRepository({ commandId: commandId(), projectId: project.id, repositoryId: api?.id ?? '' })))
+            .message,
+          'The project needs a repository for its tasks to work in. Add another before leaving this one out.',
+        )
+
+        // Added again, it comes back as it was; a fork comes with where its pull requests open.
+        yield* client.AddRepositories({ commandId: commandId(), projectId: project.id, grant: yield* grant(join(folder, 'meridian-web')) })
+        const forked = folderWith({
+          'refund-docs': ['origin=git@github.com:you/refund-docs.git', 'upstream=https://github.com/meridian/refund-docs.git'],
+        })
+        yield* client.AddRepositories({ commandId: commandId(), projectId: project.id, grant: yield* grant(forked) })
+        const again = yield* client.GetRepositories({ projectId: project.id })
+        assert.deepStrictEqual(
+          again.map((repository) => [repository.id === web?.id, repository.name, repository.role, repository.tasks]),
+          [
+            [false, 'meridian-api', 'library', 0],
+            [true, 'meridian-web', 'frontend', 1],
+            [false, 'refund-docs', 'docs', 0],
+          ],
+        )
+        const docs = again[2]
+        assert.deepStrictEqual(docs?.fork, { fork: 'you/refund-docs', upstream: 'meridian/refund-docs', target: 'fork' })
+        assert.strictEqual(docs?.remote, 'git@github.com:you/refund-docs.git')
+        yield* client.SetRepository({
+          commandId: commandId(),
+          projectId: project.id,
+          repositoryId: docs?.id ?? '',
+          changeTarget: 'upstream',
+        })
+        assert.strictEqual((yield* client.GetRepositories({ projectId: project.id }))[2]?.fork?.target, 'upstream')
+        // A folder inside one it has already adds nothing more.
+        mkdirSync(join(folder, 'meridian-api', 'src'))
+        yield* client.AddRepositories({
+          commandId: commandId(),
+          projectId: project.id,
+          grant: yield* grant(join(folder, 'meridian-api', 'src')),
+        })
+        assert.lengthOf(yield* client.GetRepositories({ projectId: project.id }), 3)
+        // Its tasks' worktrees are in a folder named for it, as it was made.
+        assert.strictEqual(
+          (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.worktrees?.endsWith(`/${named?.slug}`),
+          true,
+        )
+        assert.isNull(named?.worktrees)
+        // A folder with no repository adds nothing.
+        assert.strictEqual(
+          (yield* Effect.flip(
+            client.AddRepositories({
+              commandId: commandId(),
+              projectId: project.id,
+              grant: yield* grant(realpathSync(mkdtempSync(join(tmpdir(), 'althar-empty-')))),
+            }),
+          )).reason,
+          'NotARepository',
+        )
+      }),
+    ),
+  )
+
+  it.live('removes a project: its agents stop and its plans don’t start, and its folders stay exactly as they were', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected({ countdown: Duration.minutes(5) })
+        const folder = folderWith({ api: ['origin=git@github.com:meridian/api.git'] })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folder) })
+        const other = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+
+        // A task whose lead works until it is stopped, and a plan counting down.
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Retry',
+          description: '[lead:hang]',
+          steps: [
+            { key: 'implement', agentId: 'codex', model: null, skipped: false },
+            { key: 'review', agentId: 'claude-code', model: null, skipped: true },
+          ],
+        })
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.session?.turnRunning === true)
+        const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: coordinator.threadId,
+          body: 'Add docs. [coordinator:plan]',
+          disposition: 'after_current',
+        })
+        const planned = yield* eventually(client.GetCoordinator({ projectId: project.id, limit: 50 }), (snapshot) =>
+          snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null && item.content.phase === 'planned'),
+        )
+        const card = planned.items.find((item) => item.kind === 'task' && item.content.phase === 'planned')
+        const before = asLeft(folder)
+
+        const removing = { commandId: commandId(), projectId: project.id }
+        yield* client.RemoveProject(removing)
+        // Retried, it is the same removal.
+        yield* client.RemoveProject(removing)
+        assert.deepStrictEqual(
+          (yield* client.ListProjects()).projects.map((summary) => summary.id),
+          [other.id],
+        )
+        assert.deepStrictEqual(
+          (yield* client.GetHome({})).projects.map((summary) => summary.id),
+          [other.id],
+        )
+        // The lead and the coordinator stop.
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.session === null)
+        yield* eventually(client.GetCoordinator({ projectId: project.id }), (snapshot) => snapshot.session === null)
+        // A window that hadn't heard can't start its plan, a task, an agent, or the coordinator again.
+        assert.strictEqual(
+          (yield* Effect.flip(client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'One more' }))).message,
+          "That project isn't there any more.",
+        )
+        const planId = card?.kind === 'task' ? (card.content.plan?.id ?? '') : ''
+        assert.strictEqual(
+          (yield* Effect.flip(client.StartPlan({ commandId: commandId(), planId }))).message,
+          "That plan isn't there any more.",
+        )
+        assert.strictEqual(
+          (yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'codex' }))).message,
+          "That project isn't there any more.",
+        )
+        assert.strictEqual(
+          (yield* Effect.flip(
+            client.Send({ commandId: commandId(), threadId: coordinator.threadId, body: 'Hello?', disposition: 'after_current' }),
+          )).message,
+          "That project isn't there any more.",
+        )
+        // The task's run ended, and nothing asks the person about it.
+        const thread = yield* client.GetThread({ threadId: task.threadId })
+        assert.strictEqual(thread.attention.length, 0)
+        // The folders are exactly as they were; the task's worktree stays where it was made.
+        assert.strictEqual(asLeft(folder), before)
+        assert.isTrue(existsSync(thread.task.worktree ?? ''))
+        // Gone from Althar, it can't be changed, and opening its folder again makes a new project.
+        assert.strictEqual(
+          (yield* Effect.flip(client.RenameProject({ commandId: commandId(), projectId: project.id, name: 'Back' }))).message,
+          "That project isn't there any more.",
+        )
+        assert.notStrictEqual((yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folder) })).id, project.id)
       }),
     ),
   )

@@ -186,7 +186,7 @@ describe('a task of several repositories', () => {
       assert.strictEqual(launches.at(-1)?.cwd, dirname(worktrees[0]?.path ?? ''))
       const [brief] = yield* until(turns(task.threadId), (rows) => rows.length > 0)
       assert.include(brief?.prompt ?? '', 'You are working on a task across several repositories')
-      assert.include(brief?.prompt ?? '', `- web: ${worktrees[1]?.path ?? ''}, on the branch ${task.branch}`)
+      assert.include(brief?.prompt ?? '', `- web, the frontend: ${worktrees[1]?.path ?? ''}, on the branch ${task.branch}`)
 
       // What it changed, in each, by repository.
       for (const [index, worktree] of worktrees.entries()) {
@@ -322,7 +322,7 @@ describe('a task of several repositories', () => {
       assert.strictEqual(launches.at(-1)?.cwd, onWeb.worktree)
       const [brief] = yield* until(turns(onWeb.threadId), (rows) => rows.length > 0)
       assert.include(brief?.prompt ?? '', `The project's other repositories, to read but not change`)
-      assert.include(brief?.prompt ?? '', `api at ${join(localFirst, 'api')}.`)
+      assert.include(brief?.prompt ?? '', `api, a service, at ${join(localFirst, 'api')}.`)
     }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))
   })
 

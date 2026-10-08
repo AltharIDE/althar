@@ -210,6 +210,45 @@ describe('a task that ends in a pull request', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('pushes a fork’s branch to the fork, and opens its pull request where the project says: on the fork, or upstream', () => {
+    const { working, bare } = hosted(['you', 'api'])
+    git(working, 'remote', 'add', 'upstream', `${HOST}/meridian/api.git`)
+    const pushedTo: Array<string> = []
+    const github = makeFakeService({
+      pushUrl: (path) => {
+        pushedTo.push(path.join('/'))
+        return bare
+      },
+    })
+    github.addRepository(['you', 'api'])
+    // The repository it came from has another default branch.
+    github.addRepository(['meridian', 'api'], 'trunk')
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projects = yield* Projects
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const [repository] = yield* projects.repositories(project.projectId)
+      assert.deepStrictEqual(repository?.fork, { fork: 'you/api', upstream: 'meridian/api', target: 'fork' })
+      yield* projects.setRepository({ projectId: project.projectId, repositoryId: repository?.id ?? '', changeTarget: 'upstream' })
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      assert.strictEqual(ready?.change?.url, 'https://github.com/meridian/api/pull/1')
+      assert.strictEqual(github.forkOf(1), 'you/api')
+      assert.strictEqual(github.changes[0]?.target, 'trunk')
+      assert.deepStrictEqual(pushedTo, ['you/api'])
+      // Back on the fork, the next one opens there.
+      yield* projects.setRepository({ projectId, repositoryId: repository?.id ?? '', changeTarget: 'fork' })
+      yield* ask(working, 'Add a limit. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      yield* until(
+        Effect.sync(() => github.changes),
+        (changes) => changes.length === 2,
+        Duration.seconds(20),
+      )
+      assert.strictEqual(github.changes[1]?.url, 'https://github.com/you/api/pull/2')
+      assert.isNull(github.forkOf(2))
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('adopts the pull request already open from its branch, rather than opening another', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })

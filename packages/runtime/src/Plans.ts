@@ -61,7 +61,8 @@ export class Plans extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [plan] = yield* sql<{ projectId: ProjectId; taskId: string; state: string; parameters: string; startsAt: string | null }>`
-            SELECT project_id, task_id, state, parameters, starts_at FROM task_plans WHERE id = ${planId}`
+            SELECT project_id, task_id, state, parameters, starts_at FROM task_plans
+            WHERE id = ${planId} AND project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
           return plan === undefined ? yield* new NotFound({ kind: 'plan', id: planId }) : plan
         })
 

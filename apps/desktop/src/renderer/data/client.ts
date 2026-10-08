@@ -17,8 +17,11 @@ import {
   type FolderReading,
   type IssueList,
   type Product,
+  type ChangeTarget,
   type ProjectList,
+  type ProjectRepository,
   type ProjectSummary,
+  type RepositoryRole,
   type PlanStep,
   type SignInStart,
   type SignInState,
@@ -141,6 +144,20 @@ export interface Client {
   }) => Promise<ConnectionSummary>
   readonly disconnect: (connectionId: string) => Promise<void>
   /** A project's rules. */
+  /** Renames a project; its mark and its worktrees' folders stay. */
+  readonly renameProject: (projectId: string, name: string) => Promise<void>
+  /** Removes a project from Althar: its agents stop; its folders, worktrees and branches stay. */
+  readonly removeProject: (projectId: string) => Promise<void>
+  readonly getRepositories: (projectId: string) => Promise<ReadonlyArray<ProjectRepository>>
+  /** Adds the repositories at the folder a grant names. */
+  readonly addRepositories: (projectId: string, grant: string) => Promise<void>
+  readonly leaveOutRepository: (projectId: string, repositoryId: string) => Promise<void>
+  readonly setRepository: (input: {
+    readonly projectId: string
+    readonly repositoryId: string
+    readonly role?: RepositoryRole
+    readonly changeTarget?: ChangeTarget
+  }) => Promise<void>
   readonly getProjectRules: (projectId: string) => Promise<ProjectRulesView>
   /** Changes what is given of a project's rules; the rules as they are after it. */
   readonly setProjectRules: (input: ProjectRulesChange) => Promise<ProjectRulesView>
@@ -274,6 +291,12 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     cancelSignIn: (flowId) => command((commandId) => api.CancelSignIn({ commandId, flowId })),
     connectToken: (input) => command((commandId) => api.ConnectToken({ commandId, ...input })),
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
+    renameProject: (projectId, name) => command((commandId) => api.RenameProject({ commandId, projectId, name })),
+    removeProject: (projectId) => command((commandId) => api.RemoveProject({ commandId, projectId })),
+    getRepositories: (projectId) => settle(api.GetRepositories({ projectId })),
+    addRepositories: (projectId, grant) => command((commandId) => api.AddRepositories({ commandId, projectId, grant })),
+    leaveOutRepository: (projectId, repositoryId) => command((commandId) => api.LeaveOutRepository({ commandId, projectId, repositoryId })),
+    setRepository: (input) => command((commandId) => api.SetRepository({ commandId, ...input })),
     getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),
     setProjectRules: (input) => command((commandId) => api.SetProjectRules({ commandId, ...input })),
     addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),

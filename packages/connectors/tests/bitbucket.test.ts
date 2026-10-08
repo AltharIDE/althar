@@ -243,6 +243,23 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
+  it.effect('opens one from a fork’s branch, and finds it by the fork', () =>
+    Effect.gen(function* () {
+      const fork: Repository = { ...ace, id: '{fork}', path: ['you', 'atlassian-connect-express'] }
+      const { host, sent } = cloud([
+        ['GET', /pullrequests\?q=/, { json: { values: [] } }],
+        ['POST', `${ACE}/pullrequests`, { status: 201, json: pull() }],
+      ])
+      const change = { title: 't', body: '', source: 'althar/mer-231', target: 'master', draft: false, from: fork }
+      assert.strictEqual((yield* host.openChange(ace, change)).number, 552)
+      assert.include(decodeURIComponent(sent[0]?.url ?? ''), 'source.repository.full_name = "you/atlassian-connect-express"')
+      assert.deepStrictEqual((sent[1]?.body as { source: unknown } | undefined)?.source, {
+        branch: { name: 'althar/mer-231' },
+        repository: { full_name: 'you/atlassian-connect-express' },
+      })
+    }),
+  )
+
   it.effect('adopts one opened meanwhile when Bitbucket refuses, and otherwise says why in its words', () =>
     Effect.gen(function* () {
       let asked = 0
@@ -1122,6 +1139,22 @@ describe('Bitbucket Data Center as a code host', () => {
       assert.deepInclude(yield* Effect.flip(refused.host.openChange(prj, change)), {
         reason: 'rejected',
         message: 'The target branch is already up-to-date with the source branch.',
+      })
+    }),
+  )
+
+  it.effect('opens one from a fork’s branch into the repository it was forked from, and finds it from the fork', () =>
+    Effect.gen(function* () {
+      const fork: Repository = { ...prj, id: '2', path: ['~YOU', 'my-repo'] }
+      const { host, sent } = center([
+        ['GET', /\/projects\/~YOU\/repos\/my-repo\/pull-requests\?at=/, { json: page([]) }],
+        ['POST', `${MY}/pull-requests`, { status: 201, json: pr() }],
+      ])
+      const change = { title: 't', body: '', source: 'feature-ABC-123', target: 'master', draft: false, from: fork }
+      assert.strictEqual((yield* host.openChange(prj, change)).number, 101)
+      assert.deepStrictEqual((sent[1]?.body as { fromRef: unknown } | undefined)?.fromRef, {
+        id: 'refs/heads/feature-ABC-123',
+        repository: { slug: 'my-repo', project: { key: '~YOU' } },
       })
     }),
   )

@@ -63,14 +63,22 @@ export const useTabs = (): TabsModel => {
   // Going into a project, or one of its tasks, gives it a tab and keeps where in it the window is.
   const seeded = kept !== null
   const projectId = known ?? undefined
-  const rules = where.kind === 'project' && where.place.kind === 'rules'
+  // Its rules or its repositories, as the place to come back to; a task's place is its thread.
+  const page = where.kind === 'project' ? where.place.kind : 'project'
   const threadId = where.kind === 'thread' ? where.threadId : undefined
   useEffect(() => {
     if (projectId === undefined || !seeded) return
     store.change(
-      arrived(projectId, threadId !== undefined ? { kind: 'thread', threadId } : rules ? { kind: 'rules' } : { kind: 'project' }),
+      arrived(
+        projectId,
+        threadId !== undefined
+          ? { kind: 'thread', threadId }
+          : page === 'rules' || page === 'repositories'
+            ? { kind: page }
+            : { kind: 'project' },
+      ),
     )
-  }, [store, projectId, rules, threadId, seeded])
+  }, [store, projectId, page, threadId, seeded])
 
   const go = useCallback(
     (id: string | null, places: Readonly<Record<string, Place>>) => {
@@ -81,6 +89,8 @@ export const useTabs = (): TabsModel => {
           return void navigate({ to: '/projects/$projectId', params: { projectId: id } })
         case 'rules':
           return void navigate({ to: '/projects/$projectId/rules', params: { projectId: id } })
+        case 'repositories':
+          return void navigate({ to: '/projects/$projectId/repositories', params: { projectId: id } })
         case 'thread':
           return void navigate({ to: '/threads/$threadId', params: { threadId: at.threadId } })
       }

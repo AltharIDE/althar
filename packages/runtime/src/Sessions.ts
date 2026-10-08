@@ -34,6 +34,7 @@ import { Live } from './Live'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { touchCard } from './cards'
 import { change, fact, timestamp } from './records'
+import { withRole } from './roles'
 import { git } from './git'
 import { reviewCopyOf } from './reviewCopy'
 import { defaultEffortOf } from './preferences'
@@ -61,6 +62,8 @@ export type AcceptedInput = typeof AcceptedInput.Type
 /** One of a task's repositories, in its worktree here. */
 interface TaskRepository {
   readonly name: string
+  /** What it is to the project, as the person set it. */
+  readonly role: string
   readonly worktree: string
   readonly branch: string
   readonly baseRef: string
@@ -342,6 +345,16 @@ export class Sessions extends Context.Service<
       const threads = new Map<string, Running>()
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
+      /** No agent starts, and nothing is said to one, in a project removed from Althar: a window that hadn't heard yet is told it's gone. */
+      const inLiveProject = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [removed] = yield* sql<{ projectId: string }>`
+            SELECT p.id AS project_id FROM threads t JOIN projects p ON p.id = t.project_id
+            WHERE t.id = ${threadId} AND p.archived_at IS NOT NULL`
+          if (removed !== undefined) return yield* new NotFound({ kind: 'project', id: removed.projectId })
+        })
+
       const loadThread = (threadId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -357,7 +370,7 @@ export class Sessions extends Context.Service<
             } satisfies ThreadContext as ThreadContext
           // The task's repositories, each in its worktree here, the first first.
           const repositories = yield* sql<TaskRepository>`
-            SELECT b.display_name AS name, w.path AS worktree, w.branch, w.base_ref, w.base_commit,
+            SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.base_ref, w.base_commit,
               coalesce(b.default_base_ref, w.base_ref) AS default_branch, b.folder AS within
             FROM threads t
             JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
@@ -412,6 +425,9 @@ export class Sessions extends Context.Service<
           const sessionId = yield* newId(Ids.providerSession)
           yield* sql.withTransaction(
             Effect.gen(function* () {
+              // Checked where the session is written: a removal is a transaction too, so it either sees this session and
+              // stops it, or came first and this one never starts.
+              yield* inLiveProject(thread.threadId)
               yield* sql`INSERT INTO provider_sessions ${sql.insert({
                 id: sessionId,
                 projectId: thread.projectId,
@@ -861,7 +877,11 @@ export class Sessions extends Context.Service<
                       worktree: thread.cwd,
                       worktrees: thread.repositories.map((repository) => repository.worktree),
                       defaultBranch: thread.defaultBranch,
-                      defaultBranches: thread.repositories.map((repository) => repository.defaultBranch),
+                      // A fork's task bound for the repository it came from has that repository's default too.
+                      defaultBranches: thread.repositories.flatMap((repository) => [
+                        repository.defaultBranch,
+                        ...(repository.baseRef.startsWith('upstream/') ? [repository.baseRef.slice('upstream/'.length)] : []),
+                      ]),
                       taskBranch: thread.branch,
                     },
                   }
@@ -1045,6 +1065,7 @@ export class Sessions extends Context.Service<
           input.threadId,
           Effect.gen(function* () {
             if (threads.has(input.threadId)) return yield* new SessionRunning({ threadId: input.threadId })
+            yield* inLiveProject(input.threadId)
             const thread = yield* loadThread(input.threadId)
             const entry = yield* (yield* Agents).get(input.agentId)
             const account = yield* limits.pick({
@@ -1120,6 +1141,8 @@ export class Sessions extends Context.Service<
             projectId: thread.projectId,
             result: AcceptedInput,
             handle: Effect.gen(function* () {
+              // In the command's transaction, so a removal either came first or sees what was said.
+              yield* inLiveProject(input.threadId)
               const inputId = yield* newId(Ids.userInput)
               const [next] = yield* sql<{
                 sequence: number
@@ -1281,8 +1304,8 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           // The project's repositories the task doesn't change, which it may read where the person keeps them.
-          const others = yield* sql<{ name: string; path: string }>`
-            SELECT b.display_name AS name, l.path FROM repository_bindings b
+          const others = yield* sql<{ name: string; role: string; path: string }>`
+            SELECT b.display_name AS name, b.role, l.path FROM repository_bindings b
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
             WHERE b.project_id = ${thread.projectId} AND b.detached_at IS NULL
               AND b.id NOT IN (SELECT w.binding_id FROM workspaces w WHERE w.task_id = ${thread.taskId})
@@ -1318,12 +1341,12 @@ export class Sessions extends Context.Service<
               : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
             several
-              ? `Its repositories are side by side in ${thread.cwd}, each with its own branch and history; commit in each one you change:\n${thread.repositories.map((repository) => `- ${repository.name}: ${where(repository)}.`).join('\n')}`
-              : `The worktree is ${thread.repositories[0] === undefined ? thread.worktree : where(thread.repositories[0])}.`,
+              ? `Its repositories are side by side in ${thread.cwd}, each with its own branch and history; commit in each one you change:\n${thread.repositories.map((repository) => `- ${withRole(repository.name, repository.role)}: ${where(repository)}.`).join('\n')}`
+              : `The worktree is ${thread.repositories[0] === undefined ? thread.worktree : `${where(thread.repositories[0])}. The repository is ${withRole(thread.repositories[0].name, thread.repositories[0].role)}`}.`,
             ...(others.length === 0
               ? []
               : [
-                  `The project's other repositories, to read but not change (they are the person's own checkouts, on whatever branch they left them): ${others.map((other) => `${other.name} at ${other.path}`).join(', ')}.`,
+                  `The project's other repositories, to read but not change (they are the person's own checkouts, on whatever branch they left them): ${others.map((other) => `${withRole(other.name, other.role)}, at ${other.path}`).join('; ')}.`,
                 ]),
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",

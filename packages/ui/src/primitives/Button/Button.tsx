@@ -10,8 +10,9 @@ export interface ButtonProps extends ComponentProps<'button'> {
   /**
    * default: raised paper. signal: violet, and only for answering something
    * that waits on a person. quiet: text only, for the lesser choice beside another.
+   * danger: raised paper in red words, for the one press that ends or throws something away.
    */
-  variant?: 'default' | 'signal' | 'quiet'
+  variant?: 'default' | 'signal' | 'quiet' | 'danger'
   /** small: inside a row of a thread or a card, beside 11–12px text. */
   size?: 'medium' | 'small'
   icon?: IconName

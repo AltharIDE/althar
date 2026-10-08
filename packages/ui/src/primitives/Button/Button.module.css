@@ -45,6 +45,24 @@
   box-shadow: inset 0 0 0 1px var(--line-3);
 }
 
+.danger {
+  background: var(--paper);
+  color: var(--danger);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift);
+}
+.danger:hover:not(:disabled, .busy) {
+  background: var(--danger-dim);
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift);
+}
+.danger:active:not(:disabled, .busy) {
+  background: var(--danger-hover);
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+
 .signal {
   background: var(--signal);
   color: var(--on-signal);

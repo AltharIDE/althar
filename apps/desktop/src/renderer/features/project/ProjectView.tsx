@@ -15,10 +15,12 @@ import {
   ThreadMeasure,
   ThreadSkeleton,
   MenuItem,
+  MenuSeparator,
   ProjectHead,
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
+import { shortFolder } from '../../shared/folders'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { PartPending, pendingText } from '../../shared/Pending'
@@ -34,6 +36,7 @@ import { ConnectionsView, text as connectionsText } from '../connections/Connect
 import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
 import { NewTask } from './NewTask'
+import { ProjectDialogs, ProjectItems, ProjectMenu, type ProjectMenuActions } from './ProjectMenu'
 import { nextRoom, ProjectBar } from './ProjectBar'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
@@ -70,7 +73,6 @@ export const text = {
   boardReading: 'Reading the board',
   notConnected: (host: string) => `Althar isn't connected to ${host}, so tasks here end on their branch.`,
   connect: (host: string) => `Connect ${host}`,
-  rules: 'Project rules',
   newTask: 'New task',
   width: 'Width of the conversation',
   /** Where a project of several repositories is: how many, and their names. */
@@ -81,7 +83,7 @@ export const text = {
 export const whereOf = (project: { readonly repository: string | null; readonly repositories: ReadonlyArray<string> } | null) => {
   if (project === null) return undefined
   if (project.repositories.length > 1) return text.repositories(project.repositories)
-  return project.repository?.replace(/^\/(?:Users|home)\/[^/]+(?=\/)/, '~') ?? undefined
+  return project.repository === null ? undefined : shortFolder(project.repository)
 }
 
 /** How wide the conversation is beside the board, as the person last dragged it: this window's own, kept across launches. */
@@ -122,7 +124,7 @@ export function ProjectView({
   board,
   connections,
   onTask,
-  onRules,
+  menu,
   room: opening = Room.Talk,
   onRoomChange,
   newTask = false,
@@ -131,8 +133,8 @@ export function ProjectView({
   board: BoardModel
   connections: ConnectionsModel
   onTask: (threadId: string) => void
-  /** Opens the project's rules; without it, no way there. */
-  onRules?: () => void
+  /** The project's menu: rename, its repositories, its rules, remove; without it, none. */
+  menu?: ProjectMenuActions
   /** The view it opens on: the one a task's bar chose, or the one the person was last on. */
   room?: Room
   /** The view it is on, each time it changes, to be opened on again. */
@@ -270,7 +272,7 @@ export function ProjectView({
         yours={lanes === null ? null : yours}
         {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask) })}
         onYours={openYours}
-        {...(onRules === undefined ? {} : { onRules })}
+        {...(menu === undefined ? {} : { menu: <ProjectMenu {...menu} /> })}
         newTask={panel === 'task'}
         onNewTask={() => {
           if (room === Room.Board) setRoom(Room.Both)
@@ -286,11 +288,6 @@ export function ProjectView({
               side={room === Room.Both}
               menu={
                 <>
-                  {onRules && (
-                    <MenuItem icon="gear" onSelect={onRules}>
-                      {text.rules}
-                    </MenuItem>
-                  )}
                   <MenuItem icon="plus" onSelect={() => setPanel('task')}>
                     {text.newTask}
                   </MenuItem>
@@ -298,6 +295,12 @@ export function ProjectView({
                     <MenuItem icon="plug" onSelect={() => setPanel('connections')}>
                       {text.connect(host.name)}
                     </MenuItem>
+                  )}
+                  {menu && (
+                    <>
+                      <MenuSeparator />
+                      <ProjectItems {...menu} />
+                    </>
                   )}
                 </>
               }
@@ -399,6 +402,7 @@ export function ProjectView({
           </div>
         )}
       </div>
+      {menu && <ProjectDialogs model={menu.model} />}
     </div>
   )
 }

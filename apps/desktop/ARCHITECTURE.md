@@ -46,9 +46,10 @@ MVVM in feature folders ([ADR-010](../../docs/decisions/010-desktop-app-mvvm.md)
 | `features/start` | Where the window starts: the first screen with no project yet, a folder of several repositories before it is a project, and the home once there are projects; opening a folder by the button, ⌘N or a drop |
 | `features/home` | The home: across projects, what waits on you, what runs and what the loop did since you left, with the projects beside it and the agents' marks in the bar |
 | `features/settings` | The agents on this Mac with their accounts, and the code hosts and trackers |
-| `features/project` | A project's window: the coordinator's thread with each task's card (its plan before it starts, then where it stands), the agent the coordinator runs on, and a task you plan yourself, beside it |
+| `features/project` | A project's menu (rename, its repositories, its rules, remove from Althar, each asked in a dialog first), on its bar and its tasks' bars. A project's window: the coordinator's thread with each task's card (its plan before it starts, then where it stands), the agent the coordinator runs on, and a task you plan yourself, beside it |
 | `features/board` | A project's board: its lanes, what waits on you in it, and the dock the home used to open, now unused |
 | `features/rules` | A project's rules (ADR-013): who answers, what always asks and what is never allowed, how a task ends, usage limits and accounts; each change saved at once |
+| `features/repositories` | A project's repositories: adding a folder, leaving one out, each one's role, and where a fork's pull requests open; each change saved at once |
 | `features/task` | A task's thread, the calls waiting on you, the composer, and what it changed |
 | `shared/` | A thread's items as blocks, drawn with the kit (finished work folded, steps' results under it); the model picker every conversation and plan step uses; how agents and times are drawn; what a place shows while a slow read comes |
 

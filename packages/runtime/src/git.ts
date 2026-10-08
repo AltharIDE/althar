@@ -172,11 +172,11 @@ const COMMON_DEFAULTS = ['main', 'master', 'trunk', 'develop']
  * `main`. Never the branch the person happens to have checked out, which may
  * be a feature branch the push rules would then protect instead.
  */
-export const defaultBranch = (cwd: string) =>
-  git(cwd, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD').pipe(
-    Effect.map((ref) => ref.replace(/^origin\//, '')),
+export const defaultBranch = (cwd: string, remote = 'origin') =>
+  git(cwd, 'symbolic-ref', '--quiet', '--short', `refs/remotes/${remote}/HEAD`).pipe(
+    Effect.map((ref) => ref.slice(remote.length + 1)),
     Effect.catch(() =>
-      gitWithin(15_000, cwd, 'ls-remote', '--symref', 'origin', 'HEAD').pipe(
+      gitWithin(15_000, cwd, 'ls-remote', '--symref', remote, 'HEAD').pipe(
         Effect.flatMap((output) => {
           const branch = /^ref: refs\/heads\/(\S+)\s+HEAD$/m.exec(output)?.[1]
           return branch === undefined ? Effect.fail(new GitFailed({ args: ['ls-remote'], cwd, stderr: 'no HEAD' })) : Effect.succeed(branch)
@@ -192,8 +192,8 @@ export const defaultBranch = (cwd: string) =>
   )
 
 /** Brings a remote branch up to date locally; false when that can't be done, as offline. */
-export const fetchBranch = (cwd: string, branch: string) =>
-  gitWithin(60_000, cwd, 'fetch', '--quiet', '--no-tags', 'origin', branch).pipe(
+export const fetchBranch = (cwd: string, branch: string, remote = 'origin') =>
+  gitWithin(60_000, cwd, 'fetch', '--quiet', '--no-tags', remote, branch).pipe(
     Effect.as(true),
     Effect.orElseSucceed(() => false),
   )
@@ -215,6 +215,19 @@ export const remoteUrls = (cwd: string) =>
         .filter((url) => url !== ''),
     ),
   ])
+
+/** Each remote by name, with its fetch URL without credentials, in the order git lists them. */
+export const namedRemotes = (cwd: string) =>
+  Effect.map(git(cwd, 'remote', '-v'), (output) =>
+    output
+      .split('\n')
+      .filter((line) => line.endsWith('(fetch)'))
+      .map((line) => {
+        const [name = '', url = ''] = line.split(/\s+/)
+        return { name, url: redactUrl(url) }
+      })
+      .filter((remote) => remote.name !== '' && remote.url !== ''),
+  )
 
 /** Adds a worktree on a new branch from a base. */
 export const addWorktree = (repository: string, path: string, branch: string, base: string) =>
