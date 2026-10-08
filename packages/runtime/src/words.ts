@@ -2,7 +2,7 @@ import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
 import type { AccountRefused } from './Accounts'
-import type { CantMerge, NoChangeToOpen } from './errors'
+import type { CantMerge, NoChangeToOpen, ProjectRefused } from './errors'
 
 /*
  * What went wrong, in words a person reads in the window. The runtime's
@@ -90,6 +90,7 @@ const kinds: Readonly<Record<string, string>> = {
   provider_session: 'agent',
   folder: 'folder',
   account: 'account',
+  repository: 'repository',
 }
 
 /** What went wrong, for the window: the error's tag as its reason, and words for the person. */
@@ -106,6 +107,8 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
           ? `The project has no repository called ${unknown.join(' or ')}. It has ${choices}.`
           : `Say which of the project's repositories the task changes: ${choices}.`
       }
+      case 'ProjectRefused':
+        return projectRefused[text(error, 'reason') as ProjectRefused['reason']] ?? "Althar can't change the project that way."
       case 'NotFound':
         return `That ${kinds[text(error, 'kind')] ?? 'thing'} isn't there any more.`
       case 'UnknownAgent':
@@ -221,6 +224,7 @@ export const expected = new Set([
   'NotAnIssue',
   'NotARepository',
   'RepositoriesNeeded',
+  'ProjectRefused',
   'NotFound',
   'UnknownAgent',
   'SessionRunning',
@@ -228,6 +232,14 @@ export const expected = new Set([
   'AttentionClosed',
   'CommandIdReused',
 ])
+
+/** Why a project can't be changed so, by reason. */
+const projectRefused = {
+  no_name: 'Give the project a name.',
+  last_repository: 'The project needs a repository for its tasks to work in. Add another before leaving this one out.',
+  no_role: "That isn't a role a repository can have.",
+  not_a_fork: "That repository isn't a fork, so its pull requests open on it.",
+} as const satisfies Record<ProjectRefused['reason'], string>
 
 /** Why an account can't be added, renamed or removed, by reason. */
 const accountRefused = {

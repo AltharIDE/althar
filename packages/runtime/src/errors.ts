@@ -18,6 +18,15 @@ export class RepositoriesNeeded extends Schema.TaggedError<RepositoriesNeeded>()
   choices: Schema.Array(Schema.String),
 }) {}
 
+/**
+ * A change to a project that can't be made: a name that is empty, the
+ * project's last repository left out (a task needs one to work in), a role
+ * that isn't one, or a pull request target for a repository that isn't a fork.
+ */
+export class ProjectRefused extends Schema.TaggedError<ProjectRefused>()('ProjectRefused', {
+  reason: Schema.Literals(['no_name', 'last_repository', 'no_role', 'not_a_fork']),
+}) {}
+
 /** Something the caller named does not exist. */
 export class NotFound extends Schema.TaggedError<NotFound>()('NotFound', {
   kind: Schema.String,

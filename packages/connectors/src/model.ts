@@ -155,12 +155,24 @@ export interface CodeHost {
   readonly capabilities: HostCapabilities
   readonly account: Effect.Effect<Account, ConnectorFailed>
   repository(path: ReadonlyArray<string>): Effect.Effect<Repository, ConnectorFailed>
-  /** The open change from a branch, if there is one: how a change opened some other way is adopted. */
-  findChange(repository: Repository, source: string): Effect.Effect<ChangeRequest | null, ConnectorFailed>
-  /** Opens a change; one already open from the branch is returned instead of a second. */
+  /**
+   * The open change from a branch, if there is one: how a change opened some
+   * other way is adopted. `from` is the fork the branch is on, for a change
+   * into the repository it was forked from; without it, the branch is the
+   * repository's own.
+   */
+  findChange(repository: Repository, source: string, from?: Repository): Effect.Effect<ChangeRequest | null, ConnectorFailed>
+  /** Opens a change; one already open from the branch is returned instead of a second. From a fork's branch where `from` says. */
   openChange(
     repository: Repository,
-    change: { readonly title: string; readonly body: string; readonly source: string; readonly target: string; readonly draft: boolean },
+    change: {
+      readonly title: string
+      readonly body: string
+      readonly source: string
+      readonly target: string
+      readonly draft: boolean
+      readonly from?: Repository
+    },
   ): Effect.Effect<ChangeRequest, ConnectorFailed>
   change(repository: Repository, number: number): Effect.Effect<ChangeRequest, ConnectorFailed>
   markReady(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>

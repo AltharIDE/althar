@@ -215,12 +215,15 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     name: user.name ?? null,
   }))
 
-  const findChange = (repository: Repository, source: string) =>
+  /** A branch as a pull request's head names it: with its owner, the fork's where it is on one. */
+  const headOf = (repository: Repository, source: string, from?: Repository) => `${(from ?? repository).path[0]}:${source}`
+
+  const findChange = (repository: Repository, source: string, from?: Repository) =>
     Effect.map(
       http.json(
         Schema.Array(PullAnswer),
         'GET',
-        `${repo(repository)}/pulls?state=open&head=${encodeURIComponent(`${repository.path[0]}:${source}`)}`,
+        `${repo(repository)}/pulls?state=open&head=${encodeURIComponent(headOf(repository, source, from))}`,
       ),
       (pulls) => (pulls[0] === undefined ? null : changeOf(pulls[0])),
     )
@@ -292,7 +295,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         .json(PullAnswer, 'POST', `${repo(repository)}/pulls`, {
           title: change.title,
           body: change.body,
-          head: change.source,
+          head: change.from === undefined ? change.source : headOf(repository, change.source, change.from),
           base: change.target,
           draft: change.draft,
         })
@@ -302,7 +305,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           Effect.catchIf(
             (error) => error.reason === 'rejected' && /already exists/i.test(error.message),
             (error) =>
-              Effect.flatMap(findChange(repository, change.source), (found) =>
+              Effect.flatMap(findChange(repository, change.source, change.from), (found) =>
                 found === null ? Effect.fail(error) : Effect.succeed(found),
               ),
           ),

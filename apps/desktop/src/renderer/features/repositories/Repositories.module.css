@@ -1,0 +1,24 @@
+.window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--n-2);
+}
+
+/* The bar stays; what is under it scrolls, with the scrollbar at the window's edge. */
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 32px max(40px, calc((100% - 760px) / 2)) 64px;
+}
+
+.repositories {
+  max-width: 760px;
+}
+
+.error {
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  color: var(--danger, var(--signal-bright));
+}

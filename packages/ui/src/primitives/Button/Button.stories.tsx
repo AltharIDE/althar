@@ -16,6 +16,8 @@ export const Default: Story = {}
 /** Violet is only for answering something that waits on you. */
 export const Signal: Story = { args: { variant: 'signal', children: 'Allow', kbd: '↵' } }
 export const Quiet: Story = { args: { variant: 'quiet', children: 'Hold' } }
+/** Red words, for the one press that ends or throws something away, as a dialog's last word. */
+export const Danger: Story = { args: { variant: 'danger', children: 'Remove project' } }
 /** Inside a row of a thread or a card, beside 11–12px text. */
 export const Small: Story = { args: { size: 'small', children: 'Undo' } }
 export const WithIcon: Story = { args: { icon: 'arrow', children: 'Open task' } }
@@ -62,6 +64,7 @@ export const AllStates: Story = {
       <States cells={every({ children: 'Open task' })} />
       <States cells={every({ variant: 'signal', children: 'Allow', kbd: '↵' })} />
       <States cells={every({ variant: 'quiet', children: 'Hold' })} />
+      <States cells={every({ variant: 'danger', children: 'Remove project' })} />
       <States cells={every({ size: 'small', children: 'Undo' })} />
       <States cells={every({ size: 'small', variant: 'quiet', children: 'Hold' })} />
     </div>

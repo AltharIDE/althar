@@ -13,6 +13,14 @@ export type ActorKind = typeof ActorKind.Type
 export const RepositoryAccess = Schema.Literals(['read', 'write', 'observe'])
 export type RepositoryAccess = typeof RepositoryAccess.Type
 
+/** What a repository is to its project, as the person or the reading said. Tasks and the coordinator are told it. */
+export const RepositoryRole = Schema.Literals(['service', 'frontend', 'infrastructure', 'library', 'docs', 'other'])
+export type RepositoryRole = typeof RepositoryRole.Type
+
+/** Where a fork's tasks open their pull requests: on the repository it was forked from, or on the fork. */
+export const ChangeTarget = Schema.Literals(['upstream', 'fork'])
+export type ChangeTarget = typeof ChangeTarget.Type
+
 export const LocationKind = Schema.Literals(['existing', 'managed'])
 export type LocationKind = typeof LocationKind.Type
 

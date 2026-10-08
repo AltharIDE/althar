@@ -120,6 +120,8 @@ export const ProjectSummary = Schema.Struct({
   repository: Schema.NullOr(Schema.String),
   /** The repositories its tasks may change, by name, the first first. */
   repositories: Schema.Array(Schema.String),
+  /** The folder its tasks' worktrees are in on this Mac; null before it has had a task. */
+  worktrees: Schema.NullOr(Schema.String),
   tasks: Schema.Number,
   /** Sessions working now. */
   running: Schema.Number,
@@ -139,6 +141,33 @@ export const ProjectSummary = Schema.Struct({
 export type ProjectSummary = typeof ProjectSummary.Type
 
 export const ProjectList = Schema.Struct({ cursor: Cursor, projects: Schema.Array(ProjectSummary) })
+
+/** What a repository is to its project. The runtime's vocabulary, said again here, as the contract stands alone. */
+export const RepositoryRole = Schema.Literals(['service', 'frontend', 'infrastructure', 'library', 'docs', 'other'])
+export type RepositoryRole = typeof RepositoryRole.Type
+
+/** Where a fork's tasks open their pull requests: on the repository it was forked from, or on the fork. */
+export const ChangeTarget = Schema.Literals(['upstream', 'fork'])
+export type ChangeTarget = typeof ChangeTarget.Type
+
+/** One of a project's repositories, as this Mac has it. */
+export const ProjectRepository = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  /** Its root on this Mac; null where this Mac has none. */
+  path: Schema.NullOr(Schema.String),
+  /** The folder inside it the project is about, such as one package of a monorepo; null for all of it. */
+  folder: Schema.NullOr(Schema.String),
+  branch: Schema.NullOr(Schema.String),
+  /** Its first remote, without any password in it. */
+  remote: Schema.NullOr(Schema.String),
+  role: RepositoryRole,
+  /** The fork its remotes make it (an `upstream` beside `origin`), by each one's path on its host, and where its pull requests open. */
+  fork: Schema.NullOr(Schema.Struct({ fork: Schema.String, upstream: Schema.String, target: ChangeTarget })),
+  /** Tasks under way that change it: they keep it if it is left out. */
+  tasks: Schema.Number,
+})
+export type ProjectRepository = typeof ProjectRepository.Type
 
 /** A git repository found where a folder was opened. */
 export const FoundRepository = Schema.Struct({
@@ -945,6 +974,30 @@ export const Api = RpcGroup.make(
       repositories: Schema.optional(Schema.Array(Schema.Struct({ grant: Schema.String, path: Schema.String }))),
     },
     ProjectSummary,
+  ),
+  /** Renames a project. Its mark, and the folders its tasks' worktrees are in, stay as they are. */
+  command('RenameProject', { projectId: Schema.String, name: Schema.String }, Schema.Void),
+  /**
+   * Removes a project from Althar: its agents stop, its plans don't start and
+   * its runs end. Its folders, its tasks' worktrees and their branches stay.
+   */
+  command('RemoveProject', { projectId: Schema.String }, Schema.Void),
+  /** A project's repositories, as this Mac has them. */
+  call('GetRepositories', { projectId: Schema.String }, Schema.Array(ProjectRepository)),
+  /** Adds the repositories at a folder the person chose, by its grant: the one it is or is in, or those directly inside it. */
+  command('AddRepositories', { projectId: Schema.String, grant: Schema.String }, Schema.Void),
+  /** Leaves a repository out of the project: new tasks can't change it; tasks made with it keep it. */
+  command('LeaveOutRepository', { projectId: Schema.String, repositoryId: Schema.String }, Schema.Void),
+  /** Sets a repository's role, or, for a fork, where its pull requests open. */
+  command(
+    'SetRepository',
+    {
+      projectId: Schema.String,
+      repositoryId: Schema.String,
+      role: Schema.optional(RepositoryRole),
+      changeTarget: Schema.optional(ChangeTarget),
+    },
+    Schema.Void,
   ),
   call('ListTasks', { projectId: Schema.String }, TaskList),
   command(

@@ -203,6 +203,8 @@ describe('working out the tabs', () => {
     expect(whereOf('/settings')).toEqual({ kind: 'home' })
     expect(whereOf('/projects/p%201')).toEqual({ kind: 'project', projectId: 'p 1', place: { kind: 'project' } })
     expect(whereOf('/projects/p1/rules')).toEqual({ kind: 'project', projectId: 'p1', place: { kind: 'rules' } })
+    expect(whereOf('/projects/p1/repositories')).toEqual({ kind: 'project', projectId: 'p1', place: { kind: 'repositories' } })
+    expect(whereOf('/projects/p1/other')).toEqual({ kind: 'home' })
     expect(whereOf('/threads/th1')).toEqual({ kind: 'thread', threadId: 'th1' })
   })
 

@@ -48,6 +48,8 @@
 -- connection_auth: device_flow, pkce, token
 -- connection_state: ready, reauth_required, removed
 -- external_kind: issue, change
+-- repository_role: service, frontend, infrastructure, library, docs, other
+-- change_target: upstream, fork
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -128,7 +130,7 @@ CREATE TABLE repository_bindings (
   allowed_subpaths TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(allowed_subpaths)),
   default_base_ref TEXT,
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  detached_at TEXT CHECK (detached_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), folder TEXT,
+  detached_at TEXT CHECK (detached_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), folder TEXT, change_target TEXT REFERENCES vocab_change_target (word),
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;

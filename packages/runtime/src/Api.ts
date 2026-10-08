@@ -291,6 +291,7 @@ export const handlers = Api.toLayer(
                 lastWorkAt: null,
                 repository: opened.repository,
                 repositories: [],
+                worktrees: null,
                 tasks: 0,
                 running: 0,
                 waiting: 0,
@@ -302,6 +303,65 @@ export const handlers = Api.toLayer(
               }
             )
           }),
+        ),
+      RenameProject: ({ commandId, projectId, name }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.rename', { projectId, name }, commandId)
+              yield* projects.rename(projectId, name, said.commandId)
+            }),
+          ),
+        ),
+      RemoveProject: ({ commandId, projectId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.remove', { projectId }, commandId)
+              const threads = yield* projects.remove(projectId, said.commandId)
+              // Its runs are over, so no step answers an agent going: each one still on it stops, the coordinator too.
+              yield* Effect.forEach(threads, (threadId) => Effect.ignore(sessions.stop(threadId)), { discard: true })
+            }),
+          ),
+        ),
+      GetRepositories: ({ projectId }) => api(Effect.map(projects.repositories(projectId), (list) => [...list])),
+      AddRepositories: ({ commandId, projectId, grant }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.add_repositories', { projectId }, commandId)
+              yield* projects.addRepositories(projectId, yield* folders.path(grant), said.commandId)
+            }),
+          ),
+        ),
+      LeaveOutRepository: ({ commandId, projectId, repositoryId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.leave_out_repository', { projectId, repositoryId }, commandId)
+              yield* projects.leaveOut(projectId, repositoryId, said.commandId)
+            }),
+          ),
+        ),
+      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.set_repository', { projectId, repositoryId, role, changeTarget }, commandId)
+              yield* projects.setRepository({
+                projectId,
+                repositoryId,
+                ...(role === undefined ? {} : { role }),
+                ...(changeTarget === undefined ? {} : { changeTarget }),
+                commandId: said.commandId,
+              })
+            }),
+          ),
         ),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
       CreateTask: ({ commandId, projectId, title, description, issue, repositories }) =>

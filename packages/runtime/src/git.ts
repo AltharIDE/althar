@@ -216,6 +216,19 @@ export const remoteUrls = (cwd: string) =>
     ),
   ])
 
+/** Each remote by name, with its fetch URL without credentials, in the order git lists them. */
+export const namedRemotes = (cwd: string) =>
+  Effect.map(git(cwd, 'remote', '-v'), (output) =>
+    output
+      .split('\n')
+      .filter((line) => line.endsWith('(fetch)'))
+      .map((line) => {
+        const [name = '', url = ''] = line.split(/\s+/)
+        return { name, url: redactUrl(url) }
+      })
+      .filter((remote) => remote.name !== '' && remote.url !== ''),
+  )
+
 /** Adds a worktree on a new branch from a base. */
 export const addWorktree = (repository: string, path: string, branch: string, base: string) =>
   git(repository, 'worktree', 'add', '-b', branch, path, base)

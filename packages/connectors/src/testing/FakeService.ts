@@ -68,6 +68,8 @@ export interface FakeControls {
   commentsOn(number: number): ReadonlyArray<Comment>
   issueComments(ref: string): ReadonlyArray<string>
   linksOn(ref: string): ReadonlyArray<{ readonly url: string; readonly title: string }>
+  /** The fork a change came from, by its path; null for one from the repository's own branch. */
+  forkOf(number: number): string | null
   /** Method names, in the order they were called. */
   readonly calls: ReadonlyArray<string>
 }
@@ -86,6 +88,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const changes: Array<ChangeRequest> = []
   /** Each change's repository, by number. */
   const repositoryOf = new Map<number, string>()
+  /** The fork each change came from, by number, by its path. */
+  const forks = new Map<number, string>()
   const comments = new Map<number, Array<Comment>>()
   const reviews = new Map<number, Array<Review>>()
   const checks = new Map<number, Array<Check>>()
@@ -141,10 +145,14 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         const found = repositories.get(path.join('/').toLowerCase())
         return found === undefined ? Effect.fail(missing(`repository ${path.join('/')}`)) : Effect.succeed(found)
       }),
-    findChange: (repository, source) =>
+    findChange: (repository, source, from) =>
       Effect.andThen(called('findChange'), () => {
         const found = changes.find(
-          (change) => repositoryOf.get(change.number) === repository.id && change.source === source && change.state === 'open',
+          (change) =>
+            repositoryOf.get(change.number) === repository.id &&
+            change.source === source &&
+            forks.get(change.number) === from?.path.join('/') &&
+            change.state === 'open',
         )
         return Effect.succeed(found ?? null)
       }),
@@ -152,7 +160,10 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       Effect.andThen(called('openChange'), () => {
         const open = changes.find(
           (candidate) =>
-            repositoryOf.get(candidate.number) === repository.id && candidate.source === change.source && candidate.state === 'open',
+            repositoryOf.get(candidate.number) === repository.id &&
+            candidate.source === change.source &&
+            forks.get(candidate.number) === change.from?.path.join('/') &&
+            candidate.state === 'open',
         )
         if (open !== undefined) return Effect.succeed(open)
         const number = changes.length + 1
@@ -175,6 +186,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         }
         changes.push(opened)
         repositoryOf.set(number, repository.id)
+        if (change.from !== undefined) forks.set(number, change.from.path.join('/'))
         return Effect.succeed(opened)
       }),
     change: (_repository, number) =>
@@ -361,6 +373,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     commentsOn: (number) => comments.get(number) ?? [],
     issueComments: (ref) => issueComments.get(ref) ?? [],
     linksOn: (ref) => links.get(ref) ?? [],
+    forkOf: (number) => forks.get(number) ?? null,
     calls,
   }
   return service

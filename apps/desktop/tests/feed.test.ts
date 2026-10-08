@@ -134,6 +134,33 @@ describe('the window’s watch', () => {
     expect(marks(changed('thread_item', 'i1', 'th9', 'p1'))).toBe(false)
   })
 
+  it('reads a project’s repositories again only while they show, and marks its threads when it is renamed', async () => {
+    const { client, cache, emit, read } = opened()
+    await cache.fetchQuery(read.repositories('p1'))
+    await cache.fetchQuery(read.thread('th1'))
+    await cache.fetchQuery(read.coordinator('p1'))
+    const showing = new QueryObserver(cache, read.repositories('p1'))
+    const stop = showing.subscribe(() => undefined)
+    emit(changed('project', 'p1', null, 'p1'))
+    await settle()
+    expect(client.getRepositories).toHaveBeenCalledTimes(2)
+    // The thread and the coordinator say the project's name: read again on their next visit.
+    expect(cache.getQueryState(keys.thread('th1'))?.isInvalidated).toBe(true)
+    expect(cache.getQueryState(keys.coordinator('p1'))?.isInvalidated).toBe(true)
+    // Another project's change touches neither.
+    cache.setQueryData(keys.thread('th1'), cache.getQueryData(keys.thread('th1')))
+    emit(changed('project', 'p2', null, 'p2'))
+    await settle()
+    expect(cache.getQueryState(keys.thread('th1'))?.isInvalidated).toBe(false)
+    expect(client.getRepositories).toHaveBeenCalledTimes(2)
+    stop()
+    // Off screen, a task made in it marks them for the next visit.
+    emit(changed('task', 't1', 'th1', 'p1'))
+    await settle()
+    expect(client.getRepositories).toHaveBeenCalledTimes(2)
+    expect(cache.getQueryState(keys.repositories('p1'))?.isInvalidated).toBe(true)
+  })
+
   it('reads once more what was being read when a change touched it', async () => {
     const { client, cache, emit, read } = opened()
     const first = later<ProjectList>()

@@ -59,6 +59,16 @@ type Store =
   | Issues
   | Policies
 
+/** A repository's role, as the coordinator is told it. */
+const roleWords: Readonly<Record<string, string>> = {
+  service: 'a service',
+  frontend: 'the frontend',
+  infrastructure: 'infrastructure',
+  library: 'a library',
+  docs: 'docs',
+  other: 'repository',
+}
+
 const Drafted = Schema.Struct({
   title: Schema.String,
   description: Schema.optional(Schema.String),
@@ -202,8 +212,8 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${access.projectId}`
-          const repositories = yield* sql<{ name: string; base: string | null; within: string | null; path: string }>`
-            SELECT b.display_name AS name, b.default_base_ref AS base, b.folder AS within, l.path FROM repository_bindings b
+          const repositories = yield* sql<{ name: string; role: string; base: string | null; within: string | null; path: string }>`
+            SELECT b.display_name AS name, b.role, b.default_base_ref AS base, b.folder AS within, l.path FROM repository_bindings b
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
             WHERE b.project_id = ${access.projectId} AND b.detached_at IS NULL
             ORDER BY b.created_at, b.rowid`
@@ -214,7 +224,7 @@ export class Coordinator extends Context.Service<
             `Repositories:\n${repositories
               .map(
                 (repository) =>
-                  `- ${repository.name} (${repository.base ?? 'main'}), on this Mac at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
+                  `- ${repository.name}, ${roleWords[repository.role] ?? 'repository'} (${repository.base ?? 'main'}), on this Mac at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
               )
               .join('\n')}`,
             `Tasks: ${counts?.open ?? 0} open, ${counts?.drafts ?? 0} planned and not yet started.`,

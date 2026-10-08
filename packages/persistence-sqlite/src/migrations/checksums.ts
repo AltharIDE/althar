@@ -15,4 +15,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0009_accounts': '80be008b6fe8da401f0a2a31fa59631cadc0ad6eb8ea89ddc157c3ccd78b35c5',
   '0010_project_folders': '337403cea68a97b524ef4931a29eae2c2f06957a75e578a24dad86f931d1b5ee',
   '0011_home': '1c2c2b05faca7a0930302523b8d1ada32aa657d9cf31fb4a3c39769974e60f7f',
+  '0012_project_changes': '5bc32c9042d2f2b1c31cfc8a8a76a907638fe5b0bc15d734f76331ae7d5ef344',
 }

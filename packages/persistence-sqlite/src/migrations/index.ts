@@ -13,6 +13,7 @@ import { statements as usageLimits } from './0008_usage_limits'
 import { statements as accounts } from './0009_accounts'
 import { statements as projectFolders } from './0010_project_folders'
 import { statements as home } from './0011_home'
+import { statements as projectChanges } from './0012_project_changes'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -37,6 +38,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0009_accounts', statements: accounts },
   { key: '0010_project_folders', statements: projectFolders },
   { key: '0011_home', statements: home },
+  { key: '0012_project_changes', statements: projectChanges },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

@@ -267,14 +267,14 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
       return found
     })
 
-  const findChange = (repository: Repository, source: string) =>
+  const findChange = (repository: Repository, source: string, from?: Repository) =>
     Effect.map(
       http.json(
         Page(PullAnswer),
         'GET',
         `${repo(repository.path)}/pullrequests?q=${encodeURIComponent(
           // A fork's branch of the same name isn't this repository's.
-          `source.branch.name = ${quoted(source)} AND source.repository.full_name = ${quoted(repository.path.join('/'))} AND state = "OPEN"`,
+          `source.branch.name = ${quoted(source)} AND source.repository.full_name = ${quoted((from ?? repository).path.join('/'))} AND state = "OPEN"`,
         )}`,
       ),
       (pulls) => (pulls.values[0] === undefined ? null : changeOf(repository, pulls.values[0])),
@@ -383,13 +383,17 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
     openChange: (repository, change) =>
       Effect.gen(function* () {
         // One already open from the branch is the one: adopted, not duplicated, nor written over.
-        const open = yield* findChange(repository, change.source)
+        const open = yield* findChange(repository, change.source, change.from)
         if (open !== null) return open
         return yield* http
           .json(PullAnswer, 'POST', `${repo(repository.path)}/pullrequests`, {
             title: change.title,
             description: change.body,
-            source: { branch: { name: change.source } },
+            source: {
+              branch: { name: change.source },
+              // From a fork: the branch is the fork's.
+              ...(change.from === undefined ? {} : { repository: { full_name: change.from.path.join('/') } }),
+            },
             destination: { branch: { name: change.target } },
             draft: change.draft,
           })
@@ -399,7 +403,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
             Effect.catchIf(
               (error) => error.reason === 'rejected',
               (error) =>
-                Effect.flatMap(findChange(repository, change.source), (found) =>
+                Effect.flatMap(findChange(repository, change.source, change.from), (found) =>
                   found === null ? Effect.fail(error) : Effect.succeed(found),
                 ),
             ),
