@@ -2,6 +2,17 @@
    section rules, and the homepage's rails for every figure. */
 
 .page { background: var(--n-2); color: var(--t-1); overflow-x: clip; }
+/* The top bar stays put. A hairline draws in once the page has moved. */
+.pin {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--n-2) 92%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: box-shadow var(--fast) var(--ease);
+}
+.pin[data-scrolled] { box-shadow: inset 0 -1px 0 var(--line-3); }
 .page :focus-visible { outline: 2px solid var(--live); outline-offset: 3px; }
 
 /* One sheet: the contents and the reading column share an edge, so the title

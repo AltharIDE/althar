@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react'
+
 import source from '../../../../THESIS.md?raw'
 import { LINKS } from '../content/facts'
 import { DATE } from '../content/sheet'
@@ -19,10 +21,26 @@ const IDS = THESIS.parts.map((p) => p.id)
 
 export function Thesis() {
   const current = useCurrent(IDS)
+  const pin = useRef<HTMLDivElement>(null)
   const [lede, claim, ...rest] = THESIS.intro
+
+  useEffect(() => {
+    const el = pin.current
+    if (!el) return
+    const onScroll = () => {
+      if (window.scrollY > 8) el.dataset.scrolled = ''
+      else delete el.dataset.scrolled
+    }
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
   return (
     <div className={s.page}>
-      <Bar tone="paper" base="/" />
+      <div className={s.pin} ref={pin}>
+        <Bar tone="paper" base="/" />
+      </div>
 
       <main id="main" tabIndex={-1}>
         <div className={s.sheet}>
