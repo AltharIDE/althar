@@ -92,7 +92,8 @@ export type ThreadItemKind = typeof ThreadItemKind.Type
 export const InputDisposition = Schema.Literals(['after_current', 'interrupt_and_continue', 'supersede_pending', 'cancel_run'])
 export type InputDisposition = typeof InputDisposition.Type
 
-export const UserInputState = Schema.Literals(['queued', 'delivered', 'superseded'])
+/** Where something the person said stands: waiting its turn, given to the agent, replaced, or taken back before it went. */
+export const UserInputState = Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn'])
 export type UserInputState = typeof UserInputState.Type
 
 export const TurnDeliveryState = Schema.Literals(['pending', 'delivered', 'completed', 'interrupted', 'interruption_uncertain', 'failed'])

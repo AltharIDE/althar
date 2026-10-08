@@ -211,6 +211,22 @@ describe('a task', () => {
     )
   })
 
+  it('takes back a queued message, or puts it back in the composer to change', async () => {
+    const edited = items.you('Use the helper', { state: 'queued', interrupting: false })
+    const dropped = items.you('Skip the docs', { state: 'queued', interrupting: false })
+    const { client } = fakeClient({ getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), edited, dropped] })) })
+    withServices(<Task />, client)
+    const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the lead' })
+    expect(screen.getByRole('region', { name: '2 queued; the lead reads them in order' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Take “Skip the docs” out of the queue' }))
+    expect(client.takeBack).toHaveBeenCalledWith(dropped.id)
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    expect(client.takeBack).toHaveBeenCalledWith(edited.id)
+    await waitFor(() => expect((busy as HTMLTextAreaElement).value).toBe('Use the helper'))
+    expect(screen.queryByRole('region', { name: /queued/ })).toBeNull()
+    expect(screen.queryByText('Skip the docs')).toBeNull()
+  })
+
   it('changes how hard its lead thinks and its model, hands it to another agent, and stops it', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     withServices(<Task />, client)

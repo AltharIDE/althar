@@ -464,6 +464,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     interrupt: vi.fn(async () => {}),
     stopSession: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
+    takeBack: vi.fn(async () => {}),
     answer: vi.fn(async () => {}),
     getCoordinator: vi.fn(async () => coordinatorSnapshot()),
     startTask: vi.fn(async () => task),

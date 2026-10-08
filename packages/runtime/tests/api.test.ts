@@ -192,6 +192,11 @@ describe('the API', () => {
         assert.isTrue(newest.earlier)
         const before = yield* client.GetThread({ threadId: task.threadId, before: newest.items[0]?.sequence ?? 0, limit: 1 })
         assert.deepStrictEqual(texts(before), ['hello'])
+        // What the agent already has can't be taken back.
+        assert.strictEqual(
+          (yield* Effect.flip(client.TakeBack({ commandId: commandId(), itemId: before.items[0]?.id ?? '' }))).message,
+          "The agent already has that message, so it can't be taken back.",
+        )
         assert.isEmpty((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).items)
         const reply = yield* client.GetThreadItem({ threadId: task.threadId, itemId: newest.items[0]?.id ?? '' })
         assert.deepStrictEqual(reply.content, { text: 'Hello' })

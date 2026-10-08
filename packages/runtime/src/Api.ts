@@ -441,6 +441,12 @@ export const handlers = Api.toLayer(
             yield* Effect.forkDetach(issues.unfurlInput(commandId))
           }),
         ),
+      TakeBack: ({ commandId, itemId }) =>
+        api(
+          Effect.gen(function* () {
+            yield* sessions.takeBack({ envelope: yield* envelope('thread.take_back', { itemId }, commandId), itemId })
+          }),
+        ),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
       StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories }) =>

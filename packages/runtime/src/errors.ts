@@ -76,6 +76,11 @@ export class AttentionClosed extends Schema.TaggedError<AttentionClosed>()('Atte
   attentionId: Schema.String,
 }) {}
 
+/** The message went to the agent before it could be taken back, or was taken back already. */
+export class AlreadyDelivered extends Schema.TaggedError<AlreadyDelivered>()('AlreadyDelivered', {
+  itemId: Schema.String,
+}) {}
+
 /** An outward action's earlier answer was lost, and doing it again could do it twice: the person checks. */
 export class OutwardUncertain extends Schema.TaggedError<OutwardUncertain>()('OutwardUncertain', {
   operation: Schema.String,

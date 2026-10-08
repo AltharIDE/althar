@@ -22,7 +22,7 @@
 -- thread_kind: coordinator, task, step
 -- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
--- user_input_state: queued, delivered, superseded
+-- user_input_state: queued, delivered, superseded, withdrawn
 -- turn_delivery_state: pending, delivered, completed, interrupted, interruption_uncertain, failed
 -- installation_status: supported, degraded, blocked, missing
 -- auth_mode: vendor_cli, api_key, oauth, enterprise, workload

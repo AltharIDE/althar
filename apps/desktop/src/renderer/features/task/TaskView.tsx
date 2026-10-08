@@ -22,6 +22,7 @@ import {
 import { useModels } from '../../data/models'
 import { modelInfo, waitsWords } from '../../shared/agents'
 import { contextMeter } from '../../shared/ContextMeter'
+import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
 import { catalogOf, type Choice, modelName, runningOn } from '../../shared/models'
@@ -262,6 +263,7 @@ export function TaskView({
   const since = sinceOf(snapshot, now)
   const shown: Face = outputs ? (face ?? 'talk') : 'talk'
   const busy = session?.turnRunning ?? false
+  const queue = queueShown(session, model.pending)
   // A stopped task picks up with the agent that last led it, when it still can.
   const last = snapshot.items.findLast((item) => item.agentId !== null)?.agentId
   const resume = model.agents.find((agent) => agent.id === last) ?? model.agents[0]
@@ -273,6 +275,11 @@ export function TaskView({
     setDraft('')
     if (session === null) void model.send(body, chosen ?? undefined)
     else void (now ? model.sendNow(body) : model.send(body))
+  }
+  // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
+  const edit = async (id: string) => {
+    const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
+    if (said !== undefined && (await model.takeBack(id))) setDraft((current) => withQueued(current, said.text))
   }
 
   const issue = snapshot.task.issue
@@ -306,6 +313,9 @@ export function TaskView({
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
+        queued={queuedOf(snapshot.items, queue)}
+        onEditQueued={(id) => void edit(id)}
+        onUnqueue={(id) => void model.takeBack(id)}
         placeholder={busy ? text.placeholderBusy : text.placeholder(session?.agentName ?? agentName(chosen?.agentId ?? null))}
         meter={contextMeter(session)}
         // Another agent's model hands the task to that agent.
@@ -400,7 +410,7 @@ export function TaskView({
             )}
             <ThreadBlocks
               blocks={blocksOf(
-                { items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree },
+                { items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree, queue },
                 model.streaming,
                 (iso) => ago(iso),
                 now,

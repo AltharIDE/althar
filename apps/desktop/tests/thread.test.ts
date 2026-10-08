@@ -90,17 +90,28 @@ describe('a thread as blocks', () => {
     ])
   })
 
-  it('says where a message stands with the lead', () => {
+  it('says where a message stands with the lead, and leaves what waits behind a running turn to the composer', () => {
     const thread = [
       items.you('next', { state: 'queued', interrupting: false }),
       items.you('now', { state: 'queued', interrupting: true }),
+      items.you('dropped', { state: 'withdrawn', interrupting: false }),
       items.you('old', null),
     ]
-    expect(blocksOf(source(thread), new Map(), at).map((block) => (block.kind === 'you' ? [block.text, block.delivery] : null))).toEqual([
+    const shown = (turnRunning: boolean, queue?: boolean) =>
+      blocksOf({ ...source(thread), turnRunning, ...(queue === undefined ? {} : { queue }) }, new Map(), at).map((block) =>
+        block.kind === 'you' ? [block.text, block.delivery] : null,
+      )
+    expect(shown(false)).toEqual([
       ['next', Delivery.Queued],
       ['now', Delivery.Interrupting],
       ['old', Delivery.Delivered],
     ])
+    expect(shown(true)).toEqual([
+      ['now', Delivery.Interrupting],
+      ['old', Delivery.Delivered],
+    ])
+    // With no agent to take it, what waits is in the queue too.
+    expect(shown(false, true)).toEqual(shown(true))
   })
 
   it('runs a plan step and a tool call only while their turn does', () => {

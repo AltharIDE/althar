@@ -179,6 +179,7 @@ describe('the API', () => {
               Interrupt: () => Effect.void,
               StopSession: () => Effect.void,
               Send: () => Effect.void,
+              TakeBack: () => Effect.die('unused'),
               Answer: () => Effect.void,
               ListConnections: () => Effect.succeed({ cursor: 0, connections: [], products: [] }),
               StartSignIn: ({ commandId: id }) =>

@@ -21,6 +21,7 @@ import {
 
 import { contextMeter } from '../../shared/ContextMeter'
 import { shortFolder } from '../../shared/folders'
+import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
@@ -60,6 +61,7 @@ export const text = {
   takesOver: (to: string, from: string) => `${to} takes over from a brief; ${from}’s turn stops.`,
   handOver: 'Hand it over',
   queued: 'Queued · the coordinator reads it next',
+  queue: (n: number) => (n === 1 ? 'Queued; the coordinator reads it next' : `${n} queued; the coordinator reads them in order`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in, so the coordinator starts on ${instead}.`,
   needsAgent: 'No agent is signed in. Sign one in with its own tool, then come back.',
@@ -173,6 +175,7 @@ export function ProjectView({
   const session = coordinator?.session ?? null
   const suggested = coordinator?.suggested ?? null
   const busy = session?.turnRunning ?? false
+  const queue = queueShown(session, model.pending)
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Whatever it ran on last, while that agent can; otherwise the first that can.
@@ -197,6 +200,11 @@ export function ProjectView({
   const send = (body: string, now: boolean) => {
     setDraft('')
     void (now ? model.sayNow(body) : model.say(body, chosen))
+  }
+  // A queued message goes back in the composer to be changed, and out of the queue, unless the coordinator has it already.
+  const edit = async (id: string) => {
+    const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
+    if (said !== undefined && (await model.takeBack(id))) setDraft((current) => withQueued(current, said.text))
   }
 
   const composer = (
@@ -225,6 +233,10 @@ export function ProjectView({
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
+        queued={queuedOf(coordinator?.items ?? [], queue)}
+        onEditQueued={(id) => void edit(id)}
+        onUnqueue={(id) => void model.takeBack(id)}
+        text={{ queued: text.queue }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
         meter={contextMeter(session)}
         picker={
@@ -351,7 +363,7 @@ export function ProjectView({
                   {coordinator.items.length === 0 && model.streaming.size === 0 && <p className={s.quiet}>{text.empty}</p>}
                   <ThreadBlocks
                     blocks={blocksOf(
-                      { items: coordinator.items, turnRunning: busy, worktree: null },
+                      { items: coordinator.items, turnRunning: busy, worktree: null, queue },
                       model.streaming,
                       (iso) => ago(iso),
                       now,
