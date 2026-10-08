@@ -15,6 +15,7 @@ import {
 } from '@althar/ui'
 
 import { modelInfo, waitsWords } from '../../shared/agents'
+import { kindWords } from '../../shared/calls'
 import { productBrand, productName } from '../../shared/products'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -40,7 +41,6 @@ export const text = {
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   stopped: 'No agent is working on it',
-  approval: 'Approval',
   allow: 'Allow',
   deny: 'Don’t allow',
   merged: (name: string) => `${name} merged`,
@@ -207,7 +207,7 @@ export const callCardOf = (waiting: BoardCall, name: (id: string | null) => stri
   if (waiting.stuck !== null) {
     const stuck = waiting.stuck
     return {
-      kind: stuckText.step[stuck.step],
+      kind: kindWords.stuck,
       title:
         stuck.step === 'publish' && stuck.why !== 'not_connected'
           ? stuckText.publishing(stuck)
@@ -218,7 +218,7 @@ export const callCardOf = (waiting: BoardCall, name: (id: string | null) => stri
     }
   }
   return {
-    kind: text.approval,
+    kind: kindWords.permission,
     title: waiting.title,
     because: waiting.reason,
     options: [text.allow, text.deny],

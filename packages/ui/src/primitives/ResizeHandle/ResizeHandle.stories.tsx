@@ -51,6 +51,35 @@ export const ByKeyboard: Story = {
   },
 }
 
+/** Where a move ended is said once, not at every step of it. */
+export const CommittingOnce: Story = {
+  render: function Render() {
+    const [width, setWidth] = useState(320)
+    const [kept, setKept] = useState<number[]>([])
+    return (
+      <div style={{ position: 'relative', width, height: 120, background: 'var(--n-1)' }}>
+        <p data-testid="kept" style={{ margin: 16, fontSize: 12 }}>
+          {kept.join(' ')}
+        </p>
+        <ResizeHandle
+          value={width}
+          min={240}
+          max={480}
+          onChange={setWidth}
+          onCommit={(at) => setKept((all) => [...all, at])}
+          label="Width of the conversation"
+        />
+      </div>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    c.getByRole('separator').focus()
+    await userEvent.keyboard('{ArrowRight}{ArrowRight}')
+    await expect(c.getByTestId('kept')).toHaveTextContent('336 352')
+  },
+}
+
 /** A double click puts it back. */
 export const Reset: Story = {
   render: () => <Columns start={400} />,

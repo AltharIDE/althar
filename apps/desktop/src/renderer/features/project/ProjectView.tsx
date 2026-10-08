@@ -94,7 +94,7 @@ const storedWidth = (): number => {
   }
 }
 
-/** The conversation's width beside the board: dragged, kept, and never so wide the board has no room. */
+/** The conversation's width beside the board: dragged, kept once a move ends, and never so wide the board has no room. */
 const useBothWidth = () => {
   const [width, setWidth] = useState(storedWidth)
   const [room, setRoom] = useState(() => window.innerWidth)
@@ -112,7 +112,7 @@ const useBothWidth = () => {
       // Not kept; it still holds for this window.
     }
   }
-  return { width: Math.min(width, max), min: WIDTH.min, max, set: keep, reset: () => keep(WIDTH.start) }
+  return { width: Math.min(width, max), min: WIDTH.min, max, set: setWidth, keep, reset: () => keep(WIDTH.start) }
 }
 
 export function ProjectView({
@@ -361,7 +361,15 @@ export function ProjectView({
               </TaskFace>
             )}
             {room === Room.Both && (
-              <ResizeHandle value={both.width} min={both.min} max={both.max} onChange={both.set} onReset={both.reset} label={text.width} />
+              <ResizeHandle
+                value={both.width}
+                min={both.min}
+                max={both.max}
+                onChange={both.set}
+                onCommit={both.keep}
+                onReset={both.reset}
+                label={text.width}
+              />
             )}
           </div>
         )}

@@ -49,6 +49,37 @@ export const ShowingWhatNeedsYou: Story = {
   },
 }
 
+/** From the keyboard: ArrowDown on the count opens what it counts, the arrows move through it, Escape goes back. */
+export const ByKeyboard: Story = {
+  args: { needs },
+  play: async ({ canvasElement }) => {
+    const count = within(canvasElement).getByRole('button', { name: '4 need you' })
+    count.focus()
+    await userEvent.keyboard('{ArrowDown}')
+    const list = await screen.findByRole('list', { name: 'What needs you' })
+    const rows = within(list).getAllByRole('button')
+    await waitFor(() => expect(rows[0]).toHaveFocus())
+    await expect(count).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.keyboard('{ArrowDown}')
+    await expect(rows[1]).toHaveFocus()
+    await userEvent.keyboard('{ArrowUp}{ArrowUp}')
+    await expect(rows.at(-1)).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
+    await expect(needs.at(-1)?.onOpen).toHaveBeenCalled()
+  },
+}
+
+/** On a task's screen, the task itself is listed, but isn't a way anywhere. */
+export const WithTheOneOnScreen: Story = {
+  args: { needs: needs.map((need, index) => (index === 1 ? { ...need, here: true } : need)) },
+  play: async ({ canvasElement }) => {
+    await userEvent.hover(within(canvasElement).getByRole('button', { name: '4 need you' }))
+    const list = await screen.findByRole('list', { name: 'What needs you' })
+    await expect(within(list).getByText('This task')).toBeInTheDocument()
+    await expect(within(list).getAllByRole('button')).toHaveLength(3)
+  },
+}
+
 export const OpeningTheFirst: Story = {
   play: async ({ args, canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: '4 need you' }))

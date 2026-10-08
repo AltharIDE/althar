@@ -15,12 +15,15 @@ import { useTask } from './useTask'
 
 /** The project's bar over one of its tasks: the way back to the project, on the view it was on, and which task this is. */
 function TaskNav({
+  threadId,
   projectId,
   project,
   title,
   agents,
   onBack,
 }: {
+  /** The task on screen: listed among what needs the person, but not opened again. */
+  threadId: string
   projectId: string
   project: string
   title: string
@@ -32,16 +35,15 @@ function TaskNav({
   const lanes = board.board === null ? null : lanesOf(board.board)
   const openTask = (threadId: string) => void navigate({ to: '/threads/$threadId', params: { threadId } })
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
+  // The first that isn't this task: with nothing else, the count only says how many.
+  const first = lanes === null ? null : firstNeedOf(lanes, threadId)
   return (
     <ProjectBar
       place={{ back: { project, task: title, onBack } }}
       working={lanes === null ? null : lanes.running.filter((task) => task.phase !== 'stopped').length}
       yours={lanes === null ? null : yoursOf(lanes)}
-      {...(lanes === null ? {} : { needs: needsOf(lanes, name, openTask) })}
-      onYours={() => {
-        const first = lanes === null ? null : firstNeedOf(lanes)
-        if (first !== null) openTask(first)
-      }}
+      {...(lanes === null ? {} : { needs: needsOf(lanes, name, openTask, threadId) })}
+      {...(first === null ? {} : { onYours: () => openTask(first) })}
       onRules={() => void navigate({ to: '/projects/$projectId/rules', params: { projectId } })}
       onNewTask={() => void navigate({ to: '/projects/$projectId', params: { projectId }, search: { new: 'task' } })}
     />
@@ -63,7 +65,18 @@ function TaskScreen({ threadId }: { threadId: string }) {
       model={model}
       {...(project === undefined || title === undefined
         ? {}
-        : { nav: <TaskNav projectId={project.id} project={project.name} title={title} agents={model.agents} onBack={back} /> })}
+        : {
+            nav: (
+              <TaskNav
+                threadId={threadId}
+                projectId={project.id}
+                project={project.name}
+                title={title}
+                agents={model.agents}
+                onBack={back}
+              />
+            ),
+          })}
       onBack={back}
     />
   )

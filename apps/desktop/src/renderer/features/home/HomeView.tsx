@@ -28,6 +28,7 @@ import { ago, clock, running, useNow } from '../../shared/time'
 import { type DockTarget, trackOf } from '../board/BoardView'
 import { DockView } from '../board/DockView'
 import type { StartModel } from '../start/useStart'
+import { kindWords } from '../../shared/calls'
 import { text as stuckText } from '../task/StuckCall'
 import s from './Home.module.css'
 import type { HomeModel } from './useHome'
@@ -45,7 +46,7 @@ export const text = {
   dock: 'Beside the home',
   settings: 'Settings',
   settingsKbd: '⌘,',
-  kind: { permission: 'Permission', stuck: 'Stuck', ready: 'Ready to accept' },
+  kind: kindWords,
   allow: 'Allow once',
   deny: 'Deny',
   look: 'Open',

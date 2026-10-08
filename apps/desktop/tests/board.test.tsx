@@ -8,6 +8,7 @@ import { BoardView, trackOf } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
 import { clock, running } from '../src/renderer/shared/time'
 import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
+import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
 import { useBoard } from '../src/renderer/features/board/useBoard'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
@@ -148,6 +149,20 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
+  it('lists what needs the person, the task on screen among them but opening nothing, and opens the first of the others', () => {
+    const lanes = lanesOf(board())
+    const onTask = vi.fn()
+    const needs = needsOf(lanes, () => '', onTask, 'th3')
+    expect(needs.map((need) => [need.kind, need.title, need.here === true])).toEqual([
+      ['Permission', 'Run make deploy', true],
+      ['Ready to accept', 'Rate-limit refunds', false],
+      ['Ready to accept', 'Tidy the docs', false],
+    ])
+    expect(firstNeedOf(lanes)).toBe('th3')
+    expect(firstNeedOf(lanes, 'th3')).toBe('th4')
+    expect(firstNeedOf(lanesOf(board({ tasks: [], calls: [permission] })), 'th3')).toBeNull()
+  })
+
   it('names a task’s steps, and the one it is on', () => {
     expect(trackOf(task({ step: 'settle' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
     expect(trackOf(task({ step: 'publish' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
@@ -189,7 +204,7 @@ describe('the board', () => {
     const needs = await screen.findByRole('list', { name: 'What needs you' })
     const rows = within(needs).getAllByRole('button')
     expect(rows.map((row) => row.textContent)).toEqual([
-      expect.stringMatching(/^Approval.*Run make deployShip it$/),
+      expect.stringMatching(/^Permission.*Run make deployShip it$/),
       'Ready to acceptRate-limit refundsPR #12',
       'Ready to acceptTidy the docsalthar/tidy-the-docs',
     ])

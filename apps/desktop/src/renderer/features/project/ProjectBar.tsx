@@ -37,7 +37,8 @@ export function ProjectBar({
   yours: number | null
   /** What waits on the person, each opening its task, for the count's preview. */
   needs?: ReadonlyArray<WorkNeed>
-  onYours: () => void
+  /** Opens the first thing that needs the person; without it, the count only says how many. */
+  onYours?: () => void
   /** Opens the project's rules; without it, no way there. */
   onRules?: () => void
   onNewTask: () => void
@@ -50,7 +51,12 @@ export function ProjectBar({
       end={
         <>
           {working !== null && yours !== null && (
-            <WorkStatus running={working} yours={yours} onYours={onYours} {...(needs === undefined ? {} : { needs })} />
+            <WorkStatus
+              running={working}
+              yours={yours}
+              {...(onYours === undefined ? {} : { onYours })}
+              {...(needs === undefined ? {} : { needs })}
+            />
           )}
           {onRules && <ChromeButton icon="gear" label={text.rules} compact onClick={onRules} />}
           <ChromeButton icon="plus" label={text.newTask} expanded={newTask} onClick={onNewTask} />

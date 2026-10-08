@@ -8,7 +8,8 @@ import s from './ResizeHandle.module.css'
  * two panes, with room to catch it. It sits over its column's edge, so the
  * column must be positioned. The arrow keys move it a step, Home and End to
  * its narrowest and widest, and a double click puts it back. The width is
- * the consumer's to keep.
+ * the consumer's: `onChange` follows the drag, and `onCommit` says where it
+ * ended (the pointer let go, a key moved it), so it is kept once a move.
  */
 
 export interface ResizeHandleProps {
@@ -17,6 +18,8 @@ export interface ResizeHandleProps {
   min: number
   max: number
   onChange: (width: number) => void
+  /** Where a move ended, once: the pointer let go, or a key moved it. Keep the width here, not on every change. */
+  onCommit?: (width: number) => void
   /** Puts the width back, on a double click; without it, a double click does nothing. */
   onReset?: () => void
   /** What it resizes, as its name: Width of the conversation. */
@@ -30,24 +33,38 @@ export interface ResizeHandleProps {
 
 const clamp = (width: number, min: number, max: number) => Math.round(Math.min(Math.max(width, min), Math.max(min, max)))
 
-export function ResizeHandle({ value, min, max, onChange, onReset, label, edge = 'end', step = 16, className }: ResizeHandleProps) {
-  const drag = useRef<{ readonly x: number; readonly width: number } | null>(null)
+export function ResizeHandle({
+  value,
+  min,
+  max,
+  onChange,
+  onCommit,
+  onReset,
+  label,
+  edge = 'end',
+  step = 16,
+  className,
+}: ResizeHandleProps) {
+  const drag = useRef<{ readonly x: number; readonly width: number; at: number } | null>(null)
   const sign = edge === 'end' ? 1 : -1
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
-    drag.current = { x: event.clientX, width: value }
+    drag.current = { x: event.clientX, width: value, at: value }
   }
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     const from = drag.current
     if (from === null) return
-    onChange(clamp(from.width + (event.clientX - from.x) * sign, min, max))
+    from.at = clamp(from.width + (event.clientX - from.x) * sign, min, max)
+    onChange(from.at)
   }
   const end = (event: PointerEvent<HTMLDivElement>) => {
+    const from = drag.current
     drag.current = null
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    if (from !== null && from.at !== from.width) onCommit?.(from.at)
   }
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const to =
@@ -62,7 +79,9 @@ export function ResizeHandle({ value, min, max, onChange, onReset, label, edge =
               : null
     if (to === null) return
     event.preventDefault()
-    onChange(clamp(to, min, max))
+    const width = clamp(to, min, max)
+    onChange(width)
+    onCommit?.(width)
   }
 
   return (

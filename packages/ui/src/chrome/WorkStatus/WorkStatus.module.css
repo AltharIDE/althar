@@ -38,7 +38,7 @@
   z-index: var(--z-popover);
   width: 300px;
   max-width: calc(100vw - 16px);
-  max-height: min(420px, var(--radix-hover-card-content-available-height));
+  max-height: min(420px, var(--radix-popover-content-available-height));
   overflow-y: auto;
   padding: 5px;
   background: var(--paper);
@@ -80,8 +80,12 @@
   text-align: left;
   transition: background var(--fast) var(--ease);
 }
-.need:hover {
+.need:hover:not(.here) {
   background: var(--n-2);
+}
+/* already on screen: said, not offered */
+.here .title {
+  color: var(--t-2);
 }
 .need:focus-visible {
   outline: 2px solid var(--signal);
