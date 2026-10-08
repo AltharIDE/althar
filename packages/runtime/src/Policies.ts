@@ -217,7 +217,7 @@ export class Policies extends Context.Service<
                 for (const key of CLEARABLE) {
                   const value = change[key]
                   if (value === null || (typeof value === 'string' && value.trim() === '')) delete kept[key]
-                  else if (value !== undefined) kept[key] = typeof value === 'string' ? value.trim() : value
+                  else if (value !== undefined) kept[key] = value.trim()
                 }
                 const changed: ProjectRules = {
                   ...(kept as ProjectRules),

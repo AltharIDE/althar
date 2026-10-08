@@ -1,7 +1,11 @@
 import { assert, describe, it } from '@effect/vitest'
+import { Effect } from 'effect'
+import { SqlClient } from 'effect/sql'
 
 import { branchFor, namingIn, titleFor } from '../src/conventions'
 import { bodyOf } from '../src/pullRequestWords'
+import type { ToolAccess } from '../src/ToolServer'
+import { callTool, runtime, task } from './support'
 
 /*
  * A team's conventions (DEV-42): what a repository's docs say of naming,
@@ -78,6 +82,14 @@ describe('a description in the repository’s template', () => {
     )
   })
 
+  it('reads no heading in a template’s fenced code', () => {
+    const fenced = '## Summary\n\n```sh\n# run the tests\nbun test\n```\n'
+    assert.strictEqual(
+      bodyOf({ lead: 'Did it.', ...nothingElse, template: fenced, written: '## Summary\n\nDid it.' }),
+      '## Summary\n\nDid it.\n\n<sub>Opened by Althar.</sub>',
+    )
+  })
+
   it('takes the lead’s, unticked, where it keeps the template', () => {
     const written = '## Summary\n\nDid it.\n\n## How to test\n\nRun it.\n\n## Checklist\n\n- [x] Tests pass\n'
     assert.strictEqual(
@@ -101,4 +113,31 @@ describe('a description in the repository’s template', () => {
       '## Checklist\n\n- [ ] Tests pass\n\n### Summary\n\nDid it.\n\n<sub>Opened by Althar.</sub>',
     )
   })
+})
+
+describe('the descriptions a lead gives', () => {
+  it.live('are kept by the repository each is for, and refused for one the task doesn’t change', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { project, task: made } = yield* task('Say hello')
+      const lead: ToolAccess = {
+        role: 'lead',
+        projectId: project.projectId,
+        threadId: made.threadId,
+        sessionId: 'none',
+        taskId: made.taskId,
+      }
+      const elsewhere = yield* callTool(lead, 'finish_step', { summary: 'Did it.', descriptions: [{ repository: 'elsewhere', text: 'x' }] })
+      assert.match(elsewhere, /^Say which repository each description is for: /)
+      // A task of one needn't name it.
+      const kept = yield* callTool(lead, 'finish_step', { summary: 'Did it.', descriptions: [{ text: '## Summary\n\nDid it.' }] })
+      assert.strictEqual(kept, 'Althar has your summary.')
+      const [item] = yield* sql<{ content: string }>`
+        SELECT content FROM thread_items WHERE thread_id = ${made.threadId} AND kind = 'step_result'`
+      const [slug] = yield* sql<{ slug: string }>`SELECT slug FROM repository_bindings`
+      assert.deepStrictEqual((JSON.parse(item?.content ?? '{}') as { descriptions?: unknown }).descriptions, {
+        [slug?.slug ?? '']: '## Summary\n\nDid it.',
+      })
+    }).pipe(Effect.provide(runtime())),
+  )
 })

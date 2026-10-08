@@ -511,6 +511,35 @@ describe('project rules, through the API', () => {
       }),
     ),
   )
+
+  it.live('names branches and titles by the person’s patterns, over the repository’s, and goes back to the repository’s', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const set = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          branchPattern: 'feature/{key}-{slug}',
+          titlePattern: '{key}: {title}',
+        })
+        assert.deepStrictEqual([set.branchPattern, set.titlePattern], ['feature/{key}-{slug}', '{key}: {title}'])
+        // A task with no issue leaves the key out, with what held it.
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Say hello' })
+        assert.strictEqual(task.branch, 'feature/say-hello')
+        // Taken back, or emptied: the repository's again, here Althar's own.
+        const back = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          branchPattern: null,
+          titlePattern: ' ',
+        })
+        assert.deepStrictEqual([back.branchPattern, back.titlePattern], [null, null])
+        const next = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Say goodbye' })
+        assert.strictEqual(next.branch, 'althar/say-goodbye')
+      }),
+    ),
+  )
 })
 
 /** A folder holding a repository for each name, each with one commit, and each remote given as `name=url`. */
