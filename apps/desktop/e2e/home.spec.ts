@@ -8,7 +8,7 @@ import { repository } from '../tests/repository'
 import { chooseFolder, launch } from './support'
 
 /*
- * The home, once there are projects: what waits on you, what runs, and what
+ * The home, once there are projects: what waits on you, what is in progress, and what
  * the loop did, across projects, with the projects beside it; settings for
  * the agents and connections.
  */
@@ -44,7 +44,7 @@ test('comes back to what runs and what waits across projects, with the projects 
     // The home has it running, and the project beside it.
     const projects = page.getByRole('complementary', { name: 'Projects' })
     await expect(projects.getByRole('button', { name: /meridian/ })).toBeVisible()
-    await expect(page.getByRole('region', { name: /Running/ }).getByRole('button', { name: LONG })).toBeVisible()
+    await expect(page.getByRole('region', { name: /In progress/ }).getByRole('button', { name: LONG })).toBeVisible()
 
     // Another project, opened from the home, with a task that is soon ready.
     await chooseFolder(electronApp, halyard)
@@ -60,12 +60,14 @@ test('comes back to what runs and what waits across projects, with the projects 
     await expect(projects.getByRole('button', { name: /halyard/ })).toBeVisible()
     await page.screenshot({ path: 'test-results/home.png' })
 
-    // Review opens it in the dock, in the projects' place.
+    // Review opens the task itself, which leaves the home.
     await page.getByRole('button', { name: 'Review' }).click()
     await expect(page.getByRole('button', { name: 'Merge into main' })).toBeVisible()
     await expect(projects).toHaveCount(0)
-    await page.screenshot({ path: 'test-results/home-dock.png' })
+    await page.screenshot({ path: 'test-results/home-task.png' })
     await page.getByRole('button', { name: 'Merge into main' }).click()
+    // Back at the home, what was accepted no longer waits on you.
+    await tabs.getByRole('button', { name: /^Home/ }).click()
     await expect(page.getByRole('heading', { name: 'Name the limits better', level: 3 })).toHaveCount(0)
 
     // Settings hold the agents and their accounts, the connections, and the app's icon, kept in the profile.

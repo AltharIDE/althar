@@ -39,7 +39,7 @@ export const Permission: Story = {
   args: { detail: <NeedCommand command={PUBLISH.command} agent={PUBLISH.agent} step={PUBLISH.step} />, actions: permission },
 }
 
-/** A change ready to accept: its pull request, size, checks and who led and reviewed it. Accepting means reading it first, so Review opens the dock. */
+/** A change ready to accept: its pull request, size, checks and who led and reviewed it. Accepting means reading it first, so Review opens the task. */
 export const ReadyToAccept: Story = {
   args: {
     kind: READY.kind,
@@ -126,9 +126,6 @@ export const Stuck: Story = {
   },
 }
 
-/** Open in the dock beside the home: ringed in ink. */
-export const Current: Story = { args: { ...Permission.args, current: true } }
-
 /** Nowhere to open it: the title is words. */
 export const WithoutOpening: Story = { args: { ...Permission.args, onOpen: undefined } }
 
@@ -191,7 +188,6 @@ export const AllStates: Story = {
         { state: 'decision', node: <NeedCard {...args} {...Decision.args} /> },
         { state: 'sign-in', node: <NeedCard {...args} {...SignIn.args} /> },
         { state: 'stuck', node: <NeedCard {...args} {...Stuck.args} /> },
-        { state: 'current', node: <NeedCard {...args} {...Permission.args} current /> },
         { state: 'hover', node: <NeedCard {...args} {...Permission.args} /> },
         { state: 'focus', node: <NeedCard {...args} {...Permission.args} /> },
         {

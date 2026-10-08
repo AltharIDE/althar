@@ -10,9 +10,11 @@ import s from './HomeSection.module.css'
 
 /*
  * One of the home's sections, in the order you deal with them: what waits on
- * you, what runs, and what the loop did since you last looked. Each is headed
- * by its glyph, as the board's lanes are, and says how many it holds. Violet
- * is only for what waits on you, and only while something does.
+ * you, what is in progress, and what the loop did since you last looked. Each is
+ * headed by its glyph, as the board's lanes are, and says how many it holds.
+ * Violet is only for what waits on you, and only while something does. In
+ * progress is not the same as running: a task nobody is working on is in it
+ * too, and says so on its row.
  */
 
 export interface HomeSectionText {
@@ -26,13 +28,13 @@ export interface HomeSectionText {
 export const homeSectionText: HomeSectionText = {
   title: {
     [HomeLane.Yours]: 'Needs you',
-    [HomeLane.Running]: 'Running',
+    [HomeLane.Running]: 'In progress',
     [HomeLane.Since]: 'Since you looked',
   },
   since: (when) => `Since you looked, ${when}`,
   empty: {
     [HomeLane.Yours]: 'Nothing is waiting on you.',
-    [HomeLane.Running]: 'Nothing is running.',
+    [HomeLane.Running]: 'Nothing is in progress.',
     [HomeLane.Since]: 'Nothing has happened since.',
   },
 }
@@ -58,7 +60,7 @@ function Glyph({ lane, count }: { lane: HomeLane; count: number }) {
     case HomeLane.Yours:
       return <span className={count > 0 ? s.you : s.none} aria-hidden="true" />
     case HomeLane.Running:
-      return <LiveDot ping={count > 0} />
+      return <LiveDot />
     case HomeLane.Since:
       return <Icon name="clock" size={12} className={s.since} />
     default:

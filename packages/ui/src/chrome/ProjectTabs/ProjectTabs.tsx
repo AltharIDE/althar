@@ -15,8 +15,7 @@ import s from './ProjectTabs.module.css'
  * The top of the window: a tab for the home, then one for each project the
  * person keeps open, so going from one project to another is one press.
  * Each project's tab carries its mark, with the running arc while work runs
- * there, and a violet dot after its name while anything there waits on you;
- * the home's has the dot while anything waits in any project. How many is
+ * there, and a violet dot after its name while anything there waits on you; the home's has the dot while anything waits in any project. How many is
  * read out, not shown. The tab that has the window
  * joins the screen's own bar below it. A project's tab closes from its ×,
  * and the + opens one of the other projects, or a folder as a new one.

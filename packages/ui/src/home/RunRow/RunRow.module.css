@@ -11,10 +11,6 @@
 .row:hover {
   background: var(--n-1);
 }
-.row[aria-current='true'] {
-  background: var(--paper);
-  box-shadow: inset 0 0 0 1.5px var(--t-1);
-}
 .row:has(.open:focus-visible) {
   outline: 1.5px solid var(--signal);
   outline-offset: 0;

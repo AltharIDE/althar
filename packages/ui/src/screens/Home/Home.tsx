@@ -14,12 +14,11 @@ import s from './Home.module.css'
 /*
  * The window you come back to, once there are projects. One stream across
  * every project, in the order you deal with it: what waits on you, what
- * runs, and what the loop did since you last looked. Beside it, every
- * project, as the way into each.
+ * is in progress, and what the loop did since you last looked. Beside it,
+ * every project, as the way into each.
  *
  * A call that can be answered in a click is answered where it is; anything
- * that needs reading opens in the dock, which takes the projects' place.
- * There is no composer here: every coordinator belongs to a project, so you
+ * else opens its task. There is no side panel to read it in. There is no composer here: every coordinator belongs to a project, so you
  * talk to one in its project. The window's bar is the consumer's.
  */
 
@@ -39,7 +38,7 @@ export const homeText: HomeText = {
 }
 
 /** A running task, as its row is given it. */
-export type HomeRun = Omit<RunRowProps, 'onOpen' | 'current' | 'text'> & { id: string }
+export type HomeRun = Omit<RunRowProps, 'onOpen' | 'text'> & { id: string }
 
 /** Something the loop did, as its line is given it. */
 export type HomeEvent = Omit<SinceRowProps, 'onOpen' | 'text'> & { id: string }
@@ -57,10 +56,6 @@ export interface HomeProps {
   /** When you last looked: 3 h ago. */
   looked: string
   projects: readonly HomeProject[]
-  /** The task open in the dock, by id. */
-  current?: string
-  /** What is open beside the stream, in the projects' place: a Dock. */
-  dock?: ReactNode
   onOpenTask?: (id: string) => void
   /** Open what something the loop did happened to, by the event's id. */
   onOpenEvent?: (id: string) => void
@@ -78,8 +73,6 @@ export function Home({
   since,
   looked,
   projects,
-  current,
-  dock,
   onOpenTask,
   onOpenEvent,
   onOpenProject,
@@ -104,7 +97,7 @@ export function Home({
               <ul className={s.rows}>
                 {running.map(({ id, ...run }) => (
                   <li key={id}>
-                    <RunRow {...run} current={current === id} {...(onOpenTask ? { onOpen: () => onOpenTask(id) } : {})} />
+                    <RunRow {...run} {...(onOpenTask ? { onOpen: () => onOpenTask(id) } : {})} />
                   </li>
                 ))}
               </ul>
@@ -124,25 +117,21 @@ export function Home({
         </div>
       </main>
 
-      {dock ? (
-        <div className={s.dock}>{dock}</div>
-      ) : (
-        <aside className={s.projects} aria-labelledby={projectsId}>
-          <header className={s.projectsHead}>
-            <Heading level={2} id={projectsId} className={s.projectsTitle}>
-              {t.projects}
-            </Heading>
-            {onOpenFolder && <IconButton icon="plus" label={t.openFolder} kbd={t.openFolderKbd} size="small" onClick={onOpenFolder} />}
-          </header>
-          <ul className={s.list}>
-            {projects.map(({ id, ...project }) => (
-              <li key={id}>
-                <ProjectRow {...project} {...(onOpenProject ? { onOpen: () => onOpenProject(id) } : {})} />
-              </li>
-            ))}
-          </ul>
-        </aside>
-      )}
+      <aside className={s.projects} aria-labelledby={projectsId}>
+        <header className={s.projectsHead}>
+          <Heading level={2} id={projectsId} className={s.projectsTitle}>
+            {t.projects}
+          </Heading>
+          {onOpenFolder && <IconButton icon="plus" label={t.openFolder} kbd={t.openFolderKbd} size="small" onClick={onOpenFolder} />}
+        </header>
+        <ul className={s.list}>
+          {projects.map(({ id, ...project }) => (
+            <li key={id}>
+              <ProjectRow {...project} {...(onOpenProject ? { onOpen: () => onOpenProject(id) } : {})} />
+            </li>
+          ))}
+        </ul>
+      </aside>
     </div>
   )
 }

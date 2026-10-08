@@ -1,4 +1,4 @@
-/* The home: the stream, and the projects or the dock beside it. */
+/* The home: the stream, and the projects beside it. */
 .home {
   display: flex;
   height: 100%;
@@ -75,9 +75,4 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
-.dock {
-  flex: none;
-  width: 440px;
-  min-height: 0;
 }

@@ -47,7 +47,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Reopen | a new run on a finished task | Only for a task that is done. |
 | Althar restarted | reconciliation after process loss | The thread line shown while Althar checks what the lead had done, so nothing runs twice. |
 
-A call's kind reads the same everywhere it shows: on the board, in the dock, in the bar's preview and on the home.
+A call's kind reads the same everywhere it shows: on the board, in the bar's preview and on the home.
 
 ## What comes back
 

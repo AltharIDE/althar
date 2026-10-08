@@ -53,32 +53,46 @@ export interface WorkStatusProps {
   yours: number
   /** Open the first call that waits on you. Without it, the count is words, not a button. */
   onYours?: () => void
+  /** The dot rings. Only the home's bar asks for it: it is the one place where what needs you is meant to pull the eye. */
+  ring?: boolean
   /** What waits on you, shown while the count is pointed at; without them, no preview. */
   needs?: ReadonlyArray<WorkNeed>
   className?: string
   text?: Partial<WorkStatusText>
 }
 
-export function WorkStatus({ running, yours, onYours, needs, className, text }: WorkStatusProps) {
+export function WorkStatus({ running, yours, onYours, needs, ring = false, className, text }: WorkStatusProps) {
   const t = { ...workStatusText, ...text }
   return (
     <span className={cx(s.status, className)}>
       {running > 0 && (
         <span className={s.running}>
-          <LiveDot ping />
+          <LiveDot />
           {t.running(running)}
         </span>
       )}
-      <Yours yours={yours} onYours={onYours} needs={needs} t={t} />
+      <Yours yours={yours} onYours={onYours} needs={needs} ring={ring} t={t} />
     </span>
   )
 }
 
-function Yours({ yours, onYours, needs, t }: { yours: number; onYours?: () => void; needs?: ReadonlyArray<WorkNeed>; t: WorkStatusText }) {
+function Yours({
+  yours,
+  onYours,
+  needs,
+  ring,
+  t,
+}: {
+  yours: number
+  onYours?: () => void
+  needs?: ReadonlyArray<WorkNeed>
+  ring: boolean
+  t: WorkStatusText
+}) {
   if (yours === 0) return <span className={s.none}>{t.none}</span>
   const said = (
     <>
-      <span className={s.dot} aria-hidden="true" />
+      <LiveDot signal ping={ring} className={s.dot} />
       {t.yours(yours)}
     </>
   )

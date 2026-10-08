@@ -11,10 +11,21 @@ export type LiveDotProps = RootProps<
     urgent?: boolean
     /** Breathing and a size smaller: new things waiting, below. */
     pulse?: boolean
+    /** Violet, not cobalt: something waits on you. The only dot that asks to be seen. */
+    signal?: boolean
   }
 >
 
-/** Something live: running, or listening. Cobalt, and decoration only: the words beside it say what is live. */
-export function LiveDot({ ping = false, urgent = false, pulse = false, className, ...rest }: LiveDotProps) {
-  return <span className={cx(s.dot, ping && s.ping, urgent && s.urgent, pulse && s.pulse, className)} aria-hidden="true" {...rest} />
+/**
+ * Something live: running, or listening. Cobalt, and decoration only: the words beside it say what is live. Running
+ * stays still, so it doesn't pull the eye; a violet one, for what waits on you, rings only where asked.
+ */
+export function LiveDot({ ping = false, urgent = false, pulse = false, signal = false, className, ...rest }: LiveDotProps) {
+  return (
+    <span
+      className={cx(s.dot, signal && s.signal, ping && s.ping, urgent && s.urgent, pulse && s.pulse, className)}
+      aria-hidden="true"
+      {...rest}
+    />
+  )
 }

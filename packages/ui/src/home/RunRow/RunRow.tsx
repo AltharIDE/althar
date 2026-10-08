@@ -10,7 +10,7 @@ import { type ProjectRef, ProjectWord } from '../ProjectWord/ProjectWord'
 import s from './RunRow.module.css'
 
 /*
- * A task running in any project, as a row on the home: its title, whose it
+ * A task in progress in any project, as a row on the home: its title, whose it
  * is, its steps as a track with the one it is on and who is on it, and how
  * long it has run. A task that stands still says why in a word: held for a
  * reset, waiting on you. The whole row opens the task.
@@ -43,8 +43,6 @@ export type RunRowProps = RootProps<
     note?: string
     /** Open the task. Without it, the row is words. */
     onOpen?: () => void
-    /** It is open in the dock. */
-    current?: boolean
     text?: Partial<RunRowText>
   }
 >
@@ -60,14 +58,13 @@ export function RunRow({
   elapsed,
   note,
   onOpen,
-  current,
   className,
   text,
   ...rest
 }: RunRowProps) {
   const t = { ...runRowText, ...text }
   return (
-    <div className={cx(s.row, className)} data-status={status} aria-current={current || undefined} {...rest}>
+    <div className={cx(s.row, className)} data-status={status} {...rest}>
       <span className={s.glyph}>{status === TaskStatus.Running ? <LiveDot /> : <TaskGlyph status={status} />}</span>
       <div className={s.main}>
         {onOpen ? (
