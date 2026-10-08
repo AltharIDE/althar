@@ -2,7 +2,7 @@
      src/assets/{board,conversation}.png -> AVIF and WebP at a few widths
      public/favicon.svg                  -> favicon.ico, apple-touch-icon, manifest icons
      scripts/og.html                     -> public/og.png, the 1200×630 social card
-     scripts/readme-header.html          -> docs/assets/readme-header.png, the repo README's banner at 2× */
+   The repository README's banner is drawn by the brand package (brand/banners). */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -66,16 +66,6 @@ try {
   await page.evaluate(() => document.fonts.ready)
   const shot = await page.screenshot({ type: 'png' })
   await sharp(shot).png({ compressionLevel: 9, palette: true, quality: 95 }).toFile(`${pub}/og.png`)
-
-  /* ---- README banner ---- */
-  const docs = resolve(root, '../../docs/assets')
-  await mkdir(docs, { recursive: true })
-  const banner = await browser.newPage({ viewport: { width: 1280, height: 400 }, deviceScaleFactor: 2 })
-  await banner.goto(pathToFileURL(resolve(root, 'scripts/readme-header.html')).href)
-  /* it draws on canvases once its fonts are in, and says when it's done */
-  await banner.waitForFunction(() => document.body.dataset.ready === '1')
-  const header = await banner.screenshot({ type: 'png' })
-  await sharp(header).png({ compressionLevel: 9, palette: true, quality: 95 }).toFile(`${docs}/readme-header.png`)
 } finally {
   await browser.close()
 }
