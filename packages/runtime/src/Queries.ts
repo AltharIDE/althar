@@ -103,7 +103,7 @@ interface ItemRow {
   readonly kind: string
   readonly content: string
   readonly agentId: string | null
-  readonly inputState: 'queued' | 'delivered' | 'superseded' | null
+  readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
   readonly disposition: string | null
   /** For a tool call that asked: what was decided, last. */
   readonly decision: string | null
@@ -480,7 +480,8 @@ export class Queries extends Context.Service<
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id
             WHERE i.thread_id = ${threadId}
-              AND ${where.itemId === undefined ? sql`1 = 1` : sql`i.id = ${where.itemId}`}
+              -- A message taken back takes no place on a page; read by id, it says it was taken back.
+              AND ${where.itemId === undefined ? sql`(u.state IS NULL OR u.state <> 'withdrawn')` : sql`i.id = ${where.itemId}`}
               AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}
             ORDER BY i.sequence DESC LIMIT ${where.limit + 1}`
           // One more than asked for says whether there are earlier ones.

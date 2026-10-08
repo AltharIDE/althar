@@ -101,6 +101,8 @@ export interface Client {
     readonly body: string
     readonly disposition: 'after_current' | 'interrupt_and_continue'
   }) => Promise<void>
+  /** Takes back a message still waiting its turn, by its item. */
+  readonly takeBack: (itemId: string) => Promise<void>
   readonly answer: (input: {
     readonly attentionId: string
     readonly decision: 'allow' | 'reject'
@@ -257,6 +259,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     stopSession: (threadId) => command((commandId) => api.StopSession({ commandId, threadId })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
+    takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),

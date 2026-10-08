@@ -245,6 +245,8 @@ export interface ThreadSource {
   readonly items: ReadonlyArray<ThreadItem>
   readonly turnRunning: boolean
   readonly worktree: string | null
+  /** What waits its turn is in the composer's queue, not here: see `queueShown`. The turn running, when not said. */
+  readonly queue?: boolean
 }
 
 /** A turn's work and what it said: all but its last message folds, and all of it before a step's result. */
@@ -284,6 +286,7 @@ export const blocksOf = (
   now: string = new Date().toISOString(),
 ): ReadonlyArray<Block> => {
   const { turnRunning, worktree } = source
+  const queue = source.queue ?? turnRunning
   const blocks: Array<Block> = []
   /** When each turn began and last grew, by its id. */
   const spans = new Map<string, { from: string; to: string }>()
@@ -301,6 +304,8 @@ export const blocksOf = (
   for (const item of source.items) {
     switch (item.kind) {
       case 'user_message': {
+        // What waits its turn shows in the composer's queue, where it can be edited or taken back; what was taken back is gone.
+        if (item.input?.state === 'withdrawn' || (queue && item.input?.state === 'queued' && !item.input.interrupting)) continue
         const delivery =
           item.input?.state === 'queued' ? (item.input.interrupting ? Delivery.Interrupting : Delivery.Queued) : Delivery.Delivered
         blocks.push({ kind: 'you', id: item.id, text: item.content.text, at: ago(item.createdAt), delivery, links: item.content.links })

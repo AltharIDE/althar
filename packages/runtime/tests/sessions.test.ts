@@ -4,14 +4,15 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect, Option } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { AttentionClosed, NoSession, NotFound, SessionFailed, SessionRunning } from '../src/errors'
+import { AlreadyDelivered, AttentionClosed, NoSession, NotFound, SessionFailed, SessionRunning } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { Permissions } from '../src/Permissions'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
+import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { errorClassOf, promptFor, Sessions } from '../src/Sessions'
 import { items, repository, runtime, task, turns, until } from './support'
@@ -20,6 +21,23 @@ const say = (threadId: string, body: string, disposition: 'after_current' | 'int
   Effect.gen(function* () {
     const sessions = yield* Sessions
     return yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body, disposition })
+  })
+
+/** The thread item of what the person said, and where that input stands. */
+const message = (inputId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{
+      itemId: string
+      state: string
+    }>`SELECT i.id AS item_id, u.state FROM thread_items i JOIN user_inputs u ON u.id = i.user_input_id WHERE u.id = ${inputId}`
+    return row ?? { itemId: '', state: 'missing' }
+  })
+
+const takeBack = (itemId: string) =>
+  Effect.gen(function* () {
+    const sessions = yield* Sessions
+    return yield* sessions.takeBack({ envelope: yield* Runtime.envelope('thread.take_back', { itemId }), itemId })
   })
 
 const done = (row: { readonly state: string }) => !['pending', 'delivered'].includes(row.state)
@@ -138,6 +156,62 @@ describe('sessions', () => {
         replies.at(-1),
         `echo: ${promptFor([{ body: 'use the retry helper', disposition: 'interrupt_and_continue' }], undefined)}`,
       )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('takes back a message waiting its turn, so the agent never reads it, and keeps one the agent has', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      yield* say(created.threadId, scenarios.slow)
+      yield* until(threadItems(created.threadId), (rows) => rows.some((item) => item.content.text === 'Starting'))
+      const dropped = yield* say(created.threadId, 'drop the cache')
+      const kept = yield* say(created.threadId, 'keep the retry')
+      const droppedItem = (yield* message(dropped.inputId)).itemId
+      yield* takeBack(droppedItem)
+      assert.strictEqual((yield* message(kept.inputId)).state, 'queued')
+      yield* sessions.interrupt(created.threadId)
+      const [, next] = yield* ended(created.threadId, 2)
+      assert.isTrue(next?.prompt?.includes('keep the retry'))
+      assert.isFalse(next?.prompt?.includes('drop the cache'))
+      assert.strictEqual((yield* message(dropped.inputId)).state, 'withdrawn')
+      // Taken back, it takes no place on a page of the thread, and read by itself it says so.
+      const queries = yield* Queries
+      assert.isFalse((yield* queries.thread(created.threadId)).items.some((item) => item.id === droppedItem))
+      const read = yield* queries.item(created.threadId, droppedItem)
+      assert.strictEqual(read.kind === 'user_message' ? read.input?.state : null, 'withdrawn')
+      // Once the agent has it, or once it is taken back, it stays as it is.
+      assert.instanceOf(yield* Effect.flip(takeBack((yield* message(kept.inputId)).itemId)), AlreadyDelivered)
+      assert.instanceOf(yield* Effect.flip(takeBack(droppedItem)), AlreadyDelivered)
+      assert.instanceOf(yield* Effect.flip(takeBack('item_missing')), NotFound)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+
+  it.live('never both gives a message to the agent and takes it back', () =>
+    Effect.gen(function* () {
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      // Taken back at once, or after letting the session run, so some go before a turn has them and some after.
+      for (let round = 0; round < 8; round += 1) {
+        const body = `round ${round}`
+        const sent = yield* say(created.threadId, body)
+        const itemId = (yield* message(sent.inputId)).itemId
+        if (round % 2 === 1) yield* Effect.yieldNow
+        const taken = yield* Effect.exit(takeBack(itemId))
+        const given = <A extends { readonly prompt: string | null }>(rows: ReadonlyArray<A>) =>
+          rows.filter((row) => row.prompt?.endsWith(body))
+        if (taken._tag === 'Success') {
+          // Taken back: it stays out of every turn, now and after.
+          assert.strictEqual((yield* message(sent.inputId)).state, 'withdrawn')
+          assert.isEmpty(given(yield* turns(created.threadId)))
+        } else {
+          // Too late: the agent has it, once.
+          const rows = yield* until(turns(created.threadId), (all) => given(all).some(done))
+          assert.lengthOf(given(rows), 1)
+          assert.strictEqual((yield* message(sent.inputId)).state, 'delivered')
+        }
+      }
     }).pipe(Effect.provide(runtime())),
   )
 
