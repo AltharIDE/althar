@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { arrive, Launch } from '../src/screens/Launch/Launch'
 import { COLUMN_COUNT, COLUMNS, drawColumn, drawGrain, jitter, PICTURE, toneOf } from '../src/screens/Launch/light'
-import { arrivalOf, AT, lightAt, markAt, SET, spring, springEasing } from '../src/screens/Launch/timeline'
+import { BORE, DOTS, halftone, inSection, PARTICLES, POINT_RADIUS } from '../src/screens/Launch/halftone'
+import { arrivalOf, AT, dotAt, lightAt, particleAt, pointAt, SETTLED, spring, springEasing } from '../src/screens/Launch/timeline'
 
 /*
  * The launch: the light it rises in, when each part moves, and the window
@@ -80,44 +81,59 @@ describe('when each part of the launch moves', () => {
   it('starts with no light and no mark', () => {
     const light = lightAt(0, null)
     expect(light.columns.every((column) => column.height === 0)).toBe(true)
-    expect(light.reach).toBe(0)
-    const mark = markAt(0, null, light.reach)
-    expect(mark.shown).toBe(0)
-    expect(mark.clear).toBe(0)
-    expect(mark.point).toBe(0)
-    expect(mark.bloom).toBe(0)
-    expect(mark.drop).toBeCloseTo(0.09)
+    expect(DOTS.every((dot) => dotAt(dot, 0, null) === null)).toBe(true)
+    expect(PARTICLES.every((_, i) => particleAt(i, 0) === null)).toBe(true)
+    expect(pointAt(0, null)).toBeNull()
   })
 
-  it('has the light up and the mark clear of it, in ink with its foot lit and its point all but set, by the time it may open', () => {
-    const light = lightAt(AT.set, null)
-    expect(light.reach).toBeGreaterThan(0.9)
-    expect(light.strength).toBe(1)
-    const middle = light.columns[Math.floor(COLUMN_COUNT / 2)]!
-    expect(middle.height).toBeGreaterThan(0.5)
-    const mark = markAt(AT.set, null, light.reach)
-    expect(mark.shown).toBe(1)
-    expect(mark.drop).toBeLessThan(0.005)
-    expect(mark.blur).toBeLessThan(0.5)
-    expect(mark.clear).toBeGreaterThan(0.95)
-    expect(mark.lit).toBeGreaterThan(0.8)
-    expect(mark.rim).toBeGreaterThan(0.8)
-    expect(mark.point).toBeGreaterThan(0.9)
-    expect(mark.bloom).toBeGreaterThan(0.35)
+  it('raises the dots out of the light below, the base first, and has every one in place, with the point grown, a moment before it may open', () => {
+    const base = DOTS.reduce((a, b) => (b.down > a.down ? b : a))
+    const tip = DOTS.reduce((a, b) => (b.down < a.down ? b : a))
+    const early = AT.dots.start + AT.dots.jitter + 60
+    const rising = dotAt(base, early, null)
+    expect(rising).not.toBeNull()
+    expect(rising!.y).toBeGreaterThan(base.y)
+    expect(rising!.r).toBeLessThan(base.r)
+    expect(dotAt(tip, AT.dots.start + 40, null)).toBeNull()
+    // Set and still a while before it may open, so the mark can be made out.
+    const held = AT.set - 200
+    for (const dot of DOTS) {
+      const at = dotAt(dot, held, null)!
+      expect(at.alpha).toBe(1)
+      // Within a tenth of a unit: under a pixel at the launch's size.
+      expect(Math.abs(at.x - dot.x)).toBeLessThan(0.1)
+      expect(Math.abs(at.y - dot.y)).toBeLessThan(0.1)
+    }
+    expect(pointAt(held, null)).toEqual({ x: BORE.x, y: BORE.y, r: POINT_RADIUS, alpha: 1 })
   })
 
-  it('sinks the light from the edges in and takes the mark into a blur', () => {
+  it('closes the particles in on the bore one after another, and grows the point as they arrive', () => {
+    const { particles } = AT
+    const first = particleAt(0, particles.start + particles.length / 2)!
+    const far = Math.hypot(first.x - BORE.x, first.y - BORE.y)
+    const later = particleAt(0, particles.start + particles.length * 0.9)!
+    expect(Math.hypot(later.x - BORE.x, later.y - BORE.y)).toBeLessThan(far)
+    expect(particleAt(0, particles.start + particles.length)).toBeNull()
+    expect(particleAt(PARTICLES.length - 1, particles.start + particles.length / 2)).toBeNull()
+    expect(particleAt(PARTICLES.length, particles.start + 200)).toBeNull()
+    const growing = pointAt(AT.point.start + AT.point.length / 2, null)!
+    expect(growing.r).toBeCloseTo(POINT_RADIUS / 2)
+  })
+
+  it('sinks the light from the edges in and lets the dots fall back into it, the base first', () => {
     const open = 2000
     const early = lightAt(open + 100, open)
     expect(early.columns[0]!.height).toBeLessThan(lightAt(open + 100, null).columns[0]!.height)
     const sunk = lightAt(open + AT.open.spread + AT.open.sink, open)
     expect(sunk.columns.every((column) => column.height === 0)).toBe(true)
-    expect(sunk.reach).toBe(0)
     expect(lightAt(open + AT.open.fade.start + AT.open.fade.length, open).strength).toBe(0)
-    const gone = markAt(open + AT.open.mark.start + AT.open.mark.length, open, 0)
-    expect(gone.shown).toBe(0)
-    expect(gone.up).toBe(10)
-    expect(gone.blur).toBeGreaterThan(10)
+    const base = DOTS.reduce((a, b) => (b.down > a.down ? b : a))
+    const tip = DOTS.reduce((a, b) => (b.down < a.down ? b : a))
+    const falling = open + AT.open.fall.length / 2
+    expect(dotAt(base, falling, open)!.y).toBeGreaterThan(dotAt(tip, falling, open)!.y - tip.y + base.y)
+    const gone = open + AT.open.fall.spread + AT.open.fall.length
+    expect(DOTS.every((dot) => dotAt(dot, gone, open) === null)).toBe(true)
+    expect(pointAt(gone, open)!.alpha).toBe(0)
     // The veil is gone by the time it goes.
     expect(AT.through).toBeGreaterThanOrEqual(AT.open.fade.start + AT.open.fade.length)
     expect(AT.through).toBeGreaterThanOrEqual(AT.open.paper.start + AT.open.paper.length)
@@ -137,17 +153,36 @@ describe('when each part of the launch moves', () => {
     expect(duration).toBeLessThan(1200)
   })
 
-  it('brings the point out of the light in the bore without a bounce: it never grows past its size', () => {
-    const points = Array.from({ length: 200 }, (_, i) => markAt(i * 10, null, 1).point)
-    expect(Math.max(...points)).toBeLessThanOrEqual(1)
-    const before = markAt(AT.point.start, null, 1)
-    expect(before.point).toBe(0)
-    expect(before.bloom).toBeGreaterThan(0)
-    expect(markAt(AT.gather.start + AT.gather.length, null, 1).focus).toBeLessThan(before.focus)
+  it('has the mark set at once, every dot in place and the point grown, when it opens at once', () => {
+    expect(spring(SETTLED, 0.5, 0.5)).toBe(1)
+    expect(DOTS.every((dot) => dotAt(dot, SETTLED, null)?.alpha === 1)).toBe(true)
+    expect(pointAt(SETTLED, null)?.r).toBe(POINT_RADIUS)
+  })
+})
+
+describe('the halftone', () => {
+  it('knows the section: in it below the bore and in the tips, not in the bore, the hollows or beyond the corners', () => {
+    expect(inSection(12, 16.8)).toBe(true)
+    expect(inSection(12, 6.5)).toBe(true)
+    expect(inSection(18.8, 18.6)).toBe(true)
+    expect(inSection(14.2, 13.2)).toBe(true)
+    expect(inSection(12, 14.4)).toBe(false)
+    expect(inSection(14.8, 12.6)).toBe(false)
+    // The base is hollowed too, up to about 17.3 at its middle.
+    expect(inSection(12, 17.5)).toBe(false)
+    expect(inSection(12, 19.6)).toBe(false)
+    expect(inSection(21, 19)).toBe(false)
   })
 
-  it('has the mark set, in ink and with its point, when it opens at once', () => {
-    expect(SET).toMatchObject({ shown: 1, blur: 0, clear: 1, point: 1, lit: 0, rim: 0 })
+  it('puts dots only in the section, heavier toward the base, the same every time', () => {
+    expect(DOTS.length).toBeGreaterThan(120)
+    expect(DOTS.every((dot) => inSection(dot.x, dot.y))).toBe(true)
+    const base = DOTS.filter((dot) => dot.down > 0.85)
+    const tip = DOTS.filter((dot) => dot.down < 0.2)
+    const mean = (dots: typeof DOTS) => dots.reduce((sum, dot) => sum + dot.r, 0) / dots.length
+    expect(mean(base)).toBeGreaterThan(mean(tip))
+    expect(halftone()).toEqual(DOTS)
+    expect(halftone(0.25).length).toBeGreaterThan(DOTS.length * 3)
   })
 })
 
@@ -166,7 +201,7 @@ describe('the launch', () => {
       </Launch>,
     )
     expect(container.querySelector('[inert]')).not.toBeNull()
-    expect(container.querySelector('[aria-hidden="true"] svg')).not.toBeNull()
+    expect(container.querySelector('[aria-hidden="true"] canvas')).not.toBeNull()
     act(() => void vi.advanceTimersByTime(AT.set + 1000))
     // Up, but what is behind isn't ready: it holds, the light standing.
     expect(onDone).not.toHaveBeenCalled()
@@ -181,7 +216,7 @@ describe('the launch', () => {
     act(() => void vi.advanceTimersByTime(AT.through + AT.settle + 100))
     expect(onDone).toHaveBeenCalledOnce()
     expect(container.querySelector('[inert]')).toBeNull()
-    expect(container.querySelector('svg')).toBeNull()
+    expect(container.querySelector('canvas')).toBeNull()
     expect(screen.getByRole('button', { name: 'Behind' })).toBeTruthy()
   })
 
@@ -207,6 +242,43 @@ describe('the launch', () => {
     expect(delays).toEqual([arrivalOf(10 / 800, 0), arrivalOf(100 / 800, 0), arrivalOf(400 / 800, 0.6)])
     expect((animate.mock.calls[0]![1] as KeyframeAnimationOptions).fill).toBe('backwards')
     expect((animate.mock.calls[0]![1] as KeyframeAnimationOptions).easing).toMatch(/^linear\(/)
+  })
+
+  it('draws the mark on its canvas in cobalt: a dot for each of the halftone’s, once they are up, and the point', () => {
+    const arcs: Array<number> = []
+    let frameArcs = 0
+    // The light's columns and grain draw on canvases too: everything else they ask of it does nothing.
+    const own = {
+      setTransform: () => {
+        arcs.push(frameArcs)
+        frameArcs = 0
+      },
+      arc: () => void frameArcs++,
+      createLinearGradient: () => ({ addColorStop: () => undefined }),
+      createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+      fillStyle: '' as unknown,
+      globalAlpha: 1,
+      filter: '',
+    }
+    const context = new Proxy(own, { get: (target, name) => (name in target ? target[name as keyof typeof own] : () => undefined) })
+    const drawing = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockImplementation((() => context) as unknown as HTMLCanvasElement['getContext'])
+    const picture = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:,')
+    try {
+      const { container } = render(<Launch ready={false} />)
+      act(() => void vi.advanceTimersByTime(AT.set + 200))
+      const canvas = container.querySelector<HTMLCanvasElement>('[aria-hidden="true"] > canvas')!
+      // Placed about the mark, at its smallest in a window with no size: 22 grid units across at 4.5 px each.
+      expect(canvas.style.width).toBe(`${22 * 4.5}px`)
+      expect(own.fillStyle).toBe('#2b3bff')
+      // Set: every dot and the point; on the way, the point's particles too.
+      expect(arcs.at(-1)).toBe(DOTS.length + 1)
+      expect(Math.max(...arcs)).toBeGreaterThan(DOTS.length + 1)
+    } finally {
+      drawing.mockRestore()
+      picture.mockRestore()
+    }
   })
 
   it('skips to the mark set on a click', () => {

@@ -1,15 +1,16 @@
-import { type ReactNode, useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 
-import { LOGO_BORE, LOGO_SECTION } from '../../foundations/Logo/Logo'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import { DOTS, PARTICLES } from './halftone'
 import { COLUMNS, drawColumn, drawGrain, PICTURE } from './light'
-import { arrivalOf, AT, clamp, lightAt, type Mark, markAt, SET, springEasing } from './timeline'
+import { arrivalOf, AT, clamp, dotAt, lightAt, particleAt, pointAt, SETTLED, type Speck, springEasing } from './timeline'
 import s from './Launch.module.css'
 
 /*
  * The window opening. A light rises off the bottom of the window and the
- * mark comes up out of it (see timeline.ts), on a veil over what it opens
+ * mark comes up out of it as a halftone, dot by dot (see timeline.ts), on a
+ * small canvas, on a veil over what it opens
  * onto, which is drawn under it as soon as it is given. Once both are done,
  * the light sinks back, the veil's paper goes, and what is behind arrives
  * piece by piece: whatever is marked `data-arrive`, and the children of
@@ -68,10 +69,10 @@ export type LaunchProps = RootProps<
   }
 >
 
-/** The bore's middle, on the mark's 24 grid (foundations/Logo), and the sizes drawn about it. */
+/** What the mark's canvas covers, in the mark's 24 grid: the section, with room below for the dots to rise from and fall to. */
+const REGION = { x: 1, y: 4.5, width: 22, height: 30 }
+/** The bore's middle, where the mark is placed from. */
 const BORE = { x: 12, y: 14.4 }
-const BORE_RADIUS = 1.8
-const POINT_RADIUS = 0.8
 
 /** Placing the mark in a window: px per grid unit, and where its bore is, a little above the middle. */
 const placeIn = (width: number, height: number) => ({
@@ -84,7 +85,6 @@ const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.
 
 export function Launch({ ready, quick = false, onDone, children, className, ...rest }: LaunchProps) {
   const [done, setDone] = useState(false)
-  const id = `launch-${useId().replace(/[^a-zA-Z0-9-]/g, '')}`
   const root = useRef<HTMLDivElement>(null)
   const behind = useRef<HTMLDivElement>(null)
   const veil = useRef<HTMLDivElement>(null)
@@ -92,11 +92,7 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
   const light = useRef<HTMLDivElement>(null)
   const grain = useRef<HTMLDivElement>(null)
   const columns = useRef<Array<HTMLCanvasElement | null>>([])
-  const mark = useRef<SVGSVGElement>(null)
-  const lit = useRef<SVGGElement>(null)
-  const rim = useRef<SVGGElement>(null)
-  const bloom = useRef<SVGCircleElement>(null)
-  const point = useRef<SVGCircleElement>(null)
+  const mark = useRef<HTMLCanvasElement>(null)
   // Read by the frames as they come, not as they were when the frames began.
   const readyNow = useRef(ready)
   useEffect(() => void (readyNow.current = ready), [ready])
@@ -128,29 +124,40 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
     let open: number | null = null
     let placed = ''
 
-    const drawMark = (m: Mark, width: number, height: number) => {
+    const context = mark.current?.getContext('2d') ?? null
+    const cobalt = (root.current && getComputedStyle(root.current).getPropertyValue('--live').trim()) || '#2b3bff'
+    const speck = (draw: CanvasRenderingContext2D, item: Speck | null) => {
+      if (item === null) return
+      draw.globalAlpha = item.alpha
+      draw.beginPath()
+      draw.arc(item.x, item.y, item.r, 0, Math.PI * 2)
+      draw.fill()
+    }
+
+    /** The mark as it is at `t`: its dots, the point's particles, and the point, drawn in the mark's grid. */
+    const drawMark = (t: number, width: number, height: number) => {
+      const canvas = mark.current
+      if (canvas === null || context === null) return
       const place = placeIn(width, height)
-      const svg = mark.current
-      if (svg !== null) {
-        // Placed when the window's size changes, not on every frame.
-        const where = `${place.x - BORE.x * place.k}px ${place.y - BORE.y * place.k}px ${24 * place.k}px`
-        if (where !== placed) {
-          placed = where
-          svg.style.left = `${place.x - BORE.x * place.k}px`
-          svg.style.top = `${place.y - BORE.y * place.k}px`
-          svg.style.width = svg.style.height = `${24 * place.k}px`
-        }
-        svg.style.opacity = String(m.shown)
-        svg.style.filter = m.blur > 0.05 ? `blur(${m.blur.toFixed(2)}px)` : ''
-        svg.style.transform = `translateY(${(m.drop * height - m.up).toFixed(2)}px) scale(${m.scale.toFixed(4)})`
-        svg.style.setProperty('--clear', m.clear.toFixed(3))
+      const scale = place.k * (window.devicePixelRatio || 1)
+      // Placed when the window's size changes, not on every frame.
+      const where = `${width}x${height}@${scale}`
+      if (where !== placed) {
+        placed = where
+        canvas.style.left = `${place.x + (REGION.x - BORE.x) * place.k}px`
+        canvas.style.top = `${place.y + (REGION.y - BORE.y) * place.k}px`
+        canvas.style.width = `${REGION.width * place.k}px`
+        canvas.style.height = `${REGION.height * place.k}px`
+        canvas.width = Math.round(REGION.width * scale)
+        canvas.height = Math.round(REGION.height * scale)
       }
-      lit.current?.setAttribute('opacity', m.lit.toFixed(3))
-      rim.current?.setAttribute('opacity', m.rim.toFixed(3))
-      bloom.current?.setAttribute('opacity', m.bloom.toFixed(3))
-      bloom.current?.setAttribute('r', (BORE_RADIUS * m.focus).toFixed(3))
-      point.current?.setAttribute('r', (POINT_RADIUS * (0.4 + 0.6 * m.point)).toFixed(3))
-      point.current?.setAttribute('opacity', m.point.toFixed(3))
+      context.setTransform(scale, 0, 0, scale, -REGION.x * scale, -REGION.y * scale)
+      context.clearRect(REGION.x, REGION.y, REGION.width, REGION.height)
+      context.fillStyle = cobalt
+      for (const dot of DOTS) speck(context, dotAt(dot, t, open))
+      for (let i = 0; i < PARTICLES.length; i++) speck(context, particleAt(i, t))
+      speck(context, pointAt(t, open))
+      context.globalAlpha = 1
     }
 
     /** Fades `element` out, on the compositor, starting `delay` ms from now. */
@@ -174,7 +181,7 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
       const height = root.current?.clientHeight ?? 0
       if (fast) {
         // Set, then the veil fades off what is behind once it is ready.
-        drawMark(SET, width, height)
+        drawMark(SETTLED, width, height)
         if (open === null && readyAt !== null && now - start >= AT.quick.hold && now - readyAt >= AT.settle) {
           open = now
           fadeOut(veil.current, AT.quick.fade)
@@ -197,7 +204,7 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
       })
       if (light.current !== null) light.current.style.opacity = String(l.strength)
       if (grain.current !== null) grain.current.style.opacity = String(l.grain)
-      drawMark(markAt(t, open, l.reach), width, height)
+      drawMark(t, width, height)
       if (open !== null && t - open >= AT.through) return end()
       frame = requestAnimationFrame(tick)
     }
@@ -239,46 +246,7 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
             })}
             <div ref={grain} className={s.grain} />
           </div>
-          <svg ref={mark} className={s.mark} viewBox="0 0 24 24">
-            <defs>
-              <clipPath id={`${id}-section`}>
-                <path d={LOGO_SECTION + LOGO_BORE} clipRule="evenodd" />
-              </clipPath>
-              <filter id={`${id}-glow`} x="-1" y="-1" width="3" height="3">
-                <feGaussianBlur stdDeviation="0.45" />
-              </filter>
-              {/* The light on the mark's foot, from below. */}
-              <linearGradient id={`${id}-foot`} gradientUnits="userSpaceOnUse" x1="0" y1="19.5" x2="0" y2="14.6">
-                <stop offset="0" className={s.footLow} />
-                <stop offset="0.35" className={s.footMiddle} />
-                <stop offset="1" className={s.footHigh} />
-              </linearGradient>
-              {/* Its edge, lit only from below. */}
-              <linearGradient id={`${id}-under`} gradientUnits="userSpaceOnUse" x1="0" y1="19.5" x2="0" y2="13.5">
-                <stop offset="0" stopColor="#fff" />
-                <stop offset="1" stopColor="#fff" stopOpacity="0" />
-              </linearGradient>
-              <mask id={`${id}-rim`} maskUnits="userSpaceOnUse" x="-12" y="-12" width="48" height="48">
-                <rect x="-12" y="-12" width="48" height="48" fill={`url(#${id}-under)`} />
-              </mask>
-              {/* The light in the bore, drawn about the glow whatever its size. */}
-              <radialGradient id={`${id}-bloom`}>
-                <stop offset="0.4" className={s.bloomMiddle} />
-                <stop offset="0.62" className={s.bloomEdge} />
-                <stop offset="0.85" className={s.bloomOut} />
-              </radialGradient>
-            </defs>
-            <path className={s.ink} d={LOGO_SECTION + LOGO_BORE} fillRule="evenodd" />
-            <g ref={lit} clipPath={`url(#${id}-section)`} opacity="0">
-              <rect width="24" height="24" fill={`url(#${id}-foot)`} />
-            </g>
-            <g ref={rim} mask={`url(#${id}-rim)`} opacity="0">
-              <path className={s.rimGlow} d={LOGO_SECTION} filter={`url(#${id}-glow)`} />
-              <path className={s.rimEdge} d={LOGO_SECTION} />
-            </g>
-            <circle ref={bloom} cx={BORE.x} cy={BORE.y} r={BORE_RADIUS} fill={`url(#${id}-bloom)`} opacity="0" />
-            <circle ref={point} className={s.point} cx={BORE.x} cy={BORE.y} r={0} opacity="0" />
-          </svg>
+          <canvas ref={mark} className={s.mark} />
         </div>
       )}
     </div>

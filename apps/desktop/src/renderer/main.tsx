@@ -4,7 +4,7 @@ import '@althar/ui/styles.css'
 import './app.css'
 
 import { RouterProvider } from '@tanstack/react-router'
-import { StrictMode, useEffect, useState } from 'react'
+import { StrictMode, startTransition, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { Launch, OpenFailed } from '@althar/ui/screens'
@@ -53,8 +53,10 @@ function Window() {
   const [failed, setFailed] = useState<string | null>(null)
   useEffect(
     () =>
-      void opening.then(setOpened, (failure: unknown) =>
-        setFailed(failure instanceof Error && failure.message !== '' ? failure.message : String(failure)),
+      // Drawn as a transition, a little at a time, so the launch playing over it keeps every frame.
+      void opening.then(
+        (given) => startTransition(() => setOpened(given)),
+        (failure: unknown) => setFailed(failure instanceof Error && failure.message !== '' ? failure.message : String(failure)),
       ),
     [],
   )

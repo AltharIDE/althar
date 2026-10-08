@@ -57,52 +57,6 @@
 }
 
 .mark {
-  /* The light's own pale cobalt, which the mark is in until it comes clear (--clear, 0 to 1) and is ink. */
-  --rising: color-mix(in oklab, var(--live) 62%, white);
   position: absolute;
-  overflow: visible;
-  opacity: 0;
-  transform-origin: 50% 60%;
-}
-.ink {
-  fill: color-mix(in oklab, var(--t-1) calc(var(--clear, 0) * 100%), var(--rising));
-}
-.footLow {
-  stop-color: color-mix(in oklab, var(--live) 52%, white);
-  stop-opacity: 0.9;
-}
-.footMiddle {
-  stop-color: color-mix(in oklab, var(--live) 92%, white);
-  stop-opacity: 0.5;
-}
-.footHigh {
-  stop-color: var(--live);
-  stop-opacity: 0;
-}
-.rimGlow {
-  fill: none;
-  stroke: color-mix(in oklab, var(--live) 34%, white);
-  stroke-width: 0.9;
-  opacity: 0.75;
-}
-.rimEdge {
-  fill: none;
-  stroke: color-mix(in oklab, var(--live) 8%, white);
-  stroke-width: 0.18;
-  stroke-linejoin: round;
-}
-.bloomMiddle {
-  stop-color: var(--live);
-  stop-opacity: 0.4;
-}
-.bloomEdge {
-  stop-color: var(--live);
-  stop-opacity: 0.1;
-}
-.bloomOut {
-  stop-color: var(--live);
-  stop-opacity: 0;
-}
-.point {
-  fill: var(--live);
+  pointer-events: none;
 }
