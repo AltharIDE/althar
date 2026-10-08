@@ -1,77 +1,112 @@
 /*
- * The launch: what it opens onto, under a veil the mark is drawn on. The
- * veil's lines are hairlines at any zoom (their widths are set with the
- * zoom); only the section is ink.
+ * The launch: a veil of paper with the light and the mark on it, and what it
+ * opens onto over the veil, hidden until it opens, rising in over both. What
+ * draws them sets their transforms, opacities and softness.
  */
 
 .launch {
   position: relative;
   height: 100%;
+  isolation: isolate;
 }
 
 .behind {
+  position: relative;
+  z-index: 1;
   height: 100%;
+}
+/* Until it opens: there, laid out, and not yet seen. */
+.waiting {
+  opacity: 0;
   will-change: transform, filter, opacity;
 }
 
 .veil {
-  /* What is being drawn is cobalt, and settles into ink (--settled, from 0 to 1). */
-  --drawn: color-mix(in oklab, var(--t-1) calc(var(--settled, 0) * 100%), var(--live));
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: var(--z-dialog);
-  display: block;
+  z-index: 0;
+  overflow: hidden;
+  background: var(--n-2);
   cursor: default;
 }
 
-.paper {
-  fill: var(--n-2);
+/* The light stands off the bottom, a little wider than the window, so its edges are never seen to end. */
+.light {
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  bottom: -4%;
+  height: 100%;
+}
+.column {
+  position: absolute;
+  bottom: 0;
+  height: 100%;
+  border-radius: 50% 50% 0 0 / 22% 22% 0 0;
+  transform: scaleY(0);
+  transform-origin: 50% 100%;
+  filter: blur(22px);
+  will-change: transform;
+}
+/* Grain only where the light is. */
+.grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  mix-blend-mode: soft-light;
+  mask-image: radial-gradient(ellipse 52% 62% at 50% 100%, #000 25%, transparent 78%);
+}
+.grain svg {
+  display: block;
 }
 
-.side,
-.circle,
-.scale,
-.major,
-.outline,
-.ring {
-  fill: none;
+.mark {
+  /* The light's own pale cobalt, which the mark is in until it comes clear (--clear, 0 to 1) and is ink. */
+  --rising: color-mix(in oklab, var(--live) 62%, white);
+  position: absolute;
+  overflow: visible;
+  opacity: 0;
+  transform-origin: 50% 60%;
 }
-
-.side {
-  stroke: var(--drawn);
-  stroke-opacity: 0.26;
-}
-
-.circle {
-  stroke: var(--drawn);
-  stroke-opacity: 0.18;
-}
-
-.scale {
-  stroke: var(--drawn);
-  stroke-opacity: 0.2;
-}
-
-.major {
-  stroke: var(--drawn);
-  stroke-opacity: 0.42;
-}
-
 .ink {
-  fill: var(--t-1);
+  fill: color-mix(in oklab, var(--t-1) calc(var(--clear, 0) * 100%), var(--rising));
 }
-
-.outline {
-  stroke: var(--drawn);
+.footLow {
+  stop-color: color-mix(in oklab, var(--live) 52%, white);
+  stop-opacity: 0.9;
+}
+.footMiddle {
+  stop-color: color-mix(in oklab, var(--live) 92%, white);
+  stop-opacity: 0.5;
+}
+.footHigh {
+  stop-color: var(--live);
+  stop-opacity: 0;
+}
+.rimGlow {
+  fill: none;
+  stroke: color-mix(in oklab, var(--live) 34%, white);
+  stroke-width: 0.9;
+  opacity: 0.75;
+}
+.rimEdge {
+  fill: none;
+  stroke: color-mix(in oklab, var(--live) 8%, white);
+  stroke-width: 0.18;
   stroke-linejoin: round;
 }
-
-.ring {
-  stroke: var(--live);
+.bloomMiddle {
+  stop-color: var(--live);
+  stop-opacity: 0.4;
 }
-
+.bloomEdge {
+  stop-color: var(--live);
+  stop-opacity: 0.1;
+}
+.bloomOut {
+  stop-color: var(--live);
+  stop-opacity: 0;
+}
 .point {
   fill: var(--live);
 }

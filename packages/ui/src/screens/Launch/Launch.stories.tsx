@@ -52,10 +52,10 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** As at a launch: what is behind is ready before the mark is drawn. */
+/** As at a launch: what is behind is ready before the mark is up. */
 export const Opening: Story = { render: () => <Replayable after={600} /> }
 
-/** What is behind takes longer than the drawing: the set mark holds, still, until it is ready. */
+/** What is behind takes longer than the mark: the light stands and the mark holds until it is ready. */
 export const Waiting: Story = { render: () => <Replayable after={3600} /> }
 
 /** After a reload, or with motion reduced: the mark set, then a fade. */
