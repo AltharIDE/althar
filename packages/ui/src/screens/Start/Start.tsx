@@ -53,12 +53,13 @@ export function Start({ onCreate, className, text, ...runtimes }: StartProps) {
   const ready = runtimes.runtimes.some((r) => r.state === RuntimeState.Ready)
   return (
     <div className={cx(s.start, className)}>
-      <h1 className={s.title}>
+      {/* Each part arrives on its own as the window opens (screens/Launch). */}
+      <h1 className={s.title} data-arrive>
         <Logo size={22} />
         {t.title}
       </h1>
 
-      <section aria-labelledby={agentsId} className={s.section}>
+      <section aria-labelledby={agentsId} className={s.section} data-arrive>
         <h2 id={agentsId} className={s.label}>
           {t.agents}
         </h2>
@@ -67,7 +68,7 @@ export function Start({ onCreate, className, text, ...runtimes }: StartProps) {
         {!ready && <p className={s.none}>{t.noneReady}</p>}
       </section>
 
-      <section aria-labelledby={beginId} className={s.section}>
+      <section aria-labelledby={beginId} className={s.section} data-arrive>
         <h2 id={beginId} className={s.label}>
           {t.begin}
         </h2>

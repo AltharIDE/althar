@@ -1,77 +1,66 @@
 /*
- * The launch: what it opens onto, under a veil the mark is drawn on. The
- * veil's lines are hairlines at any zoom (their widths are set with the
- * zoom); only the section is ink.
+ * The launch: what it opens onto, drawn from the start, under a veil of
+ * paper with the light and the mark on it. Opening, the paper goes and what
+ * is behind arrives under the light as it sinks. What draws them sets their
+ * transforms, opacities and softness.
  */
 
 .launch {
   position: relative;
   height: 100%;
+  isolation: isolate;
 }
 
 .behind {
+  position: relative;
+  z-index: 0;
   height: 100%;
-  will-change: transform, filter, opacity;
 }
 
 .veil {
-  /* What is being drawn is cobalt, and settles into ink (--settled, from 0 to 1). */
-  --drawn: color-mix(in oklab, var(--t-1) calc(var(--settled, 0) * 100%), var(--live));
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: var(--z-dialog);
-  display: block;
+  z-index: 1;
+  overflow: hidden;
   cursor: default;
 }
-
+/* Opening: only decoration is left on it, so the pointer goes through to what arrives. */
+.through {
+  pointer-events: none;
+}
 .paper {
-  fill: var(--n-2);
+  position: absolute;
+  inset: 0;
+  background: var(--n-2);
 }
 
-.side,
-.circle,
-.scale,
-.major,
-.outline,
-.ring {
-  fill: none;
+/* The light stands off the bottom, a little wider than the window, so its edges are never seen to end. */
+.light {
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  bottom: -4%;
+  height: 100%;
+}
+/* Each column is a small picture, soft already, stretched to its place: cheap to move. */
+.column {
+  position: absolute;
+  bottom: 0;
+  height: 100%;
+  transform: scaleY(0);
+  transform-origin: 50% 100%;
+  will-change: transform;
+}
+/* Grain only where the light is. */
+.grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background-size: 128px 128px;
+  mask-image: radial-gradient(ellipse 52% 62% at 50% 100%, #000 25%, transparent 78%);
 }
 
-.side {
-  stroke: var(--drawn);
-  stroke-opacity: 0.26;
-}
-
-.circle {
-  stroke: var(--drawn);
-  stroke-opacity: 0.18;
-}
-
-.scale {
-  stroke: var(--drawn);
-  stroke-opacity: 0.2;
-}
-
-.major {
-  stroke: var(--drawn);
-  stroke-opacity: 0.42;
-}
-
-.ink {
-  fill: var(--t-1);
-}
-
-.outline {
-  stroke: var(--drawn);
-  stroke-linejoin: round;
-}
-
-.ring {
-  stroke: var(--live);
-}
-
-.point {
-  fill: var(--live);
+.mark {
+  position: absolute;
+  pointer-events: none;
 }

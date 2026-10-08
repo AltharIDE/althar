@@ -74,14 +74,21 @@ export function HomeSection({ lane, count, when, children, headingLevel = 2, cla
   const title = lane === HomeLane.Since && when ? t.since(when) : t.title[lane]
   return (
     <section aria-labelledby={id} className={cx(s.section, className)} {...rest}>
-      <header className={s.head}>
+      {/* It arrives on its own as the window opens (screens/Launch). */}
+      <header className={s.head} data-arrive>
         <Glyph lane={lane} count={count} />
         <Heading level={headingLevel} id={id} className={s.title}>
           {title}
         </Heading>
         {count > 0 && lane !== HomeLane.Since && <span className={cx(s.count, lane === HomeLane.Yours && s.countYou)}>{count}</span>}
       </header>
-      {Children.toArray(children).length > 0 ? children : <p className={s.empty}>{t.empty[lane]}</p>}
+      {Children.toArray(children).length > 0 ? (
+        children
+      ) : (
+        <p className={s.empty} data-arrive>
+          {t.empty[lane]}
+        </p>
+      )}
     </section>
   )
 }
