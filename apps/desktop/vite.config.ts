@@ -1,5 +1,9 @@
+import { join } from 'node:path'
+
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite-plus'
+
+const pages = join(import.meta.dirname, 'src/renderer')
 
 /* The window: a React app, loaded from a file, so its paths are relative. */
 export default defineConfig(({ mode }) => ({
@@ -13,7 +17,15 @@ export default defineConfig(({ mode }) => ({
     },
   },
   // One bundle is right for a page read from disk; there is no network to split it for.
-  build: { outDir: '../../dist/renderer', emptyOutDir: true, target: 'chrome140', sourcemap: true, chunkSizeWarningLimit: 2_000 },
+  // Two pages: the window, and the edge of the screen (the island round the notch, or the menu bar's sheet).
+  build: {
+    outDir: '../../dist/renderer',
+    emptyOutDir: true,
+    target: 'chrome140',
+    sourcemap: true,
+    chunkSizeWarningLimit: 2_000,
+    rollupOptions: { input: { index: join(pages, 'index.html'), edge: join(pages, 'edge.html') } },
+  },
   test: {
     root: '.',
     include: ['tests/**/*.test.{ts,tsx}'],
@@ -24,6 +36,7 @@ export default defineConfig(({ mode }) => ({
       // The entry and the routes wire the app together; what they use is tested on its own, and the whole in the end-to-end tests.
       exclude: [
         'src/renderer/main.tsx',
+        'src/renderer/edge.tsx',
         'src/renderer/data/open.ts',
         'src/renderer/router.tsx',
         'src/renderer/root.ts',

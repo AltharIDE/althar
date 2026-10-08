@@ -1,0 +1,4 @@
+/* The menu bar's sheet: its window is paper, and as tall as this. */
+.menu {
+  background: var(--n-1);
+}

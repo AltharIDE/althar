@@ -1,0 +1,166 @@
+import { act, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
+
+import type { HomeCall, HomeTask, ProjectSummary } from '@althar/contracts'
+
+import { EdgeView, type EdgePlaceShown } from '../src/renderer/features/edge/EdgeView'
+import { useEdge } from '../src/renderer/features/edge/useEdge'
+import { card, change, changed, fakeClient, fakeHost, home, project } from './fixtures'
+import { withServices } from './render'
+
+/*
+ * Althar at the edge of the screen: round the notch, or under the menu bar's
+ * mark. What waits on the person first, answered in place or opened in the
+ * window; what is in progress; a call that comes in said for a moment.
+ */
+
+const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', ink: 'rose', lastWorkAt: null }
+
+const task = (overrides: Partial<HomeTask> = {}): HomeTask => ({
+  ...card(),
+  state: 'open',
+  createdAt: '2026-10-07T09:00:00.000Z',
+  settledAt: null,
+  changed: null,
+  here: [],
+  projectId: 'p1',
+  ...overrides,
+})
+
+const permission: HomeCall = {
+  id: 'a1',
+  kind: 'permission',
+  title: 'Run npm publish',
+  reason: 'Deploying or publishing always asks.',
+  command: 'npm publish',
+  stuck: null,
+  createdAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+  projectId: 'p2',
+  taskId: 't3',
+  threadId: 'th3',
+  taskTitle: 'Ship it',
+  taskSlug: 'ship-it',
+}
+
+const running = task({ phase: 'running', step: 'implement', startedAt: new Date(Date.now() - 41 * 60_000).toISOString() })
+const ready = task({
+  taskId: 't2',
+  threadId: 'th2',
+  title: 'Name the limits better',
+  phase: 'ready',
+  projectId: 'p2',
+  changed: { files: 1, add: 1, del: 0 },
+})
+
+const island: EdgePlaceShown = { place: 'island', notch: { width: 179, height: 32 } }
+
+function Edge({ shown = island }: { shown?: EdgePlaceShown }) {
+  return <EdgeView model={useEdge()} shown={shown} />
+}
+
+describe('the edge', () => {
+  it('lists what waits on you, answered in place, then what is in progress', async () => {
+    const { client } = fakeClient({
+      getHome: vi.fn(async () => home({ tasks: [running, ready], calls: [permission], projects: [project, halyard] })),
+    })
+    withServices(<Edge />, client)
+    // At rest the island says how many wait; pressed, it opens.
+    const count = await screen.findByRole('button', { name: '2 need you' })
+    await userEvent.click(count)
+    expect(count.getAttribute('aria-expanded')).toBe('true')
+
+    const needs = screen.getByRole('region', { name: /Needs you/ })
+    expect(within(needs).getByText('npm publish')).toBeTruthy()
+    expect(within(needs).getByText('Ready to accept')).toBeTruthy()
+    expect(within(needs).getByText('On its branch: 1 file, +1 −0')).toBeTruthy()
+    const work = screen.getByRole('region', { name: /In progress/ })
+    expect(within(work).getByText('Implement · Claude Code · 41m')).toBeTruthy()
+
+    await userEvent.click(within(needs).getByRole('button', { name: 'Allow once' }))
+    expect(client.answer).toHaveBeenCalledWith(expect.objectContaining({ attentionId: 'a1', decision: 'allow' }))
+    expect(await within(needs).findByText('Allowed npm publish')).toBeTruthy()
+  })
+
+  it('says why a stuck task waits, what a change is, and what each task in progress is doing', async () => {
+    const host = fakeHost()
+    const stuck: HomeCall = {
+      ...permission,
+      id: 'a2',
+      kind: 'stuck',
+      title: '',
+      command: null,
+      stuck: { step: 'implement', why: 'session_ended', detail: null, agentId: 'claude-code', round: 0, open: 0 },
+      projectId: 'p1',
+      threadId: 'th4',
+      taskTitle: 'Spike the cache',
+    }
+    const tasks = [
+      task({ taskId: 't5', title: 'Held a while', phase: 'running', waits: { agentId: 'codex', until: '2026-10-07T14:50:00.000Z' } }),
+      task({ taskId: 't6', title: 'Left alone', phase: 'stopped' }),
+      task({ taskId: 't7', title: 'Asks you', phase: 'waiting' }),
+      { ...ready, change: change({ number: 1191, additions: 212, deletions: 41 }) },
+    ]
+    const { client } = fakeClient({ getHome: vi.fn(async () => home({ tasks, calls: [stuck], projects: [project, halyard] })) })
+    withServices(<Edge shown={{ place: 'menu' }} />, client, host)
+    const needs = await screen.findByRole('region', { name: /Needs you/ })
+    expect(within(needs).getByText('Claude Code stopped before the step was done.')).toBeTruthy()
+    expect(within(needs).getByText('GitHub #1191 · +212 −41')).toBeTruthy()
+    await userEvent.click(within(needs).getByRole('button', { name: 'Open' }))
+    expect(host.openInWindow).toHaveBeenCalledWith('th4')
+    const work = screen.getByRole('region', { name: /In progress/ })
+    expect(within(work).getByText(/^Waits for Codex, back at/)).toBeTruthy()
+    expect(within(work).getByText('No agent is working on it')).toBeTruthy()
+    expect(within(work).getByText('Waits on you')).toBeTruthy()
+  })
+
+  it('opens a task in Althar’s window by its title or its review, and Althar by its mark', async () => {
+    const host = fakeHost()
+    const { client } = fakeClient({ getHome: vi.fn(async () => home({ tasks: [ready], projects: [project, halyard] })) })
+    withServices(<Edge />, client, host)
+    await userEvent.click(await screen.findByRole('button', { name: '1 needs you' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Name the limits better' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    expect(host.openInWindow).toHaveBeenCalledWith('th2')
+    expect(host.openInWindow).toHaveBeenCalledTimes(2)
+    await userEvent.click(screen.getAllByRole('button', { name: 'Open Althar' })[0] as HTMLElement)
+    expect(host.openInWindow).toHaveBeenLastCalledWith()
+  })
+
+  it('says a call that comes in, not the ones there when it opened', async () => {
+    let calls: ReadonlyArray<HomeCall> = []
+    const { client, emit } = fakeClient({
+      getHome: vi.fn(async () => home({ tasks: [running], calls, projects: [project, halyard] })),
+    })
+    withServices(<Edge />, client)
+    await screen.findByRole('button', { name: '1 running' })
+    expect(screen.queryByText('Permission')).toBeNull()
+    calls = [permission]
+    act(() => emit(changed('attention_request', 'a1', 'th3', 'p2')))
+    const region = screen.getByRole('region', { name: 'Althar' })
+    // Said beside the notch, and on its row in the sheet.
+    await waitFor(() => expect(within(region).getAllByText('Permission')).toHaveLength(2))
+    expect(within(region).getAllByText('halyard')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: '1 needs you' })).toBeTruthy()
+  })
+
+  it('opens as the pointer comes onto it, as the main process watches it, and says where it draws', async () => {
+    const pointed: Array<(on: boolean) => void> = []
+    const host = fakeHost({ onEdgePointed: vi.fn((listener) => (pointed.push(listener), () => {})) })
+    withServices(<Edge />, fakeClient({ getHome: vi.fn(async () => home({ tasks: [running] })) }).client, host)
+    const count = await screen.findByRole('button', { name: '1 running' })
+    expect(host.edgeDrawn).toHaveBeenCalled()
+    act(() => pointed.forEach((listener) => listener(true)))
+    await waitFor(() => expect(count.getAttribute('aria-expanded')).toBe('true'))
+    act(() => pointed.forEach((listener) => listener(false)))
+    await waitFor(() => expect(count.getAttribute('aria-expanded')).toBe('false'))
+  })
+
+  it('under the menu bar, is the sheet on paper, and says how tall it is', async () => {
+    const host = fakeHost()
+    withServices(<Edge shown={{ place: 'menu' }} />, fakeClient({ getHome: vi.fn(async () => home({ tasks: [running] })) }).client, host)
+    expect(await screen.findByRole('region', { name: /In progress/ })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Althar' })).toBeNull()
+    expect(host.edgeSize).toHaveBeenCalled()
+  })
+})

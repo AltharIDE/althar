@@ -190,6 +190,19 @@ When a workflow node starts an agent:
 The runtime never holds a SQLite transaction open while an agent, Git command,
 test, or network call is running.
 
+### The edge of the screen
+
+While the person works in another app, Althar shows at the edge of the
+screen: an island round the notch on a Mac that has one, otherwise its mark
+in the menu bar, with a sheet under it. Each is a page of its own, given a
+port to the runtime as a window is, so it reads and answers through the same
+API and holds no state the main process must keep. The main process only
+places it: it finds the notch (AppKit knows it; Electron doesn't), keeps the
+person's choice beside the app's icon, and, since a panel above the menu bar
+isn't told when the pointer arrives while another app is active, watches the
+pointer against where the island draws. The island never takes focus from
+what the person is typing in.
+
 ### Window close and application quit
 
 Closing a window is not necessarily the same as quitting the application. A

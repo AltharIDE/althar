@@ -7,6 +7,7 @@ import { useConnections } from '../connections/useConnections'
 import { useStart } from '../start/useStart'
 import { SettingsView } from './SettingsView'
 import { useAppIcon } from './useAppIcon'
+import { useEdgePlace } from './useEdgePlace'
 
 function Settings() {
   const navigate = useNavigate()
@@ -16,12 +17,13 @@ function Settings() {
       model={useStart({ recheck: true })}
       connections={useConnections()}
       appIcon={useAppIcon()}
+      edge={useEdgePlace()}
       onBack={() => void navigate({ to: '/' })}
     />
   )
 }
 
-/** Settings: the agents on this Mac and their accounts, the connections, and the app's icon. */
+/** Settings: the agents on this Mac and their accounts, the connections, the app's icon, and where Althar shows at the edge of the screen. */
 export const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/settings',

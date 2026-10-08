@@ -17,7 +17,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `coordinator` | What the coordinator shows about tasks: Issue, TaskLaunch, TaskCard, TaskMark, TaskHeld. |
 | `board` | The project's work in lanes: Board, BoardColumn, and a card or row for each lane. |
 | `dock` | What opens beside the board: Dock and a peek for each kind of card. |
-| `home` | Work across every project, as the home shows it: HomeSection, NeedCard, RunRow, SinceRow, ProjectRow, ProjectWord. |
+| `home` | Work across every project, as the home shows it: HomeSection, NeedCard, RunRow, SinceRow, ProjectRow, ProjectWord; and the home in small at the edge of the screen: Island, EdgeSheet, EdgeRow. |
 | `outputs` | What a task made: ChangeSet, ArtifactCard. |
 | `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu. |
 | `setup` | What comes before a project: Runtimes, ConnectAgent, SourceMap. |

@@ -1,0 +1,50 @@
+.sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 8px 8px;
+  color: var(--t-1);
+}
+/* the sections' headings line up with the rows' glyphs */
+.section > header {
+  margin: 0 0 4px;
+  padding: 0 8px;
+}
+.section > p {
+  padding: 2px 8px 6px 27px;
+}
+.foot {
+  padding: 10px 8px 4px;
+  border-top: 1px solid var(--line);
+}
+.openApp {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/*
+ * Ink: the island's, the notch's black. The words are the terminal's;
+ * cobalt and violet are a step lighter to read on it, so a violet button
+ * takes ink words, and a plain one is a lighter shade of the black.
+ */
+.ink {
+  --t-1: var(--term-t1);
+  --t-2: var(--term-t2);
+  --t-3: var(--term-t4);
+  --t-4: #6e6d72;
+  --line: rgba(255, 255, 255, 0.1);
+  --line-2: rgba(255, 255, 255, 0.14);
+  --line-3: rgba(255, 255, 255, 0.28);
+  --n-3: rgba(255, 255, 255, 0.05);
+  --paper: rgba(255, 255, 255, 0.1);
+  --sunk: rgba(255, 255, 255, 0.08);
+  --lift: none;
+  --live: var(--live-on-ink);
+  --signal: var(--signal-on-ink);
+  --signal-bright: var(--signal-on-ink-hover);
+  --signal-pressed: var(--signal-on-ink-pressed);
+  --on-signal: #141417;
+  --edge-hover: rgba(255, 255, 255, 0.05);
+  color-scheme: dark;
+}
