@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { ThreadSnapshot } from '@althar/contracts'
 import {
@@ -8,7 +8,6 @@ import {
   Issue,
   LinkButton,
   type ModelInfo,
-  Spinner,
   TaskFace,
   TaskHeader,
   TaskMenu,
@@ -16,12 +15,15 @@ import {
   Thread,
   ThreadDivider,
   ThreadMeasure,
+  ThreadSkeleton,
   TitleBar,
 } from '@althar/ui'
 
 import { useModels } from '../../data/models'
 import { modelInfo, waitsWords } from '../../shared/agents'
+import { contextMeter } from '../../shared/ContextMeter'
 import { ModelChoice } from '../../shared/ModelChoice'
+import { pendingText } from '../../shared/Pending'
 import { catalogOf, type Choice, modelName, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { stepNames, stepText, trackFor } from '../../shared/steps'
@@ -200,6 +202,17 @@ export function TaskView({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [show, files.length])
+  // What it changed is read from git as the task opens, and again as its outputs or changes show: the person's own edits too.
+  const { readFiles } = model
+  const showsTask = face !== null
+  const showsOutputs = face === 'out'
+  const showsChanges = changes.open
+  const showed = useRef({ task: false, outputs: false, changes: false })
+  useEffect(() => {
+    const was = showed.current
+    showed.current = { task: showsTask, outputs: showsOutputs, changes: showsChanges }
+    if ((showsTask && !was.task) || (showsOutputs && !was.outputs) || (showsChanges && !was.changes)) readFiles()
+  }, [showsTask, showsOutputs, showsChanges, readFiles])
   // c and o switch the faces, and Escape goes back to the project: never while typing, or with something else open.
   const outputs = model.snapshot !== null && hasOutputs(model.snapshot)
   const open = changes.open
@@ -222,7 +235,17 @@ export function TaskView({
     return (
       <div className={s.window}>
         {nav ?? <TitleBar lights="none">{null}</TitleBar>}
-        <div className={s.loading}>{model.error === null ? <Spinner /> : <p role="alert">{model.error}</p>}</div>
+        {model.error === null ? (
+          <div className={s.reading}>
+            <ThreadMeasure>
+              <ThreadSkeleton label={pendingText.thread} />
+            </ThreadMeasure>
+          </div>
+        ) : (
+          <div className={s.loading}>
+            <p role="alert">{model.error}</p>
+          </div>
+        )}
       </div>
     )
   }
@@ -284,6 +307,7 @@ export function TaskView({
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
         placeholder={busy ? text.placeholderBusy : text.placeholder(session?.agentName ?? agentName(chosen?.agentId ?? null))}
+        meter={contextMeter(session)}
         // Another agent's model hands the task to that agent.
         picker={
           model.agents.length > 0 &&

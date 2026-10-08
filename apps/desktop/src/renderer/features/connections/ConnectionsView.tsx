@@ -1,6 +1,7 @@
 import type { ConnectionList, Product } from '@althar/contracts'
-import { Connections, type ServiceConnection, type ServiceOption, Spinner } from '@althar/ui'
+import { Connections, type ServiceConnection, type ServiceOption } from '@althar/ui'
 
+import { PartPending } from '../../shared/Pending'
 import { productBrand } from '../../shared/products'
 import s from './Connections.module.css'
 import type { ConnectionsModel } from './useConnections'
@@ -15,6 +16,7 @@ export const text = {
   what: { both: 'Pull requests and issues', host: 'Pull requests', tracker: 'Issues' },
   /** An example of the address of a service connected by one. */
   example: { jira_cloud: 'https://your-site.atlassian.net' } as Partial<Record<Product, string>>,
+  reading: 'Reading the connections',
 }
 
 /** The products as the kit offers them. */
@@ -55,7 +57,7 @@ const isProduct = (list: ConnectionList, id: string): Product | undefined =>
 
 export function ConnectionsView({ model }: { model: ConnectionsModel }) {
   const list = model.list
-  if (list === null) return model.error === null ? <Spinner /> : <p role="alert">{model.error}</p>
+  if (list === null) return model.error === null ? <PartPending label={text.reading} /> : <p role="alert">{model.error}</p>
   return (
     <div className={s.connections}>
       <Connections

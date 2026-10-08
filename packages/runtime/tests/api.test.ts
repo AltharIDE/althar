@@ -225,6 +225,22 @@ describe('the API', () => {
         yield* client.SetDefaultEffort({ commandId: commandId(), agentId: 'codex', model: 'large', effort: 'high' })
         const codex = (yield* client.GetModels({})).find((agent) => agent.agentId === 'codex')
         assert.deepStrictEqual(codex?.defaults, [{ model: 'large', effort: 'high' }])
+
+        // How full the agent's context is reaches a client as the agent says it, and its session says it after.
+        const contexts = yield* Effect.forkChild(
+          Stream.runCollect(
+            Stream.take(
+              Stream.filter(client.Watch({}), (event) => event._tag === 'Context'),
+              1,
+            ),
+          ),
+        )
+        yield* Effect.sleep('50 millis')
+        yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.updates, disposition: 'after_current' })
+        const [usage] = (yield* Fiber.join(contexts)) as ReadonlyArray<WatchEvent>
+        assert.deepStrictEqual(usage, { _tag: 'Context', threadId: task.threadId, used: 1200, size: 200_000 })
+        const full = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (value) => value.session?.context != null)
+        assert.deepStrictEqual(full.session?.context, { used: 1200, size: 200_000 })
         yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
         yield* client.StopSession({ commandId: commandId(), threadId: task.threadId })
         assert.isNull((yield* client.GetThread({ threadId: task.threadId })).session)

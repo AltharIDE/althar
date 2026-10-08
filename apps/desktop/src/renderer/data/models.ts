@@ -57,6 +57,9 @@ const read = (client: Client, store: Store, again = false) => {
   )
 }
 
+/** Reads the models ahead, as the window opens, so the first picker shows them. */
+export const readModelsAhead = (client: Client) => read(client, storeOf(client))
+
 /** Every agent's models, as far as they are known; null until first read. */
 export const useModels = (): ReadonlyArray<AgentModels> | null => {
   const { client } = useServices()

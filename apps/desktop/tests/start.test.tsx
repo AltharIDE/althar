@@ -150,15 +150,14 @@ describe('the start', () => {
     expect(onProject).toHaveBeenCalledWith('p1')
 
     // A change to a project reads the list again; a change to anything else doesn't.
-    // It asks each agent again, since the bar shows how each is signed in.
-    await waitFor(() => expect(watching).toEqual(expect.arrayContaining([3, 1])))
-    expect(client.status).toHaveBeenCalledWith({ recheck: true })
+    // The home shows the agents as the runtime last checked them: they are asked again once a launch, and when the window comes back.
+    expect(client.status).not.toHaveBeenCalledWith({ recheck: true })
     emit(changed('task', 't1'))
     emit(changed('thread_item', 'i1'))
     emit(streamed('i1', 'Hi'))
     await waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(2))
-    // A later read doesn't start the watch again: one for the projects, one for the home.
-    expect(watching).toHaveLength(2)
+    // The window watches once, for the projects and the home alike.
+    expect(watching).toHaveLength(1)
   })
 
   it('opens a folder as a project: from the button, from ⌘N, and dropped on the window', async () => {

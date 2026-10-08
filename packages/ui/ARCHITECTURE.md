@@ -11,7 +11,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | Layer | What it holds |
 | --- | --- |
 | `foundations` | Tokens, icons, brand marks, project marks, `Model`, and the domain vocabularies. |
-| `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, and Ask, which every part that asks a person shares. |
+| `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), and Ask, which every part that asks a person shares. |
 | `thread` | What appears in a conversation: turns, tool calls, steps, permissions, questions, Stuck, documents. |
 | `composer` | What writes into a conversation: Composer, ModelPick, ContextRing, Listening, Running. |
 | `coordinator` | What the coordinator shows about tasks: Issue, TaskLaunch, TaskCard, TaskMark, TaskHeld. |
@@ -21,7 +21,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `outputs` | What a task made: ChangeSet, ArtifactCard. |
 | `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu. |
 | `setup` | What comes before a project: Runtimes, ConnectAgent, SourceMap. |
-| `screens` | Whole screens made from the layers above: Welcome, Start, Home, NewProject, ProjectRules. |
+| `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), Start, Home, NewProject, ProjectRules. |
 
 The rules between them:
 

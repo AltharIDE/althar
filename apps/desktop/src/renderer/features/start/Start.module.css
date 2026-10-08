@@ -29,7 +29,3 @@
   gap: 8px;
 }
 
-.loading {
-  display: grid;
-  place-items: center;
-}

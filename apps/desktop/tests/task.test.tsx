@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -11,7 +11,9 @@ import { useTask } from '../src/renderer/features/task/useTask'
 import { change, changed, fakeClient, items, models, snapshot, streamed } from './fixtures'
 import type { ChangedFile } from '@althar/contracts'
 import { clock } from '../src/renderer/shared/time'
-import { withServices } from './render'
+import { reads } from '../src/renderer/data/reads'
+import { ServicesProvider } from '../src/renderer/data/services'
+import { servicesFor, withServices } from './render'
 
 function Task({ onBack = vi.fn() }: { onBack?: () => void }) {
   return <TaskView model={useTask('th1')} onBack={onBack} />
@@ -38,6 +40,46 @@ const running = (overrides: Partial<ThreadSnapshot> = {}) => {
 }
 
 describe('a task', () => {
+  it('catches up on what changed between its route reading it and its first listening', async () => {
+    const meanwhile = items.says('Said meanwhile', 'claude-code', 'i-meanwhile')
+    const getThread = vi
+      .fn()
+      .mockResolvedValueOnce(thread())
+      .mockResolvedValue(thread({ items: [...thread().items, meanwhile] }))
+    const { client, emit } = fakeClient({ getThread })
+    const services = servicesFor(client)
+    // The route's loader reads the thread; an item arrives before the screen has mounted and listens.
+    await services.cache.fetchQuery(reads(client).thread('th1'))
+    act(() => emit(changed('thread_item', 'i-meanwhile')))
+    render(
+      <ServicesProvider value={services}>
+        <Task />
+      </ServicesProvider>,
+    )
+    expect(await screen.findByText('Said meanwhile')).toBeTruthy()
+    // Read again whole as it showed, beside reading what it changed.
+    expect(getThread.mock.calls.filter(([, page]) => page === undefined)).toHaveLength(2)
+  })
+
+  it('reads what it changed from git as it opens, and again as its outputs or its changes show', async () => {
+    const file: ChangedFile = { path: 'src/checkout.ts', from: null, status: 'modified', add: 4, del: 1, binary: false, uncommitted: false }
+    const ready = thread({ task: { ...thread().task, phase: 'ready', files: [file] } })
+    const { client } = fakeClient({ getThread: vi.fn(async () => ready) })
+    withServices(<Task />, client)
+    await screen.findByRole('heading', { name: 'Add a retry', level: 1 })
+    const fresh = () => vi.mocked(client.getThread).mock.calls.filter(([, page]) => page?.fresh === true).length
+    // Ready, it opens on its outputs: one read.
+    await waitFor(() => expect(fresh()).toBe(1))
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await userEvent.keyboard('c')
+    expect(fresh()).toBe(1)
+    await userEvent.keyboard('o')
+    await waitFor(() => expect(fresh()).toBe(2))
+    // And the changes, over the window.
+    await userEvent.keyboard('{Meta>}d{/Meta}')
+    await waitFor(() => expect(fresh()).toBe(3))
+  })
+
   it('shows its header and its thread', async () => {
     const onBack = vi.fn()
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
@@ -482,11 +524,16 @@ describe('a task', () => {
       const { client, emit, watching } = fakeClient({ getThread: vi.fn(async () => thread()) })
       withServices(<Task />, client)
       await screen.findByText('it')
-      // It watches from the cursor its first read had.
-      expect(watching).toEqual([10])
+      // The window watches once, for every screen.
+      expect(watching).toHaveLength(1)
       act(() => emit(streamed('reply', 'Found it, and a second call.')))
       act(() => emit(streamed('reply', 'Not this thread', 'other')))
       await screen.findByText('Found it, and a second call.')
+      // How full the lead's context is shows in the composer as it says, for this thread only.
+      expect(screen.queryByRole('button', { name: /^Context/ })).toBeNull()
+      act(() => emit({ _tag: 'Context', threadId: 'other', used: 190_000, size: 200_000 }))
+      act(() => emit({ _tag: 'Context', threadId: 'th1', used: 50_000, size: 200_000 }))
+      expect(await screen.findByRole('button', { name: 'Context 25% used' })).toBeTruthy()
 
       vi.mocked(client.getThreadItem).mockImplementation(async (_threadId, itemId) =>
         itemId === 'reply'
@@ -630,7 +677,8 @@ describe('a task', () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread({ items: [], earlier: true })) })
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Show' }))
-    expect(client.getThread).toHaveBeenCalledTimes(1)
+    // Only the thread, and what it changed as it opened: no page before nothing.
+    expect(vi.mocked(client.getThread).mock.calls.filter(([, page]) => page?.before !== undefined)).toEqual([])
   })
 
   it('says where it stands', () => {

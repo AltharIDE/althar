@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
@@ -46,9 +47,11 @@ const run = (
   args: ReadonlyArray<string>,
   env: Readonly<Record<string, string>> = {},
   trim = true,
+  /** What the command reads, for one such as `cat-file --batch-check`. */
+  input?: string,
 ): Effect.Effect<string, GitFailed> =>
   Effect.callback<string, GitFailed>((resume) => {
-    execFile(
+    const child = execFile(
       'git',
       ['-c', 'core.hooksPath=/dev/null', ...args],
       { cwd, timeout, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...env } },
@@ -59,6 +62,10 @@ const run = (
             : Effect.fail(new GitFailed({ args: [...args], cwd, stderr: stderr.trim() || error.message })),
         ),
     )
+    if (input === undefined || child.stdin === null) return
+    // A git that ends before it has read everything fails on its own; the pipe closing under it isn't another failure.
+    child.stdin.on('error', () => undefined)
+    child.stdin.end(input)
   })
 
 /**
@@ -98,6 +105,50 @@ export const topLevel = (path: string) => git(path, 'rev-parse', '--show-topleve
 
 /** The commit a ref points at. */
 export const commitOf = (cwd: string, ref: string) => git(cwd, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`)
+
+/**
+ * The commit each of `revisions` names, in one git process: null for one git
+ * doesn't know here, or that isn't one name. They go to git as its input,
+ * never as arguments, so none is read as an option.
+ */
+export const commitsOf = (cwd: string, revisions: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<string | null>> => {
+  const named = revisions.filter((revision) => /^[^\s^:]+$/.test(revision))
+  if (named.length === 0) return Effect.succeed(revisions.map(() => null))
+  return run(
+    60_000,
+    cwd,
+    ['cat-file', '--batch-check=%(objectname)'],
+    {},
+    true,
+    named.map((revision) => `${revision}^{commit}\n`).join(''),
+  ).pipe(
+    Effect.map((output) => {
+      // A line for each name asked about: its commit, or the name and why there is none (`missing`, `ambiguous`).
+      const lines = output.split('\n')
+      const commits = new Map(named.map((revision, at) => [revision, lines[at]]))
+      return revisions.map((revision) => {
+        const commit = commits.get(revision)
+        return commit !== undefined && /^[0-9a-f]{40,64}$/.test(commit) ? commit : null
+      })
+    }),
+    Effect.orElseSucceed(() => revisions.map(() => null)),
+  )
+}
+
+/**
+ * A worktree's index file as the file system has it now: where it is, its
+ * size and when it was written. Git writes it anew, by renaming a new file
+ * over it, whenever anything is staged, so any of that changes this. Empty
+ * where it can't be read. A linked worktree's `.git` is a file that names
+ * its folder in the repository's, where its index is.
+ */
+export const indexStamp = (worktree: string): Effect.Effect<string> =>
+  Effect.tryPromise(async () => {
+    const dotGit = join(worktree, '.git')
+    const linked = (await stat(dotGit)).isFile() ? /^gitdir: (.+)$/m.exec(await readFile(dotGit, 'utf8'))?.[1] : undefined
+    const index = await stat(join(linked === undefined ? dotGit : resolve(worktree, linked.trim()), 'index'), { bigint: true })
+    return `${index.ino}:${index.size}:${index.mtimeNs}`
+  }).pipe(Effect.orElseSucceed(() => ''))
 
 /** Whether a local branch exists. */
 export const branchExists = (cwd: string, branch: string) =>
@@ -177,31 +228,9 @@ export const uncommittedFiles = (cwd: string) =>
     return [...new Set([...changed.split('\n'), ...added.split('\n')].filter((path) => path !== ''))].toSorted()
   })
 
-/** How many commits HEAD has that a base doesn't. */
-export const commitsAhead = (cwd: string, base: string) => Effect.map(git(cwd, 'rev-list', '--count', `${base}..HEAD`), Number)
-
-/**
- * A worktree's head, and how many commits on it what was pushed doesn't have:
- * what is still the person's to push. What was pushed is the first of
- * `pushed` the worktree knows, such as the pull request's head, else the
- * commit Althar last pushed. None, where it can't be told.
- */
-export const unpushedOf = (cwd: string, pushed: ReadonlyArray<string | null>) =>
-  Effect.gen(function* () {
-    const localHead = yield* commitOf(cwd, 'HEAD').pipe(Effect.orElseSucceed(() => null))
-    for (const candidate of pushed) {
-      if (candidate === null || localHead === null) continue
-      const known = yield* commitOf(cwd, candidate).pipe(Effect.orElseSucceed(() => ''))
-      if (known === '') continue
-      // Counted up to the head read, not HEAD again: the lead may commit in between.
-      const ahead = yield* git(cwd, 'rev-list', '--count', `${known}..${localHead}`).pipe(
-        Effect.map(Number),
-        Effect.orElseSucceed(() => 0),
-      )
-      return { localHead, unpushed: ahead }
-    }
-    return { localHead, unpushed: 0 }
-  })
+/** How many commits `head` (HEAD, unless named) has that a base doesn't. */
+export const commitsAhead = (cwd: string, base: string, head = 'HEAD') =>
+  Effect.map(git(cwd, 'rev-list', '--count', `${base}..${head}`), Number)
 
 /** Whether `commit` is the worktree's head or behind it. */
 export const onHead = (cwd: string, commit: string) =>

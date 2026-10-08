@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useEffect } from 'react'
 
 import type { AgentStatus, BoardTask, ThreadSnapshot } from '@althar/contracts'
 import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, WorkPeek } from '@althar/ui'
 
+import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { modelInfo, waitsWords } from '../../shared/agents'
 import { checkOf } from '../../shared/checks'
@@ -52,24 +54,29 @@ const stepsOf = (task: BoardTask): ReadonlyArray<PeekStep> => {
   }))
 }
 
-/** A task's head, read when the dock opens on it and again as the board changes: its files, for accepting. */
+/**
+ * A task's head as the board stood (`version`): its files, for accepting.
+ * Read ahead with the board (`useBoard`), so the dock opens with it; until a
+ * newer one is read, the last one shows, or the thread as the window last
+ * read it.
+ */
 export const useHead = (threadId: string | null, version: number) => {
-  const { client } = useServices()
-  const [head, setHead] = useState<ThreadSnapshot | null>(null)
-  useEffect(() => {
-    if (threadId === null) return
-    let current = true
-    client.getThread(threadId, { limit: 0 }).then(
-      (read) => {
-        if (current) setHead(read)
-      },
-      () => undefined,
-    )
-    return () => {
-      current = false
-    }
-  }, [client, threadId, version])
+  const { client, cache } = useServices()
+  const read = useQuery({
+    ...reads(client).head(threadId ?? '', version),
+    enabled: threadId !== null,
+    placeholderData: (previous) => previous ?? (threadId === null ? undefined : cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))),
+  })
+  const head = read.data ?? null
   return head?.task.id === undefined || threadId === null ? null : head
+}
+
+/** Reads ahead the thread of what the dock shows, so opening its task from there is instant. */
+const useThreadAhead = (threadId: string | null) => {
+  const { client, cache } = useServices()
+  useEffect(() => {
+    if (threadId !== null) void cache.prefetchQuery(reads(client).thread(threadId))
+  }, [client, cache, threadId])
 }
 
 export function DockView({
@@ -99,6 +106,7 @@ export function DockView({
   const call = target.kind === 'call' ? board?.calls.find((candidate) => candidate.id === target.id) : undefined
   const task = target.kind === 'task' ? board?.tasks.find((candidate) => candidate.taskId === target.id) : undefined
   const head = useHead(task?.phase === 'ready' && task.change !== null ? task.threadId : null, board?.cursor ?? 0)
+  useThreadAhead(call?.threadId ?? task?.threadId ?? null)
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   const open = (threadId: string) => (
     <div className={s.actions}>

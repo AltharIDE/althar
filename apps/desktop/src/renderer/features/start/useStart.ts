@@ -1,9 +1,11 @@
+import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useState } from 'react'
 
 import { ApiError, type FoundAccount, type FoundRepository, type ProjectSummary, type Status } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
-import { useServices, useWatch } from '../../data/services'
+import { keys, reads, recheckStatus } from '../../data/reads'
+import { useServices } from '../../data/services'
 
 /*
  * The start screen's view model: the agents on this Mac, each with its
@@ -60,42 +62,40 @@ export interface StartModel {
   readonly removeAnyway: () => Promise<void>
 }
 
-/** Changes that move what the start screen shows: a project's name, its tasks, who is working, what waits on you. */
-const SHOWN = new Set(['project', 'task', 'provider_session', 'attention_request'])
-
-export const useStart = (): StartModel => {
-  const { client, host } = useServices()
-  const [status, setStatus] = useState<Status | null>(null)
-  const [projects, setProjects] = useState<ReadonlyArray<ProjectSummary> | null>(null)
-  const [since, setSince] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
+/**
+ * `recheck` asks every agent again as the screen opens, rather than trust the
+ * runtime's last answer: where the person signs in, so after they did. The
+ * window also asks again whenever it comes back to the front.
+ */
+export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {}): StartModel => {
+  const { client, host, cache } = useServices()
+  const read = reads(client)
+  const projectsRead = useQuery(read.projects())
+  const statusRead = useQuery(read.status())
+  const status = statusRead.data ?? null
+  const projects = projectsRead.data?.projects ?? null
+  const [failed, setError] = useState<string | null>(null)
+  const readFailure = projectsRead.error ?? statusRead.error
+  const error = failed ?? (readFailure === null ? null : messageOf(readFailure))
   const [opening, setOpening] = useState(false)
   const [forming, setForming] = useState<Forming | null>(null)
   const [creating, setCreating] = useState(false)
   const [found, setFound] = useState<Readonly<Record<string, ReadonlyArray<FoundAccount>>>>({})
   const [unremoved, setUnremoved] = useState<string | null>(null)
 
-  const loadProjects = useCallback(() => {
-    client.listProjects().then(
-      (list) => {
-        setProjects(list.projects)
-        setSince((first) => first ?? list.cursor)
-      },
-      (failure: unknown) => setError(messageOf(failure)),
-    )
-  }, [client])
+  /** The agents again: checked afresh after a sign-in, as the runtime last knew them after anything else. */
+  const reloadStatus = useCallback(
+    (again: boolean) =>
+      (again ? recheckStatus(client, cache) : cache.fetchQuery({ ...reads(client).status(), staleTime: 0 })).then(
+        () => undefined,
+        (failure: unknown) => setError(messageOf(failure)),
+      ),
+    [client, cache],
+  )
 
   useEffect(() => {
-    loadProjects()
-    // This is where sign-in shows, so each agent is asked again. That takes a moment; the projects don't wait for it.
-    client.status({ recheck: true }).then(setStatus, (failure: unknown) => setError(messageOf(failure)))
-  }, [client, loadProjects])
-
-  /** The agents again: checked afresh after a sign-in, as read when anything else changed. */
-  const reloadStatus = useCallback(
-    (recheck: boolean) => client.status({ recheck }).then(setStatus, (failure: unknown) => setError(messageOf(failure))),
-    [client],
-  )
+    if (recheck) void reloadStatus(true)
+  }, [recheck, reloadStatus])
 
   // Back from signing in, in Terminal: each account is asked again.
   useEffect(() => {
@@ -104,16 +104,25 @@ export const useStart = (): StartModel => {
     return () => window.removeEventListener('focus', onFocus)
   }, [reloadStatus])
 
+  /** The projects read again, so a project just made is in them when its screen opens. */
+  const listed = useCallback(
+    async (project: ProjectSummary) => {
+      await cache.refetchQueries({ queryKey: keys.projects }).catch(() => undefined)
+      return project
+    },
+    [cache],
+  )
+
   /** Runs an account change, says what went wrong if it did, and shows the agents as they are after it. */
   const changing = useCallback(
-    async (change: () => Promise<unknown>, recheck = false) => {
+    async (change: () => Promise<unknown>, again = false) => {
       setError(null)
       try {
         await change()
       } catch (failure) {
         setError(messageOf(failure))
       }
-      await reloadStatus(recheck)
+      await reloadStatus(again)
     },
     [reloadStatus],
   )
@@ -160,10 +169,6 @@ export const useStart = (): StartModel => {
     [changing, client, status],
   )
 
-  useWatch((event) => {
-    if (event._tag === 'Changed' && SHOWN.has(event.aggregateType)) loadProjects()
-  }, since)
-
   // A folder of several repositories waits for the person to say which to keep; anything else opens at once.
   const open = useCallback(
     async (grant: string | null) => {
@@ -176,7 +181,7 @@ export const useStart = (): StartModel => {
           setForming({ grant, name: reading.name, repositories: reading.repositories.map((found) => ({ ...found, grant })) })
           return null
         }
-        return await client.openProject(grant)
+        return await listed(await client.openProject(grant))
       } catch (failure) {
         setError(messageOf(failure))
         return null
@@ -184,7 +189,7 @@ export const useStart = (): StartModel => {
         setOpening(false)
       }
     },
-    [client],
+    [client, listed],
   )
 
   const openFolder = useCallback(async () => open(await host.pickFolder()), [host, open])
@@ -229,14 +234,14 @@ export const useStart = (): StartModel => {
       setError(null)
       setCreating(true)
       try {
-        const opened = await client.openProject(forming.grant, {
+        const made = await client.openProject(forming.grant, {
           name: project.name,
           repositories: forming.repositories.map((kept) => ({ grant: kept.grant, path: kept.path })),
         })
         // Who answers when agents need a yes is the project's first rule, where the person chose other than the default.
-        if (project.permissions !== 'rules') await client.setProjectRules({ projectId: opened.id, permissions: project.permissions })
+        if (project.permissions !== 'rules') await client.setProjectRules({ projectId: made.id, permissions: project.permissions })
         setForming(null)
-        return opened
+        return await listed(made)
       } catch (failure) {
         setError(messageOf(failure))
         return null
@@ -244,7 +249,7 @@ export const useStart = (): StartModel => {
         setCreating(false)
       }
     },
-    [client, forming],
+    [client, forming, listed],
   )
   const openDropped = useCallback(async (file: File) => open(await host.grantDropped(file)), [host, open])
 

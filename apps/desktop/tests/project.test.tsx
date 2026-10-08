@@ -46,6 +46,7 @@ const session = {
   effort: null,
   models: [],
   turnRunning: false,
+  context: null,
 }
 
 /** The coordinator's thread with a conversation and two cards: one running, one planned. */
@@ -111,8 +112,8 @@ describe('the Talk room', () => {
     expect(screen.getByText(/^Starts in \d+s$/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Open task/ }))
     expect(onTask).toHaveBeenCalledWith('th2')
-    // It watches from the earlier of its two reads; the connections, from theirs.
-    await waitFor(() => expect(watching).toEqual(expect.arrayContaining([3, 2])))
+    // The window watches once for every screen; the room doesn't watch on its own.
+    expect(watching).toHaveLength(1)
   })
 
   it('draws each task as it stands: ready with its summary, waiting on you, stopped, held, or started by hand', async () => {
@@ -290,7 +291,7 @@ describe('the Talk room', () => {
     try {
       const queued = items.you('Next', { state: 'queued', interrupting: false })
       const { client, emit } = fakeClient({
-        getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [queued, items.card(card(), 'c1')] })),
+        getCoordinator: vi.fn(async () => coordinatorSnapshot({ session, items: [queued, items.card(card(), 'c1')] })),
         getThreadItem: vi.fn(async (_threadId: string, itemId: string) =>
           itemId === queued.id ? { ...queued, input: { state: 'delivered' as const, interrupting: false } } : items.says('Read again'),
         ),
@@ -299,6 +300,9 @@ describe('the Talk room', () => {
       await screen.findByText('Queued · the coordinator reads it next')
       act(() => emit(streamed('live', 'Thinking it over', 'thc')))
       expect(await screen.findByText('Thinking it over')).toBeTruthy()
+      // How full the coordinator's context is shows in its composer as it says.
+      act(() => emit({ _tag: 'Context', threadId: 'thc', used: 100_000, size: 1_000_000 }))
+      expect(await screen.findByRole('button', { name: 'Context 10% used' })).toBeTruthy()
       act(() => {
         emit(changed('thread_item', 'i9', 'thc'))
         emit(changed('provider_session', 's1', 'thc'))
@@ -452,7 +456,8 @@ describe('what can go wrong', () => {
     })
     withServices(<Project />, client)
     expect(await screen.findByText(/That project isn't there any more\.|runtime didn't answer/)).toBeTruthy()
-    expect(screen.getByRole('heading', { name: 'Project', level: 1 })).toBeTruthy()
+    // The projects were read, so it is still named.
+    expect(screen.getByRole('heading', { name: 'meridian', level: 1 })).toBeTruthy()
   })
 
   it('says when a plan could not be held, or earlier items could not be read', async () => {

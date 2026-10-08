@@ -1,14 +1,15 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChangedFile, ThreadSnapshot } from '@althar/contracts'
 
 import { taskRoute } from '../src/renderer/features/task/route'
 import { keptFrom } from '../src/renderer/features/tabs/tabs'
+import { ServicesProvider } from '../src/renderer/data/services'
 import { rootRoute } from '../src/renderer/root'
 import { fakeClient, project, snapshot } from './fixtures'
-import { withServices } from './render'
+import { servicesFor } from './render'
 
 /*
  * The app's own routes, under its tabs: what the window does going from one
@@ -42,16 +43,22 @@ describe('going from one task to another', () => {
       getThread,
       listProjects: vi.fn(async () => ({ cursor: 3, projects: [project, { ...project, id: 'p2', name: 'halyard', slug: 'halyard' }] })),
     })
+    const services = servicesFor(client)
     const router = createRouter({
       routeTree: rootRoute.addChildren([taskRoute]),
       history: createMemoryHistory({ initialEntries: ['/threads/tha'] }),
+      context: { client, cache: services.cache },
     })
-    withServices(<RouterProvider router={router} />, client)
+    render(
+      <ServicesProvider value={services}>
+        <RouterProvider router={router} />
+      </ServicesProvider>,
+    )
     // Ready, the first opens on what it made.
     expect(await screen.findByRole('article', { name: 'Ready one' })).toBeTruthy()
 
     act(() => router.history.push('/threads/thb'))
-    // Until the second is read, nothing of the first stands in for it.
+    // Until the second is read, nothing of the first stands in for it: after a glance, the place's outline shows.
     await waitFor(() => expect(screen.queryByRole('article', { name: 'Ready one' })).toBeNull())
     act(() => answer(taskIn('thb', 'p2', 'Running one', 'running')))
 

@@ -9,6 +9,21 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## Screens that don't flicker, 7 October
+
+- [x] **Where the window keeps what it read.** Settled on 7 October 2026 in
+  [ADR-014](decisions/014-window-keeps-what-it-read.md): one cache for the
+  window's life (TanStack Query), ended by the change feed, with each screen
+  reading before it shows and the launch covering the first reads.
+- [ ] **Keeping open tabs mounted.** React's `<Activity>` would make a tab
+  switch draw nothing new and keep scroll positions and drafts. Leaning:
+  only if switching still feels slow with the cache; the person said to add
+  it on top if needed.
+- [ ] **The runtime pushing what changed.** Instead of the window reading
+  again on a change, the runtime could send the new snapshot or the rows
+  that moved, a step towards a replica in the window. Not yet: reads are
+  cheap while the runtime is on the same machine.
+
 ## Project rules, 4 October
 
 Decided in [ADR-013](decisions/013-project-rules.md).

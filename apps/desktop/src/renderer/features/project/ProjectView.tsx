@@ -6,20 +6,23 @@ import {
   ActionButton,
   ChangeView,
   Composer,
-  Heading,
   LinkButton,
   SidePanel,
   SidePanelBody,
   SidePanelTitle,
   Room,
-  Spinner,
   TaskFace,
   Thread,
   ThreadDivider,
   ThreadMeasure,
+  ThreadSkeleton,
+  MenuItem,
+  ProjectHead,
 } from '@althar/ui'
 
+import { contextMeter } from '../../shared/ContextMeter'
 import { ModelChoice } from '../../shared/ModelChoice'
+import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
@@ -65,8 +68,20 @@ export const text = {
   loadingEarlier: 'Showing…',
   dismiss: 'Dismiss',
   boardFailed: 'Althar couldn’t read the board.',
+  boardReading: 'Reading the board',
   notConnected: (host: string) => `Althar isn't connected to ${host}, so tasks here end on their branch.`,
   connect: (host: string) => `Connect ${host}`,
+  rules: 'Project rules',
+  newTask: 'New task',
+  /** Where a project of several repositories is: how many, and their names. */
+  repositories: (names: ReadonlyArray<string>) => `${names.length} repositories · ${names.join(', ')}`,
+}
+
+/** Where a project is, as its head says: its folder, with the home folder as ~, or its repositories where it has several. */
+export const whereOf = (project: { readonly repository: string | null; readonly repositories: ReadonlyArray<string> } | null) => {
+  if (project === null) return undefined
+  if (project.repositories.length > 1) return text.repositories(project.repositories)
+  return project.repository?.replace(/^\/(?:Users|home)\/[^/]+(?=\/)/, '~') ?? undefined
 }
 
 export function ProjectView({
@@ -177,6 +192,7 @@ export function ProjectView({
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
+        meter={contextMeter(session)}
         picker={
           model.agents.length > 0 &&
           chosen !== null && (
@@ -228,24 +244,47 @@ export function ProjectView({
       <div className={room === Room.Both ? `${s.rooms} ${s.both}` : s.rooms}>
         {talking && (
           <div className={s.talk}>
-            <div className={s.head}>
-              <ThreadMeasure>
-                <div className={s.heading}>
-                  <div>
-                    <Heading level={1}>{name}</Heading>
-                    {model.project?.repository && <p className={s.repository}>{model.project.repository}</p>}
-                  </div>
-                </div>
-                {coordinator?.host != null && !coordinator.host.connected && (
-                  <p className={s.host}>
-                    {text.notConnected(coordinator.host.name)}{' '}
-                    <ActionButton onClick={() => setPanel('connections')}>{text.connect(coordinator.host.name)}</ActionButton>
-                  </p>
-                )}
-              </ThreadMeasure>
-            </div>
+            <ProjectHead
+              title={name}
+              meta={whereOf(model.project)}
+              side={room === Room.Both}
+              menu={
+                <>
+                  {onRules && (
+                    <MenuItem icon="gear" onSelect={onRules}>
+                      {text.rules}
+                    </MenuItem>
+                  )}
+                  <MenuItem icon="plus" onSelect={() => setPanel('task')}>
+                    {text.newTask}
+                  </MenuItem>
+                  {coordinator?.host != null && !coordinator.host.connected && (
+                    <MenuItem icon="plug" onSelect={() => setPanel('connections')}>
+                      {text.connect(coordinator.host.name)}
+                    </MenuItem>
+                  )}
+                </>
+              }
+            >
+              {coordinator?.host != null && !coordinator.host.connected && (
+                <p className={s.host}>
+                  {text.notConnected(coordinator.host.name)}{' '}
+                  <ActionButton onClick={() => setPanel('connections')}>{text.connect(coordinator.host.name)}</ActionButton>
+                </p>
+              )}
+            </ProjectHead>
             {coordinator === null ? (
-              <div className={s.loading}>{model.error === null ? <Spinner /> : <p role="alert">{model.error}</p>}</div>
+              model.error === null ? (
+                <div className={s.reading}>
+                  <ThreadMeasure>
+                    <ThreadSkeleton label={pendingText.thread} />
+                  </ThreadMeasure>
+                </div>
+              ) : (
+                <div className={s.loading}>
+                  <p role="alert">{model.error}</p>
+                </div>
+              )
             ) : (
               <TaskFace
                 className={s.face}
@@ -311,9 +350,7 @@ export function ProjectView({
             {lanes !== null ? (
               <BoardView lanes={lanes} agents={model.agents} now={now} current={dock} onOpen={(target) => setDock(target)} />
             ) : board.error === null ? (
-              <div className={s.loading}>
-                <Spinner />
-              </div>
+              <PartPending label={text.boardReading} />
             ) : (
               <p className={s.failure} role="alert">
                 {text.boardFailed} {board.error}

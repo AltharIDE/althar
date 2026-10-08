@@ -11,6 +11,31 @@ export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: Readonl
   return [...byId.values()].toSorted((a, b) => a.sequence - b.sequence)
 }
 
+/**
+ * An item that can't change any more: a tool call that completed or failed,
+ * a message delivered (or never queued), a plan with every entry done, a
+ * task settled. What an agent said, a notice, a step's result and what
+ * arrived from outside are settled once written.
+ */
+export const settled = (item: ThreadItem): boolean => {
+  switch (item.kind) {
+    case 'tool_call':
+      return item.content.status === 'completed' || item.content.status === 'failed'
+    case 'user_message':
+      return item.input?.state !== 'queued'
+    case 'plan':
+      return item.content.entries.every((entry) => entry.status === 'completed')
+    case 'task':
+      return item.content.phase === 'settled'
+    case 'agent_message':
+    case 'agent_thought':
+    case 'notice':
+    case 'step_result':
+    case 'arrival':
+      return true
+  }
+}
+
 /** Streamed text the store now holds in full needs no streamed copy. */
 export const caughtUp = (streaming: ReadonlyMap<string, Streamed>, items: ReadonlyArray<ThreadItem>): ReadonlyMap<string, Streamed> => {
   const kept = new Map(streaming)

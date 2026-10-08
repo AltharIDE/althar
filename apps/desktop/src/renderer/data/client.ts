@@ -71,7 +71,11 @@ export interface Client {
     readonly issue?: string
   }) => Promise<TaskSummary>
   /** The thread, with the newest `limit` items before `before`. */
-  readonly getThread: (threadId: string, page?: { readonly before?: number; readonly limit?: number }) => Promise<ThreadSnapshot>
+  /** A task's thread; `fresh` reads the files it changed from git, for the person looking at them. */
+  readonly getThread: (
+    threadId: string,
+    page?: { readonly before?: number; readonly limit?: number; readonly fresh?: boolean },
+  ) => Promise<ThreadSnapshot>
   readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem>
   /** One file a task changed, as a diff from its base to its worktree. */
   readonly getFileDiff: (taskId: string, path: string) => Promise<FileDiff>

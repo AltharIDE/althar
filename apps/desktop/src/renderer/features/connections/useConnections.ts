@@ -1,10 +1,12 @@
+import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ConnectionList, Product } from '@althar/contracts'
 import type { ServiceSignIn, ServiceToken } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
-import { useServices, useWatch } from '../../data/services'
+import { keys, reads } from '../../data/reads'
+import { useServices } from '../../data/services'
 
 /*
  * The connections view model (docs/architecture/06): the code hosts and
@@ -31,34 +33,18 @@ export interface ConnectionsModel {
 }
 
 export const useConnections = (): ConnectionsModel => {
-  const { client } = useServices()
-  const [list, setList] = useState<ConnectionList | null>(null)
-  const [since, setSince] = useState<number | null>(null)
+  const { client, cache } = useServices()
+  // Read again when a connection changes, as the window hears it.
+  const listRead = useQuery(reads(client).connections())
+  const list = listRead.data ?? null
   const [signingIn, setSigningIn] = useState<ServiceSignIn | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
   const [tokenError, setTokenError] = useState<{ readonly service: string; readonly message: string } | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [failed, setError] = useState<string | null>(null)
+  const error = failed ?? (listRead.error === null ? null : messageOf(listRead.error))
   const flow = useRef<{ readonly id: string; readonly product: Product } | null>(null)
 
-  const load = useCallback(
-    () =>
-      client.listConnections().then(
-        (next) => {
-          setList(next)
-          setSince((first) => first ?? next.cursor)
-        },
-        (failure: unknown) => setError(messageOf(failure)),
-      ),
-    [client],
-  )
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  useWatch((event) => {
-    if (event._tag === 'Changed' && event.aggregateType === 'connection') void load()
-  }, since)
+  const load = useCallback(() => cache.refetchQueries({ queryKey: keys.connections }), [cache])
 
   // A sign-in under way is asked how it stands, until it ends.
   useEffect(() => {

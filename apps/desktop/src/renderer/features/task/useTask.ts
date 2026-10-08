@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
+import { keys, reads } from '../../data/reads'
 import { caughtUp, mergeItems, newestReads, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
@@ -35,6 +37,8 @@ export interface TaskModel {
   /** Earlier items are on their way. */
   readonly loadingEarlier: boolean
   readonly loadEarlier: () => Promise<void>
+  /** Reads the files the task changed from git, past what the runtime keeps: for the person looking at them, hand edits and all. */
+  readonly readFiles: () => void
   /**
    * Says something to the lead. With no lead working, `start` names the one
    * to start: the message is its first turn, with its brief.
@@ -66,12 +70,15 @@ export interface TaskModel {
 }
 
 export const useTask = (threadId: string): TaskModel => {
-  const { client } = useServices()
-  const [snapshot, setSnapshot] = useState<ThreadSnapshot | null>(null)
+  const { client, cache } = useServices()
+  const read = reads(client)
+  const thread = useQuery(read.thread(threadId))
+  const snapshot = thread.data ?? null
+  const status = useQuery(read.status()).data
+  const agents = useMemo(() => status?.agents.filter((agent) => agent.signIn !== 'signed_out') ?? [], [status])
   const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
-  const [since, setSince] = useState<number | null>(null)
-  const [agents, setAgents] = useState<ReadonlyArray<AgentStatus>>([])
-  const [error, setError] = useState<string | null>(null)
+  const [failed, setError] = useState<string | null>(null)
+  const error = failed ?? (thread.error === null ? null : messageOf(thread.error))
   const [pending, setPending] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -80,17 +87,29 @@ export const useTask = (threadId: string): TaskModel => {
   const taskId = snapshot?.task.id ?? null
   const hasChange = (snapshot?.task.changes.length ?? 0) > 0
 
+  /** Changes the thread as the window keeps it; nothing before it is first read. */
+  const setSnapshot = useCallback(
+    (change: (current: ThreadSnapshot) => ThreadSnapshot) =>
+      cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) => (current === undefined ? current : change(current))),
+    [cache, threadId],
+  )
+
   // A task with a pull request asks its host for news as it opens, rather than at the next turn of listening.
   useEffect(() => {
     if (taskId !== null && hasChange) client.refreshTask(taskId).catch(() => undefined)
   }, [client, taskId, hasChange])
 
+  useEffect(() => () => clearTimeout(timer.current), [])
+
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
 
-  const arrived = useCallback((items: ReadonlyArray<ThreadItem>) => {
-    setSnapshot((current) => (current === null ? current : { ...current, items: mergeItems(current.items, items) }))
-    setStreaming((current) => caughtUp(current, items))
-  }, [])
+  const arrived = useCallback(
+    (items: ReadonlyArray<ThreadItem>) => {
+      setSnapshot((current) => ({ ...current, items: mergeItems(current.items, items) }))
+      setStreaming((current) => caughtUp(current, items))
+    },
+    [setSnapshot],
+  )
 
   /** The thread's head again: its task, the agent working, the calls waiting. Its items stay as they are. */
   const readHead = useCallback(
@@ -98,20 +117,28 @@ export const useTask = (threadId: string): TaskModel => {
       newest(
         'head',
         client.getThread(threadId, { limit: 0 }),
-        (head) => setSnapshot((current) => (current === null ? head : { ...head, items: current.items, earlier: current.earlier })),
+        (head) =>
+          cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
+            current === undefined ? head : { ...head, items: current.items, earlier: current.earlier },
+          ),
         fail,
       ),
-    [client, threadId, newest, fail],
+    [client, cache, threadId, newest, fail],
   )
 
-  useEffect(() => {
-    client.getThread(threadId).then((first) => {
-      setSnapshot(first)
-      setSince(first.cursor)
-    }, fail)
-    client.status().then((status) => setAgents(status.agents.filter((agent) => agent.signIn !== 'signed_out')), fail)
-    return () => clearTimeout(timer.current)
-  }, [client, threadId, fail])
+  const readFiles = useCallback(
+    () =>
+      void newest(
+        'head',
+        client.getThread(threadId, { limit: 0, fresh: true }),
+        (head) =>
+          cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
+            current === undefined ? head : { ...head, items: current.items, earlier: current.earlier },
+          ),
+        fail,
+      ),
+    [client, cache, threadId, newest, fail],
+  )
 
   /** Reads what the gathered changes touched. */
   const readChanged = useCallback(() => {
@@ -136,12 +163,19 @@ export const useTask = (threadId: string): TaskModel => {
       return
     }
     if (event.threadId !== threadId) return
+    // How full the lead's context is, as it says: kept on its session, which the composer shows.
+    if (event._tag === 'Context')
+      return void setSnapshot((current) =>
+        current.session === null
+          ? current
+          : { ...current, session: { ...current.session, context: { used: event.used, size: event.size } } },
+      )
     if (event.aggregateType === 'thread_item') changed.current.items.add(event.aggregateId)
     else changed.current.head = true
     // A message delivered changes its input, not its item: read again what still shows as queued.
     if (event.aggregateType === 'user_input') for (const id of waiting(snapshot?.items ?? [])) changed.current.items.add(id)
     timer.current ??= setTimeout(readChanged, GATHER)
-  }, since)
+  })
 
   const loadEarlier = useCallback(async () => {
     const first = snapshot?.items[0]
@@ -149,15 +183,13 @@ export const useTask = (threadId: string): TaskModel => {
     setLoadingEarlier(true)
     try {
       const page = await client.getThread(threadId, { before: first.sequence, limit: PAGE })
-      setSnapshot((current) =>
-        current === null ? current : { ...current, items: mergeItems(current.items, page.items), earlier: page.earlier },
-      )
+      setSnapshot((current) => ({ ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }))
     } catch (failure) {
       fail(failure)
     } finally {
       setLoadingEarlier(false)
     }
-  }, [client, threadId, snapshot, fail])
+  }, [client, threadId, snapshot, setSnapshot, fail])
 
   /** Runs an action, says what went wrong if it did, and reads the thread's head again. */
   const act = useCallback(
@@ -184,6 +216,7 @@ export const useTask = (threadId: string): TaskModel => {
     pending,
     loadingEarlier,
     loadEarlier,
+    readFiles,
     send: (body, start) =>
       act(async () => {
         // Queued first, so the lead that starts reads it in its first turn rather than after one of its own.

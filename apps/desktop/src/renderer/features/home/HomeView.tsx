@@ -410,32 +410,35 @@ export function HomeView({
         </p>
       )}
       <div className={s.body}>
-        <Home
-          waiting={waiting}
-          needs={[
-            ...cards.map(({ key, node }) => <div key={key}>{node}</div>),
-            ...answered.map((one) => (
-              <AskAnswered key={one.id} said={one.said} denied={one.denied} focusOnMount>
-                <AskNote>{text.answeredIn(one.project)}</AskNote>
-              </AskAnswered>
-            )),
-          ]}
-          running={runs}
-          since={lines}
-          looked={home === null ? '' : home.looked === null ? text.firstLook : ago(home.looked, new Date(now))}
-          projects={list}
-          {...(target?.kind === 'task' ? { current: target.id } : {})}
-          {...(dock === undefined ? {} : { dock })}
-          onOpenTask={(id) => open({ kind: 'task', id })}
-          onOpenEvent={(id) => {
-            const event = home?.events.find((one) => one.id === id)
-            if (event === undefined || event.kind === 'answered') return
-            if (tasks.some((task) => task.taskId === event.task.id)) open({ kind: 'task', id: event.task.id })
-            else onTask(event.task.threadId)
-          }}
-          onOpenProject={onProject}
-          onOpenFolder={openFolder}
-        />
+        {/* Unread is not empty: nothing shows until the home is read. */}
+        {home !== null && (
+          <Home
+            waiting={waiting}
+            needs={[
+              ...cards.map(({ key, node }) => <div key={key}>{node}</div>),
+              ...answered.map((one) => (
+                <AskAnswered key={one.id} said={one.said} denied={one.denied} focusOnMount>
+                  <AskNote>{text.answeredIn(one.project)}</AskNote>
+                </AskAnswered>
+              )),
+            ]}
+            running={runs}
+            since={lines}
+            looked={home === null ? '' : home.looked === null ? text.firstLook : ago(home.looked, new Date(now))}
+            projects={list}
+            {...(target?.kind === 'task' ? { current: target.id } : {})}
+            {...(dock === undefined ? {} : { dock })}
+            onOpenTask={(id) => open({ kind: 'task', id })}
+            onOpenEvent={(id) => {
+              const event = home?.events.find((one) => one.id === id)
+              if (event === undefined || event.kind === 'answered') return
+              if (tasks.some((task) => task.taskId === event.task.id)) open({ kind: 'task', id: event.task.id })
+              else onTask(event.task.threadId)
+            }}
+            onOpenProject={onProject}
+            onOpenFolder={openFolder}
+          />
+        )}
       </div>
     </div>
   )

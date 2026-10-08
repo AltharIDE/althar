@@ -106,12 +106,20 @@ const linesIn = (text: string) => (text === '' ? 0 : text.split('\n').length - (
 export const baseOf = (worktree: string, baseRef: string | null, started: string): Effect.Effect<string> =>
   baseRef === null ? Effect.succeed(started) : git(worktree, 'merge-base', baseRef, 'HEAD').pipe(Effect.orElseSucceed(() => started))
 
-/** The files git tracks that a task changed since `base`, committed or not: without reading any of them. */
+/** The files git tracks that a task changed since `base`, committed or not: without reading any of them. Its three diffs run at once. */
 const trackedFiles = (worktree: string, base: string) =>
   Effect.gen(function* () {
-    const statuses = reader(yield* git(worktree, 'diff', '--name-status', '-z', '-M', base))
-    const counts = reader(yield* git(worktree, 'diff', '--numstat', '-z', '-M', base))
-    const dirty = new Set(split(yield* git(worktree, 'diff', '--name-only', '-z', 'HEAD')))
+    const [named, numbered, uncommitted] = yield* Effect.all(
+      [
+        git(worktree, 'diff', '--name-status', '-z', '-M', base),
+        git(worktree, 'diff', '--numstat', '-z', '-M', base),
+        git(worktree, 'diff', '--name-only', '-z', 'HEAD'),
+      ],
+      { concurrency: 'unbounded' },
+    )
+    const statuses = reader(named)
+    const counts = reader(numbered)
+    const dirty = new Set(split(uncommitted))
 
     // Sizes, by the path a file has now: `add del path`, or for a move `add del` then its old and new paths.
     const sizes = new Map<string, { readonly add: number; readonly del: number; readonly binary: boolean }>()
@@ -171,16 +179,20 @@ const newEntry = (path: string, content: NewFile): ChangedFile | null =>
         uncommitted: true,
       }
 
-/** The files a task changed since `base`, committed or not, in path order. */
+/** How many new files are looked at at once. */
+const NEW_FILES_AT_ONCE = 16
+
+/** The files a task changed since `base`, committed or not, in path order. Git's lists are read at once, then the new files a few at a time. */
 export const changedFiles = (worktree: string, base: string): Effect.Effect<ReadonlyArray<ChangedFile>, unknown> =>
   Effect.gen(function* () {
-    const files = [...(yield* trackedFiles(worktree, base))]
-    const untracked = yield* untrackedPaths(worktree)
-    for (const [index, path] of untracked.entries()) {
+    const [tracked, untracked] = yield* Effect.all([trackedFiles(worktree, base), untrackedPaths(worktree)], { concurrency: 'unbounded' })
+    const added = yield* Effect.forEach(
+      untracked,
       // Past the first few dozen, a new file is listed without its lines counted.
-      const entry = newEntry(path, yield* newFile(worktree, path, index < NEW_FILES_COUNTED))
-      if (entry !== null) files.push(entry)
-    }
+      (path, index) => Effect.map(newFile(worktree, path, index < NEW_FILES_COUNTED), (content) => newEntry(path, content)),
+      { concurrency: NEW_FILES_AT_ONCE },
+    )
+    const files = [...tracked, ...added.filter((entry) => entry !== null)]
     // Paths are unique, so two are never equal.
     return files.toSorted((a, b) => (a.path < b.path ? -1 : 1))
   })

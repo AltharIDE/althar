@@ -227,6 +227,8 @@ const openWindow = () => {
     minWidth: 880,
     minHeight: 600,
     show: false,
+    // The page's own paper, so nothing else shows before its first frame.
+    backgroundColor: '#f4f2ec',
     titleBarStyle: 'hiddenInset',
     // Centred in the window's tabs, 40 high.
     trafficLightPosition: { x: 16, y: 14 },

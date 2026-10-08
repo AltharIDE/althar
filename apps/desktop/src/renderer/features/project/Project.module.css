@@ -42,19 +42,6 @@
   border-left: 1px solid var(--line);
 }
 
-.head {
-  flex: none;
-  padding: 20px 24px 12px;
-  border-bottom: 1px solid var(--line);
-}
-
-.heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
 .host {
   display: flex;
   flex-wrap: wrap;
@@ -63,13 +50,6 @@
   margin: 10px 0 0;
   color: var(--t-2);
   font-size: 12.5px;
-}
-
-.repository {
-  margin: 4px 0 0;
-  color: var(--t-3);
-  font-family: var(--mono);
-  font-size: 12px;
 }
 
 .face {
@@ -81,6 +61,14 @@
   display: grid;
   flex: 1;
   place-items: center;
+}
+
+/* The thread's shape while it is read, where it will be. */
+.reading {
+  flex: 1;
+  min-height: 0;
+  padding-top: 40px;
+  overflow: hidden;
 }
 
 .composer {

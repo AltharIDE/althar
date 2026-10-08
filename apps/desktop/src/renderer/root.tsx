@@ -1,6 +1,8 @@
-import { createRootRoute, Outlet, useNavigate } from '@tanstack/react-router'
+import type { QueryClient } from '@tanstack/react-query'
+import { createRootRouteWithContext, Outlet, useNavigate } from '@tanstack/react-router'
 import { useEffect } from 'react'
 
+import type { Client } from './data/client'
 import { useServices } from './data/services'
 import { TabsFrame } from './features/tabs/TabsFrame'
 
@@ -19,4 +21,10 @@ function Root() {
   )
 }
 
-export const rootRoute = createRootRoute({ component: Root })
+/** What each route reads with before it shows: the runtime's client, and the window's cache of what it read. */
+export interface RouterContext {
+  readonly client: Client
+  readonly cache: QueryClient
+}
+
+export const rootRoute = createRootRouteWithContext<RouterContext>()({ component: Root })

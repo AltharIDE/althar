@@ -1,7 +1,8 @@
 import type { AgentStatus, CommandRule, ProjectRulesView, RuleKind } from '@althar/contracts'
-import { BackCrumb, LimitPolicy, PermissionPolicy, Spinner, TaskEnd, TitleBar } from '@althar/ui'
+import { BackCrumb, LimitPolicy, PermissionPolicy, TaskEnd, TitleBar } from '@althar/ui'
 import { ProjectRules, projectRulesText } from '@althar/ui/screens'
 
+import { PartPending, pendingText } from '../../shared/Pending'
 import s from './Rules.module.css'
 import type { RulesModel } from './useRules'
 
@@ -112,7 +113,7 @@ export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => 
           </p>
         )}
         {rules === null ? (
-          <Spinner />
+          <PartPending label={pendingText.page} />
         ) : (
           <ProjectRules
             project={model.project ?? ''}

@@ -1,10 +1,11 @@
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 
-import type { ProjectSummary } from '@althar/contracts'
 import type { ProjectTab } from '@althar/ui'
 
-import { useServices, useWatch } from '../../data/services'
+import { reads } from '../../data/reads'
+import { useServices } from '../../data/services'
 import { arrived, closed, tabsStoreOf } from './store'
 import { afterClosing, firstOpen, type Place, tabOf, whereOf, yoursIn } from './tabs'
 
@@ -12,8 +13,9 @@ import { afterClosing, firstOpen, type Place, tabOf, whereOf, yoursIn } from './
  * The window's tabs: one for each project the person keeps open, with where
  * in each they last were, so pressing a tab goes back there. Going into a
  * project, from anywhere, gives it a tab. Every project's tab says whether
- * a task is under way there and what waits on the person, read again when a
- * project, a task, a run, a session or a call changes.
+ * a task is under way there and what waits on the person, as the window's
+ * projects are read: again whenever a project, a task, a run, a session or a
+ * call changes.
  */
 
 export interface TabsModel {
@@ -33,32 +35,14 @@ export interface TabsModel {
   readonly visit: (threadId: string, projectId: string, title?: string) => void
 }
 
-/** Changes that move what the tabs show: a project's name, its tasks and runs, who is working, what waits on you. */
-const SHOWN = new Set(['project', 'task', 'run', 'provider_session', 'attention_request'])
-
 export const useTabs = (): TabsModel => {
   const { client } = useServices()
   const navigate = useNavigate()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const store = tabsStoreOf(client)
   const { kept, threads } = useSyncExternalStore(store.subscribe, store.get)
-  const [projects, setProjects] = useState<ReadonlyArray<ProjectSummary> | null>(null)
-  const [since, setSince] = useState<number | null>(null)
-
-  const load = useCallback(() => {
-    client.listProjects().then(
-      (list) => {
-        setProjects(list.projects)
-        setSince((first) => first ?? list.cursor)
-      },
-      // The tabs keep what they last showed.
-      () => undefined,
-    )
-  }, [client])
-  useEffect(load, [load])
-  useWatch((event) => {
-    if (event._tag === 'Changed' && SHOWN.has(event.aggregateType)) load()
-  }, since)
+  // Unread, or not read this time, the tabs keep what they last showed.
+  const projects = useQuery(reads(client).projects()).data?.projects ?? null
 
   const where = whereOf(pathname)
   const known = where.kind === 'home' ? null : where.kind === 'project' ? where.projectId : threads[where.threadId]

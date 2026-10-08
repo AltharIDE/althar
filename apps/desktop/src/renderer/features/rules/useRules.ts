@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useCallback, useState } from 'react'
 
 import type { AgentStatus, ProjectRulesView } from '@althar/contracts'
 
 import { messageOf, type ProjectRulesChange } from '../../data/client'
+import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 
 /*
@@ -21,32 +23,26 @@ export interface RulesModel {
 }
 
 export const useRules = (projectId: string): RulesModel => {
-  const { client } = useServices()
-  const [project, setProject] = useState<string | null>(null)
-  const [rules, setRules] = useState<ProjectRulesView | null>(null)
-  const [agents, setAgents] = useState<ReadonlyArray<AgentStatus>>([])
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    client.getProjectRules(projectId).then(setRules, (failure: unknown) => setError(messageOf(failure)))
-    client.listProjects().then(
-      (list) => setProject(list.projects.find((each) => each.id === projectId)?.name ?? null),
-      () => {},
-    )
-    client.status().then(
-      (status) => setAgents(status.agents),
-      () => {},
-    )
-  }, [client, projectId])
+  const { client, cache } = useServices()
+  const read = reads(client)
+  const rulesRead = useQuery(read.rules(projectId))
+  const project = useQuery(read.projects()).data?.projects.find((each) => each.id === projectId)?.name ?? null
+  const agents = useQuery(read.status()).data?.agents ?? []
+  const [failed, setError] = useState<string | null>(null)
+  const error = failed ?? (rulesRead.error === null ? null : messageOf(rulesRead.error))
 
   const change = useCallback(
     (next: Omit<ProjectRulesChange, 'projectId'>) => {
       setError(null)
-      setRules((now) => (now === null ? now : { ...now, ...next }))
-      client.setProjectRules({ projectId, ...next }).then(setRules, (failure: unknown) => setError(messageOf(failure)))
+      const key = keys.rules(projectId)
+      cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, ...next }))
+      client.setProjectRules({ projectId, ...next }).then(
+        (kept) => cache.setQueryData(key, kept),
+        (failure: unknown) => setError(messageOf(failure)),
+      )
     },
-    [client, projectId],
+    [client, cache, projectId],
   )
 
-  return { project, rules, agents, error, change }
+  return { project, rules: rulesRead.data ?? null, agents, error, change }
 }

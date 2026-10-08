@@ -347,6 +347,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     effort: 'high',
     models: ['opus', 'sonnet'],
     turnRunning: false,
+    context: null,
   },
   attention: [],
   items: [],

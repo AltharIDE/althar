@@ -22,7 +22,13 @@ export default defineConfig(({ mode }) => ({
     coverage: {
       include: ['src/renderer/**/*.{ts,tsx}'],
       // The entry and the routes wire the app together; what they use is tested on its own, and the whole in the end-to-end tests.
-      exclude: ['src/renderer/main.tsx', 'src/renderer/router.tsx', 'src/renderer/root.ts', 'src/renderer/features/*/route.tsx'],
+      exclude: [
+        'src/renderer/main.tsx',
+        'src/renderer/data/open.ts',
+        'src/renderer/router.tsx',
+        'src/renderer/root.ts',
+        'src/renderer/features/*/route.tsx',
+      ],
       reporter: ['text', 'html'],
       thresholds: { lines: 90, branches: 90 },
     },
