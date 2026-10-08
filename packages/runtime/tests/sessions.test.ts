@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect, Option } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { AlreadyDelivered, AttentionClosed, NoSession, NotFound, SessionFailed, SessionRunning } from '../src/errors'
@@ -12,6 +12,7 @@ import { Instance } from '../src/Instance'
 import { Permissions } from '../src/Permissions'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
+import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { errorClassOf, promptFor, Sessions } from '../src/Sessions'
 import { items, repository, runtime, task, turns, until } from './support'
@@ -175,11 +176,16 @@ describe('sessions', () => {
       assert.isTrue(next?.prompt?.includes('keep the retry'))
       assert.isFalse(next?.prompt?.includes('drop the cache'))
       assert.strictEqual((yield* message(dropped.inputId)).state, 'withdrawn')
+      // Taken back, it takes no place on a page of the thread, and read by itself it says so.
+      const queries = yield* Queries
+      assert.isFalse((yield* queries.thread(created.threadId)).items.some((item) => item.id === droppedItem))
+      const read = yield* queries.item(created.threadId, droppedItem)
+      assert.strictEqual(read.kind === 'user_message' ? read.input?.state : null, 'withdrawn')
       // Once the agent has it, or once it is taken back, it stays as it is.
       assert.instanceOf(yield* Effect.flip(takeBack((yield* message(kept.inputId)).itemId)), AlreadyDelivered)
       assert.instanceOf(yield* Effect.flip(takeBack(droppedItem)), AlreadyDelivered)
       assert.instanceOf(yield* Effect.flip(takeBack('item_missing')), NotFound)
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 
   it.live('never both gives a message to the agent and takes it back', () =>

@@ -97,8 +97,8 @@ describe('a thread as blocks', () => {
       items.you('dropped', { state: 'withdrawn', interrupting: false }),
       items.you('old', null),
     ]
-    const shown = (turnRunning: boolean) =>
-      blocksOf({ ...source(thread), turnRunning }, new Map(), at).map((block) =>
+    const shown = (turnRunning: boolean, queue?: boolean) =>
+      blocksOf({ ...source(thread), turnRunning, ...(queue === undefined ? {} : { queue }) }, new Map(), at).map((block) =>
         block.kind === 'you' ? [block.text, block.delivery] : null,
       )
     expect(shown(false)).toEqual([
@@ -110,6 +110,8 @@ describe('a thread as blocks', () => {
       ['now', Delivery.Interrupting],
       ['old', Delivery.Delivered],
     ])
+    // With no agent to take it, what waits is in the queue too.
+    expect(shown(false, true)).toEqual(shown(true))
   })
 
   it('runs a plan step and a tool call only while their turn does', () => {

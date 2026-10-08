@@ -2,7 +2,7 @@ import { Brand } from '@althar/ui'
 import { describe, expect, it } from 'vitest'
 
 import { brandOf, modelInfo } from '../src/renderer/shared/agents'
-import { newestReads } from '../src/renderer/shared/items'
+import { newestReads, queueShown } from '../src/renderer/shared/items'
 import { ago, clock, took } from '../src/renderer/shared/time'
 
 describe('agents', () => {
@@ -93,5 +93,14 @@ describe('a clock', () => {
     )
     const november = new Date('2026-11-20T09:00:00')
     expect(clock(november.toISOString(), now)).toContain(november.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }))
+  })
+})
+
+describe('the composer queue', () => {
+  it('shows behind a turn running, or with no agent to take what waits, but not while the person is sending', () => {
+    expect(queueShown({ turnRunning: true }, false)).toBe(true)
+    expect(queueShown({ turnRunning: false }, false)).toBe(false)
+    expect(queueShown(null, false)).toBe(true)
+    expect(queueShown(null, true)).toBe(false)
   })
 })

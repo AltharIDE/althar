@@ -19,7 +19,7 @@ import {
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
-import { queuedOf, withQueued } from '../../shared/items'
+import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
@@ -173,6 +173,7 @@ export function ProjectView({
   const session = coordinator?.session ?? null
   const suggested = coordinator?.suggested ?? null
   const busy = session?.turnRunning ?? false
+  const queue = queueShown(session, model.pending)
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Whatever it ran on last, while that agent can; otherwise the first that can.
@@ -200,7 +201,7 @@ export function ProjectView({
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the coordinator has it already.
   const edit = async (id: string) => {
-    const said = queuedOf(coordinator?.items ?? [], busy).find((message) => message.id === id)
+    const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
     if (said !== undefined && (await model.takeBack(id))) setDraft((current) => withQueued(current, said.text))
   }
 
@@ -230,7 +231,7 @@ export function ProjectView({
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
-        queued={queuedOf(coordinator?.items ?? [], busy)}
+        queued={queuedOf(coordinator?.items ?? [], queue)}
         onEditQueued={(id) => void edit(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue }}
@@ -359,7 +360,7 @@ export function ProjectView({
                   {coordinator.items.length === 0 && model.streaming.size === 0 && <p className={s.quiet}>{text.empty}</p>}
                   <ThreadBlocks
                     blocks={blocksOf(
-                      { items: coordinator.items, turnRunning: busy, worktree: null },
+                      { items: coordinator.items, turnRunning: busy, worktree: null, queue },
                       model.streaming,
                       (iso) => ago(iso),
                       now,

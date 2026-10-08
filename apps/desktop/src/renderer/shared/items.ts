@@ -57,16 +57,26 @@ export const waiting = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<string>
   items.flatMap((item) => (item.kind === 'user_message' && item.input?.state === 'queued' ? [item.id] : []))
 
 /**
- * What waits behind the turn running, oldest first, in the composer where the
- * person can edit it or take it back. With no turn running there is nothing
- * to wait behind: what was just sent goes straight to the thread. A message
- * sent now isn't there either: it goes first, as soon as the turn stops.
+ * Whether what waits its turn shows in the composer's queue: behind a turn
+ * running, or with no agent on the thread to take it, where it could wait
+ * for long. With an agent idle there is nothing to wait behind, and while the
+ * person's own send is on its way (which may start the agent), what they just
+ * sent is about to be read: it goes straight to the thread, rather than
+ * flashing in the queue.
+ */
+export const queueShown = (session: { readonly turnRunning: boolean } | null, sending: boolean): boolean =>
+  session === null ? !sending : session.turnRunning
+
+/**
+ * What waits its turn, oldest first, in the composer where the person can
+ * edit it or take it back, when the queue shows. A message sent now isn't
+ * there: it goes first, as soon as the turn stops.
  */
 export const queuedOf = (
   items: ReadonlyArray<ThreadItem>,
-  turnRunning: boolean,
+  shown: boolean,
 ): ReadonlyArray<{ readonly id: string; readonly text: string }> =>
-  !turnRunning
+  !shown
     ? []
     : items.flatMap((item) =>
         item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting
