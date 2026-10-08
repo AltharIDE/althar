@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { PROJECT_LIST, RUNNING, SINCE } from '../src/fixtures/home'
-import { Home } from '../src/screens/Home/Home'
+import { FERROUS, HALYARD, MERIDIAN, PROJECT_LIST, RUNNING, SINCE, TESSERA } from '../src/fixtures/home'
+import { type HomeProject, Home, REST_SINCE } from '../src/screens/Home/Home'
 
 const home = (props: Partial<Parameters<typeof Home>[0]> = {}) =>
   render(<Home waiting={0} running={RUNNING} since={SINCE} looked="3 h ago" projects={PROJECT_LIST} {...props} />)
@@ -53,10 +53,95 @@ describe('Home', () => {
     expect(onOpenEvent).toHaveBeenCalledWith('s1')
   })
 
-  it('says what is empty', () => {
-    home({ running: [], since: [] })
-    expect(screen.getByText('Nothing is waiting on you.')).toBeInTheDocument()
+  it('says what is empty in the stream', () => {
+    home({ running: [], since: [], needs: [<p key="a">Allowed npm test</p>] })
     expect(screen.getByText('Nothing is in progress.')).toBeInTheDocument()
     expect(screen.getByText('Nothing has happened since.')).toBeInTheDocument()
+  })
+})
+
+const fresh = (project: typeof MERIDIAN, id: string): HomeProject => ({
+  id,
+  project,
+  running: 0,
+  yours: 0,
+  note: 'No tasks yet',
+  fresh: true,
+})
+const worked = (project: typeof MERIDIAN, id: string): HomeProject => ({ id, project, running: 0, yours: 0, note: 'Last task Monday' })
+
+describe('Home at rest', () => {
+  const rest = (props: Partial<Parameters<typeof Home>[0]> = {}) =>
+    render(
+      <Home waiting={0} running={[]} since={[]} looked="3 h ago" projects={[fresh(MERIDIAN, 'meridian')]} onTalk={vi.fn()} {...props} />,
+    )
+
+  it('offers one new project’s coordinator in place of three empty sections', () => {
+    const onTalk = vi.fn()
+    rest({ onTalk })
+    expect(screen.getByRole('heading', { name: 'Nothing in Meridian yet' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: /In progress/ })).toBeNull()
+    expect(screen.queryByText('Nothing is waiting on you.')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to Meridian’s coordinator' }))
+    expect(onTalk).toHaveBeenCalledWith('meridian')
+    expect(screen.getByRole('complementary', { name: 'Projects' })).toBeInTheDocument()
+  })
+
+  it('offers each new project’s coordinator, up to three, and says how many more', () => {
+    rest({ projects: [fresh(MERIDIAN, 'm'), fresh(HALYARD, 'h'), fresh(TESSERA, 't'), fresh(FERROUS, 'f'), fresh(MERIDIAN, 'm2')] })
+    expect(screen.getByRole('heading', { name: 'Nothing in your projects yet' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /^Talk to/ })).toHaveLength(3)
+    expect(screen.getByText('2 more under Projects')).toBeInTheDocument()
+  })
+
+  it('says one more in the singular', () => {
+    rest({ projects: [fresh(MERIDIAN, 'm'), fresh(HALYARD, 'h'), fresh(TESSERA, 't'), fresh(FERROUS, 'f')] })
+    expect(screen.getByText('1 more under Projects')).toBeInTheDocument()
+  })
+
+  it('offers no way to a coordinator it can’t open', () => {
+    rest({ onTalk: undefined })
+    expect(screen.getByRole('heading', { name: 'Nothing in Meridian yet' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Talk to/ })).toBeNull()
+  })
+
+  it('is all quiet once projects have had work, with the last few things the loop did', () => {
+    const onOpenEvent = vi.fn()
+    rest({ projects: [worked(HALYARD, 'h'), fresh(MERIDIAN, 'm')], since: SINCE.slice(0, 2), onOpenEvent })
+    expect(screen.getByRole('heading', { name: 'All quiet' })).toBeInTheDocument()
+    expect(screen.getByText('Nothing needs you and nothing is in progress. Since you looked, 3 h ago:')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Talk to/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Pull request #1191 opened' }))
+    expect(onOpenEvent).toHaveBeenCalledWith('s1')
+  })
+
+  it('is all quiet with nothing to add when nothing has happened since', () => {
+    rest({ projects: [worked(HALYARD, 'h')] })
+    expect(screen.getByRole('heading', { name: 'All quiet' })).toBeInTheDocument()
+    expect(screen.getByText('Nothing needs you and nothing is in progress.')).toBeInTheDocument()
+  })
+
+  it('still offers a new project’s coordinator beside projects that have had work', () => {
+    rest({ projects: [worked(HALYARD, 'h'), fresh(MERIDIAN, 'm')] })
+    expect(screen.getByRole('heading', { name: 'All quiet' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Talk to Meridian’s coordinator' })).toBeInTheDocument()
+  })
+
+  it('shows the stream once the loop has done more than it rests over', () => {
+    const many = Array.from({ length: REST_SINCE + 1 }, (_, i) => ({ ...SINCE[i % SINCE.length], id: `e${i}` })).filter(
+      (event): event is (typeof SINCE)[number] => event.what !== undefined,
+    )
+    rest({ projects: [worked(HALYARD, 'h')], since: many })
+    expect(screen.queryByRole('heading', { name: 'All quiet' })).toBeNull()
+    expect(screen.getByRole('region', { name: /In progress/ })).toBeInTheDocument()
+  })
+
+  it('leaves for the stream when work comes, and comes back when it is gone', () => {
+    const { rerender } = rest()
+    rerender(<Home waiting={0} running={RUNNING} since={[]} looked="3 h ago" projects={[fresh(MERIDIAN, 'meridian')]} />)
+    expect(screen.queryByRole('heading', { name: 'Nothing in Meridian yet' })).toBeNull()
+    expect(screen.getByRole('region', { name: /In progress/ })).toBeInTheDocument()
+    rerender(<Home waiting={0} running={[]} since={[]} looked="3 h ago" projects={[fresh(MERIDIAN, 'meridian')]} />)
+    expect(screen.getByRole('heading', { name: 'Nothing in Meridian yet' })).toBeInTheDocument()
   })
 })

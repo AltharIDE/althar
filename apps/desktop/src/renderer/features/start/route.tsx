@@ -1,6 +1,8 @@
 import { createRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect } from 'react'
 
+import { Room } from '@althar/ui'
+
 import { reads } from '../../data/reads'
 import { rootRoute } from '../../root'
 import { HomePending } from '../../shared/Pending'
@@ -16,6 +18,7 @@ function Home({ start }: { start: StartModel }) {
       model={useHome()}
       start={start}
       onProject={(projectId) => void navigate({ to: '/projects/$projectId', params: { projectId } })}
+      onTalk={(projectId) => void navigate({ to: '/projects/$projectId', params: { projectId }, search: { room: Room.Talk } })}
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
       onSettings={() => void navigate({ to: '/settings' })}
     />

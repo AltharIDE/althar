@@ -2,12 +2,22 @@ import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { arrive, Launch } from '../src/screens/Launch/Launch'
-import { COLUMN_COUNT, COLUMNS, drawColumn, drawGrain, jitter, PICTURE, toneOf } from '../src/screens/Launch/light'
+import { COLUMN_COUNT, COLUMNS, drawColumn, drawGrain, jitter, PICTURE, toneOf } from '../src/foundations/Light/columns'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { LOGO_BORE, LOGO_SECTION } from '../src/foundations/Logo/Logo'
-import { BORE, BORE_RADIUS, CORNERS, DOTS, FACE_RADIUS, halftone, inSection, PARTICLES, POINT_RADIUS } from '../src/screens/Launch/halftone'
+import {
+  BORE,
+  BORE_RADIUS,
+  CORNERS,
+  DOTS,
+  FACE_RADIUS,
+  halftone,
+  inSection,
+  PARTICLES,
+  POINT_RADIUS,
+} from '../src/foundations/HalftoneMark/halftone'
 import { arrivalOf, AT, dotAt, lightAt, particleAt, pointAt, SETTLED, spring, springEasing } from '../src/screens/Launch/timeline'
 
 /*
