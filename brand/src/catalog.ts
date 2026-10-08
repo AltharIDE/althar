@@ -3,7 +3,6 @@ import { NEEDS_YOU, RUNNING, tileSvg } from './emoji'
 import { type LockupLayout, lockupSvg } from './lockup'
 import { MARK_STYLES, type MarkName, markSvg } from './mark'
 import { paletteJson } from './palette'
-import { projectMarkSvg, sampleMarks, sampleSheet } from './project-marks'
 
 /*
  * Everything the pack draws, as a list of files: what each contains, and the
@@ -54,9 +53,6 @@ export async function catalog(): Promise<Catalog> {
   }
 
   for (const name of names(AVATAR_STYLES)) drawing(`avatar/avatar-${name}`, avatarSvg(AVATAR_STYLES[name]), [1024, 400, 128])
-
-  for (const { seed, ink } of sampleMarks()) drawing(`project-marks/${seed}`, projectMarkSvg(seed, ink), [256])
-  drawing('project-marks/sheet', sampleSheet(), [1600])
 
   /* Chat emoji: one file each at the size chats ask for. */
   for (const [name, svg] of [

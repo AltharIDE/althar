@@ -18,7 +18,7 @@ const clear = (...folders: string[]): Promise<void[]> =>
   Promise.all(folders.map((f) => rm(resolve(EXPORT, f), { recursive: true, force: true })))
 
 if (only === undefined || only === 'drawings') {
-  await clear('mark', 'lockup', 'avatar', 'project-marks', 'emoji', 'web', 'palette', 'app-icon')
+  await clear('mark', 'lockup', 'avatar', 'emoji', 'web', 'palette', 'app-icon')
   const { files, rasters } = await catalog()
   await writeAll(files)
   await rasterise(rasters, files)
@@ -40,7 +40,8 @@ if (only === undefined || only === 'drawings') {
 
 if (only === undefined || only === 'banners') {
   const names = process.argv.slice(3)
-  if (names.length === 0) await clear('banner')
+  if (names.length === 0)
+    await clear('banner', 'avatar/avatar-printed-1024.png', 'avatar/avatar-printed-400.png', 'avatar/avatar-printed-128.png')
   const { exportBanners } = await import('./banners')
   await exportBanners(names)
 }

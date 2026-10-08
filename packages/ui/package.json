@@ -8,7 +8,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./screens": "./src/screens/index.ts",
-    "./project-mark": "./src/foundations/ProjectMark/drawing.ts",
     "./styles.css": "./src/styles/global.css"
   },
   "scripts": {

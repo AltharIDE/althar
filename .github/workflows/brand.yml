@@ -1,3 +1,8 @@
+# Checks the brand pack in brand/: format, lint and types, then the tests that keep the pack in step with the rest of the
+# repository: the mark's copies in the UI package, the pitch, the favicons and Storybook; the brand colours against the
+# interface's tokens; the app icons against the desktop app's; and the committed export/ against what the code draws.
+# It runs when any of those files change. It doesn't redraw the pack: after changing a drawing, run
+# `bun --filter @althar/brand export` and commit what it writes.
 name: brand
 
 on:
@@ -6,10 +11,8 @@ on:
     paths:
       [
         'brand/**',
-        'packages/ui/package.json',
         'packages/ui/src/styles/tokens.css',
         'packages/ui/src/foundations/Logo/**',
-        'packages/ui/src/foundations/ProjectMark/**',
         'packages/ui/.storybook/**',
         'apps/pitch/src/components/Logo.tsx',
         'apps/pitch/public/**',
@@ -25,10 +28,8 @@ on:
     paths:
       [
         'brand/**',
-        'packages/ui/package.json',
         'packages/ui/src/styles/tokens.css',
         'packages/ui/src/foundations/Logo/**',
-        'packages/ui/src/foundations/ProjectMark/**',
         'packages/ui/.storybook/**',
         'apps/pitch/src/components/Logo.tsx',
         'apps/pitch/public/**',
@@ -66,4 +67,4 @@ jobs:
       - run: bun install --frozen-lockfile
         working-directory: .
       - run: bun run check
-      - run: bun run test:coverage
+      - run: bun run test

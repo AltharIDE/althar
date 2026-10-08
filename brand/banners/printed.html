@@ -106,6 +106,12 @@
           half: { sc, cx: W - 8.6 * sc - 0.02 * W, top: 0.1 * H },
         }
       },
+      // an avatar: the mark alone, as a coarser halftone so it holds at a small size; a circle crop keeps all of it
+      avatar() {
+        const sc = (0.64 * W) / 15.78
+        // a little above the box's middle: the tip is faint, so the eye centres on the heavy base and the bore
+        return { half: { sc, cx: W / 2, top: (H - TOP * sc) / 2 - 1.0 * sc, pitch: 0.4 * sc } }
+      },
       // channel art: what shows on every screen is the middle, so the mark and the name stand in it whole
       centre() {
         const safe = { x: 507, y: 508, w: 1546, h: 423 }
@@ -127,10 +133,10 @@
     const probe = document.createElement('canvas').getContext('2d')
 
     // the section as a halftone lit from the upper left: the top tip pale, the base heavy, the faces darker toward their edges
-    function halftone(x, { sc, cx, top }) {
+    function halftone(x, { sc, cx, top, pitch }) {
       const ox = cx - 12 * sc, oy = top - 5.5 * sc
-      const cell = 5.4 * (sc / 20), ang = (15 * Math.PI) / 180, ca = Math.cos(ang), sa = Math.sin(ang)
-      const cy = oy + 12.9 * sc, reach = Math.ceil(130 * (sc / 20) / (cell / 5.4 || 1))
+      const cell = pitch ?? 5.4 * (sc / 20), ang = (15 * Math.PI) / 180, ca = Math.cos(ang), sa = Math.sin(ang)
+      const cy = oy + 12.9 * sc, reach = Math.ceil((10.5 * sc) / cell) + 2 // lattice steps from the centre to the section's far corner
       for (let a = -reach; a < reach; a++) for (let b = -reach; b < reach; b++) {
         const px = cx + (a * ca - b * sa) * cell, py = cy + (a * sa + b * ca) * cell
         const gx = (px - ox) / sc, gy = (py - oy) / sc
@@ -166,8 +172,10 @@
         const [c, x] = plate('cobalt')
         x.translate(...OFF)
         x.fillStyle = COBALT
-        x.font = `800 ${P.word.size}px Inter`; x.letterSpacing = `${-0.048 * P.word.size}px`
-        x.fillText(NAME, P.word.x, P.word.y)
+        if (P.word) {
+          x.font = `800 ${P.word.size}px Inter`; x.letterSpacing = `${-0.048 * P.word.size}px`
+          x.fillText(NAME, P.word.x, P.word.y)
+        }
         if (P.head) {
           x.font = `700 ${P.head.size}px Inter`; x.letterSpacing = `${-0.045 * P.head.size}px`
           x.fillText(LINE2, P.head.x, P.head.y1 + P.head.size * P.head.lead)

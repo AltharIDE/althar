@@ -10,7 +10,7 @@ import { BORE, SECTION } from '../src/geometry'
 
 const page = resolve(import.meta.dirname, '../banners/printed.html')
 
-/** Draws each banner in a browser, and writes it to export/banner/ as a PNG. Pass names to draw only those. */
+/** Draws each banner in a browser, and writes it to export/ as a PNG. Pass names to draw only those. */
 export async function exportBanners(names: readonly string[] = []): Promise<void> {
   const browser = await chromium.launch()
   try {
@@ -21,7 +21,13 @@ export async function exportBanners(names: readonly string[] = []): Promise<void
       /* it draws on canvases once its fonts are in, and says when it's done */
       await tab.waitForFunction(() => document.body.dataset['ready'] === '1', undefined, { timeout: 60_000 })
       const shot = await tab.screenshot({ type: 'png' })
-      await write(`banner/${b.file}.png`, await sharp(shot).png({ compressionLevel: 9, palette: true, quality: 95 }).toBuffer())
+      const png = (width?: number): Promise<Buffer> =>
+        sharp(shot)
+          .resize(width === undefined ? {} : { width })
+          .png({ compressionLevel: 9, palette: true, quality: 95 })
+          .toBuffer()
+      if (b.sizes) for (const width of b.sizes) await write(`${b.folder}/${b.file}-${width}.png`, await png(width))
+      else await write(`${b.folder}/${b.file}.png`, await png())
       await tab.close()
     }
   } finally {
