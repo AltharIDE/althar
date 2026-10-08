@@ -1,7 +1,9 @@
 /*
  * Starts each agent over ACP, creates a session in a scratch folder, prints
  * what it reports (capabilities, sign-in methods, modes, config options), and
- * stops it. It sends no prompt, so it costs no usage.
+ * stops it. It puts the session on each model in turn, to print each one's
+ * effort levels: an agent may offer them only once a session is on a model
+ * that has some. It sends no prompt, so it costs no usage.
  *
  *   bun run probe            # every agent
  *   bun run probe codex      # one agent
@@ -24,6 +26,10 @@ const agents: Record<string, { readonly command: string; readonly args: Readonly
   opencode: { command: 'opencode', args: ['acp'] },
 }
 
+/** A select's values, its groups' included. */
+const valuesOf = (options: acp.SessionConfigSelectOptions): Array<string> =>
+  options.flatMap((option) => ('group' in option ? option.options.map((inner) => inner.value) : [option.value]))
+
 const probe = async (name: string, spec: { readonly command: string; readonly args: ReadonlyArray<string> }) => {
   const cwd = mkdtempSync(join(tmpdir(), `althar-probe-${name}-`))
   const child = spawn(spec.command, [...spec.args], { cwd, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -38,7 +44,18 @@ const probe = async (name: string, spec: { readonly command: string; readonly ar
       .connectWith(stream, async (context) => {
         const init = await context.request(acp.methods.agent.initialize, { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} })
         const session = await context.request(acp.methods.agent.session.new, { cwd, mcpServers: [] })
-        return { init, session }
+        const model = session.configOptions?.find((option) => option.category === 'model')
+        const efforts: Record<string, unknown> = {}
+        for (const value of model?.type === 'select' ? valuesOf(model.options) : []) {
+          const set = await context.request(acp.methods.agent.session.setConfigOption, {
+            sessionId: session.sessionId,
+            configId: model?.id ?? 'model',
+            value,
+          })
+          const effort = set.configOptions.find((option) => option.category === 'thought_level')
+          efforts[value] = effort?.type === 'select' ? { current: effort.currentValue, levels: valuesOf(effort.options) } : null
+        }
+        return { init, session, efforts }
       })
     process.stdout.write(`${JSON.stringify({ agent: name, ...report }, null, 2)}\n`)
   } catch (error) {
