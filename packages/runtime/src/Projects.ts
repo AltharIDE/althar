@@ -10,9 +10,9 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { postCard } from './cards'
 import { RuntimeConfig } from './Config'
 import { type GitFailed, NotARepository, NotFound, RepositoriesNeeded } from './errors'
+import { branchFor, conventionsOnBase, ruleOf } from './conventions'
 import { addWorktree, branchExists, commitOf, currentBranch, defaultBranch, fetchBranch, redactUrl, remoteUrls, topLevel } from './git'
 import { Instance } from './Instance'
-import { branchKey } from './Issues'
 import { change, fact, timestamp } from './records'
 
 /*
@@ -416,6 +416,15 @@ export class Projects extends Context.Service<
           if (unknown.length > 0) return yield* new RepositoriesNeeded({ unknown, choices })
           const chosen = bindings.length === 1 ? bindings : bindings.filter((binding) => named.some((name) => matches(binding, name)))
           if (chosen.length === 0) return yield* new RepositoriesNeeded({ unknown: [], choices })
+          // How each repository names branches, read before the task is made (git doesn't run inside it): the person's rule,
+          // else what its docs say, else Althar's own.
+          const [rules] = yield* sql<{ pattern: string | null }>`
+            SELECT json_extract(rules, '$.branchPattern') AS pattern FROM policies WHERE project_id = ${first.projectId}
+            ORDER BY revision DESC LIMIT 1`
+          const rule = ruleOf('branch', rules?.pattern ?? undefined)
+          const patterns = new Map<string, string | null>()
+          for (const binding of chosen)
+            patterns.set(binding.id, rule ?? (yield* conventionsOnBase(binding.repository, binding.base ?? 'main')).branch?.pattern ?? null)
           const created = yield* commands.execute({
             envelope,
             projectId: first.projectId,
@@ -440,9 +449,9 @@ export class Projects extends Context.Service<
               })}`
               const threadId = yield* newId(Ids.thread)
               yield* sql`INSERT INTO threads ${sql.insert({ id: threadId, projectId: first.projectId, kind: 'task', taskId, createdAt })}`
-              const branch = input.issueKey === undefined ? `althar/${slug}` : `althar/${branchKey(input.issueKey)}-${slug}`
+              const branchOf = (bindingId: string) => branchFor(patterns.get(bindingId) ?? null, { key: input.issueKey ?? null, slug })
               // A worktree for each repository it changes, side by side in the task's folder (ADR-006).
-              const workspaces: Array<{ id: string; worktree: string }> = []
+              const workspaces: Array<{ id: string; worktree: string; branch: string }> = []
               for (const binding of chosen) {
                 yield* sql`INSERT INTO task_repository_requirements ${sql.insert({
                   id: yield* newId(Ids.taskRequirement),
@@ -463,11 +472,11 @@ export class Projects extends Context.Service<
                   access: 'write',
                   path: worktree,
                   baseRef: binding.base ?? 'main',
-                  branch,
+                  branch: branchOf(binding.id),
                   state: 'preparing',
                   createdAt,
                 })}`
-                workspaces.push({ id: workspaceId, worktree })
+                workspaces.push({ id: workspaceId, worktree, branch: branchOf(binding.id) })
               }
               yield* fact({
                 projectId: first.projectId,
@@ -482,7 +491,7 @@ export class Projects extends Context.Service<
               // A task started by hand shows in the coordinator's thread as its card; a draft's card comes with its plan.
               if (input.draft !== true) yield* postCard(first.projectId, taskId)
               const [made] = workspaces
-              return { taskId, slug, threadId, workspaceId: made?.id ?? '', worktree: made?.worktree ?? '', branch }
+              return { taskId, slug, threadId, workspaceId: made?.id ?? '', worktree: made?.worktree ?? '', branch: made?.branch ?? '' }
             }),
           })
 

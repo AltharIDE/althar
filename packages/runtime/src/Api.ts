@@ -24,6 +24,7 @@ import { NotFound } from './errors'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { Folders } from './Folders'
+import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
@@ -142,8 +143,28 @@ export const handlers = Api.toLayer(
     const issueFor = (projectId: string, issue: string | undefined) =>
       issue === undefined ? Effect.succeed(undefined) : issues.read(issue, projectId)
 
-    /** A project's rules as its rules screen shows them. */
-    const rulesView = (projectId: string, rules: ProjectRules): ProjectRulesView => {
+    /** A project's rules as its rules screen shows them, with what each of its repositories says on its default branch. */
+    const rulesView = (projectId: string, rules: ProjectRules) =>
+      Effect.gen(function* () {
+        const repositories = yield* sql<{ name: string; path: string; base: string | null }>`
+          SELECT b.display_name AS name, l.path, b.default_base_ref AS base FROM repository_bindings b
+          JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+          WHERE b.project_id = ${projectId} AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid`
+        const conventions = yield* Effect.forEach(
+          repositories,
+          (repository) =>
+            Effect.map(conventionsOnBase(repository.path, repository.base ?? 'main'), (found) => ({
+              repository: repository.name,
+              branch: found.branch,
+              title: found.title,
+              template: found.template?.path ?? null,
+            })),
+          { concurrency: 4 },
+        )
+        return { ...rulesFields(projectId, rules), conventions }
+      })
+
+    const rulesFields = (projectId: string, rules: ProjectRules): Omit<ProjectRulesView, 'conventions'> => {
       const set = ruleSetOf(rules)
       const accounts = accountsOf(rules)
       return {
@@ -156,6 +177,8 @@ export const handlers = Api.toLayer(
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
         onlyAccounts: accounts.only ?? null,
+        branchPattern: rules.branchPattern ?? null,
+        titlePattern: rules.titlePattern ?? null,
       }
     }
 
@@ -533,7 +556,7 @@ export const handlers = Api.toLayer(
             const sql = yield* SqlClient.SqlClient
             const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
             if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
-            return rulesView(projectId, (yield* policies.current(project.id)).rules)
+            return yield* rulesView(projectId, (yield* policies.current(project.id)).rules)
           }),
         ),
       SetProjectRules: ({ commandId, projectId, rotateAccounts, onlyAccounts, ...change }) =>
@@ -554,7 +577,7 @@ export const handlers = Api.toLayer(
                       },
                     }
               const rules = yield* policies.set(projectId, { ...change, ...accounts }, instance.personId)
-              return rulesView(projectId, rules)
+              return yield* rulesView(projectId, rules)
             }),
           ),
         ),

@@ -20,7 +20,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `home` | Work across every project, as the home shows it: HomeSection, NeedCard, RunRow, SinceRow, ProjectRow, ProjectWord. |
 | `outputs` | What a task made: ChangeSet, ArtifactCard. |
 | `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu. |
-| `setup` | What comes before a project: Runtimes, ConnectAgent, SourceMap. |
+| `setup` | What comes before a project, and what sets one up: Runtimes, ConnectAgent, SourceMap, Accounts, Connections, and Conventions (NamingRule, TemplateSources). |
 | `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), Start, Home, NewProject, ProjectRules. |
 
 The rules between them:

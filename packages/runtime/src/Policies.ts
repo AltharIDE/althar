@@ -32,6 +32,13 @@ export const ProjectRules = Schema.Struct({
   commands: Schema.optional(Schema.Array(Schema.Struct({ pattern: Schema.String, decision: Schema.Literals(['ask', 'never']) }))),
   /** How a task ends when its plan doesn't say: a draft pull request, one ready for review, or its branch alone. */
   end: Schema.optional(Schema.Literals(['draft', 'ready', 'none'])),
+  /**
+   * How a task's branch and its pull request's title are named, by a pattern
+   * (`@althar/contracts`' names): the person's own, over what each
+   * repository's docs say. Without one, the docs', else Althar's own.
+   */
+  branchPattern: Schema.optional(Schema.String),
+  titlePattern: Schema.optional(Schema.String),
   /** Without one, it moves on. */
   usageLimit: Schema.optional(Schema.Literals(['move', 'wait'])),
   /**
@@ -61,9 +68,13 @@ export const ruleSetOf = (rules: ProjectRules): ProjectRuleSet => ({
   commands: rules.commands ?? [],
 })
 
-/** What the person may change of a project's rules, at once; an end of null goes back to deciding by the code host. */
-export type RulesChange = { readonly [Key in keyof Omit<ProjectRules, 'source' | 'end'>]?: ProjectRules[Key] | undefined } & {
-  readonly end?: ProjectRules['end'] | null | undefined
+/** What of a project's rules can be taken back with null: to deciding by the code host, or to what the repositories say. */
+type Clearable = 'end' | 'branchPattern' | 'titlePattern'
+const CLEARABLE: ReadonlyArray<Clearable> = ['end', 'branchPattern', 'titlePattern']
+
+/** What the person may change of a project's rules, at once; null takes back what can be. */
+export type RulesChange = { readonly [Key in keyof Omit<ProjectRules, 'source' | Clearable>]?: ProjectRules[Key] | undefined } & {
+  readonly [Key in Clearable]?: ProjectRules[Key] | null | undefined
 }
 
 /** What a revision's rules say a usage limit does. */
@@ -197,17 +208,21 @@ export class Policies extends Context.Service<
                 return pattern === '' ? [] : [{ pattern, decision: rule.decision }]
               })
               let next: ProjectRules | undefined
-              const { end, ...given } = change
-              // What isn't given stays as it is.
-              const rest = Object.fromEntries(Object.entries(given).filter(([, value]) => value !== undefined)) as Partial<ProjectRules>
+              // What isn't given stays as it is; what can be taken back goes with null.
+              const rest = Object.fromEntries(
+                Object.entries(change).filter(([key, value]) => value !== undefined && !CLEARABLE.includes(key as Clearable)),
+              ) as Partial<ProjectRules>
               yield* revise(projectId, actorId, (rules) => {
-                const { end: before, ...kept } = rules
-                const ending = end === undefined ? before : (end ?? undefined)
+                const kept: Record<string, unknown> = { ...rules }
+                for (const key of CLEARABLE) {
+                  const value = change[key]
+                  if (value === null || (typeof value === 'string' && value.trim() === '')) delete kept[key]
+                  else if (value !== undefined) kept[key] = typeof value === 'string' ? value.trim() : value
+                }
                 const changed: ProjectRules = {
-                  ...kept,
+                  ...(kept as ProjectRules),
                   ...rest,
                   ...(commands === undefined ? {} : { commands }),
-                  ...(ending === undefined ? {} : { end: ending }),
                   source: 'person',
                 }
                 next = changed

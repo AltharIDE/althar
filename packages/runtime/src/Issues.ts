@@ -73,9 +73,6 @@ const summaryOf = (product: Product, issue: Issue): IssueSummary => ({
   updatedAt: issue.updatedAt,
 })
 
-/** A key as a branch has it: MER-231 is mer-231, GitHub's #12 is issue-12. */
-export const branchKey = (key: string) => (key.startsWith('#') ? `issue-${key.slice(1)}` : key.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))
-
 type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections | ToolServer
 
 export class Issues extends Context.Service<

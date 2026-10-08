@@ -447,7 +447,8 @@ describe('project rules, through the API', () => {
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
-        assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), {
+        const { conventions, ...rules } = yield* client.GetProjectRules({ projectId: project.id })
+        assert.deepStrictEqual(rules, {
           projectId: project.id,
           permissions: 'rules',
           alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
@@ -457,7 +458,14 @@ describe('project rules, through the API', () => {
           usageLimit: 'move',
           rotateAccounts: false,
           onlyAccounts: null,
+          branchPattern: null,
+          titlePattern: null,
         })
+        // A repository that says nothing of its pull requests: Althar's own names, and no template.
+        assert.deepStrictEqual(
+          conventions.map(({ branch, title, template }) => ({ branch, title, template })),
+          [{ branch: null, title: null, template: null }],
+        )
         const changed = yield* client.SetProjectRules({
           commandId: commandId(),
           projectId: project.id,

@@ -177,6 +177,21 @@ export type RuleKind = typeof RuleKind.Type
 export const CommandRule = Schema.Struct({ pattern: Schema.String, decision: Schema.Literals(['ask', 'never']) })
 export type CommandRule = typeof CommandRule.Type
 
+/** A name pattern a repository's docs spell out, and the doc, by its path in the repository. */
+export const FoundPattern = Schema.Struct({ pattern: Schema.String, from: Schema.String })
+export type FoundPattern = typeof FoundPattern.Type
+
+/** What one of a project's repositories says of its pull requests, on its default branch: where Althar's names come from without a rule. */
+export const RepositoryConventions = Schema.Struct({
+  repository: Schema.String,
+  /** How its docs say branches and titles are named; null where they don't, and Althar names them its own way. */
+  branch: Schema.NullOr(FoundPattern),
+  title: Schema.NullOr(FoundPattern),
+  /** Its pull request template, by its path; null without one. */
+  template: Schema.NullOr(Schema.String),
+})
+export type RepositoryConventions = typeof RepositoryConventions.Type
+
 /** A project's rules, as its rules screen shows them. */
 export const ProjectRulesView = Schema.Struct({
   projectId: Schema.String,
@@ -190,6 +205,11 @@ export const ProjectRulesView = Schema.Struct({
   usageLimit: Schema.Literals(['move', 'wait']),
   rotateAccounts: Schema.Boolean,
   onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+  /** The person's patterns for branches and titles (`names.ts`), over what each repository says; null without one. */
+  branchPattern: Schema.NullOr(Schema.String),
+  titlePattern: Schema.NullOr(Schema.String),
+  /** What each of the project's repositories says, in the project's order. */
+  conventions: Schema.Array(RepositoryConventions),
 })
 export type ProjectRulesView = typeof ProjectRulesView.Type
 export type ProjectList = typeof ProjectList.Type
@@ -1103,6 +1123,9 @@ export const Api = RpcGroup.make(
       usageLimit: Schema.optional(Schema.Literals(['move', 'wait'])),
       rotateAccounts: Schema.optional(Schema.Boolean),
       onlyAccounts: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String)))),
+      /** Null goes back to what each repository says. */
+      branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
+      titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
     },
     ProjectRulesView,
   ),

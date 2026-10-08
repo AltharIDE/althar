@@ -46,6 +46,9 @@ export const projectRules: ProjectRulesView = {
   usageLimit: 'move',
   rotateAccounts: false,
   onlyAccounts: null,
+  branchPattern: null,
+  titlePattern: null,
+  conventions: [{ repository: 'api', branch: null, title: null, template: null }],
 }
 
 export const agents: ReadonlyArray<AgentStatus> = [

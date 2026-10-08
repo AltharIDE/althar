@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -170,6 +170,33 @@ describe('a task that ends in a pull request', () => {
       assert.isTrue(after.some((arrival) => arrival.kind === 'merged'))
       const [link] = yield* sql<{ listening: number }>`SELECT listening FROM external_links WHERE kind = 'change'`
       assert.strictEqual(link?.listening, 0)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('follows the team’s conventions: a branch named as its guide says, and a description in its template, no box ticked', () => {
+    const { working, bare } = hosted()
+    mkdirSync(join(working, '.github'))
+    writeFileSync(join(working, 'CONTRIBUTING.md'), '# Contributing\n\nName your branch `feature/<short-description>`.\n')
+    writeFileSync(
+      join(working, '.github', 'pull_request_template.md'),
+      '## What changed\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n',
+    )
+    git(working, '-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'add', '-A')
+    git(working, '-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'commit', '-q', '-m', 'Conventions')
+    git(working, 'push', '-q', bare, 'main')
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:pass]')
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const opened = github.changes[0]
+      assert.strictEqual(opened?.source, 'feature/add-a-retry')
+      // The lead's description, in the template: its headings and checklist kept, the box it ticked unticked, Althar's own below.
+      assert.strictEqual(
+        opened?.body,
+        '## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\n### Review\n\nPassed after one round of review.\n\n<sub>Opened by Althar.</sub>',
+      )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

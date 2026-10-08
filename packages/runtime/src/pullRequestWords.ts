@@ -1,5 +1,7 @@
 import type { Check, Comment, Review } from '@althar/connectors'
 
+import { keepsTemplate, placeSummary, untick } from './conventions'
+
 /*
  * What Althar writes about a task's pull request: its description, made
  * from what the steps reported, and what it tells the lead of what people
@@ -65,15 +67,34 @@ export interface FindingLine {
   readonly response: string | null
 }
 
-/** The pull request's description: the lead's summary, how review went, the issue it is for, and who opened it. */
+/**
+ * The pull request's description: the lead's summary, how review went, the
+ * issue it is for, and who opened it. Where the repository has a template,
+ * it's written in that: the lead's own description where it keeps the
+ * template, with every box unticked, else the template with the lead's
+ * summary in its place for one, or under a heading of its own below.
+ */
 export const bodyOf = (input: {
   readonly lead: string | null
   readonly review: { readonly rounds: number; readonly verdict: string | null } | null
   readonly findings: ReadonlyArray<FindingLine>
   readonly issue: { readonly key: string; readonly url: string; readonly sameHost: boolean } | null
+  /** The repository's template, and the description the lead wrote in it. */
+  readonly template?: string | null
+  readonly written?: string | null
 }) => {
   const parts: Array<string> = []
-  if (input.lead !== null && input.lead !== '') parts.push(input.lead)
+  const lead = input.lead !== null && input.lead !== '' ? input.lead : null
+  const template = input.template ?? null
+  const written = input.written ?? null
+  if (template === null) {
+    if (lead !== null) parts.push(lead)
+  } else if (written !== null && keepsTemplate(template, written)) parts.push(untick(written).trim())
+  else {
+    const placed = lead === null ? null : placeSummary(template, lead)
+    parts.push(untick(placed ?? template).trim())
+    if (placed === null && lead !== null) parts.push(`### Summary\n\n${lead}`)
+  }
   if (input.review !== null && input.review.rounds > 0) {
     const rounds = input.review.rounds === 1 ? 'one round' : `${input.review.rounds} rounds`
     parts.push(`### Review\n\n${input.review.verdict === 'pass' ? `Passed after ${rounds} of review.` : `Reviewed in ${rounds}.`}`)
@@ -94,6 +115,19 @@ export const bodyOf = (input: {
   parts.push('<sub>Opened by Althar.</sub>')
   return parts.join('\n\n')
 }
+
+/** What the lead is told when it finishes without a description in a repository's pull request template. */
+export const templateAsk = (
+  unwritten: ReadonlyArray<{ readonly name: string; readonly path: string; readonly text: string }>,
+  several: boolean,
+) =>
+  [
+    `The task's pull request is described in the repository's template, so write its description before you finish${several ? `, one for each of ${unwritten.map((template) => template.name).join(', ')}` : ''}. Write it as a teammate would: keep every heading and checklist, fill each section from what you did and how you checked it, and leave every box unticked for the person. Then call finish_step again with your summary and the description in \`descriptions\`${several ? ', each with its repository' : ''}.`,
+    ...unwritten.map(
+      (template) =>
+        `${several ? `${template.name}'s template` : 'The template'}, ${template.path}:\n~~~~~markdown\n${template.text.slice(0, 6000)}\n~~~~~`,
+    ),
+  ].join('\n\n')
 
 /** How a change stands, in a word. */
 export const standing = (change: { readonly state: string; readonly draft: boolean }) =>
