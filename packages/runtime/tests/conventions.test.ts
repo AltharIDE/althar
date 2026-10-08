@@ -28,6 +28,7 @@ describe('what a repository’s docs say of naming', () => {
       namingIn(doc('## Pull requests\n\nStart the title with the ticket: `PROJ-123: Add login`.')).title?.pattern,
       '{key}: {title}',
     )
+    assert.strictEqual(namingIn(doc('Title your PR like `[PROJ-123] Short summary`.')).title?.pattern, '[{key}] {title}')
   })
 
   it('reads nothing where the docs leave it to judgement, or only name branches', () => {
@@ -35,6 +36,7 @@ describe('what a repository’s docs say of naming', () => {
     assert.isNull(namingIn(doc('Branch from `main` as `feature/<description>` or `fix/<description>`.')).branch)
     assert.isNull(namingIn(doc('Always branch off `origin/main`, never `develop`.')).branch)
     assert.isNull(namingIn(doc('Branches are named `<type>/<description>`.')).branch)
+    assert.isNull(namingIn(doc('Branch names: `users/<name>/<topic>`.')).branch)
     // Conventional Commits: the type is the author's call.
     assert.isNull(namingIn(doc('PR titles follow Conventional Commits, as in `feat(api): add login`.')).title)
   })

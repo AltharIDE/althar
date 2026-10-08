@@ -31,7 +31,7 @@ export const fillPattern = (pattern: string, values: Readonly<Record<string, str
 }
 
 /** A character git refuses in a branch name, or a run of them it refuses together. */
-const REFUSED = /[\s~^:?*[\\\x00-\x1f\x7f]|\.\.|@\{|\/\/|^[/.]|[/.]$|\.lock$|\/\./
+const REFUSED = /[\s~^:?*[\\\p{Cc}]|\.\.|@\{|\/\/|^[/.]|[/.]$|\.lock$|\/\./u
 
 /** What is wrong with a pattern, in words, or null where nothing is. */
 export const patternProblem = (kind: NameKind, pattern: string): string | null => {

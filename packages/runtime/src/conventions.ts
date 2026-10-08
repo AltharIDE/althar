@@ -62,12 +62,19 @@ const withPlaces = (candidate: string, words: 'slug' | 'title') => {
   const swapped = candidate.replace(PLACEHOLDER, (whole, a?: string, b?: string, c?: string) => {
     const name = a ?? b ?? c ?? ''
     if (name === 'key' || name === words) return `{${name}}`
+    // An example key in brackets, `[PROJ-123]`, is the key in its brackets.
+    if (c !== undefined && KEY.test(c)) return '[{key}]'
     const place = placeOf(name, words)
     if (place === null) unknown = true
     return place ?? whole
   })
-  return unknown ? null : swapped
+  // A placeholder twice, `users/<name>/<topic>`, is something Althar can't fill twice over.
+  const places = swapped.match(/\{(key|slug|title)\}/g) ?? []
+  return unknown || new Set(places).size !== places.length ? null : swapped
 }
+
+/** An issue's key, as an example writes one: `PROJ-123`, `#123`. */
+const KEY = /^(?:[A-Z][A-Z0-9]*-\d+|#\d+)$/
 
 /** What a candidate leaves for a branch: the names a repository's own branches go by aren't a pattern. */
 const PLAIN_BRANCHES = /^(origin|upstream)\//
