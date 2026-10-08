@@ -221,7 +221,8 @@ describe('a task that ends in a pull request', () => {
       },
     })
     github.addRepository(['you', 'api'])
-    github.addRepository(['meridian', 'api'])
+    // The repository it came from has another default branch.
+    github.addRepository(['meridian', 'api'], 'trunk')
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const projects = yield* Projects
@@ -233,6 +234,7 @@ describe('a task that ends in a pull request', () => {
       const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       assert.strictEqual(ready?.change?.url, 'https://github.com/meridian/api/pull/1')
       assert.strictEqual(github.forkOf(1), 'you/api')
+      assert.strictEqual(github.changes[0]?.target, 'trunk')
       assert.deepStrictEqual(pushedTo, ['you/api'])
       // Back on the fork, the next one opens there.
       yield* projects.setRepository({ projectId, repositoryId: repository?.id ?? '', changeTarget: 'fork' })

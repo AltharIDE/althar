@@ -210,12 +210,16 @@ the project again.
 - **A fork** is known from its clone's remotes, an `upstream` beside
   `origin` on the same host. Its binding says where tasks open pull requests:
   on the fork, as before, or on the repository it was forked from, from the
-  fork's branch. The branch is pushed to the fork either way.
-- **Removing** sets the project's `archived_at`. Its countdowns are held, its
-  calls withdrawn and its runs cancelled, so no step reacts to its agents
-  stopping; then every agent on it stops. Its folders, its tasks' worktrees
-  and their branches stay where they are (ADR-006 never removes the person's
-  worktrees for them), and opening its folder again makes a new project.
+  fork's branch. The branch is pushed to the fork either way. A task made
+  for the repository it came from starts from that repository's default
+  branch, and its pull request targets it.
+- **Removing** sets the project's `archived_at`. Its proposed plans are
+  declined, its calls withdrawn and its runs cancelled, so no step reacts to
+  its agents stopping; then every agent on it stops. Nothing starts in it
+  after: no plan, no agent, and nothing said to one. Its folders, its tasks'
+  worktrees and their branches stay where they are (ADR-006 never removes
+  the person's worktrees for them), and opening its folder again makes a
+  new project.
 
 ### Existing working copies
 

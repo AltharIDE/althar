@@ -17,6 +17,7 @@ import { sayRules } from './rules'
 import { envelope } from './envelope'
 import { type PlanStep } from './Runs'
 import { type Disposition, Sessions } from './Sessions'
+import { withRole } from './roles'
 import { SignIns } from './SignIns'
 import { addItem, transcript } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
@@ -58,16 +59,6 @@ type Store =
   | Changes
   | Issues
   | Policies
-
-/** A repository's role, as the coordinator is told it. */
-const roleWords: Readonly<Record<string, string>> = {
-  service: 'a service',
-  frontend: 'the frontend',
-  infrastructure: 'infrastructure',
-  library: 'a library',
-  docs: 'docs',
-  other: 'repository',
-}
 
 const Drafted = Schema.Struct({
   title: Schema.String,
@@ -224,7 +215,7 @@ export class Coordinator extends Context.Service<
             `Repositories:\n${repositories
               .map(
                 (repository) =>
-                  `- ${repository.name}, ${roleWords[repository.role] ?? 'repository'} (${repository.base ?? 'main'}), on this Mac at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
+                  `- ${withRole(repository.name, repository.role)} (${repository.base ?? 'main'}), on this Mac at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
               )
               .join('\n')}`,
             `Tasks: ${counts?.open ?? 0} open, ${counts?.drafts ?? 0} planned and not yet started.`,

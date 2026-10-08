@@ -534,7 +534,14 @@ export class Changes extends Context.Service<
             task.threadId,
             issueLink === undefined ? null : { key: issueLink.key, url: issueLink.url, sameHost },
           )
-          const target = (task.baseRef ?? '').replace(/^origin\//, '') || task.defaultBase || repository.defaultBranch
+          // The branch it started from, on the repository it opens on; into the one a fork came from, from a task made before it
+          // was chosen, that repository's default.
+          const target =
+            from === undefined
+              ? (task.baseRef ?? '').replace(/^origin\//, '') || task.defaultBase || repository.defaultBranch
+              : task.baseRef?.startsWith('upstream/') === true
+                ? task.baseRef.slice('upstream/'.length)
+                : repository.defaultBranch
           const opened = yield* outward({
             projectId: input.projectId,
             subject: { type: 'task', id: input.taskId },

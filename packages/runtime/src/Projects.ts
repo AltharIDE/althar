@@ -198,6 +198,15 @@ export interface ProjectRepository {
   readonly tasks: number
 }
 
+/** The fork a repository's clone is here, read from its remotes; none where it has no clone here, or isn't one. */
+const forkAt = (path: string | null): Effect.Effect<Fork | null> =>
+  path === null
+    ? Effect.succeed(null)
+    : namedRemotes(path).pipe(
+        Effect.map(forkOf),
+        Effect.orElseSucceed(() => null),
+      )
+
 /** A slug from a name: lowercase letters, digits and dashes. */
 export const slugify = (name: string, fallback: string) => {
   const slug = name
@@ -225,10 +234,15 @@ const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
  * another project on the same repository or an earlier profile, gets the next
  * free name instead of failing.
  */
-const prepareWorktree = (repository: string, base: string, planned: { readonly worktree: string; readonly branch: string }) =>
+const prepareWorktree = (
+  repository: string,
+  base: string,
+  planned: { readonly worktree: string; readonly branch: string },
+  from = 'origin',
+) =>
   Effect.gen(function* () {
-    const fetched = yield* fetchBranch(repository, base)
-    const remote = `origin/${base}`
+    const fetched = yield* fetchBranch(repository, base, from)
+    const remote = `${from}/${base}`
     const fromRemote = fetched ? yield* commitOf(repository, remote).pipe(Effect.option) : Option.none()
     const baseRef = Option.isSome(fromRemote) ? remote : base
     const baseCommit = Option.isSome(fromRemote)
@@ -491,9 +505,10 @@ export class Projects extends Context.Service<
             name: string
             base: string | null
             repository: string
+            changeTarget: string | null
           }>`
             SELECT p.id AS project_id, p.slug AS project_slug, b.id, b.slug, b.display_name AS name, b.default_base_ref AS base,
-              l.path AS repository
+              l.path AS repository, b.change_target
             FROM projects p
             JOIN repository_bindings b ON b.project_id = p.id AND b.detached_at IS NULL
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -590,9 +605,16 @@ export class Projects extends Context.Service<
               continue
             }
             const binding = bindings.find((candidate) => candidate.id === workspace.bindingId) ?? first
-            const base = binding.base ?? 'main'
+            // A fork whose pull requests open on the repository it came from starts from that repository's default branch.
+            const upstream = binding.changeTarget === 'upstream' && (yield* forkAt(binding.repository)) !== null
+            const base = upstream ? yield* defaultBranch(binding.repository, 'upstream') : (binding.base ?? 'main')
             const prepared = yield* Effect.exit(
-              prepareWorktree(binding.repository, base, { worktree: workspace.path, branch: workspace.branch }),
+              prepareWorktree(
+                binding.repository,
+                base,
+                { worktree: workspace.path, branch: workspace.branch },
+                upstream ? 'upstream' : 'origin',
+              ),
             )
             yield* sql.withTransaction(
               Effect.gen(function* () {
@@ -664,15 +686,6 @@ export class Projects extends Context.Service<
             WHERE b.id = ${repositoryId} AND b.project_id = ${projectId} AND b.detached_at IS NULL`
           return binding ?? (yield* new NotFound({ kind: 'repository', id: repositoryId }))
         })
-
-      /** The fork a repository's clone is here, read from its remotes; none where it has no clone here, or isn't one. */
-      const forkAt = (path: string | null): Effect.Effect<Fork | null> =>
-        path === null
-          ? Effect.succeed(null)
-          : namedRemotes(path).pipe(
-              Effect.map(forkOf),
-              Effect.orElseSucceed(() => null),
-            )
 
       const repositories = (projectId: string) =>
         Effect.gen(function* () {
@@ -861,17 +874,17 @@ export class Projects extends Context.Service<
             Effect.gen(function* () {
               const project = yield* projectOf(projectId)
               const at = yield* timestamp
-              // Nothing it planned starts: each countdown is held, as the person holding it would.
-              const counting = yield* sql<{ id: string }>`
-                SELECT id FROM task_plans WHERE project_id = ${project.id} AND state = 'proposed' AND starts_at IS NOT NULL`
-              for (const plan of counting) {
-                const revision = yield* change('task_plans', plan.id, { startsAt: null })
+              // Nothing it planned starts: each plan still proposed is declined, its countdown with it.
+              const proposed = yield* sql<{ id: string }>`
+                SELECT id FROM task_plans WHERE project_id = ${project.id} AND state = 'proposed'`
+              for (const plan of proposed) {
+                const revision = yield* change('task_plans', plan.id, { state: 'declined', startsAt: null, decidedAt: at })
                 yield* fact({
                   projectId: project.id,
                   aggregateType: 'task_plan',
                   aggregateId: plan.id,
                   revision,
-                  type: 'task_plan.held',
+                  type: 'task_plan.declined',
                   actorId: instance.personId,
                 })
               }

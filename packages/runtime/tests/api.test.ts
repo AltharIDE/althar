@@ -696,11 +696,25 @@ describe('a project’s menu, through the API', () => {
           (yield* client.GetHome({})).projects.map((summary) => summary.id),
           [other.id],
         )
-        // The lead and the coordinator stop; the plan is held, so it never starts.
+        // The lead and the coordinator stop.
         yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.session === null)
         yield* eventually(client.GetCoordinator({ projectId: project.id }), (snapshot) => snapshot.session === null)
-        const held = yield* client.GetThreadItem({ threadId: planned.threadId, itemId: card?.id ?? '' })
-        assert.strictEqual(held.kind === 'task' ? held.content.phase : undefined, 'held')
+        // A window that hadn't heard can't start its plan, an agent, or the coordinator again.
+        const planId = card?.kind === 'task' ? (card.content.plan?.id ?? '') : ''
+        assert.strictEqual(
+          (yield* Effect.flip(client.StartPlan({ commandId: commandId(), planId }))).message,
+          "That plan isn't there any more.",
+        )
+        assert.strictEqual(
+          (yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'codex' }))).message,
+          "That project isn't there any more.",
+        )
+        assert.strictEqual(
+          (yield* Effect.flip(
+            client.Send({ commandId: commandId(), threadId: coordinator.threadId, body: 'Hello?', disposition: 'after_current' }),
+          )).message,
+          "That project isn't there any more.",
+        )
         // The task's run ended, and nothing asks the person about it.
         const thread = yield* client.GetThread({ threadId: task.threadId })
         assert.strictEqual(thread.attention.length, 0)
