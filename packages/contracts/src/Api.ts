@@ -952,7 +952,17 @@ export const Api = RpcGroup.make(
     TaskSummary,
   ),
   /** The thread, with the newest `limit` items before `before` (a sequence), or none with `limit: 0`. */
-  call('GetThread', { threadId: Schema.String, before: Schema.optional(Schema.Int), limit }, ThreadSnapshot),
+  call(
+    'GetThread',
+    {
+      threadId: Schema.String,
+      before: Schema.optional(Schema.Int),
+      limit,
+      /** Reads the files its task changed from git, past what the runtime keeps: for the person looking at them. */
+      fresh: Schema.optional(Schema.Boolean),
+    },
+    ThreadSnapshot,
+  ),
   /** One file a task changed, as a diff from its base to its worktree. */
   call('GetFileDiff', { taskId: Schema.String, path: Schema.String }, FileDiff),
   /** A project's board: its tasks, by card, and the calls that wait on the person. */

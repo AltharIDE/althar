@@ -1,3 +1,4 @@
+import { QueryObserver } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ProjectList, ThreadSnapshot } from '@althar/contracts'
@@ -78,6 +79,27 @@ describe('the window’s watch', () => {
     emit(changed('connection', 'c1', null, null))
     await settle()
     expect(client.listConnections).toHaveBeenCalledTimes(2)
+  })
+
+  it('reads the home again for a permission the rules answered only while it shows; off screen, on its next visit', async () => {
+    const { client, cache, emit, read } = opened()
+    await cache.fetchQuery(read.home())
+    emit(changed('decision', 'd1', 'th1', 'p1'))
+    await settle()
+    expect(client.getHome).toHaveBeenCalledTimes(1)
+    expect(cache.getQueryState(keys.home)?.isInvalidated).toBe(true)
+    // Gathered with a change that moves more of it, it is read off screen too.
+    emit(changed('decision', 'd2', 'th1', 'p1'))
+    emit(changed('task', 't1', 'th1', 'p1'))
+    await settle()
+    expect(client.getHome).toHaveBeenCalledTimes(2)
+    // While the home shows, it is read at once.
+    const showing = new QueryObserver(cache, read.home())
+    const stop = showing.subscribe(() => undefined)
+    emit(changed('decision', 'd3', 'th1', 'p1'))
+    await settle()
+    expect(client.getHome).toHaveBeenCalledTimes(3)
+    stop()
   })
 
   it('marks a thread out of date for its next visit, without reading it now', async () => {
@@ -163,6 +185,26 @@ describe('the window’s reads', () => {
     expect(sequences(continued(was, page([9, 10], true)))).toEqual([9, 10])
     expect(sequences(continued(undefined, page([9], false)))).toEqual([9])
     expect(sequences(continued(was, page([], false)))).toEqual([])
+  })
+
+  it('starts over from the new page when an earlier one holds something that may have moved since', () => {
+    const at = (item: ThreadSnapshot['items'][number], sequence: number) => ({ ...item, id: `i${sequence}`, sequence })
+    const with_ = (first: ThreadSnapshot['items'][number]) => snapshot({ items: [at(first, 1), at(items.says('#2'), 2)], earlier: true })
+    // A tool call still running, a message still queued: the earlier page goes, to be read again.
+    for (const unsettled of [items.tool({ status: 'in_progress' }), items.you('Wait', { state: 'queued', interrupting: false })])
+      expect(sequences(continued(with_(unsettled), page([2, 3], true)))).toEqual([2, 3])
+    // Done and delivered: kept.
+    for (const done of [items.tool({ status: 'completed' }), items.you('Hi')])
+      expect(sequences(continued(with_(done), page([2, 3], false)))).toEqual([1, 2, 3])
+    // What the new page holds is its own, settled or not.
+    expect(
+      sequences(
+        continued(with_(items.says('#1')), {
+          ...page([2, 3], false),
+          items: [at(items.tool({ status: 'in_progress' }), 2), at(items.says('#3'), 3)],
+        }),
+      ),
+    ).toEqual([1, 2, 3])
   })
 
   it('reads the home from where it was pinned, for each window', async () => {

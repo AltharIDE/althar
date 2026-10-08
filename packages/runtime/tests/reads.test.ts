@@ -115,6 +115,24 @@ describe('what screens read from git', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('reads the files afresh for the person looking at them, and keeps that for the reads after', () =>
+    Effect.gen(function* () {
+      const queries = yield* Queries
+      const { threadId, worktree } = yield* ready
+      quiet(worktree)
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
+      // A hand edit nobody staged: a read as things change keeps what it had; the person looking reads it.
+      writeFileSync(join(worktree, 'notes.md'), 'by hand\n')
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
+      const looked = yield* queries.thread(threadId, { limit: 0, fresh: true })
+      assert.deepStrictEqual(
+        looked.task.files.map((file) => file.path),
+        ['change.txt', 'notes.md'],
+      )
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt', 'notes.md'])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live("reads a worktree again after each of the lead's tool calls, which may have changed it", () =>
     Effect.gen(function* () {
       const { projectId, threadId, worktree } = yield* ready
