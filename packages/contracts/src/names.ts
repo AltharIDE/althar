@@ -31,15 +31,20 @@ export const fillPattern = (pattern: string, values: Readonly<Record<string, str
 }
 
 /** A character git refuses in a branch name, or a run of them it refuses together. */
-const REFUSED = /[\s~^:?*[\\\p{Cc}]|\.\.|@\{|\/\/|^[/.]|[/.]$|\.lock$|\/\./u
+const REFUSED = /[\s~^:?*[\\\p{Cc}]|\.\.|@\{|\/\/|^[/.-]|[/.]$|\.lock$|\/[.-]/u
+
+/** Whether git takes a name as a branch's. */
+export const branchNameOk = (name: string) => name !== '' && name !== '@' && !REFUSED.test(name)
 
 /** What is wrong with a pattern, in words, or null where nothing is. */
 export const patternProblem = (kind: NameKind, pattern: string): string | null => {
-  const unknown = [...pattern.matchAll(/\{(\w*)\}/g)].map((match) => match[1] ?? '').find((name) => !PLACES[kind].includes(name))
-  if (unknown !== undefined)
-    return `{${unknown}} isn't something Althar can fill. Use ${PLACES[kind].map((name) => `{${name}}`).join(' and ')}.`
+  const places = PLACES[kind].map((name) => `{${name}}`).join(' and ')
+  const unknown = [...pattern.matchAll(/\{([^{}]*)\}/g)].map((match) => match[1] ?? '').find((name) => !PLACES[kind].includes(name))
+  if (unknown !== undefined) return `{${unknown}} isn't something Althar can fill. Use ${places}.`
+  // What's left of a brace once the placeholders are out, `{{slug}}`, would be in every name.
+  if (/[{}]/.test(pattern.replace(/\{(\w+)\}/g, ''))) return `Braces go round a placeholder only: ${places}.`
   if (!pattern.includes(`{${NEEDED[kind]}}`)) return `It needs {${NEEDED[kind]}}, so each task's is its own.`
-  if (kind === 'branch' && REFUSED.test(fillPattern(pattern, { key: 'KEY-1', slug: 'slug' })))
+  if (kind === 'branch' && !branchNameOk(fillPattern(pattern, { key: 'KEY-1', slug: 'slug' })))
     return 'Git doesn’t allow that in a branch name: no spaces, and none of ~ ^ : ? * [ \\ or “..”.'
   return null
 }

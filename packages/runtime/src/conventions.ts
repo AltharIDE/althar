@@ -1,4 +1,4 @@
-import { fillPattern, type NameKind, patternProblem } from '@althar/contracts'
+import { branchNameOk, fillPattern, type NameKind, patternProblem } from '@althar/contracts'
 import { Effect } from 'effect'
 
 import { commitOf, git, gitExactly } from './git'
@@ -118,19 +118,16 @@ const quotedIn = (lines: ReadonlyArray<string>) =>
   })
 
 /** The one pattern a doc's candidates agree on; none where they say several things, or nothing. */
-const agreed = (patterns: ReadonlyArray<string | null>) => {
-  const distinct = [...new Set(patterns.filter((pattern) => pattern !== null))]
-  return distinct.length === 1 ? (distinct[0] ?? null) : null
-}
+const distinct = (patterns: ReadonlyArray<string | null>) => [...new Set(patterns.filter((pattern) => pattern !== null))]
 
-/** What a doc says of branch names: the code quoted on a line that speaks of branches, or the few after it. */
+/** The patterns a doc offers for branch names: the code quoted on a line that speaks of branches, or the few after it. */
 export const branchIn = (text: string) => {
   const lines = text.split('\n')
   const candidates = lines.flatMap((line, at) => (/\bbranch/i.test(line) ? quotedIn(lines.slice(at, at + 4)) : []))
-  return agreed(candidates.map(branchPatternOf))
+  return distinct(candidates.map(branchPatternOf))
 }
 
-/** What a doc says of pull requests' titles: the code quoted where a line speaks of a title, under a pull request heading or beside one. */
+/** The patterns a doc offers for pull requests' titles: the code quoted where a line speaks of a title, under a pull request heading or beside one. */
 export const titleIn = (text: string) => {
   const lines = text.split('\n')
   let heading = ''
@@ -139,15 +136,19 @@ export const titleIn = (text: string) => {
     const aboutChanges = /pull request|merge request|\bPRs?\b|\bMRs?\b/i
     return /\btitle/i.test(line) && (aboutChanges.test(line) || aboutChanges.test(heading)) ? quotedIn(lines.slice(at, at + 4)) : []
   })
-  return agreed(candidates.map(titlePatternOf))
+  return distinct(candidates.map(titlePatternOf))
 }
 
-/** What a repository's docs say of naming: from the first doc, in `DOCS`'s order, that says it. */
+/**
+ * What a repository's docs say of naming: the first doc, in `DOCS`'s order,
+ * that offers a pattern decides. One that offers several leaves it to the
+ * person, rather than to an older doc further down.
+ */
 export const namingIn = (docs: ReadonlyArray<{ readonly path: string; readonly text: string }>) => {
-  const first = (read: (text: string) => string | null): Found | null => {
+  const first = (read: (text: string) => ReadonlyArray<string>): Found | null => {
     for (const doc of docs) {
-      const pattern = read(doc.text)
-      if (pattern !== null) return { pattern, from: doc.path }
+      const [pattern, ...others] = read(doc.text)
+      if (pattern !== undefined) return others.length === 0 ? { pattern, from: doc.path } : null
     }
     return null
   }
@@ -230,12 +231,17 @@ export const keepsTemplate = (template: string, written: string) => {
     if (at === -1) return false
     at += 1
   }
+  // Each item as often as the template has it: two sections may each end in `- [ ] Done`.
   const items = checklistOf(written)
-  return checklistOf(template).every((item) => items.includes(item))
+  return checklistOf(template).every((item) => {
+    const index = items.indexOf(item)
+    if (index !== -1) items.splice(index, 1)
+    return index !== -1
+  })
 }
 
-/** A heading where a summary of the change goes. */
-const SUMMARY = /\b(summary|description|what|overview|changes?|context|about|motivation)\b/
+/** Headings where a summary of the change goes, the likeliest first: `What type of change` is a checklist, not one. */
+const SUMMARY = [/\b(summary|description)\b/, /\b(overview|changes|context|about|motivation)\b/, /^what\b(?!.*\btype\b)/]
 
 /**
  * A template with a summary in its own place for one: under its first
@@ -244,11 +250,11 @@ const SUMMARY = /\b(summary|description|what|overview|changes?|context|about|mot
  */
 export const placeSummary = (template: string, summary: string): string | null => {
   const lines = template.split('\n')
-  const at = lines.findIndex((line) => {
-    const heading = headingOf(line)
-    return heading !== undefined && SUMMARY.test(heading)
-  })
-  if (at === -1) return null
+  const headings = lines.map(headingOf)
+  const at = SUMMARY.map((wanted) => headings.findIndex((heading) => heading !== undefined && wanted.test(heading))).find(
+    (index) => index !== -1,
+  )
+  if (at === undefined) return null
   let after = at + 1
   let comment = false
   while (after < lines.length) {
@@ -277,11 +283,13 @@ export const branchKey = (key: string) => (key.startsWith('#') ? `issue-${key.sl
  * docs give, else Althar's own, `althar/` and the issue's key, lowercased as
  * trackers' Git integrations read it, before the task's name.
  */
-export const branchFor = (pattern: string | null, task: { readonly key: string | null; readonly slug: string }) => {
+export const branchFor = (pattern: string | null, task: { readonly key: string | null; readonly slug: string }): string => {
   if (pattern === null) return task.key === null ? `althar/${task.slug}` : `althar/${branchKey(task.key)}-${task.slug}`
   // The key as the tracker writes it, `PROJ-123`, with GitHub's `#` gone and nothing git refuses.
-  const key = task.key === null ? null : task.key.replace(/^#/, '').replace(/[^A-Za-z0-9._-]+/g, '-')
-  return fillPattern(pattern, { key, slug: task.slug })
+  const key = task.key === null ? null : task.key.replace(/^#/, '').replace(/[^A-Za-z0-9_-]+/g, '-')
+  const name = fillPattern(pattern, { key, slug: task.slug })
+  // A name git would refuse all the same leaves the task on Althar's own, rather than without a worktree.
+  return branchNameOk(name) ? name : branchFor(null, task)
 }
 
 /**

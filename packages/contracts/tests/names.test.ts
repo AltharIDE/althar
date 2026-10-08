@@ -18,5 +18,8 @@ describe('a name made by a pattern', () => {
     expect(patternProblem('branch', '{type}/{slug}')).toMatch(/\{type\} isn't something/)
     expect(patternProblem('branch', 'my feature/{slug}')).toMatch(/Git doesn’t allow/)
     expect(patternProblem('title', '{key}')).toMatch(/needs \{title\}/)
+    expect(patternProblem('branch', 'feature/{issue-id}/{slug}')).toMatch(/\{issue-id\} isn't something/)
+    expect(patternProblem('branch', '{{slug}}')).toMatch(/Braces go round a placeholder only/)
+    expect(patternProblem('branch', '-{slug}')).toMatch(/Git doesn’t allow/)
   })
 })

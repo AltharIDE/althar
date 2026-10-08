@@ -37,6 +37,13 @@ describe('what a repository’s docs say of naming', () => {
     assert.isNull(namingIn(doc('Always branch off `origin/main`, never `develop`.')).branch)
     assert.isNull(namingIn(doc('Branches are named `<type>/<description>`.')).branch)
     assert.isNull(namingIn(doc('Branch names: `users/<name>/<topic>`.')).branch)
+    // The contributing guide leaves it open: an older readme further down doesn't decide it.
+    assert.isNull(
+      namingIn([
+        { path: 'CONTRIBUTING.md', text: 'Branch as `feature/<description>` or `fix/<description>`.' },
+        { path: 'README.md', text: 'Branches: `feature/<description>`.' },
+      ]).branch,
+    )
     // Conventional Commits: the type is the author's call.
     assert.isNull(namingIn(doc('PR titles follow Conventional Commits, as in `feat(api): add login`.')).title)
   })
@@ -54,6 +61,9 @@ describe('the names Althar gives', () => {
     assert.strictEqual(branchFor('feature/{key}-{slug}', { key: 'PROJ-123', slug: 'fix-login' }), 'feature/PROJ-123-fix-login')
     assert.strictEqual(branchFor('feature/{key}-{slug}', { key: '#12', slug: 'fix-login' }), 'feature/12-fix-login')
     assert.strictEqual(titleFor('{key}: {title}', { title: 'Fix login', issue: { key: '#12', sameHost: true } }), '#12: Fix login')
+    // A name git would refuse, from a key it can't take or a pattern that starts badly, is Althar's own instead.
+    assert.strictEqual(branchFor('feature/{key}-{slug}', { key: 'A..B', slug: 'fix-login' }), 'feature/A-B-fix-login')
+    assert.strictEqual(branchFor('{key}-{slug}', { key: '-1', slug: 'fix-login' }), 'althar/-1-fix-login')
   })
 })
 
@@ -80,6 +90,11 @@ describe('a description in the repository’s template', () => {
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template, written: 'Did it, my own way.' }),
       '## Summary\n\n<!-- What and why. -->\n\nDid it.\n\n## How to test\n\n## Checklist\n\n- [ ] Tests pass\n\n<sub>Opened by Althar.</sub>',
+    )
+    // `What type of change` is a checklist; the summary goes under Description.
+    assert.strictEqual(
+      bodyOf({ lead: 'Did it.', ...nothingElse, template: '## What type of change?\n\n- [ ] Fix\n\n## Description\n', written: null }),
+      '## What type of change?\n\n- [ ] Fix\n\n## Description\n\nDid it.\n\n<sub>Opened by Althar.</sub>',
     )
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template: '## Checklist\n\n- [ ] Tests pass', written: null }),
