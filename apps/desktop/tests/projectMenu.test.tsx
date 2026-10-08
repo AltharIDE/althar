@@ -13,7 +13,7 @@ import { useRepositories } from '../src/renderer/features/repositories/useReposi
 import { rulesRoute } from '../src/renderer/features/rules/route'
 import { taskRoute } from '../src/renderer/features/task/route'
 import { rootRoute } from '../src/renderer/root'
-import { fakeClient, fakeHost, project, repositories } from './fixtures'
+import { changed, fakeClient, fakeHost, project, repositories } from './fixtures'
 import { servicesFor, withServices } from './render'
 
 /*
@@ -105,6 +105,15 @@ describe('a project’s menu', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/'))
     expect(await screen.findByText('The home')).toBeTruthy()
     expect(tabNamed('meridian')).toBeNull()
+  })
+
+  it('goes home when another window removes the project', async () => {
+    let listed: ReadonlyArray<ProjectSummary> = [project]
+    const { emit, router } = windowAt('/threads/th1', { listProjects: vi.fn(async () => ({ cursor: 3, projects: listed })) })
+    await screen.findByRole('button', { name: 'More for this project' })
+    listed = []
+    emit(changed('project', 'p1', null, 'p1'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/'))
   })
 
   it('offers the same from a task’s bar, and opens the project’s repositories and rules', async () => {

@@ -699,7 +699,11 @@ describe('a project’s menu, through the API', () => {
         // The lead and the coordinator stop.
         yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.session === null)
         yield* eventually(client.GetCoordinator({ projectId: project.id }), (snapshot) => snapshot.session === null)
-        // A window that hadn't heard can't start its plan, an agent, or the coordinator again.
+        // A window that hadn't heard can't start its plan, a task, an agent, or the coordinator again.
+        assert.strictEqual(
+          (yield* Effect.flip(client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'One more' }))).message,
+          "That project isn't there any more.",
+        )
         const planId = card?.kind === 'task' ? (card.content.plan?.id ?? '') : ''
         assert.strictEqual(
           (yield* Effect.flip(client.StartPlan({ commandId: commandId(), planId }))).message,

@@ -425,6 +425,9 @@ export class Sessions extends Context.Service<
           const sessionId = yield* newId(Ids.providerSession)
           yield* sql.withTransaction(
             Effect.gen(function* () {
+              // Checked where the session is written: a removal is a transaction too, so it either sees this session and
+              // stops it, or came first and this one never starts.
+              yield* inLiveProject(thread.threadId)
               yield* sql`INSERT INTO provider_sessions ${sql.insert({
                 id: sessionId,
                 projectId: thread.projectId,
@@ -874,7 +877,11 @@ export class Sessions extends Context.Service<
                       worktree: thread.cwd,
                       worktrees: thread.repositories.map((repository) => repository.worktree),
                       defaultBranch: thread.defaultBranch,
-                      defaultBranches: thread.repositories.map((repository) => repository.defaultBranch),
+                      // A fork's task bound for the repository it came from has that repository's default too.
+                      defaultBranches: thread.repositories.flatMap((repository) => [
+                        repository.defaultBranch,
+                        ...(repository.baseRef.startsWith('upstream/') ? [repository.baseRef.slice('upstream/'.length)] : []),
+                      ]),
                       taskBranch: thread.branch,
                     },
                   }
@@ -1129,12 +1136,13 @@ export class Sessions extends Context.Service<
           const disposition = input.disposition ?? 'after_current'
           const [thread] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM threads WHERE id = ${input.threadId}`
           if (thread === undefined) return yield* new NotFound({ kind: 'thread', id: input.threadId })
-          yield* inLiveProject(input.threadId)
           const accepted = yield* commands.execute({
             envelope: input.envelope,
             projectId: thread.projectId,
             result: AcceptedInput,
             handle: Effect.gen(function* () {
+              // In the command's transaction, so a removal either came first or sees what was said.
+              yield* inLiveProject(input.threadId)
               const inputId = yield* newId(Ids.userInput)
               const [next] = yield* sql<{
                 sequence: number

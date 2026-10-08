@@ -159,10 +159,12 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
         due.set(hash, { key: read.key, offScreen: read.offScreen || (due.get(hash)?.offScreen ?? false) })
       }
       if (due.size > 0) timer ??= setTimeout(readDue, GATHER)
+      // A thread on screen reads its own changes item by item; a project's new name it reads again whole, at once.
+      const renamed = event.aggregateType === 'project'
       for (const queryKey of threadReads(cache, event)) {
         if (cache.getQueryState(queryKey) === undefined) continue
         touched.set(hashKey(queryKey), heardSoFar)
-        void cache.invalidateQueries({ queryKey, exact: true, refetchType: 'none' })
+        void cache.invalidateQueries({ queryKey, exact: true, refetchType: renamed ? 'active' : 'none' })
       }
     }
     for (const listener of listeners) listener(event)

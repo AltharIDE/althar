@@ -529,6 +529,9 @@ export class Projects extends Context.Service<
             projectId: first.projectId,
             result: CreatedTask,
             handle: Effect.gen(function* () {
+              // In the command's transaction, so a removal either came first or cancels what this makes.
+              const [live] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${first.projectId} AND archived_at IS NULL`
+              if (live === undefined) return yield* new NotFound({ kind: 'project', id: first.projectId })
               const createdAt = yield* timestamp
               const taskId: TaskId = yield* newId(Ids.task)
               const taken = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE project_id = ${first.projectId}`

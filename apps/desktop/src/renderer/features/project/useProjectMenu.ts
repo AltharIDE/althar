@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ProjectSummary } from '@althar/contracts'
 
@@ -26,13 +26,14 @@ export interface ProjectMenuModel {
   readonly busy: boolean
   readonly error: string | null
   readonly rename: (name: string) => Promise<void>
-  /** Removes the project; `onRemoved` is called once it is gone. */
+  /** Removes the project; `onRemoved` is called once it is gone, from here or from another window. */
   readonly remove: () => Promise<void>
 }
 
 export const useProjectMenu = (projectId: string, onRemoved: () => void): ProjectMenuModel => {
   const { client, cache } = useServices()
-  const project = useQuery(reads(client).projects()).data?.projects.find((each) => each.id === projectId) ?? null
+  const listed = useQuery(reads(client).projects()).data
+  const project = listed?.projects.find((each) => each.id === projectId) ?? null
   const [dialog, setDialog] = useState<ProjectDialog | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -73,7 +74,25 @@ export const useProjectMenu = (projectId: string, onRemoved: () => void): Projec
       ),
     [client, doing, projectId],
   )
-  const remove = useCallback(() => doing(() => client.removeProject(projectId), onRemoved), [client, doing, projectId, onRemoved])
+  // Once it is read again without it, the watch below sends the window on.
+  const remove = useCallback(
+    () =>
+      doing(
+        () => client.removeProject(projectId),
+        () => undefined,
+      ),
+    [client, doing, projectId],
+  )
+
+  // Removed from another window, or by this one: once listed and then gone, the window goes where `onRemoved` says.
+  const seen = useRef(false)
+  useEffect(() => {
+    if (project !== null) seen.current = true
+    else if (seen.current && listed !== undefined) {
+      seen.current = false
+      onRemoved()
+    }
+  }, [project, listed, onRemoved])
 
   return { project, dialog, ask, close, busy, error, rename, remove }
 }

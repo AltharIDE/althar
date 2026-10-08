@@ -136,6 +136,13 @@ describe('the window’s watch', () => {
 
   it('reads a project’s repositories again only while they show, and marks its threads when it is renamed', async () => {
     const { client, cache, emit, read } = opened()
+    // A task on screen reads its project's new name at once.
+    const onScreen = new QueryObserver(cache, read.thread('th1'))
+    const watching = onScreen.subscribe(() => undefined)
+    await vi.waitFor(() => expect(cache.getQueryData(keys.thread('th1'))).toBeDefined())
+    emit(changed('project', 'p1', null, 'p1'))
+    await vi.waitFor(() => expect(client.getThread).toHaveBeenCalledTimes(2))
+    watching()
     await cache.fetchQuery(read.repositories('p1'))
     await cache.fetchQuery(read.thread('th1'))
     await cache.fetchQuery(read.coordinator('p1'))
