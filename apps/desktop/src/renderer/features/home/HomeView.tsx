@@ -1,9 +1,7 @@
 import { type DragEvent, type ReactNode, useEffect, useState } from 'react'
 
-import type { AgentStatus, HomeCall, HomeEvent, HomeTask, ProjectSummary } from '@althar/contracts'
+import type { HomeCall, HomeEvent, HomeTask, ProjectSummary } from '@althar/contracts'
 import {
-  type AgentMark,
-  AgentMarks,
   AskAnswered,
   AskNote,
   Button,
@@ -14,19 +12,16 @@ import {
   NeedCommand,
   ProjectInk,
   type ProjectRef,
-  RuntimeState,
   TaskStatus,
   TitleBar,
-  TitleBarRule,
   WorkStatus,
 } from '@althar/ui'
 import { Home, type HomeEvent as HomeLine, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
-import { brandOf, modelInfo, waitsWords } from '../../shared/agents'
+import { modelInfo, waitsWords } from '../../shared/agents'
 import { productBrand, productName } from '../../shared/products'
 import { ago, clock, running, useNow } from '../../shared/time'
-import { type DockTarget, trackOf } from '../board/BoardView'
-import { DockView } from '../board/DockView'
+import { trackOf } from '../board/BoardView'
 import type { StartModel } from '../start/useStart'
 import { kindWords } from '../../shared/calls'
 import { text as stuckText } from '../task/StuckCall'
@@ -36,14 +31,14 @@ import type { HomeModel } from './useHome'
 /*
  * The window you come back to, once there are projects: the kit's Home.
  * Across every project, what waits on you, answered where it is when a click
- * will do and opened in the dock when it needs reading; what runs; and what
- * the loop did since you last left. Beside them, the projects, each with its
- * mark. The bar has the agents' marks, how much runs and needs you, and the
- * way to settings. There is no composer: coordinators belong to projects.
+ * will do and opened as its task when it needs reading; what is in progress;
+ * and what the loop did since you last left. Beside them, the projects, each
+ * with its mark. The bar has how much runs and needs you, and the way to
+ * settings; which agents are signed in is for settings, not the home. There
+ * is no composer: coordinators belong to projects.
  */
 
 export const text = {
-  dock: 'Beside the home',
   settings: 'Settings',
   settingsKbd: '⌘,',
   kind: kindWords,
@@ -82,20 +77,7 @@ const inkOf = (ink: ProjectSummary['ink']): ProjectInk => ink as ProjectInk
 /** A project as the home draws it: its mark, from its id, which outlives its name; its ink; its name. */
 export const refOf = (project: ProjectSummary): ProjectRef => ({ seed: project.id, ink: inkOf(project.ink), name: project.name })
 
-/** An agent in the bar: ready, out of usage until the first of its accounts is back, or signed out. */
-export const agentMarkOf = (agent: AgentStatus, now: Date = new Date()): AgentMark => {
-  const brand = brandOf(agent.id)
-  const base = { id: agent.id, name: agent.name, ...(brand === undefined ? {} : { brand }) }
-  if (agent.signIn === 'signed_out') return { ...base, state: RuntimeState.SignedOut }
-  const usable = agent.accounts.filter((account) => account.signIn !== 'signed_out')
-  const back = usable.flatMap((account) => (account.outUntil === null ? [] : [account.outUntil])).toSorted((a, b) => a.localeCompare(b))
-  const [first] = back
-  if (usable.length > 0 && back.length === usable.length && first !== undefined)
-    return { ...base, state: RuntimeState.OutOfUsage, back: clock(first, now) }
-  return { ...base, state: RuntimeState.Ready }
-}
-
-/** How a task that isn't ready stands: running, waiting on a call, or stopped. */
+/** How a task that isn't ready stands: running, waiting on a call, or stopped with no agent on it. */
 const statusOf = (phase: HomeTask['phase']) =>
   phase === 'waiting' ? TaskStatus.Yours : phase === 'stopped' ? TaskStatus.Stopped : TaskStatus.Running
 
@@ -154,7 +136,6 @@ export function HomeView({
 }) {
   const home = model.home
   const now = useNow(true)
-  const [target, setTarget] = useState<DockTarget | null>(null)
   const [answered, setAnswered] = useState<ReadonlyArray<Answered & { readonly id: string }>>([])
   const agents = start.status?.agents ?? []
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
@@ -163,7 +144,9 @@ export function HomeView({
   const projects = home?.projects ?? []
   const refs = new Map(projects.map((project) => [project.id, refOf(project)]))
   const tasks = home?.tasks ?? []
+  // In progress is every task not ready to accept; only those with an agent on them, or held for a reset, are running.
   const working = tasks.filter((task) => task.phase !== 'ready')
+  const underway = tasks.filter((task) => task.phase === 'running' && refs.has(task.projectId)).length
   const ready = tasks.filter((task) => task.phase === 'ready')
   const calls = (home?.calls ?? []).filter((call) => !answered.some((one) => one.id === call.id))
   const waiting = calls.length + ready.length
@@ -193,12 +176,8 @@ export function HomeView({
         project: project.name,
       },
     ])
-    if (target?.kind === 'call' && target.id === call.id) setTarget(null)
     void model.answer(call.id, decision)
   }
-
-  const open = (next: DockTarget) => setTarget(next)
-  const isOpen = (kind: DockTarget['kind'], id: string) => target?.kind === kind && target.id === id
 
   const cards: ReadonlyArray<{ readonly key: string; readonly node: ReactNode }> = [
     ...calls.flatMap((call) => {
@@ -208,8 +187,7 @@ export function HomeView({
       const shared = {
         project,
         at: ago(call.createdAt, new Date(now)),
-        current: isOpen('call', call.id),
-        onOpen: () => open({ kind: 'call', id: call.id }),
+        onOpen: () => onTask(call.threadId),
       }
       return [
         {
@@ -262,8 +240,7 @@ export function HomeView({
               kind={text.kind.ready}
               project={project}
               title={task.title}
-              current={isOpen('task', task.taskId)}
-              onOpen={() => open({ kind: 'task', id: task.taskId })}
+              onOpen={() => onTask(task.threadId)}
               detail={
                 change === null ? (
                   task.changed === null ? (
@@ -289,7 +266,7 @@ export function HomeView({
                 )
               }
               actions={
-                <Button size="small" onClick={() => open({ kind: 'task', id: task.taskId })}>
+                <Button size="small" onClick={() => onTask(task.threadId)}>
                   {text.review}
                 </Button>
               }
@@ -341,35 +318,13 @@ export function HomeView({
     return {
       id: project.id,
       project: refOf(project),
-      running: mine.filter((task) => task.phase !== 'ready').length,
+      running: mine.filter((task) => task.phase === 'running').length,
       yours,
       moving: mine.some((task) => task.phase === 'running' && task.waits === null),
       ...(step === undefined ? {} : { now: { step: step.steps[step.at] ?? '', task: step.on.title, who: lead(step.on) } }),
       note: project.lastWorkAt === null ? text.noWork : text.lastWork(ago(project.lastWorkAt, new Date(now))),
     }
   })
-
-  // The dock acts on the task or call it holds, in whichever project that is.
-  const docked =
-    target === null
-      ? undefined
-      : target.kind === 'call'
-        ? home?.calls.find((call) => call.id === target.id)?.projectId
-        : home?.tasks.find((task) => task.taskId === target.id)?.projectId
-  const dock =
-    target === null || docked === undefined ? undefined : (
-      <DockView
-        label={text.dock}
-        target={target}
-        model={model}
-        agents={agents}
-        project={refs.get(docked)?.name ?? ''}
-        now={now}
-        onClose={() => setTarget(null)}
-        onTask={onTask}
-        onChanges={(task) => onTask(task.threadId)}
-      />
-    )
 
   const drop = {
     onDragOver: (event: DragEvent) => event.preventDefault(),
@@ -387,16 +342,15 @@ export function HomeView({
         lights="none"
         end={
           <>
-            <AgentMarks agents={agents.map((agent) => agentMarkOf(agent, new Date(now)))} />
-            <TitleBarRule />
             <WorkStatus
-              running={working.length}
+              ring
+              running={underway}
               yours={waiting}
               onYours={() => {
                 const [call] = calls
                 const [first] = ready
-                if (call !== undefined) open({ kind: 'call', id: call.id })
-                else if (first !== undefined) open({ kind: 'task', id: first.taskId })
+                if (call !== undefined) onTask(call.threadId)
+                else if (first !== undefined) onTask(first.threadId)
               }}
             />
             <IconButton icon="gear" label={text.settings} kbd={text.settingsKbd} size="small" onClick={onSettings} />
@@ -427,14 +381,14 @@ export function HomeView({
             since={lines}
             looked={home === null ? '' : home.looked === null ? text.firstLook : ago(home.looked, new Date(now))}
             projects={list}
-            {...(target?.kind === 'task' ? { current: target.id } : {})}
-            {...(dock === undefined ? {} : { dock })}
-            onOpenTask={(id) => open({ kind: 'task', id })}
+            onOpenTask={(id) => {
+              const task = tasks.find((one) => one.taskId === id)
+              if (task !== undefined) onTask(task.threadId)
+            }}
             onOpenEvent={(id) => {
               const event = home?.events.find((one) => one.id === id)
               if (event === undefined || event.kind === 'answered') return
-              if (tasks.some((task) => task.taskId === event.task.id)) open({ kind: 'task', id: event.task.id })
-              else onTask(event.task.threadId)
+              onTask(event.task.threadId)
             }}
             onOpenProject={onProject}
             onOpenFolder={openFolder}

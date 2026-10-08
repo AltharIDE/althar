@@ -4,7 +4,7 @@
  * table each, so a setting reads the same wherever it is changed. English
  * defaults, like every component's `text`; a consumer passes its own.
  */
-import { FindingsReach, LimitPolicy, PermissionPolicy, TaskEnd } from './vocabulary'
+import { FindingsReach, LimitPolicy, PermissionPolicy, RepositoryRole, TaskEnd } from './vocabulary'
 
 export interface ChoiceWords {
   title: string
@@ -56,4 +56,14 @@ export const limitPolicyText: Record<LimitPolicy, ChoiceWords> = {
   },
   [LimitPolicy.Wait]: { title: 'Wait for the reset', note: 'The task keeps its place and resumes on its own.' },
   [LimitPolicy.Ask]: { title: 'Ask me', note: 'A card in the thread, with the agents that are free.' },
+}
+
+/** A repository's role, as a choice names it. */
+export const repositoryRoleText: Record<RepositoryRole, string> = {
+  [RepositoryRole.Service]: 'Service',
+  [RepositoryRole.Frontend]: 'Frontend',
+  [RepositoryRole.Infrastructure]: 'Infrastructure',
+  [RepositoryRole.Library]: 'Library',
+  [RepositoryRole.Docs]: 'Docs',
+  [RepositoryRole.Other]: 'Other',
 }

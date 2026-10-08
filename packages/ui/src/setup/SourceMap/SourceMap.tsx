@@ -46,6 +46,8 @@ export interface SourceEntry {
   /** What it is to this project: frontend, service. Suggested from what was read. */
   role: string
   findings?: readonly SourceFinding[]
+  /** Stays: no way to remove it here, as a project's last repository. */
+  fixed?: boolean
 }
 
 export interface SourceMapText {
@@ -164,7 +166,7 @@ function Source({ x, t, roles, onRoleChange, onOriginChange, onFindingChange, on
         {!x.reading && roles !== undefined && roles.length > 0 && (
           <Select label={t.role(x.name)} options={roles} value={x.role} onChange={(v) => onRoleChange?.(x.id, v)} />
         )}
-        <IconButton icon="close" size="small" label={t.remove(x.name)} onClick={() => onRemove(x.id)} />
+        {x.fixed !== true && <IconButton icon="close" size="small" label={t.remove(x.name)} onClick={() => onRemove(x.id)} />}
       </span>
 
       <span className={s.facts}>

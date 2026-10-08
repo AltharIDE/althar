@@ -15,10 +15,13 @@ import {
   ThreadMeasure,
   ThreadSkeleton,
   MenuItem,
+  MenuSeparator,
   ProjectHead,
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
+import { shortFolder } from '../../shared/folders'
+import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
@@ -33,6 +36,7 @@ import { ConnectionsView, text as connectionsText } from '../connections/Connect
 import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
 import { NewTask } from './NewTask'
+import { ProjectDialogs, ProjectItems, ProjectMenu, type ProjectMenuActions } from './ProjectMenu'
 import { nextRoom, ProjectBar } from './ProjectBar'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
@@ -57,6 +61,7 @@ export const text = {
   takesOver: (to: string, from: string) => `${to} takes over from a brief; ${from}’s turn stops.`,
   handOver: 'Hand it over',
   queued: 'Queued · the coordinator reads it next',
+  queue: (n: number) => (n === 1 ? 'Queued; the coordinator reads it next' : `${n} queued; the coordinator reads them in order`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in, so the coordinator starts on ${instead}.`,
   needsAgent: 'No agent is signed in. Sign one in with its own tool, then come back.',
@@ -68,7 +73,6 @@ export const text = {
   boardReading: 'Reading the board',
   notConnected: (host: string) => `Althar isn't connected to ${host}, so tasks here end on their branch.`,
   connect: (host: string) => `Connect ${host}`,
-  rules: 'Project rules',
   newTask: 'New task',
   width: 'Width of the conversation',
   /** Where a project of several repositories is: how many, and their names. */
@@ -79,7 +83,7 @@ export const text = {
 export const whereOf = (project: { readonly repository: string | null; readonly repositories: ReadonlyArray<string> } | null) => {
   if (project === null) return undefined
   if (project.repositories.length > 1) return text.repositories(project.repositories)
-  return project.repository?.replace(/^\/(?:Users|home)\/[^/]+(?=\/)/, '~') ?? undefined
+  return project.repository === null ? undefined : shortFolder(project.repository)
 }
 
 /** How wide the conversation is beside the board, as the person last dragged it: this window's own, kept across launches. */
@@ -120,7 +124,7 @@ export function ProjectView({
   board,
   connections,
   onTask,
-  onRules,
+  menu,
   room: opening = Room.Talk,
   onRoomChange,
   newTask = false,
@@ -129,8 +133,8 @@ export function ProjectView({
   board: BoardModel
   connections: ConnectionsModel
   onTask: (threadId: string) => void
-  /** Opens the project's rules; without it, no way there. */
-  onRules?: () => void
+  /** The project's menu: rename, its repositories, its rules, remove; without it, none. */
+  menu?: ProjectMenuActions
   /** The view it opens on: the one a task's bar chose, or the one the person was last on. */
   room?: Room
   /** The view it is on, each time it changes, to be opened on again. */
@@ -171,6 +175,7 @@ export function ProjectView({
   const session = coordinator?.session ?? null
   const suggested = coordinator?.suggested ?? null
   const busy = session?.turnRunning ?? false
+  const queue = queueShown(session, model.pending)
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Whatever it ran on last, while that agent can; otherwise the first that can.
@@ -195,6 +200,11 @@ export function ProjectView({
   const send = (body: string, now: boolean) => {
     setDraft('')
     void (now ? model.sayNow(body) : model.say(body, chosen))
+  }
+  // A queued message goes back in the composer to be changed, and out of the queue, unless the coordinator has it already.
+  const edit = async (id: string) => {
+    const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
+    if (said !== undefined && (await model.takeBack(id))) setDraft((current) => withQueued(current, said.text))
   }
 
   const composer = (
@@ -223,6 +233,10 @@ export function ProjectView({
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
+        queued={queuedOf(coordinator?.items ?? [], queue)}
+        onEditQueued={(id) => void edit(id)}
+        onUnqueue={(id) => void model.takeBack(id)}
+        text={{ queued: text.queue }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
         meter={contextMeter(session)}
         picker={
@@ -258,7 +272,7 @@ export function ProjectView({
         yours={lanes === null ? null : yours}
         {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask) })}
         onYours={openYours}
-        {...(onRules === undefined ? {} : { onRules })}
+        {...(menu === undefined ? {} : { menu: <ProjectMenu {...menu} /> })}
         newTask={panel === 'task'}
         onNewTask={() => {
           if (room === Room.Board) setRoom(Room.Both)
@@ -274,11 +288,6 @@ export function ProjectView({
               side={room === Room.Both}
               menu={
                 <>
-                  {onRules && (
-                    <MenuItem icon="gear" onSelect={onRules}>
-                      {text.rules}
-                    </MenuItem>
-                  )}
                   <MenuItem icon="plus" onSelect={() => setPanel('task')}>
                     {text.newTask}
                   </MenuItem>
@@ -286,6 +295,12 @@ export function ProjectView({
                     <MenuItem icon="plug" onSelect={() => setPanel('connections')}>
                       {text.connect(host.name)}
                     </MenuItem>
+                  )}
+                  {menu && (
+                    <>
+                      <MenuSeparator />
+                      <ProjectItems {...menu} />
+                    </>
                   )}
                 </>
               }
@@ -348,7 +363,7 @@ export function ProjectView({
                   {coordinator.items.length === 0 && model.streaming.size === 0 && <p className={s.quiet}>{text.empty}</p>}
                   <ThreadBlocks
                     blocks={blocksOf(
-                      { items: coordinator.items, turnRunning: busy, worktree: null },
+                      { items: coordinator.items, turnRunning: busy, worktree: null, queue },
                       model.streaming,
                       (iso) => ago(iso),
                       now,
@@ -387,6 +402,7 @@ export function ProjectView({
           </div>
         )}
       </div>
+      {menu && <ProjectDialogs model={menu.model} />}
     </div>
   )
 }

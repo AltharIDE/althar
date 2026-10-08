@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 
 import {
   type BoardSnapshot,
@@ -21,7 +22,7 @@ import {
 import { Context, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
-import { Agents } from './Config'
+import { Agents, RuntimeConfig } from './Config'
 import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
@@ -103,7 +104,7 @@ interface ItemRow {
   readonly kind: string
   readonly content: string
   readonly agentId: string | null
-  readonly inputState: 'queued' | 'delivered' | 'superseded' | null
+  readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
   readonly disposition: string | null
   /** For a tool call that asked: what was decided, last. */
   readonly decision: string | null
@@ -356,7 +357,7 @@ export interface ThreadChange {
   readonly threadId: string | null
 }
 
-type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes
+type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig
 
 export class Queries extends Context.Service<
   Queries,
@@ -392,6 +393,7 @@ export class Queries extends Context.Service<
     Effect.gen(function* () {
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
+      const config = yield* RuntimeConfig
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const live = LIVE.map((state) => `'${state}'`).join(', ')
 
@@ -405,7 +407,7 @@ export class Queries extends Context.Service<
         const sql = yield* SqlClient.SqlClient
         const at = yield* cursor
         const rows = yield* sql<
-          Omit<ProjectList['projects'][number], 'rotateAccounts' | 'onlyAccounts' | 'repositories'> & {
+          Omit<ProjectList['projects'][number], 'rotateAccounts' | 'onlyAccounts' | 'repositories' | 'worktrees'> & {
             readonly rotateAccounts: number
             readonly onlyAccounts: string | null
             readonly repositories: string
@@ -448,6 +450,8 @@ export class Queries extends Context.Service<
             onlyAccounts:
               row.onlyAccounts === null ? null : (JSON.parse(row.onlyAccounts) as Readonly<Record<string, ReadonlyArray<string>>>),
             repositories: JSON.parse(row.repositories) as ReadonlyArray<string>,
+            // Where its tasks' worktrees are, once it has had a task (ADR-006).
+            worktrees: row.tasks > 0 ? join(config.worktreeRoot, row.slug) : null,
           })),
         }
       })
@@ -480,7 +484,8 @@ export class Queries extends Context.Service<
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id
             WHERE i.thread_id = ${threadId}
-              AND ${where.itemId === undefined ? sql`1 = 1` : sql`i.id = ${where.itemId}`}
+              -- A message taken back takes no place on a page; read by id, it says it was taken back.
+              AND ${where.itemId === undefined ? sql`(u.state IS NULL OR u.state <> 'withdrawn')` : sql`i.id = ${where.itemId}`}
               AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}
             ORDER BY i.sequence DESC LIMIT ${where.limit + 1}`
           // One more than asked for says whether there are earlier ones.

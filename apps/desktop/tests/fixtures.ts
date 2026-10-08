@@ -7,6 +7,7 @@ import type {
   CoordinatorSnapshot,
   HomeSnapshot,
   ProjectRulesView,
+  ProjectRepository,
   ProjectSummary,
   Status,
   TaskSummary,
@@ -98,6 +99,32 @@ export const models: ReadonlyArray<AgentModels> = [
   { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], probing: true },
 ]
 
+/** A project's repositories as this Mac has them: one plain, one a fork. */
+export const repositories: ReadonlyArray<ProjectRepository> = [
+  {
+    id: 'repo_api',
+    name: 'meridian-api',
+    path: '/Users/me/code/meridian-api',
+    folder: null,
+    branch: 'main',
+    remote: 'git@github.com:meridian/api.git',
+    role: 'service',
+    fork: null,
+    tasks: 1,
+  },
+  {
+    id: 'repo_web',
+    name: 'meridian-web',
+    path: '/Users/me/code/meridian-web',
+    folder: null,
+    branch: 'main',
+    remote: 'git@github.com:you/meridian-web.git',
+    role: 'frontend',
+    fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'fork' },
+    tasks: 0,
+  },
+]
+
 export const project: ProjectSummary = {
   id: 'p1',
   name: 'meridian',
@@ -106,6 +133,7 @@ export const project: ProjectSummary = {
   lastWorkAt: '2026-10-05T09:00:00.000Z',
   repository: '/code/meridian',
   repositories: ['meridian'],
+  worktrees: '/Users/me/Althar/meridian',
   tasks: 1,
   running: 1,
   waiting: 0,
@@ -439,6 +467,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     interrupt: vi.fn(async () => {}),
     stopSession: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
+    takeBack: vi.fn(async () => {}),
     answer: vi.fn(async () => {}),
     getCoordinator: vi.fn(async () => coordinatorSnapshot()),
     startTask: vi.fn(async () => task),
@@ -458,6 +487,12 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     cancelSignIn: vi.fn(async () => {}),
     connectToken: vi.fn(async () => connectionList.connections[0] ?? githubConnection),
     disconnect: vi.fn(async () => {}),
+    renameProject: vi.fn(async () => {}),
+    removeProject: vi.fn(async () => {}),
+    getRepositories: vi.fn(async () => repositories),
+    addRepositories: vi.fn(async () => {}),
+    leaveOutRepository: vi.fn(async () => {}),
+    setRepository: vi.fn(async () => {}),
     getProjectRules: vi.fn(async (projectId: string) => ({ ...projectRules, projectId })),
     setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({ ...projectRules, ...change, projectId })),
     addAccount: vi.fn(async (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => ({

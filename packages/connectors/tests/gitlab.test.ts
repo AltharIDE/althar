@@ -252,6 +252,25 @@ describe('GitLab as a code host', () => {
     }),
   )
 
+  it.effect('opens one on a fork into the project it was forked from, and tells a fork’s branch from the project’s own', () =>
+    Effect.gen(function* () {
+      const fork: Repository = { ...repository, id: '99', path: ['you', 'api'], webUrl: 'https://gitlab.com/you/api' }
+      const { host, sent } = gitlab([
+        ['POST', `${API}/projects/99/merge_requests`, { status: 201, json: request({ source_project_id: 99 }) }],
+        [
+          'GET',
+          `${PROJECT}/merge_requests?state=opened&source_branch=althar%2Fmer-231`,
+          { json: [request({ iid: 11, source_project_id: 34675721 }), request({ source_project_id: 99 })] },
+        ],
+      ])
+      const asked = { title: 'Rate-limit refunds', body: '', source: 'althar/mer-231', target: 'main', draft: false, from: fork }
+      assert.strictEqual((yield* host.openChange(repository, asked)).number, 12)
+      assert.strictEqual((sent[0]?.body as { target_project_id: number } | undefined)?.target_project_id, 34675721)
+      assert.strictEqual((yield* host.findChange(repository, 'althar/mer-231', fork))?.number, 12)
+      assert.strictEqual((yield* host.findChange(repository, 'althar/mer-231'))?.number, 11)
+    }),
+  )
+
   it.effect('passes on a refusal it can’t adopt', () =>
     Effect.gen(function* () {
       const { host } = gitlab([

@@ -2,16 +2,38 @@ import { existsSync, readdirSync, realpathSync } from 'node:fs'
 import { basename, join, relative } from 'node:path'
 
 import { ProjectInk } from '@althar/contracts'
-import { type CommandEnvelope, Ids, newId, type ProjectId, type TaskId, type ThreadId } from '@althar/domain'
-import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
+import {
+  ChangeTarget,
+  type CommandEnvelope,
+  type CommandId,
+  Ids,
+  newId,
+  type ProjectId,
+  RepositoryRole,
+  type TaskId,
+  type ThreadId,
+} from '@althar/domain'
+import { bumpRevision, Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
 import { Context, Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { postCard } from './cards'
 import { RuntimeConfig } from './Config'
-import { type GitFailed, NotARepository, NotFound, RepositoriesNeeded } from './errors'
 import { branchFor, conventionsOnBase, ruleOf } from './conventions'
-import { addWorktree, branchExists, commitOf, currentBranch, defaultBranch, fetchBranch, redactUrl, remoteUrls, topLevel } from './git'
+import { type GitFailed, NotARepository, NotFound, ProjectRefused, RepositoriesNeeded } from './errors'
+import { type Fork, forkOf } from './forks'
+import {
+  addWorktree,
+  branchExists,
+  commitOf,
+  currentBranch,
+  defaultBranch,
+  fetchBranch,
+  namedRemotes,
+  redactUrl,
+  remoteUrls,
+  topLevel,
+} from './git'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
 
@@ -142,6 +164,49 @@ export const inkFor = (seed: string, taken: ReadonlyArray<string>): ProjectInk =
   return free ?? inks[start] ?? 'clay'
 }
 
+/**
+ * The role a repository plays, as its name suggests it, for the person to
+ * change: `meridian-web` a frontend, `infra` infrastructure. Anything the
+ * name doesn't say is other.
+ */
+export const roleFor = (name: string): RepositoryRole => {
+  const words = name.toLowerCase().split(/[^a-z0-9]+/)
+  const says = (...some: ReadonlyArray<string>) => words.some((word) => some.includes(word))
+  if (says('docs', 'doc', 'documentation', 'handbook', 'guide')) return 'docs'
+  if (says('infra', 'infrastructure', 'terraform', 'deploy', 'ops', 'devops', 'k8s', 'helm', 'ansible')) return 'infrastructure'
+  if (says('web', 'frontend', 'ui', 'app', 'client', 'www', 'site', 'dashboard')) return 'frontend'
+  if (says('lib', 'library', 'sdk', 'core', 'shared', 'common', 'utils', 'kit')) return 'library'
+  if (says('api', 'service', 'server', 'backend', 'worker', 'svc')) return 'service'
+  return 'other'
+}
+
+/** A project's repository, as its Repositories screen shows it: where it is here, and what the project makes of it. */
+export interface ProjectRepository {
+  readonly id: string
+  readonly name: string
+  /** Its root on this device; null where this device has none. */
+  readonly path: string | null
+  /** The folder inside it the project is about, if any. */
+  readonly folder: string | null
+  readonly branch: string | null
+  /** Its first remote, without credentials. */
+  readonly remote: string | null
+  readonly role: RepositoryRole
+  /** The fork its remotes make it, with where its tasks open pull requests: as before, on the fork, until the person says. */
+  readonly fork: { readonly fork: string; readonly upstream: string; readonly target: ChangeTarget } | null
+  /** Tasks under way that change it, which keep it if it is left out. */
+  readonly tasks: number
+}
+
+/** The fork a repository's clone is here, read from its remotes; none where it has no clone here, or isn't one. */
+const forkAt = (path: string | null): Effect.Effect<Fork | null> =>
+  path === null
+    ? Effect.succeed(null)
+    : namedRemotes(path).pipe(
+        Effect.map(forkOf),
+        Effect.orElseSucceed(() => null),
+      )
+
 /** A slug from a name: lowercase letters, digits and dashes. */
 export const slugify = (name: string, fallback: string) => {
   const slug = name
@@ -169,10 +234,15 @@ const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
  * another project on the same repository or an earlier profile, gets the next
  * free name instead of failing.
  */
-const prepareWorktree = (repository: string, base: string, planned: { readonly worktree: string; readonly branch: string }) =>
+const prepareWorktree = (
+  repository: string,
+  base: string,
+  planned: { readonly worktree: string; readonly branch: string },
+  from = 'origin',
+) =>
   Effect.gen(function* () {
-    const fetched = yield* fetchBranch(repository, base)
-    const remote = `origin/${base}`
+    const fetched = yield* fetchBranch(repository, base, from)
+    const remote = `${from}/${base}`
     const fromRemote = fetched ? yield* commitOf(repository, remote).pipe(Effect.option) : Option.none()
     const baseRef = Option.isSome(fromRemote) ? remote : base
     const baseCommit = Option.isSome(fromRemote)
@@ -224,6 +294,43 @@ export class Projects extends Context.Service<
       /** The project's repositories it changes, by name; needed only where it has several. */
       readonly repositories?: ReadonlyArray<string>
     }): Effect.Effect<CreatedTask, NotFound | RepositoriesNeeded | GitFailed | Failure>
+    /** A project's repositories, as this device has them: each one's branch, remote, role, and the fork it is. */
+    repositories(projectId: string): Effect.Effect<ReadonlyArray<ProjectRepository>, NotFound | Failure>
+    /** Renames a project. Its slug, and so its worktrees' folders, stay as they were made; its mark stays too. */
+    rename(projectId: string, name: string, commandId?: CommandId): Effect.Effect<void, NotFound | ProjectRefused | Failure>
+    /**
+     * Adds the repositories at a folder to a project, as opening it would find
+     * them: the repository it is or is in, whole, or those directly inside it.
+     * One it has already stays as it is; one left out before comes back as it
+     * was.
+     */
+    addRepositories(
+      projectId: string,
+      path: string,
+      commandId?: CommandId,
+    ): Effect.Effect<void, NotFound | NotARepository | GitFailed | Failure>
+    /**
+     * Leaves a repository out: new tasks can't change it, and the coordinator
+     * no longer reads it. Tasks made with it keep it, and nothing in its
+     * folder changes. The last one stays.
+     */
+    leaveOut(projectId: string, repositoryId: string, commandId?: CommandId): Effect.Effect<void, NotFound | ProjectRefused | Failure>
+    /** Sets a repository's role, and for a fork, where its tasks open pull requests. */
+    setRepository(input: {
+      readonly projectId: string
+      readonly repositoryId: string
+      readonly role?: string
+      readonly changeTarget?: string
+      readonly commandId?: CommandId
+    }): Effect.Effect<void, NotFound | ProjectRefused | GitFailed | Failure>
+    /**
+     * Removes a project from Althar: it leaves the window, its plans stop
+     * counting down, its runs end and its calls are withdrawn. Its folders,
+     * its tasks' worktrees and their branches stay as they are; opening the
+     * folder again makes a new project. The agents still on it are the
+     * caller's to stop: the threads they are on come back.
+     */
+    remove(projectId: string, commandId?: CommandId): Effect.Effect<ReadonlyArray<string>, NotFound | Failure>
   }
 >()('@althar/runtime/Projects') {
   static readonly layer: Layer.Layer<Projects, never, Store> = Layer.effect(
@@ -322,7 +429,7 @@ export class Projects extends Context.Service<
                 createdAt,
               })}`
               const slugs: Array<string> = []
-              for (const [index, repository] of repositories.entries()) {
+              for (const repository of repositories) {
                 const bindingId = yield* newId(Ids.repositoryBinding)
                 const bindingSlug = freeSlug(slugify(repository.name, 'repository'), slugs)
                 slugs.push(bindingSlug)
@@ -330,7 +437,7 @@ export class Projects extends Context.Service<
                   id: bindingId,
                   projectId,
                   slug: bindingSlug,
-                  role: index === 0 ? 'primary' : 'repository',
+                  role: roleFor(repository.name),
                   displayName: repository.name,
                   remoteFingerprints: JSON.stringify(repository.remotes),
                   defaultBaseRef: repository.base,
@@ -377,6 +484,15 @@ export class Projects extends Context.Service<
           })
         })
 
+      /** Where a task starts in a repository: its default branch, or, for a fork whose pull requests open on the repository it came from, that repository's. */
+      const startOf = (binding: { readonly repository: string; readonly base: string | null; readonly changeTarget: string | null }) =>
+        Effect.gen(function* () {
+          const upstream = binding.changeTarget === 'upstream' && (yield* forkAt(binding.repository)) !== null
+          return upstream
+            ? { remote: 'upstream', base: yield* defaultBranch(binding.repository, 'upstream') }
+            : { remote: 'origin', base: binding.base ?? 'main' }
+        })
+
       const createTask = (input: {
         readonly envelope: CommandEnvelope
         readonly projectId: string
@@ -398,13 +514,14 @@ export class Projects extends Context.Service<
             name: string
             base: string | null
             repository: string
+            changeTarget: string | null
           }>`
             SELECT p.id AS project_id, p.slug AS project_slug, b.id, b.slug, b.display_name AS name, b.default_base_ref AS base,
-              l.path AS repository
+              l.path AS repository, b.change_target
             FROM projects p
             JOIN repository_bindings b ON b.project_id = p.id AND b.detached_at IS NULL
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE p.id = ${input.projectId}
+            WHERE p.id = ${input.projectId} AND p.archived_at IS NULL
             ORDER BY b.created_at, b.rowid`
           const [first] = bindings
           if (first === undefined) return yield* new NotFound({ kind: 'project', id: input.projectId })
@@ -423,13 +540,22 @@ export class Projects extends Context.Service<
             ORDER BY revision DESC LIMIT 1`
           const rule = ruleOf('branch', rules?.pattern ?? undefined)
           const patterns = new Map<string, string | null>()
-          for (const binding of chosen)
-            patterns.set(binding.id, rule ?? (yield* conventionsOnBase(binding.repository, binding.base ?? 'main')).branch?.pattern ?? null)
+          for (const binding of chosen) {
+            if (rule !== null) {
+              patterns.set(binding.id, rule)
+              continue
+            }
+            const { remote, base } = yield* startOf(binding)
+            patterns.set(binding.id, (yield* conventionsOnBase(binding.repository, base, remote)).branch?.pattern ?? null)
+          }
           const created = yield* commands.execute({
             envelope,
             projectId: first.projectId,
             result: CreatedTask,
             handle: Effect.gen(function* () {
+              // In the command's transaction, so a removal either came first or cancels what this makes.
+              const [live] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${first.projectId} AND archived_at IS NULL`
+              if (live === undefined) return yield* new NotFound({ kind: 'project', id: first.projectId })
               const createdAt = yield* timestamp
               const taskId: TaskId = yield* newId(Ids.task)
               const taken = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE project_id = ${first.projectId}`
@@ -506,9 +632,9 @@ export class Projects extends Context.Service<
               continue
             }
             const binding = bindings.find((candidate) => candidate.id === workspace.bindingId) ?? first
-            const base = binding.base ?? 'main'
+            const { remote, base } = yield* startOf(binding)
             const prepared = yield* Effect.exit(
-              prepareWorktree(binding.repository, base, { worktree: workspace.path, branch: workspace.branch }),
+              prepareWorktree(binding.repository, base, { worktree: workspace.path, branch: workspace.branch }, remote),
             )
             yield* sql.withTransaction(
               Effect.gen(function* () {
@@ -544,10 +670,310 @@ export class Projects extends Context.Service<
           return made === undefined ? created : { ...created, worktree: made.worktree, branch: made.branch }
         })
 
+      /** A project still in the window, and its revision. */
+      const projectOf = (projectId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [project] = yield* sql<{ id: ProjectId; revision: number }>`
+            SELECT id, revision FROM projects WHERE id = ${projectId} AND archived_at IS NULL`
+          return project ?? (yield* new NotFound({ kind: 'project', id: projectId }))
+        })
+
+      /** Records a change to a project as one of its own, so every read of the project reads again. */
+      const changed = (projectId: string, type: string, payload: unknown, commandId: CommandId | undefined) =>
+        Effect.gen(function* () {
+          const project = yield* projectOf(projectId)
+          const revision = yield* bumpRevision('projects', project.id, project.revision)
+          yield* fact({
+            projectId: project.id,
+            aggregateType: 'project',
+            aggregateId: project.id,
+            revision,
+            type,
+            payload,
+            actorId: instance.personId,
+            ...(commandId === undefined ? {} : { commandId }),
+          })
+        })
+
+      /** One of a project's repositories still in it. */
+      const bindingOf = (projectId: string, repositoryId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [binding] = yield* sql<{ id: string; name: string; path: string | null }>`
+            SELECT b.id, b.display_name AS name, l.path FROM repository_bindings b
+            LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE b.id = ${repositoryId} AND b.project_id = ${projectId} AND b.detached_at IS NULL`
+          return binding ?? (yield* new NotFound({ kind: 'repository', id: repositoryId }))
+        })
+
+      const repositories = (projectId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* projectOf(projectId)
+          const rows = yield* sql<{
+            id: string
+            name: string
+            path: string | null
+            folder: string | null
+            role: string
+            changeTarget: ChangeTarget | null
+            tasks: number
+          }>`
+            SELECT b.id, b.display_name AS name, l.path, b.folder, b.role, b.change_target,
+              (SELECT count(DISTINCT w.task_id) FROM workspaces w JOIN tasks k ON k.id = w.task_id
+                WHERE w.binding_id = b.id AND k.state NOT IN ('done', 'abandoned')) AS tasks
+            FROM repository_bindings b
+            LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE b.project_id = ${projectId} AND b.detached_at IS NULL
+            ORDER BY b.created_at, b.rowid`
+          return yield* Effect.forEach(rows, (row) =>
+            Effect.gen(function* () {
+              const here = row.path === null ? null : yield* describe(row.path, row.folder)
+              const fork = yield* forkAt(row.path)
+              return {
+                id: row.id,
+                name: row.name,
+                path: row.path,
+                folder: row.folder,
+                branch: here?.branch ?? null,
+                remote: here?.remote ?? null,
+                role: Schema.is(RepositoryRole)(row.role) ? row.role : 'other',
+                fork:
+                  fork === null
+                    ? null
+                    : { fork: fork.fork.path.join('/'), upstream: fork.upstream.path.join('/'), target: row.changeTarget ?? 'fork' },
+                tasks: row.tasks,
+              } satisfies ProjectRepository
+            }),
+          )
+        })
+
+      const rename = (projectId: string, name: string, commandId?: CommandId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const trimmed = name.trim()
+          if (trimmed === '') return yield* new ProjectRefused({ reason: 'no_name' })
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const project = yield* projectOf(projectId)
+              const revision = yield* change('projects', project.id, { name: trimmed })
+              yield* fact({
+                projectId: project.id,
+                aggregateType: 'project',
+                aggregateId: project.id,
+                revision,
+                type: 'project.renamed',
+                payload: { name: trimmed },
+                actorId: instance.personId,
+                ...(commandId === undefined ? {} : { commandId }),
+              })
+            }),
+          )
+        })
+
+      const addRepositories = (projectId: string, path: string, commandId?: CommandId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* projectOf(projectId)
+          const reading = yield* readFolder(path)
+          if (reading.repositories.length === 0) return yield* new NotARepository({ path })
+          // Each is added whole: a folder inside one adds the repository it is in.
+          const found = yield* Effect.forEach(reading.repositories, (repository) =>
+            Effect.gen(function* () {
+              return {
+                ...repository,
+                folder: null,
+                remotes: yield* remoteUrls(repository.path),
+                base: yield* defaultBranch(repository.path),
+              }
+            }),
+          )
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const createdAt = yield* timestamp
+              const bindings = yield* sql<{
+                id: string
+                slug: string
+                path: string | null
+                detachedAt: string | null
+              }>`
+                SELECT b.id, b.slug, l.path, b.detached_at FROM repository_bindings b
+                LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+                WHERE b.project_id = ${projectId}`
+              const slugs = bindings.map((binding) => binding.slug)
+              const added: Array<string> = []
+              for (const repository of found) {
+                // Known by its root, whatever folder in it the project was opened at.
+                const known = bindings.find((binding) => binding.path === repository.path)
+                if (known !== undefined) {
+                  // One left out before comes back, with its role and slug, so its tasks' worktrees still name it.
+                  if (known.detachedAt !== null) {
+                    yield* sql`UPDATE repository_bindings SET detached_at = NULL WHERE id = ${known.id}`
+                    added.push(repository.name)
+                  }
+                  continue
+                }
+                const bindingId = yield* newId(Ids.repositoryBinding)
+                const slug = freeSlug(slugify(repository.name, 'repository'), slugs)
+                slugs.push(slug)
+                yield* sql`INSERT INTO repository_bindings ${sql.insert({
+                  id: bindingId,
+                  projectId,
+                  slug,
+                  role: roleFor(repository.name),
+                  displayName: repository.name,
+                  remoteFingerprints: JSON.stringify(repository.remotes),
+                  defaultBaseRef: repository.base,
+                  folder: repository.folder,
+                  createdAt,
+                })}`
+                yield* sql`INSERT INTO repository_locations ${sql.insert({
+                  id: yield* newId(Ids.repositoryLocation),
+                  projectId,
+                  bindingId,
+                  deviceId: instance.deviceId,
+                  kind: 'existing',
+                  path: repository.path,
+                  observedRemotes: JSON.stringify(repository.remotes),
+                  state: 'ready',
+                  verifiedAt: createdAt,
+                  createdAt,
+                })}`
+                added.push(repository.name)
+              }
+              if (added.length > 0) yield* changed(projectId, 'project.repositories_added', { repositories: added }, commandId)
+            }),
+          )
+        })
+
+      const leaveOut = (projectId: string, repositoryId: string, commandId?: CommandId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const binding = yield* bindingOf(projectId, repositoryId)
+              const [others] = yield* sql<{ n: number }>`
+                SELECT count(*) AS n FROM repository_bindings WHERE project_id = ${projectId} AND detached_at IS NULL AND id <> ${binding.id}`
+              if ((others?.n ?? 0) === 0) return yield* new ProjectRefused({ reason: 'last_repository' })
+              yield* sql`UPDATE repository_bindings SET detached_at = ${yield* timestamp} WHERE id = ${binding.id}`
+              yield* changed(projectId, 'project.repository_left_out', { repository: binding.name }, commandId)
+            }),
+          )
+        })
+
+      const setRepository = (input: {
+        readonly projectId: string
+        readonly repositoryId: string
+        readonly role?: string
+        readonly changeTarget?: string
+        readonly commandId?: CommandId
+      }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const binding = yield* bindingOf(input.projectId, input.repositoryId)
+          const role = input.role
+          if (role !== undefined && !Schema.is(RepositoryRole)(role)) return yield* new ProjectRefused({ reason: 'no_role' })
+          const target = input.changeTarget
+          if (target !== undefined && (!Schema.is(ChangeTarget)(target) || (yield* forkAt(binding.path)) === null))
+            return yield* new ProjectRefused({ reason: 'not_a_fork' })
+          const set = { ...(role === undefined ? {} : { role }), ...(target === undefined ? {} : { changeTarget: target }) }
+          if (Object.keys(set).length === 0) return
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              yield* sql`UPDATE repository_bindings SET ${sql.update(set)} WHERE id = ${binding.id}`
+              yield* changed(input.projectId, 'project.repository_changed', { repository: binding.name, ...set }, input.commandId)
+            }),
+          )
+        })
+
+      const remove = (projectId: string, commandId?: CommandId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const project = yield* projectOf(projectId)
+              const at = yield* timestamp
+              // Nothing it planned starts: each plan still proposed is declined, its countdown with it.
+              const proposed = yield* sql<{ id: string }>`
+                SELECT id FROM task_plans WHERE project_id = ${project.id} AND state = 'proposed'`
+              for (const plan of proposed) {
+                const revision = yield* change('task_plans', plan.id, { state: 'declined', startsAt: null, decidedAt: at })
+                yield* fact({
+                  projectId: project.id,
+                  aggregateType: 'task_plan',
+                  aggregateId: plan.id,
+                  revision,
+                  type: 'task_plan.declined',
+                  actorId: instance.personId,
+                })
+              }
+              // Its calls go: there is no one left to answer them.
+              const calls = yield* sql<{ id: string }>`
+                SELECT id FROM attention_requests WHERE project_id = ${project.id} AND state = 'open'`
+              for (const call of calls) {
+                const revision = yield* change('attention_requests', call.id, { state: 'withdrawn' })
+                yield* fact({
+                  projectId: project.id,
+                  aggregateType: 'attention_request',
+                  aggregateId: call.id,
+                  revision,
+                  type: 'attention_request.withdrawn',
+                  actorId: instance.personId,
+                })
+              }
+              // Its runs end, cancelled, with the steps they were on: no step is told to carry on, or handed to another agent.
+              const runs = yield* sql<{ id: string }>`
+                SELECT id FROM runs WHERE project_id = ${project.id} AND state IN ('admitted', 'running', 'suspended')`
+              for (const runRow of runs) {
+                const attempts = yield* sql<{ id: string }>`
+                  SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+                  WHERE e.run_id = ${runRow.id} AND a.state IN ('ready', 'admitted', 'running', 'waiting_attention', 'verifying', 'held', 'reconciling')`
+                for (const attempt of attempts) yield* change('node_attempts', attempt.id, { state: 'cancelled', endedAt: at })
+                const live = yield* sql<{ id: string; kind: 'run_attempts' | 'workflow_executions' }>`
+                  SELECT id, 'run_attempts' AS kind FROM run_attempts WHERE run_id = ${runRow.id} AND state = 'active'
+                  UNION ALL SELECT id, 'workflow_executions' AS kind FROM workflow_executions WHERE run_id = ${runRow.id} AND state = 'running'`
+                for (const row of live) yield* change(row.kind, row.id, { state: 'cancelled', endedAt: at })
+                const revision = yield* change('runs', runRow.id, { state: 'cancelled', endedAt: at })
+                yield* fact({
+                  projectId: project.id,
+                  aggregateType: 'run',
+                  aggregateId: runRow.id,
+                  revision,
+                  type: 'run.cancelled',
+                  payload: { projectRemoved: true },
+                  actorId: instance.personId,
+                })
+              }
+              const revision = yield* change('projects', project.id, { archivedAt: at })
+              yield* fact({
+                projectId: project.id,
+                aggregateType: 'project',
+                aggregateId: project.id,
+                revision,
+                type: 'project.removed',
+                actorId: instance.personId,
+                ...(commandId === undefined ? {} : { commandId }),
+              })
+              // The threads agents may still be on, for the caller to stop.
+              const threads = yield* sql<{
+                threadId: string
+              }>`SELECT DISTINCT thread_id FROM provider_sessions WHERE project_id = ${project.id}`
+              return threads.map((thread) => thread.threadId)
+            }),
+          )
+        })
+
       return Projects.of({
         read: (path) => run(read(path)),
         open: (input) => run(open(input)),
         createTask: (input) => run(createTask(input)),
+        repositories: (projectId) => run(repositories(projectId)),
+        rename: (projectId, name, commandId) => run(rename(projectId, name, commandId)),
+        addRepositories: (projectId, path, commandId) => run(addRepositories(projectId, real(path), commandId)),
+        leaveOut: (projectId, repositoryId, commandId) => run(leaveOut(projectId, repositoryId, commandId)),
+        setRepository: (input) => run(setRepository(input)),
+        remove: (projectId, commandId) => run(remove(projectId, commandId)),
       })
     }),
   )

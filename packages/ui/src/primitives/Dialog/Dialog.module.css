@@ -1,0 +1,69 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  background: var(--scrim);
+  animation: fade var(--fast) var(--ease);
+}
+.dialog {
+  position: fixed;
+  z-index: var(--z-dialog);
+  top: 18vh;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+  padding: 20px 22px 18px;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  box-shadow: var(--lift-dialog);
+  overflow-y: auto;
+  animation: in var(--base) var(--ease);
+}
+.dialog:focus {
+  outline: none;
+}
+.title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--t-1);
+}
+.description {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+.body {
+  margin-top: 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+@keyframes in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  .dialog {
+    animation: none;
+  }
+}

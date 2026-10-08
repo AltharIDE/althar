@@ -10,6 +10,7 @@ import { clock } from '../../shared/time'
 import { text as rulesText } from '../rules/RulesView'
 import s from './Start.module.css'
 import type { StartModel } from './useStart'
+import { shortFolder } from '../../shared/folders'
 
 /*
  * Where the window starts. With no project yet, the kit's Start screen, whose
@@ -31,9 +32,6 @@ export const text = {
     drop: 'Or drop the folder anywhere on this window.',
   },
 }
-
-/** A folder as the person would recognise it: under their home, from ~. */
-export const shortFolder = (path: string) => path.replace(/^\/Users\/[^/]+(?=\/)/, '~')
 
 /** An account, as a row of the kit's list of an agent's accounts. */
 export const accountEntry = (account: AccountStatus, now: Date = new Date()): AccountEntry => ({

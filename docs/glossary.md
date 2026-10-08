@@ -12,6 +12,10 @@ say the right. When something new needs a name on screen, add it here first.
 | Repository | `RepositoryBinding` | A repository that the project's tasks may change, with its role. It is shared by everyone on the project. |
 | On this Mac, Map it later | `RepositoryLocation`, or none | Where this device keeps that repository. "Map it later" is a binding with no location here. On the Sources view that state is "needs mapping". |
 | Reading it | read-only inspection | What Althar does to a folder before a project exists. It changes nothing. |
+| Role | `RepositoryBinding.role` | What a repository is to its project: Service, Frontend, Infrastructure, Library, Docs or Other. Suggested from its name, changed on the Repositories screen; tasks and the coordinator are told it. |
+| Leave out | `RepositoryBinding.detached_at` | Taking a repository out of a project: new tasks can't change it and the coordinator stops reading it. Tasks made with it keep it. Nothing in its folder changes. Not "remove" or "detach". |
+| Where tasks open pull requests | `RepositoryBinding.change_target` | For a fork (an `upstream` remote beside `origin`): on the repository it was forked from, or on the fork. The branch is pushed to the fork either way. |
+| Remove from Althar | `Project.archived_at` | Taking a project out of the window and the home. Its agents stop and nothing it planned starts. Its folders, its tasks' worktrees and their branches stay. Opening its folder again makes a new project. Not "delete" or "archive". |
 | Agent | runtime, adapter | Claude Code, Codex, OpenCode and the like, as installed on this machine. |
 | Account | `AgentAccount`, its home | One sign-in of an agent, kept in a folder of its own. The agent's usual sign-in is its first account; the person can add more, or bring in folders a switcher made. Named by the person ("work"), it shows after the agent's name: "Codex (work)". |
 | Signed in as | `ProviderPrincipal` | Who the agent says you are, for an account. The agent keeps its own sign-in; Althar never holds the credential. |
@@ -47,7 +51,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Reopen | a new run on a finished task | Only for a task that is done. |
 | Althar restarted | reconciliation after process loss | The thread line shown while Althar checks what the lead had done, so nothing runs twice. |
 
-A call's kind reads the same everywhere it shows: on the board, in the dock, in the bar's preview and on the home.
+A call's kind reads the same everywhere it shows: on the board, in the bar's preview and on the home.
 
 ## What comes back
 

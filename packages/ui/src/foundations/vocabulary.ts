@@ -409,6 +409,24 @@ export enum SourceOrigin {
   Later = 'later',
 }
 
+/** What a repository is to its project. Tasks and the coordinator are told it. */
+export enum RepositoryRole {
+  Service = 'service',
+  Frontend = 'frontend',
+  Infrastructure = 'infrastructure',
+  Library = 'library',
+  Docs = 'docs',
+  Other = 'other',
+}
+
+/** Where a fork's tasks open their pull requests. */
+export enum ChangeTarget {
+  /** On the repository it was forked from. */
+  Upstream = 'upstream',
+  /** On the fork itself. */
+  Fork = 'fork',
+}
+
 /** How another agent would be connected. */
 export enum ConnectKind {
   /** Installed as its own app or command line, signed in through it. */

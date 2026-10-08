@@ -106,6 +106,7 @@ export class Nudges extends Context.Service<
           FROM tasks k
           JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
           JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
+          JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
           WHERE k.state NOT IN ('done', 'abandoned') AND r.state = 'succeeded'
             AND coalesce((SELECT state FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted')
               ORDER BY proposed_at DESC LIMIT 1), '') <> 'proposed'

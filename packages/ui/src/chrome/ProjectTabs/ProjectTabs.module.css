@@ -181,6 +181,10 @@
   border-radius: 99px;
   background: var(--signal);
 }
+/* the mark's drawing leaves 3px at its side, so the home's tab takes that much less there: the same space round both ends */
+.home .select {
+  padding: 0 12px 0 9px;
+}
 
 .close {
   position: absolute;

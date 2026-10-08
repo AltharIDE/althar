@@ -61,7 +61,7 @@ function Glyph({ lane }: { lane: BoardLane }) {
     case BoardLane.Next:
       return <span className={s.ring} aria-hidden="true" />
     case BoardLane.Running:
-      return <LiveDot ping />
+      return <LiveDot />
     case BoardLane.Yours:
       return <span className={s.you} aria-hidden="true" />
     case BoardLane.Settled:

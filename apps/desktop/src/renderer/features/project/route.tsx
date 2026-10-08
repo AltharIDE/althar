@@ -10,6 +10,7 @@ import { useLastRoom } from '../tabs/TabsFrame'
 import { useConnections } from '../connections/useConnections'
 import { ProjectView } from './ProjectView'
 import { useProject } from './useProject'
+import { useProjectMenu } from './useProjectMenu'
 
 function Project() {
   const { projectId } = projectRoute.useParams()
@@ -18,6 +19,8 @@ function Project() {
   // The view it was last on, unless a task's bar asked for one.
   const [last, keepRoom] = useLastRoom(projectId)
   const opening = room ?? last
+  // Removed, the project is gone: back to the home.
+  const menu = useProjectMenu(projectId, () => void navigate({ to: '/' }))
   return (
     <ProjectView
       {...(opening === null ? {} : { room: opening })}
@@ -27,7 +30,11 @@ function Project() {
       board={useBoard(projectId)}
       connections={useConnections()}
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
-      onRules={() => void navigate({ to: '/projects/$projectId/rules', params: { projectId } })}
+      menu={{
+        model: menu,
+        onRepositories: () => void navigate({ to: '/projects/$projectId/repositories', params: { projectId } }),
+        onRules: () => void navigate({ to: '/projects/$projectId/rules', params: { projectId } }),
+      }}
     />
   )
 }

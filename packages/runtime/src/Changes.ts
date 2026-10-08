@@ -22,7 +22,8 @@ import { Connections, NotConnected } from './Connections'
 import { envelope } from './envelope'
 import { CantMerge, ChangedSinceSeen, NotFound } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
-import { commitOf, commitsAhead, gitOutcome, onHead, pushTo, uncommittedFiles } from './git'
+import { forkOf } from './forks'
+import { commitOf, commitsAhead, gitOutcome, namedRemotes, onHead, pushTo, uncommittedFiles } from './git'
 import { Instance } from './Instance'
 import { applyMerges, planMerge } from './localMerge'
 import { outward, reconcileOutward } from './outward'
@@ -448,9 +449,10 @@ export class Changes extends Context.Service<
             bindingId: string
             remotes: string
             defaultBase: string | null
+            changeTarget: 'upstream' | 'fork' | null
           }>`
             SELECT k.title, b.display_name AS name, b.slug, t.id AS thread_id, w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.id AS binding_id,
-              b.remote_fingerprints AS remotes, b.default_base_ref AS default_base
+              b.remote_fingerprints AS remotes, b.default_base_ref AS default_base, b.change_target
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
             JOIN repository_bindings b ON b.id = w.binding_id
@@ -490,13 +492,21 @@ export class Changes extends Context.Service<
           readonly bindingId: string
           readonly remotes: string
           readonly defaultBase: string | null
+          /** For a fork: where its pull requests open, the repository it was forked from or the fork itself. */
+          readonly changeTarget: 'upstream' | 'fork' | null
         },
         /** Whether the task changes several repositories, and whether its project has several. */
         { several, ofSeveral }: { readonly several: boolean; readonly ofSeveral: boolean },
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const remotes = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(task.remotes)
+          // A fork's branch goes to the fork, whatever else its clone's remotes name; its pull request, where the project says.
+          const fork = yield* namedRemotes(task.path).pipe(
+            Effect.map(forkOf),
+            Effect.orElseSucceed(() => null),
+          )
+          const remotes =
+            fork === null ? Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(task.remotes) : [fork.fork.url]
           const found = yield* connections.hostOf(remotes)
           // In a project of several, one on no host Althar knows ends on its branch. A project of one needs its host, which may be
           // one Althar can't tell by its address until it's connected; so does one on a host it knows but isn't connected to.
@@ -506,15 +516,18 @@ export class Changes extends Context.Service<
             return yield* new NotConnected({ product: known?.product ?? 'github', what: remotes[0] ?? 'the repository' })
           }
           const { host } = found
-          const repository = yield* host.repository(found.path)
+          const own = yield* host.repository(found.path)
+          // Into the repository it was forked from, on the same host, from the fork's branch.
+          const repository = fork !== null && task.changeTarget === 'upstream' ? yield* host.repository(fork.upstream.path) : own
+          const from = repository === own ? undefined : own
           // The repository as its host names it, not as the remote spells it: Bitbucket Data Center's has `scm/` in front.
           const path = repository.path
           // Althar pushes what the lead committed, never what it left lying in the worktree.
           const left = yield* uncommittedFiles(task.path)
-          const base = task.baseCommit ?? task.baseRef ?? repository.defaultBranch
+          const base = task.baseCommit ?? task.baseRef ?? own.defaultBranch
           if ((yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing', left } as const
           const head = yield* commitOf(task.path, 'HEAD')
-          yield* pushTo(task.path, yield* host.pushTarget(repository), task.branch)
+          yield* pushTo(task.path, yield* host.pushTarget(own), task.branch)
           if (input.end === 'none') return { kind: 'pushed', branch: task.branch, left } as const
           const draft = input.end === 'draft' && host.capabilities.drafts
           const [issueLink] = yield* sql<{
@@ -544,7 +557,14 @@ export class Changes extends Context.Service<
             issueLink === undefined ? null : { key: issueLink.key, url: issueLink.url, sameHost },
             { slug: task.slug, template: conventions.template?.text ?? null },
           )
-          const target = (task.baseRef ?? '').replace(/^origin\//, '') || task.defaultBase || repository.defaultBranch
+          // The branch it started from, on the repository it opens on; into the one a fork came from, from a task made before it
+          // was chosen, that repository's default.
+          const target =
+            from === undefined
+              ? (task.baseRef ?? '').replace(/^origin\//, '') || task.defaultBase || repository.defaultBranch
+              : task.baseRef?.startsWith('upstream/') === true
+                ? task.baseRef.slice('upstream/'.length)
+                : repository.defaultBranch
           const opened = yield* outward({
             projectId: input.projectId,
             subject: { type: 'task', id: input.taskId },
@@ -554,7 +574,14 @@ export class Changes extends Context.Service<
             key: `open_change:${input.taskId}:${task.branch}${several ? `:${task.bindingId}` : ''}`,
             request: { title, source: task.branch, target, draft },
             retryable: true,
-            perform: host.openChange(repository, { title, body, source: task.branch, target, draft }),
+            perform: host.openChange(repository, {
+              title,
+              body,
+              source: task.branch,
+              target,
+              draft,
+              ...(from === undefined ? {} : { from }),
+            }),
             encode: (answer) => answer,
             decode: (kept) => Option.getOrUndefined(Schema.decodeUnknownOption(ChangeRequest)(kept)),
           })
@@ -703,7 +730,14 @@ export class Changes extends Context.Service<
           if (workspace === undefined) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
           // What the person saw, and nothing the lead committed after: one rewritten away since isn't pushed.
           if (!(yield* onHead(workspace.path, head))) return yield* new ChangedSinceSeen({ taskId })
-          yield* pushTo(workspace.path, yield* host.pushTarget(repository), workspace.branch, head)
+          // A pull request from a fork into the repository it was forked from takes its commits on the fork.
+          const fork = yield* namedRemotes(workspace.path).pipe(
+            Effect.map(forkOf),
+            Effect.orElseSucceed(() => null),
+          )
+          const into = fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase()
+          const to = into ? yield* host.repository(fork.fork.path) : repository
+          yield* pushTo(workspace.path, yield* host.pushTarget(to), workspace.branch, head)
           yield* sql`UPDATE repository_changes SET head_commit = ${head}, updated_at = ${yield* timestamp}, revision = revision + 1
             WHERE pull_request_url = ${snapshot.url} AND project_id = ${link.projectId}`
           yield* news(taskId)
@@ -1195,7 +1229,8 @@ export class Changes extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const due = yield* sql<LinkRow>`
             SELECT id, project_id, task_id, connection_id, product, snapshot, cursor, listening FROM external_links
-            WHERE kind = 'change' AND listening = 1 ${only === null ? sql`` : sql`AND task_id = ${only}`}`
+            WHERE kind = 'change' AND listening = 1 AND project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
+              ${only === null ? sql`` : sql`AND task_id = ${only}`}`
           const now = yield* Clock.currentTimeMillis
           for (const link of due) {
             if (only === null) {

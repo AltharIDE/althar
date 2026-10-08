@@ -18,6 +18,15 @@ export class RepositoriesNeeded extends Schema.TaggedError<RepositoriesNeeded>()
   choices: Schema.Array(Schema.String),
 }) {}
 
+/**
+ * A change to a project that can't be made: a name that is empty, the
+ * project's last repository left out (a task needs one to work in), a role
+ * that isn't one, or a pull request target for a repository that isn't a fork.
+ */
+export class ProjectRefused extends Schema.TaggedError<ProjectRefused>()('ProjectRefused', {
+  reason: Schema.Literals(['no_name', 'last_repository', 'no_role', 'not_a_fork']),
+}) {}
+
 /** Something the caller named does not exist. */
 export class NotFound extends Schema.TaggedError<NotFound>()('NotFound', {
   kind: Schema.String,
@@ -65,6 +74,11 @@ export class ModelUnchanged extends Schema.TaggedError<ModelUnchanged>()('ModelU
 /** The attention request has already been answered, or was withdrawn. */
 export class AttentionClosed extends Schema.TaggedError<AttentionClosed>()('AttentionClosed', {
   attentionId: Schema.String,
+}) {}
+
+/** The message went to the agent before it could be taken back, or was taken back already. */
+export class AlreadyDelivered extends Schema.TaggedError<AlreadyDelivered>()('AlreadyDelivered', {
+  itemId: Schema.String,
 }) {}
 
 /** An outward action's earlier answer was lost, and doing it again could do it twice: the person checks. */

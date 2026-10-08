@@ -17,6 +17,7 @@ import { sayRules } from './rules'
 import { envelope } from './envelope'
 import { type PlanStep } from './Runs'
 import { type Disposition, Sessions } from './Sessions'
+import { withRole } from './roles'
 import { SignIns } from './SignIns'
 import { addItem, transcript } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
@@ -202,8 +203,8 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${access.projectId}`
-          const repositories = yield* sql<{ name: string; base: string | null; within: string | null; path: string }>`
-            SELECT b.display_name AS name, b.default_base_ref AS base, b.folder AS within, l.path FROM repository_bindings b
+          const repositories = yield* sql<{ name: string; role: string; base: string | null; within: string | null; path: string }>`
+            SELECT b.display_name AS name, b.role, b.default_base_ref AS base, b.folder AS within, l.path FROM repository_bindings b
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
             WHERE b.project_id = ${access.projectId} AND b.detached_at IS NULL
             ORDER BY b.created_at, b.rowid`
@@ -214,7 +215,7 @@ export class Coordinator extends Context.Service<
             `Repositories:\n${repositories
               .map(
                 (repository) =>
-                  `- ${repository.name} (${repository.base ?? 'main'}), on this Mac at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
+                  `- ${withRole(repository.name, repository.role)} (${repository.base ?? 'main'}), on this Mac at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
               )
               .join('\n')}`,
             `Tasks: ${counts?.open ?? 0} open, ${counts?.drafts ?? 0} planned and not yet started.`,

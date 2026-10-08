@@ -5,7 +5,7 @@ import { type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@a
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { keys, reads } from '../../data/reads'
-import { caughtUp, mergeItems, newestReads, waiting } from '../../shared/items'
+import { caughtUp, mergeItems, newestReads, takenBack, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
@@ -45,6 +45,8 @@ export interface TaskModel {
    */
   readonly send: (body: string, start?: Choice) => Promise<void>
   readonly sendNow: (body: string) => Promise<void>
+  /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
+  readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
   /** Puts the lead on another model or effort, or hands the task to another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
@@ -224,6 +226,18 @@ export const useTask = (threadId: string): TaskModel => {
         if (start !== undefined) await client.startSession(startOf(threadId, start))
       }),
     sendNow: (body) => act(() => client.send({ threadId, body, disposition: 'interrupt_and_continue' })),
+    takeBack: async (itemId) => {
+      setError(null)
+      try {
+        await client.takeBack(itemId)
+        // Gone from the queue at once, rather than when the runtime's word of it arrives.
+        arrived(takenBack(snapshot?.items ?? [], itemId))
+        return true
+      } catch (failure) {
+        fail(failure)
+        return false
+      }
+    },
     interrupt: () => act(() => client.interrupt(threadId)),
     choose: (choice) =>
       act(async () => {

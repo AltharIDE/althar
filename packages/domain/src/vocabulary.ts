@@ -13,6 +13,14 @@ export type ActorKind = typeof ActorKind.Type
 export const RepositoryAccess = Schema.Literals(['read', 'write', 'observe'])
 export type RepositoryAccess = typeof RepositoryAccess.Type
 
+/** What a repository is to its project, as the person or the reading said. Tasks and the coordinator are told it. */
+export const RepositoryRole = Schema.Literals(['service', 'frontend', 'infrastructure', 'library', 'docs', 'other'])
+export type RepositoryRole = typeof RepositoryRole.Type
+
+/** Where a fork's tasks open their pull requests: on the repository it was forked from, or on the fork. */
+export const ChangeTarget = Schema.Literals(['upstream', 'fork'])
+export type ChangeTarget = typeof ChangeTarget.Type
+
 export const LocationKind = Schema.Literals(['existing', 'managed'])
 export type LocationKind = typeof LocationKind.Type
 
@@ -84,7 +92,8 @@ export type ThreadItemKind = typeof ThreadItemKind.Type
 export const InputDisposition = Schema.Literals(['after_current', 'interrupt_and_continue', 'supersede_pending', 'cancel_run'])
 export type InputDisposition = typeof InputDisposition.Type
 
-export const UserInputState = Schema.Literals(['queued', 'delivered', 'superseded'])
+/** Where something the person said stands: waiting its turn, given to the agent, replaced, or taken back before it went. */
+export const UserInputState = Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn'])
 export type UserInputState = typeof UserInputState.Type
 
 export const TurnDeliveryState = Schema.Literals(['pending', 'delivered', 'completed', 'interrupted', 'interruption_uncertain', 'failed'])

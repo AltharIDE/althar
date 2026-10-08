@@ -19,7 +19,7 @@ import s from './NeedCard.module.css'
  * a change ready to accept, a decision, an agent to sign in, a task that
  * stalled. It says what kind of call it is, whose, and what it asks, and
  * holds its answers at the right, so the quick ones are given where they
- * are. Opening it (its title) puts it in the dock, for the ones that need
+ * are. Opening it (its title) opens the task, for the ones that need
  * reading first.
  *
  * What it asks and how it is answered differ by kind, so they are slots:
@@ -49,10 +49,8 @@ export type NeedCardProps = RootProps<
     detail?: ReactNode
     /** Its answers, at the right: Buttons, the one that matters most in violet. */
     actions?: ReactNode
-    /** Open it in the dock. Without it, the title is words. */
+    /** Open its task. Without it, the title is words. */
     onOpen?: () => void
-    /** It is open in the dock. */
-    current?: boolean
     /** The title's rank in the page's outline: 3 under the home's sections. */
     headingLevel?: HeadingLevel
     text?: Partial<NeedCardText>
@@ -68,7 +66,6 @@ export function NeedCard({
   detail,
   actions,
   onOpen,
-  current,
   headingLevel = 3,
   className,
   text,
@@ -77,7 +74,7 @@ export function NeedCard({
   const t = { ...needCardText, ...text }
   const titleId = useId()
   return (
-    <article aria-labelledby={titleId} aria-current={current || undefined} className={cx(s.card, className)} {...rest}>
+    <article aria-labelledby={titleId} className={cx(s.card, className)} {...rest}>
       <div className={s.top}>
         <span className={s.kind}>{kind}</span>
         <ProjectWord project={project} />

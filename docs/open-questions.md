@@ -9,6 +9,27 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## A project's menu, 8 October
+
+- [ ] **A project's intent.** The older Rooms prototype's project menu had
+  "Change the intent", and the prototype's project head shows an intent
+  where the app shows the project's name. Does a project still have an
+  intent, a sentence the coordinator works towards, beside its name? Not
+  built until that is settled.
+- [ ] **Telling a fork from the host.** A fork is known from its clone's
+  remotes, an `upstream` beside `origin`. A fork cloned without an
+  `upstream` isn't seen as one; the host (GitHub's `parent`, GitLab's
+  `forked_from_project`) could say, but only once it is connected. Leaning:
+  ask the host when it is connected, and keep the remotes as the fallback.
+- [ ] **Where a fork's pull requests open by default.** Today, on the fork,
+  as before, until the person chooses the repository it came from. The
+  prototype suggests the repository it came from. Leaning: suggest it once
+  the host can say the person can't push there.
+- [ ] **Removing for good.** Removing a project hides it and keeps its
+  record; nothing can bring it back in the app yet, and nothing deletes its
+  worktrees. Is there an undo, a list of removed projects, or a way to
+  delete what Althar made for it?
+
 ## Screens that don't flicker, 7 October
 
 - [x] **Where the window keeps what it read.** Settled on 7 October 2026 in

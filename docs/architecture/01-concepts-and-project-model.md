@@ -190,6 +190,37 @@ this device's location, observed revision, capabilities, and one of:
 
 Tasks, evidence, and decisions remain readable when a source is unavailable.
 
+### Changing a project after it is made
+
+A project's menu renames it, opens its repositories and its rules, and removes
+it. Each change is recorded as a fact of the project, so every window reads
+the project again.
+
+- **Renaming** changes its name only. Its slug, and so the folders its tasks'
+  worktrees are in, stays, and so does its mark, drawn from its id.
+- **Adding** a folder binds the repositories at it, as opening it would find
+  them: the one it is or is in, whole, or those directly inside it. One left
+  out before comes back with its role and slug.
+- **Leaving a repository out** sets its binding's `detached_at`. New tasks
+  can't require it and the coordinator stops reading it; tasks made with it
+  keep their requirement and their worktree. The last binding stays, since a
+  task needs one.
+- **A role** is one of the roles the Repositories screen offers, suggested
+  from the repository's name. Tasks and the coordinator are told it.
+- **A fork** is known from its clone's remotes, an `upstream` beside
+  `origin` on the same host. Its binding says where tasks open pull requests:
+  on the fork, as before, or on the repository it was forked from, from the
+  fork's branch. The branch is pushed to the fork either way. A task made
+  for the repository it came from starts from that repository's default
+  branch, and its pull request targets it.
+- **Removing** sets the project's `archived_at`. Its proposed plans are
+  declined, its calls withdrawn and its runs cancelled, so no step reacts to
+  its agents stopping; then every agent on it stops. Nothing starts in it
+  after: no plan, no agent, and nothing said to one. Its folders, its tasks'
+  worktrees and their branches stay where they are (ADR-006 never removes
+  the person's worktrees for them), and opening its folder again makes a
+  new project.
+
 ### Existing working copies
 
 An existing clone is an input source, not the default execution workspace.

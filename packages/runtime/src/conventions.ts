@@ -180,11 +180,11 @@ export const conventionsAt = (repository: string, ref: string): Effect.Effect<Co
     return { ...namingIn(docs), template: template === null || template.text.trim() === '' ? null : template }
   }).pipe(Effect.orElseSucceed(() => NO_CONVENTIONS))
 
-/** What a repository says as a task starts from it: its default branch as origin has it, else as it is here. */
-export const conventionsOnBase = (repository: string, base: string) =>
+/** What a repository says as a task starts from it: its default branch as its remote has it, else as it is here. */
+export const conventionsOnBase = (repository: string, base: string, remote = 'origin') =>
   Effect.gen(function* () {
-    const ref = yield* commitOf(repository, `origin/${base}`).pipe(
-      Effect.as(`origin/${base}`),
+    const ref = yield* commitOf(repository, `${remote}/${base}`).pipe(
+      Effect.as(`${remote}/${base}`),
       Effect.catch(() => commitOf(repository, base).pipe(Effect.as(base))),
       Effect.orElseSucceed(() => 'HEAD'),
     )

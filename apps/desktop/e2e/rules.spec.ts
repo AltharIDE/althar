@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, test } from '@playwright/test'
+import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
 import { chooseFolder, launch } from './support'
@@ -13,6 +13,12 @@ import { chooseFolder, launch } from './support'
  * come back.
  */
 
+/** The project's rules, from its bar's menu. */
+const openRules = async (page: Page) => {
+  await page.getByRole('button', { name: 'More for this project' }).click()
+  await page.getByRole('menuitem', { name: 'Project rules' }).click()
+}
+
 test('changes a project’s rules from its title bar, and keeps them', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
@@ -21,7 +27,7 @@ test('changes a project’s rules from its title bar, and keeps them', async () 
     await chooseFolder(electronApp, repo)
     await page.getByRole('button', { name: /Open a folder/ }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await page.getByRole('button', { name: 'Project rules' }).click()
+    await openRules(page)
     await expect(page.getByRole('radio', { name: /Allow, except what you keep/ })).toBeChecked()
     await page.screenshot({ path: 'test-results/rules-top.png', animations: 'disabled' })
 
@@ -39,7 +45,7 @@ test('changes a project’s rules from its title bar, and keeps them', async () 
     // Back to the project and in again: as it was left.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await page.getByRole('button', { name: 'Project rules' }).click()
+    await openRules(page)
     await expect(page.getByRole('group', { name: 'Always ask me' }).getByRole('checkbox', { name: 'Force pushes' })).not.toBeChecked()
     await expect(page.getByRole('group', { name: 'Never' }).getByRole('checkbox', { name: 'Force pushes' })).toBeChecked()
     await expect(page.getByRole('checkbox', { name: 'Running terraform *' })).toBeChecked()
