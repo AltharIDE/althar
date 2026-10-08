@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useRef, use
 
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
-import { DOTS, PARTICLES } from './halftone'
+import { BORE, DOTS, PARTICLES } from './halftone'
 import { COLUMNS, drawColumn, drawGrain, PICTURE } from './light'
 import { arrivalOf, AT, clamp, dotAt, lightAt, particleAt, pointAt, SETTLED, type Speck, springEasing } from './timeline'
 import s from './Launch.module.css'
@@ -16,6 +16,8 @@ import s from './Launch.module.css'
  * piece by piece: whatever is marked `data-arrive`, and the children of
  * whatever is marked `data-arrive-each`, top to bottom. Those arrivals are
  * the compositor's animations, so they stay smooth while the window is busy.
+ * The home and the first-run Start mark theirs; a new screen marks its own.
+ * Once it starts to open, what is behind takes the pointer and the keys.
  *
  * It plays once a launch. `quick` opens at once, with the mark set and gone
  * in a fade: after a reload, or where motion is reduced (which it also
@@ -64,15 +66,17 @@ export type LaunchProps = RootProps<
     quick?: boolean
     /** It is over: what it opened onto is the window's. */
     onDone?: () => void
-    /** What it opens onto, drawn under it as soon as it is given, and inert until it opens. */
+    /** What it opens onto, drawn under it as soon as it is given, and inert until it starts to open. */
     children?: ReactNode
   }
 >
 
 /** What the mark's canvas covers, in the mark's 24 grid: the section, with room below for the dots to rise from and fall to. */
 const REGION = { x: 1, y: 4.5, width: 22, height: 30 }
-/** The bore's middle, where the mark is placed from. */
-const BORE = { x: 12, y: 14.4 }
+/** The smallest a dot is drawn, in px, so the pale tip still holds in a small window. */
+const LEAST_DOT = 0.6
+/** Keys that are no skip on their own: ⌘ on the way to ⌘Tab, or ⌘⇧5 to record the launch. */
+const MODIFIERS = new Set(['Meta', 'Control', 'Alt', 'Shift', 'CapsLock', 'Fn'])
 
 /** Placing the mark in a window: px per grid unit, and where its bore is, a little above the middle. */
 const placeIn = (width: number, height: number) => ({
@@ -85,6 +89,8 @@ const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.
 
 export function Launch({ ready, quick = false, onDone, children, className, ...rest }: LaunchProps) {
   const [done, setDone] = useState(false)
+  // Opened: what is behind can be used, and the veil, only decoration now, lets the pointer through.
+  const [opened, setOpened] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const behind = useRef<HTMLDivElement>(null)
   const veil = useRef<HTMLDivElement>(null)
@@ -101,9 +107,10 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
 
   // The light's columns, each drawn once and soft already, and its grain.
   useLayoutEffect(() => {
+    const live = (root.current && getComputedStyle(root.current).getPropertyValue('--live').trim()) || undefined
     COLUMNS.forEach((column, i) => {
       const context = columns.current[i]?.getContext('2d')
-      if (context) drawColumn(context, column)
+      if (context) drawColumn(context, column, live)
     })
     const tile = document.createElement('canvas')
     tile.width = tile.height = 128
@@ -126,11 +133,11 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
 
     const context = mark.current?.getContext('2d') ?? null
     const cobalt = (root.current && getComputedStyle(root.current).getPropertyValue('--live').trim()) || '#2b3bff'
-    const speck = (draw: CanvasRenderingContext2D, item: Speck | null) => {
+    const speck = (draw: CanvasRenderingContext2D, item: Speck | null, least = 0) => {
       if (item === null) return
       draw.globalAlpha = item.alpha
       draw.beginPath()
-      draw.arc(item.x, item.y, item.r, 0, Math.PI * 2)
+      draw.arc(item.x, item.y, Math.max(item.r, least), 0, Math.PI * 2)
       draw.fill()
     }
 
@@ -154,7 +161,8 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
       context.setTransform(scale, 0, 0, scale, -REGION.x * scale, -REGION.y * scale)
       context.clearRect(REGION.x, REGION.y, REGION.width, REGION.height)
       context.fillStyle = cobalt
-      for (const dot of DOTS) speck(context, dotAt(dot, t, open))
+      const least = LEAST_DOT / place.k
+      for (const dot of DOTS) speck(context, dotAt(dot, t, open), least)
       for (let i = 0; i < PARTICLES.length; i++) speck(context, particleAt(i, t))
       speck(context, pointAt(t, open))
       context.globalAlpha = 1
@@ -169,7 +177,14 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
         fill: 'forwards',
       })
 
+    // A key skips too, while it plays: what is behind can't take it yet. A modifier alone doesn't.
+    const onKey = (event: KeyboardEvent) => {
+      if (!MODIFIERS.has(event.key)) skipped.current = true
+    }
+    window.addEventListener('keydown', onKey)
+
     const end = () => {
+      window.removeEventListener('keydown', onKey)
       setDone(true)
       finished()
     }
@@ -184,6 +199,7 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
         drawMark(SETTLED, width, height)
         if (open === null && readyAt !== null && now - start >= AT.quick.hold && now - readyAt >= AT.settle) {
           open = now
+          setOpened(true)
           fadeOut(veil.current, AT.quick.fade)
         }
         if (open !== null && now - open >= AT.quick.fade) return end()
@@ -194,6 +210,7 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
       const t = now - start + shift
       if (open === null && readyAt !== null && t >= AT.set && now - readyAt >= AT.settle) {
         open = t
+        setOpened(true)
         if (behind.current) arrive(behind.current)
         fadeOut(paper.current, AT.open.paper.length, AT.open.paper.start)
       }
@@ -209,9 +226,6 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
       frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
-    // A key skips too, while it plays: what is behind can't take it yet.
-    const onKey = () => void (skipped.current = true)
-    window.addEventListener('keydown', onKey)
     return () => {
       cancelAnimationFrame(frame)
       window.removeEventListener('keydown', onKey)
@@ -222,12 +236,12 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
 
   return (
     <div ref={root} className={cx(s.launch, className)} {...rest}>
-      <div ref={behind} className={s.behind} inert={!done}>
+      <div ref={behind} className={s.behind} inert={!opened}>
         {children}
       </div>
       {!done && (
         // Decoration: what it opens onto is what reads, once it is there.
-        <div ref={veil} className={s.veil} aria-hidden="true" onPointerDown={skip}>
+        <div ref={veil} className={cx(s.veil, opened && s.through)} aria-hidden="true" onPointerDown={skip}>
           <div ref={paper} className={s.paper} />
           <div ref={light} className={s.light}>
             {COLUMNS.map((column) => {

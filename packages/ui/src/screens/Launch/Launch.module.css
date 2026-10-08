@@ -24,6 +24,10 @@
   overflow: hidden;
   cursor: default;
 }
+/* Opening: only decoration is left on it, so the pointer goes through to what arrives. */
+.through {
+  pointer-events: none;
+}
 .paper {
   position: absolute;
   inset: 0;

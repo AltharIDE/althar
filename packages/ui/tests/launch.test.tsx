@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { arrive, Launch } from '../src/screens/Launch/Launch'
 import { COLUMN_COUNT, COLUMNS, drawColumn, drawGrain, jitter, PICTURE, toneOf } from '../src/screens/Launch/light'
-import { BORE, DOTS, halftone, inSection, PARTICLES, POINT_RADIUS } from '../src/screens/Launch/halftone'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { LOGO_BORE, LOGO_SECTION } from '../src/foundations/Logo/Logo'
+import { BORE, BORE_RADIUS, CORNERS, DOTS, FACE_RADIUS, halftone, inSection, PARTICLES, POINT_RADIUS } from '../src/screens/Launch/halftone'
 import { arrivalOf, AT, dotAt, lightAt, particleAt, pointAt, SETTLED, spring, springEasing } from '../src/screens/Launch/timeline'
 
 /*
@@ -56,6 +60,20 @@ describe('the light', () => {
     expect(put).toHaveBeenCalledOnce()
     expect(data[0]).toBe(0)
     expect(data[3]).toBeLessThanOrEqual(22)
+  })
+
+  it('stands on cobalt as tokens.css has it, and on the window’s own --live when given one', () => {
+    const tokens = readFileSync(join(import.meta.dirname, '../src/styles/tokens.css'), 'utf8')
+    expect(tokens).toContain(`--live: ${toneOf(0)[0]};`)
+    const stops: Array<string> = []
+    const context = new Proxy(
+      { createLinearGradient: () => ({ addColorStop: (_: number, colour: string) => void stops.push(colour) }) },
+      { get: (target, name) => (name in target ? target[name as keyof typeof target] : () => undefined) },
+    ) as unknown as CanvasRenderingContext2D
+    drawColumn(context, COLUMNS[Math.floor(COLUMN_COUNT / 2)]!, '#123456')
+    drawColumn(context, COLUMNS[0]!, '#123456')
+    expect(stops[0]).toBe('#123456')
+    expect(stops[4]).toBe(toneOf(1)[0])
   })
 
   it('is uneven the same way every time', () => {
@@ -161,6 +179,13 @@ describe('when each part of the launch moves', () => {
 })
 
 describe('the halftone', () => {
+  it('is a halftone of the mark Logo draws', () => {
+    const path =
+      CORNERS.map((c, i) => (i % 2 === 1 ? `A${FACE_RADIUS} ${FACE_RADIUS} 0 0 0 ` : i === 0 ? 'M' : 'L') + `${c.x} ${c.y}`).join('') + 'Z'
+    expect(path).toBe(LOGO_SECTION)
+    expect(LOGO_BORE.startsWith(`M${BORE.x - BORE_RADIUS} ${BORE.y}a${BORE_RADIUS} ${BORE_RADIUS} `)).toBe(true)
+  })
+
   it('knows the section: in it below the bore and in the tips, not in the bore, the hollows or beyond the corners', () => {
     expect(inSection(12, 16.8)).toBe(true)
     expect(inSection(12, 6.5)).toBe(true)
@@ -297,6 +322,28 @@ describe('the launch', () => {
     act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
     act(() => void vi.advanceTimersByTime(AT.through + 100))
     expect(onDone).toHaveBeenCalledOnce()
+  })
+
+  it('isn’t skipped by a modifier alone, as on the way to ⌘Tab', () => {
+    const onDone = vi.fn()
+    render(<Launch ready onDone={onDone} />)
+    act(() => void vi.advanceTimersByTime(100))
+    act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta' })))
+    act(() => void vi.advanceTimersByTime(AT.through + 100))
+    expect(onDone).not.toHaveBeenCalled()
+  })
+
+  it('lets what is behind be used as soon as it starts to arrive, the veil only decoration then', () => {
+    const onDone = vi.fn()
+    const { container } = render(
+      <Launch ready onDone={onDone}>
+        <button type="button">Behind</button>
+      </Launch>,
+    )
+    act(() => void vi.advanceTimersByTime(AT.set + AT.settle + 50))
+    expect(onDone).not.toHaveBeenCalled()
+    expect(container.querySelector('[inert]')).toBeNull()
+    expect(container.querySelector('[aria-hidden="true"]')?.className).toMatch(/through/)
   })
 
   it('opens at once, with the mark set and a fade, when asked to be quick', () => {

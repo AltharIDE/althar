@@ -13,7 +13,7 @@ export interface Point {
 }
 
 /** The section's corners, going round as LOGO_SECTION draws it; its faces run 0→1, 2→3 and 4→5, hollowed. */
-const CORNERS: ReadonlyArray<Point> = [
+export const CORNERS: ReadonlyArray<Point> = [
   { x: 12.42, y: 5.53 },
   { x: 19.89, y: 18.47 },
   { x: 19.47, y: 19.2 },
@@ -25,7 +25,7 @@ export const BORE: Point = { x: 12, y: 14.4 }
 export const BORE_RADIUS = 1.8
 /** The point, solid in the bore, as large as the README prints it. */
 export const POINT_RADIUS = 1.05
-const FACE_RADIUS = 15.36
+export const FACE_RADIUS = 15.36
 
 /** The middle of the circle that hollows the face from `from` to `to`: beyond it, away from the bore. */
 const hollowOf = (from: Point, to: Point): Point => {

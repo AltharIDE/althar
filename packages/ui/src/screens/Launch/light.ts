@@ -58,13 +58,15 @@ export const PICTURE = { width: 64, height: 256, column: 30, blur: 5 } as const
  * Draws a column once, soft already, small: the window stretches it to the
  * column's place. Blurring it once here, not on every frame, keeps the light
  * cheap to show while it moves. Its picture is wider than the column by the
- * blur's reach either side.
+ * blur's reach either side. `live` is the window's --live, for the middle.
  */
-export const drawColumn = (context: CanvasRenderingContext2D, column: Column) => {
+export const drawColumn = (context: CanvasRenderingContext2D, column: Column, live?: string) => {
   const { width, height, column: inner, blur } = PICTURE
   const left = (width - inner) / 2
   const cap = height * 0.22
-  const [low, middle, high] = column.tones
+  const [first, middle, high] = column.tones
+  // The middle's foot is --live, as the mark's dots are, when the window says what that is.
+  const low = live !== undefined && first === toneOf(0)[0] ? live : first
   const fill = context.createLinearGradient(0, height, 0, 0)
   fill.addColorStop(0, low)
   fill.addColorStop(0.34, middle)
