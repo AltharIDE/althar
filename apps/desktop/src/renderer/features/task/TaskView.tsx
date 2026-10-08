@@ -277,7 +277,7 @@ export function TaskView({
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
   const edit = async (id: string) => {
-    const said = queuedOf(snapshot.items).find((message) => message.id === id)
+    const said = queuedOf(snapshot.items, busy).find((message) => message.id === id)
     if (said !== undefined && (await model.takeBack(id))) setDraft((current) => withQueued(current, said.text))
   }
 
@@ -312,7 +312,7 @@ export function TaskView({
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
-        queued={queuedOf(snapshot.items)}
+        queued={queuedOf(snapshot.items, busy)}
         onEditQueued={(id) => void edit(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         placeholder={busy ? text.placeholderBusy : text.placeholder(session?.agentName ?? agentName(chosen?.agentId ?? null))}

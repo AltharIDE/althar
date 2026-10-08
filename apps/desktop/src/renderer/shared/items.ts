@@ -57,16 +57,22 @@ export const waiting = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<string>
   items.flatMap((item) => (item.kind === 'user_message' && item.input?.state === 'queued' ? [item.id] : []))
 
 /**
- * What waits its turn in the composer, oldest first, where the person can
- * edit it or take it back. A message sent now isn't there: it goes first, as
- * soon as the turn running stops.
+ * What waits behind the turn running, oldest first, in the composer where the
+ * person can edit it or take it back. With no turn running there is nothing
+ * to wait behind: what was just sent goes straight to the thread. A message
+ * sent now isn't there either: it goes first, as soon as the turn stops.
  */
-export const queuedOf = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<{ readonly id: string; readonly text: string }> =>
-  items.flatMap((item) =>
-    item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting
-      ? [{ id: item.id, text: item.content.text }]
-      : [],
-  )
+export const queuedOf = (
+  items: ReadonlyArray<ThreadItem>,
+  turnRunning: boolean,
+): ReadonlyArray<{ readonly id: string; readonly text: string }> =>
+  !turnRunning
+    ? []
+    : items.flatMap((item) =>
+        item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting
+          ? [{ id: item.id, text: item.content.text }]
+          : [],
+      )
 
 /** A message taken back, as the window holds it until the runtime's word of it arrives. */
 export const takenBack = (items: ReadonlyArray<ThreadItem>, itemId: string): ReadonlyArray<ThreadItem> =>

@@ -57,7 +57,8 @@ export const text = {
   handsOver: (agent: string) => `hands the conversation to ${agent}`,
   takesOver: (to: string, from: string) => `${to} takes over from a brief; ${from}’s turn stops.`,
   handOver: 'Hand it over',
-  queued: (n: number) => (n === 1 ? 'Queued; the coordinator reads it next' : `${n} queued; the coordinator reads them in order`),
+  queued: 'Queued · the coordinator reads it next',
+  queue: (n: number) => (n === 1 ? 'Queued; the coordinator reads it next' : `${n} queued; the coordinator reads them in order`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in, so the coordinator starts on ${instead}.`,
   needsAgent: 'No agent is signed in. Sign one in with its own tool, then come back.',
@@ -199,7 +200,7 @@ export function ProjectView({
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the coordinator has it already.
   const edit = async (id: string) => {
-    const said = queuedOf(coordinator?.items ?? []).find((message) => message.id === id)
+    const said = queuedOf(coordinator?.items ?? [], busy).find((message) => message.id === id)
     if (said !== undefined && (await model.takeBack(id))) setDraft((current) => withQueued(current, said.text))
   }
 
@@ -229,10 +230,10 @@ export function ProjectView({
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
-        queued={queuedOf(coordinator?.items ?? [])}
+        queued={queuedOf(coordinator?.items ?? [], busy)}
         onEditQueued={(id) => void edit(id)}
         onUnqueue={(id) => void model.takeBack(id)}
-        text={{ queued: text.queued }}
+        text={{ queued: text.queue }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
         meter={contextMeter(session)}
         picker={
@@ -365,6 +366,7 @@ export function ProjectView({
                     )}
                     agentName={agentName}
                     card={(card) => <Card card={card} actions={actions} />}
+                    queued={text.queued}
                   />
                 </Thread>
               </TaskFace>

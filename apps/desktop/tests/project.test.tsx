@@ -309,6 +309,8 @@ describe('the Talk room', () => {
     })
     withServices(<Project />, client)
     const composer = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
+    // Behind a running turn, waiting messages are in the composer's queue rather than the thread.
+    expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull()
     const queue = screen.getByRole('region', { name: '2 queued; the coordinator reads them in order' })
     // Waiting, it is in the composer's queue rather than the thread.
     expect(within(queue).getByText('Rename the flag')).toBeTruthy()
@@ -333,7 +335,7 @@ describe('the Talk room', () => {
         ),
       })
       withServices(<Project />, client)
-      await screen.findByText('Queued; the coordinator reads it next')
+      await screen.findByText('Queued · the coordinator reads it next')
       act(() => emit(streamed('live', 'Thinking it over', 'thc')))
       expect(await screen.findByText('Thinking it over')).toBeTruthy()
       // How full the coordinator's context is shows in its composer as it says.
@@ -357,7 +359,7 @@ describe('the Talk room', () => {
           .toSorted(),
       ).toEqual(['c1', 'i9', queued.id].toSorted())
       expect(client.getCoordinator).toHaveBeenLastCalledWith('p1', { limit: 0 })
-      await waitFor(() => expect(screen.queryByText('Queued; the coordinator reads it next')).toBeNull())
+      await waitFor(() => expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull())
     } finally {
       vi.useRealTimers()
     }

@@ -273,6 +273,7 @@ export function ThreadBlocks({
   blocks,
   agentName,
   card,
+  queued,
   onPassOn,
 }: {
   blocks: ReadonlyArray<Block>
@@ -281,6 +282,8 @@ export function ThreadBlocks({
   onPassOn?: (words: string) => void
   /** Draws a task's card, in the coordinator's thread. */
   card?: (card: TaskCardContent) => ReactNode
+  /** What a message still waiting says: who reads it next. */
+  queued?: string
 }) {
   // A task that was reviewed has two steps, the review and settling it being the second; its pull request, once opened, is one more.
   const done = new Set(blocks.flatMap((block) => (block.kind === 'step' ? [block.result.step] : [])))
@@ -290,7 +293,7 @@ export function ThreadBlocks({
       case 'you':
         return (
           <Fragment key={block.id}>
-            <You at={block.at} delivery={block.delivery}>
+            <You at={block.at} delivery={block.delivery} {...(queued === undefined ? {} : { text: { queued } })}>
               {block.text}
             </You>
             {block.links.length > 0 && (
