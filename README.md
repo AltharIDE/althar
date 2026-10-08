@@ -1,4 +1,4 @@
-<img src="docs/assets/readme-header.png" width="100%" alt="Althar. The project should persist. The agents should not have to." />
+<img src="brand/export/banner/readme-header.png" width="100%" alt="Althar. The project should persist. The agents should not have to." />
 
 Althar is an open-source environment for running software projects with AI coding agents. It keeps the project in one place: its rules, knowledge, decisions, tasks and history. That place outlasts any single agent session. The work goes to whichever agents suit it, such as Claude Code, Codex or OpenCode, as installed on your machine.
 

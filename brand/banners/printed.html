@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8" />
+<title>printed banner</title>
+<style>
+  @font-face { font-family: Inter; src: url(../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2) format('woff2'); font-weight: 100 900; }
+  @font-face { font-family: Mono; src: url(../node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2) format('woff2'); font-weight: 100 800; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { overflow: hidden; }
+  body { background: #efeadf; position: relative; }
+  canvas { position: absolute; left: 0; top: 0; mix-blend-mode: multiply; }
+  .stock { mix-blend-mode: normal; }
+</style>
+<body>
+  <!--
+    Printed, not filled: two inks on paper stock, like a riso print. Cobalt lies in the paper with uneven cover and
+    sits a little off the black. The mark is the picture, as a halftone of the ruler's section lit from above.
+
+    One template for every size. The page is told what to draw in its address (?w=1280&h=400&layout=wide) and is given
+    the mark's geometry by whatever opens it (scripts/banners.ts sets window.ALTHAR_MARK from src/geometry.ts), so the
+    drawing exists once. It draws when its fonts have loaded and sets body[data-ready] when it is done.
+  -->
+  <canvas class="stock"></canvas><canvas class="cobalt"></canvas><canvas class="black"></canvas>
+  <script>
+    const q = new URLSearchParams(location.search)
+    const W = Number(q.get('w') ?? 1280), H = Number(q.get('h') ?? 400), LAYOUT = q.get('layout') ?? 'wide'
+    const S = Number(q.get('scale') ?? 2) // drawn at this many times, the image's size
+    const STOCK = '#efeadf', COBALT = '#2b3bff', BLACK = '#1b1b20'
+    const { SECTION, BORE } = window.ALTHAR_MARK
+    const OFF = [1.6, -1.1] // how far the cobalt plate sits off the black
+    const NAME = 'Althar'
+    const LINE1 = 'The project should persist.', LINE2 = 'The agents should not have to.'
+    const TAG = 'THE OPEN PROJECT LAYER FOR AGENTS'
+
+    document.documentElement.style.width = document.body.style.width = W + 'px'
+    document.documentElement.style.height = document.body.style.height = H + 'px'
+
+    // seeded, so every run prints the same sheet
+    let seed = 5
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646
+    // smooth value noise, for how the ink lies on the paper
+    const lat = new Float32Array(257 * 257).map(() => rnd())
+    const vn = (x, y) => {
+      const xi = Math.floor(x) & 255, yi = Math.floor(y) & 255, xf = x - Math.floor(x), yf = y - Math.floor(y)
+      const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf), g = (i, j) => lat[(yi + j) * 257 + xi + i]
+      return g(0, 0) * (1 - u) * (1 - v) + g(1, 0) * u * (1 - v) + g(0, 1) * (1 - u) * v + g(1, 1) * u * v
+    }
+    const plate = (cls) => {
+      const c = document.querySelector(`canvas.${cls}`)
+      c.width = W * S; c.height = H * S
+      c.style.width = W + 'px'; c.style.height = H + 'px'
+      const x = c.getContext('2d'); x.scale(S, S)
+      return [c, x]
+    }
+    // ink cover: a slow drift in density, a fine tooth, and the odd speck where the drum skipped
+    const ink = (c, x, depth) => {
+      const img = x.getImageData(0, 0, c.width, c.height), d = img.data
+      for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+        if (!d[i + 3]) continue
+        const px = p % c.width, py = (p / c.width) | 0
+        let a = 0.84 + 0.16 * vn(px / 260, py / 260) - depth * vn(px / 2.1, py / 2.1)
+        if (rnd() < 0.012) a *= 0.35
+        d[i + 3] *= Math.max(0, Math.min(1, a))
+      }
+      x.putImageData(img, 0, 0)
+    }
+
+    // ---- where things go ----------------------------------------------------------------------------------------
+    // Drawn first for 1280×400 (the README's banner). A taller shape lets the name fill the width, with the mark above
+    // it and a larger line; a strip or a stage has its own arrangement.
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+    const lerp = (a, b, f) => a + (b - a) * f
+    const u = W / 1280                                  // one unit of the README's drawing
+    const t = clamp(H / W / (400 / 1280), 1, 2)         // how much taller than the README's shape: 1 is as tall
+    const f = clamp((t - 1) / 0.6, 0, 1)                // how far the name has grown to fill the width
+    const scratch = document.createElement('canvas').getContext('2d')
+    // the size that sets the name this wide, with the tracking it is drawn with
+    const sizeFor = (width) => {
+      scratch.font = '800 100px Inter'; scratch.letterSpacing = `${-0.048 * 100}px`
+      return (width / scratch.measureText(NAME).width) * 100
+    }
+    const TOP = 13.67 // the section's height on the grid; its width is 15.78
+
+    const plans = {
+      // the README's: a bar, two lines, the name off the bottom, the mark as a halftone at the right
+      wide() {
+        const word = lerp(250 * u, sizeFor(0.9 * W), f)
+        const base = H + 0.096 * word
+        const wordTop = base - 0.727 * word
+        const hh = lerp(273.4 * u, 0.4 * H, f)
+        const bottom = lerp(H - 34.6 * u, wordTop - 30 * u, f)
+        return {
+          bar: { y: 61 * u, mark: 26 * u, markX: 60 * u, nameX: 96 * u, size: 17 * u, right: W - 60 * u },
+          head: { size: 40 * u * (1 + 0.5 * (t - 1)), x: 58 * u, y1: (128 + 40 * (t - 1)) * u, lead: 1.1 },
+          word: { size: word, x: 50 * u, y: base },
+          half: { sc: hh / TOP, cx: W - 218 * u, top: bottom - hh },
+        }
+      },
+      // a cover that is mostly width: the name, a line, the mark; the lower left is where the logo sits
+      strip() {
+        const word = sizeFor(0.33 * W)
+        const sc = (0.8 * H) / TOP
+        return {
+          head: { size: 0.13 * H, x: 0.545 * W, y1: 0.42 * H, lead: 1.2 },
+          word: { size: word, x: 0.17 * W, y: H + 0.096 * word },
+          half: { sc, cx: W - 8.6 * sc - 0.02 * W, top: 0.1 * H },
+        }
+      },
+      // channel art: what shows on every screen is the middle, so the mark and the name stand in it whole
+      centre() {
+        const safe = { x: 507, y: 508, w: 1546, h: 423 }
+        const word = sizeFor(0.58 * safe.w)
+        const cap = 0.727 * word
+        const hh = safe.h * 0.96
+        const baseline = safe.y + safe.h / 2 + cap / 2
+        const half = { sc: hh / TOP, cx: safe.x + 0.2 * safe.w, top: safe.y + safe.h / 2 - hh / 2 }
+        return {
+          word: { size: word, x: safe.x + 0.4 * safe.w, y: baseline },
+          half,
+          tag: { size: 26, x: safe.x + 0.4 * safe.w + 4, y: baseline + 56, right: false },
+        }
+      },
+    }
+
+    // ---- the plates ---------------------------------------------------------------------------------------------
+    const section = new Path2D(SECTION + BORE)
+    const probe = document.createElement('canvas').getContext('2d')
+
+    // the section as a halftone lit from the upper left: the top tip pale, the base heavy, the faces darker toward their edges
+    function halftone(x, { sc, cx, top }) {
+      const ox = cx - 12 * sc, oy = top - 5.5 * sc
+      const cell = 5.4 * (sc / 20), ang = (15 * Math.PI) / 180, ca = Math.cos(ang), sa = Math.sin(ang)
+      const cy = oy + 12.9 * sc, reach = Math.ceil(130 * (sc / 20) / (cell / 5.4 || 1))
+      for (let a = -reach; a < reach; a++) for (let b = -reach; b < reach; b++) {
+        const px = cx + (a * ca - b * sa) * cell, py = cy + (a * sa + b * ca) * cell
+        const gx = (px - ox) / sc, gy = (py - oy) / sc
+        if (gx < 3 || gx > 21 || gy < 5 || gy > 20) continue
+        if (!probe.isPointInPath(section, gx, gy, 'evenodd')) continue
+        const tt = Math.min(1, Math.max(0.06, ((gy - 5.5) / 13.7) * 0.78 + (Math.abs(gx - 12) / 8) * 0.18 + ((gx - 12) / 8) * 0.1))
+        x.beginPath(); x.arc(px, py, (cell / 2) * Math.sqrt(tt) * 1.08, 0, Math.PI * 2); x.fill()
+      }
+      x.beginPath(); x.arc(ox + 12 * sc, oy + 14.4 * sc, 1.05 * sc, 0, Math.PI * 2); x.fill()
+    }
+
+    // canvas text doesn't make the page fetch a face, so ask for each one first
+    Promise.all(['800 250px Inter', '700 40px Inter', '500 17px Mono'].map((f) => document.fonts.load(f))).then(() => {
+      const P = plans[LAYOUT]()
+      const markS = P.bar ? P.bar.mark / 24 : 0
+      const MARK = P.bar ? { x: P.bar.markX, y: P.bar.y - 19.2 * markS, s: markS } : null // its base on the name's baseline
+
+      // the stock: a fine tooth and a faint mottle
+      {
+        const [c, x] = plate('stock')
+        x.fillStyle = STOCK; x.fillRect(0, 0, W, H)
+        const img = x.getImageData(0, 0, c.width, c.height), d = img.data
+        for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+          const px = p % c.width, py = (p / c.width) | 0
+          const n = (rnd() - 0.5) * 12 + (vn(px / 140, py / 140) - 0.5) * 7
+          d[i] += n; d[i + 1] += n; d[i + 2] += n
+        }
+        x.putImageData(img, 0, 0)
+      }
+
+      // cobalt: the name off the bottom, the second line, the section as a halftone, and the small mark's point
+      {
+        const [c, x] = plate('cobalt')
+        x.translate(...OFF)
+        x.fillStyle = COBALT
+        x.font = `800 ${P.word.size}px Inter`; x.letterSpacing = `${-0.048 * P.word.size}px`
+        x.fillText(NAME, P.word.x, P.word.y)
+        if (P.head) {
+          x.font = `700 ${P.head.size}px Inter`; x.letterSpacing = `${-0.045 * P.head.size}px`
+          x.fillText(LINE2, P.head.x, P.head.y1 + P.head.size * P.head.lead)
+        }
+        halftone(x, P.half)
+        if (MARK) { x.beginPath(); x.arc(MARK.x + 12 * MARK.s, MARK.y + 14.4 * MARK.s, 1.05 * MARK.s, 0, Math.PI * 2); x.fill() }
+        ink(c, x, 0.2)
+      }
+
+      // black: the bar, the small mark with its bore open, and the first line
+      {
+        const [c, x] = plate('black')
+        x.fillStyle = BLACK
+        if (P.bar) {
+          x.font = `500 ${P.bar.size}px Mono`; x.letterSpacing = `${0.5 * (P.bar.size / 17)}px`
+          x.fillText(NAME.toUpperCase(), P.bar.nameX, P.bar.y)
+          x.textAlign = 'right'; x.fillText(TAG, P.bar.right, P.bar.y); x.textAlign = 'left'
+          x.save(); x.translate(MARK.x, MARK.y); x.scale(MARK.s, MARK.s)
+          x.fill(new Path2D(SECTION + BORE), 'evenodd'); x.restore()
+        }
+        if (P.head) {
+          x.font = `700 ${P.head.size}px Inter`; x.letterSpacing = `${-0.045 * P.head.size}px`
+          x.fillText(LINE1, P.head.x, P.head.y1)
+        }
+        if (P.tag) {
+          x.font = `500 ${P.tag.size}px Mono`; x.letterSpacing = `${0.5 * (P.tag.size / 17)}px`
+          x.fillText(TAG, P.tag.x, P.tag.y)
+        }
+        ink(c, x, 0.14)
+      }
+      document.body.dataset.ready = '1'
+    })
+  </script>
+</body>
+</html>

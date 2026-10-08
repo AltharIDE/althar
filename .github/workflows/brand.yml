@@ -1,0 +1,69 @@
+name: brand
+
+on:
+  push:
+    branches: [main]
+    paths:
+      [
+        'brand/**',
+        'packages/ui/package.json',
+        'packages/ui/src/styles/tokens.css',
+        'packages/ui/src/foundations/Logo/**',
+        'packages/ui/src/foundations/ProjectMark/**',
+        'packages/ui/.storybook/**',
+        'apps/pitch/src/components/Logo.tsx',
+        'apps/pitch/public/**',
+        'apps/pitch/scripts/og.html',
+        'apps/site/public/**',
+        'apps/desktop/resources/**',
+        'package.json',
+        'bun.lock',
+        'vite.config.ts',
+        '.github/workflows/brand.yml',
+      ]
+  pull_request:
+    paths:
+      [
+        'brand/**',
+        'packages/ui/package.json',
+        'packages/ui/src/styles/tokens.css',
+        'packages/ui/src/foundations/Logo/**',
+        'packages/ui/src/foundations/ProjectMark/**',
+        'packages/ui/.storybook/**',
+        'apps/pitch/src/components/Logo.tsx',
+        'apps/pitch/public/**',
+        'apps/pitch/scripts/og.html',
+        'apps/site/public/**',
+        'apps/desktop/resources/**',
+        'package.json',
+        'bun.lock',
+        'vite.config.ts',
+        '.github/workflows/brand.yml',
+      ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brand-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: brand
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run check
+      - run: bun run test:coverage
