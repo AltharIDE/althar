@@ -34,6 +34,8 @@ type Story = StoryObj<typeof meta>
 
 export const RunningAndYours: Story = {}
 export const OneNeedsYou: Story = { args: { yours: 1 } }
+/** The home's bar: the dot rings. Everywhere else it is still. */
+export const Ringing: Story = { args: { ring: true } }
 /** Nothing waits on you: it says so, and isn't a button. */
 export const NothingNeedsYou: Story = { args: { yours: 0 } }
 export const NothingRunning: Story = { args: { running: 0, yours: 0 } }

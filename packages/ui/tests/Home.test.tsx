@@ -28,10 +28,17 @@ describe('Home', () => {
     expect(screen.queryByRole('button', { name: /Open a folder/ })).toBeNull()
   })
 
-  it('gives the projects’ place to the dock while something is open in it', () => {
-    home({ dock: <p>In the dock</p> })
-    expect(screen.getByText('In the dock')).toBeInTheDocument()
-    expect(screen.queryByRole('complementary', { name: 'Projects' })).toBeNull()
+  it('keeps the projects beside the stream: nothing opens in their place', () => {
+    home({ onOpenTask: vi.fn() })
+    expect(screen.getByRole('complementary', { name: 'Projects' })).toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Beside the home' })).toBeNull()
+  })
+
+  it('calls the second section in progress, and rings nothing in the stream', () => {
+    const { container } = home({ waiting: 2, needs: [<p key="a">A call</p>] })
+    expect(screen.getByRole('region', { name: /In progress/ })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: /Running/ })).toBeNull()
+    expect(container.querySelectorAll('[class*="ping"]')).toHaveLength(0)
   })
 
   it('says nothing waits when the calls come as an empty list', () => {
@@ -46,10 +53,10 @@ describe('Home', () => {
     expect(onOpenEvent).toHaveBeenCalledWith('s1')
   })
 
-  it('says what is empty, and marks the task open in the dock', () => {
-    const { container } = home({ running: RUNNING, current: 'h207', since: [] })
+  it('says what is empty', () => {
+    home({ running: [], since: [] })
     expect(screen.getByText('Nothing is waiting on you.')).toBeInTheDocument()
+    expect(screen.getByText('Nothing is in progress.')).toBeInTheDocument()
     expect(screen.getByText('Nothing has happened since.')).toBeInTheDocument()
-    expect(container.querySelectorAll('[aria-current="true"]')).toHaveLength(1)
   })
 })

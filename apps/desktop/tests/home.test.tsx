@@ -3,21 +3,21 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { HomeCall, HomeEvent, HomeTask, ProjectSummary } from '@althar/contracts'
-import { ProjectInk, RuntimeState } from '@althar/ui'
+import { ProjectInk } from '@althar/ui'
 
-import { agentMarkOf, HomeView, lineOf, refOf } from '../src/renderer/features/home/HomeView'
+import { HomeView, lineOf, refOf } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
 import { SettingsView } from '../src/renderer/features/settings/SettingsView'
 import { useAppIcon } from '../src/renderer/features/settings/useAppIcon'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useStart } from '../src/renderer/features/start/useStart'
-import { agents, card, change, changed, fakeClient, fakeHost, home, project, usual } from './fixtures'
+import { card, change, changed, fakeClient, fakeHost, home, project } from './fixtures'
 import { withServices } from './render'
 
 /*
  * The home: across projects, what waits on the person, answered where it is
- * or opened in the dock; what runs; what the loop did since they last left;
- * the projects beside it; and the bar's way to settings.
+ * or opened as its task; what is in progress; what the loop did since they
+ * last left; the projects beside it; and the bar's way to settings.
  */
 
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', ink: 'rose', lastWorkAt: null }
@@ -162,7 +162,7 @@ function Home({
 }
 
 describe('the home', () => {
-  it('shows what waits on you across projects, answers a permission where it is, and opens the rest in the dock', async () => {
+  it('shows what waits on you across projects, answers a permission where it is, and opens the rest as their tasks', async () => {
     const onTask = vi.fn()
     const { client } = fakeClient({ getHome: vi.fn(async () => busy()) })
     withServices(<Home onTask={onTask} />, client)
@@ -186,51 +186,52 @@ describe('the home', () => {
     expect(await within(needs).findByText('Allowed npm publish')).toBeTruthy()
     expect(within(needs).getByText('in halyard')).toBeTruthy()
 
-    // Review opens the change in the dock, in the projects' place.
+    // Review opens the task itself, and the projects stay where they are.
     await userEvent.click(within(needs).getAllByRole('button', { name: 'Review' })[0]!)
-    const dock = await screen.findByRole('complementary', { name: 'Beside the home' })
-    expect(screen.queryByRole('complementary', { name: 'Projects' })).toBeNull()
-    await userEvent.click(within(dock).getByRole('button', { name: 'Close the panel' }))
-    expect(await screen.findByRole('complementary', { name: 'Projects' })).toBeTruthy()
+    expect(onTask).toHaveBeenLastCalledWith('th5')
+    expect(screen.queryByRole('complementary', { name: 'Beside the home' })).toBeNull()
+    expect(screen.getByRole('complementary', { name: 'Projects' })).toBeTruthy()
 
-    // A stuck step opens in the dock to be answered there.
+    // A stuck step opens its task to be answered there; so does a card's title.
     await userEvent.click(within(needs).getAllByRole('button', { name: 'Open' })[0]!)
-    expect(await screen.findByRole('complementary', { name: 'Beside the home' })).toBeTruthy()
-    await userEvent.click(
-      within(screen.getByRole('complementary', { name: 'Beside the home' })).getByRole('button', { name: 'Open the task' }),
-    )
-    expect(onTask).toHaveBeenCalledWith('th4')
+    expect(onTask).toHaveBeenLastCalledWith('th4')
+    await userEvent.click(within(needs).getByRole('button', { name: 'Name it better' }))
+    expect(onTask).toHaveBeenLastCalledWith('th5')
   })
 
   it('denies where it is, and opens the first thing that waits from the bar', async () => {
+    const onTask = vi.fn()
     const { client } = fakeClient({ getHome: vi.fn(async () => busy()) })
-    withServices(<Home />, client)
+    withServices(<Home onTask={onTask} />, client)
     const needs = await screen.findByRole('region', { name: /Needs you/ })
     await userEvent.click(within(needs).getAllByRole('button', { name: 'Deny' })[0]!)
     expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'reject' })
     expect(await within(needs).findByText('Didn’t allow npm publish')).toBeTruthy()
     await userEvent.click(within(screen.getAllByRole('banner')[0]!).getByRole('button', { name: /need you/ }))
-    expect(await screen.findByRole('complementary', { name: 'Beside the home' })).toBeTruthy()
+    expect(onTask).toHaveBeenCalledWith('th4')
   })
 
-  it('opens the first ready task from the bar when no call waits, and answers a call opened in the dock', async () => {
+  it('opens the first ready task from the bar when no call waits', async () => {
+    const onTask = vi.fn()
     const one = busy()
     const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...one, calls: [] })) })
-    withServices(<Home />, client)
+    withServices(<Home onTask={onTask} />, client)
     await screen.findByRole('heading', { name: 'Name it better', level: 3 })
     await userEvent.click(within(screen.getAllByRole('banner')[0]!).getByRole('button', { name: /needs? you/ }))
-    const dock = await screen.findByRole('complementary', { name: 'Beside the home' })
-    expect(within(dock).getByRole('heading', { name: 'Name it better' })).toBeTruthy()
+    expect(onTask).toHaveBeenCalledWith('th5')
   })
 
-  it('closes the dock when the call it holds is answered on its card', async () => {
+  it('counts as running only the tasks that are, and shows no agents in the bar', async () => {
     const { client } = fakeClient({ getHome: vi.fn(async () => busy()) })
     withServices(<Home />, client)
-    const needs = await screen.findByRole('region', { name: /Needs you/ })
-    await userEvent.click(within(needs).getByRole('button', { name: 'Run npm publish' }))
-    expect(await screen.findByRole('complementary', { name: 'Beside the home' })).toBeTruthy()
-    await userEvent.click(within(needs).getAllByRole('button', { name: 'Allow once' })[0]!)
-    expect(await screen.findByRole('complementary', { name: 'Projects' })).toBeTruthy()
+    const bar = (await screen.findAllByRole('banner'))[0]!
+    // Two have an agent on them, or are held for a reset; the stopped one and the one waiting on a call are in progress, not running.
+    await within(bar).findByText('2 running')
+    expect(within(bar).queryByText(/Claude Code|Codex|OpenCode/)).toBeNull()
+    expect(within(bar).queryByRole('img')).toBeNull()
+    const progress = screen.getByRole('region', { name: /In progress/ })
+    expect(within(progress).getByText('Stopped work')).toBeTruthy()
+    expect(within(progress).getByText('Waits on a call')).toBeTruthy()
   })
 
   it('shows what runs, what the loop did, and the projects, and opens each', async () => {
@@ -238,21 +239,21 @@ describe('the home', () => {
     const onProject = vi.fn()
     const { client } = fakeClient({ getHome: vi.fn(async () => busy()) })
     withServices(<Home onTask={onTask} onProject={onProject} />, client)
-    const runningNow = await screen.findByRole('region', { name: /Running/ })
+    const runningNow = await screen.findByRole('region', { name: /In progress/ })
     expect(within(runningNow).getByText(/Waits for Claude Code, back at/)).toBeTruthy()
     expect(within(runningNow).getByText('No agent is working on it')).toBeTruthy()
     expect(within(runningNow).getByText('Waits on you')).toBeTruthy()
     await userEvent.click(within(runningNow).getByRole('button', { name: 'Retry the call' }))
-    expect(await screen.findByRole('complementary', { name: 'Beside the home' })).toBeTruthy()
+    expect(onTask).toHaveBeenLastCalledWith('th1')
 
     const since = screen.getByRole('region', { name: /Since you looked, the last day/ })
     expect(within(since).getByText('Moved to Codex.')).toBeTruthy()
     expect(within(since).getByText('Answered 3 permission asks')).toBeTruthy()
-    // One still on the home opens in the dock; one that isn't opens its task.
+    // Each opens the task it happened to, still on the home or not.
     await userEvent.click(within(since).getByRole('button', { name: 'Implement finished' }))
+    expect(onTask).toHaveBeenLastCalledWith('th5')
     await userEvent.click(within(since).getByRole('button', { name: 'Review settled' }))
-    expect(onTask).toHaveBeenCalledWith('thg')
-    await userEvent.click(screen.getByRole('button', { name: 'Close the panel' }))
+    expect(onTask).toHaveBeenLastCalledWith('thg')
 
     const projects = await screen.findByRole('complementary', { name: 'Projects' })
     expect(within(projects).getByText('No tasks yet')).toBeTruthy()
@@ -348,26 +349,8 @@ describe('the home', () => {
     expect(lineOf({ kind: 'answered', id: 'a', at, count: 1 }, projects, now)).toMatchObject({ what: 'Answered 1 permission ask' })
   })
 
-  it('draws each project in its ink, and each agent in the bar as it stands', () => {
+  it('draws each project in its ink', () => {
     expect(refOf(project)).toEqual({ seed: 'p1', ink: ProjectInk.Teal, name: 'meridian' })
-    const now = new Date('2026-10-07T12:00:00')
-    const [claude, codex, opencode] = agents
-    expect(agentMarkOf(claude!, now).state).toBe(RuntimeState.Ready)
-    expect(agentMarkOf(codex!, now)).not.toHaveProperty('brand', undefined)
-    expect(agentMarkOf(opencode!, now).state).toBe(RuntimeState.SignedOut)
-    const out = {
-      ...claude!,
-      accounts: [
-        { ...usual('acc_1', 'signed_in'), outUntil: '2026-10-07T14:20:00' },
-        { ...usual('acc_2', 'signed_in'), outUntil: '2026-10-07T13:00:00' },
-      ],
-    }
-    expect(agentMarkOf(out, now)).toMatchObject({ state: RuntimeState.OutOfUsage, back: expect.stringMatching(/1:00|13:00/) })
-    const partly = {
-      ...claude!,
-      accounts: [{ ...usual('acc_1', 'signed_in'), outUntil: '2026-10-07T14:20:00' }, usual('acc_2', 'signed_in')],
-    }
-    expect(agentMarkOf(partly, now).state).toBe(RuntimeState.Ready)
   })
 })
 

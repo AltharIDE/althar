@@ -33,9 +33,6 @@ export const Held: Story = { args: HELD }
 /** Stuck on something only you can answer. */
 export const WaitsOnYou: Story = { args: { ...RUNNING_207, status: TaskStatus.Yours, note: 'Stuck: waits on you' } }
 
-/** Open in the dock. */
-export const Current: Story = { args: { current: true } }
-
 /** A long title stays on one line. */
 export const LongTitle: Story = {
   args: {
@@ -70,7 +67,6 @@ export const AllStates: Story = {
         { state: 'on a review', node: <RunRow {...args} {...ON_REVIEW} /> },
         { state: 'held', node: <RunRow {...args} {...HELD} /> },
         { state: 'waits on you', node: <RunRow {...args} {...WaitsOnYou.args} /> },
-        { state: 'current', node: <RunRow {...args} current /> },
         { state: 'hover', node: <RunRow {...args} /> },
         { state: 'focus', node: <RunRow {...args} /> },
         { state: 'long title', node: <RunRow {...args} {...LongTitle.args} /> },

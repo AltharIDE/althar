@@ -2,16 +2,9 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { AgentMarks, type AgentMark } from '../../chrome/AgentMarks/AgentMarks'
-import { TitleBar, TitleBarRule } from '../../chrome/TitleBar/TitleBar'
+import { TitleBar } from '../../chrome/TitleBar/TitleBar'
 import { WorkStatus } from '../../chrome/WorkStatus/WorkStatus'
-import { AcceptPeek } from '../../dock/AcceptPeek/AcceptPeek'
-import { CallPeek } from '../../dock/CallPeek/CallPeek'
-import { Dock } from '../../dock/Dock/Dock'
-import { ACCEPT, CALL } from '../../fixtures/dock'
 import {
-  AGENTS_READY,
-  AGENTS_TROUBLED,
   DECISION,
   PROJECT_LIST,
   PROJECTS_QUIET,
@@ -55,27 +48,13 @@ type Story = StoryObj<typeof meta>
 
 /* ---- the window around the home: its bar, as the app draws it ---- */
 
-function Window({
-  agents,
-  running,
-  waiting,
-  onYours,
-  children,
-}: {
-  agents: readonly AgentMark[]
-  running: number
-  waiting: number
-  onYours?: () => void
-  children: ReactNode
-}) {
+function Window({ running, waiting, onYours, children }: { running: number; waiting: number; onYours?: () => void; children: ReactNode }) {
   return (
     <div className={s.window}>
       <TitleBar
         lights="drawn"
         end={
           <>
-            <AgentMarks agents={agents} />
-            <TitleBarRule />
             <WorkStatus running={running} yours={waiting} {...(onYours ? { onYours } : {})} />
             <IconButton icon="gear" label="Settings" kbd="⌘," size="small" />
           </>
@@ -91,26 +70,17 @@ function Window({
   )
 }
 
-/* ---- what waits on you, answered where it is or opened in the dock ---- */
+/* ---- what waits on you, answered where it is or opened as the task ---- */
 
-type Open = 'decision' | 'accept' | null
 interface Said {
   said: string
   note: string
   denied?: boolean
 }
 
-function Day({
-  initial = null,
-  troubled = false,
-  ...props
-}: Omit<HomeProps, 'needs' | 'dock' | 'waiting'> & { initial?: Open; troubled?: boolean }) {
-  const [open, setOpen] = useState<Open>(initial)
+function Day({ troubled = false, ...props }: Omit<HomeProps, 'needs' | 'waiting'> & { troubled?: boolean }) {
   const [answers, setAnswers] = useState<Record<string, Said>>({})
-  const answer = (id: string, said: Said) => {
-    setAnswers((now) => ({ ...now, [id]: said }))
-    setOpen(null)
-  }
+  const answer = (id: string, said: Said) => setAnswers((now) => ({ ...now, [id]: said }))
   const undo = (id: string) =>
     setAnswers((now) => {
       const { [id]: _, ...rest } = now
@@ -221,11 +191,10 @@ function Day({
                 task={READY.task}
                 title={READY.title}
                 at={READY.at}
-                current={open === 'accept'}
-                onOpen={() => setOpen('accept')}
+                onOpen={() => props.onOpenTask?.('accept')}
                 detail={<NeedChange {...READY.change} />}
                 actions={
-                  <Button size="small" onClick={() => setOpen('accept')}>
+                  <Button size="small" onClick={() => props.onOpenTask?.('accept')}>
                     Review
                   </Button>
                 }
@@ -242,11 +211,10 @@ function Day({
                 task={DECISION.task}
                 title={DECISION.title}
                 at={DECISION.at}
-                current={open === 'decision'}
-                onOpen={() => setOpen('decision')}
+                onOpen={() => props.onOpenTask?.('decision')}
                 detail={<NeedOptions options={DECISION.options} />}
                 actions={
-                  <Button size="small" onClick={() => setOpen('decision')}>
+                  <Button size="small" onClick={() => props.onOpenTask?.('decision')}>
                     Decide
                   </Button>
                 }
@@ -259,23 +227,8 @@ function Day({
   // each project's dot and count follow the calls this day shows
   const projects = props.projects.map((p) => ({ ...p, yours: waiting.filter((c) => c.project === p.id).length }))
 
-  const dock =
-    open === 'decision' ? (
-      <Dock label="Decision" name="Decision" sub="Meridian · task 423 · 1h ago" call onClose={() => setOpen(null)}>
-        <CallPeek {...CALL} onRecord={() => answer('decision', { said: 'Decided: queue and retry', note: 'releases 422' })} />
-      </Dock>
-    ) : open === 'accept' ? (
-      <Dock label="Ready to accept" name="Ready to accept" sub="Meridian · task 416 · 22m ago" onClose={() => setOpen(null)}>
-        <AcceptPeek
-          {...ACCEPT}
-          onAccept={() => answer('accept', { said: 'Accepted #1191', note: 'merging into main' })}
-          onSendBack={() => answer('accept', { said: 'Sent back', note: 'the lead has your note', denied: true })}
-        />
-      </Dock>
-    ) : undefined
-
   return (
-    <Window agents={troubled ? AGENTS_TROUBLED : AGENTS_READY} running={props.running.length} waiting={waiting.length}>
+    <Window running={props.running.length} waiting={waiting.length}>
       <Home
         {...props}
         projects={projects}
@@ -290,21 +243,20 @@ function Day({
             <div key={id}>{node}</div>
           )
         })}
-        {...(dock ? { dock } : {})}
       />
     </Window>
   )
 }
 
-/** A busy afternoon: three calls across projects, five tasks running, and what the loop did in the three hours since you looked. Answer the permission where it is; Review and Decide open the dock. */
+/** A busy afternoon: three calls across projects, five tasks running, and what the loop did in the three hours since you looked. Answer the permission where it is; Review and Decide open the task. */
 export const Busy: Story = {
   render: (args) => <Day {...args} />,
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Allow once' }))
     await expect(await canvas.findByText('Allowed npm publish')).toBeInTheDocument()
     await userEvent.click(canvas.getByRole('button', { name: 'Decide' }))
-    await expect(await canvas.findByRole('button', { name: 'Record decision' })).toBeInTheDocument()
+    await expect(args.onOpenTask).toHaveBeenCalledWith('decision')
   },
 }
 
@@ -312,13 +264,13 @@ export const Busy: Story = {
 export const Quiet: Story = {
   args: { needs: [], running: RUNNING_QUIET, since: SINCE_QUIET, looked: 'last night, 23:40', projects: PROJECTS_QUIET },
   render: (args) => (
-    <Window agents={AGENTS_READY} running={args.running.length} waiting={0}>
+    <Window running={args.running.length} waiting={0}>
       <Home {...args} waiting={0} />
     </Window>
   ),
 }
 
-/** Something's wrong: an agent signed out, another out until its reset, and a task stuck. The bar says which agents; what needs a person comes first. */
+/** Something's wrong: a task stuck and another held for a sign-in. What needs a person comes first. */
 export const SomethingWrong: Story = {
   args: {
     running: RUNNING.map((run) =>
@@ -331,9 +283,6 @@ export const SomethingWrong: Story = {
   },
   render: (args) => <Day {...args} troubled />,
 }
-
-/** A decision open in the dock, which takes the projects' place. */
-export const WithTheDock: Story = { render: (args) => <Day {...args} initial="decision" /> }
 
 /** Without a way to open a folder, the projects' head has no button. */
 export const WithoutOpeningAFolder: Story = {
@@ -357,7 +306,7 @@ export const AllStates: Story = {
           state: 'quiet',
           node: (
             <div className={s.cell}>
-              <Window agents={AGENTS_READY} running={1} waiting={0}>
+              <Window running={1} waiting={0}>
                 <Home {...args} {...Quiet.args} waiting={0} />
               </Window>
             </div>
@@ -368,14 +317,6 @@ export const AllStates: Story = {
           node: (
             <div className={s.cell}>
               <Day {...args} {...SomethingWrong.args} troubled />
-            </div>
-          ),
-        },
-        {
-          state: 'dock open',
-          node: (
-            <div className={s.cell}>
-              <Day {...args} initial="decision" />
             </div>
           ),
         },

@@ -7,6 +7,14 @@
   border-radius: 99px;
   background: var(--live);
 }
+.signal {
+  background: var(--signal);
+}
+.signal.ping::after {
+  inset: -2px;
+  box-shadow: 0 0 0 1px var(--signal);
+  --ring: 1.35;
+}
 .ping::after {
   content: '';
   position: absolute;
@@ -26,7 +34,7 @@
   }
   70%,
   100% {
-    transform: scale(1.7);
+    transform: scale(var(--ring, 1.7));
     opacity: 0;
   }
 }
