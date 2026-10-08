@@ -5,9 +5,10 @@
  * the page makes the argument once, at the top, not in every entry.
  *
  * Collected on 1 October 2026 from search results, covering 1 August to 30
- * September. Before launch, open every source and check the date and the line
- * against it; replace secondary sources with the company's own post where
- * there is one.
+ * September. Topped up on 8 October with 1 to 8 October, and one September
+ * item that was missed. Before launch, open every source and check the date
+ * and the line against it; replace secondary sources with the company's own
+ * post where there is one.
  */
 
 export enum ShiftKind {
@@ -45,6 +46,63 @@ export interface Shift {
 }
 
 export const SHIFTS: readonly Shift[] = [
+  {
+    id: 'claude-haiku-5-5-copilot',
+    date: '2026-10-07',
+    kind: ShiftKind.Model,
+    who: 'Anthropic',
+    title: 'Claude Haiku 5.5 in GitHub Copilot',
+    what: 'Anthropic’s lightweight model is generally available in Copilot on Pro and up, billed at list price under usage-based billing.',
+    source: {
+      name: 'GitHub Changelog',
+      url: 'https://github.blog/changelog/2026-10-07-claude-haiku-5-5-in-github-copilot',
+    },
+  },
+  {
+    id: 'claude-spend-limit-pause',
+    date: '2026-10-07',
+    kind: ShiftKind.Outage,
+    who: 'Anthropic',
+    title: 'Some organisations wrongly paused at spend limit',
+    what: 'Requests were refused across the API, Claude.ai, Claude Code and Cowork. The incident is marked resolved.',
+    source: { name: 'Claude Status', url: 'https://status.claude.com/incidents/vmys9qn874h4' },
+  },
+  {
+    id: 'copilot-local-sandbox',
+    date: '2026-10-07',
+    kind: ShiftKind.Tools,
+    who: 'GitHub',
+    title: 'Local sandboxing for Copilot is generally available',
+    what: 'Commands that Copilot agents start get limited access to files, network and credentials, under policies admins can lock. No extra cost.',
+    source: {
+      name: 'GitHub Changelog',
+      url: 'https://github.blog/changelog/2026-10-07-local-sandboxing-for-github-copilot-now-generally-available',
+    },
+  },
+  {
+    id: 'mistral-large-4',
+    date: '2026-10-06',
+    kind: ShiftKind.Model,
+    who: 'Mistral',
+    title: 'Mistral Large 4, a trillion-parameter model',
+    what: 'A preview of Mistral’s largest model, reachable through a guardrail endpoint for now. Weights follow about three weeks later, after safety testing.',
+    source: {
+      name: 'TechCrunch',
+      url: 'https://techcrunch.com/2026/10/06/mistrals-new-1t-model-aims-to-leapfrog-closed-and-open-rivals/',
+    },
+  },
+  {
+    id: 'copilot-four-models-deprecated',
+    date: '2026-10-02',
+    kind: ShiftKind.Access,
+    who: 'GitHub',
+    title: 'Four models deprecated across Copilot',
+    what: 'Gemini 3.5 Flash, Gemini 3.6 Flash, Kimi K2.7 Code and Claude Opus 4.7. Replacements named are Gemini 3.8 Flash, Kimi K3 and Claude Opus 5.5.',
+    source: {
+      name: 'GitHub Changelog',
+      url: 'https://github.blog/changelog/2026-10-02-selected-models-in-github-copilot-deprecated',
+    },
+  },
   {
     id: 'gemini-4-argon',
     date: '2026-09-30',
@@ -118,6 +176,18 @@ export const SHIFTS: readonly Shift[] = [
     source: {
       name: 'Enterprise DNA',
       url: 'https://enterprisedna.co/resources/ai-pulse/ai-pulse-2026-09-19-claude-code-adopts-agents-md-standard/',
+    },
+  },
+  {
+    id: 'gpt-5-5-retires',
+    date: '2026-09-16',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'GPT-5.5 leaves ChatGPT and Codex on 14 October',
+    what: 'Retired from ChatGPT, ChatGPT Work and Codex on every plan. The API is not affected, but Codex settings that pin it need to move first.',
+    source: {
+      name: 'BusinessToday',
+      url: 'https://www.businesstoday.in/technology/artificial-intelligence/story/openai-to-retire-gpt-5-5-from-chatgpt-work-and-codex-on-october-14-what-changes-to-expect-555782-2026-09-16',
     },
   },
   {
