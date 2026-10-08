@@ -37,6 +37,8 @@ export interface TaskModel {
   /** Earlier items are on their way. */
   readonly loadingEarlier: boolean
   readonly loadEarlier: () => Promise<void>
+  /** Reads the files the task changed from git, past what the runtime keeps: for the person looking at them, hand edits and all. */
+  readonly readFiles: () => void
   /**
    * Says something to the lead. With no lead working, `start` names the one
    * to start: the message is its first turn, with its brief.
@@ -124,6 +126,20 @@ export const useTask = (threadId: string): TaskModel => {
     [client, cache, threadId, newest, fail],
   )
 
+  const readFiles = useCallback(
+    () =>
+      void newest(
+        'head',
+        client.getThread(threadId, { limit: 0, fresh: true }),
+        (head) =>
+          cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
+            current === undefined ? head : { ...head, items: current.items, earlier: current.earlier },
+          ),
+        fail,
+      ),
+    [client, cache, threadId, newest, fail],
+  )
+
   /** Reads what the gathered changes touched. */
   const readChanged = useCallback(() => {
     timer.current = undefined
@@ -200,6 +216,7 @@ export const useTask = (threadId: string): TaskModel => {
     pending,
     loadingEarlier,
     loadEarlier,
+    readFiles,
     send: (body, start) =>
       act(async () => {
         // Queued first, so the lead that starts reads it in its first turn rather than after one of its own.

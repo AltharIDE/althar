@@ -1,0 +1,43 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--n-2);
+}
+
+.body {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  padding: 24px;
+}
+
+.box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  text-align: center;
+}
+
+.mark {
+  margin-bottom: 6px;
+  color: var(--t-1);
+}
+
+.title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 560;
+  letter-spacing: -0.017em;
+  color: var(--t-1);
+}
+
+.reason {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+  overflow-wrap: anywhere;
+}
