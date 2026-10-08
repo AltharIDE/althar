@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, type ComponentType } from 'react'
 import { pageMeta } from './content/pages'
 import { Home } from './home/Home'
 import { Shifts } from './shifts/Shifts'
+import { Wallpaper } from './wallpaper/Wallpaper'
 
 /* The thesis (with its Markdown compiler) and the earlier enterprise page (with its 3D scene) load only on their own paths. */
 const Thesis = lazy(() => import('./thesis/Thesis').then((m) => ({ default: m.Thesis })))
@@ -11,6 +12,7 @@ const EnterpriseHome = lazy(() => import('./enterprise/Home').then((m) => ({ def
 const PAGES: Record<string, ComponentType> = {
   '/shifts': Shifts,
   '/thesis': Thesis,
+  '/wallpaper': Wallpaper,
   /** The earlier, enterprise-facing page: kept for the company version, linked from nowhere. */
   '/enterprise': EnterpriseHome,
 }

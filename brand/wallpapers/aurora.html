@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8" />
+<title>aurora wallpaper</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { overflow: hidden; }
+  canvas { display: block; }
+</style>
+<body>
+  <!--
+    The launch, held at the moment the mark has set: the light standing off the bottom of the screen, cobalt in the
+    middle and paler out to warm at the edges, and the mark above it as the launch's halftone, its point in the bore.
+    On ink the light glows instead of tinting.
+
+    One drawing for every size. The page is told what to draw in its address (?w=3456&h=2234&theme=dark) and is given
+    the launch's light and dots by whatever opens it (scripts/wallpapers.ts sets window.ALTHAR_AURORA from
+    packages/ui/src/screens/Launch), so it draws what the app shows. It draws in device pixels at w × h and sets
+    body[data-ready] when it is done.
+  -->
+  <canvas></canvas>
+  <script>
+    const q = new URLSearchParams(location.search)
+    const W = Number(q.get('w') ?? 1600), H = Number(q.get('h') ?? 1000), DARK = q.get('theme') === 'dark'
+    const { columns, dots, point, cobalt } = window.ALTHAR_AURORA
+    const GROUND = DARK ? '#0e0e12' : '#f6f4ef'
+    const MARK = DARK ? '#8a96ff' : cobalt // on ink, the dots are the light's own pale cobalt
+    const TALL = H > W * 1.1 // a phone: the light narrower and lower, the mark below the clock
+
+    const canvas = document.querySelector('canvas')
+    canvas.width = W; canvas.height = H
+    const ctx = canvas.getContext('2d')
+    const layer = () => {
+      const c = document.createElement('canvas')
+      c.width = W; c.height = H
+      return [c, c.getContext('2d')]
+    }
+    // seeded, so every run draws the same grain
+    let seed = 17
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646
+
+    ctx.fillStyle = GROUND
+    ctx.fillRect(0, 0, W, H)
+
+    // the light: the launch's columns, in a field a little wider than the screen, standing off its bottom
+    {
+      const field = { x: -0.08 * W, w: 1.16 * W, bottom: H * 1.04, h: H * (TALL ? 0.78 : 1) }
+      const blur = Math.max(W, H) * (DARK ? 0.03 : 0.019)
+      const [c, g] = layer()
+      g.filter = `blur(${blur}px)`
+      for (const col of columns) {
+        const w = (col.width / 100) * field.w * (TALL ? 1.5 : 1)
+        const x = field.x + (col.left / 100) * field.w - w / 2
+        const h = col.height * field.h
+        const top = field.bottom - h
+        const cap = h * 0.22
+        const [low, middle, high] = col.tones
+        const fill = g.createLinearGradient(0, field.bottom, 0, top)
+        if (DARK) {
+          // on ink the pale tops would glow like caps, so the light thins out well before them
+          fill.addColorStop(0, low)
+          fill.addColorStop(0.3, middle + 'cc')
+          fill.addColorStop(0.62, high + '40')
+          fill.addColorStop(0.9, high + '00')
+        } else {
+          fill.addColorStop(0, low)
+          fill.addColorStop(0.34, middle)
+          fill.addColorStop(0.66, high)
+          fill.addColorStop(1, 'rgba(255, 255, 255, 0)')
+        }
+        g.fillStyle = fill
+        g.beginPath()
+        g.moveTo(x, field.bottom + blur * 3)
+        g.lineTo(x, top + cap)
+        g.ellipse(x + w / 2, top + cap, w / 2, cap, 0, Math.PI, 0)
+        g.lineTo(x + w, field.bottom + blur * 3)
+        g.closePath()
+        g.fill()
+      }
+      if (DARK) ctx.globalCompositeOperation = 'screen'
+      ctx.drawImage(c, 0, 0)
+      ctx.globalCompositeOperation = 'source-over'
+    }
+
+    // fine grain over the light, as the launch lays it, fading out away from the bottom's middle
+    {
+      const [c, g] = layer()
+      const img = g.createImageData(W, H)
+      const most = DARK ? 18 : 26
+      for (let i = 0; i < W * H; i++) {
+        const v = rnd() < 0.5 ? 0 : 255
+        img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v
+        img.data[i * 4 + 3] = Math.round(rnd() * most)
+      }
+      g.putImageData(img, 0, 0)
+      g.globalCompositeOperation = 'destination-in'
+      const mask = g.createRadialGradient(W / 2, H, 0, W / 2, H, Math.max(W, H) * 0.75)
+      mask.addColorStop(0.2, '#000')
+      mask.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      g.fillStyle = mask
+      g.fillRect(0, 0, W, H)
+      ctx.drawImage(c, 0, 0)
+    }
+
+    // the mark, set: the launch's dots and its point, the bore's middle at (x, y), k pixels to a grid unit
+    {
+      const k = TALL ? (W * 0.3) / 15.78 : (Math.min(W, H) * 0.175) / 13.67
+      const x = W / 2, y = H * (TALL ? 0.42 : 0.4)
+      const least = 0.6 * (W / 1280) // no dot so small it vanishes
+      ctx.fillStyle = MARK
+      for (const d of dots) {
+        ctx.beginPath()
+        ctx.arc(x + (d.x - point.x) * k, y + (d.y - point.y) * k, Math.max(least, d.r * k), 0, Math.PI * 2)
+        ctx.fill()
+      }
+      ctx.beginPath()
+      ctx.arc(x, y, point.r * k, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    document.body.dataset.ready = '1'
+  </script>
+</body>
+</html>

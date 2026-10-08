@@ -98,6 +98,7 @@ export function Close() {
           </a>
           <a href={SHIFTS}>Shifts</a>
           <a href="/thesis">Thesis</a>
+          <a href="/wallpaper">Wallpaper</a>
           <a href={LINKS.repo}>GitHub</a>
           <a href={LINKS.issues}>Issues</a>
         </nav>
