@@ -9,7 +9,7 @@ import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
-import { agents, card, changed, coordinatorSnapshot, fakeClient, items, status, streamed } from './fixtures'
+import { agents, card, changed, coordinatorSnapshot, efforts, fakeClient, items, models, status, streamed } from './fixtures'
 import { clock } from '../src/renderer/shared/time'
 import { withServices } from './render'
 
@@ -215,6 +215,33 @@ describe('the Talk room', () => {
       expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'codex', model: 'gpt-5.2-codex', effort: 'low' }),
     )
     expect(client.send).toHaveBeenLastCalledWith({ threadId: 'thc', body: 'And a test', disposition: 'after_current' })
+  })
+
+  it('keeps the effort picked on another of the agent’s models only where that model offers it', async () => {
+    const sonnetLowOrMedium = models.map((offered) =>
+      offered.agentId === 'claude-code'
+        ? {
+            ...offered,
+            models: offered.models.map((model) => (model.id === 'sonnet' ? { ...model, efforts: efforts('Low', 'Medium') } : model)),
+          }
+        : offered,
+    )
+    const { client } = fakeClient({ getModels: vi.fn(async () => sonnetLowOrMedium) })
+    withServices(<Project />, client)
+    const use = async (from: string, model: string) => {
+      await userEvent.click(await screen.findByRole('button', { name: from }))
+      await userEvent.click(screen.getByRole('button', { name: /All models/ }))
+      await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: `Use ${model}` }))
+    }
+    await userEvent.click(await screen.findByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'High' }))
+    await userEvent.keyboard('{Escape}')
+    await use('Coordinator: Claude Code default High', 'Opus')
+    // Sonnet has no High: it starts at its own.
+    await use('Coordinator: Opus High', 'Sonnet')
+    expect(await screen.findByRole('button', { name: 'Coordinator: Sonnet Medium' })).toBeTruthy()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Tell the coordinator something' }), 'Hello{Enter}')
+    await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code', model: 'sonnet' }))
   })
 
   it("says when the agent it last ran on isn't signed in, and starts it on one that is", async () => {

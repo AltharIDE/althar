@@ -117,11 +117,20 @@ export interface FakeAgentOptions {
    * for good, saying no reset time.
    */
   readonly outOfUsage?: { readonly until?: number }
+  /**
+   * Offer effort as OpenCode does: as a model's variants, with a `default`
+   * that leaves it at its own. The small model has none, and a third, huge
+   * model levels of its own. Put on another model, a session takes its first.
+   */
+  readonly variants?: boolean
+  /** Models it fails to put a session on the first time, as Claude Code does now and then when Anthropic doesn't confirm one. */
+  readonly failsOnce?: ReadonlyArray<string>
 }
 
 interface SessionState {
   mode: string
   model: string
+  /** Empty where the model it is on has no effort levels. */
   effort: string
   cancelled: boolean
   stubborn: boolean
@@ -342,6 +351,12 @@ const MODES = ['ask', 'read-only', 'bypass']
 const MODELS = ['small', 'large']
 /** How hard the fake thinks, as agents offer it: a select in the `thought_level` category. */
 const EFFORTS = ['low', 'medium', 'high']
+/** Each model's variants, as OpenCode offers them: its own levels, then `default`. */
+const VARIANTS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  small: [],
+  large: ['low', 'high', 'default'],
+  huge: ['high', 'max', 'default'],
+}
 
 const modeOption = (session: SessionState): acp.SessionConfigOption => ({
   id: 'mode',
@@ -352,7 +367,7 @@ const modeOption = (session: SessionState): acp.SessionConfigOption => ({
   options: MODES.map((value) => ({ value, name: value })),
 })
 
-const modelOption = (session: SessionState): acp.SessionConfigOption => ({
+const modelOption = (session: SessionState, variants: boolean): acp.SessionConfigOption => ({
   id: 'model',
   name: 'Model',
   category: 'model',
@@ -365,18 +380,19 @@ const modelOption = (session: SessionState): acp.SessionConfigOption => ({
       options: [
         { value: 'small', name: 'Small', description: 'Quick, for small things' },
         { value: 'large', name: 'Large', description: 'The most capable' },
+        ...(variants ? [{ value: 'huge', name: 'Huge', description: 'Thinks the longest' }] : []),
       ],
     },
   ],
 })
 
-const effortOption = (session: SessionState): acp.SessionConfigOption => ({
+const effortOption = (session: SessionState, levels: ReadonlyArray<string>): acp.SessionConfigOption => ({
   id: 'effort',
   name: 'Effort',
   category: 'thought_level',
   type: 'select',
   currentValue: session.effort,
-  options: EFFORTS.map((value) => ({ value, name: value.charAt(0).toUpperCase() + value.slice(1) })),
+  options: levels.map((value) => ({ value, name: value.charAt(0).toUpperCase() + value.slice(1) })),
 })
 
 const permissionOptions = (alwaysOnly: boolean): Array<acp.PermissionOption> =>
@@ -398,11 +414,18 @@ export const fakeAgent = (options: FakeAgentOptions = {}): InProcessAgent => ({ 
 
 export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
   const modes = options.modes ?? 'config'
-  const configOptions = (session: SessionState): Array<acp.SessionConfigOption> =>
-    modes === 'config' || modes === 'stuck'
-      ? [modeOption(session), modelOption(session), effortOption(session)]
-      : [modelOption(session), effortOption(session)]
+  const variants = options.variants === true
+  /** The effort levels of the model a session is on. */
+  const levelsOf = (model: string) => (variants ? (VARIANTS[model] ?? []) : EFFORTS)
+  const configOptions = (session: SessionState): Array<acp.SessionConfigOption> => {
+    const levels = levelsOf(session.model)
+    const effort = levels.length === 0 ? [] : [effortOption(session, levels)]
+    return modes === 'config' || modes === 'stuck'
+      ? [modeOption(session), modelOption(session, variants), ...effort]
+      : [modelOption(session, variants), ...effort]
+  }
   const sessions = new Map<string, SessionState>()
+  const failedOnce = new Set<string>()
   let created = 0
   const sessionOf = (sessionId: string): SessionState => {
     const session = sessions.get(sessionId)
@@ -429,7 +452,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const session: SessionState = {
         mode: 'bypass',
         model: 'small',
-        effort: 'medium',
+        effort: variants ? '' : 'medium',
         cancelled: false,
         stubborn: false,
         abort: undefined,
@@ -462,8 +485,14 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const session = sessionOf(params.sessionId)
       const value = String(params.value)
       if (params.configId === 'mode' && MODES.includes(value)) session.mode = modes === 'stuck' ? session.mode : value
-      else if (params.configId === 'model' && MODELS.includes(value)) session.model = value
-      else if (params.configId === 'effort' && EFFORTS.includes(value)) session.effort = value
+      else if (params.configId === 'model' && options.failsOnce?.includes(value) && !failedOnce.has(value)) {
+        failedOnce.add(value)
+        throw acp.RequestError.internalError({ details: `Couldn't confirm model "${value}" with the API. Try again.` })
+      } else if (params.configId === 'model' && (MODELS.includes(value) || (variants && value in VARIANTS))) {
+        // OpenCode's way: another model's first variant, or none.
+        if (variants && value !== session.model) session.effort = levelsOf(value)[0] ?? ''
+        session.model = value
+      } else if (params.configId === 'effort' && levelsOf(session.model).includes(value)) session.effort = value
       else throw acp.RequestError.invalidParams(params, `No option ${params.configId}=${value}`)
       return { configOptions: configOptions(session) }
     })

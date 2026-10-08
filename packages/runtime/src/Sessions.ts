@@ -4,6 +4,7 @@ import { type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain
 import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
 import {
   type AgentConnection,
+  type AgentDefinition,
   type AgentSession,
   connect,
   type ConfigOption,
@@ -184,6 +185,28 @@ const optionValue = (options: ReadonlyArray<ConfigOption>, id: string | undefine
   const value = id === undefined ? undefined : options.find((option) => option.id === id)?.currentValue
   return typeof value === 'string' ? value : null
 }
+
+/**
+ * Puts a session on the effort for the model it is on: the one asked for, or
+ * else the person's default for the model, or else the model's own where the
+ * agent names it. One the model doesn't offer goes on to the next, and past
+ * the last leaves it at the agent's own; a model without efforts has none.
+ */
+const settleEffort = (definition: AgentDefinition, agent: AgentSession, asked: string | null) =>
+  Effect.gen(function* () {
+    const { effort, model, ownEffort } = definition.options
+    if (effort === undefined) return
+    const on = optionValue(yield* agent.options, model)
+    const wanted = [asked, on === null ? null : yield* defaultEffortOf(definition.id, on), ownEffort ?? null]
+    for (const level of wanted) {
+      if (level === null) continue
+      const set = yield* agent.setOption(effort, level).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      )
+      if (set) return
+    }
+  })
 
 /**
  * What a turn says to the agent: the brief when the session is new, then each
@@ -841,13 +864,8 @@ export class Sessions extends Context.Service<
                   : { meta: definition.sessionMeta(thread.role === 'task' ? 'lead' : 'reader') }),
               })
               if (model !== undefined) yield* agent.setOption(definition.options.model, model)
-              if (definition.options.effort !== undefined) {
-                // Without an effort of its own, the person's default for the model it is on, where they set one.
-                const on = model ?? optionValue(yield* agent.options, definition.options.model)
-                const wanted = effort ?? (on === null ? null : yield* defaultEffortOf(definition.id, on))
-                // An effort the model doesn't offer leaves it at the agent's own: no reason not to start.
-                if (wanted !== null) yield* agent.setOption(definition.options.effort, wanted).pipe(Effect.ignore)
-              }
+              // An effort the model doesn't offer is no reason not to start.
+              yield* settleEffort(definition, agent, effort ?? null)
               return { connection, agent }
             }).pipe(Scope.provide(scope)),
           )
@@ -1083,13 +1101,17 @@ export class Sessions extends Context.Service<
           const running = threads.get(input.threadId)
           if (running === undefined) return yield* new NoSession({ threadId: input.threadId })
           const { definition } = running.entry
-          const options = yield* running.agent
+          const was = optionValue(yield* running.agent.options, definition.options.effort)
+          yield* running.agent
             .setOption(definition.options.model, input.model)
             .pipe(
               Effect.mapError(
                 (error) => new ModelUnchanged({ agentId: definition.id, model: input.model, summary: agentSaid(error) ?? error.message }),
               ),
             )
+          // It keeps its effort where the model offers it, as most agents do by themselves; else the person's default for it, or its own.
+          yield* settleEffort(definition, running.agent, was)
+          const options = yield* running.agent.options
           const sql = yield* SqlClient.SqlClient
           yield* sql.withTransaction(
             Effect.gen(function* () {

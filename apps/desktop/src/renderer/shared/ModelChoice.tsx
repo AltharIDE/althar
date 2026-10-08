@@ -13,6 +13,7 @@ import {
   effortId,
   effortName,
   infoOf,
+  offersEffort,
   togglePin,
   useModelPrefs,
 } from './models'
@@ -69,14 +70,14 @@ export function ModelChoice({ owner, agents, value, onChange, onRemove, handover
 
   const choose = (key: string) => {
     const { agentId, model } = choiceOf(key)
-    // The person's default for this model, or the effort in use where the same agent keeps it.
-    const effort = catalog.defaults.get(key) ?? (agentId === value.agentId ? value.effort : null)
-    onChange({ agentId, model, effort })
+    // The person's default for this model, or the effort in use where the same agent keeps it and the model offers it.
+    const kept = agentId === value.agentId && offersEffort(catalog, key, value.effort) ? value.effort : null
+    onChange({ agentId, model, effort: catalog.defaults.get(key) ?? kept })
   }
   /** Makes an effort a model's default; an agent's own default, whose model isn't known, has none to keep. */
   const makeDefault = (key: string, name: string) => {
     const { agentId, model } = choiceOf(key)
-    if (model !== null) void setDefault({ agentId, model, effort: effortId(catalog, agentId, name) })
+    if (model !== null) void setDefault({ agentId, model, effort: effortId(catalog, key, name) })
   }
 
   return (
@@ -84,11 +85,11 @@ export function ModelChoice({ owner, agents, value, onChange, onRemove, handover
       <ModelPick
         model={current}
         pinned={pinned}
-        // Without one of its own, the effort it starts at: the person's default, or what the agent is on.
-        effort={effortName(catalog, value.agentId, value.effort) ?? defaultOf(current)}
+        // Without one of its own, the effort it starts at: the person's default, or else the model's own.
+        effort={effortName(catalog, current.id, value.effort) ?? defaultOf(current)}
         defaultEffort={defaultOf(current)}
         onChange={choose}
-        onEffort={(name) => onChange({ ...value, effort: effortId(catalog, value.agentId, name) })}
+        onEffort={(name) => onChange({ ...value, effort: effortId(catalog, current.id, name) })}
         {...(choiceOf(current.id).model === null ? {} : { onMakeDefault: (name: string) => makeDefault(current.id, name) })}
         onBrowse={() => setBrowsing(true)}
         {...(onRemove === undefined ? {} : { onRemove })}

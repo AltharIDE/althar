@@ -78,9 +78,17 @@ export type FoundAccount = typeof FoundAccount.Type
  */
 export const AgentModels = Schema.Struct({
   agentId: Schema.String,
-  models: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, description: Schema.NullOr(Schema.String) })),
-  /** Lowest first; empty where the agent has no such choice. */
-  efforts: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  models: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      name: Schema.String,
+      description: Schema.NullOr(Schema.String),
+      /** In the agent's order; empty where the model has no such choice, or it isn't known yet. */
+      efforts: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+      /** The effort a session on it starts at, the person's default aside; null where it isn't known. */
+      effort: Schema.NullOr(Schema.String),
+    }),
+  ),
   /** What it is on, as last seen: its own default, or what it was last set to. */
   model: Schema.NullOr(Schema.String),
   effort: Schema.NullOr(Schema.String),

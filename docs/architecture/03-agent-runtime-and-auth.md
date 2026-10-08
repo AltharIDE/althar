@@ -246,7 +246,7 @@ type AgentDefinition = {
   source: "bundled" | "user_installed"
   launch: (node: string) => LaunchSpec // command, args, env, which parent variables it inherits
   modes: { ask: string; readOnly: string }
-  options: { mode: string; model: string; effort?: string } // config option ids
+  options: { mode: string; model: string; effort?: string; ownEffort?: string } // config option ids, and the level that is a model's own
   signIn: { status: (node: string) => LaunchSpec; read: (output, exitCode) => boolean | undefined; login: string }
   permissions: PermissionMeanings // what its option ids mean
   sessionMeta?: (role?: 'lead' | 'reader') => Record<string, unknown> // `_meta` for session/new: asking, or read-only
@@ -336,9 +336,11 @@ agents needs this today. Effort is the same: a config option (`thought_level`)
 set as a session starts and changed within it.
 
 What each agent offers comes from the agent, in its own ids and names: the
-choices of its session's model and effort options. Althar keeps no table of
-models; it reads them from the agent's latest session, and asks an agent it has
-never run by starting it once in an empty folder, read-only, and stopping it.
+choices of its session's model and effort options. Each model has effort
+levels of its own, and some none, and an agent says them only for the model
+a session is on. Althar keeps no table of models; it reads them from the
+agent's latest session, and asks each agent once a launch by starting it in an
+empty folder, read-only, putting it on each model in turn, and stopping it.
 
 **Agent.** A session can't move between agents. A switch starts a new session
 on the new agent, in the same workspace, from a brief. The new session belongs

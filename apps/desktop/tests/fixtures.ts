@@ -56,7 +56,16 @@ export const agents: ReadonlyArray<AgentStatus> = [
 
 export const status: Status = { apiVersion: 1, appVersion: '0.0.0', agents }
 
-const efforts = (...names: ReadonlyArray<string>) => names.map((name) => ({ id: name.toLowerCase().replace(' ', '-'), name }))
+export const efforts = (...names: ReadonlyArray<string>) => names.map((name) => ({ id: name.toLowerCase().replace(' ', '-'), name }))
+
+/** A model with these effort levels, which starts at medium by itself. */
+const offering =
+  (levels: ReadonlyArray<{ readonly id: string; readonly name: string }>) =>
+  (model: { readonly id: string; readonly name: string; readonly description: string | null }) => ({
+    ...model,
+    efforts: levels,
+    effort: 'medium',
+  })
 
 /** What the agents offer: Claude Code's own default first, Codex's models by id, OpenCode still being asked. */
 export const models: ReadonlyArray<AgentModels> = [
@@ -66,8 +75,7 @@ export const models: ReadonlyArray<AgentModels> = [
       { id: 'default', name: 'Default (recommended)', description: 'Opus for complex work' },
       { id: 'opus', name: 'Opus', description: null },
       { id: 'sonnet', name: 'Sonnet', description: 'For everyday tasks' },
-    ],
-    efforts: efforts('Low', 'Medium', 'High'),
+    ].map(offering(efforts('Low', 'Medium', 'High'))),
     model: 'default',
     effort: 'medium',
     defaults: [],
@@ -78,14 +86,13 @@ export const models: ReadonlyArray<AgentModels> = [
     models: [
       { id: 'gpt-5.2-codex', name: 'gpt-5.2-codex', description: null },
       { id: 'gpt-5.2', name: 'gpt-5.2', description: null },
-    ],
-    efforts: efforts('Low', 'Medium', 'High', 'Extra high'),
+    ].map(offering(efforts('Low', 'Medium', 'High', 'Extra high'))),
     model: 'gpt-5.2-codex',
     effort: 'medium',
     defaults: [],
     probing: false,
   },
-  { agentId: 'opencode', models: [], efforts: [], model: null, effort: null, defaults: [], probing: true },
+  { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], probing: true },
 ]
 
 export const project: ProjectSummary = {
