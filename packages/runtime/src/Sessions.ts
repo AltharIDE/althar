@@ -18,6 +18,7 @@ import { type Account, Accounts } from './Accounts'
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import {
+  AlreadyDelivered,
   EffortUnchanged,
   type GitFailed,
   ModelUnchanged,
@@ -186,6 +187,9 @@ type Store =
   | Limits
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
 
+/** A turn's input was taken back while the turn was being made: it is made again from what still waits. */
+class TakenBack extends Schema.TaggedError<TakenBack>()('TakenBack', {}) {}
+
 const PROMPT_BUDGET = 60_000
 
 const optionValue = (options: ReadonlyArray<ConfigOption>, id: string | undefined) => {
@@ -281,6 +285,11 @@ export class Sessions extends Context.Service<
       /** Input Althar writes, such as findings to settle: delivered, but shown in the thread by what it came from, not as the person's message. */
       readonly quiet?: boolean
     }): Effect.Effect<AcceptedInput, NotFound | Failure>
+    /** Takes back a message still waiting its turn, by its thread item: the agent never reads it. One the agent has stays. */
+    takeBack(input: {
+      readonly envelope: CommandEnvelope
+      readonly itemId: string
+    }): Effect.Effect<void, NotFound | AlreadyDelivered | Failure>
     /** Changes the session's model; the session and its context carry on. */
     setModel(input: { readonly threadId: string; readonly model: string }): Effect.Effect<void, NoSession | ModelUnchanged | Failure>
     /** How hard the running session's agent thinks, from here on. */
@@ -454,36 +463,47 @@ export class Sessions extends Context.Service<
             model: string | null
             effort: string | null
           }>`SELECT model, effort FROM provider_sessions WHERE id = ${running.sessionId}`
-          yield* sql.withTransaction(
-            Effect.gen(function* () {
-              const at = yield* timestamp
-              yield* sql`INSERT INTO turn_deliveries ${sql.insert({
-                id: turnId,
-                projectId: thread.projectId,
-                threadId: thread.threadId,
-                providerSessionId: running.sessionId,
-                controllerGeneration: 1,
-                model: session?.model ?? null,
-                effort: session?.effort ?? null,
-                // What the agent is told, kept so it can always be read back (docs/architecture/03).
-                prompt,
-                state: 'pending',
-                requestedAt: at,
-              })}`
-              for (const [index, input] of inputs.entries()) {
-                yield* sql`INSERT INTO turn_delivery_inputs ${sql.insert({ projectId: thread.projectId, deliveryId: turnId, userInputId: input.id, position: index + 1 })}`
-              }
-              yield* fact({
-                projectId: thread.projectId,
-                aggregateType: 'turn_delivery',
-                aggregateId: turnId,
-                revision: 1,
-                type: 'turn_delivery.requested',
-                payload: { inputs: inputs.map((input) => input.id), briefed: brief !== undefined },
-                actorId: instance.systemId,
-              })
-            }),
-          )
+          const claimed = yield* sql
+            .withTransaction(
+              Effect.gen(function* () {
+                // The person may have taken some of it back since it was read: then this turn isn't given, and what still waits is read again.
+                if (inputs.length > 0) {
+                  const still = yield* sql<{
+                    id: string
+                  }>`SELECT id FROM user_inputs WHERE state = 'queued' AND id IN ${sql.in(inputs.map((input) => input.id))}`
+                  if (still.length < inputs.length) return yield* new TakenBack()
+                }
+                const at = yield* timestamp
+                yield* sql`INSERT INTO turn_deliveries ${sql.insert({
+                  id: turnId,
+                  projectId: thread.projectId,
+                  threadId: thread.threadId,
+                  providerSessionId: running.sessionId,
+                  controllerGeneration: 1,
+                  model: session?.model ?? null,
+                  effort: session?.effort ?? null,
+                  // What the agent is told, kept so it can always be read back (docs/architecture/03).
+                  prompt,
+                  state: 'pending',
+                  requestedAt: at,
+                })}`
+                for (const [index, input] of inputs.entries()) {
+                  yield* sql`INSERT INTO turn_delivery_inputs ${sql.insert({ projectId: thread.projectId, deliveryId: turnId, userInputId: input.id, position: index + 1 })}`
+                }
+                yield* fact({
+                  projectId: thread.projectId,
+                  aggregateType: 'turn_delivery',
+                  aggregateId: turnId,
+                  revision: 1,
+                  type: 'turn_delivery.requested',
+                  payload: { inputs: inputs.map((input) => input.id), briefed: brief !== undefined },
+                  actorId: instance.systemId,
+                })
+                return true
+              }),
+            )
+            .pipe(Effect.catchTag('TakenBack', () => Effect.succeed(false)))
+          if (!claimed) return true
           // Recorded as delivered before the prompt goes out: after a crash, a delivered turn may have acted.
           yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -1043,6 +1063,45 @@ export class Sessions extends Context.Service<
           }),
         )
 
+      /*
+       * A message is taken back only while it waits: not once a turn has it.
+       * A turn takes its input in a transaction that checks it still waits,
+       * and this one checks no turn has it, so the two can't both have it.
+       */
+      const takeBack = (input: { readonly envelope: CommandEnvelope; readonly itemId: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const commands = yield* Commands
+          const [item] = yield* sql<{
+            inputId: string
+            projectId: ProjectId
+          }>`SELECT user_input_id AS input_id, project_id FROM thread_items WHERE id = ${input.itemId} AND user_input_id IS NOT NULL`
+          if (item === undefined) return yield* new NotFound({ kind: 'thread item', id: input.itemId })
+          yield* commands.execute({
+            envelope: input.envelope,
+            projectId: item.projectId,
+            result: Schema.Void,
+            handle: Effect.gen(function* () {
+              const [waiting] = yield* sql<{ id: string }>`
+                SELECT u.id FROM user_inputs u
+                WHERE u.id = ${item.inputId} AND u.state = 'queued'
+                  AND NOT EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
+                    WHERE di.user_input_id = u.id AND d.state = 'pending')`
+              if (waiting === undefined) return yield* new AlreadyDelivered({ itemId: input.itemId })
+              const revision = yield* change('user_inputs', item.inputId, { state: 'withdrawn' })
+              yield* fact({
+                projectId: item.projectId,
+                aggregateType: 'user_input',
+                aggregateId: item.inputId,
+                revision,
+                type: 'user_input.withdrawn',
+                actorId: input.envelope.actorId,
+                commandId: input.envelope.commandId,
+              })
+            }),
+          })
+        })
+
       const send = (input: {
         readonly envelope: CommandEnvelope
         readonly threadId: string
@@ -1366,6 +1425,7 @@ export class Sessions extends Context.Service<
       return Sessions.of({
         start: (input) => run(start(input)),
         send: (input) => run(send(input)),
+        takeBack: (input) => run(takeBack(input)),
         setModel: (input) => run(setModel(input)),
         setEffort: (input) => run(setEffort(input)),
         wake: (threadId) =>

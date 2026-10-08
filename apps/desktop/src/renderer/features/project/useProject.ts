@@ -17,7 +17,7 @@ import { messageOf } from '../../data/client'
 import { CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
-import { caughtUp, mergeItems, newestReads, waiting } from '../../shared/items'
+import { caughtUp, mergeItems, newestReads, takenBack, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 
@@ -69,6 +69,8 @@ export interface ProjectModel {
   /** Tells the coordinator something; a coordinator not running starts as the person chose, when they did. */
   readonly say: (body: string, choice: Choice | null) => Promise<void>
   readonly sayNow: (body: string) => Promise<void>
+  /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
+  readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
   /** Moves the running coordinator to another agent. */
   /** Puts the coordinator on another model or effort, or another agent with one. */
@@ -287,6 +289,18 @@ export const useProject = (projectId: string): ProjectModel => {
         await send(body, 'after_current')
       }),
     sayNow: (body) => act(() => send(body, 'interrupt_and_continue')),
+    takeBack: async (itemId) => {
+      setError(null)
+      try {
+        await client.takeBack(itemId)
+        // Gone from the queue at once, rather than when the runtime's word of it arrives.
+        arrived(takenBack(coordinator?.items ?? [], itemId))
+        return true
+      } catch (failure) {
+        fail(failure)
+        return false
+      }
+    },
     interrupt: () => act(async () => (threadId === null ? undefined : client.interrupt(threadId))),
     choose: (choice) =>
       act(async () => {

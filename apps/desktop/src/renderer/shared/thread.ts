@@ -301,8 +301,9 @@ export const blocksOf = (
   for (const item of source.items) {
     switch (item.kind) {
       case 'user_message': {
-        const delivery =
-          item.input?.state === 'queued' ? (item.input.interrupting ? Delivery.Interrupting : Delivery.Queued) : Delivery.Delivered
+        // What waits its turn shows in the composer, where it can be edited or taken back; what was taken back is gone.
+        if (item.input?.state === 'withdrawn' || (item.input?.state === 'queued' && !item.input.interrupting)) continue
+        const delivery = item.input?.state === 'queued' ? Delivery.Interrupting : Delivery.Delivered
         blocks.push({ kind: 'you', id: item.id, text: item.content.text, at: ago(item.createdAt), delivery, links: item.content.links })
         continue
       }

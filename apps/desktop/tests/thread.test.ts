@@ -90,14 +90,14 @@ describe('a thread as blocks', () => {
     ])
   })
 
-  it('says where a message stands with the lead', () => {
+  it('says where a message stands with the lead, and leaves what waits its turn to the composer', () => {
     const thread = [
       items.you('next', { state: 'queued', interrupting: false }),
       items.you('now', { state: 'queued', interrupting: true }),
+      items.you('dropped', { state: 'withdrawn', interrupting: false }),
       items.you('old', null),
     ]
     expect(blocksOf(source(thread), new Map(), at).map((block) => (block.kind === 'you' ? [block.text, block.delivery] : null))).toEqual([
-      ['next', Delivery.Queued],
       ['now', Delivery.Interrupting],
       ['old', Delivery.Delivered],
     ])

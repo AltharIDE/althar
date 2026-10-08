@@ -57,6 +57,29 @@ export const waiting = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<string>
   items.flatMap((item) => (item.kind === 'user_message' && item.input?.state === 'queued' ? [item.id] : []))
 
 /**
+ * What waits its turn in the composer, oldest first, where the person can
+ * edit it or take it back. A message sent now isn't there: it goes first, as
+ * soon as the turn running stops.
+ */
+export const queuedOf = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<{ readonly id: string; readonly text: string }> =>
+  items.flatMap((item) =>
+    item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting
+      ? [{ id: item.id, text: item.content.text }]
+      : [],
+  )
+
+/** A message taken back, as the window holds it until the runtime's word of it arrives. */
+export const takenBack = (items: ReadonlyArray<ThreadItem>, itemId: string): ReadonlyArray<ThreadItem> =>
+  items.flatMap((item) =>
+    item.id === itemId && item.kind === 'user_message' && item.input !== null
+      ? [{ ...item, input: { ...item.input, state: 'withdrawn' as const } }]
+      : [],
+  )
+
+/** A queued message back in the composer: in place of nothing, or after what is already written. */
+export const withQueued = (draft: string, text: string): string => (draft.trim() === '' ? text : `${draft.trimEnd()}\n\n${text}`)
+
+/**
  * Reads that can come back out of order, as the runtime answers each on its
  * own: an answer is kept only if no read of the same thing began after it,
  * so an earlier answer never puts back what a later one replaced.

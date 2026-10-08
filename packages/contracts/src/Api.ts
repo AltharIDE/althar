@@ -402,7 +402,9 @@ export const UserMessageItem = Schema.Struct({
   kind: Schema.Literal('user_message'),
   /** What they said, and the links in it Althar could unfurl. */
   content: Schema.Struct({ text: Schema.String, links: Schema.Array(Unfurl) }),
-  input: Schema.NullOr(Schema.Struct({ state: Schema.Literals(['queued', 'delivered', 'superseded']), interrupting: Schema.Boolean })),
+  input: Schema.NullOr(
+    Schema.Struct({ state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']), interrupting: Schema.Boolean }),
+  ),
 })
 
 /** What an agent said or thought, as far as the store has it. */
@@ -1029,6 +1031,8 @@ export const Api = RpcGroup.make(
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
   command('Send', { threadId: Schema.String, body: Schema.String, disposition: Disposition }, Schema.Void),
+  /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
+  command('TakeBack', { itemId: Schema.String }, Schema.Void),
   /** The person's answer to a step that needs them: tell its agent what to do, hand it to an agent, or abandon it (a review is gone on without). */
   command(
     'AnswerStuck',

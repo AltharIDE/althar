@@ -22,6 +22,7 @@ import {
 import { useModels } from '../../data/models'
 import { modelInfo, waitsWords } from '../../shared/agents'
 import { contextMeter } from '../../shared/ContextMeter'
+import { queuedOf, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
 import { catalogOf, type Choice, modelName, runningOn } from '../../shared/models'
@@ -274,6 +275,11 @@ export function TaskView({
     if (session === null) void model.send(body, chosen ?? undefined)
     else void (now ? model.sendNow(body) : model.send(body))
   }
+  // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
+  const edit = async (id: string) => {
+    const said = queuedOf(snapshot.items).find((message) => message.id === id)
+    if (said !== undefined && (await model.takeBack(id))) setDraft((current) => withQueued(current, said.text))
+  }
 
   const issue = snapshot.task.issue
   // What it changed opens over the window; what else it can do is in its menu.
@@ -306,6 +312,9 @@ export function TaskView({
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
+        queued={queuedOf(snapshot.items)}
+        onEditQueued={(id) => void edit(id)}
+        onUnqueue={(id) => void model.takeBack(id)}
         placeholder={busy ? text.placeholderBusy : text.placeholder(session?.agentName ?? agentName(chosen?.agentId ?? null))}
         meter={contextMeter(session)}
         // Another agent's model hands the task to that agent.

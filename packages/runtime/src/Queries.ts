@@ -103,7 +103,7 @@ interface ItemRow {
   readonly kind: string
   readonly content: string
   readonly agentId: string | null
-  readonly inputState: 'queued' | 'delivered' | 'superseded' | null
+  readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
   readonly disposition: string | null
   /** For a tool call that asked: what was decided, last. */
   readonly decision: string | null

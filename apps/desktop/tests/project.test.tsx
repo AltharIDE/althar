@@ -274,7 +274,7 @@ describe('the Talk room', () => {
     })
     withServices(<Project />, client)
     const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
-    expect(screen.getByText('Queued · the coordinator reads it next')).toBeTruthy()
+    expect(screen.getByText('Queued; the coordinator reads it next')).toBeTruthy()
     // While it works, its work folds too, under how long it has worked so far and what it is doing now.
     expect(screen.queryByText('checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /Working for .*Reading checkout\.ts/ })).toBeTruthy()
@@ -292,6 +292,36 @@ describe('the Talk room', () => {
     await waitFor(() => expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'codex', model: 'gpt-5.2-codex' }))
   })
 
+  it('takes back what waits its turn: Edit puts it back in the composer, and one the coordinator has already says so', async () => {
+    const first = items.you('Rename the flag', { state: 'queued', interrupting: false })
+    const second = items.you('Ship it', { state: 'queued', interrupting: false })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({ session: { ...session, turnRunning: true }, items: [first, second, items.tool({ status: 'in_progress' })] }),
+      ),
+      takeBack: vi.fn(async (itemId: string) =>
+        itemId === second.id
+          ? Promise.reject(
+              new ApiError({ reason: 'AlreadyDelivered', message: "The agent already has that message, so it can't be taken back." }),
+            )
+          : undefined,
+      ),
+    })
+    withServices(<Project />, client)
+    const composer = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
+    const queue = screen.getByRole('region', { name: '2 queued; the coordinator reads them in order' })
+    // Waiting, it is in the composer's queue rather than the thread.
+    expect(within(queue).getByText('Rename the flag')).toBeTruthy()
+    await userEvent.type(composer, 'Also the docs')
+    await userEvent.click(within(queue).getAllByRole('button', { name: 'Edit' })[0] as HTMLElement)
+    expect(client.takeBack).toHaveBeenCalledWith(first.id)
+    // What was written stays, with the message after it to change.
+    await waitFor(() => expect((composer as HTMLTextAreaElement).value).toBe('Also the docs\n\nRename the flag'))
+    expect(screen.queryByRole('button', { name: 'Take “Rename the flag” out of the queue' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Take “Ship it” out of the queue' }))
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('already has that message'))
+  })
+
   it("reads a changed item alone, its head for anything else, and the cards when the project's tasks move", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
@@ -303,7 +333,7 @@ describe('the Talk room', () => {
         ),
       })
       withServices(<Project />, client)
-      await screen.findByText('Queued · the coordinator reads it next')
+      await screen.findByText('Queued; the coordinator reads it next')
       act(() => emit(streamed('live', 'Thinking it over', 'thc')))
       expect(await screen.findByText('Thinking it over')).toBeTruthy()
       // How full the coordinator's context is shows in its composer as it says.
@@ -327,7 +357,7 @@ describe('the Talk room', () => {
           .toSorted(),
       ).toEqual(['c1', 'i9', queued.id].toSorted())
       expect(client.getCoordinator).toHaveBeenLastCalledWith('p1', { limit: 0 })
-      await waitFor(() => expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull())
+      await waitFor(() => expect(screen.queryByText('Queued; the coordinator reads it next')).toBeNull())
     } finally {
       vi.useRealTimers()
     }

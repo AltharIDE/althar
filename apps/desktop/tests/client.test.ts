@@ -209,6 +209,7 @@ describe('the client', () => {
           },
           StopSession: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
+          TakeBack: () => Effect.die('unused'),
           Answer: () => Effect.die('unused'),
           GetCoordinator: () => Effect.die('unused'),
           StartTask: () => Effect.die('unused'),
