@@ -533,21 +533,12 @@ export class Projects extends Context.Service<
           if (unknown.length > 0) return yield* new RepositoriesNeeded({ unknown, choices })
           const chosen = bindings.length === 1 ? bindings : bindings.filter((binding) => named.some((name) => matches(binding, name)))
           if (chosen.length === 0) return yield* new RepositoriesNeeded({ unknown: [], choices })
-          // How each repository names branches, read before the task is made (git doesn't run inside it): the person's rule,
-          // else what its docs say, else Althar's own.
+          // The person's rule for branch names, if any. Without one, each repository's docs are read once the task is made,
+          // as its worktree is, so nothing waits on git before the task is there.
           const [rules] = yield* sql<{ pattern: string | null }>`
             SELECT json_extract(rules, '$.branchPattern') AS pattern FROM policies WHERE project_id = ${first.projectId}
             ORDER BY revision DESC LIMIT 1`
           const rule = ruleOf('branch', rules?.pattern ?? undefined)
-          const patterns = new Map<string, string | null>()
-          for (const binding of chosen) {
-            if (rule !== null) {
-              patterns.set(binding.id, rule)
-              continue
-            }
-            const { remote, base } = yield* startOf(binding)
-            patterns.set(binding.id, (yield* conventionsOnBase(binding.repository, base, remote)).branch?.pattern ?? null)
-          }
           const created = yield* commands.execute({
             envelope,
             projectId: first.projectId,
@@ -575,7 +566,8 @@ export class Projects extends Context.Service<
               })}`
               const threadId = yield* newId(Ids.thread)
               yield* sql`INSERT INTO threads ${sql.insert({ id: threadId, projectId: first.projectId, kind: 'task', taskId, createdAt })}`
-              const branchOf = (bindingId: string) => branchFor(patterns.get(bindingId) ?? null, { key: input.issueKey ?? null, slug })
+              // Planned by the rule, else Althar's own until the repository's docs are read.
+              const branch = branchFor(rule, { key: input.issueKey ?? null, slug })
               // A worktree for each repository it changes, side by side in the task's folder (ADR-006).
               const workspaces: Array<{ id: string; worktree: string; branch: string }> = []
               for (const binding of chosen) {
@@ -598,11 +590,11 @@ export class Projects extends Context.Service<
                   access: 'write',
                   path: worktree,
                   baseRef: binding.base ?? 'main',
-                  branch: branchOf(binding.id),
+                  branch,
                   state: 'preparing',
                   createdAt,
                 })}`
-                workspaces.push({ id: workspaceId, worktree, branch: branchOf(binding.id) })
+                workspaces.push({ id: workspaceId, worktree, branch })
               }
               yield* fact({
                 projectId: first.projectId,
@@ -633,9 +625,10 @@ export class Projects extends Context.Service<
             }
             const binding = bindings.find((candidate) => candidate.id === workspace.bindingId) ?? first
             const { remote, base } = yield* startOf(binding)
-            const prepared = yield* Effect.exit(
-              prepareWorktree(binding.repository, base, { worktree: workspace.path, branch: workspace.branch }, remote),
-            )
+            // Named as the repository's docs say, where the person has no rule: read now, from where the task starts.
+            const docs = rule === null ? (yield* conventionsOnBase(binding.repository, base, remote)).branch : null
+            const branch = docs === null ? workspace.branch : branchFor(docs.pattern, { key: input.issueKey ?? null, slug: created.slug })
+            const prepared = yield* Effect.exit(prepareWorktree(binding.repository, base, { worktree: workspace.path, branch }, remote))
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 const done = prepared._tag === 'Success'

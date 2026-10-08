@@ -1,7 +1,7 @@
 import { branchNameOk, fillPattern, type NameKind, patternProblem } from '@althar/contracts'
 import { Effect } from 'effect'
 
-import { commitOf, git, gitExactly } from './git'
+import { git, gitExactly } from './git'
 
 /*
  * A team's conventions for pull requests, as its repository writes them down
@@ -166,30 +166,39 @@ const pathIn = (paths: ReadonlyArray<string>, wanted: string) => paths.find((pat
  * where git can't read it.
  */
 export const conventionsAt = (repository: string, ref: string): Effect.Effect<Conventions> =>
+  readAt(repository, ref).pipe(Effect.orElseSucceed(() => NO_CONVENTIONS))
+
+/** Where the docs and templates can be, in one listing: the root, and the folders hosts look in. */
+const LISTED = ['.', '.github/', 'docs/', '.gitlab/merge_request_templates/', '.bitbucket/']
+
+/** Reads them in two goes, a listing and then the files at once, since a task waits on it; fails where git has no such commit. */
+const readAt = (repository: string, ref: string) =>
   Effect.gen(function* () {
-    const directories = ['.github/', 'docs/', '.gitlab/merge_request_templates/', '.bitbucket/']
-    const listed = `${yield* git(repository, 'ls-tree', '--name-only', ref)}\n${yield* git(repository, 'ls-tree', '--name-only', ref, '--', ...directories)}`
-    const paths = listed.split('\n').filter((path) => path !== '')
-    const show = (path: string) => Effect.map(gitExactly(repository, 'show', `${ref}:${path}`), (text) => text.slice(0, READ))
-    const docs = yield* Effect.forEach(
-      DOCS.flatMap((wanted) => pathIn(paths, wanted) ?? []),
-      (path) => Effect.map(show(path), (text) => ({ path, text })),
-    )
+    const paths = (yield* git(repository, 'ls-tree', '--name-only', ref, '--', ...LISTED)).split('\n').filter((path) => path !== '')
+    const show = (path: string) =>
+      Effect.map(gitExactly(repository, 'show', `${ref}:${path}`), (text) => ({ path, text: text.slice(0, READ) }))
     const templatePath = TEMPLATES.flatMap((wanted) => pathIn(paths, wanted) ?? [])[0]
-    const template = templatePath === undefined ? null : { path: templatePath, text: yield* show(templatePath) }
+    const [docs, template] = yield* Effect.all(
+      [
+        Effect.forEach(
+          DOCS.flatMap((wanted) => pathIn(paths, wanted) ?? []),
+          show,
+          { concurrency: 'unbounded' },
+        ),
+        templatePath === undefined ? Effect.succeed(null) : show(templatePath),
+      ],
+      { concurrency: 'unbounded' },
+    )
     return { ...namingIn(docs), template: template === null || template.text.trim() === '' ? null : template }
-  }).pipe(Effect.orElseSucceed(() => NO_CONVENTIONS))
+  })
 
 /** What a repository says as a task starts from it: its default branch as its remote has it, else as it is here. */
 export const conventionsOnBase = (repository: string, base: string, remote = 'origin') =>
-  Effect.gen(function* () {
-    const ref = yield* commitOf(repository, `${remote}/${base}`).pipe(
-      Effect.as(`${remote}/${base}`),
-      Effect.catch(() => commitOf(repository, base).pipe(Effect.as(base))),
-      Effect.orElseSucceed(() => 'HEAD'),
-    )
-    return yield* conventionsAt(repository, ref)
-  })
+  readAt(repository, `${remote}/${base}`).pipe(
+    Effect.catch(() => readAt(repository, base)),
+    Effect.catch(() => readAt(repository, 'HEAD')),
+    Effect.orElseSucceed(() => NO_CONVENTIONS),
+  )
 
 /* ---- A pull request's description in its template ---- */
 
