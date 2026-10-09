@@ -17,6 +17,7 @@ import { statements as withdrawnInput } from './0012_withdrawn_input'
 import { statements as projectChanges } from './0013_project_changes'
 import { statements as modelBlocks } from './0014_model_blocks'
 import { statements as taskRequests } from './0015_task_requests'
+import { statements as settings } from './0016_settings'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -45,6 +46,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0013_project_changes', statements: projectChanges },
   { key: '0014_model_blocks', statements: modelBlocks },
   { key: '0015_task_requests', statements: taskRequests },
+  { key: '0016_settings', statements: settings },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

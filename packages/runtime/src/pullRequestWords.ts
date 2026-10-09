@@ -69,7 +69,8 @@ export interface FindingLine {
 
 /**
  * The pull request's description: the lead's summary, how review went, the
- * issue it is for, and who opened it. Where the repository has a template,
+ * issue it is for, and who opened it, unless the person turned Althar's
+ * credit off. Where the repository has a template,
  * it's written in that: the lead's own description where it keeps the
  * template, with every box unticked, else the template with the lead's
  * summary in its place for one, or under a heading of its own below.
@@ -82,6 +83,8 @@ export const bodyOf = (input: {
   /** The repository's template, and the description the lead wrote in it. */
   readonly template?: string | null
   readonly written?: string | null
+  /** Althar is co-author of what it sends, so it says it opened the pull request. On where not said. */
+  readonly credit?: boolean
 }) => {
   const parts: Array<string> = []
   const lead = input.lead !== null && input.lead !== '' ? input.lead : null
@@ -112,7 +115,7 @@ export const bodyOf = (input: {
   }
   if (input.issue !== null)
     parts.push(input.issue.sameHost ? `Issue: ${input.issue.key}` : `Issue: [${input.issue.key}](${input.issue.url})`)
-  parts.push('<sub>Opened by Althar.</sub>')
+  if (input.credit !== false) parts.push('<sub>Opened by Althar.</sub>')
   return parts.join('\n\n')
 }
 

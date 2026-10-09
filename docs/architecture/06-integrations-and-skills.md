@@ -209,6 +209,40 @@ service's model.
   template with the lead's summary in its place for one. Templates kept
   elsewhere (an organisation's `.github` repository, a host's settings)
   aren't read yet.
+- **What leaves the Mac is credited to the person, and to Althar.** Agents
+  sign their commits in their own ways (a `Co-authored-by` trailer, a
+  "Generated with" footer), and only Althar sees every agent's commits on
+  their way out, so it is Althar that takes those lines out, whichever agent
+  made them.
+  - Before each push, and before a merge here, the branch's own commits that
+    are nowhere else yet are made again with the agents' lines out. Nowhere
+    else means: on no other branch, tag or remote here, not on the remote's
+    branch (Althar asks the remote, since it pushes by address and keeps no
+    remote branches), and not sent by Althar before. Only the branch's own
+    line is made again, and only the person's commits on it: agents commit
+    as the person, so a commit made as anyone else came from elsewhere and
+    keeps its credit. Where one of those would have to move, the branch goes
+    as it is.
+  - Unless the person turned it off in Settings, Althar's own trailer goes
+    in: its GitHub account, by that account's private address, so the host
+    shows its picture. The person stays the author, and the pull request's
+    description says Althar opened it only while that is on.
+  - An agent's line is known by name and address together: a name like an
+    agent's or a model's at a machine's address. On GitHub's private
+    addresses the account decides, so a person called Claude keeps their
+    credit there too.
+  - Althar remembers each commit it makes again, and what from, as it makes
+    it: what it made is never made again, and the same commit always goes
+    the same way, signed or not, whatever the setting says by then. A commit
+    is made again from its tree, parents, people, dates and message, and
+    signed where the person has git sign their commits, or where it was
+    signed. One that making again would spoil (a message in another
+    encoding, a signed tag merged) leaves the branch as it is.
+  - The branch moves onto the new commits only once they are pushed or
+    merged, only from where it was, and never while a rebase, merge or
+    cherry-pick is under way in the worktree. Where an agent committed meanwhile, its commits are credited
+    onto what was sent. The commit the person saw counts as seen in either
+    form.
 - **After the first push, pushing is the person's.** When a plan's steps are
   done, Althar pushes the branch and opens the pull request. What the lead
   commits after, answering the person, a review or failed checks, waits on the

@@ -19,4 +19,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0013_project_changes': '5bc32c9042d2f2b1c31cfc8a8a76a907638fe5b0bc15d734f76331ae7d5ef344',
   '0014_model_blocks': '9ae81573cc0bb4e5c408be373e1c0f5967cf1af95a93b406c87fc41f793d0c6d',
   '0015_task_requests': '49472c4c5266e0af35bcffd5c12c0e69fe414916c72bbee9b281c54de71ae311',
+  '0016_settings': '60eb94358968e28b6154a4cc352ec2ead79d8edec9e1a87119d9390d16405676',
 }

@@ -2,6 +2,7 @@ import {
   type AccountSignInState,
   type AccountStatus,
   type AgentModels,
+  type AppSettings,
   type FoundAccount,
   type ProjectRulesView,
   Api,
@@ -101,6 +102,10 @@ export interface Client {
   readonly setDefaultEffort: (input: { readonly agentId: string; readonly model: string; readonly effort: string }) => Promise<void>
   /** Switches one of an agent's models off, or on again (ADR-015). */
   readonly setModelBlocked: (input: { readonly agentId: string; readonly model: string; readonly blocked: boolean }) => Promise<void>
+  /** The person's settings for the app as a whole. */
+  readonly getSettings: () => Promise<AppSettings>
+  /** Althar as co-author of the commits and pull requests it sends, or not. */
+  readonly setCoAuthor: (on: boolean) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
   readonly stopSession: (threadId: string) => Promise<void>
   readonly send: (input: {
@@ -297,6 +302,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getModels: () => settle(api.GetModels({})),
     setDefaultEffort: (input) => command((commandId) => api.SetDefaultEffort({ commandId, ...input })),
     setModelBlocked: (input) => command((commandId) => api.SetModelBlocked({ commandId, ...input })),
+    getSettings: () => settle(api.GetSettings({})),
+    setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     stopSession: (threadId) => command((commandId) => api.StopSession({ commandId, threadId })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),

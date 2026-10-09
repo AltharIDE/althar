@@ -506,6 +506,42 @@ describe('settings', () => {
     expect(marks.find((mark) => mark.id === 'bitbucket')).toMatchObject({ faint: true })
   })
 
+  it('has Althar as co-author of what it sends until the person turns it off, and then says why it would stay', async () => {
+    const { client } = fakeClient()
+    withServices(<Settings />, client)
+    await openModule('Code hosts and trackers')
+    const credit = await screen.findByRole('switch', { name: 'Althar as co-author' })
+    expect(credit.getAttribute('aria-checked')).toBe('true')
+    expect(screen.queryByText(/no marketing budget/)).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'See the line' }))
+    expect(screen.getByText('Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>')).toBeTruthy()
+
+    await userEvent.click(credit)
+    expect(client.setCoAuthor).toHaveBeenCalledWith(false)
+    expect(credit.getAttribute('aria-checked')).toBe('false')
+    expect(screen.getByText(/Althar is free, and we have no marketing budget/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Turn it back on' }))
+    expect(client.setCoAuthor).toHaveBeenLastCalledWith(true)
+    expect(credit.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('turns co-authoring back when the change can’t be kept, and says so', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.setCoAuthor).mockRejectedValue(new Error('disk full'))
+    withServices(<Settings />, client)
+    await openModule('Code hosts and trackers')
+    const credit = await screen.findByRole('switch', { name: 'Althar as co-author' })
+    await userEvent.click(credit)
+    expect((await screen.findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(credit.getAttribute('aria-checked')).toBe('true'))
+    // Off and on again, both lost: it shows what the runtime kept, not the opposite of the last try.
+    const reads = vi.mocked(client.getSettings).mock.calls.length
+    await userEvent.click(credit)
+    await userEvent.click(credit)
+    await waitFor(() => expect(vi.mocked(client.getSettings).mock.calls.length).toBeGreaterThan(reads))
+    expect(credit.getAttribute('aria-checked')).toBe('true')
+  })
+
   it('shows the icon the app has, and gives it another', async () => {
     const host = fakeHost({ appIcon: vi.fn(async () => 'paper') })
     withServices(<Settings />, fakeClient().client, host)

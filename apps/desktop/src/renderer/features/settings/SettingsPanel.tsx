@@ -6,6 +6,7 @@ import {
   type AgentTab,
   AgentTabs,
   Choices,
+  CoAuthor,
   ControlAgents,
   ControlCenter,
   ControlDetail,
@@ -35,6 +36,7 @@ import type { StartModel } from '../start/useStart'
 import s from './Settings.module.css'
 import { type AppIconModel, useAppIcon } from './useAppIcon'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
+import { type CoAuthorModel, useCoAuthor } from './useCoAuthor'
 
 /*
  * Settings, as a panel from the home's bar, over the home: the kit's Control
@@ -61,6 +63,7 @@ export const text = {
   edge: 'While you’re in another app',
   edgeNote: 'Where Althar shows what needs you and what runs.',
   edgeFailed: 'That couldn’t be kept. Try again.',
+  coAuthorFailed: 'That couldn’t be kept. Try again.',
   version: (version: string) => `Althar ${version}`,
 }
 
@@ -113,7 +116,16 @@ export interface SettingsPanelProps {
 
 /** Settings from the home's bar, with what it shows read here. */
 export function SettingsPanel(props: SettingsPanelProps) {
-  return <SettingsView {...props} accounts={useAccountSignIn(props.start)} connections={useConnections()} appIcon={useAppIcon()} edge={useEdgePlace()} />
+  return (
+    <SettingsView
+      {...props}
+      accounts={useAccountSignIn(props.start)}
+      connections={useConnections()}
+      appIcon={useAppIcon()}
+      edge={useEdgePlace()}
+      coAuthor={useCoAuthor()}
+    />
+  )
 }
 
 export function SettingsView({
@@ -122,9 +134,17 @@ export function SettingsView({
   connections,
   appIcon,
   edge,
+  coAuthor,
   open,
   onOpenChange,
-}: SettingsPanelProps & { accounts: AccountSignInModel; connections: ConnectionsModel; appIcon: AppIconModel; edge: EdgePlaceModel }) {
+}: SettingsPanelProps & {
+  accounts: AccountSignInModel
+  connections: ConnectionsModel
+  appIcon: AppIconModel
+  edge: EdgePlaceModel
+  /** Null until the settings are read. */
+  coAuthor: CoAuthorModel | null
+}) {
   const [showing, setShowing] = useState<Showing>('all')
   const [agentId, setAgentId] = useState<string | null>(null)
   const agents = start.status?.agents ?? []
@@ -234,6 +254,16 @@ export function SettingsView({
           <ControlSheet>
             <ConnectionsView model={connections} columns />
           </ControlSheet>
+          {coAuthor !== null && (
+            <ControlSheet>
+              <CoAuthor on={coAuthor.on} onChange={coAuthor.set} trailer={coAuthor.line} />
+              {coAuthor.failed && (
+                <p role="alert" className={s.failed}>
+                  {text.coAuthorFailed}
+                </p>
+              )}
+            </ControlSheet>
+          )}
         </ControlDetail>
       )}
       {showing === 'edge' && edge.place !== null && (

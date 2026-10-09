@@ -1,0 +1,86 @@
+/* The picture, the name over its line, the switch; what opens under it lines up with the words. */
+.coAuthor {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  column-gap: 12px;
+  row-gap: 8px;
+  align-items: start;
+}
+.picture {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--t-1);
+  color: var(--on-ink);
+}
+.picture > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.words {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.line {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.switch {
+  margin-top: 4px;
+}
+.trailer,
+.ask {
+  grid-column: 2 / -1;
+  margin: 0;
+}
+.trailer {
+  display: block;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--t-2);
+  white-space: nowrap;
+  transition: opacity var(--base) var(--ease);
+}
+/* off, it is what would be added */
+.trailerOff {
+  opacity: 0.5;
+  text-decoration: line-through;
+  text-decoration-color: var(--line-2);
+}
+.ask {
+  max-width: 46ch;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-2);
+  animation: ask var(--base) var(--ease) both;
+}
+.again {
+  font-size: 12px;
+}
+
+@keyframes ask {
+  from {
+    opacity: 0;
+    translate: 0 -2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ask {
+    animation: none;
+  }
+}
