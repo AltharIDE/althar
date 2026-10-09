@@ -24,3 +24,16 @@ export function useSeen(ref: RefObject<Element | null>, share = 0.35) {
   }, [ref, share])
   return seen
 }
+
+/** Whether `ref` is on screen now (by `share` of itself): for what loops only while it is watched. */
+export function useInView(ref: RefObject<Element | null>, share = 0.3) {
+  const [on, setOn] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const io = new IntersectionObserver(([e]) => setOn(e?.isIntersecting ?? false), { threshold: share })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [ref, share])
+  return on
+}

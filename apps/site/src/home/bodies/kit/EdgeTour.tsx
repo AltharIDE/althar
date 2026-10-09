@@ -7,7 +7,7 @@ import { IslandOpen } from './app'
 import { BrowserWindow, Desktop, EditorWindow, TerminalWindow } from './Mac'
 import { Reel, type ReelMoment } from './Reel'
 import { cx } from '../../../lib/cx'
-import { useSeen } from './seen'
+import { useInView, useSeen } from './seen'
 import { Shot } from './Shot'
 import s from './EdgeTour.module.css'
 import t from './type.module.css'
@@ -134,11 +134,12 @@ export function EdgeTour({ tone = 'ink' }: { tone?: 'paper' | 'ink' }) {
 /*
  * The menu bar, for a Mac without a notch: the top right corner of a screen
  * at the size it is, a terminal behind. The pointer comes up to Althar's
- * mark, clicks, and the same list drops from it.
+ * mark, clicks, and the same list drops from it; it reads down it, clicks
+ * the mark again, and it closes, round and round while it is on screen.
  */
 function MenuBarNote() {
   const ref = useRef<HTMLDivElement>(null)
-  const seen = useSeen(ref, 0.45)
+  const seen = useInView(ref, 0.35)
   return (
     <div ref={ref} className={s.menuNote}>
       <div className={s.menuWords}>

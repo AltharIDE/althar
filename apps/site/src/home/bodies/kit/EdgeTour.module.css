@@ -51,19 +51,37 @@
 }
 .cursor { position: absolute; left: 0; top: 0; z-index: 5; transform: translate(250px, 420px); opacity: 0; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35)); }
 
-.cornerOn .cursor { animation: point 2600ms cubic-bezier(0.45, 0, 0.2, 1) 300ms forwards; }
-.cornerOn .cornerMark { animation: press 260ms ease 1350ms forwards; }
-.cornerOn .drop { animation: drop 560ms cubic-bezier(0.2, 0.9, 0.3, 1.08) 1450ms forwards; }
+/* One loop, 7.5 s, while it is on screen: the pointer comes up to the mark and clicks, the list drops,
+   the pointer reads down it, goes back up and clicks again, the list closes, and it rests a moment. */
+.corner { --loop: 7500ms; }
+.cursor, .cornerMark, .drop { animation-duration: var(--loop); animation-iteration-count: infinite; animation-play-state: paused; animation-fill-mode: both; }
+.cursor { animation-name: point; }
+.cornerMark { animation-name: press; }
+.drop { animation-name: drop; }
+.cornerOn .cursor, .cornerOn .cornerMark, .cornerOn .drop { animation-play-state: running; }
 @keyframes point {
-  0% { opacity: 0; transform: translate(250px, 420px); }
-  10% { opacity: 1; }
-  40% { transform: translate(368px, 12px); }
-  44% { transform: translate(368px, 12px) scale(0.85); }
-  48% { transform: translate(368px, 12px); }
-  80%, 100% { opacity: 1; transform: translate(330px, 118px); }
+  0% { opacity: 0; transform: translate(250px, 430px); animation-timing-function: ease-out; }
+  6% { opacity: 1; transform: translate(260px, 400px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); }
+  22% { transform: translate(368px, 12px); animation-timing-function: ease; }
+  24% { transform: translate(368px, 12px) scale(0.85); animation-timing-function: ease; }
+  26% { transform: translate(368px, 12px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); }
+  40% { transform: translate(300px, 236px); animation-timing-function: ease-in-out; }
+  56% { transform: translate(318px, 330px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); }
+  70% { transform: translate(368px, 12px); animation-timing-function: ease; }
+  72% { transform: translate(368px, 12px) scale(0.85); animation-timing-function: ease; }
+  74% { opacity: 1; transform: translate(368px, 12px); animation-timing-function: ease-in; }
+  86%, 100% { opacity: 0; transform: translate(420px, 120px); }
 }
-@keyframes press { to { background: rgba(255, 255, 255, 0.22); } }
-@keyframes drop { to { opacity: 1; transform: none; } }
+@keyframes press {
+  0%, 23.5% { background: transparent; }
+  24.5%, 72% { background: rgba(255, 255, 255, 0.22); }
+  73%, 100% { background: transparent; }
+}
+@keyframes drop {
+  0%, 25% { opacity: 0; transform: translateY(-10px) scale(0.96); animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1.08); }
+  31%, 72.5% { opacity: 1; transform: none; animation-timing-function: ease-in; }
+  76%, 100% { opacity: 0; transform: translateY(-6px) scale(0.98); }
+}
 .cornerStill .cursor, .cornerStill .cornerMark, .cornerStill .drop { animation: none; }
 .cornerStill .drop { opacity: 1; transform: none; }
 .cornerStill .cornerMark { background: rgba(255, 255, 255, 0.22); }

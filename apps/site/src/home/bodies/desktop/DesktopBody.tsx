@@ -1,17 +1,16 @@
-import { Turn, WorkedFor, You } from '@althar/ui'
-import { type ReactNode, useRef } from 'react'
+import type { ReactNode } from 'react'
 
 import { LINKS } from '../../../content/facts'
 import { cx } from '../../../lib/cx'
 import { Get } from '../../../shared/Close'
-import { DOCS_PLAN, HomeWindow, IslandOpen, Launch, ProjectWindow, useAssembling } from '../kit/app'
+import { HomeWindow, IslandOpen } from '../kit/app'
 import { EdgeTour } from '../kit/EdgeTour'
 import { Desktop, MacWindow } from '../kit/Mac'
-import { useSeen } from '../kit/seen'
 import { Shot } from '../kit/Shot'
 import t from '../kit/type.module.css'
 import s from './DesktopBody.module.css'
 import { Flow } from './Flow'
+import { Lift } from './Lift'
 import { Trio } from './Trio'
 
 /*
@@ -75,56 +74,6 @@ function Screen({
   )
 }
 
-/*
- * The coordinator: the project's one conversation, alone, down the middle
- * of the window. You ask for two things; it reads the repositories and your
- * rules, says what it makes of it, and puts a team on each task, a step at a
- * time. The first plan lifts out of the window toward you.
- */
-function CoordinatorScene() {
-  const ref = useRef<HTMLDivElement>(null)
-  const seen = useSeen(ref)
-  const steps = useAssembling(seen)
-  const docs = useAssembling(seen && steps.length >= 4, DOCS_PLAN)
-  const thread = (
-    <>
-      <You at="10:58">
-        Backfill idempotency keys on the refunds made before PR 1184 (it’s MER-231), and fix the refunds docs while you’re there.
-      </You>
-      <Turn voice="Meridian’s coordinator" at="10:59">
-        <WorkedFor took="14s" summary="Read meridian-api, meridian-web and Meridian’s rules">
-          <p className={s.said}>Read 3 repositories, MER-231 and the project’s rules.</p>
-        </WorkedFor>
-        <p className={s.said}>
-          Two tasks. The backfill writes to money records, so your security review applies and a second lab reviews it. The docs are small:
-          Codex writes them, Sonnet reads them over. Change anyone before they start.
-        </p>
-      </Turn>
-      <Launch steps={steps} />
-      {docs.length > 0 && <Launch task="433" title="Fix the refunds docs" steps={docs} from={false} estimate="About 10 min" />}
-    </>
-  )
-  return (
-    <div ref={ref} className={s.team}>
-      <Screen
-        label="Meridian's coordinator: you ask for two things, it reads the project and puts a team on each task"
-        phone={{ x: 330, y: 150, w: 780, h: 720 }}
-      >
-        <Desktop>
-          <MacWindow style={{ left: 40, top: 24, width: 1360, height: 826 }}>
-            <ProjectWindow centered meta="The coordinator · 3 repositories, your rules" thread={thread} />
-          </MacWindow>
-        </Desktop>
-      </Screen>
-      <div className={s.slab} aria-hidden="true">
-        <Shot w={700} label="" maxScale={1.08} frame={s.slabCard}>
-          <Launch steps={steps} />
-        </Shot>
-      </div>
-    </div>
-  )
-}
-
 export function DesktopBody() {
   return (
     <main id="main" tabIndex={-1} className={s.body}>
@@ -150,18 +99,7 @@ export function DesktopBody() {
         </Screen>
       </Scene>
 
-      <Scene
-        id="team"
-        kicker="The coordinator"
-        title={
-          <>
-            Say what you want. <b>It puts the team together.</b>
-          </>
-        }
-        lead="Each project has a coordinator that knows its repositories and your rules. Tell it what you want; it splits it into tasks and gives each step the model that suits it, from whichever lab. Change anyone, or let it start."
-      >
-        <CoordinatorScene />
-      </Scene>
+      <Lift />
 
       <Trio />
 

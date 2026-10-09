@@ -27,36 +27,6 @@
 }
 .screen { border-radius: 20px; }
 
-/* ---- the coordinator's plan: the card, lifted out of the window toward you ---- */
-.said { margin: 0; }
-.team { position: relative; }
-.slab {
-  position: absolute;
-  right: max(var(--gut), calc(50% - 660px));
-  bottom: -80px;
-  width: min(640px, 50%);
-  perspective: 1800px;
-  pointer-events: none;
-}
-.slabCard {
-  border-radius: 14px;
-  transform: rotateX(8deg) rotateY(9deg) rotateZ(-0.6deg);
-  transform-origin: 70% 50%;
-  box-shadow:
-    -1px 1px 0 #dfe1f1,
-    -2px 2px 0 #d6d9ee,
-    -3px 3px 0 #ced1ea,
-    -4px 4px 0 #c6cae6,
-    -5px 5px 0 #bec2e2,
-    -30px 50px 80px rgba(6, 10, 70, 0.28),
-    -60px 90px 120px rgba(6, 10, 70, 0.14);
-  animation: float 9s ease-in-out infinite;
-}
-@keyframes float {
-  50% { translate: 0 -8px; }
-}
-@media (prefers-reduced-motion: reduce) { .slabCard { animation: none; } }
-
 /* ---- a piece up close, in the light ---- */
 .closeUp {
   position: relative;
@@ -89,7 +59,8 @@
 .fade .card { max-height: 760px; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
 
 /* ---- the edge of the screen: a dark scene ---- */
-.ink { margin-top: 150px; padding-bottom: 150px; background: #0b0c12; }
+/* A dark panel, set in as the light one before it is. */
+.ink { margin: 120px 16px 0; padding-bottom: 150px; border-radius: 30px; background: #0b0c12; }
 .ink .head h2 { color: #fff; }
 .ink .head p { color: rgba(255, 255, 255, 0.7); }
 .ink .head p:first-child i { background: #9aa6ff; }
@@ -132,11 +103,10 @@
   .screenWrap { max-width: none; margin-top: 40px; }
   .bezel { padding: 6px; border-radius: 18px; }
   .screen { border-radius: 12px; }
-  .slab { display: none; }
   .cards { grid-template-columns: 1fr; }
   .closeUp { margin-top: 36px; padding: 40px 12px 48px; }
   .lit { inset: 0; border-radius: 0; }
-  .ink { margin-top: 96px; padding-bottom: 96px; }
+  .ink { margin: 96px 12px 0; padding-bottom: 96px; border-radius: 24px; }
   .marks { gap: 18px 30px; margin-top: 36px; }
   .marks svg { width: 30px; height: 30px; }
   .end { padding-top: 120px; }

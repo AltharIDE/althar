@@ -222,7 +222,7 @@ export function Trio() {
       <div className={s.sticky}>
         <div className={s.panel}>
           <div className={s.light} aria-hidden="true">
-            <Light height={0.72} />
+            <Light height={0.95} />
           </div>
           <div ref={stage} className={s.steps}>
             {STEPS.map((step, i) => (

@@ -5,7 +5,12 @@
 
 .sticky { position: sticky; top: 0; height: 100svh; padding: 76px 16px 16px; }
 .panel { position: relative; isolation: isolate; height: 100%; overflow: hidden; border-radius: 30px; background: #efede7; }
-.light { position: absolute; left: 0; right: 0; bottom: -6%; height: 62%; z-index: -1; pointer-events: none; overflow: hidden; }
+.light {
+  position: absolute; left: 0; right: 0; bottom: -2%; height: 62%; z-index: -1; pointer-events: none; overflow: hidden;
+  /* Its foot fades into the panel's floor, so the light never ends on the panel's edge. */
+  -webkit-mask-image: linear-gradient(to top, transparent 3%, #000 calc(3% + 110px));
+  mask-image: linear-gradient(to top, transparent 3%, #000 calc(3% + 110px));
+}
 
 /* The steps stand in one place; the one the scroll is on shows. */
 .steps { display: grid; height: 100%; --tx: 0; --ty: 0; }
