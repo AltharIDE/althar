@@ -242,14 +242,16 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
     recheck: recheckNow,
     install: async (agentId) => {
       setInstallFailed((now) => Object.fromEntries(Object.entries(now).filter(([id]) => id !== agentId)))
-      // The runtime says it downloads as soon as it starts, so the row changes at once.
+      // The runtime says it downloads as soon as it starts, so the row changes at once; that read is waited for before the
+      // last one, so it can never land after it and say the agent still downloads.
       const done = client.installAgent(agentId)
-      void reloadStatus(false)
+      const first = reloadStatus(false)
       try {
         await done
       } catch (failure) {
         setInstallFailed((now) => ({ ...now, [agentId]: messageOf(failure) }))
       }
+      await first
       await reloadStatus(true)
     },
     installFailed,

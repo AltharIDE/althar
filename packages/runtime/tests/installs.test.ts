@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -157,6 +157,13 @@ describe('downloading an agent', () => {
     writeFileSync(join(empty, 'README'), 'nothing')
     execFileSync('tar', ['-czf', join(empty, ASSET), '-C', empty, 'README'])
     expect(await said(github(readFileSync(join(empty, ASSET))).fetch)).toContain('has no opencode in it')
+    // A link in the archive is never followed: what it points at was never checked.
+    const linked = mkdtempSync(join(tmpdir(), 'althar-linked-'))
+    writeFileSync(join(linked, 'payload'), '#!/bin/sh\necho outside\n')
+    chmodSync(join(linked, 'payload'), 0o755)
+    symlinkSync(join(linked, 'payload'), join(linked, 'opencode'))
+    execFileSync('tar', ['-czf', join(linked, ASSET), '-C', linked, 'opencode'])
+    expect(await said(github(readFileSync(join(linked, ASSET))).fetch)).toContain('has no opencode in it')
     const broken = mkdtempSync(join(tmpdir(), 'althar-broken-'))
     writeFileSync(join(broken, 'opencode'), '#!/bin/sh\nexit 3\n')
     chmodSync(join(broken, 'opencode'), 0o755)

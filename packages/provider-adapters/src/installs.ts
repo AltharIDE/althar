@@ -57,6 +57,9 @@ export const locate = (
   return kept !== null && isExecutable(kept) ? { command: kept, whose: 'althar' } : null
 }
 
+/** A path as a shell reads it as one word. */
+export const quoted = (path: string): string => (/^[\w./-]+$/.test(path) ? path : `'${path.replaceAll("'", `'\\''`)}'`)
+
 /**
  * The agent, with every command it runs pointed at where its command is,
  * looked up each time, so a copy downloaded while Althar runs is used at
@@ -79,6 +82,13 @@ export const usingLocated = (definition: AgentDefinition, find: () => Located | 
     launch: pointed(definition.launch),
     signIn: {
       ...signIn,
+      // What the person runs in a terminal names the same command: Althar's copy by its full path, quoted, as it isn't on their PATH.
+      get login() {
+        const found = find()
+        return found === null || found.command === install.command || !signIn.login.startsWith(`${install.command} `)
+          ? signIn.login
+          : `${quoted(found.command)}${signIn.login.slice(install.command.length)}`
+      },
       status: pointed(signIn.status),
       ...(signIn.inApp === undefined ? {} : { inApp: { ...signIn.inApp, run: pointed(signIn.inApp.run) } }),
       ...(signIn.logout === undefined ? {} : { logout: { ...signIn.logout, run: pointed(signIn.logout.run) } }),

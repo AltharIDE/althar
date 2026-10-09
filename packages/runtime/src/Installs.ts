@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
@@ -66,12 +66,18 @@ const run = (command: string, args: ReadonlyArray<string>, timeout = 60_000) =>
     )
   })
 
-/** The first file named `name` under `dir`, a level or two down, as archives nest it. */
+/**
+ * The first file named `name` under `dir`, a level or two down, as archives
+ * nest it. Never by a link: a link in the archive could point at a file the
+ * digest never covered, so neither a linked file nor a linked folder counts.
+ */
 const findIn = (dir: string, name: string, depth = 3): string | null => {
   for (const entry of readdirSync(dir)) {
     const path = join(dir, entry)
-    if (entry === name && statSync(path).isFile()) return path
-    if (depth > 0 && statSync(path).isDirectory()) {
+    const found = lstatSync(path)
+    if (found.isSymbolicLink()) continue
+    if (entry === name && found.isFile()) return path
+    if (depth > 0 && found.isDirectory()) {
       const found = findIn(path, name, depth - 1)
       if (found !== null) return found
     }
