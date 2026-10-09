@@ -1,0 +1,12 @@
+/* the island's sheet is about this wide */
+.width {
+  width: 440px;
+  max-width: 100%;
+}
+/* the island's black, for a row on ink */
+.ink {
+  width: 440px;
+  max-width: 100%;
+  padding: 8px;
+  background: #000;
+}

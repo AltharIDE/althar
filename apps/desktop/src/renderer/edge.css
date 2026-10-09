@@ -1,0 +1,13 @@
+/* The edge's page: clear round the island, so only what it draws shows; the menu bar's sheet draws its own paper. */
+html,
+body,
+#root {
+  margin: 0;
+  background: transparent;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}

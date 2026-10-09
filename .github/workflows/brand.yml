@@ -1,6 +1,7 @@
 # Checks the brand pack in brand/: format, lint and types, then the tests that keep the pack in step with the rest of the
 # repository: the mark's copies in the UI package, the pitch, the favicons and Storybook; the brand colours against the
-# interface's tokens; the app icons against the desktop app's; and the committed export/ against what the code draws.
+# interface's tokens; the app icons against the desktop app's; the committed export/ against what the code draws; and
+# the wallpapers against the launch's light and dots.
 # It runs when any of those files change. It doesn't redraw the pack: after changing a drawing, run
 # `bun --filter @althar/brand export` and commit what it writes.
 name: brand
@@ -13,6 +14,8 @@ on:
         'brand/**',
         'packages/ui/src/styles/tokens.css',
         'packages/ui/src/foundations/Logo/**',
+        'packages/ui/src/screens/Launch/light.ts',
+        'packages/ui/src/screens/Launch/halftone.ts',
         'packages/ui/.storybook/**',
         'apps/pitch/src/components/Logo.tsx',
         'apps/pitch/public/**',
@@ -30,6 +33,8 @@ on:
         'brand/**',
         'packages/ui/src/styles/tokens.css',
         'packages/ui/src/foundations/Logo/**',
+        'packages/ui/src/screens/Launch/light.ts',
+        'packages/ui/src/screens/Launch/halftone.ts',
         'packages/ui/.storybook/**',
         'apps/pitch/src/components/Logo.tsx',
         'apps/pitch/public/**',

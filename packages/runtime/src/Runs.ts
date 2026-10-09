@@ -14,8 +14,9 @@ import { Instance } from './Instance'
 import { Limits, outWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
 import { Policies, usageLimitOf } from './Policies'
-import { treeOf, uncommittedFiles } from './git'
-import { filesLine } from './pullRequestWords'
+import { conventionsAt } from './conventions'
+import { commitsAhead, treeOf, uncommittedFiles } from './git'
+import { filesLine, templateAsk } from './pullRequestWords'
 import { snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
@@ -85,6 +86,8 @@ type Finding = typeof Finding.Type
 
 const Finished = Schema.Struct({
   summary: Schema.String,
+  /** The pull request's description, in the repository's template: by repository, which a task of one needn't name. */
+  descriptions: Schema.optional(Schema.Array(Schema.Struct({ repository: Schema.optional(Schema.String), text: Schema.String }))),
   /** When settling a review: what became of each finding, by its id. */
   findings: Schema.optional(
     Schema.Array(
@@ -787,8 +790,9 @@ export class Runs extends Context.Service<
       const worktreesOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          return yield* sql<{ id: string; path: string; name: string }>`
-            SELECT w.id, w.path, b.display_name AS name FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+          return yield* sql<{ id: string; path: string; name: string; slug: string; base: string | null }>`
+            SELECT w.id, w.path, b.display_name AS name, b.slug, coalesce(w.base_commit, w.base_ref) AS base
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
         })
 
@@ -1210,11 +1214,74 @@ export class Runs extends Context.Service<
           yield* touchCard(plan.taskId)
         })
 
+      /**
+       * Descriptions the lead gave for a step Althar sent back, by thread:
+       * kept, so a task of several can give them one by one. Kept for the
+       * launch; after a restart, the lead is asked again.
+       */
+      const givenBefore = new Map<string, Readonly<Record<string, string>>>()
+
+      /** The descriptions the lead gave, by the slug of the repository each is for; refused where it names none of the task's. */
+      const descriptionsOf = (
+        worktrees: ReadonlyArray<{ readonly name: string; readonly slug: string }>,
+        given: ReadonlyArray<{ readonly repository?: string | undefined; readonly text: string }>,
+      ) =>
+        Effect.gen(function* () {
+          const named: Record<string, string> = {}
+          for (const description of given) {
+            const wanted = description.repository?.trim().toLowerCase()
+            const worktree =
+              wanted === undefined || wanted === ''
+                ? worktrees.length === 1
+                  ? worktrees[0]
+                  : undefined
+                : worktrees.find((candidate) => candidate.slug === wanted || candidate.name.toLowerCase() === wanted)
+            if (worktree === undefined)
+              return yield* new ToolRefused({
+                message: `Say which repository each description is for: ${worktrees.map((candidate) => candidate.name).join(', ')}.`,
+              })
+            if (description.text.trim() !== '') named[worktree.slug] = description.text
+          }
+          return Object.keys(named).length === 0 ? {} : { descriptions: named }
+        })
+
+      /**
+       * The task's repositories with a pull request to open, in a template
+       * the lead hasn't written a description in, now or before. One with
+       * nothing to publish opens none, so it needs none.
+       */
+      const templatesUnwritten = (
+        threadId: string,
+        worktrees: ReadonlyArray<{ readonly path: string; readonly name: string; readonly slug: string; readonly base: string | null }>,
+        given: Readonly<Record<string, string>>,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const unwritten: Array<{ readonly name: string; readonly path: string; readonly text: string }> = []
+          for (const worktree of worktrees) {
+            if (given[worktree.slug] !== undefined) continue
+            const ahead = worktree.base === null ? 1 : yield* commitsAhead(worktree.path, worktree.base).pipe(Effect.orElseSucceed(() => 1))
+            if (ahead === 0) continue
+            const { template } = yield* conventionsAt(worktree.path, 'HEAD')
+            if (template === null) continue
+            const [before] = yield* sql<{ n: number }>`
+              SELECT count(*) AS n FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
+                AND json_extract(content, '$.descriptions.' || json_quote(${worktree.slug})) IS NOT NULL`
+            if ((before?.n ?? 0) === 0) unwritten.push({ name: worktree.name, ...template })
+          }
+          return unwritten
+        })
+
       /** The lead says its step is done: Implement, or a round of settling. */
       const finishStep = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { summary, findings: settled = [] } = yield* read(Finished, input)
+          const { summary, findings: settled = [], descriptions: given = [] } = yield* read(Finished, input)
+          const worktrees = access.taskId === null ? [] : yield* worktreesOf(access.taskId)
+          // What it gave before Althar sent the step back, and what it gives now.
+          const now = yield* descriptionsOf(worktrees, given)
+          const kept = { ...givenBefore.get(access.threadId), ...now.descriptions }
+          const descriptions = Object.keys(kept).length === 0 ? {} : { descriptions: kept }
           const current = access.taskId === null ? undefined : yield* currentRun(access.taskId)
           const [planned] =
             access.taskId === null ? [] : yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${access.taskId} LIMIT 1`
@@ -1223,6 +1290,7 @@ export class Runs extends Context.Service<
             yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'step_result', {
               step: 'implement',
               summary,
+              ...descriptions,
             })
             return 'Althar has your summary.'
           }
@@ -1231,8 +1299,8 @@ export class Runs extends Context.Service<
             return yield* new ToolRefused({ message: 'No step is waiting on you, so Althar keeps no summary now.' })
           const step = attempt.nodeKey === 'settle' ? 'settle' : 'implement'
           // A task that ends on its host pushes commits only: what isn't committed is the lead's to commit or clear away first.
-          if (((yield* stepsOf(current)).end ?? (yield* changes.endFor(current.projectId, current.taskId))) !== null) {
-            const worktrees = yield* worktreesOf(current.taskId)
+          const end = (yield* stepsOf(current)).end ?? (yield* changes.endFor(current.projectId, current.taskId))
+          if (end !== null) {
             // In a task of several repositories, each file by the repository it's in.
             const left = (yield* Effect.forEach(worktrees, (worktree) =>
               Effect.map(uncommittedFiles(worktree.path), (files) =>
@@ -1244,10 +1312,19 @@ export class Runs extends Context.Service<
                 message: `These aren't committed: ${filesLine(left)}. Althar pushes commits only, so commit what belongs to the task, delete the rest (scratch files, logs), and call finish_step again.`,
               })
           }
+          // A pull request in a repository with a template is described in it, by the lead, as a teammate would.
+          if (end === 'draft' || end === 'ready') {
+            const unwritten = yield* templatesUnwritten(access.threadId, worktrees, kept)
+            if (unwritten.length > 0) {
+              givenBefore.set(access.threadId, kept)
+              return yield* new ToolRefused({ message: templateAsk(unwritten, worktrees.length > 1) })
+            }
+          }
+          givenBefore.delete(access.threadId)
           yield* sql.withTransaction(
             Effect.gen(function* () {
               yield* ended(current, attempt, 'succeeded', { summary })
-              yield* result(current, { step, round: attempt.iteration, summary })
+              yield* result(current, { step, round: attempt.iteration, summary, ...descriptions })
               // What became of each finding, as the lead says: the input to the next round, and to what reviews learn.
               if (step === 'settle') yield* settleFindings(current, attempt.id, settled)
               // A step that needed the person and reported after all no longer does.
@@ -1398,6 +1475,19 @@ export class Runs extends Context.Service<
             type: 'object',
             properties: {
               summary: { type: 'string' },
+              descriptions: {
+                type: 'array',
+                description:
+                  "Where the task's pull request is opened in a repository with a pull request template: its description, written in that template as a teammate would. Keep every heading and checklist, fill each section from your work, and leave every box unticked.",
+                items: {
+                  type: 'object',
+                  properties: {
+                    repository: { type: 'string', description: 'Which repository it is for, where the task has several.' },
+                    text: { type: 'string' },
+                  },
+                  required: ['text'],
+                },
+              },
               findings: {
                 type: 'array',
                 description: 'When settling a review: what became of each finding, by the id Althar gave it.',

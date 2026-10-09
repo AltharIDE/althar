@@ -227,7 +227,9 @@ const playStall = async (
  * until it is stopped, and `[lead:settle-quietly]` settles without reporting.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
- * Althar says it isn't committed. Told what people said on its pull
+ * Althar says it isn't committed. Asked for its pull request's description
+ * in the repository's template, it fills it in, ticking a box it shouldn't.
+ * Told what people said on its pull
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
  * publishes it. Asked to plan a change with a link in it, the coordinator
@@ -291,14 +293,22 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
       // Told to carry on, as a lead that took a step over is, it finishes as it was told to at first.
       // Told to carry on, or to try another way, as Althar tells one that stalled or went round in circles.
       const toldToGoOn = /^(Carry on with the task|Your last turn|You ran )/.test(text)
+      // Asked for its pull request's description in the repository's template, it writes under the first heading, and ticks a box it shouldn't.
+      const finish = async () => {
+        const answer = await call('finish_step', { summary: 'Did the task.' })
+        const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
+        if (template === undefined) return answer
+        const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
+        return await call('finish_step', { summary: 'Did the task.', descriptions: [{ text }] })
+      }
       if (text.includes('[lead:finish]') || (toldToGoOn && session.markers.has('[lead:finish]'))) {
         if (session.markers.has('[lead:edit]')) commitIn(session.cwd, 'change.txt', 'Change it')
-        if (!session.markers.has('[lead:scratch]')) return await call('finish_step', { summary: 'Did the task.' })
+        if (!session.markers.has('[lead:scratch]')) return await finish()
         appendFileSync(join(session.cwd, 'scratch.log'), 'trying things\n')
         const answer = await call('finish_step', { summary: 'Did the task.' })
         if (!/These aren.t committed/.test(answer)) return answer
         rmSync(join(session.cwd, 'scratch.log'))
-        return await call('finish_step', { summary: 'Did the task.' })
+        return await finish()
       }
       // What people said on the task's pull request, and its checks.
       if (available.has('reply_on_pull_request') && session.markers.has('[lead:answer]') && / commented on /.test(text)) {

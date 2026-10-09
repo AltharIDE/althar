@@ -20,6 +20,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/RunRow/RunRow.tsx': 'a running task’s title, stretched over its row',
   'home/SinceRow/SinceRow.tsx': 'what happened, stretched over its row',
   'home/ProjectRow/ProjectRow.tsx': 'a project’s row, which opens the project',
+  'home/EdgeRow/EdgeRow.tsx': 'a task’s title, which opens it in Althar',
   'chrome/ProjectTabs/ProjectTabs.tsx': 'a tab, whose shape joins the bar below it',
   'chrome/WorkStatus/WorkStatus.tsx': 'a row of what needs you, in the count’s preview',
   /* opens and closes what is below it */
@@ -46,6 +47,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'composer/Listening/Listening.tsx': 'the listening pill, and stop on its sunk bar',
   'composer/Running/Running.tsx': 'the running pill, and its actions on the sunk bar',
   'setup/ControlCenter/ControlCenter.tsx': 'a module, the whole of which opens it out, and a round switch',
+  'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',
 }

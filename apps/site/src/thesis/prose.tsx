@@ -3,14 +3,14 @@ import type { ReactNode } from 'react'
 
 import { LINKS } from '../content/facts'
 import s from './Thesis.module.css'
+import { ThesisFigure } from './ThesisFigure'
 
 /*
  * THESIS.md, compiled into the page: marked's lexer splits it into tokens,
  * and each token is drawn as the site's own element. Nothing is inserted as
  * HTML. Links into the document go to its sections here; links to other
  * files in the repository go to them on GitHub. A proposition, a quote set
- * all in bold, reads as a claim; the diagrams in code blocks sit on grid
- * paper, like the site's drawings.
+ * all in bold, reads as a claim; text diagrams become responsive figures.
  */
 
 /** A heading's anchor, as GitHub makes it, so the document's own links still land. */
@@ -68,6 +68,24 @@ function inline(tokens: readonly Token[] | undefined, key = ''): ReactNode {
 const allStrong = (q: Tokens.Blockquote) =>
   q.tokens.every((p) => p.type === 'space' || (p.type === 'paragraph' && (p as Tokens.Paragraph).tokens.every((x) => x.type === 'strong')))
 
+export type ListLayout = 'plain' | 'columns' | 'rows'
+
+const itemPlain = (it: Tokens.ListItem) =>
+  it.tokens
+    .filter((c) => c.type !== 'list')
+    .map((c) => plain(c))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+/** A catalogue of short phrases can sit in two columns. A sentence, or a long numbered sequence, stays one column with a rule. */
+export function listLayout(items: readonly { text: string; nested: boolean }[], ordered: boolean): ListLayout {
+  if (items.length < 6 || items.some((item) => item.nested)) return 'plain'
+  const phrase = (text: string) => text.length > 0 && text.length <= 78 && !/[.?!]/.test(text)
+  if (!ordered && items.every((item) => phrase(item.text))) return 'columns'
+  return 'rows'
+}
+
 export function block(t: Token, key: string, depth = 0): ReactNode {
   switch (t.type) {
     case 'paragraph':
@@ -83,6 +101,13 @@ export function block(t: Token, key: string, depth = 0): ReactNode {
     }
     case 'list': {
       const l = t as Tokens.List
+      const layout =
+        depth > 0
+          ? 'plain'
+          : listLayout(
+              l.items.map((it) => ({ text: itemPlain(it), nested: it.tokens.some((c) => c.type === 'list') })),
+              l.ordered,
+            )
       const items = l.items.map((it, i) => (
         <li key={`${key}-${i}`}>
           {it.tokens.map((c, j) =>
@@ -90,12 +115,13 @@ export function block(t: Token, key: string, depth = 0): ReactNode {
           )}
         </li>
       ))
+      const klass = [l.ordered ? s.ol : s.ul, layout === 'columns' ? s.cols : '', layout === 'rows' ? s.rows : ''].filter(Boolean).join(' ')
       return l.ordered ? (
-        <ol key={key} className={s.ol} start={typeof l.start === 'number' ? l.start : undefined}>
+        <ol key={key} className={klass} start={typeof l.start === 'number' ? l.start : undefined}>
           {items}
         </ol>
       ) : (
-        <ul key={key} className={s.ul}>
+        <ul key={key} className={klass}>
           {items}
         </ul>
       )
@@ -109,11 +135,7 @@ export function block(t: Token, key: string, depth = 0): ReactNode {
       )
     }
     case 'code':
-      return (
-        <figure key={key} className={s.diagram}>
-          <pre>{(t as Tokens.Code).text}</pre>
-        </figure>
-      )
+      return <ThesisFigure key={key} source={(t as Tokens.Code).text} />
     case 'table': {
       const tb = t as Tokens.Table
       return (

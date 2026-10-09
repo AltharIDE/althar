@@ -39,6 +39,13 @@ export const PAGE_META = {
     image: '/og/home.png',
     index: true,
   },
+  '/wallpaper': {
+    path: '/wallpaper',
+    title: 'Wallpaper · Althar',
+    description: 'Aurora, the light Althar opens in, as a wallpaper: light and dark, for a Mac, a larger display and a phone.',
+    image: '/og/wallpaper.png',
+    index: true,
+  },
   /** The earlier page, kept for the company version: linked from nowhere, and kept out of search until then. */
   '/enterprise': {
     path: '/enterprise',

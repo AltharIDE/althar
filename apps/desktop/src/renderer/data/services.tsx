@@ -29,6 +29,18 @@ export interface Host {
   readonly setAppIcon: (icon: string) => Promise<void>
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
   readonly onOpen: (listener: (threadId: string) => void) => () => void
+  /** Where Althar shows while the person is in another app (`shared/edge`), and whether this Mac has a notch to choose the island by; null before the main process knows. */
+  readonly edge: () => Promise<{ readonly place: string; readonly notch: boolean } | null>
+  /** Shows it there instead, and keeps the choice. */
+  readonly setEdge: (place: string) => Promise<void>
+  /** From the island: where it draws in its page, so the main process can tell when the pointer is on it. */
+  readonly edgeDrawn: (rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }) => void
+  /** For the island: calls `listener` as the pointer comes onto it or leaves, until the returned function is called. */
+  readonly onEdgePointed: (listener: (on: boolean) => void) => () => void
+  /** From the menu bar's sheet: how tall it draws. */
+  readonly edgeSize: (height: number) => void
+  /** From the edge: brings Althar's window forward, on a thread, or as it was. */
+  readonly openInWindow: (threadId?: string) => void
 }
 
 export interface Services {

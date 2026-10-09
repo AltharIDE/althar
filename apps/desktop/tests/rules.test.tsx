@@ -80,6 +80,32 @@ describe('a project’s rules', () => {
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', onlyAccounts: null }))
   })
 
+  it('says where names come from, saves a pattern Althar can follow, and says why it can’t follow one', async () => {
+    const { client } = fakeClient({
+      getProjectRules: vi.fn(async () => ({
+        ...projectRules,
+        conventions: [
+          {
+            repository: 'api',
+            branch: { pattern: 'feature/{key}-{slug}', from: 'CONTRIBUTING.md' },
+            title: null,
+            template: '.github/pull_request_template.md',
+          },
+        ],
+      })),
+    })
+    withServices(<Rules />, client)
+    expect(await screen.findByText('CONTRIBUTING.md says feature/{key}-{slug}')).toBeTruthy()
+    expect(screen.getByText('.github/pull_request_template.md, filled in by the lead')).toBeTruthy()
+    const branches = screen.getByRole('textbox', { name: 'Branch names' })
+    await userEvent.type(branches, 'feature/{{key}{Enter}')
+    expect((await screen.findByRole('alert')).textContent).toContain('needs {slug}')
+    expect(client.setProjectRules).not.toHaveBeenCalled()
+    await userEvent.type(branches, '-{{slug}{Enter}')
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', branchPattern: 'feature/{key}-{slug}' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('says what went wrong saving', async () => {
     const { client } = fakeClient({
       setProjectRules: vi.fn(async () => Promise.reject(new ApiError({ reason: 'SqlError', message: 'The disk is full.' }))),

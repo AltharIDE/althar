@@ -22,6 +22,7 @@ import {
 
 import { agentLineOf, brandOf } from '../../shared/agents'
 import { appIcons } from '../../shared/appIcons'
+import { edgePlaces } from '../../shared/edge'
 import { productBrand } from '../../shared/products'
 import { clock } from '../../shared/time'
 import { AgentAccounts } from '../accounts/AgentAccounts'
@@ -33,11 +34,13 @@ import { ModelsView } from './ModelsView'
 import type { StartModel } from '../start/useStart'
 import s from './Settings.module.css'
 import { type AppIconModel, useAppIcon } from './useAppIcon'
+import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 
 /*
  * Settings, as a panel from the home's bar, over the home: the kit's Control
  * Center. Each module says at a glance where something stands: the agents on
- * this Mac and a word on each, the code hosts and trackers, the app's icon.
+ * this Mac and a word on each, the code hosts and trackers, the app's icon,
+ * and, on a Mac with a notch, where Althar shows while you're in another app.
  * Any opens out in place, the agents one at a time with their accounts, and
  * steps back. It is calm: nothing in it says what is running.
  */
@@ -55,6 +58,9 @@ export const text = {
   connected: (n: number) => `${n} connected`,
   icon: 'App icon',
   iconFailed: 'That icon couldn’t be kept. Try again.',
+  edge: 'While you’re in another app',
+  edgeNote: 'Where Althar shows what needs you and what runs.',
+  edgeFailed: 'That couldn’t be kept. Try again.',
   version: (version: string) => `Althar ${version}`,
 }
 
@@ -96,7 +102,7 @@ export const marksOf = (list: ConnectionList): ReadonlyArray<MarkGlance> => {
   return [...marks.values()]
 }
 
-type Showing = 'all' | 'agents' | 'connections' | 'icon'
+type Showing = 'all' | 'agents' | 'connections' | 'icon' | 'edge'
 
 export interface SettingsPanelProps {
   start: StartModel
@@ -107,7 +113,7 @@ export interface SettingsPanelProps {
 
 /** Settings from the home's bar, with what it shows read here. */
 export function SettingsPanel(props: SettingsPanelProps) {
-  return <SettingsView {...props} accounts={useAccountSignIn(props.start)} connections={useConnections()} appIcon={useAppIcon()} />
+  return <SettingsView {...props} accounts={useAccountSignIn(props.start)} connections={useConnections()} appIcon={useAppIcon()} edge={useEdgePlace()} />
 }
 
 export function SettingsView({
@@ -115,9 +121,10 @@ export function SettingsView({
   accounts,
   connections,
   appIcon,
+  edge,
   open,
   onOpenChange,
-}: SettingsPanelProps & { accounts: AccountSignInModel; connections: ConnectionsModel; appIcon: AppIconModel }) {
+}: SettingsPanelProps & { accounts: AccountSignInModel; connections: ConnectionsModel; appIcon: AppIconModel; edge: EdgePlaceModel }) {
   const [showing, setShowing] = useState<Showing>('all')
   const [agentId, setAgentId] = useState<string | null>(null)
   const agents = start.status?.agents ?? []
@@ -132,6 +139,8 @@ export function SettingsView({
     agents.reduce((n, agent) => n + agent.accounts.length, 0),
   )
   const icon = appIcons.find((one) => one.value === appIcon.icon)
+  // Only on a Mac whose screen has a notch is there anywhere to choose.
+  const place = edgePlaces.find((one) => one.value === edge.place)
   const list = connections.list
   const all = () => setShowing('all')
 
@@ -189,6 +198,11 @@ export function SettingsView({
                 onClick={() => setShowing('icon')}
               />
             )}
+            {place !== undefined && (
+              <ControlModule title={text.edge} aside={place.title} onClick={() => setShowing('edge')}>
+                <span className={s.quiet}>{place.note}</span>
+              </ControlModule>
+            )}
           </ControlGrid>
           {start.status !== null && (
             <ControlFoot>
@@ -219,6 +233,24 @@ export function SettingsView({
         <ControlDetail title={connectionsText.label} onBack={all}>
           <ControlSheet>
             <ConnectionsView model={connections} columns />
+          </ControlSheet>
+        </ControlDetail>
+      )}
+      {showing === 'edge' && edge.place !== null && (
+        <ControlDetail title={text.edge} onBack={all}>
+          <ControlSheet>
+            <p className={s.quiet}>{text.edgeNote}</p>
+            <Choices
+              label={text.edge}
+              options={edgePlaces.map((one) => ({ value: one.value, title: one.title, note: one.note }))}
+              value={edge.place}
+              onChange={edge.choose}
+            />
+            {edge.failed && (
+              <p role="alert" className={s.failed}>
+                {text.edgeFailed}
+              </p>
+            )}
           </ControlSheet>
         </ControlDetail>
       )}

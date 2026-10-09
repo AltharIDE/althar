@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { basename, resolve } from 'node:path'
 
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite-plus'
@@ -28,8 +28,34 @@ const routePages = (): Plugin => ({
   },
 })
 
+/**
+ * The wallpapers are the brand pack's (brand/export/wallpaper), kept once:
+ * served from there at /wallpaper/ in development, and copied into the build.
+ */
+const WALLPAPERS = resolve(import.meta.dirname, '../../brand/export/wallpaper')
+const wallpapers = (): Plugin => ({
+  name: 'wallpapers',
+  configureServer(server) {
+    server.middlewares.use('/wallpaper', (req, res, next) => {
+      const name = basename(decodeURIComponent((req.url ?? '').split('?')[0] ?? ''))
+      readFile(resolve(WALLPAPERS, name)).then(
+        (body) => {
+          res.setHeader('content-type', 'image/jpeg')
+          res.end(body)
+        },
+        () => next(),
+      )
+    })
+  },
+  async generateBundle() {
+    for (const name of await readdir(WALLPAPERS))
+      if (name.endsWith('.jpg'))
+        this.emitFile({ type: 'asset', fileName: `wallpaper/${name}`, source: await readFile(resolve(WALLPAPERS, name)) })
+  },
+})
+
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), routePages()],
+  plugins: [react(), routePages(), wallpapers()],
   css: {
     modules: {
       localsConvention: 'camelCaseOnly',

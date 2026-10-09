@@ -13,6 +13,7 @@
   "scripts": {
     "storybook": "storybook dev --port 6006 --no-open",
     "build": "storybook build --output-dir dist/storybook --quiet",
+    "deploy": "wrangler deploy",
     "check": "vp check",
     "fix": "vp check --fix",
     "test": "vp test run",
@@ -45,7 +46,8 @@
     "typescript": "^7.0.2",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
     "vite-plus": "1.0.0-rc.0",
-    "vitest": "5.0.1"
+    "vitest": "5.0.1",
+    "wrangler": "^4.143.0"
   },
   "peerDependencies": {
     "react": "^19.3.0",

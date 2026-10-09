@@ -21,6 +21,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import { envelope } from './envelope'
 import { CantMerge, ChangedSinceSeen, type GitFailed, NotFound, PushRefused } from './errors'
+import { conventionsAt, ruleOf, titleFor } from './conventions'
 import { forkOf } from './forks'
 import { commitOf, commitsAhead, commitsOf, gitOutcome, gitWithin, namedRemotes, onHead, pushTo, uncommittedFiles } from './git'
 import { Instance } from './Instance'
@@ -351,17 +352,27 @@ export class Changes extends Context.Service<
           return { link, snapshot, host: adapters.host, repository, account: adapters.info.account }
         })
 
-      /** What the steps reported, as the pull request's description. */
+      /** What the steps reported, as the pull request's description: in the repository's template, where it has one. */
       const bodyFor = (
         taskId: string,
         threadId: string,
         issue: { readonly key: string; readonly url: string; readonly sameHost: boolean } | null,
+        repository: { readonly slug: string; readonly template: string | null },
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [lead] = yield* sql<{ summary: string }>`
             SELECT json_extract(content, '$.summary') AS summary FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
               AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
+          // The lead's latest description in the template, for this repository.
+          const [written] =
+            repository.template === null
+              ? []
+              : yield* sql<{ text: string | null }>`
+                  SELECT json_extract(content, '$.descriptions.' || json_quote(${repository.slug})) AS text FROM thread_items
+                  WHERE thread_id = ${threadId} AND kind = 'step_result'
+                    AND json_extract(content, '$.descriptions.' || json_quote(${repository.slug})) IS NOT NULL
+                  ORDER BY sequence DESC LIMIT 1`
           const findings = yield* sql<{ severity: string; location: string; claim: string; state: string; response: string | null }>`
             SELECT f.severity, f.location, f.claim, f.state, f.response FROM findings f
             JOIN node_attempts a ON a.id = f.review_attempt_id JOIN nodes n ON n.id = a.node_id
@@ -380,6 +391,8 @@ export class Changes extends Context.Service<
               return { ...finding, file: location.file ?? null, line: location.line ?? null }
             }),
             issue,
+            template: repository.template,
+            written: written?.text ?? null,
           })
         })
 
@@ -438,6 +451,7 @@ export class Changes extends Context.Service<
           const tasks = yield* sql<{
             title: string
             name: string
+            slug: string
             threadId: string
             workspaceId: string
             path: string
@@ -449,7 +463,7 @@ export class Changes extends Context.Service<
             defaultBase: string | null
             changeTarget: 'upstream' | 'fork' | null
           }>`
-            SELECT k.title, b.display_name AS name, t.id AS thread_id, w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.id AS binding_id,
+            SELECT k.title, b.display_name AS name, b.slug, t.id AS thread_id, w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.id AS binding_id,
               b.remote_fingerprints AS remotes, b.default_base_ref AS default_base, b.change_target
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
@@ -479,6 +493,8 @@ export class Changes extends Context.Service<
         input: { readonly projectId: ProjectId; readonly taskId: string; readonly runId: string; readonly end: 'draft' | 'ready' | 'none' },
         task: {
           readonly title: string
+          readonly name: string
+          readonly slug: string
           readonly threadId: string
           readonly workspaceId: string
           readonly path: string
@@ -540,11 +556,18 @@ export class Changes extends Context.Service<
             issueLink !== undefined &&
             issueLink.product === host.product &&
             issueLink.ref.toLowerCase().startsWith(`${path.join('/').toLowerCase()}#`)
-          const title = issueLink === undefined || sameHost ? task.title : `${issueLink.key}: ${task.title}`
+          // The team's conventions, as the task's worktree has them now, under the person's own rule for titles.
+          const conventions = yield* conventionsAt(task.path, 'HEAD')
+          const rule = ruleOf('title', (yield* (yield* Policies).current(input.projectId)).rules.titlePattern)
+          const title = titleFor(rule ?? conventions.title?.pattern ?? null, {
+            title: task.title,
+            issue: issueLink === undefined ? null : { key: issueLink.key, sameHost },
+          })
           const body = yield* bodyFor(
             input.taskId,
             task.threadId,
             issueLink === undefined ? null : { key: issueLink.key, url: issueLink.url, sameHost },
+            { slug: task.slug, template: conventions.template?.text ?? null },
           )
           // The branch it started from, on the repository it opens on; into the one a fork came from, from a task made before it
           // was chosen, that repository's default.

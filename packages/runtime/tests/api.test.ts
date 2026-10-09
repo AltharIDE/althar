@@ -484,7 +484,8 @@ describe('project rules, through the API', () => {
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
-        assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), {
+        const { conventions, ...rules } = yield* client.GetProjectRules({ projectId: project.id })
+        assert.deepStrictEqual(rules, {
           projectId: project.id,
           permissions: 'rules',
           alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
@@ -494,7 +495,14 @@ describe('project rules, through the API', () => {
           usageLimit: 'move',
           rotateAccounts: false,
           onlyAccounts: null,
+          branchPattern: null,
+          titlePattern: null,
         })
+        // A repository that says nothing of its pull requests: Althar's own names, and no template.
+        assert.deepStrictEqual(
+          conventions.map(({ branch, title, template }) => ({ branch, title, template })),
+          [{ branch: null, title: null, template: null }],
+        )
         const changed = yield* client.SetProjectRules({
           commandId: commandId(),
           projectId: project.id,
@@ -532,6 +540,35 @@ describe('project rules, through the API', () => {
         assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
         const missing = yield* Effect.flip(client.GetProjectRules({ projectId: 'proj_missing' }))
         assert.strictEqual(missing.reason, 'NotFound')
+      }),
+    ),
+  )
+
+  it.live('names branches and titles by the person’s patterns, over the repository’s, and goes back to the repository’s', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const set = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          branchPattern: 'feature/{key}-{slug}',
+          titlePattern: '{key}: {title}',
+        })
+        assert.deepStrictEqual([set.branchPattern, set.titlePattern], ['feature/{key}-{slug}', '{key}: {title}'])
+        // A task with no issue leaves the key out, with what held it.
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Say hello' })
+        assert.strictEqual(task.branch, 'feature/say-hello')
+        // Taken back, or emptied: the repository's again, here Althar's own.
+        const back = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          branchPattern: null,
+          titlePattern: ' ',
+        })
+        assert.deepStrictEqual([back.branchPattern, back.titlePattern], [null, null])
+        const next = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Say goodbye' })
+        assert.strictEqual(next.branch, 'althar/say-goodbye')
       }),
     ),
   )

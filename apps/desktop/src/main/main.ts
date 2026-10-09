@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
+import { isEdgePlace } from './edge'
+import { type Edge, startEdge } from './edgeWindows'
 
 import {
   app,
@@ -32,7 +34,8 @@ import {
  * opens the runtime's secrets, such as a code host's token, with Electron's
  * safeStorage, whose key the keychain keeps for this app alone: the runtime
  * keeps them sealed and never holds the key. It gives the Dock the icon the
- * person chose.
+ * person chose, and puts Althar at the edge of the screen (edgeWindows.ts):
+ * round the notch, or in the menu bar.
  */
 
 const here = import.meta.dirname
@@ -81,16 +84,28 @@ interface RuntimeMessage {
 /* Notifications the person may still click: kept, so they aren't collected before then. */
 const shown = new Set<Notification>()
 
-/** Opens the window on a thread, as a notification the person clicked asks: a window there is, or a new one. */
-const openThread = (threadId: string) => {
-  const existing = BrowserWindow.getAllWindows()[0]
+/* Althar's own windows, apart from the edge's pages. */
+const windows = new Set<BrowserWindow>()
+let edge: Edge | undefined
+
+/** Brings Althar's window forward, a window there is or a new one, from wherever the person is. */
+const bringForward = () => {
+  const existing = [...windows][0]
   const window = existing ?? openWindow()
-  const send = () => window.webContents.send('althar:open', threadId)
-  if (existing === undefined || window.webContents.isLoading()) window.webContents.once('did-finish-load', send)
-  else send()
   if (window.isMinimized()) window.restore()
+  // Asked from the edge, Althar isn't the active app: it becomes it.
+  app.focus({ steal: true })
   window.show()
   window.focus()
+  return { window, fresh: existing === undefined }
+}
+
+/** Opens the window on a thread, as a notification or the edge asks. */
+const openThread = (threadId: string) => {
+  const { window, fresh } = bringForward()
+  const send = () => window.webContents.send('althar:open', threadId)
+  if (fresh || window.webContents.isLoading()) window.webContents.once('did-finish-load', send)
+  else send()
 }
 
 /**
@@ -99,7 +114,10 @@ const openThread = (threadId: string) => {
  * the Dock. Never for progress.
  */
 const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
-  if (event._tag === 'Waiting' && typeof event.count === 'number') return void app.setBadgeCount(event.count)
+  if (event._tag === 'Waiting' && typeof event.count === 'number') {
+    edge?.waiting(event.count)
+    return void app.setBadgeCount(event.count)
+  }
   if (event._tag !== 'Nudge' || typeof event.title !== 'string' || typeof event.body !== 'string' || typeof event.threadId !== 'string')
     return
   if (BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) return
@@ -239,6 +257,12 @@ const openWindow = () => {
       nodeIntegration: false,
     },
   })
+  windows.add(window)
+  window.on('closed', () => {
+    windows.delete(window)
+    // Off a Mac, closing Althar's last window quits, as it did before the edge kept pages of its own open.
+    if (windows.size === 0 && process.platform !== 'darwin') app.quit()
+  })
   window.webContents.on('did-finish-load', () => connect(window))
   window.once('ready-to-show', () => window.show())
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
@@ -285,6 +309,30 @@ ipcMain.handle('althar:set-app-icon', async (_event, icon: unknown) => {
   await writeAppIcon(locations().profile, icon)
 })
 
+// Where Althar shows while the person is in another app, and whether this Mac has a notch to choose the island by.
+ipcMain.handle('althar:edge', () => edge?.state() ?? null)
+ipcMain.handle('althar:set-edge', async (_event, place: unknown) => {
+  if (!isEdgePlace(place)) throw new Error(`Althar can't show at ${String(place)}.`)
+  await edge?.choose(place)
+})
+// From an edge page: where the island draws, how tall the menu bar's sheet is, and what to open in the window.
+ipcMain.on('althar:edge-drawn', (event, rect: unknown) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (window === null || typeof rect !== 'object' || rect === null) return
+  const { x, y, width, height } = rect as Record<string, unknown>
+  if ([x, y, width, height].every((n) => typeof n === 'number' && Number.isFinite(n)))
+    edge?.drawn(window, { x: x as number, y: y as number, width: width as number, height: height as number })
+})
+ipcMain.on('althar:edge-size', (event, height: unknown) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (window !== null && typeof height === 'number') edge?.sized(window, height)
+})
+ipcMain.on('althar:edge-open', (_event, threadId: unknown) => {
+  edge?.settle()
+  if (typeof threadId === 'string' && threadId !== '') openThread(threadId)
+  else bringForward()
+})
+
 void app.whenReady().then(() => {
   // The window asks for nothing: no notifications, camera, microphone or anything else a page can ask for.
   // Althar's own notifications come from here, as the runtime says something needs the person.
@@ -293,8 +341,15 @@ void app.whenReady().then(() => {
   void showChosenIcon()
   startRuntime()
   openWindow()
+  edge = startEdge({
+    profile: () => locations().profile,
+    connect,
+    preload: join(here, '../preload/preload.cjs'),
+    page: join(here, '../renderer/edge.html'),
+    pictures: join(here, '../../resources/tray'),
+  })
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) openWindow()
+    if (windows.size === 0) openWindow()
   })
 })
 

@@ -101,6 +101,12 @@
   --on-ink-focus: #b99bff;
   --ink-hover: #2a2a30;
   --ink-pressed: #000000;
+  /* Cobalt and violet on the island's black: a step lighter, and kept far
+     enough apart that running and waiting on you never read alike there. */
+  --live-on-ink: #6b78ff;
+  --signal-on-ink: #a77bff;
+  --signal-on-ink-hover: #b994ff;
+  --signal-on-ink-pressed: #9566f2;
 
   /* ---- Terminal, dark -----------------------------------------------------
      Command output on its own dark sheet. The near-greys are kept apart

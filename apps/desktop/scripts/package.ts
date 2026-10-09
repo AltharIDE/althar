@@ -10,7 +10,7 @@ import { build } from 'electron-builder'
  * `bun run build:package` (so without the end-to-end tests' hooks). The
  * bundles hold everything but the agent adapters, which run as processes of
  * their own and are found in node_modules, so the app is staged with the
- * bundles, the icons, and a flat install of the adapters alone, with the
+ * bundles, the icons, the menu bar's pictures, and a flat install of the adapters alone, with the
  * packages that carry the agents' own binaries pinned to the versions the
  * workspace runs, so the app ships what dev and CI tested. Electron comes
  * from the copy already installed, at the version the app is tested on.
@@ -57,6 +57,7 @@ rmSync(out, { recursive: true, force: true })
 mkdirSync(stage, { recursive: true })
 cpSync(join(desktop, 'dist'), join(stage, 'dist'), { recursive: true, filter: (path) => !path.endsWith('.map') })
 cpSync(join(desktop, 'resources', 'icons'), join(stage, 'resources', 'icons'), { recursive: true, filter: (path) => !path.endsWith('.md') })
+cpSync(join(desktop, 'resources', 'tray'), join(stage, 'resources', 'tray'), { recursive: true })
 writeFileSync(
   join(stage, 'package.json'),
   `${JSON.stringify(

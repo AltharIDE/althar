@@ -165,8 +165,12 @@ const busy = () =>
     projects: [project, halyard, ferrous],
   })
 
-function Home({ onProject = vi.fn(), onTask = vi.fn() }: Partial<Record<'onProject' | 'onTask', (id: string) => void>>) {
-  return <HomeView model={useHome()} start={useStart()} onProject={onProject} onTask={onTask} />
+function Home({
+  onProject = vi.fn(),
+  onTalk = vi.fn(),
+  onTask = vi.fn(),
+}: Partial<Record<'onProject' | 'onTalk' | 'onTask', (id: string) => void>>) {
+  return <HomeView model={useHome()} start={useStart()} onProject={onProject} onTalk={onTalk} onTask={onTask} />
 }
 
 describe('the home', () => {
@@ -274,7 +278,7 @@ describe('the home', () => {
     const getHome = vi.fn(async () => home({ looked: '2026-10-07T08:00:00.000Z', projects: [project, halyard] }))
     const { client, emit } = fakeClient({ getHome })
     const view = withServices(<Home onProject={onProject} />, client)
-    await screen.findByRole('button', { name: /halyard/ })
+    await within(await screen.findByRole('complementary', { name: 'Projects' })).findByRole('button', { name: /halyard/ })
     fireEvent.keyDown(window, { key: '2', metaKey: true })
     fireEvent.keyDown(window, { key: 'x', metaKey: true })
     expect(onProject).not.toHaveBeenCalled()
@@ -294,6 +298,24 @@ describe('the home', () => {
     view.unmount()
     expect(client.leftHome).toHaveBeenCalled()
     act(() => void window.dispatchEvent(new Event('pagehide')))
+  })
+
+  it('rests when nothing waits and nothing is in progress, and offers a new project’s coordinator', async () => {
+    const onTalk = vi.fn()
+    const { client } = fakeClient({ getHome: vi.fn(async () => home({ projects: [halyard] })) })
+    withServices(<Home onTalk={onTalk} />, client)
+    expect(await screen.findByRole('heading', { name: 'Nothing in halyard yet' })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: /In progress/ })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Talk to halyard’s coordinator' }))
+    expect(onTalk).toHaveBeenCalledWith('p2')
+    expect(within(screen.getByRole('complementary', { name: 'Projects' })).getByText('No tasks yet')).toBeTruthy()
+  })
+
+  it('is all quiet once its projects have had work', async () => {
+    const { client } = fakeClient({ getHome: vi.fn(async () => home()) })
+    withServices(<Home />, client)
+    expect(await screen.findByRole('heading', { name: 'All quiet' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Talk to/ })).toBeNull()
   })
 
   it('says what went wrong opening a folder, and opens one dropped', async () => {
@@ -514,6 +536,48 @@ describe('settings', () => {
     await userEvent.click(within(icons).getByRole('radio', { name: 'Keystone' }))
     expect((await screen.findByRole('alert')).textContent).toBe('That icon couldn’t be kept. Try again.')
     expect(within(icons).getByRole('radio', { name: 'Cobalt' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('offers where Althar shows in another app, on a Mac with a notch, and keeps a choice', async () => {
+    const host = fakeHost()
+    withServices(<Settings />, fakeClient().client, host)
+    const places = await screen.findByRole('radiogroup', { name: 'While you’re in another app' })
+    expect(
+      within(places)
+        .getAllByRole('radio')
+        .map((radio) => radio.getAttribute('aria-checked')),
+    ).toEqual(['true', 'false'])
+    await userEvent.click(within(places).getByRole('radio', { name: /In the menu bar/ }))
+    expect(host.setEdge).toHaveBeenCalledWith('menu')
+    expect(
+      within(places)
+        .getByRole('radio', { name: /In the menu bar/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
+  })
+
+  it('says nothing of it without a notch, where it is the menu bar', async () => {
+    withServices(<Settings />, fakeClient().client, fakeHost({ edge: vi.fn(async () => ({ place: 'island', notch: false })) }))
+    await screen.findByRole('radiogroup', { name: 'App icon' })
+    expect(screen.queryByRole('radiogroup', { name: 'While you’re in another app' })).toBeNull()
+  })
+
+  it('goes back to where it was when a choice can’t be kept', async () => {
+    const host = fakeHost({
+      edge: vi.fn(async () => ({ place: 'menu', notch: true })),
+      setEdge: vi.fn(async () => {
+        throw new Error('disk full')
+      }),
+    })
+    withServices(<Settings />, fakeClient().client, host)
+    const places = await screen.findByRole('radiogroup', { name: 'While you’re in another app' })
+    await userEvent.click(within(places).getByRole('radio', { name: /Round the notch/ }))
+    expect((await screen.findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    expect(
+      within(places)
+        .getByRole('radio', { name: /In the menu bar/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
   })
 
   it('offers no icon where there is no Dock to show one', async () => {

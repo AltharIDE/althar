@@ -70,7 +70,7 @@ test('comes back to what runs and what waits across projects, with the projects 
     await tabs.getByRole('button', { name: /^Home/ }).click()
     await expect(page.getByRole('heading', { name: 'Name the limits better', level: 3 })).toHaveCount(0)
 
-    // Settings is a panel from the bar: the agents and their accounts, the code hosts, and the app's icon, kept in the profile.
+    // Settings is a panel from the bar: the agents and their accounts, the code hosts, the app's icon and where Althar shows, kept in the profile.
     await page.keyboard.press('Meta+,')
     const settings = page.getByRole('dialog', { name: 'Settings' })
     await expect(settings.getByText('Claude Code')).toBeVisible()
@@ -93,6 +93,24 @@ test('comes back to what runs and what waits across projects, with the projects 
       await expect(settings.getByRole('button', { name: /^App icon/ })).toBeVisible()
     } else {
       await expect(settings.getByRole('button', { name: /^App icon/ })).toHaveCount(0)
+    }
+    // While the person is in another app, Althar shows round the notch, on a Mac that has one, or in the menu bar.
+    // Only with a notch is there a choice; the edge is a page of its own, with what needs you and what runs.
+    const edgePage = (place: string) => electronApp.windows().find((window) => window.url().includes(`place=${place}`))
+    const edge = await page.evaluate(() => window.althar.edge())
+    if (edge?.notch === true) {
+      await expect.poll(() => edgePage('island') !== undefined).toBe(true)
+      const island = edgePage('island')
+      if (island !== undefined) await expect(island.getByRole('region', { name: 'Althar' })).toHaveCount(1)
+      await settings.getByRole('button', { name: /^While you’re in another app/ }).click()
+      const places = settings.getByRole('radiogroup', { name: 'While you’re in another app' })
+      await expect(places.getByRole('radio', { name: /Round the notch/ })).toBeChecked()
+      await places.getByRole('radio', { name: /In the menu bar/ }).click()
+      await expect.poll(() => readFileSync(join(home, 'profile', 'desktop.json'), 'utf8')).toContain('"edge": "menu"')
+      await expect.poll(() => edgePage('island') === undefined && edgePage('menu') !== undefined).toBe(true)
+      await page.keyboard.press('Escape')
+    } else {
+      await expect(settings.getByRole('button', { name: /^While you’re in another app/ })).toHaveCount(0)
     }
     await page.keyboard.press('Escape')
     await expect(settings).toHaveCount(0)

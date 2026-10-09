@@ -199,6 +199,16 @@ service's model.
   nothing itself; a step that ends in a push isn't done while the worktree
   has uncommitted files, so the lead commits what belongs to the task and
   clears away the rest. The record keeps the commit pushed.
+- **A pull request is described in the repository's template,** where it
+  has one in the places its host looks (GitHub's
+  `pull_request_template.md`, GitLab's default merge request template,
+  Bitbucket Cloud's). The lead writes the description in it, as a teammate
+  would; Althar asks it to before the step can end. Althar keeps the
+  template's headings and checklists, unticks every box, and adds the
+  review below. A description that drops the template is replaced by the
+  template with the lead's summary in its place for one. Templates kept
+  elsewhere (an organisation's `.github` repository, a host's settings)
+  aren't read yet.
 - **After the first push, pushing is the person's.** When a plan's steps are
   done, Althar pushes the branch and opens the pull request. What the lead
   commits after, answering the person, a review or failed checks, waits on the

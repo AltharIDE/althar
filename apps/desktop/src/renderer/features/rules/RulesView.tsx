@@ -1,4 +1,4 @@
-import type { AgentStatus, CommandRule, ProjectRulesView, RuleKind } from '@althar/contracts'
+import { type AgentStatus, type CommandRule, fillPattern, type ProjectRulesView, type RuleKind } from '@althar/contracts'
 import { BackCrumb, LimitPolicy, PermissionPolicy, TaskEnd, TitleBar } from '@althar/ui'
 import { ProjectRules, projectRulesText } from '@althar/ui/screens'
 
@@ -9,8 +9,9 @@ import type { RulesModel } from './useRules'
 /*
  * A project's rules (ADR-013): what happens to what agents ask to do beyond
  * their sandbox, what always waits for the person and what is never
- * allowed, how a task ends, what a usage limit does, and which accounts
- * work runs on. The kit's screen, with only what Althar does today.
+ * allowed, how a task ends, how its branches and pull requests are named
+ * and described, what a usage limit does, and which accounts work runs on.
+ * The kit's screen, with only what Althar does today.
  */
 
 export const text = {
@@ -25,6 +26,8 @@ export const text = {
     outside: 'Writing outside the task’s worktree',
   } satisfies Record<RuleKind, string>,
   command: (pattern: string) => `Running ${pattern}`,
+  /** The task a pattern's example is made for. */
+  example: { key: 'PROJ-123', slug: 'fix-login', title: 'Fix login' },
   /** The kit's words where Althar does less, or says it more exactly. */
   screen: {
     lede: 'For every task in this project, from the next request on.',
@@ -89,6 +92,13 @@ const withCommand = (rules: ProjectRulesView, pattern: string, decision: Command
   { pattern, decision },
 ]
 
+/** Althar's own patterns, where a repository's docs say nothing and the person set none. */
+const OWN = { branch: 'althar/{key}-{slug}', title: '{title}' } as const
+
+/** What each repository's docs say of a kind of name, as the naming rows list them. */
+const namingOf = (rules: ProjectRulesView, kind: 'branch' | 'title') =>
+  rules.conventions.map((repository) => ({ id: repository.repository, name: repository.repository, found: repository[kind] }))
+
 /** The agents with more than one account, as the accounts row lists them. */
 export const agentAccountsOf = (agents: ReadonlyArray<AgentStatus>) =>
   agents
@@ -139,6 +149,27 @@ export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => 
             onAddNever={(pattern) => model.change({ commands: withCommand(rules, pattern, 'never') })}
             end={rules.end === null ? TaskEnd.DraftPr : toEnd[rules.end]}
             onEndChange={(end) => model.change({ end })}
+            branches={{
+              value: rules.branchPattern,
+              onChange: (pattern) => model.setPattern('branch', pattern),
+              error: model.patternErrors.branch,
+              exampleOf: (pattern) => fillPattern(pattern, text.example),
+              fallback: OWN.branch,
+              repositories: namingOf(rules, 'branch'),
+            }}
+            titles={{
+              value: rules.titlePattern,
+              onChange: (pattern) => model.setPattern('title', pattern),
+              error: model.patternErrors.title,
+              exampleOf: (pattern) => fillPattern(pattern, text.example),
+              fallback: OWN.title,
+              repositories: namingOf(rules, 'title'),
+            }}
+            templates={rules.conventions.map((repository) => ({
+              id: repository.repository,
+              name: repository.repository,
+              path: repository.template,
+            }))}
             limitOptions={[LimitPolicy.Move, LimitPolicy.Wait]}
             limits={rules.usageLimit === 'wait' ? LimitPolicy.Wait : LimitPolicy.Move}
             onLimitsChange={(limit) => model.change({ usageLimit: limit === LimitPolicy.Wait ? 'wait' : 'move' })}

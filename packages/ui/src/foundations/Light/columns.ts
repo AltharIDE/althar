@@ -1,6 +1,7 @@
 /*
- * The light the launch rises in: a row of tall columns standing off the
- * window's bottom, highest in the middle, Althar's cobalt there and paler
+ * Althar's light: the window opens in it (screens/Launch), and the home
+ * rests over it (Light). A row of tall columns standing off the window's
+ * bottom, highest in the middle, Althar's cobalt there and paler
  * out to warm at the edges, as Dia's light is a rainbow. Each is a little
  * uneven, the same every time, so the light has a profile of its own.
  */
