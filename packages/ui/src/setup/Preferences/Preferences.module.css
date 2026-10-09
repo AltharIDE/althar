@@ -1,0 +1,45 @@
+/* Rows of settings, ruled between; the frame around them is the consumer's. */
+.list {
+  display: grid;
+}
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+  align-items: start;
+  padding: 11px 0;
+}
+.row + .row {
+  border-top: 1px solid var(--line);
+}
+/* depends on the row above: set in under its words, without a rule between */
+.indent {
+  padding-left: 18px;
+}
+.row + .indent {
+  padding-top: 0;
+  border-top: 0;
+}
+.words {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.indent .title {
+  font-weight: 500;
+}
+.note {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.control {
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+}

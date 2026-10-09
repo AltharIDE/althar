@@ -19,6 +19,7 @@ import type {
 } from '@althar/contracts'
 import { vi } from 'vitest'
 
+import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
 import type { Host } from '../src/renderer/data/services'
 
@@ -568,7 +569,20 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
   return { client, emit: (event: WatchEvent) => listeners.forEach((listener) => listener(event)), listeners, watching }
 }
 
+/** The app's preferences as a main process would keep them: where each starts, then each change. */
+const keptPreferences = (): Pick<Host, 'preferences' | 'setPreference'> => {
+  let kept: AppPreferences = DEFAULT_PREFERENCES
+  return {
+    preferences: vi.fn(async () => kept),
+    setPreference: vi.fn(async (key, value) => {
+      kept = { ...kept, [key]: value }
+      return kept
+    }),
+  }
+}
+
 export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
+  ...keptPreferences(),
   pickFolder: vi.fn(async () => 'grant_picked'),
   grantDropped: vi.fn(async () => 'grant_dropped'),
   onOpen: vi.fn(() => () => {}),

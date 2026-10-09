@@ -16,14 +16,23 @@ import {
   ControlModule,
   ControlPicture,
   ControlSheet,
+  ControlToggle,
   DockPreview,
+  Icon,
   IconButton,
+  KeepAwake,
   type MarkGlance,
+  NotificationSettings,
+  type NotifyChoices,
+  OpenFilesIn,
+  SettingList,
 } from '@althar/ui'
 
 import { agentLineOf, brandOf } from '../../shared/agents'
 import { appIcons } from '../../shared/appIcons'
 import { edgePlaces } from '../../shared/edge'
+import { useEditorList } from '../../shared/OpenIn'
+import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { productBrand } from '../../shared/products'
 import { clock } from '../../shared/time'
 import { AgentAccounts } from '../accounts/AgentAccounts'
@@ -40,7 +49,10 @@ import { type CoAuthorModel, useCoAuthor } from './useCoAuthor'
 
 /*
  * Settings, as a panel from the home's bar, over the home: the kit's Control
- * Center. Each module says at a glance where something stands: the agents on
+ * Center. Round switches first, for keeping the Mac awake while work runs
+ * and for notifications, each opening out to the rest of its settings: on
+ * battery too and the editor files open in, and which notifications, the
+ * Dock's count and a sound. Each module says at a glance where something stands: the agents on
  * this Mac and a word on each, the code hosts and trackers, the app's icon,
  * and, on a Mac with a notch, where Althar shows while you're in another app.
  * Any opens out in place, the agents one at a time with their accounts, and
@@ -65,7 +77,27 @@ export const text = {
   edgeFailed: 'That couldn’t be kept. Try again.',
   coAuthorFailed: 'That couldn’t be kept. Try again.',
   version: (version: string) => `Althar ${version}`,
+  awake: 'Keep awake',
+  awakeOn: 'While work runs',
+  off: 'Off',
+  mac: 'This Mac',
+  notify: 'Notifications',
+  withSound: 'With sound',
+  silent: 'Silent',
+  notifyNote: 'Only while Althar isn’t in front. Never for progress.',
+  preferenceFailed: 'That couldn’t be kept. Try again.',
 }
+
+/** The notification switches as the kit shows them, from the preferences as kept. */
+const notifyChoicesOf = (preferences: PreferencesModel['preferences']): NotifyChoices => ({
+  calls: preferences.notifyCalls,
+  ready: preferences.notifyReady,
+  stopped: preferences.notifyStopped,
+  badge: preferences.badge,
+  sound: preferences.sound,
+})
+
+const NOTIFY_KEYS = { calls: 'notifyCalls', ready: 'notifyReady', stopped: 'notifyStopped', badge: 'badge', sound: 'sound' } as const
 
 /** An agent at a glance: an account only the person can sign in again, one resting until its usage is back, or how many it has. */
 export const agentGlanceOf = (agent: AgentStatus, now: Date = new Date()): AgentGlance => {
@@ -105,7 +137,7 @@ export const marksOf = (list: ConnectionList): ReadonlyArray<MarkGlance> => {
   return [...marks.values()]
 }
 
-type Showing = 'all' | 'agents' | 'connections' | 'icon' | 'edge'
+type Showing = 'all' | 'agents' | 'connections' | 'icon' | 'edge' | 'mac' | 'notify'
 
 export interface SettingsPanelProps {
   start: StartModel
@@ -124,6 +156,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
       appIcon={useAppIcon()}
       edge={useEdgePlace()}
       coAuthor={useCoAuthor()}
+      preferences={usePreferences()}
+      editors={useEditorList()}
     />
   )
 }
@@ -135,6 +169,8 @@ export function SettingsView({
   appIcon,
   edge,
   coAuthor,
+  preferences: kept,
+  editors,
   open,
   onOpenChange,
 }: SettingsPanelProps & {
@@ -144,6 +180,8 @@ export function SettingsView({
   edge: EdgePlaceModel
   /** Null until the settings are read. */
   coAuthor: CoAuthorModel | null
+  preferences: PreferencesModel
+  editors: ReadonlyArray<{ readonly id: string; readonly name: string }>
 }) {
   const [showing, setShowing] = useState<Showing>('all')
   const [agentId, setAgentId] = useState<string | null>(null)
@@ -163,6 +201,19 @@ export function SettingsView({
   const place = edgePlaces.find((one) => one.value === edge.place)
   const list = connections.list
   const all = () => setShowing('all')
+  const { preferences, set } = kept
+  const notifying = preferences.notifyCalls || preferences.notifyReady || preferences.notifyStopped
+  // The round switch turns every kind of notification on or off together.
+  const notifyAll = (on: boolean) => {
+    set('notifyCalls', on)
+    set('notifyReady', on)
+    set('notifyStopped', on)
+  }
+  const failed = kept.failed && (
+    <p role="alert" className={s.failed}>
+      {text.preferenceFailed}
+    </p>
+  )
 
   // It opens on all the modules, or on the agents while an account is signing in.
   const [wasOpen, setWasOpen] = useState(open)
@@ -195,6 +246,22 @@ export function SettingsView({
       {showing === 'all' && (
         <>
           <ControlGrid>
+            <ControlToggle
+              title={text.awake}
+              line={preferences.keepAwake ? text.awakeOn : text.off}
+              on={preferences.keepAwake}
+              onChange={(on) => set('keepAwake', on)}
+              glyph={<Icon name="cup" size={16} />}
+              onOpen={() => setShowing('mac')}
+            />
+            <ControlToggle
+              title={text.notify}
+              line={notifying ? (preferences.sound ? text.withSound : text.silent) : text.off}
+              on={notifying}
+              onChange={notifyAll}
+              glyph={<Icon name="bell" size={16} />}
+              onOpen={() => setShowing('notify')}
+            />
             <ControlModule title={text.agents} aside={start.status === null ? undefined : counted} onClick={() => setShowing('agents')}>
               {start.status === null ? (
                 <span className={s.quiet}>{text.connecting}</span>
@@ -281,6 +348,39 @@ export function SettingsView({
                 {text.edgeFailed}
               </p>
             )}
+          </ControlSheet>
+        </ControlDetail>
+      )}
+      {showing === 'mac' && (
+        <ControlDetail title={text.mac} onBack={all}>
+          <ControlSheet>
+            <SettingList>
+              <KeepAwake
+                on={preferences.keepAwake}
+                onChange={(on) => set('keepAwake', on)}
+                onBattery={preferences.awakeOnBattery}
+                onBatteryChange={(on) => set('awakeOnBattery', on)}
+              />
+              {editors.length > 0 && (
+                <OpenFilesIn
+                  editors={editors.map((editor) => ({ value: editor.id, label: editor.name }))}
+                  value={editors.find((editor) => editor.id === preferences.editor)?.id ?? editors[0]?.id ?? null}
+                  onChange={(editor) => set('editor', editor)}
+                />
+              )}
+            </SettingList>
+            {failed}
+          </ControlSheet>
+        </ControlDetail>
+      )}
+      {showing === 'notify' && (
+        <ControlDetail title={text.notify} onBack={all}>
+          <ControlSheet>
+            <p className={s.quiet}>{text.notifyNote}</p>
+            <SettingList>
+              <NotificationSettings value={notifyChoicesOf(preferences)} onChange={(key, on) => set(NOTIFY_KEYS[key], on)} />
+            </SettingList>
+            {failed}
           </ControlSheet>
         </ControlDetail>
       )}

@@ -102,7 +102,7 @@ function Settings({ start = 'all', ...args }: Partial<ControlCenterProps> & { st
               line="While work runs"
               on={awake}
               onChange={setAwake}
-              glyph={<Icon name="clock" size={16} />}
+              glyph={<Icon name="cup" size={16} />}
               onOpen={fn()}
             />
             <ControlToggle title="Dictation" line="Off" on={false} onChange={fn()} glyph={<Icon name="mic" size={16} />} />
@@ -251,7 +251,7 @@ export const AllStates: Story = {
                 <ControlModule title="Code hosts and trackers" span={2} onClick={fn()}>
                   <ControlMarks marks={MARK_GLANCES.slice(0, 3)} />
                 </ControlModule>
-                <ControlToggle title="Keep awake" on onChange={fn()} glyph={<Icon name="clock" size={16} />} />
+                <ControlToggle title="Keep awake" on onChange={fn()} glyph={<Icon name="cup" size={16} />} />
                 <ControlPicture title="App icon" name="Cobalt" picture={COBALT.picture} onClick={fn()} />
               </ControlGrid>
             </div>

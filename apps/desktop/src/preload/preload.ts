@@ -4,8 +4,8 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
  * The window's bridge to the main process, and nothing more: the port to the
  * runtime, handed on to the page, folders the person chose, by the picker or
  * a drop, each as a grant, the thread a notification they clicked opens,
- * the icon they gave the app, and where Althar shows at the edge of the
- * screen. The edge's own pages say through it where they draw, and what to
+ * the icon they gave the app, the app's own preferences, and where Althar
+ * shows at the edge of the screen. The edge's own pages say through it where they draw, and what to
  * open in the window, and hear whether the pointer is on the island. The page never sees or sends a
  * path. It gets no Node, no file system, no shell.
  */
@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('althar', {
   },
   appIcon: (): Promise<string | null> => ipcRenderer.invoke('althar:app-icon'),
   setAppIcon: (icon: string): Promise<void> => ipcRenderer.invoke('althar:set-app-icon', icon),
+  preferences: (): Promise<unknown> => ipcRenderer.invoke('althar:preferences'),
+  setPreference: (key: string, value: unknown): Promise<unknown> => ipcRenderer.invoke('althar:set-preference', key, value),
   edge: (): Promise<{ place: string; notch: boolean } | null> => ipcRenderer.invoke('althar:edge'),
   setEdge: (place: string): Promise<void> => ipcRenderer.invoke('althar:set-edge', place),
   edgeDrawn: (rect: { x: number; y: number; width: number; height: number }): void => ipcRenderer.send('althar:edge-drawn', rect),

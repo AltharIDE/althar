@@ -3,6 +3,8 @@ import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } 
 
 import type { WatchEvent } from '@althar/contracts'
 
+import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
+
 import type { Client } from './client'
 import type { Feed } from './feed'
 
@@ -27,6 +29,10 @@ export interface Host {
   readonly appIcon: () => Promise<string | null>
   /** Gives the app another icon, kept and shown on the Dock at once. */
   readonly setAppIcon: (icon: string) => Promise<void>
+  /** The app's own preferences (`main/appPreferences`), as the main process keeps them. */
+  readonly preferences: () => Promise<AppPreferences>
+  /** Changes one, kept and acted on at once; all of them as they now stand. */
+  readonly setPreference: <K extends PreferenceKey>(key: K, value: AppPreferences[K]) => Promise<AppPreferences>
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
   readonly onOpen: (listener: (threadId: string) => void) => () => void
   /** Where Althar shows while the person is in another app (`shared/edge`), and whether this Mac has a notch to choose the island by; null before the main process knows. */

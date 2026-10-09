@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { HomeCall, HomeEvent, HomeTask, ProjectSummary } from '@althar/contracts'
 import { ProjectInk } from '@althar/ui'
 
+import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import { HomeView, lineOf, refOf } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
 import { agentGlanceOf, marksOf, SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
@@ -660,5 +661,83 @@ describe('settings', () => {
         .getByRole('radio', { name: 'Cobalt' })
         .getAttribute('aria-checked'),
     ).toBe('true')
+  })
+})
+
+describe('the app’s own preferences in settings', () => {
+  it('keeps the Mac awake by a round switch, and opens out to on battery too and the editor files open in', async () => {
+    const host = fakeHost()
+    const { client } = fakeClient({
+      listEditors: vi.fn(async () => [
+        { id: 'cursor', name: 'Cursor' },
+        { id: 'zed', name: 'Zed' },
+        { id: 'finder', name: 'Finder' },
+      ]),
+    })
+    withServices(<Settings />, client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    const awake = await within(panel).findByRole('switch', { name: 'Keep awake' })
+    expect(awake.getAttribute('aria-checked')).toBe('true')
+    expect(within(panel).getByRole('button', { name: /^Keep awake\s*While work runs/ })).toBeTruthy()
+    await userEvent.click(awake)
+    expect(host.setPreference).toHaveBeenCalledWith('keepAwake', false)
+    expect(within(panel).getByRole('button', { name: /^Keep awake\s*Off/ })).toBeTruthy()
+
+    await openModule(/^Keep awake/)
+    expect(within(panel).getByRole('heading', { name: 'This Mac', level: 2 })).toBeTruthy()
+    const battery = within(panel).getByRole('switch', { name: 'On battery too' })
+    // Nothing to add to while it is off.
+    expect((battery as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(within(panel).getByRole('switch', { name: 'Keep this Mac awake while work runs' }))
+    expect(host.setPreference).toHaveBeenLastCalledWith('keepAwake', true)
+    await userEvent.click(battery)
+    expect(host.setPreference).toHaveBeenLastCalledWith('awakeOnBattery', true)
+    // The first editor found until one is chosen.
+    const editor = within(panel).getByRole('combobox', { name: 'Open files in' })
+    expect(editor.textContent).toContain('Cursor')
+    await userEvent.click(editor)
+    await userEvent.click(await screen.findByRole('option', { name: 'Zed' }))
+    expect(host.setPreference).toHaveBeenLastCalledWith('editor', 'zed')
+    await waitFor(() => expect(within(panel).getByRole('combobox', { name: 'Open files in' }).textContent).toContain('Zed'))
+  })
+
+  it('turns every kind of notification off and on at once, and each on its own, with the count and a sound', async () => {
+    const host = fakeHost()
+    withServices(<Settings />, fakeClient().client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    expect(await within(panel).findByRole('button', { name: /^Notifications\s*Silent/ })).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('switch', { name: 'Notifications' }))
+    for (const key of ['notifyCalls', 'notifyReady', 'notifyStopped']) expect(host.setPreference).toHaveBeenCalledWith(key, false)
+    expect(within(panel).getByRole('button', { name: /^Notifications\s*Off/ })).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('switch', { name: 'Notifications' }))
+
+    await openModule(/^Notifications/)
+    expect(within(panel).getByText('Only while Althar isn’t in front. Never for progress.')).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('switch', { name: 'A task is ready for you' }))
+    expect(host.setPreference).toHaveBeenLastCalledWith('notifyReady', false)
+    await userEvent.click(within(panel).getByRole('switch', { name: 'Count them on the Dock icon' }))
+    expect(host.setPreference).toHaveBeenLastCalledWith('badge', false)
+    await userEvent.click(within(panel).getByRole('switch', { name: 'Play a sound' }))
+    expect(host.setPreference).toHaveBeenLastCalledWith('sound', true)
+    await userEvent.click(within(panel).getByRole('button', { name: 'Back to all settings' }))
+    // One kind still on is notifications on.
+    expect(within(panel).getByRole('button', { name: /^Notifications\s*With sound/ })).toBeTruthy()
+  })
+
+  it('shows what was kept, and goes back to it when a change can’t be kept', async () => {
+    const host = fakeHost({
+      preferences: vi.fn(async () => ({ ...DEFAULT_PREFERENCES, keepAwake: false, sound: true })),
+      setPreference: vi.fn(async () => {
+        throw new Error('disk full')
+      }),
+    })
+    withServices(<Settings />, fakeClient().client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await waitFor(() => expect(within(panel).getByRole('switch', { name: 'Keep awake' }).getAttribute('aria-checked')).toBe('false'))
+    expect(within(panel).getByRole('button', { name: /^Notifications\s*With sound/ })).toBeTruthy()
+    await openModule(/^Notifications/)
+    await userEvent.click(within(panel).getByRole('switch', { name: 'Play a sound' }))
+    expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(within(panel).getByRole('switch', { name: 'Play a sound' }).getAttribute('aria-checked')).toBe('true'))
   })
 })

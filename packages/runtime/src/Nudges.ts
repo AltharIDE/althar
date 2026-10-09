@@ -11,20 +11,34 @@ import { Sessions } from './Sessions'
 /*
  * What reaches the person outside the window (docs/plans/usable.md, work
  * that doesn't need you): a nudge each time something comes to need them,
- * a call or a task ready to accept, and how many such things wait, for the
- * app's badge. Never for progress. Read from the store, in two small
- * queries, whenever a change that can bear on it is recorded; what already
+ * a call, work that stopped, or a task ready to accept, each said by its
+ * kind so the app can keep to what the person wants told; and how many such
+ * things wait, for the app's badge. Never for progress. With them, whether
+ * any work runs, so the app can keep the Mac awake while it does. Read from
+ * the store whenever a change that can bear on it is recorded; what already
  * waited when Althar started isn't nudged again.
  */
 
 /** How long changes are gathered, so a burst is read once. */
 const GATHER = Duration.millis(250)
 
+/** What a nudge is about: an agent asks the person, work stopped and couldn't start again, or a task is ready. */
+export type NudgeKind = 'call' | 'stopped' | 'ready'
+
 export type NudgeEvent =
-  /** Something came to need the person: a call, or a task ready to accept. */
-  | { readonly _tag: 'Nudge'; readonly key: string; readonly title: string; readonly body: string; readonly threadId: string }
+  /** Something came to need the person. */
+  | {
+      readonly _tag: 'Nudge'
+      readonly kind: NudgeKind
+      readonly key: string
+      readonly title: string
+      readonly body: string
+      readonly threadId: string
+    }
   /** How many things wait on the person, across every project. */
   | { readonly _tag: 'Waiting'; readonly count: number }
+  /** Whether any work runs: a task's run under way, or an agent mid-turn anywhere. */
+  | { readonly _tag: 'Working'; readonly working: boolean }
 
 /** What a step that needs the person is called in a nudge. */
 const STEPS: Readonly<Record<StuckStep['step'], string>> = {
@@ -67,7 +81,7 @@ export const readyWords = (summary: string): string => {
 export class Nudges extends Context.Service<
   Nudges,
   {
-    /** How many things wait on the person now, then each nudge and each change of that count, as they come. */
+    /** How many things wait on the person now and whether work runs, then each nudge and each change of either, as they come. */
     readonly events: Stream.Stream<NudgeEvent>
   }
 >()('@althar/runtime/Nudges') {
@@ -80,6 +94,7 @@ export class Nudges extends Context.Service<
       const agents = yield* Agents
       const published = yield* PubSub.unbounded<NudgeEvent>()
       const waiting = yield* Ref.make(0)
+      const working = yield* Ref.make(false)
 
       /** Everything that needs the person now, by a key that stays the same while it does. */
       const needs = Effect.gen(function* () {
@@ -91,6 +106,7 @@ export class Nudges extends Context.Service<
         for (const call of calls)
           found.set(`call:${call.id}`, {
             _tag: 'Nudge',
+            kind: call.kind === 'stuck' ? 'stopped' : 'call',
             key: `call:${call.id}`,
             title: call.title,
             body: callWords({ kind: call.kind, payload: parse(call.payload) }, agents.list),
@@ -127,6 +143,7 @@ export class Nudges extends Context.Service<
           if ((yield* turning(task.threadId)) || (yield* turning(task.review))) continue
           found.set(`ready:${task.taskId}`, {
             _tag: 'Nudge',
+            kind: 'ready',
             key: `ready:${task.taskId}`,
             title: task.title,
             body: readyWords(text(parse(task.latest), 'summary')),
@@ -134,6 +151,35 @@ export class Nudges extends Context.Service<
           })
         }
         return found
+      })
+
+      /**
+       * Whether any work runs, as the home counts it: an agent on a task's
+       * step, or on its way to one, a step held until a usage limit resets,
+       * which starts again by itself, or a plan counting down to its start;
+       * or an agent mid-turn on any thread, as when the person talks to a
+       * lead after its run, or to a coordinator, and while it waits on them
+       * for a permission. A task stopped, or stuck on the person, runs no more.
+       */
+      const runs = Effect.gen(function* () {
+        const [waiting] = yield* sql<{ id: string }>`
+          SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+            JOIN runs r ON r.id = e.run_id JOIN tasks k ON k.id = r.task_id JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
+          WHERE r.state IN ('admitted', 'running') AND k.state NOT IN ('done', 'abandoned')
+            AND (a.state IN ('admitted', 'held') OR (a.state = 'running' AND EXISTS (SELECT 1 FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
+              WHERE h.task_id = k.id AND s.state IN ('starting', 'active', 'waiting_approval', 'cancelling'))))
+          UNION ALL
+          SELECT t.id FROM task_plans t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
+          WHERE t.state = 'proposed' AND t.starts_at IS NOT NULL AND k.state NOT IN ('done', 'abandoned')
+          UNION ALL
+          SELECT id FROM provider_sessions WHERE state = 'starting'
+          LIMIT 1`
+        if (waiting !== undefined) return true
+        const threads = yield* sql<{ threadId: string }>`
+          SELECT DISTINCT thread_id FROM provider_sessions WHERE state IN ('active', 'waiting_approval', 'cancelling')`
+        for (const { threadId } of threads)
+          if (Option.exists(yield* sessions.running(threadId), (session) => session.turnRunning)) return true
+        return false
       })
 
       const latest = Effect.map(sql<{ cursor: number }>`SELECT coalesce(max(cursor), 0) AS cursor FROM change_log`, (rows) =>
@@ -164,6 +210,9 @@ export class Nudges extends Context.Service<
             if (seen !== undefined) for (const [key, nudge] of now) if (!seen.has(key)) yield* PubSub.publish(published, nudge)
             if ((yield* Ref.getAndSet(waiting, now.size)) !== now.size || seen === undefined)
               yield* PubSub.publish(published, { _tag: 'Waiting', count: now.size })
+            const busy = yield* runs
+            if ((yield* Ref.getAndSet(working, busy)) !== busy || seen === undefined)
+              yield* PubSub.publish(published, { _tag: 'Working', working: busy })
             seen = now
             // Changes are gathered for a moment, so a burst is read once.
             do {
@@ -184,9 +233,11 @@ export class Nudges extends Context.Service<
         events: Stream.unwrap(
           Effect.gen(function* () {
             const subscription = yield* PubSub.subscribe(published)
-            const count = yield* Ref.get(waiting)
-            const now: NudgeEvent = { _tag: 'Waiting', count }
-            return Stream.concat(Stream.make(now), Stream.fromSubscription(subscription))
+            const now: ReadonlyArray<NudgeEvent> = [
+              { _tag: 'Waiting', count: yield* Ref.get(waiting) },
+              { _tag: 'Working', working: yield* Ref.get(working) },
+            ]
+            return Stream.concat(Stream.fromIterable(now), Stream.fromSubscription(subscription))
           }),
         ),
       })

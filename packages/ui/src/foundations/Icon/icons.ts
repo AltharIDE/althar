@@ -4,10 +4,12 @@ import {
   ArrowRight,
   ArrowUp,
   Attachment,
+  Bell,
   Book,
   ChatBubble,
   Check,
   Clock,
+  CoffeeCup,
   Community,
   Compress,
   Copy,
@@ -113,6 +115,10 @@ export const ICONS = {
   compress: Compress,
   up: ArrowUp,
   clock: Clock,
+  /** Keeps the Mac awake while work runs. */
+  cup: CoffeeCup,
+  /** Notifications. */
+  bell: Bell,
   /** Waits for something else to merge first. */
   after: GitMerge,
   external: OpenNewWindow,
