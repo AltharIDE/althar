@@ -6,9 +6,10 @@ import { ApiError, type StuckStep, type ThreadSnapshot } from '@althar/contracts
 import { TaskStatus } from '@althar/ui'
 
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
+import { conflictsOf } from '../src/renderer/features/task/Outputs'
 import { elapsedOf, sinceOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
-import { change, changed, fakeClient, items, models, snapshot, streamed } from './fixtures'
+import { change, changed, fakeClient, items, models, snapshot, status, streamed } from './fixtures'
 import type { ChangedFile } from '@althar/contracts'
 import { clock } from '../src/renderer/shared/time'
 import { reads } from '../src/renderer/data/reads'
@@ -86,7 +87,7 @@ describe('a task', () => {
     withServices(<Task onBack={onBack} />, client)
     await screen.findByRole('heading', { name: 'Add a retry', level: 1 })
     // The lead's model, by the name its agent gives it.
-    expect((await screen.findAllByText('Claude Code · Opus')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('Claude Opus')).length).toBeGreaterThan(0)
     expect(screen.getByText('althar/add-a-retry')).toBeTruthy()
     // Work under way has no pull request to open yet.
     expect(screen.queryByRole('button', { name: 'Open a pull request' })).toBeNull()
@@ -99,13 +100,63 @@ describe('a task', () => {
     expect(screen.getByText('Write the test')).toBeTruthy()
     expect(screen.getByText('Context is filling up')).toBeTruthy()
     expect(screen.getByText('Codex took over from Claude Code.')).toBeTruthy()
-    expect(screen.getByText('Codex')).toBeTruthy()
+    // Its turns are named by model, the agent said on hover.
+    expect(screen.getAllByText('gpt-5.2-codex').length).toBeGreaterThan(0)
     await userEvent.click(screen.getByRole('button', { name: 'Thought' }))
     expect(screen.getByText('Where is the call?')).toBeTruthy()
     // Escape, with nothing else open, goes back to the project.
     ;(document.activeElement as HTMLElement | null)?.blur()
     await userEvent.keyboard('{Escape}')
     expect(onBack).toHaveBeenCalled()
+  })
+
+  it('opens its thread with what the person asked for, and names its last lead when none runs', async () => {
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [items.says('On it.', 'codex')],
+          task: {
+            ...base.task,
+            request: 'Add a retry with backoff so a flaky provider doesn’t fail the order',
+            lead: { agentId: 'codex', model: 'gpt-5.2-codex', account: null },
+          },
+          session: null,
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    const asked = await screen.findByText('Add a retry with backoff so a flaky provider doesn’t fail the order')
+    // Said before anything the lead did.
+    expect(asked.compareDocumentPosition(screen.getByText('On it.')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // Stopped, the task is still led by who led it last, not by nobody.
+    expect(screen.queryByText('No lead yet')).toBeNull()
+    expect(screen.getAllByText('gpt-5.2-codex').length).toBeGreaterThan(0)
+  })
+
+  it('starts a stopped task on its last lead and model, and not on an agent signed out since', async () => {
+    const base = snapshot()
+    const stopped = thread({
+      task: { ...base.task, lead: { agentId: 'claude-code', model: 'claude-opus-5', account: null } },
+      session: null,
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => stopped) })
+    const first = withServices(<Task />, client)
+    await waitFor(() => expect(client.status).toHaveBeenCalled())
+    await userEvent.type(await screen.findByRole('textbox', { name: /^Tell .* something$/ }), 'Carry on{Enter}')
+    await waitFor(() =>
+      expect(client.startSession).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'claude-code', model: 'claude-opus-5' })),
+    )
+    first.unmount()
+
+    // Every agent signed out now: none is started that can't, the person is told why, and what they send waits.
+    const out = { ...status, agents: status.agents.map((agent) => ({ ...agent, signIn: 'signed_out' as const })) }
+    const again = fakeClient({ getThread: vi.fn(async () => stopped), status: vi.fn(async () => out) }).client
+    withServices(<Task />, again)
+    expect(await screen.findByText(/No agent is signed in, so nothing can pick this up\./)).toBeTruthy()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Tell the lead something' }), 'Carry on{Enter}')
+    await waitFor(() => expect(again.send).toHaveBeenCalled())
+    expect(again.startSession).not.toHaveBeenCalled()
   })
 
   it('shows its steps as a track, the one it is on by what it does, and how long it has run', async () => {
@@ -159,6 +210,147 @@ describe('a task', () => {
     expect(onBack).toHaveBeenCalled()
   })
 
+  it('says what merged here and whether its remote has it, and pushes it when the person says', async () => {
+    const merged = [{ repository: 'meridian', name: 'meridian', branch: 'main', remote: 'origin/main', ahead: 1 }]
+    const base = thread({ session: null })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...base, task: { ...base.task, phase: 'settled' as const, merged } })),
+    })
+    withServices(<Task />, client)
+    const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(outputs.getByText('Into main on this Mac. origin doesn’t have it yet.')).toBeTruthy()
+    expect(outputs.getByText('Repository')).toBeTruthy()
+    await userEvent.click(outputs.getByRole('button', { name: 'Push main to origin' }))
+    await waitFor(() => expect(client.pushHere).toHaveBeenCalledWith('t1'))
+    expect(outputs.queryByRole('button', { name: /^Merge into/ })).toBeNull()
+  })
+
+  it('offers the push of what merged here beside a pull request for the rest', async () => {
+    const merged = [{ repository: 'web', name: 'web', branch: 'main', remote: 'origin/main', ahead: 2 }]
+    const base = thread({ session: null })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...base, task: { ...base.task, phase: 'settled' as const, changes: [change()], merged } })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Push main to origin' }))
+    await waitFor(() => expect(client.pushHere).toHaveBeenCalledWith('t1'))
+  })
+
+  it('says a merge here was pushed, or that there is nowhere to push it', async () => {
+    const base = thread({ session: null })
+    const once = (merged: ReadonlyArray<{ remote: string | null; ahead: number }>) =>
+      fakeClient({
+        getThread: vi.fn(async () => ({
+          ...base,
+          task: {
+            ...base.task,
+            phase: 'settled' as const,
+            merged: merged.map((one) => ({ repository: 'meridian', name: 'meridian', branch: 'main', ...one })),
+          },
+        })),
+      }).client
+    const view = withServices(<Task />, once([{ remote: 'origin/main', ahead: 0 }]))
+    // Nothing left to do there, it opens on its conversation, and what it made is a press away, in a line.
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    expect(await screen.findByText('Merged into main, and pushed to origin.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Push/ })).toBeNull()
+    view.unmount()
+    withServices(<Task />, once([{ remote: null, ahead: 0 }]))
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    expect(await screen.findByText('Merged into main on this Mac.')).toBeTruthy()
+  })
+
+  it('offers to have the lead settle a merge that conflicts, in words it acts on', async () => {
+    const file: ChangedFile = { path: 'README.md', from: null, status: 'modified', add: 1, del: 1, binary: false, uncommitted: false }
+    const here = [{ repository: 'meridian', name: 'meridian', branch: 'main', head: 'abc111' }]
+    const base = thread({ session: null })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...base, task: { ...base.task, phase: 'ready' as const, files: [file], commits: 1, here } })),
+    })
+    vi.mocked(client.mergeHere).mockRejectedValueOnce(
+      new ApiError({
+        reason: 'CantMerge',
+        message: 'It conflicts with the default branch, in README.md.',
+        why: 'conflicts',
+        detail: 'README.md',
+      }),
+    )
+    withServices(<Task />, client)
+    const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    await userEvent.click(outputs.getByRole('button', { name: 'Merge into main' }))
+    expect(await outputs.findByText(/It conflicts with main as it is now, in README\.md\./)).toBeTruthy()
+    await userEvent.click(outputs.getByRole('button', { name: 'Ask the lead to resolve it' }))
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.stringMatching(/^main has moved on, and merging this task's branch into it conflicts in README\.md\./),
+        }),
+      ),
+    )
+    expect(outputs.queryByRole('button', { name: 'Ask the lead to resolve it' })).toBeNull()
+  })
+
+  it('says what merged in each of several repositories, pushes them all, and names the branch a conflict is with', async () => {
+    const merged = [
+      { repository: 'api', name: 'api', branch: 'main', remote: 'origin/main', ahead: 1 },
+      { repository: 'web', name: 'web', branch: 'develop', remote: 'upstream/develop', ahead: 0 },
+    ]
+    const base = thread({ session: null })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...base, task: { ...base.task, phase: 'settled' as const, commits: 2, merged } })),
+    })
+    const view = withServices(<Task />, client)
+    expect(await screen.findByText('Into main and develop on this Mac. origin and upstream don’t have it yet.')).toBeTruthy()
+    expect(screen.getByText('Repositories')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Push main to origin' }))
+    await waitFor(() => expect(client.pushHere).toHaveBeenCalledWith('t1'))
+    view.unmount()
+    // Ahead on both: one press pushes each.
+    const both = fakeClient({
+      getThread: vi.fn(async () => ({
+        ...base,
+        task: { ...base.task, phase: 'settled' as const, commits: 2, merged: merged.map((one) => ({ ...one, ahead: 1 })) },
+      })),
+    })
+    const again = withServices(<Task />, both.client)
+    expect(await screen.findByRole('button', { name: 'Push to each remote' })).toBeTruthy()
+    again.unmount()
+    // A conflict in one of several says whose branch it is with.
+    const here = [
+      { repository: 'api', name: 'api', branch: 'main', head: 'abc111' },
+      { repository: 'web', name: 'web', branch: 'develop', head: 'def222' },
+    ]
+    const file: ChangedFile = { path: 'web/README.md', from: null, status: 'modified', add: 1, del: 1, binary: false, uncommitted: false }
+    const conflicted = fakeClient({
+      getThread: vi.fn(async () => ({ ...base, task: { ...base.task, phase: 'ready' as const, files: [file], commits: 1, here } })),
+    })
+    vi.mocked(conflicted.client.mergeHere).mockRejectedValueOnce(
+      new ApiError({ reason: 'CantMerge', message: 'It conflicts.', why: 'conflicts', detail: 'web: README.md' }),
+    )
+    withServices(<Task />, conflicted.client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge into each default branch' }))
+    expect(await screen.findByText(/It conflicts with web’s develop as it is now, in README\.md\./)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Ask the lead to resolve it' }))
+    await waitFor(() =>
+      expect(conflicted.client.send).toHaveBeenCalledWith(
+        expect.objectContaining({ body: expect.stringMatching(/in web, develop conflicts in README\.md/) }),
+      ),
+    )
+  })
+
+  it('tells the lead of a task across repositories which default branch each conflicts with', () => {
+    const here = [
+      { name: 'api', branch: 'main' },
+      { name: 'web', branch: 'develop' },
+    ]
+    expect(conflictsOf('web: README.md', here)).toEqual([{ name: 'web', branch: 'develop', files: 'README.md' }])
+    expect(conflictsOf('api: a.ts; web: b.ts, c.ts', here).map((one) => [one.name, one.branch, one.files])).toEqual([
+      ['api', 'main', 'a.ts'],
+      ['web', 'develop', 'b.ts, c.ts'],
+    ])
+    expect(conflictsOf('README.md', [{ name: 'meridian', branch: 'trunk' }])).toEqual([{ name: null, branch: 'trunk', files: 'README.md' }])
+  })
+
   it('stays on the conversation the person is reading when the task becomes ready', async () => {
     const file: ChangedFile = { path: 'src/checkout.ts', from: null, status: 'modified', add: 4, del: 1, binary: false, uncommitted: false }
     const base = thread()
@@ -184,9 +376,9 @@ describe('a task', () => {
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge' }))
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith('t1', 'abc123', 'https://github.com/meridian/api/pull/12'))
-    await userEvent.click(screen.getByRole('button', { name: 'Send back' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Ask for changes' }))
     await userEvent.type(screen.getByRole('textbox', { name: /What should change/ }), 'Name the retry')
-    await userEvent.click(screen.getByRole('button', { name: 'Send back' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Send to the lead' }))
     await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ body: 'Name the retry' })))
   })
 
@@ -211,6 +403,44 @@ describe('a task', () => {
     )
   })
 
+  it('names its lead by model, with the agent and account it runs on said on hover, and switches a model off from every model', async () => {
+    const base = thread()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...base, session: base.session === null ? null : { ...base.session, account: 'work' } })),
+      getModels: vi.fn(async () => models.map((offered) => (offered.agentId === 'codex' ? { ...offered, blocked: ['gpt-5.2'] } : offered))),
+    })
+    withServices(<Task />, client)
+    expect((await screen.findAllByText(', via Claude Code · work')).length).toBeGreaterThan(0)
+    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(screen.getByRole('button', { name: /All models/ }))
+    const browser = await screen.findByRole('dialog')
+    // Switched off: there, and not to be chosen, until it is switched on again.
+    expect(within(browser).getByRole('button', { name: 'Use gpt-5.2' })).toHaveProperty('disabled', true)
+    await userEvent.click(within(browser).getByRole('button', { name: 'Don’t use gpt-5.2' }))
+    expect(client.setModelBlocked).toHaveBeenCalledWith({ agentId: 'codex', model: 'gpt-5.2', blocked: false })
+    await userEvent.click(within(browser).getByRole('button', { name: 'Don’t use Claude Sonnet' }))
+    expect(client.setModelBlocked).toHaveBeenLastCalledWith({ agentId: 'claude-code', model: 'sonnet', blocked: true })
+  })
+
+  it('shows what the person sends at once, before Althar has it, and takes it out again if the send fails', async () => {
+    let answer: () => void = () => undefined
+    let refuse: (failure: Error) => void = () => undefined
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    vi.mocked(client.send).mockImplementationOnce(() => new Promise<void>((resolve) => (answer = resolve)))
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    await userEvent.type(box, 'Add a test{Enter}')
+    // In the thread while the send is still on its way.
+    expect(screen.getByText('Add a test')).toBeTruthy()
+    answer()
+    vi.mocked(client.send).mockImplementationOnce(() => new Promise<void>((_, reject) => (refuse = reject)))
+    await userEvent.type(box, 'Never mind{Enter}')
+    expect(screen.getByText('Never mind')).toBeTruthy()
+    refuse(new Error('Althar is restarting.'))
+    await waitFor(() => expect(screen.queryByText('Never mind')).toBeNull())
+    expect(await screen.findByRole('alert')).toBeTruthy()
+  })
+
   it('takes back a queued message, or puts it back in the composer to change', async () => {
     const edited = items.you('Use the helper', { state: 'queued', interrupting: false })
     const dropped = items.you('Skip the docs', { state: 'queued', interrupting: false })
@@ -231,7 +461,7 @@ describe('a task', () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     withServices(<Task />, client)
     // The lead's model and effort, in the composer.
-    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Opus High' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Claude Opus High' }))
     await userEvent.click(await screen.findByRole('radio', { name: 'Low' }))
     await waitFor(() => expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', effort: 'low' }))
     // Every model is one step away, whichever agent offers it.
@@ -240,13 +470,21 @@ describe('a task', () => {
     expect(within(browser).getByRole('button', { name: 'Use gpt-5.2' })).toBeTruthy()
     // An agent that is signed out offers nothing.
     expect(within(browser).queryByText(/OpenCode/)).toBeNull()
-    await userEvent.click(within(browser).getByRole('button', { name: 'Use Sonnet' }))
+    await userEvent.click(within(browser).getByRole('button', { name: 'Use Claude Sonnet' }))
     await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'sonnet' }))
     expect(client.setEffort).toHaveBeenCalledTimes(1)
-    // Another agent's model hands the task to that agent, on its own effort.
-    await userEvent.click(screen.getByRole('button', { name: 'Lead: Opus High' }))
+    // Another agent's model hands the task to that agent, on its own effort, with what the person says next: nothing happens until then.
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
     await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
-    await waitFor(() => expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2-codex' }))
+    await userEvent.keyboard('{Escape}')
+    expect(await screen.findByText(/gpt-5\.2-codex takes over from Claude Opus when you send\./)).toBeTruthy()
+    expect(client.switchAgent).not.toHaveBeenCalled()
+    await userEvent.type(screen.getByRole('textbox', { name: /^Tell .* something$/ }), 'Over to you{Enter}')
+    await waitFor(() =>
+      expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2-codex', body: 'Over to you' }),
+    )
+    expect(client.send).not.toHaveBeenCalledWith(expect.objectContaining({ body: 'Over to you' }))
+    expect(screen.queryByText(/takes over from/)).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'More for this task' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: /Stop the task/ }))
     expect(client.stopSession).toHaveBeenCalledWith('th1')
@@ -256,9 +494,20 @@ describe('a task', () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => thread({ session: null, task: { ...snapshot().task, phase: 'ready', commits: 2 } })),
     })
-    withServices(<Task />, client)
+    const view = withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Open a pull request' }))
     await waitFor(() => expect(client.openChange).toHaveBeenCalledWith('t1'))
+    view.unmount()
+    // With its host not connected, there is no pull request a press could open.
+    const unconnected = fakeClient({
+      getThread: vi.fn(async () => ({
+        ...thread({ session: null, task: { ...snapshot().task, phase: 'ready', commits: 2 } }),
+        host: { product: 'github' as const, name: 'GitHub', webUrl: 'https://github.com', connected: false },
+      })),
+    })
+    withServices(<Task />, unconnected.client)
+    expect(await screen.findByText('Ready for you')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Open a pull request' })).toBeNull()
   })
 
   it('merges work that ended on its branch here, up to the heads it showed', async () => {
@@ -310,23 +559,27 @@ describe('a task', () => {
     })
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()), getModels, setDefaultEffort })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Opus High' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Claude Opus High' }))
     // Until the person pins one, each agent's current model is pinned; the one in use shows first.
     const pinned = await screen.findByRole('radiogroup', { name: 'Pinned models' })
     expect(
       within(pinned)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Opusnot pinned', 'Claude Code default', 'gpt-5.2-codexhands the task to Codex'])
+    ).toEqual([
+      'Claude Opus, via Claude Codenot pinned',
+      'Claude Code default, via Claude Code',
+      'gpt-5.2-codex, via Codexhands the task to Codex',
+    ])
     // High is not what Claude Code is on; the person makes it Opus's.
     expect(screen.getByText(/default Medium/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Make this default' }))
     expect(setDefaultEffort).toHaveBeenCalledWith({ agentId: 'claude-code', model: 'opus', effort: 'high' })
-    expect(await screen.findByText('Opus default')).toBeTruthy()
+    expect(await screen.findByText('Claude Opus default')).toBeTruthy()
 
     await userEvent.click(screen.getByRole('button', { name: /All models/ }))
     const browser = await screen.findByRole('dialog')
-    await userEvent.click(within(browser).getByRole('button', { name: 'Pin Opus' }))
+    await userEvent.click(within(browser).getByRole('button', { name: 'Pin Claude Opus' }))
     await userEvent.click(within(browser).getByRole('combobox', { name: 'Default effort for gpt-5.2' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Extra high' }))
     await waitFor(() => expect(setDefaultEffort).toHaveBeenCalledWith({ agentId: 'codex', model: 'gpt-5.2', effort: 'extra-high' }))
@@ -337,29 +590,45 @@ describe('a task', () => {
     })
 
     // A model with the person's default effort starts on it.
-    await userEvent.click(screen.getByRole('button', { name: 'Lead: Opus High' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
     await userEvent.click(screen.getByRole('button', { name: /All models/ }))
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Use gpt-5.2' }))
+    await userEvent.type(screen.getByRole('textbox', { name: /^Tell .* something$/ }), 'Go{Enter}')
     await waitFor(() =>
-      expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2', effort: 'extra-high' }),
+      expect(client.switchAgent).toHaveBeenCalledWith({
+        threadId: 'th1',
+        agentId: 'codex',
+        model: 'gpt-5.2',
+        effort: 'extra-high',
+        body: 'Go',
+      }),
     )
   })
 
-  it('asks before another agent takes over from a lead at work, from the list or from every model', async () => {
+  it('leaves a lead at work alone when another agent is picked, until the person says something, and keeps it if asked', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread({ session: { ...snapshot().session!, turnRunning: true } })) })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Opus High' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Claude Opus High' }))
     await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
-    expect(screen.getByText('Codex takes over from a brief; Claude Code’s turn stops.')).toBeTruthy()
-    expect(client.switchAgent).not.toHaveBeenCalled()
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(screen.queryByText(/takes over from a brief/)).toBeNull()
-    // From every model, the question waits in the picker.
+    await userEvent.keyboard('{Escape}')
+    expect(await screen.findByText(/gpt-5\.2-codex takes over from Claude Opus when you send\./)).toBeTruthy()
+    // The picker says who will lead; the lead at work goes on.
+    expect(screen.getByRole('button', { name: /^Lead: gpt-5\.2-codex/ })).toBeTruthy()
+    expect([client.switchAgent, client.interrupt, client.setModel].map((call) => vi.mocked(call).mock.calls.length)).toEqual([0, 0, 0])
+    await userEvent.click(screen.getByRole('button', { name: 'Keep Claude Opus' }))
+    expect(screen.queryByText(/takes over from/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Lead: Claude Opus High' })).toBeTruthy()
+    // From every model too; what the person says then is the new lead's, not a message queued for the old one.
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
     await userEvent.click(screen.getByRole('button', { name: /All models/ }))
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Use gpt-5.2' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Hand it over' }))
-    await waitFor(() => expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2' }))
-    // Its own models change without asking.
+    await userEvent.type(screen.getByRole('textbox', { name: /^Add to the queue/ }), 'Take it from here{Enter}')
+    await waitFor(() =>
+      expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2', body: 'Take it from here' }),
+    )
+    expect(client.send).not.toHaveBeenCalled()
+    // Its own models change without waiting.
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
     await userEvent.click(await screen.findByRole('radio', { name: /Claude Code default/ }))
     await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'default' }))
   })
@@ -672,9 +941,9 @@ describe('a task', () => {
       ),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Opus High' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Claude Opus High' }))
     await userEvent.click(screen.getByRole('button', { name: /All models/ }))
-    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Use Sonnet' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Use Claude Sonnet' }))
     await screen.findByText(/still on its old model/)
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
     expect(screen.queryByText(/still on its old model/)).toBeNull()

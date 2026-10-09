@@ -1,16 +1,17 @@
 import { type DragEvent, type ReactNode, useEffect } from 'react'
 
-import type { AccountStatus, AgentStatus, ProjectSummary } from '@althar/contracts'
-import { type AccountEntry, Accounts, Button, PermissionPolicy, type RuntimeEntry, RuntimeState, SourceOrigin, TitleBar } from '@althar/ui'
+import type { AgentStatus, ProjectSummary } from '@althar/contracts'
+import { Button, PermissionPolicy, type RuntimeEntry, RuntimeState, SourceOrigin, TitleBar } from '@althar/ui'
 import { NewProject, Start } from '@althar/ui/screens'
 
 import { brandOf } from '../../shared/agents'
+import { shortFolder } from '../../shared/folders'
 import { HomePending } from '../../shared/Pending'
-import { clock } from '../../shared/time'
+import { AgentAccounts } from '../accounts/AgentAccounts'
+import type { AccountSignInModel } from '../accounts/useAccountSignIn'
 import { text as rulesText } from '../rules/RulesView'
 import s from './Start.module.css'
 import type { StartModel } from './useStart'
-import { shortFolder } from '../../shared/folders'
 
 /*
  * Where the window starts. With no project yet, the kit's Start screen, whose
@@ -33,24 +34,6 @@ export const text = {
   },
 }
 
-/** An account, as a row of the kit's list of an agent's accounts. */
-export const accountEntry = (account: AccountStatus, now: Date = new Date()): AccountEntry => ({
-  id: account.id,
-  name: account.name,
-  place:
-    account.home === null
-      ? { kind: 'usual' }
-      : account.adoptedFrom === null
-        ? { kind: 'own' }
-        : { kind: 'adopted', folder: shortFolder(account.home), from: account.adoptedFrom },
-  state:
-    account.outUntil !== null
-      ? { kind: 'out', back: clock(account.outUntil, now) }
-      : account.signIn === 'signed_out'
-        ? { kind: 'signedOut' }
-        : { kind: 'ready', ...(account.paidBy === 'unknown' ? {} : { paid: account.paidBy }) },
-})
-
 /** An agent's sign-in, as a row of the kit's list of agents, with what goes under it: its accounts. */
 export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']): RuntimeEntry => {
   const brand = brandOf(agent.id)
@@ -66,28 +49,8 @@ export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']
 }
 
 /** The agents on this Mac, each with its accounts to add, sign in, rename, order and remove. */
-export const runtimesOf = (model: StartModel): ReadonlyArray<RuntimeEntry> =>
-  model.status?.agents.map((agent) =>
-    runtimeEntry(
-      agent,
-      <Accounts
-        agent={agent.name}
-        accounts={agent.accounts.map((account) => accountEntry(account))}
-        found={(model.found[agent.id] ?? []).map((place) => ({
-          id: place.grant,
-          name: place.name,
-          folder: shortFolder(place.path),
-          from: place.tool,
-        }))}
-        onAdding={() => model.lookForAccounts(agent.id)}
-        onAdd={({ name, where }) => model.addAccount(agent.id, name, where.kind === 'found' ? { kind: 'found', grant: where.id } : where)}
-        onSignIn={(accountId) => void model.signInAccount(accountId)}
-        onRename={(accountId, name) => void model.renameAccount(accountId, name)}
-        onMove={(accountId, to) => void model.moveAccount(agent.id, accountId, to)}
-        onRemove={(accountId) => void model.removeAccount(accountId)}
-      />,
-    ),
-  ) ?? []
+export const runtimesOf = (model: StartModel, signIn: AccountSignInModel): ReadonlyArray<RuntimeEntry> =>
+  model.status?.agents.map((agent) => runtimeEntry(agent, <AgentAccounts agent={agent} start={model} signIn={signIn} />)) ?? []
 
 /** What went wrong, with a way past an account whose sign-out didn't work. */
 export function StartError({ model }: { model: StartModel }) {
@@ -108,10 +71,13 @@ export function StartError({ model }: { model: StartModel }) {
 
 export function StartView({
   model,
+  accounts,
   onProject,
   home,
 }: {
   model: StartModel
+  /** Signing the agents' accounts in, on the first screen. */
+  accounts: AccountSignInModel
   onProject: (projectId: string) => void
   /** The home, once there are projects. */
   home: () => ReactNode
@@ -187,7 +153,7 @@ export function StartView({
       <div className={s.window} {...drop}>
         <TitleBar lights="none">{null}</TitleBar>
         <div className={`${s.scroll} ${s.first}`}>
-          <Start runtimes={runtimesOf(model)} onCreate={open} text={text.first} />
+          <Start runtimes={runtimesOf(model, accounts)} onCreate={open} text={text.first} />
           <StartError model={model} />
         </div>
       </div>

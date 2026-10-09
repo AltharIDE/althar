@@ -17,4 +17,6 @@ export const checksums: Readonly<Record<string, string>> = {
   '0011_home': '1c2c2b05faca7a0930302523b8d1ada32aa657d9cf31fb4a3c39769974e60f7f',
   '0012_withdrawn_input': '7a7a13573bc70f77a9356e677d39d124eff2bb8296d29ffcd4dfebb022f84025',
   '0013_project_changes': '5bc32c9042d2f2b1c31cfc8a8a76a907638fe5b0bc15d734f76331ae7d5ef344',
+  '0014_model_blocks': '9ae81573cc0bb4e5c408be373e1c0f5967cf1af95a93b406c87fc41f793d0c6d',
+  '0015_task_requests': '49472c4c5266e0af35bcffd5c12c0e69fe414916c72bbee9b281c54de71ae311',
 }

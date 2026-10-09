@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
+import { ApiError, type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { keys, reads } from '../../data/reads'
-import { caughtUp, mergeItems, newestReads, takenBack, waiting } from '../../shared/items'
+import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
@@ -31,7 +31,12 @@ export interface TaskModel {
   readonly streaming: ReadonlyMap<string, Streamed>
   /** Agents that could lead: signed in, or that don't say. */
   readonly agents: ReadonlyArray<AgentStatus>
+  /** The agents have been read: none above then means none can lead, not that none are known yet. */
+  readonly agentsKnown: boolean
   readonly error: string | null
+  /** The files merging it here conflicts in, after a merge that couldn't go ahead for that; null otherwise. */
+  readonly conflict: string | null
+  readonly dismissConflict: () => void
   /** An action is on its way to the runtime. */
   readonly pending: boolean
   /** Earlier items are on their way. */
@@ -50,6 +55,8 @@ export interface TaskModel {
   readonly interrupt: () => Promise<void>
   /** Puts the lead on another model or effort, or hands the task to another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
+  /** Hands the task to another agent with what the person says: the new lead's first turn, after its brief. */
+  readonly handOver: (choice: Choice, body: string) => Promise<void>
   readonly stop: () => Promise<void>
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string) => Promise<void>
   /** Answers a step that needs the person. */
@@ -60,6 +67,8 @@ export interface TaskModel {
   readonly openChange: () => Promise<void>
   /** Merges the task into its repositories' default branches here, up to the heads it showed; it has no pull request. */
   readonly mergeHere: () => Promise<void>
+  /** Pushes what it merged here to the remotes its default branches follow. */
+  readonly pushHere: () => Promise<void>
   /**
    * Accepts its pull requests: merges each on its host in turn, at the head
    * the person saw, and stops at the first that is refused, so the rest
@@ -82,6 +91,7 @@ export const useTask = (threadId: string): TaskModel => {
   const [failed, setError] = useState<string | null>(null)
   const error = failed ?? (thread.error === null ? null : messageOf(thread.error))
   const [pending, setPending] = useState(false)
+  const [conflict, setConflict] = useState<string | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [newest] = useState(newestReads)
@@ -210,23 +220,52 @@ export const useTask = (threadId: string): TaskModel => {
     [readHead, fail],
   )
 
+  /** What the person sends shows at once, as the window's copy until the store's arrives; gone again if the send fails. */
+  const shown = (
+    text: string,
+    disposition: 'after_current' | 'interrupt_and_continue',
+    action: () => Promise<unknown>,
+    // Behind a turn running it waits its turn; handed to another agent, it is that one's first.
+    queued = disposition === 'interrupt_and_continue' || snapshot?.session?.turnRunning === true,
+  ) => {
+    let id = ''
+    setSnapshot((current) => {
+      const next = sending(current.items, { text, queued, interrupting: disposition === 'interrupt_and_continue' })
+      id = next.id
+      return { ...current, items: next.items }
+    })
+    return act(async () => {
+      try {
+        await action()
+      } catch (failure) {
+        setSnapshot((current) => ({ ...current, items: unsent(current.items, id, text) }))
+        throw failure
+      }
+    })
+  }
+
   return {
     snapshot,
     streaming,
     agents,
+    agentsKnown: status !== undefined,
     error,
+    conflict,
+    dismissConflict: () => setConflict(null),
     pending,
     loadingEarlier,
     loadEarlier,
     readFiles,
     send: (body, start) =>
-      act(async () => {
+      shown(body, 'after_current', async () => {
         // Queued first, so the lead that starts reads it in its first turn rather than after one of its own.
         await client.send({ threadId, body, disposition: 'after_current' })
         if (start !== undefined) await client.startSession(startOf(threadId, start))
       }),
-    sendNow: (body) => act(() => client.send({ threadId, body, disposition: 'interrupt_and_continue' })),
+    sendNow: (body) => shown(body, 'interrupt_and_continue', () => client.send({ threadId, body, disposition: 'interrupt_and_continue' })),
     takeBack: async (itemId) => {
+      // What is still on its way has nothing to take back yet.
+      if (isSending(itemId)) return false
       setError(null)
       try {
         await client.takeBack(itemId)
@@ -244,13 +283,27 @@ export const useTask = (threadId: string): TaskModel => {
         const session = snapshot?.session
         await (session == null ? client.startSession(startOf(threadId, choice)) : moveTo(client, threadId, runningOn(session), choice))
       }),
+    handOver: (choice, body) => shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body }), false),
     stop: () => act(() => client.stopSession(threadId)),
     answer: (attentionId, decision, reason) =>
       act(() => client.answer({ attentionId, decision, ...(reason === undefined || reason === '' ? {} : { reason }) })),
     answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
     markReady: (url) => act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id, url))),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id))),
-    mergeHere: () => act(async () => (snapshot === null ? undefined : client.mergeHere(snapshot.task.id, headsOf(snapshot.task.here)))),
+    mergeHere: () =>
+      act(async () => {
+        setConflict(null)
+        if (snapshot === null) return
+        try {
+          await client.mergeHere(snapshot.task.id, headsOf(snapshot.task.here))
+        } catch (failure) {
+          // Conflicting with the default branch is the lead's to settle: the window offers to ask it.
+          if (failure instanceof ApiError && failure.reason === 'CantMerge' && failure.why === 'conflicts')
+            setConflict(failure.detail ?? '')
+          throw failure
+        }
+      }),
+    pushHere: () => act(async () => (snapshot === null ? undefined : client.pushHere(snapshot.task.id))),
     accept: (changes) =>
       act(async () => {
         if (snapshot === null) return

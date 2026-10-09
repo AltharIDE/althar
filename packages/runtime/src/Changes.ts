@@ -20,9 +20,9 @@ import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import { envelope } from './envelope'
-import { CantMerge, ChangedSinceSeen, NotFound } from './errors'
+import { CantMerge, ChangedSinceSeen, type GitFailed, NotFound, PushRefused } from './errors'
 import { forkOf } from './forks'
-import { commitOf, commitsAhead, gitOutcome, namedRemotes, onHead, pushTo, uncommittedFiles } from './git'
+import { commitOf, commitsAhead, commitsOf, gitOutcome, gitWithin, namedRemotes, onHead, pushTo, uncommittedFiles } from './git'
 import { Instance } from './Instance'
 import { applyMerges, planMerge } from './localMerge'
 import { outward, reconcileOutward } from './outward'
@@ -244,6 +244,12 @@ export class Changes extends Context.Service<
       taskId: string,
       heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>,
     ): Effect.Effect<ReadonlyArray<{ readonly repository: string; readonly branch: string; readonly already: boolean }>, unknown>
+    /**
+     * Pushes each default branch the task merged into here to the remote it
+     * follows, with the person's own git sign-in (their keychain or SSH
+     * agent), not a code host's: what they would run themselves.
+     */
+    pushHere(taskId: string): Effect.Effect<ReadonlyArray<{ readonly branch: string; readonly remote: string }>, unknown>
     /** Replies on the task's pull request, in a comment's thread or its conversation, signed as from Althar and the agent that wrote it. */
     reply(
       taskId: string,
@@ -292,6 +298,12 @@ export class Changes extends Context.Service<
         locks.set(taskId, made)
         return made.withPermits(1)
       }
+      /*
+       * Default branches move here, by a local merge, and go to their remotes,
+       * by a push, one at a time across every task: a push never sends what a
+       * merge of several repositories moved and is about to put back.
+       */
+      const branches = Semaphore.makeUnsafe(1)
       /* When each task's pull request last had news, and when each was last asked: quiet ones are asked less often. */
       const newsAt = new Map<string, number>()
       const polledAt = new Map<string, number>()
@@ -861,6 +873,65 @@ export class Changes extends Context.Service<
           return merged
         })
 
+      const pushHere = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: ProjectId; threadId: string }>`
+            SELECT k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+          const repositories = yield* sql<{ base: string; root: string; worktree: string; baseCommit: string | null }>`
+            SELECT coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.base_commit
+            FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+              AND NOT EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL)`
+          const pushed: Array<{ branch: string; remote: string }> = []
+          for (const repository of repositories) {
+            // Only where the task's own work merged: a repository it left alone isn't its to push, whatever its branch holds.
+            const [head = null] = yield* commitsOf(repository.worktree, ['HEAD'])
+            if (head === null || head === repository.baseCommit) continue
+            const merged = yield* gitOutcome(repository.root, 'merge-base', '--is-ancestor', head, `refs/heads/${repository.base}`)
+            if (merged.code !== 0) continue
+            const followed = yield* gitOutcome(
+              repository.root,
+              'for-each-ref',
+              '--format=%(upstream:short)',
+              `refs/heads/${repository.base}`,
+            )
+            if (followed.code !== 0 || followed.stdout === '') continue
+            const remote = followed.stdout
+            const at = remote.indexOf('/')
+            // As the person would push it: their remote, their branch there, their sign-in. A prompt for a password fails rather than waits.
+            yield* gitWithin(
+              60_000,
+              repository.root,
+              'push',
+              remote.slice(0, at),
+              `refs/heads/${repository.base}:refs/heads/${remote.slice(at + 1)}`,
+            ).pipe(
+              Effect.catchTag('GitFailed', (failed): Effect.Effect<never, GitFailed | PushRefused> => {
+                // The remote said no on its own terms, such as a protected branch: what it said, not a guess.
+                const refused = /\[remote rejected\][^(]*\(([^)]*)\)/i.exec(failed.stderr)
+                if (refused !== null) return Effect.fail(new PushRefused({ taskId, why: 'refused', remote, said: refused[1] ?? '' }))
+                if (/! \[rejected\].*\((fetch first|non-fast-forward)\)/i.test(failed.stderr))
+                  return Effect.fail(new PushRefused({ taskId, why: 'behind', remote }))
+                if (/authentication|permission denied|could not read (username|password)|terminal prompts disabled/i.test(failed.stderr))
+                  return Effect.fail(new PushRefused({ taskId, why: 'denied', remote }))
+                return Effect.fail(failed)
+              }),
+            )
+            pushed.push({ branch: repository.base, remote })
+          }
+          if (pushed.length > 0)
+            yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: `Pushed ${pushed.map((one) => `${one.branch} to ${one.remote.slice(0, one.remote.indexOf('/'))}`).join(', ')}.`,
+            })
+          return pushed
+        })
+
       const reply = (
         taskId: string,
         input: { readonly body: string; readonly threadId: string | null; readonly by: string | null; readonly url?: string },
@@ -1354,7 +1425,8 @@ export class Changes extends Context.Service<
         markReady: (taskId, url) => provide(locked(taskId)(markReady(taskId, url))),
         exclusive: (taskId, effect) => locked(taskId)(effect),
         merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),
-        mergeHere: (taskId, heads) => provide(locked(taskId)(mergeHere(taskId, heads))),
+        mergeHere: (taskId, heads) => provide(locked(taskId)(branches.withPermits(1)(mergeHere(taskId, heads)))),
+        pushHere: (taskId) => provide(locked(taskId)(branches.withPermits(1)(pushHere(taskId)))),
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),

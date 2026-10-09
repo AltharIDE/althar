@@ -7,6 +7,7 @@ import { agents, type AgentDefinition, type Transport } from '@althar/provider-a
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import { UnknownAgent } from './errors'
+import type { ModelFactsOptions } from './ModelFacts'
 
 export interface RuntimeOptions {
   /** Where task worktrees go: `<root>/<project>/<task>/<repository>` (ADR-006). */
@@ -15,6 +16,13 @@ export interface RuntimeOptions {
   readonly accountsRoot?: string
   /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
   readonly openTerminal?: (line: string) => Effect.Effect<boolean>
+  /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */
+  readonly openUrl?: (url: string) => Effect.Effect<boolean>
+  /** The editors on this device a task's files open in, and opening one on a folder, at a file and line where it can; without it, none. */
+  readonly editors?: {
+    readonly list: () => ReadonlyArray<{ readonly id: string; readonly name: string }>
+    readonly open: (editor: string, folder: string, file: string | null, line: number | null) => Effect.Effect<boolean>
+  }
   readonly appVersion: string
   /** What this device is called, when the profile is new. */
   readonly deviceName: string
@@ -34,6 +42,8 @@ export interface RuntimeOptions {
   readonly stopGrace?: Duration.Duration
   /** When a turn counts as stalled, and how much work goes on before the person is asked (`Stalls.ts`). */
   readonly stalls?: StallOptions
+  /** Where what is known of models comes from (`ModelFacts.ts`); without it, nothing is fetched and nothing is known. */
+  readonly modelFacts?: ModelFactsOptions
 }
 
 /** Each is the default unless a test says otherwise. */

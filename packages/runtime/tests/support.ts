@@ -14,11 +14,12 @@ import type { FakeService } from '@althar/connectors/testing'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
-import { Agents, type AgentEntry, Connectors, type StallOptions } from '../src/Config'
+import { Agents, type AgentEntry, Connectors, type RuntimeOptions, type StallOptions } from '../src/Config'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { Secrets } from '../src/Secrets'
+import type { ModelFactsOptions } from '../src/ModelFacts'
 
 /** A git repository with one commit on `main`. */
 export const repository = () => {
@@ -158,6 +159,10 @@ export const runtime = (
     readonly perUse?: ReadonlyArray<string>
     readonly stalls?: StallOptions
     readonly stopGrace?: Duration.Duration
+    /** Where what is known of models comes from; nothing is fetched without it. */
+    readonly modelFacts?: ModelFactsOptions
+    /** The editors a task's files open in, and what opening one does. */
+    readonly editors?: RuntimeOptions['editors']
   } = {},
 ) =>
   Runtime.layer({
@@ -175,6 +180,8 @@ export const runtime = (
     ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),
     ...(more.stalls === undefined ? {} : { stalls: more.stalls }),
     ...(more.stopGrace === undefined ? {} : { stopGrace: more.stopGrace }),
+    ...(more.modelFacts === undefined ? {} : { modelFacts: more.modelFacts }),
+    ...(more.editors === undefined ? {} : { editors: more.editors }),
   })
 
 /** A GitHub instance that never answers: `.test` names nothing, so git's fetches fail at once, and the fake service stands in for its API. */

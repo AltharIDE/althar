@@ -35,7 +35,7 @@ test('opens a project, starts a task, and talks to its lead', async () => {
     await page.getByLabel('What should change').fill('Add a retry to the checkout call')
     // Its lead reports Implement done at once, with no review, so what follows is talking to it.
     await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
-    await expect(page.getByRole('button', { name: /^Review: Small · Codex/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Review: Small/ })).toBeVisible()
     await page.screenshot({ path: 'test-results/new-task.png', animations: 'disabled' })
     await page.getByRole('button', { name: /^Review:/ }).click()
     await page.getByRole('button', { name: 'No review' }).click()
@@ -57,7 +57,7 @@ test('opens a project, starts a task, and talks to its lead', async () => {
 
     // The lead's model and how hard it thinks, from the composer: the agent offers them, and says when they change.
     await page.getByRole('button', { name: /^Lead:/ }).click()
-    await expect(page.getByRole('radio', { name: /Small · Claude Code/ })).toBeVisible()
+    await expect(page.getByRole('radio', { name: /^Claude Small ?, via Claude Code/ })).toBeVisible()
     await page.screenshot({ path: 'test-results/model-picker.png', animations: 'disabled' })
     await page.getByRole('radio', { name: 'High' }).click()
     await page.keyboard.press('Escape')
@@ -100,19 +100,26 @@ test('opens a project, starts a task, and talks to its lead', async () => {
     await expect(page.getByText('Write the test')).toBeVisible()
     await page.screenshot({ path: 'test-results/thread.png' })
 
-    // The runtime crashes: the app starts it again, the window reconnects, and the thread says what happened.
-    const killed = await electronApp.evaluate(({ app }) => {
-      const runtime = app.getAppMetrics().find((metric) => metric.type === 'Utility' && metric.name === 'Althar runtime')
-      if (runtime !== undefined) process.kill(runtime.pid, 'SIGKILL')
-      return runtime !== undefined
-    })
-    expect(killed).toBe(true)
-    await expect(page.getByText(/Althar restarted\. The lead stopped with it/)).toBeVisible({ timeout: 20_000 })
-    // Its run passed, so the task is still ready, with no lead running.
+    // The runtime crashes: the app starts it again and the window reconnects, with nothing in the thread about it.
+    const runtimePid = () =>
+      electronApp.evaluate(
+        ({ app }) => app.getAppMetrics().find((metric) => metric.type === 'Utility' && metric.name === 'Althar runtime')?.pid ?? null,
+      )
+    const killed = await runtimePid()
+    expect(killed).not.toBeNull()
+    // The window reloads once the new runtime is up: a mark left on this page goes with it.
+    await page.evaluate(() => Object.assign(window, { beforeCrash: true }))
+    await electronApp.evaluate((_electron, pid) => process.kill(pid, 'SIGKILL'), killed ?? 0)
+    await expect.poll(runtimePid, { timeout: 20_000 }).not.toBe(killed)
+    await expect.poll(() => page.evaluate(() => 'beforeCrash' in window), { timeout: 20_000 }).toBe(false)
+    // Its run passed, so the task is still ready, with no lead running and nothing in the thread about the restart.
     await expect(page.getByText('Ready for you', { exact: true })).toBeVisible()
-    // Nothing to press to start it: what the person says next starts it.
-    await expect(page.getByRole('textbox', { name: /^Tell .+ something$/ })).toBeVisible()
+    await expect(page.getByText(/Althar restarted/)).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Start the lead' })).toHaveCount(0)
+    // Nothing to press to start it: what the person says next reaches the new runtime and starts it.
+    await expect(page.getByRole('button', { name: 'More for this task' })).toHaveCount(0)
+    await say(page, 'hello')
+    await expect(page.getByRole('button', { name: 'More for this task' })).toBeVisible({ timeout: 20_000 })
     await page.screenshot({ path: 'test-results/restarted.png' })
   } finally {
     await electronApp.close()

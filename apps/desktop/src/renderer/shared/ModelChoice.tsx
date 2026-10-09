@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import type { AgentStatus } from '@althar/contracts'
 import { type ModelInfo, ModelBrowser, ModelPick, type ModelPickText } from '@althar/ui'
 
-import { useModels, useSetDefaultEffort } from '../data/models'
+import { useModels, useSetDefaultEffort, useSetModelBlocked } from '../data/models'
 import {
   catalogOf,
   type Choice,
@@ -13,6 +13,7 @@ import {
   effortId,
   effortName,
   infoOf,
+  keyOf,
   offersEffort,
   togglePin,
   useModelPrefs,
@@ -53,11 +54,15 @@ export interface ModelChoiceProps {
 export function ModelChoice({ owner, agents, value, onChange, onRemove, handover, variant, placement, text }: ModelChoiceProps) {
   const known = useModels()
   const setDefault = useSetDefaultEffort()
+  const setBlocked = useSetModelBlocked()
   const prefs = useModelPrefs()
   const [open, setOpen] = useState(false)
   const [browsing, setBrowsing] = useState(false)
   const [asking, setAsking] = useState<ModelInfo | null>(null)
   const catalog = useMemo(() => catalogOf(known ?? [], agents), [known, agents])
+  // The browser shows the ones switched off too, to switch them on again.
+  const every = useMemo(() => catalogOf(known ?? [], agents, { withBlocked: true }), [known, agents])
+  const blocked = (known ?? []).flatMap((offered) => offered.blocked.map((model) => keyOf(offered.agentId, model)))
   const current = infoOf(catalog, value)
   const pins = prefs.pins ?? defaultPins(catalog)
   const pinned = pins.flatMap((key) => catalog.models.filter((info) => info.id === key))
@@ -109,14 +114,19 @@ export function ModelChoice({ owner, agents, value, onChange, onRemove, handover
       />
       {browsing && (
         <ModelBrowser
-          models={catalog.models}
-          runtimes={catalog.runtimes}
+          models={every.models}
+          runtimes={every.runtimes}
+          blocked={blocked}
+          onToggleBlocked={(key) => {
+            const { agentId, model } = choiceOf(key)
+            if (model !== null) void setBlocked({ agentId, model, blocked: !blocked.includes(key) })
+          }}
           value={current.id}
           pins={pins}
           defaultEffort={defaultOf}
           onPick={(key) => {
             setBrowsing(false)
-            const picked = catalog.models.find((info) => info.id === key)
+            const picked = every.models.find((info) => info.id === key)
             // A pick that asks first asks in the picker, opened again on it.
             if (picked !== undefined && confirm?.(picked) !== undefined) {
               setAsking(picked)

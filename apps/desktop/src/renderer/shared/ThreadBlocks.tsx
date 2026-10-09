@@ -24,7 +24,7 @@ import {
   You,
 } from '@althar/ui'
 
-import { modelInfo } from './agents'
+import { useModelNames } from './modelNames'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
 import type { ArrivalContent, Block, Part, StepResult, TaskCardContent } from './thread'
 import s from './ThreadBlocks.module.css'
@@ -117,10 +117,11 @@ function PartView({ part }: { part: Part }) {
 }
 
 /** What a step reported: the lead's summary, open under its work, or the review's verdict and findings. */
-function StepView({ id, result, of, agentName }: { id: string; result: StepResult; of: number; agentName: (id: string | null) => string }) {
+function StepView({ id, result, of }: { id: string; result: StepResult; of: number }) {
+  const named = useModelNames()
   // Implement is the first step, a review and settling it the second, and the pull request the last.
   const n = result.step === 'implement' ? 1 : result.step === 'publish' ? of : 2
-  const model = result.agentId === null ? undefined : modelInfo({ id: result.agentId, name: agentName(result.agentId) }, null)
+  const model = result.agentId === null ? undefined : named(result.agentId)
   if (result.step === 'publish') {
     const change = result.change
     return (
@@ -271,13 +272,14 @@ function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: s
 
 export function ThreadBlocks({
   blocks,
-  agentName,
+  session,
   card,
   queued,
   onPassOn,
 }: {
   blocks: ReadonlyArray<Block>
-  agentName: (id: string | null) => string
+  /** The thread's session, whose model and account name its turns. */
+  session?: { readonly agentId: string; readonly model: string | null; readonly account: string | null } | null
   /** Sends what someone outside said to the lead, in the person's name. */
   onPassOn?: (words: string) => void
   /** Draws a task's card, in the coordinator's thread. */
@@ -288,6 +290,10 @@ export function ThreadBlocks({
   // A task that was reviewed has two steps, the review and settling it being the second; its pull request, once opened, is one more.
   const done = new Set(blocks.flatMap((block) => (block.kind === 'step' ? [block.result.step] : [])))
   const of = 1 + (done.has('review') || done.has('settle') ? 1 : 0) + (done.has('publish') ? 1 : 0)
+  const named = useModelNames()
+  // A turn of the thread's own agent, on its session's model and account; another's, on its own model.
+  const turnModel = (agentId: string | null) =>
+    session != null && agentId === session.agentId ? named(agentId, session.model, session.account) : named(agentId)
   return blocks.map((block) => {
     switch (block.kind) {
       case 'you':
@@ -314,12 +320,12 @@ export function ThreadBlocks({
           </ThreadDivider>
         )
       case 'step':
-        return <StepView key={block.id} id={block.id} result={block.result} of={of} agentName={agentName} />
+        return <StepView key={block.id} id={block.id} result={block.result} of={of} />
       case 'card':
         return <Fragment key={block.id}>{card?.(block.card)}</Fragment>
       case 'turn':
         return (
-          <Turn key={block.id} model={modelInfo({ id: block.agentId ?? 'agent', name: agentName(block.agentId) }, null)} at={block.at}>
+          <Turn key={block.id} model={turnModel(block.agentId)} at={block.at}>
             {block.work.length > 0 && (
               <WorkedFor took={block.took} live={block.live} {...(block.doing === null ? {} : { summary: block.doing })}>
                 {block.work.map((part) => (

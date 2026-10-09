@@ -42,14 +42,14 @@ describe('a thread as blocks', () => {
       items.notice({ source: 'runtime', severity: 'warning', title: 'Althar restarted.', description: 'The lead stopped with it.' }, null),
     ]
     const blocks = blocksOf(source(thread), new Map(), at)
-    expect(blocks.map((block) => block.kind)).toEqual(['you', 'turn', 'divider', 'turn', 'divider'])
-    const [you, first, divider, second, restarted] = blocks
+    // The restart an earlier version noted isn't shown.
+    expect(blocks.map((block) => block.kind)).toEqual(['you', 'turn', 'divider', 'turn'])
+    const [you, first, divider, second] = blocks
     expect(you).toMatchObject({ text: 'Add a retry', delivery: Delivery.Delivered, at: 'just now' })
     if (first?.kind !== 'turn' || second?.kind !== 'turn') throw new Error('Expected turns')
     expect(first.parts.map((part) => part.kind)).toEqual(['thought', 'tool', 'message'])
     expect(first.parts[1]).toMatchObject({ toolKind: ToolKind.Read, verb: 'Read', target: 'src/checkout.ts', state: ToolState.Done })
     expect(divider).toMatchObject({ text: 'Codex takes over.' })
-    expect(restarted).toMatchObject({ text: 'Althar restarted. The lead stopped with it.' })
     expect(second.parts.map((part) => (part.kind === 'notice' ? [part.tone, part.text] : part.kind))).toEqual([
       'message',
       'plan',

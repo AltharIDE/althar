@@ -7,7 +7,6 @@ import { RuntimeState, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Button } from '../../primitives/Button/Button'
-import { Popover } from '../../primitives/Popover/Popover'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import s from './Runtimes.module.css'
 
@@ -109,16 +108,14 @@ export interface RuntimesProps {
   onCheck?: (id: string) => void
   /** Opens the runtime's own instructions, to install or update it. */
   onHelp?: (id: string) => void
-  /** Adds an API key or a local model. Without it (or `connect`), no such row. */
+  /** Adds another agent: an API key, a local model. Without it, no such row. */
   onAdd?: () => void
-  /** What "Connect another" opens beside itself: ConnectAgent. Takes the place of `onAdd`. */
-  connect?: ReactNode
   className?: string
   text?: Partial<RuntimesText>
 }
 
 /** The agent runtimes on this machine, each with who it is signed in as or what it needs. */
-export function Runtimes({ label, runtimes, onSignIn, onCancel, onCheck, onHelp, onAdd, connect, className, text }: RuntimesProps) {
+export function Runtimes({ label, runtimes, onSignIn, onCancel, onCheck, onHelp, onAdd, className, text }: RuntimesProps) {
   const t = { ...runtimesText, ...text }
   return (
     <div className={cx(s.runtimes, className)}>
@@ -127,24 +124,10 @@ export function Runtimes({ label, runtimes, onSignIn, onCancel, onCheck, onHelp,
           <Row key={r.id} r={r} t={t} onSignIn={onSignIn} onCancel={onCancel} onCheck={onCheck} onHelp={onHelp} />
         ))}
       </ul>
-      {connect ? (
-        <Popover
-          label={t.add}
-          width={420}
-          trigger={
-            <ActionButton icon="plus" className={s.add}>
-              {t.add}
-            </ActionButton>
-          }
-        >
-          {connect}
-        </Popover>
-      ) : (
-        onAdd && (
-          <ActionButton icon="plus" onClick={onAdd} className={s.add}>
-            {t.add}
-          </ActionButton>
-        )
+      {onAdd && (
+        <ActionButton icon="plus" onClick={onAdd} className={s.add}>
+          {t.add}
+        </ActionButton>
       )}
     </div>
   )

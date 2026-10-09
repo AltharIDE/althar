@@ -82,6 +82,13 @@
   font-size: 13px;
 }
 
+/* Another agent picked, waiting for what the person says next. */
+.handover {
+  margin: 0;
+  color: var(--t-2);
+  font-size: 12.5px;
+}
+
 .quiet {
   margin: 0;
   color: var(--t-3);
@@ -113,4 +120,45 @@
 .description:focus-visible {
   outline: 2px solid var(--signal);
   outline-offset: 1px;
+}
+
+/* TEMPORARY, on trial: the offer to connect the code host, once, at the top of the conversation */
+.offer {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 22px;
+  padding: 14px 16px 13px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: var(--lift);
+}
+.offerTitle {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.offerWhy {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.offerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* TEMPORARY, on trial: what connecting the host would have made of a task that ended on its branch */
+.offerLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 8px 2px 0;
+  font-size: 12px;
+  color: var(--t-3);
 }

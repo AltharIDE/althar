@@ -17,10 +17,13 @@
   flex: 1;
   min-width: 0;
   margin: 0;
+  overflow: hidden;
   font: 600 23px/1.25 var(--font-display);
   letter-spacing: -0.02em;
   color: var(--t-1);
-  text-wrap: pretty;
+  /* one line, however long it was written: the whole of it on hover */
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .state {
   flex: none;
@@ -81,4 +84,54 @@
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* ---- line and quiet: one row ---------------------------------------------------- */
+.slim {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.slimTitle {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font: 600 16px/1.3 var(--font-display);
+  letter-spacing: -0.014em;
+  color: var(--t-1);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.quiet .state {
+  margin-right: 2px;
+}
+.slimFaces {
+  flex: none;
+}
+.quiet .slimFaces {
+  margin-left: auto;
+}
+.slim .actions {
+  margin-left: 0;
+}
+.quiet .slim > .actions:only-of-type {
+  margin-left: auto;
+}
+/* the steps as a hairline under the line, the whole width */
+.hairline {
+  margin-top: 10px;
+}
+.hairline i {
+  height: 2px;
+  box-shadow: none;
+}
+/* the steps as a small track beside where it stands */
+.mini {
+  flex: none;
+  width: 64px;
+}
+.mini i {
+  height: 4px;
 }

@@ -1,9 +1,14 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import type { ThreadSnapshot } from '@althar/contracts'
 import {
   ChangeView,
+  BackCrumb,
   ChromeButton,
+  Delivery,
+  DiffLineKind,
+  type FileView,
+  Heading,
   Composer,
   Issue,
   LinkButton,
@@ -19,13 +24,16 @@ import {
   TitleBar,
 } from '@althar/ui'
 
-import { useModels } from '../../data/models'
-import { modelInfo, waitsWords } from '../../shared/agents'
+import { waitsWords } from '../../shared/agents'
 import { contextMeter } from '../../shared/ContextMeter'
+import { headerTrial } from '../../shared/trial'
+import { isGenerated } from '../../shared/generated'
+import { OpenIn } from '../../shared/OpenIn'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
-import { catalogOf, type Choice, modelName, runningOn } from '../../shared/models'
+import { useModelNames } from '../../shared/modelNames'
+import { type Choice, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { stepNames, stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
@@ -33,7 +41,7 @@ import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { PermissionCall } from './PermissionCall'
 import { StuckCall } from './StuckCall'
-import { hasOutputs, Outputs } from './Outputs'
+import { conflictsOf, hasOutputs, Outputs } from './Outputs'
 import s from './Task.module.css'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
@@ -57,13 +65,23 @@ type Face = 'talk' | 'out'
 
 export const text = {
   thread: 'Thread',
-  noLead: 'No lead',
+  noLead: 'No lead yet',
   lead: 'Lead',
   placeholderBusy: 'Add to the queue, or interrupt the lead',
-  placeholder: (lead: string) => `Tell ${lead} something`,
+  placeholder: (lead: string) => (lead === '' ? 'Tell the lead something' : `Tell ${lead} something`),
+  needsAgent: 'No agent is signed in, so nothing can pick this up. Sign one in from Settings; what you send waits for it.',
   handsOver: (agent: string) => `hands the task to ${agent}`,
-  takesOver: (to: string, from: string) => `${to} takes over from a brief; ${from}’s turn stops.`,
-  handOver: 'Hand it over',
+  /** Another agent's model, picked: nothing happens until the person says something. */
+  handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
+  keep: (from: string) => `Keep ${from}`,
+  /** What the lead is asked when merging its branch here conflicts: in each repository, the branch it merges into and where. */
+  resolve: (conflicts: ReadonlyArray<{ readonly name: string | null; readonly branch: string; readonly files: string }>) => {
+    const [only] = conflicts
+    if (conflicts.length === 1 && only !== undefined && only.name === null)
+      return `${only.branch} has moved on, and merging this task's branch into it conflicts in ${only.files}. Bring the branch up to date: merge ${only.branch} into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Then say it's ready to merge again.`
+    const where = conflicts.map((one) => `in ${one.name ?? 'the repository'}, ${one.branch} conflicts in ${one.files}`).join('; ')
+    return `The default branches have moved on, and merging this task's branches into them conflicts: ${where}. Bring each branch up to date: merge its default branch into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Then say it's ready to merge again.`
+  },
   working: 'Working',
   needsYou: 'Needs you',
   ready: 'Ready for you',
@@ -170,6 +188,16 @@ const typing = (event: KeyboardEvent) => {
 
 const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', efforts: [] }
 
+/** The line of a file's first change, where its diff is read: for an editor to open at. */
+const firstChange = (view: FileView): number | undefined => {
+  if (view.state !== 'ready') return undefined
+  for (const line of view.lines) {
+    if (line.kind === DiffLineKind.Added) return line.new
+    if (line.kind === DiffLineKind.Removed) return line.old
+  }
+  return undefined
+}
+
 export function TaskView({
   model,
   onBack,
@@ -183,14 +211,21 @@ export function TaskView({
 }) {
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState<Choice | null>(null)
+  // Another agent's model, picked while a lead is on the task: it takes over with what the person says next.
+  const [handover, setHandover] = useState<Choice | null>(null)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
   const [face, setFace] = useState<Face | null>(null)
+  // Ready, or merged here with its remote still to have it, it opens on what it made: there is something there to do.
   if (face === null && model.snapshot !== null)
-    setFace(model.snapshot.task.phase === 'ready' && hasOutputs(model.snapshot) ? 'out' : 'talk')
-  const known = useModels()
-  const catalog = useMemo(() => catalogOf(known ?? [], model.agents), [known, model.agents])
+    setFace(
+      (model.snapshot.task.phase === 'ready' && hasOutputs(model.snapshot)) || model.snapshot.task.merged.some((one) => one.ahead > 0)
+        ? 'out'
+        : 'talk',
+    )
+  const named = useModelNames()
   const files = model.snapshot?.task.files ?? []
-  const changes = useChanges(model.snapshot?.task.id ?? null, files[0]?.path ?? null)
+  // What it changed opens on the first file someone wrote, not a lockfile.
+  const changes = useChanges(model.snapshot?.task.id ?? null, (files.find((file) => !isGenerated(file.path)) ?? files[0])?.path ?? null)
   // ⌘D opens what the task changed, when it changed something. With its modifier, never set off by typing or by voice.
   const { show } = changes
   useEffect(() => {
@@ -254,27 +289,49 @@ export function TaskView({
   const session = snapshot.session
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
+  // Running or not, the task has its lead: the one on it now, else the last, else the one its plan names.
   const lead =
-    session === null
-      ? noLead
-      : modelInfo({ id: session.agentId, name: session.agentName }, modelName(catalog, session.agentId, session.model))
+    session !== null
+      ? named(session.agentId, session.model, session.account)
+      : snapshot.task.lead === null
+        ? noLead
+        : named(snapshot.task.lead.agentId, snapshot.task.lead.model, snapshot.task.lead.account)
   const { status, state } = statusOf(snapshot, agentName)
   const elapsed = elapsedOf(snapshot, now)
   const since = sinceOf(snapshot, now)
   const shown: Face = outputs ? (face ?? 'talk') : 'talk'
   const busy = session?.turnRunning ?? false
   const queue = queueShown(session, model.pending)
-  // A stopped task picks up with the agent that last led it, when it still can.
+  // A stopped task picks up with its last lead, on its model, while that agent can lead (or before the agents are read); else the agent that last spoke; else the first; with every one signed out, none.
+  const lastLead = snapshot.task.lead
   const last = snapshot.items.findLast((item) => item.agentId !== null)?.agentId
   const resume = model.agents.find((agent) => agent.id === last) ?? model.agents[0]
-  const chosen: Choice | null = pick ?? (resume === undefined ? null : { agentId: resume.id, model: null, effort: null })
-  const choice = session === null ? chosen : runningOn(session)
+  const canLead = (agentId: string) => !model.agentsKnown || model.agents.some((agent) => agent.id === agentId)
+  const chosen: Choice | null =
+    pick ??
+    (lastLead !== null && canLead(lastLead.agentId)
+      ? { agentId: lastLead.agentId, model: lastLead.model, effort: null }
+      : resume === undefined
+        ? null
+        : { agentId: resume.id, model: null, effort: null })
+  const waiting = session === null || handover?.agentId === session.agentId ? null : handover
+  const choice = session === null ? chosen : (waiting ?? runningOn(session))
 
-  // With no lead working, what the person says starts the one picked, as its first turn.
+  // With no lead working, what the person says starts the one picked, as its first turn; with another agent picked, that one takes over with it.
   const send = (body: string, now: boolean) => {
     setDraft('')
     if (session === null) void model.send(body, chosen ?? undefined)
-    else void (now ? model.sendNow(body) : model.send(body))
+    else if (waiting !== null) {
+      setHandover(null)
+      void model.handOver(waiting, body)
+    } else void (now ? model.sendNow(body) : model.send(body))
+  }
+  // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
+  const choose = (next: Choice) => {
+    if (session === null) return setPick(next)
+    if (next.agentId !== session.agentId) return setHandover(next)
+    setHandover(null)
+    void model.choose(next)
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
   const edit = async (id: string) => {
@@ -306,6 +363,13 @@ export function TaskView({
           {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
         </p>
       )}
+      {session === null && model.agentsKnown && model.agents.length === 0 && <p className={s.handover}>{text.needsAgent}</p>}
+      {waiting !== null && (
+        <p className={s.handover}>
+          {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}
+          <LinkButton onClick={() => setHandover(null)}>{text.keep(lead.name)}</LinkButton>
+        </p>
+      )}
       <Composer
         value={draft}
         onChange={setDraft}
@@ -317,7 +381,7 @@ export function TaskView({
         onEditQueued={(id) => void edit(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         placeholder={busy ? text.placeholderBusy : text.placeholder(session?.agentName ?? agentName(chosen?.agentId ?? null))}
-        meter={contextMeter(session)}
+        meter={contextMeter(session, named)}
         // Another agent's model hands the task to that agent.
         picker={
           model.agents.length > 0 &&
@@ -326,10 +390,9 @@ export function TaskView({
               owner={text.lead}
               agents={model.agents}
               value={choice}
-              onChange={(next) => (session === null ? setPick(next) : void model.choose(next))}
-              // A lead that runs is handed over by another agent's model; one at work, only once the person says.
-              {...(session === null ? {} : { handover: { note: text.handsOver, ask: busy ? text.takesOver : null } })}
-              text={{ proceed: text.handOver }}
+              onChange={choose}
+              // Another agent's model hands the task over, once the person says something.
+              {...(session === null ? {} : { handover: { note: text.handsOver, ask: null } })}
             />
           )
         }
@@ -337,37 +400,50 @@ export function TaskView({
     </div>
   )
 
+  // TEMPORARY: the header on trial, while the person picks one.
+  const trial = headerTrial()
+  const header = (layout: 'stack' | 'line' | 'quiet') => (
+    <TaskHeader
+      layout={layout}
+      title={snapshot.task.title}
+      status={status}
+      state={state}
+      lead={lead}
+      {...(snapshot.task.branch === null ? {} : { branch: snapshot.task.branch })}
+      {...(since === null ? {} : { since })}
+      {...(elapsed === null ? {} : { elapsed })}
+      steps={trackFor(snapshot.task.steps, snapshot.task.step, snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled')}
+      {...(outputs
+        ? {
+            faces: (['talk', 'out'] as const).map((value) => ({ value, label: text.faces[value], kbd: text.facesKbd[value] })),
+            face: shown,
+            onFace: setFace,
+          }
+        : { facesNote: text.nothingBuilt })}
+      actions={actions}
+    />
+  )
+
   return (
     <div className={s.window}>
-      {nav ?? <TitleBar lights="none">{null}</TitleBar>}
-      <div className={s.head}>
-        {/* Both faces keep the conversation's width, so switching doesn't move the page. */}
-        <ThreadMeasure>
-          <TaskHeader
-            title={snapshot.task.title}
-            status={status}
-            state={state}
-            lead={lead}
-            {...(snapshot.task.branch === null ? {} : { branch: snapshot.task.branch })}
-            {...(since === null ? {} : { since })}
-            {...(elapsed === null ? {} : { elapsed })}
-            steps={trackFor(snapshot.task.steps, snapshot.task.step, snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled')}
-            {...(outputs
-              ? {
-                  faces: (['talk', 'out'] as const).map((value) => ({ value, label: text.faces[value], kbd: text.facesKbd[value] })),
-                  face: shown,
-                  onFace: setFace,
-                }
-              : { facesNote: text.nothingBuilt })}
-            actions={actions}
-          />
-        </ThreadMeasure>
-      </div>
+      {trial === 'bar' ? (
+        // The bar is the header: the way back and which task, then where it stands, its faces and what it opens.
+        <TitleBar lights="none" end={header('quiet')}>
+          <BackCrumb to={snapshot.project.name} kbd="esc" title={snapshot.task.title} onBack={onBack} />
+        </TitleBar>
+      ) : (
+        (nav ?? <TitleBar lights="none">{null}</TitleBar>)
+      )}
+      {trial !== 'bar' && (
+        <div className={trial === 'now' ? s.head : s.slimHead}>
+          {/* Both faces keep the conversation's width, so switching doesn't move the page. */}
+          <ThreadMeasure>{header(trial === 'now' ? 'stack' : trial === 'line' ? 'line' : 'quiet')}</ThreadMeasure>
+        </div>
+      )}
       {shown === 'out' ? (
         <Outputs
           snapshot={snapshot}
           lead={lead}
-          agentName={agentName}
           pending={model.pending}
           error={model.error}
           onAccept={(changes) => void model.accept(changes)}
@@ -378,6 +454,13 @@ export function TaskView({
           // Sending it back is a note to its lead, which starts it again if it stopped.
           onSendBack={(note) => send(note, false)}
           onOpenFile={changes.show}
+          conflict={model.conflict}
+          onPushHere={() => void model.pushHere()}
+          // So is a conflict to settle, in words the lead acts on.
+          onResolve={() => {
+            model.dismissConflict()
+            send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
+          }}
         />
       ) : (
         <TaskFace className={s.face} composer={composer}>
@@ -399,6 +482,11 @@ export function TaskView({
                 />
               </div>
             )}
+            {trial === 'opening' && !snapshot.earlier && (
+              <Heading level={1} className={s.opening}>
+                {snapshot.task.title}
+              </Heading>
+            )}
             {snapshot.earlier && (
               <ThreadDivider
                 icon="up"
@@ -409,13 +497,28 @@ export function TaskView({
               </ThreadDivider>
             )}
             <ThreadBlocks
-              blocks={blocksOf(
-                { items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree, queue },
-                model.streaming,
-                (iso) => ago(iso),
-                now,
-              )}
-              agentName={agentName}
+              blocks={[
+                // What the person asked for opens the thread, in their words, before anything the lead did.
+                ...(snapshot.task.request === null || snapshot.earlier
+                  ? []
+                  : [
+                      {
+                        kind: 'you' as const,
+                        id: 'request',
+                        text: snapshot.task.request,
+                        at: snapshot.task.startedAt === null ? '' : ago(snapshot.task.startedAt),
+                        delivery: Delivery.Delivered,
+                        links: [],
+                      },
+                    ]),
+                ...blocksOf(
+                  { items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree, queue },
+                  model.streaming,
+                  (iso) => ago(iso),
+                  now,
+                ),
+              ]}
+              session={session}
               onPassOn={(words) => void model.send(words)}
             />
             {snapshot.attention.map((request) =>
@@ -440,12 +543,20 @@ export function TaskView({
           lights="space"
           branch={snapshot.task.branch ?? ''}
           {...(snapshot.task.baseRef === null ? {} : { base: snapshot.task.baseRef.replace(/^origin\//, '') })}
-          files={files}
+          files={files.map((file) => ({ ...file, generated: isGenerated(file.path) }))}
           selected={changes.selected}
           onSelect={changes.select}
           view={changes.view}
           onRetry={changes.retry}
           onClose={changes.close}
+          // An editor opens the task's folder there, at the file and its first change.
+          actions={
+            <OpenIn
+              taskId={snapshot.task.id}
+              {...(changes.selected === null ? {} : { path: changes.selected })}
+              {...(firstChange(changes.view) === undefined ? {} : { line: firstChange(changes.view) })}
+            />
+          }
         />
       )}
     </div>

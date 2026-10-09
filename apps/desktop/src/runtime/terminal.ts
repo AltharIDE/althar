@@ -20,3 +20,14 @@ export const openInTerminal = (line: string): Effect.Effect<boolean> =>
         chmodSync(script, 0o700)
         execFile('open', ['-a', 'Terminal', script], (error) => resume(Effect.succeed(error === null)))
       })
+
+/**
+ * Opens a page in the person's browser: an agent's sign-in that doesn't open
+ * one itself (Codex's). `open` on macOS, `xdg-open` elsewhere that has it.
+ */
+export const openInBrowser = (url: string): Effect.Effect<boolean> =>
+  !url.startsWith('https://')
+    ? Effect.succeed(false)
+    : Effect.callback<boolean>((resume) => {
+        execFile(process.platform === 'darwin' ? 'open' : 'xdg-open', [url], (error) => resume(Effect.succeed(error === null)))
+      })

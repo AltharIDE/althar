@@ -70,24 +70,32 @@ test('comes back to what runs and what waits across projects, with the projects 
     await tabs.getByRole('button', { name: /^Home/ }).click()
     await expect(page.getByRole('heading', { name: 'Name the limits better', level: 3 })).toHaveCount(0)
 
-    // Settings hold the agents and their accounts, the connections, and the app's icon, kept in the profile.
+    // Settings is a panel from the bar: the agents and their accounts, the code hosts, and the app's icon, kept in the profile.
     await page.keyboard.press('Meta+,')
-    await expect(page.getByRole('heading', { name: 'Agents on this Mac' })).toBeVisible()
-    await expect(page.getByText('Claude Code')).toBeVisible()
-    await page.screenshot({ path: 'test-results/settings.png' })
+    const settings = page.getByRole('dialog', { name: 'Settings' })
+    await expect(settings.getByText('Claude Code')).toBeVisible()
+    await page.screenshot({ path: 'test-results/settings.png', animations: 'disabled' })
+    await settings.getByRole('button', { name: /^Agents/ }).click()
+    await expect(settings.getByRole('list', { name: 'Claude Code accounts' })).toBeVisible()
+    await page.screenshot({ path: 'test-results/settings-agents.png', animations: 'disabled' })
+    await settings.getByRole('button', { name: 'Back to all settings' }).click()
     // The icon is the Dock's, so where there is no Dock (Linux, as CI runs) there is none to choose.
-    const icons = page.getByRole('radiogroup', { name: 'App icon' })
     if (process.platform === 'darwin') {
+      await settings.getByRole('button', { name: /^App icon/ }).click()
+      const icons = settings.getByRole('radiogroup', { name: 'App icon' })
       await expect(icons.getByRole('radio', { name: 'Cobalt', exact: true })).toBeChecked()
       await icons.getByRole('radio', { name: 'Ink' }).click()
       await expect(icons.getByRole('radio', { name: 'Ink' })).toBeChecked()
       await expect.poll(() => readFileSync(join(home, 'profile', 'desktop.json'), 'utf8')).toContain('"icon": "ink"')
-      await icons.scrollIntoViewIfNeeded()
-      await page.screenshot({ path: 'test-results/settings-icon.png' })
+      await page.screenshot({ path: 'test-results/settings-icon.png', animations: 'disabled' })
+      // Escape steps back to all of them, then closes the panel.
+      await page.keyboard.press('Escape')
+      await expect(settings.getByRole('button', { name: /^App icon/ })).toBeVisible()
     } else {
-      await expect(page.getByRole('heading', { name: 'App icon' })).toHaveCount(0)
+      await expect(settings.getByRole('button', { name: /^App icon/ })).toHaveCount(0)
     }
-    await tabs.getByRole('button', { name: /^Home/ }).click()
+    await page.keyboard.press('Escape')
+    await expect(settings).toHaveCount(0)
     await expect(projects.getByRole('button', { name: /meridian/ })).toBeVisible()
 
     // ⌘2 opens the first project's tab, ⌘1 the home's.

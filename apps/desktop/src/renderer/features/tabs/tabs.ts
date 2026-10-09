@@ -6,7 +6,7 @@ import { refOf } from '../home/HomeView'
 /*
  * The window's tabs, worked out: which projects have one, where in each the
  * person last was, and which has the window, from where the window is. The
- * home has the first tab, with settings under it; every other place belongs
+ * home has the first tab, with settings in its bar; every other place belongs
  * to a project. A task's address names only its thread, so its project is
  * learnt when the task is read.
  */

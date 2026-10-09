@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { reads } from '../../data/reads'
 import { rootRoute } from '../../root'
 import { HomePending } from '../../shared/Pending'
+import { useAccountSignIn } from '../accounts/useAccountSignIn'
 import { HomeView } from '../home/HomeView'
 import { useHome } from '../home/useHome'
 import { StartView } from './StartView'
@@ -17,7 +18,6 @@ function Home({ start }: { start: StartModel }) {
       start={start}
       onProject={(projectId) => void navigate({ to: '/projects/$projectId', params: { projectId } })}
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
-      onSettings={() => void navigate({ to: '/settings' })}
     />
   )
 }
@@ -25,6 +25,7 @@ function Home({ start }: { start: StartModel }) {
 function Start() {
   const navigate = useNavigate()
   const start = useStart()
+  const accounts = useAccountSignIn(start)
   // The window's tabs ask for a folder here: the picker opens once, and the address forgets it.
   const { open } = startRoute.useSearch()
   const { openFolder } = start
@@ -38,6 +39,7 @@ function Start() {
   return (
     <StartView
       model={start}
+      accounts={accounts}
       onProject={(projectId) => void navigate({ to: '/projects/$projectId', params: { projectId } })}
       home={() => <Home start={start} />}
     />

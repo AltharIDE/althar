@@ -221,7 +221,15 @@ service's model.
   - Refs move first and checkouts last. A checkout that refuses anyway
     (something written there since) puts back what moved, so it is all or
     none.
-  - Nothing is pushed.
+  - Nothing is pushed by the merge. Once merged, the task says whether each
+    default branch's remote has it yet, and Push sends it there with the
+    person's own git sign-in (their keychain or SSH agent), as they would from
+    a terminal; a prompt for a password fails rather than waits. A remote that
+    has moved on refuses, and the task says to pull first.
+  - A conflict with the default branch offers to have the lead resolve it: a
+    note to the lead naming the files, sent as the person's own message, to
+    merge the default branch into its branch, settle each conflict, and
+    commit. The person merges again after.
 - **A task is done once each of its repositories is merged:** its pull
   request merged, or, where it has none, its branch in its default branch
   here. A pull request closed without merging keeps the task open. Until

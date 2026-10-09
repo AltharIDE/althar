@@ -550,8 +550,9 @@ live beneath a project while keeping the MVP product coherent.
    unrelated task.
 7. A user asks the coordinator for a small change. It drafts a task and a plan
    and hands the task to a lead; it does not edit the repository itself.
-8. The user switches a task's lead to another agent mid-task. The new agent
-   continues in the same workspace, from a brief, and the task's history keeps
+8. The user switches a task's lead to another agent mid-task. Nothing changes
+   until they next write to it; then the new agent continues in the same
+   workspace, from a brief with what they wrote, and the task's history keeps
    both sessions.
 
 ## Explicit non-goals

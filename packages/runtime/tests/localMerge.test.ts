@@ -4,12 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
+import { NotFound } from '../src/errors'
 import { applyMerges, planMerge } from '../src/localMerge'
 import { Projects } from '../src/Projects'
+import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { notices, repository, runtime } from './support'
 
@@ -69,6 +71,8 @@ const stateOf = (taskId: string) =>
     ([row]) => row?.state,
   )
 
+const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
+
 describe('merging a task here', () => {
   it.live('fast-forwards the default branch where it is checked out and clean, and settles the task', () =>
     Effect.gen(function* () {
@@ -93,6 +97,111 @@ describe('merging a task here', () => {
       const again = yield* Effect.flip(mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }]))
       assert.deepStrictEqual(cantOf(again).slice(0, 2), ['CantMerge', 'settled'])
     }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('says what the remote doesn’t have once merged, pushes it with the person’s own git, and says when the remote has moved on', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      // Its default branch follows a remote's.
+      const remote = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+      git(remote, 'init', '-q', '--bare', '-b', 'main')
+      git(root, 'remote', 'add', 'origin', remote)
+      git(root, 'push', '-q', '-u', 'origin', 'main')
+      const { task, worktrees } = yield* taskIn([root], root)
+      const slug = worktrees[0]?.slug ?? ''
+      const head = commit(worktrees[0]?.path ?? '', 'retry.ts', 'retry\n')
+      const queries = yield* Queries
+      const mergedOf = Effect.map(queries.thread(task.threadId, {}), (snapshot) => snapshot.task.merged)
+      assert.deepStrictEqual(yield* mergedOf, [])
+      yield* mergeHere(task.taskId, [{ repository: slug, head }])
+      assert.deepStrictEqual(yield* mergedOf, [
+        { repository: slug, name: root.split('/').at(-1) ?? '', branch: 'main', remote: 'origin/main', ahead: 1 },
+      ])
+      const changes = yield* Changes
+      assert.deepStrictEqual(yield* changes.pushHere(task.taskId), [{ branch: 'main', remote: 'origin/main' }])
+      assert.strictEqual(git(remote, 'rev-parse', 'main'), head)
+      assert.deepStrictEqual(yield* mergedOf, [
+        { repository: slug, name: root.split('/').at(-1) ?? '', branch: 'main', remote: 'origin/main', ahead: 0 },
+      ])
+      assert.include(
+        (yield* notices(task.threadId)).map((notice) => notice.title),
+        'Pushed main to origin.',
+      )
+      // The remote moved on meanwhile: it refuses, and says how to put it right.
+      const elsewhere = mkdtempSync(join(tmpdir(), 'althar-elsewhere-'))
+      git(elsewhere, 'clone', '-q', remote, '.')
+      commit(elsewhere, 'theirs.ts', 'theirs\n')
+      git(elsewhere, 'push', '-q', 'origin', 'main')
+      commit(root, 'mine.ts', 'mine\n')
+      const refused = yield* Effect.flip(changes.pushHere(task.taskId))
+      assert.deepStrictEqual([(refused as { _tag?: string })._tag, (refused as { why?: string }).why], ['PushRefused', 'behind'])
+      // A remote that refuses on its own terms, as a protected branch does, says why in its words.
+      git(root, 'pull', '-q', '--no-rebase', 'origin', 'main')
+      writeFileSync(join(remote, 'hooks', 'pre-receive'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+      const declined = yield* Effect.flip(changes.pushHere(task.taskId))
+      assert.deepStrictEqual(
+        [(declined as { why?: string }).why, (declined as { said?: string }).said],
+        ['refused', 'pre-receive hook declined'],
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('pushes nothing where the default branch follows no remote, and says what git said where the remote is gone', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      const { task, worktrees } = yield* taskIn([root], root)
+      const changes = yield* Changes
+      assert.instanceOf(yield* Effect.flip(changes.pushHere('task_unknown')), NotFound)
+      // Nothing merged yet: nothing to push.
+      assert.deepStrictEqual(yield* changes.pushHere(task.taskId), [])
+      yield* mergeHere(task.taskId, [
+        { repository: worktrees[0]?.slug ?? '', head: commit(worktrees[0]?.path ?? '', 'retry.ts', 'retry\n') },
+      ])
+      // Merged, but following nothing: nowhere to push it, and nothing said of a push.
+      assert.deepStrictEqual(yield* changes.pushHere(task.taskId), [])
+      assert.notInclude((yield* notices(task.threadId)).map((notice) => notice.title).join(' '), 'Pushed')
+      // Following a remote that isn't there any more: git's own failure, not a guess at why.
+      git(root, 'remote', 'add', 'origin', join(tmpdir(), `althar-gone-${Date.now()}`))
+      git(root, 'config', 'branch.main.remote', 'origin')
+      git(root, 'config', 'branch.main.merge', 'refs/heads/main')
+      assert.strictEqual(((yield* Effect.flip(changes.pushHere(task.taskId))) as { _tag?: string })._tag, 'GitFailed')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('pushes only where the task’s own work merged, never a repository it left alone', () =>
+    Effect.gen(function* () {
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+      const roots = ['api', 'web'].map((name) => {
+        const root = join(folder, name)
+        mkdirSync(root)
+        git(root, 'init', '-q', '-b', 'main')
+        commit(root, 'README.md', `# ${name}\n`)
+        return root
+      })
+      const remotes = roots.map((root) => {
+        const bare = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+        git(bare, 'init', '-q', '--bare', '-b', 'main')
+        git(root, 'remote', 'add', 'origin', bare)
+        git(root, 'push', '-q', '-u', 'origin', 'main')
+        return bare
+      })
+      const { task, worktrees } = yield* taskIn(roots, folder)
+      const head = commit(worktrees[0]?.path ?? '', 'retry.ts', 'retry\n')
+      yield* mergeHere(task.taskId, [
+        { repository: worktrees[0]?.slug ?? '', head },
+        { repository: worktrees[1]?.slug ?? '', head: git(worktrees[1]?.path ?? '', 'rev-parse', 'HEAD') },
+      ])
+      // The person's own commit on the other repository's main, not pushed yet: not the task's to push.
+      const theirs = commit(roots[1] ?? '', 'mine.ts', 'mine\n')
+      const changes = yield* Changes
+      const pushed = yield* changes.pushHere(task.taskId)
+      assert.deepStrictEqual(
+        pushed.map((one) => one.remote),
+        ['origin/main'],
+      )
+      assert.strictEqual(git(remotes[0] ?? '', 'rev-parse', 'main'), head)
+      assert.notStrictEqual(git(remotes[1] ?? '', 'rev-parse', 'main'), theirs)
+    }).pipe(Effect.provide(withQueries())),
   )
 
   it.live('makes a merge commit where the default branch moved on, and moves the branch alone where nothing has it checked out', () =>

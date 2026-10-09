@@ -1,6 +1,6 @@
 import { Fragment, useId, type ReactNode } from 'react'
 
-import { Model, type ModelInfo } from '../../foundations/Model/Model'
+import { Model, type ModelInfo } from '../../primitives/Model/Model'
 import { TaskStatus } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
@@ -60,6 +60,13 @@ export interface TaskHeaderProps<F extends string> {
   actions?: ReactNode
   /** The title's rank in the page's outline. The task has the window, so by default it is the page's title. */
   headingLevel?: HeadingLevel
+  /**
+   * How much room it takes. stack: title, facts, track and faces on lines of
+   * their own. line: one line, its title, where it stands and its faces, over
+   * a hairline track; the facts on hover. quiet: no title (the thread opens
+   * with it, or the bar has it): where it stands, a small track, its faces.
+   */
+  layout?: 'stack' | 'line' | 'quiet'
   className?: string
   text?: Partial<TaskHeaderText>
 }
@@ -82,6 +89,7 @@ export function TaskHeader<F extends string>({
   facesNote,
   actions,
   headingLevel = 1,
+  layout = 'stack',
   className,
   text,
 }: TaskHeaderProps<F>) {
@@ -103,11 +111,44 @@ export function TaskHeader<F extends string>({
     ),
   ].filter(Boolean)
   const switchable = faces && faces.length > 1 && face !== undefined && onFace
+  if (layout !== 'stack') {
+    // Who leads it, its branch and how long it has run are there on hover, not on the line.
+    const said = [kind, lead.name, branch ?? t.noBranch, since, elapsed, cost].filter(Boolean).join(' · ')
+    const where = (
+      <Tooltip label={said}>
+        <span className={s.state}>
+          <TaskGlyph status={status} />
+          {state}
+          <VisuallyHidden>, {said}</VisuallyHidden>
+        </span>
+      </Tooltip>
+    )
+    return (
+      <header
+        className={cx(s.header, s[layout], s[status], className)}
+        {...(layout === 'line' ? { 'aria-labelledby': titleId } : { 'aria-label': title })}
+      >
+        <div className={s.slim}>
+          {layout === 'line' && (
+            <Heading level={headingLevel} id={titleId} className={s.slimTitle} title={title}>
+              {title}
+            </Heading>
+          )}
+          {where}
+          {layout === 'quiet' && steps && steps.length > 0 && <StepTrack steps={steps} status={status} className={s.mini} />}
+          {/* With nothing else to look at, there is no switch, and nothing said in its place. */}
+          {switchable && <Segmented label={t.faces} options={[...faces]} value={face} onChange={onFace} className={s.slimFaces} />}
+          {actions && <div className={s.actions}>{actions}</div>}
+        </div>
+        {layout === 'line' && steps && steps.length > 0 && <StepTrack steps={steps} status={status} className={s.hairline} />}
+      </header>
+    )
+  }
   return (
     <header className={cx(s.header, s[status], className)} aria-labelledby={titleId}>
       <div className={s.titleLine}>
         {task && <span className={s.task}>{task}</span>}
-        <Heading level={headingLevel} id={titleId} className={s.title}>
+        <Heading level={headingLevel} id={titleId} className={s.title} title={title}>
           {title}
         </Heading>
         <span className={s.state}>

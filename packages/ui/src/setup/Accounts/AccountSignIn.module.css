@@ -1,0 +1,154 @@
+/* A sign-in in the accounts list: the account's line (laid out by
+   Accounts.module.css), tinted while it is worked on, and under it a line or
+   two for what the step asks. */
+.signIn {
+  display: grid;
+  border-radius: 8px;
+}
+.line {
+  background: var(--sunk);
+}
+.fresh {
+  color: var(--t-3);
+  font-weight: 500;
+}
+.status {
+  color: var(--t-2);
+}
+.naming {
+  min-width: 0;
+}
+/* naming it, in its own line */
+.nameField {
+  min-width: 60px;
+  max-width: 220px;
+  padding: 1px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line-3);
+  background: transparent;
+  color: var(--t-1);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  outline: none;
+}
+.nameField:focus {
+  border-bottom-color: var(--t-1);
+}
+.nameField[aria-invalid='true'] {
+  border-bottom-color: var(--danger);
+}
+
+.under {
+  display: grid;
+  gap: 8px;
+  padding: 8px 4px 12px 34px;
+  animation: in var(--slow) var(--ease-fold);
+}
+@keyframes in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+}
+.ends {
+  flex-wrap: nowrap;
+}
+.gap {
+  flex: 1;
+}
+.or {
+  margin: 0 -4px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.hint {
+  max-width: 540px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.notYet {
+  color: var(--t-1);
+}
+.quiet {
+  font-size: 12px;
+  color: var(--t-3);
+}
+.code {
+  padding: 5px 10px;
+  border-radius: 7px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-1);
+  font: 500 15px/1.2 var(--mono);
+  letter-spacing: 0.08em;
+}
+.command {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-1);
+  font: 400 11.5px/1.4 var(--mono);
+  white-space: nowrap;
+}
+.field {
+  width: 300px;
+  max-width: 100%;
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.folders {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.folder {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+.folderName {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.folderPath {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font: 400 11px var(--mono);
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.failed {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+.said {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .under {
+    animation: none;
+  }
+}

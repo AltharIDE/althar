@@ -186,6 +186,9 @@ describe('the client', () => {
           ReadFolder: () => Effect.die('unused'),
           Push: () => Effect.die('unused'),
           MergeHere: () => Effect.die('unused'),
+          PushHere: () => Effect.die('unused'),
+          ListEditors: () => Effect.die('unused'),
+          OpenInEditor: () => Effect.die('unused'),
           ListProjects: () => Effect.die('unused'),
           OpenProject: () => Effect.die('unused'),
           ListTasks: () => Effect.die('unused'),
@@ -202,6 +205,11 @@ describe('the client', () => {
           SetEffort: () => Effect.die('unused'),
           GetModels: () => Effect.die('unused'),
           SetDefaultEffort: () => Effect.die('unused'),
+          SetModelBlocked: () => Effect.die('unused'),
+          StartAccountSignIn: () => Effect.die('unused'),
+          GetAccountSignIn: () => Effect.die('unused'),
+          PasteAccountSignInCode: () => Effect.die('unused'),
+          CancelAccountSignIn: () => Effect.die('unused'),
           // A refusal is an answer: it isn't tried again.
           Interrupt: ({ commandId }) => {
             commands.push(commandId)

@@ -22,3 +22,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [012](012-several-accounts-per-agent.md) | Several accounts per agent, each in its own home |
 | [013](013-project-rules.md) | Project rules: a mode, always ask, never, and command rules |
 | [014](014-window-keeps-what-it-read.md) | The window keeps what it read, and a screen reads before it shows |
+| [015](015-coordinator-picks-models.md) | The coordinator picks models; agents are only ways to them |

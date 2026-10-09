@@ -1,4 +1,5 @@
 import type {
+  AccountSignInState,
   AgentModels,
   AgentStatus,
   ChangeSummary,
@@ -50,9 +51,33 @@ export const projectRules: ProjectRulesView = {
 }
 
 export const agents: ReadonlyArray<AgentStatus> = [
-  { id: 'claude-code', name: 'Claude Code', signIn: 'signed_in', login: 'claude auth login', accounts: [usual('acc_claude', 'signed_in')] },
-  { id: 'codex', name: 'Codex', signIn: 'unknown', login: 'codex login', accounts: [usual('acc_codex', 'unknown')] },
-  { id: 'opencode', name: 'OpenCode', signIn: 'signed_out', login: 'opencode auth login', accounts: [usual('acc_opencode', 'signed_out')] },
+  {
+    id: 'claude-code',
+    name: 'Claude Code',
+    signIn: 'signed_in',
+    login: 'claude auth login',
+    version: '2.1.263',
+    ways: ['browser'],
+    accounts: [usual('acc_claude', 'signed_in')],
+  },
+  {
+    id: 'codex',
+    name: 'Codex',
+    signIn: 'unknown',
+    login: 'codex login',
+    version: '0.159.3',
+    ways: ['browser', 'device'],
+    accounts: [usual('acc_codex', 'unknown')],
+  },
+  {
+    id: 'opencode',
+    name: 'OpenCode',
+    signIn: 'signed_out',
+    login: 'opencode auth login',
+    version: null,
+    ways: [],
+    accounts: [usual('acc_opencode', 'signed_out')],
+  },
 ]
 
 export const status: Status = { apiVersion: 1, appVersion: '0.0.0', agents }
@@ -80,6 +105,7 @@ export const models: ReadonlyArray<AgentModels> = [
     model: 'default',
     effort: 'medium',
     defaults: [],
+    blocked: [],
     probing: false,
   },
   {
@@ -91,9 +117,10 @@ export const models: ReadonlyArray<AgentModels> = [
     model: 'gpt-5.2-codex',
     effort: 'medium',
     defaults: [],
+    blocked: [],
     probing: false,
   },
-  { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], probing: true },
+  { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], blocked: [], probing: true },
 ]
 
 /** A project's repositories as this Mac has them: one plain, one a fork. */
@@ -286,6 +313,7 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   step: null,
   summary: null,
   lead: 'claude-code',
+  leadModel: null,
   branch: 'althar/add-a-retry',
   startedAt: null,
   waits: null,
@@ -344,10 +372,12 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
   threadId: 'th1',
   cursor: 10,
   project: { id: 'p1', name: 'meridian' },
+  host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true },
   task: {
     id: 't1',
     title: 'Add a retry',
     description: '',
+    request: null,
     slug: 'add-a-retry',
     state: 'active',
     branch: 'althar/add-a-retry',
@@ -356,6 +386,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     phase: 'running',
     waits: null,
     steps: [],
+    lead: null,
     step: null,
     stepAt: null,
     startedAt: null,
@@ -365,6 +396,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     files: [],
     commits: 0,
     here: [],
+    merged: [],
   },
   session: {
     id: 's1',
@@ -372,6 +404,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     agentName: 'Claude Code',
     state: 'active',
     model: 'opus',
+    account: null,
     effort: 'high',
     models: ['opus', 'sonnet'],
     turnRunning: false,
@@ -446,6 +479,12 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
     mergeHere: vi.fn(async () => {}),
+    pushHere: vi.fn(async () => {}),
+    listEditors: vi.fn(async () => [
+      { id: 'zed', name: 'Zed' },
+      { id: 'finder', name: 'Finder' },
+    ]),
+    openInEditor: vi.fn(async () => true),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
       file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
       lines: [
@@ -461,6 +500,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setEffort: vi.fn(async () => {}),
     getModels: vi.fn(async () => models),
     setDefaultEffort: vi.fn(async () => {}),
+    setModelBlocked: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     stopSession: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
@@ -502,6 +542,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     orderAccounts: vi.fn(async () => {}),
     findAccounts: vi.fn(async () => [{ grant: 'grant_work', name: 'work', path: '/Users/me/.codex-work', tool: 'codex-profiles' }]),
     signInAccount: vi.fn(async () => ({ line: 'codex login', opened: true })),
+    startAccountSignIn: vi.fn(async () => ({ flowId: 'flow_account', state: { state: 'starting' as const } })),
+    getAccountSignIn: vi.fn(async (): Promise<AccountSignInState> => ({ state: 'starting' })),
+    pasteAccountSignInCode: vi.fn(async () => {}),
+    cancelAccountSignIn: vi.fn(async () => {}),
     listIssues: vi.fn(async () => ({ issues: [] })),
     markReady: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),

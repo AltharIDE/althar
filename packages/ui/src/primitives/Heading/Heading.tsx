@@ -1,23 +1,16 @@
 import type { ReactNode } from 'react'
 
+import type { RootProps } from '../../lib/props'
+
 /** A heading's rank. Components that title themselves take one as `headingLevel`, since only the page knows where they sit in its outline. */
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6
 
-export interface HeadingProps {
-  level: HeadingLevel
-  children: ReactNode
-  id?: string
-  className?: string
-}
+export type HeadingProps = RootProps<'h1', { level: HeadingLevel; children: ReactNode }>
 
 /** A heading at the rank it is given. Its look comes from its class, not its rank. */
-export function Heading({ level, children, id, className }: HeadingProps) {
+export function Heading({ level, children, ...rest }: HeadingProps) {
   const Tag = `h${level}` as const
-  return (
-    <Tag id={id} className={className}>
-      {children}
-    </Tag>
-  )
+  return <Tag {...rest}>{children}</Tag>
 }
 
 /** One rank down, for a component's inner headings, stopping at 6. */

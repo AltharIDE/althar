@@ -10,8 +10,8 @@ This package holds Althar's interface components: the primitives (buttons, menus
 
 | Layer | What it holds |
 | --- | --- |
-| `foundations` | Tokens, icons, brand marks, project marks, `Model`, and the domain vocabularies. |
-| `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), and Ask, which every part that asks a person shares. |
+| `foundations` | Tokens, icons, brand marks, project marks, and the domain vocabularies. |
+| `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), `Model` (a model's mark and name, and how it is reached on hover), and Ask, which every part that asks a person shares. |
 | `thread` | What appears in a conversation: turns, tool calls, steps, permissions, questions, Stuck, documents. |
 | `composer` | What writes into a conversation: Composer, ModelPick, ContextRing, Listening, Running. |
 | `coordinator` | What the coordinator shows about tasks: Issue, TaskLaunch, TaskCard, TaskMark, TaskHeld. |
@@ -20,7 +20,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `home` | Work across every project, as the home shows it: HomeSection, NeedCard, RunRow, SinceRow, ProjectRow, ProjectWord. |
 | `outputs` | What a task made: ChangeSet, ArtifactCard. |
 | `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu. |
-| `setup` | What comes before a project: Runtimes, ConnectAgent, SourceMap. |
+| `setup` | What comes before a project, and Settings: Runtimes, Accounts and AccountSignIn, Connections, SourceMap, AgentTabs, ModelSwitches, ControlCenter. |
 | `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), Start, Home, NewProject, ProjectRules. |
 
 The rules between them:
@@ -116,7 +116,7 @@ Widgets with real behaviour are built on Radix primitives (`radix-ui`), styled t
 
 | Radix primitive | Ours |
 | --- | --- |
-| Popover | Popover |
+| Popover | Popover, ControlCenter |
 | DropdownMenu | Menu, TaskMenu, ProjectMenu |
 | Tooltip | HoverCard, and Tooltip for a name or a shortcut that only shows on hover. Both open for keyboard focus too. |
 | Dialog | Dialog (a short question: RenameProject, RemoveProject), ModelBrowser, Lightbox. The title sits in `VisuallyHidden` when it isn't shown. |
@@ -124,7 +124,7 @@ Widgets with real behaviour are built on Radix primitives (`radix-ui`), styled t
 | Select | Select (`position="popper"`) |
 | RadioGroup | Segmented, Choices, ModelPick's list, ModelBrowser's filters |
 | Checkbox | CheckList |
-| Tabs | StepPanel |
+| Tabs | StepPanel, AgentTabs |
 | Collapsible | Disclosure / Fold. Content is force-mounted so it can animate, and `inert` while closed. |
 | Accordion | SubAgents |
 | Toggle | The pin in ModelBrowser |
@@ -219,6 +219,6 @@ These are known departures from the principles above, with the way back:
 - **Plays that need a browser.** Testing Library in jsdom does not know `inert`, and cannot click a label that forwards a pointer event. Five plays run in Storybook only; they are listed in `tests/stories.test.tsx`.
 - **The marks generator is not in the repository.** `brands.ts` says to regenerate rather than edit by hand, but the script that writes it lives outside the repo. It should move to `packages/ui/scripts/marks` as a Bun script that reads `simple-icons` and `@lobehub/icons-static-svg`.
 - **Dictation recording is red.** The Composer's recording state uses `--danger`, which is kept for deletions and failures. It needs its own treatment.
-- **Accessibility lint warnings.** `vp check` warns about some deliberate patterns: forms and panels that listen for their own keys (number keys, Escape), focusable scroll regions, a `role="status"` where the rule prefers `<output>`, and `role="group"` on a group that is not a form's fieldset. Each one has been reviewed. The warnings stay visible rather than being disabled.
+- **Accessibility lint warnings.** `vp check` warns about some deliberate patterns: forms and panels that listen for their own keys (number keys, Escape), focusable scroll regions, a `role="status"` where the rule prefers `<output>`, `role="group"` on a group that is not a form's fieldset, and a searchable Select's combobox, whose options its field reaches by `aria-activedescendant` rather than focus. Each one has been reviewed. The warnings stay visible rather than being disabled.
 - **Code colouring is built in only for TypeScript and JavaScript.** Other languages show plain unless the consumer passes a highlighter to CodeBlock. A real grammar-based highlighter belongs to the consumer until one is chosen for the package.
 - **Images in markdown are shown as their words.** Markdown does not fetch images from a message; a consumer that wants them has no way in yet.

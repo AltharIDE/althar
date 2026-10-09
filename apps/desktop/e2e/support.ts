@@ -28,6 +28,8 @@ export const chooseFolder = (electronApp: ElectronApplication, path: string) =>
 
 export const say = async (page: Page, words: string) => {
   const box = page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })
+  // A click waits until the window takes input, as it doesn't while the launch plays over it; typing alone wouldn't.
+  await box.click()
   await box.fill(words)
   await box.press('Enter')
 }

@@ -49,7 +49,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Stop the task | run suspended | From the task menu. Nothing runs until you resume it. Status: Stopped. |
 | Abandon | `cancel_run` | Ends the task without its change. It moves to Settled. |
 | Reopen | a new run on a finished task | Only for a task that is done. |
-| Althar restarted | reconciliation after process loss | The thread line shown while Althar checks what the lead had done, so nothing runs twice. |
+| Althar restarted | reconciliation after process loss | Not said in threads: a lead that stopped with Althar starts again when the person next writes to it, and nothing it was doing runs twice. A step that was running asks the person to carry it on. |
 
 A call's kind reads the same everywhere it shows: on the board, in the bar's preview and on the home.
 
@@ -59,7 +59,7 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 |---|---|---|
 | Change | `ChangeSet` | A task's pull requests across its repositories, with files and checks. |
 | Accept | approve, merge | Takes the change. Merging stays yours unless the rules say otherwise. |
-| Send back | request changes | Returns the change to the lead with a note. |
+| Ask for changes | request changes | Writes the lead a note about what should change; sent, the lead takes the work up again with it. |
 | Findings | review findings | What a review step found. By default the lead settles them. |
 | Artifacts | artifacts | What a task wrote that is worth keeping and isn't in a repository. |
 | Knowledge | knowledge claims | Everything the project holds. It has two parts: |

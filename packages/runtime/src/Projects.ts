@@ -293,6 +293,8 @@ export class Projects extends Context.Service<
       readonly issueKey?: string
       /** The project's repositories it changes, by name; needed only where it has several. */
       readonly repositories?: ReadonlyArray<string>
+      /** What the person asked for, in their own words: what its thread starts with, so it is never lost behind the title. */
+      readonly request?: string
     }): Effect.Effect<CreatedTask, NotFound | RepositoriesNeeded | GitFailed | Failure>
     /** A project's repositories, as this device has them: each one's branch, remote, role, and the fork it is. */
     repositories(projectId: string): Effect.Effect<ReadonlyArray<ProjectRepository>, NotFound | Failure>
@@ -492,6 +494,7 @@ export class Projects extends Context.Service<
         readonly draft?: boolean
         readonly issueKey?: string
         readonly repositories?: ReadonlyArray<string>
+        readonly request?: string
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -544,6 +547,8 @@ export class Projects extends Context.Service<
                 projectId: first.projectId,
                 title: input.title,
                 description: input.description ?? '',
+                // What the person asked for, in their words: its thread opens with it.
+                ...(input.request === undefined || input.request.trim() === '' ? {} : { request: input.request.trim() }),
                 slug,
                 state: input.draft === true ? 'draft' : 'open',
                 createdByActorId: envelope.actorId,

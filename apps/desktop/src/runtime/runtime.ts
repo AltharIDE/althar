@@ -8,7 +8,8 @@ import { emitterPort } from '@althar/contracts'
 import { connection, databaseIn, Folders, Nudges, Secrets, SecretsUnavailable, services } from '@althar/runtime'
 import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Queue, Stream } from 'effect'
 import { net } from 'electron'
-import { openInTerminal } from './terminal'
+import { editorsHere, openInEditor } from './editors'
+import { openInBrowser, openInTerminal } from './terminal'
 
 /*
  * The runtime, in Electron's utility process (ADR-003). It opens the profile,
@@ -92,11 +93,16 @@ const secrets = Secrets.sealed(join(profile, 'secrets'), {
  */
 const appFetch: Fetch = (input, init) => net.fetch(input, init)
 
+/** OpenRouter's public list of models, with each one's scores and prices (ADR-015). */
+const MODEL_LIST = 'https://openrouter.ai/api/v1/models'
+
 const options = {
   database: databaseIn(profile),
   worktreeRoot: required('ALTHAR_WORKTREES'),
   accountsRoot: join(profile, 'accounts'),
   openTerminal: openInTerminal,
+  openUrl: openInBrowser,
+  editors: { list: () => editorsHere(), open: openInEditor },
   appVersion: process.env.ALTHAR_APP_VERSION ?? '0.0.0',
   deviceName: hostname(),
 }
@@ -119,10 +125,22 @@ const program = Effect.gen(function* () {
           secrets: Secrets.memory(),
           // Nothing opens in Terminal while the tests drive the app.
           openTerminal: () => Effect.succeed(false),
+          openUrl: () => Effect.succeed(false),
         }
       : undefined
   const context = yield* Layer.build(
-    services(fake === undefined ? { ...options, clientIds, secrets, fetch: appFetch } : { ...options, ...fake }),
+    services(
+      fake === undefined
+        ? {
+            ...options,
+            clientIds,
+            secrets,
+            fetch: appFetch,
+            // What is known of models, for the coordinator to weigh (ADR-015): fetched as the runtime starts, kept in the profile.
+            modelFacts: { url: MODEL_LIST, cache: join(profile, 'model-facts.json'), fetch: appFetch },
+          }
+        : { ...options, ...fake },
+    ),
   )
   isReady(context)
   // What needs the person goes to the main process, which notifies them and keeps the Dock's count.

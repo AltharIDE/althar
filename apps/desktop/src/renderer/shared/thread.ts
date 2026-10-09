@@ -76,6 +76,9 @@ export type Block =
   | { readonly kind: 'arrival'; readonly id: string; readonly at: string; readonly arrival: ArrivalContent }
 
 /** ACP's tool kinds, as the kit's. */
+/** The notice earlier versions left in a thread when Althar restarted under its lead. */
+const RESTARTED = 'Althar restarted.'
+
 export const toolKindOf = (kind: string): ToolKind => {
   switch (kind) {
     case 'read':
@@ -326,7 +329,9 @@ export const blocksOf = (
         blocks.push({ kind: 'card', id: item.id, card: item.content })
         continue
       case 'notice':
-        // What Althar itself says, such as a change of agent or a restart, is a line across the thread.
+        // A restart is Althar's business, not the person's; earlier versions said so in the thread.
+        if (item.content.source === 'runtime' && item.content.title === RESTARTED) continue
+        // What Althar itself says, such as a change of agent, is a line across the thread.
         if (item.content.source === 'runtime') {
           blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
           continue

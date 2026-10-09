@@ -1,3 +1,4 @@
+import type { InAppSignIn } from './signInFlow'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 
@@ -79,6 +80,8 @@ export interface AgentDefinition {
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
     readonly login: string
+    /** Its sign-in as Althar runs it, without a terminal (`signInFlow.ts`); without it, `login` in a terminal. */
+    readonly inApp?: InAppSignIn
     /**
      * Its own sign-out, run in an account's home when the person removes an
      * account Althar made, before its folder goes (ADR-012). Without one,
@@ -104,6 +107,8 @@ export interface AgentDefinition {
     readonly shared: (names: ReadonlyArray<string>) => ReadonlyArray<string>
   }
   readonly permissions: PermissionMeanings
+  /** What prints its own version, for Settings; without it, none is shown. */
+  readonly version?: (node: string) => LaunchSpec
   /**
    * What goes in `_meta` on `session/new`, to keep the agent asking whatever
    * its settings say (ADR-007): for a lead, or for a role that only reads
@@ -239,6 +244,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       read: loggedInField,
       paidBy: claudePaidBy,
       login: 'claude auth login',
+      inApp: { kind: 'claude-login', ways: ['browser'], run: () => ({ command: 'claude', args: ['auth', 'login', '--claudeai'] }) },
       // Its sign-in is a Keychain item named after the home's path, which deleting the folder would leave behind.
       logout: { run: () => ({ command: 'claude', args: ['auth', 'logout'] }), line: 'claude auth logout' },
     },
@@ -249,6 +255,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       shared: only(['settings.json', 'CLAUDE.md', 'agents', 'commands', 'skills', 'plugins', 'output-styles']),
     },
     /* From claude-agent-acp's permissions/options/shared.js. Rejecting skips the action and Claude carries on. */
+    version: () => ({ command: 'claude', args: ['--version'] }),
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
     sessionMeta: (role = 'lead') => (role === 'reader' ? claudeReads : claudeAsks),
     knownGaps: [
@@ -278,6 +285,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       /* "Logged in using ChatGPT" is the person's plan; "using an API key" is paid per use. */
       paidBy: (output) => (/using chatgpt/i.test(output) ? 'plan' : /api key/i.test(output) ? 'key' : undefined),
       login: 'codex login',
+      // The bundled Codex, as its status check runs.
+      inApp: {
+        kind: 'codex-app-server',
+        ways: ['browser', 'device'],
+        run: (node) => ({ command: node, args: [bundledCodex(), 'app-server'] }),
+      },
       logout: { run: (node) => ({ command: node, args: [bundledCodex(), 'logout'] }), line: 'codex logout' },
     },
     home: {
@@ -285,6 +298,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       usual: (env, homeDir) => env.CODEX_HOME || join(homeDir, '.codex'),
       shared: only(['config.toml', 'AGENTS.md', 'skills', 'prompts', 'rules']),
     },
+    version: (node) => ({ command: node, args: [bundledCodex(), '--version'] }),
     /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
      * on; `cancel` stops the turn and is the only rejection offered for a file
@@ -342,6 +356,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       shared: (names) => names.filter((name) => name !== 'opencode'),
     },
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
+    version: () => ({ command: 'opencode', args: ['--version'] }),
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { once: 'once' } },
     knownGaps: [
       'Provider rate limits come back as errors; API keys have no plan windows.',

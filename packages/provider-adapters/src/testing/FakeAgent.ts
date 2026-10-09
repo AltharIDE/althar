@@ -125,6 +125,8 @@ export interface FakeAgentOptions {
   readonly variants?: boolean
   /** Models it fails to put a session on the first time, as Claude Code does now and then when Anthropic doesn't confirm one. */
   readonly failsOnce?: ReadonlyArray<string>
+  /** Models it says yes to but doesn't put a session on: the session stays on the model it was on. */
+  readonly staysOn?: ReadonlyArray<string>
 }
 
 interface SessionState {
@@ -488,6 +490,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       else if (params.configId === 'model' && options.failsOnce?.includes(value) && !failedOnce.has(value)) {
         failedOnce.add(value)
         throw acp.RequestError.internalError({ details: `Couldn't confirm model "${value}" with the API. Try again.` })
+      } else if (params.configId === 'model' && options.staysOn?.includes(value)) {
+        // Said yes to, and stays where it was.
       } else if (params.configId === 'model' && (MODELS.includes(value) || (variants && value in VARIANTS))) {
         // OpenCode's way: another model's first variant, or none.
         if (variants && value !== session.model) session.effort = levelsOf(value)[0] ?? ''

@@ -14,6 +14,7 @@ import { useProjectMenu } from '../project/useProjectMenu'
 import { useVisit } from '../tabs/TabsFrame'
 import { TaskView } from './TaskView'
 import { useTask } from './useTask'
+import { headerTrial } from '../../shared/trial'
 
 /** The project's bar over one of its tasks: the way back to the project, on the view it was on, and which task this is. */
 function TaskNav({
@@ -44,7 +45,8 @@ function TaskNav({
   return (
     <>
       <ProjectBar
-        place={{ back: { project, task: title, onBack } }}
+        // TEMPORARY: with the header as one line, the bar doesn't say the title twice.
+        place={{ back: { project, task: headerTrial() === 'line' ? '' : title, onBack } }}
         working={lanes === null ? null : lanes.running.filter((task) => task.phase !== 'stopped').length}
         yours={lanes === null ? null : yoursOf(lanes)}
         {...(lanes === null ? {} : { needs: needsOf(lanes, name, openTask, threadId) })}

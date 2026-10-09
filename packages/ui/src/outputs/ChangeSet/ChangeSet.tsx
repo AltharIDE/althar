@@ -3,7 +3,7 @@ import { useId, useState, type ReactNode } from 'react'
 import { Icon } from '../../foundations/Icon/Icon'
 import type { CodeHost } from '../../foundations/codeHost'
 import { BrandMark } from '../../foundations/Marks/Marks'
-import { Model, type ModelInfo } from '../../foundations/Model/Model'
+import { Model, type ModelInfo } from '../../primitives/Model/Model'
 import { ChangeState, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { useRefocus } from '../../lib/refocus'
@@ -64,9 +64,16 @@ export interface ChangeSetText {
   mergeHere: (base: string) => string
   /** Said beside that, where the order would be. */
   here: string
+  /** Pushing what merged here: to the branch its base follows. */
+  push: (remote: string) => string
+  /** Said beside that. */
+  pushNote: string
   order: (numbers: readonly number[]) => string
+  /** Opens a note to the lead about what should change. */
   sendBack: string
   sendBackPlaceholder: string
+  /** Sends that note; the lead takes the work up again with it. */
+  sendNote: string
   cancel: string
   diff: string
 }
@@ -100,9 +107,12 @@ export const changeSetText: ChangeSetText = {
   },
   order: (numbers) => (numbers.length > 1 ? `In order: ${numbers.map((n) => `#${n}`).join(', then ')}` : 'Squashes into the base branch'),
   mergeHere: (base) => `Merge into ${base}`,
-  here: 'On this Mac · nothing is pushed',
-  sendBack: 'Send back',
+  here: 'Merges on this Mac',
+  push: (remote) => `Push to ${remote}`,
+  pushNote: 'With your own git sign-in, as from a terminal',
+  sendBack: 'Ask for changes',
   sendBackPlaceholder: 'What should change? The lead picks it up with this note',
+  sendNote: 'Send to the lead',
   cancel: 'Cancel',
   diff: 'Review the diff',
 }
@@ -154,9 +164,13 @@ export interface ChangeSetProps {
   diffKey?: string
   /** Open one file's diff. Without it, files are not links. */
   onOpenFile?: (path: string) => void
+  /** Merged on this Mac, it goes to the remote its branch follows: shown only when merged. */
+  onPush?: () => void
+  /** The push is under way: Push shows it and ignores presses. */
+  pushing?: boolean
   /** Accepting is under way: Accept shows it and ignores presses. */
   accepting?: boolean
-  /** The note is on its way back: Send back shows it and ignores presses. */
+  /** The note is on its way to the lead: Ask for changes shows it and ignores presses. */
   sendingBack?: boolean
   /** Why the last answer did not go through, said in the foot. */
   error?: ReactNode
@@ -183,6 +197,8 @@ export function ChangeSet({
   onReviewDiff,
   diffKey,
   onOpenFile,
+  onPush,
+  pushing = false,
   accepting = false,
   sendingBack = false,
   error,
@@ -204,9 +220,10 @@ export function ChangeSet({
   const here = state === ChangeState.Branch
   const deciding = (state === ChangeState.Ready || here) && (onAccept !== undefined || onSendBack !== undefined)
   const numbers = prs.flatMap((p) => (p.number === undefined ? [] : [p.number]))
+  const pushes = state === ChangeState.Merged && onPush !== undefined
 
   return (
-    <article className={cx(s.change, s[state], deciding && s.asks, className)} aria-labelledby={titleId}>
+    <article className={cx(s.change, s[state], (deciding || pushes) && s.asks, className)} aria-labelledby={titleId}>
       <div className={s.body}>
         <div className={s.statusLine}>
           <Status state={state} t={t} />
@@ -297,11 +314,11 @@ export function ChangeSet({
         </section>
       </div>
 
-      {(deciding || onReviewDiff) && (
-        <footer className={cx(s.foot, deciding && s.deciding)}>
+      {(deciding || pushes || onReviewDiff) && (
+        <footer className={cx(s.foot, (deciding || pushes) && s.deciding)}>
           {deciding && sending ? (
             <NoteForm
-              text={{ placeholder: t.sendBackPlaceholder, submit: t.sendBack, cancel: t.cancel }}
+              text={{ placeholder: t.sendBackPlaceholder, submit: t.sendNote, cancel: t.cancel }}
               defaultValue={draft}
               onSubmit={(note) => {
                 /* kept, so a send that fails can be tried again without writing it twice */
@@ -324,8 +341,21 @@ export function ChangeSet({
                 </Button>
               )}
               {deciding && <span className={s.meta}>{here ? t.here : t.order(numbers)}</span>}
+              {pushes && (
+                <>
+                  <Button variant="signal" busy={pushing} onClick={onPush}>
+                    {t.push(base)}
+                  </Button>
+                  <span className={s.meta}>{t.pushNote}</span>
+                </>
+              )}
               {onReviewDiff && (
-                <Button variant={deciding ? 'quiet' : 'default'} kbd={diffKey} onClick={onReviewDiff} className={cx(deciding && s.push)}>
+                <Button
+                  variant={deciding || pushes ? 'quiet' : 'default'}
+                  kbd={diffKey}
+                  onClick={onReviewDiff}
+                  className={cx((deciding || pushes) && s.push)}
+                >
                   {t.diff}
                 </Button>
               )}

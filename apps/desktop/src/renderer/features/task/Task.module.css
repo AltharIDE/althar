@@ -11,6 +11,21 @@
   border-bottom: 1px solid var(--line);
 }
 
+/* TEMPORARY, on trial: the header as one row */
+.slimHead {
+  flex: none;
+  padding: 10px 24px 9px;
+  border-bottom: 1px solid var(--line);
+}
+/* TEMPORARY, on trial: the thread opens with the task's title */
+.opening {
+  margin: 8px 0 18px;
+  font: 600 23px/1.25 var(--font-display);
+  letter-spacing: -0.02em;
+  color: var(--t-1);
+  text-wrap: pretty;
+}
+
 .face {
   flex: 1;
   min-height: 0;
@@ -39,6 +54,13 @@
   margin: 0;
   color: var(--danger);
   font-size: 13px;
+}
+
+/* Another agent picked, waiting for what the person says next. */
+.handover {
+  margin: 0;
+  color: var(--t-2);
+  font-size: 12.5px;
 }
 
 /* The issue a task came from, heading its thread. */

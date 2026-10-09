@@ -189,7 +189,7 @@ CREATE TABLE tasks (
   created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   settled_at TEXT CHECK (settled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT,
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;
@@ -970,3 +970,10 @@ CREATE TABLE project_folders (
 ) STRICT;
 
 CREATE INDEX project_folders_by_project ON project_folders (project_id);
+
+CREATE TABLE model_blocks (
+  agent_id TEXT NOT NULL,
+  model TEXT NOT NULL,
+  updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  PRIMARY KEY (agent_id, model)
+) STRICT;

@@ -2,7 +2,10 @@ import { type CSSProperties, useEffect, useState } from 'react'
 
 import {
   ActionButton,
+  Button,
   Composer,
+  Heading,
+  Tooltip,
   LinkButton,
   ResizeHandle,
   SidePanel,
@@ -20,9 +23,11 @@ import {
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
+import { githubTrial } from '../../shared/trial'
 import { shortFolder } from '../../shared/folders'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
+import { useModelNames } from '../../shared/modelNames'
 import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
 import { ago, useNow } from '../../shared/time'
@@ -58,13 +63,14 @@ export const text = {
   empty: 'Ask the coordinator about the project, or say what should change.',
   placeholder: 'Tell the coordinator something',
   handsOver: (agent: string) => `hands the conversation to ${agent}`,
-  takesOver: (to: string, from: string) => `${to} takes over from a brief; ${from}’s turn stops.`,
-  handOver: 'Hand it over',
+  /** Another agent's model, picked: nothing happens until the person says something. */
+  handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
+  keep: (from: string) => `Keep ${from}`,
   queued: 'Queued · the coordinator reads it next',
   queue: (n: number) => (n === 1 ? 'Queued; the coordinator reads it next' : `${n} queued; the coordinator reads them in order`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in, so the coordinator starts on ${instead}.`,
-  needsAgent: 'No agent is signed in. Sign one in with its own tool, then come back.',
+  needsAgent: 'No agent is signed in. Sign one in from Settings, then come back.',
   earlier: 'Earlier',
   showEarlier: 'Show',
   loadingEarlier: 'Showing…',
@@ -73,6 +79,12 @@ export const text = {
   boardReading: 'Reading the board',
   notConnected: (host: string) => `Althar isn't connected to ${host}, so tasks here end on their branch.`,
   connect: (host: string) => `Connect ${host}`,
+  /** TEMPORARY, on trial: the offer said where it matters, once, or in the bar. */
+  asPullRequest: (host: string) => `It ended on its branch. Connected to ${host}, it would be a pull request, with its checks and reviews.`,
+  why: (host: string) =>
+    `Connected to ${host}, a task here ends as a pull request instead of on its branch: its checks run there, what reviewers say comes back to its lead, and it merges there when you accept it.`,
+  endsOnBranch: 'Tasks here end on their branch',
+  notNow: 'Not now',
   newTask: 'New task',
   width: 'Width of the conversation',
   /** Where a project of several repositories is: how many, and their names. */
@@ -166,12 +178,15 @@ export function ProjectView({
   }, [])
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState<Choice | null>(null)
+  // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
+  const [handover, setHandover] = useState<Choice | null>(null)
   // What opens beside the conversation: a task you plan, or the connections.
   const [panel, setPanel] = useState<'task' | 'connections' | null>(newTask ? 'task' : null)
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts.
   const now = useNow((model.coordinator?.session?.turnRunning ?? false) || (lanes?.next.some((task) => task.phase === 'planned') ?? false))
   const coordinator = model.coordinator
   const host = coordinator?.host ?? null
+  const named = useModelNames()
   const session = coordinator?.session ?? null
   const suggested = coordinator?.suggested ?? null
   const busy = session?.turnRunning ?? false
@@ -180,13 +195,29 @@ export function ProjectView({
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Whatever it ran on last, while that agent can; otherwise the first that can.
   const first = model.agents[0]
+  const waiting = session === null || handover?.agentId === session.agentId ? null : handover
   const chosen: Choice | null =
+    waiting ??
     (session === null ? null : runningOn(session)) ??
     pick ??
     (suggested?.available === true ? { agentId: suggested.agentId, model: suggested.model, effort: suggested.effort } : null) ??
     (first === undefined ? null : { agentId: first.id, model: null, effort: null })
   const name = model.project?.name ?? coordinator?.project.name ?? text.project
 
+  // TEMPORARY: where the offer to connect the code host is on trial, and whether this project said not now to it.
+  const githubAt = githubTrial()
+  const offer = host !== null && !host.connected ? host : null
+  const notNowKey = `althar.trial.notnow.${coordinator?.project.id ?? ''}`
+  const [saidNotNow, setNotNow] = useState(false)
+  const notNow =
+    saidNotNow ||
+    (() => {
+      try {
+        return window.localStorage.getItem(notNowKey) === '1'
+      } catch {
+        return false
+      }
+    })()
   const actions: CardActions = {
     project: name,
     agents: model.agents,
@@ -195,11 +226,24 @@ export function ProjectView({
     onHold: (planId) => void model.holdPlan(planId),
     onChange: (planId, steps, end) => void model.changePlan(planId, steps, end),
     onOpen: onTask,
+    ...(githubAt === 'end' && offer !== null
+      ? { connect: { label: text.connect(offer.name), why: text.asPullRequest(offer.name), onConnect: () => setPanel('connections') } }
+      : {}),
   }
 
   const send = (body: string, now: boolean) => {
     setDraft('')
-    void (now ? model.sayNow(body) : model.say(body, chosen))
+    if (waiting !== null) {
+      setHandover(null)
+      void model.handOver(waiting, body)
+    } else void (now ? model.sayNow(body) : model.say(body, chosen))
+  }
+  // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
+  const choose = (next: Choice) => {
+    if (session === null) return setPick(next)
+    if (next.agentId !== session.agentId) return setHandover(next)
+    setHandover(null)
+    void model.choose(next)
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the coordinator has it already.
   const edit = async (id: string) => {
@@ -214,7 +258,13 @@ export function ProjectView({
           {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
         </p>
       )}
-      {host !== null && !host.connected && (
+      {waiting !== null && session !== null && (
+        <p className={s.handover}>
+          {text.handingOver(named(waiting.agentId, waiting.model).name, named(session.agentId, session.model).name)}{' '}
+          <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
+        </p>
+      )}
+      {githubAt === 'now' && host !== null && !host.connected && (
         <p className={s.host}>
           {text.notConnected(host.name)}{' '}
           <ActionButton size="small" onClick={() => setPanel('connections')}>
@@ -238,7 +288,7 @@ export function ProjectView({
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
-        meter={contextMeter(session)}
+        meter={contextMeter(session, named)}
         picker={
           model.agents.length > 0 &&
           chosen !== null && (
@@ -246,9 +296,9 @@ export function ProjectView({
               owner={text.coordinator}
               agents={model.agents}
               value={chosen}
-              onChange={(next) => (session === null ? setPick(next) : void model.choose(next))}
-              {...(session === null ? {} : { handover: { note: text.handsOver, ask: busy ? text.takesOver : null } })}
-              text={{ proceed: text.handOver }}
+              onChange={choose}
+              // Another agent's model hands the conversation over, once the person says something.
+              {...(session === null ? {} : { handover: { note: text.handsOver, ask: null } })}
             />
           )
         }
@@ -274,6 +324,17 @@ export function ProjectView({
         onYours={openYours}
         {...(menu === undefined ? {} : { menu: <ProjectMenu {...menu} /> })}
         newTask={panel === 'task'}
+        {...(githubAt === 'bar' && offer !== null
+          ? {
+              more: (
+                <Tooltip label={text.why(offer.name)}>
+                  <ActionButton icon="pr" onClick={() => setPanel('connections')}>
+                    {text.connect(offer.name)}
+                  </ActionButton>
+                </Tooltip>
+              ),
+            }
+          : {})}
         onNewTask={() => {
           if (room === Room.Board) setRoom(Room.Both)
           setPanel('task')
@@ -351,6 +412,32 @@ export function ProjectView({
                 }
               >
                 <Thread label={text.conversation} busy={busy}>
+                  {githubAt === 'once' && offer !== null && !notNow && (
+                    <section className={s.offer} aria-labelledby="offer-title">
+                      <Heading level={2} id="offer-title" className={s.offerTitle}>
+                        {text.endsOnBranch}
+                      </Heading>
+                      <p className={s.offerWhy}>{text.why(offer.name)}</p>
+                      <div className={s.offerActions}>
+                        <Button size="small" icon="pr" onClick={() => setPanel('connections')}>
+                          {text.connect(offer.name)}
+                        </Button>
+                        <ActionButton
+                          size="small"
+                          onClick={() => {
+                            setNotNow(true)
+                            try {
+                              window.localStorage.setItem(notNowKey, '1')
+                            } catch {
+                              // Kept for this window only.
+                            }
+                          }}
+                        >
+                          {text.notNow}
+                        </ActionButton>
+                      </div>
+                    </section>
+                  )}
                   {coordinator.earlier && (
                     <ThreadDivider
                       icon="up"
@@ -368,7 +455,7 @@ export function ProjectView({
                       (iso) => ago(iso),
                       now,
                     )}
-                    agentName={agentName}
+                    session={session}
                     card={(card) => <Card card={card} actions={actions} />}
                     queued={text.queued}
                   />

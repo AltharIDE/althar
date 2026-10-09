@@ -305,8 +305,9 @@ describe('a task’s pull request', () => {
     await waitFor(() => expect(client.refreshTask).toHaveBeenCalledWith('t1'))
     expect(outputs.getByText('limit.ts')).toBeTruthy()
     expect(outputs.getByText('test')).toBeTruthy()
+    // Its review says how it went, not what the reviewer wrote: that is in the conversation.
     expect(outputs.getByText('Review')).toBeTruthy()
-    expect(outputs.getByText('Holds.')).toBeTruthy()
+    expect(outputs.queryByText('Holds.')).toBeNull()
     expect(outputs.getByText('Its checks run on it; mark it ready when you are')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Open on GitHub' }).getAttribute('href')).toBe('https://github.com/meridian/api/pull/12')
     await userEvent.click(screen.getByRole('button', { name: 'Mark ready for review' }))
@@ -379,6 +380,15 @@ describe('a task’s pull request', () => {
       element?.tagName === 'SPAN' && element.textContent === words && element.querySelector('mark') !== null
     expect(await within(view).findByText(line('const tries = 5'))).toBeTruthy()
     expect(getFileDiff).toHaveBeenLastCalledWith('t1', 'src/limit.ts')
+    // An editor here opens the task's folder at the file and its first change; the others are a menu away.
+    await userEvent.click(await within(view).findByRole('button', { name: 'Open in Zed' }))
+    expect(client.openInEditor).toHaveBeenLastCalledWith({ taskId: 't1', editor: 'zed', path: 'src/limit.ts', line: 1 })
+    await userEvent.click(within(view).getByRole('button', { name: 'Open in another editor' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Show in Finder' }))
+    expect(client.openInEditor).toHaveBeenLastCalledWith({ taskId: 't1', editor: 'finder', path: 'src/limit.ts', line: 1 })
+    // Finder, used last, comes first next time.
+    expect(within(view).getByRole('button', { name: 'Show in Finder' })).toBeTruthy()
+    window.localStorage.removeItem('althar.editor')
     // One that can't be read says why, and tries again.
     await userEvent.click(within(view).getByRole('button', { name: /notes\.md/ }))
     expect(await within(view).findByText('It went away')).toBeTruthy()

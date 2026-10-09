@@ -6,7 +6,6 @@ import {
   AskNote,
   Button,
   type IconName,
-  IconButton,
   NeedCard,
   NeedChange,
   NeedCommand,
@@ -18,10 +17,12 @@ import {
 } from '@althar/ui'
 import { Home, type HomeEvent as HomeLine, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
-import { modelInfo, waitsWords } from '../../shared/agents'
+import { waitsWords } from '../../shared/agents'
+import { useModelNames } from '../../shared/modelNames'
 import { productBrand, productName } from '../../shared/products'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { trackOf } from '../board/BoardView'
+import { SettingsPanel } from '../settings/SettingsPanel'
 import type { StartModel } from '../start/useStart'
 import { kindWords } from '../../shared/calls'
 import { text as stuckText } from '../task/StuckCall'
@@ -33,14 +34,12 @@ import type { HomeModel } from './useHome'
  * Across every project, what waits on you, answered where it is when a click
  * will do and opened as its task when it needs reading; what is in progress;
  * and what the loop did since you last left. Beside them, the projects, each
- * with its mark. The bar has how much runs and needs you, and the way to
- * settings; which agents are signed in is for settings, not the home. There
- * is no composer: coordinators belong to projects.
+ * with its mark. The bar has how much runs and needs you, and settings, as a
+ * panel from its gear; which agents are signed in is for settings, not the
+ * home. There is no composer: coordinators belong to projects.
  */
 
 export const text = {
-  settings: 'Settings',
-  settingsKbd: '⌘,',
   kind: kindWords,
   allow: 'Allow once',
   deny: 'Deny',
@@ -126,20 +125,20 @@ export function HomeView({
   start,
   onProject,
   onTask,
-  onSettings,
 }: {
   model: HomeModel
   start: StartModel
   onProject: (projectId: string) => void
   onTask: (threadId: string) => void
-  onSettings: () => void
 }) {
   const home = model.home
   const now = useNow(true)
   const [answered, setAnswered] = useState<ReadonlyArray<Answered & { readonly id: string }>>([])
+  const [settings, setSettings] = useState(false)
   const agents = start.status?.agents ?? []
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
-  const lead = (task: HomeTask) => modelInfo({ id: task.lead ?? 'agent', name: name(task.lead) }, null)
+  const named = useModelNames()
+  const lead = (task: HomeTask) => named(task.lead, task.leadModel)
 
   const projects = home?.projects ?? []
   const refs = new Map(projects.map((project) => [project.id, refOf(project)]))
@@ -152,12 +151,12 @@ export function HomeView({
   const waiting = calls.length + ready.length
 
   const openFolder = () => void start.openFolder().then((opened) => opened !== null && onProject(opened.id))
-  // ⌘N opens a folder, and ⌘, the settings. ⌘ and a number belongs to the window's tabs.
+  // ⌘N opens a folder, and ⌘, opens and closes settings. ⌘ and a number belongs to the window's tabs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return
       if (event.key === 'n') openFolder()
-      else if (event.key === ',') onSettings()
+      else if (event.key === ',') setSettings((now) => !now)
       else return
       event.preventDefault()
     }
@@ -231,7 +230,7 @@ export function HomeView({
       if (project === undefined) return []
       const change = task.change
       const brand = change === null ? undefined : productBrand(change.product)
-      const reviewer = task.plan?.steps.find((step) => step.key === 'review' && !step.skipped)?.agentId
+      const reviewer = task.plan?.steps.find((step) => step.key === 'review' && !step.skipped)
       return [
         {
           key: task.taskId,
@@ -260,7 +259,7 @@ export function HomeView({
                       running: change.checks?.running ?? 0,
                     }}
                     lead={lead(task)}
-                    {...(reviewer === undefined ? {} : { reviewer: modelInfo({ id: reviewer, name: name(reviewer) }, null) })}
+                    {...(reviewer === undefined ? {} : { reviewer: named(reviewer.agentId, reviewer.model) })}
                     text={{ number: (n) => `${change.prefix}${n}` }}
                   />
                 )
@@ -353,7 +352,7 @@ export function HomeView({
                 else if (first !== undefined) onTask(first.threadId)
               }}
             />
-            <IconButton icon="gear" label={text.settings} kbd={text.settingsKbd} size="small" onClick={onSettings} />
+            <SettingsPanel start={start} open={settings} onOpenChange={setSettings} />
           </>
         }
       >

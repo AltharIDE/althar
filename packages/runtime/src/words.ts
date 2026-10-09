@@ -94,7 +94,10 @@ const kinds: Readonly<Record<string, string>> = {
 }
 
 /** What went wrong, for the window: the error's tag as its reason, and words for the person. */
-export const words = (error: unknown, agentName: (agentId: string) => string): { readonly reason: string; readonly message: string } => {
+export const words = (
+  error: unknown,
+  agentName: (agentId: string) => string,
+): { readonly reason: string; readonly message: string; readonly why?: string; readonly detail?: string } => {
   const reason = tagOf(error)
   const message = ((): string => {
     switch (reason) {
@@ -144,6 +147,14 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
         return 'That request was already used for something else. Try again.'
       case 'DatabaseInUse':
         return 'Another copy of Althar is using this profile.'
+      case 'PushRefused': {
+        const remote = text(error, 'remote')
+        const why = text(error, 'why')
+        if (why === 'behind')
+          return `${remote} has commits that aren’t here yet, so it didn’t take the push. Pull them in, then push again.`
+        if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
+        return `git couldn’t sign in to push to ${remote}. Push once from a terminal so your sign-in is kept, then push again here.`
+      }
       case 'CantMerge': {
         const detail = text(error, 'detail')
         return cantMerge[text(error, 'why') as CantMerge['why']]?.(detail) ?? `Althar couldn't merge it. ${detail}`
@@ -168,6 +179,8 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
         return agentSaid(error) ?? "Althar's runtime couldn't do that. Its log has the details."
     }
   })()
+  // A merge that conflicts says in which files, for the window to have the lead settle them.
+  if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
   return { reason, message }
 }
 

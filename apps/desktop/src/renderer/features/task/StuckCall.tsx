@@ -2,7 +2,7 @@ import type { AgentStatus, AttentionRequest, StuckStep } from '@althar/contracts
 import { Stuck, type StuckAttempt } from '@althar/ui'
 
 import type { StuckAnswer } from '../../data/client'
-import { modelInfo } from '../../shared/agents'
+import { useModelNames } from '../../shared/modelNames'
 
 /*
  * A step of the task's plan that needs the person (docs/architecture/05):
@@ -95,6 +95,7 @@ export function StuckCall({
   agentName: (id: string | null) => string
   onAnswer: (attentionId: string, answer: StuckAnswer) => void
 }) {
+  const named = useModelNames()
   const agent = agentName(stuck.agentId) || 'The agent'
   const tried: ReadonlyArray<StuckAttempt> =
     stuck.why === 'no_report'
@@ -124,9 +125,7 @@ export function StuckCall({
       step={text.step[stuck.step]}
       what={text.what(stuck, agent)}
       tried={tried}
-      agents={others
-        .filter((candidate) => !out || candidate.id !== stuck.agentId)
-        .map((candidate) => ({ model: modelInfo({ id: candidate.id, name: candidate.name }, null) }))}
+      agents={others.filter((candidate) => !out || candidate.id !== stuck.agentId).map((candidate) => ({ model: named(candidate.id) }))}
       {...(review || out ? {} : { onTell: (note: string) => onAnswer(request.id, { kind: 'tell', note }) })}
       {...((out || (again !== undefined && !review)) && stuck.agentId !== null
         ? { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId: stuck.agentId ?? '' }) }
