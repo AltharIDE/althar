@@ -586,7 +586,7 @@ describe('settings', () => {
         .map((radio) => radio.getAttribute('aria-checked')),
     ).toEqual(['true', 'false'])
     // Each place as the screen would look; with nothing under way, a busy moment, said as such.
-    expect(within(panel).getByText('With nothing under way yet, here is how a busy moment would look.')).toBeTruthy()
+    expect(screen.getByText('With nothing under way yet, here is how a busy moment would look.')).toBeTruthy()
     expect(places.textContent).toContain('Publish the SDK to npm')
     await userEvent.click(within(places).getByRole('radio', { name: /In the menu bar/ }))
     expect(host.setEdge).toHaveBeenCalledWith('menu')
