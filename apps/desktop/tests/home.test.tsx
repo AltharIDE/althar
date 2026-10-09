@@ -9,6 +9,7 @@ import { HomeView, lineOf, refOf } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
 import { SettingsView } from '../src/renderer/features/settings/SettingsView'
 import { useAppIcon } from '../src/renderer/features/settings/useAppIcon'
+import { useEdgePlace } from '../src/renderer/features/settings/useEdgePlace'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { card, change, changed, fakeClient, fakeHost, home, project } from './fixtures'
@@ -383,7 +384,7 @@ describe('the home', () => {
 })
 
 function Settings({ onBack = () => {} }: { onBack?: () => void }) {
-  return <SettingsView model={useStart()} connections={useConnections()} appIcon={useAppIcon()} onBack={onBack} />
+  return <SettingsView model={useStart()} connections={useConnections()} appIcon={useAppIcon()} edge={useEdgePlace()} onBack={onBack} />
 }
 
 describe('settings', () => {
@@ -425,6 +426,48 @@ describe('settings', () => {
     await userEvent.click(within(icons).getByRole('radio', { name: 'Solid' }))
     expect((await screen.findByRole('alert')).textContent).toBe('That icon couldn’t be kept. Try again.')
     expect(within(icons).getByRole('radio', { name: 'Cobalt' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('offers where Althar shows in another app, on a Mac with a notch, and keeps a choice', async () => {
+    const host = fakeHost()
+    withServices(<Settings />, fakeClient().client, host)
+    const places = await screen.findByRole('radiogroup', { name: 'While you’re in another app' })
+    expect(
+      within(places)
+        .getAllByRole('radio')
+        .map((radio) => radio.getAttribute('aria-checked')),
+    ).toEqual(['true', 'false'])
+    await userEvent.click(within(places).getByRole('radio', { name: /In the menu bar/ }))
+    expect(host.setEdge).toHaveBeenCalledWith('menu')
+    expect(
+      within(places)
+        .getByRole('radio', { name: /In the menu bar/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
+  })
+
+  it('says nothing of it without a notch, where it is the menu bar', async () => {
+    withServices(<Settings />, fakeClient().client, fakeHost({ edge: vi.fn(async () => ({ place: 'island', notch: false })) }))
+    await screen.findByRole('radiogroup', { name: 'App icon' })
+    expect(screen.queryByRole('radiogroup', { name: 'While you’re in another app' })).toBeNull()
+  })
+
+  it('goes back to where it was when a choice can’t be kept', async () => {
+    const host = fakeHost({
+      edge: vi.fn(async () => ({ place: 'menu', notch: true })),
+      setEdge: vi.fn(async () => {
+        throw new Error('disk full')
+      }),
+    })
+    withServices(<Settings />, fakeClient().client, host)
+    const places = await screen.findByRole('radiogroup', { name: 'While you’re in another app' })
+    await userEvent.click(within(places).getByRole('radio', { name: /Round the notch/ }))
+    expect((await screen.findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    expect(
+      within(places)
+        .getByRole('radio', { name: /In the menu bar/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
   })
 
   it('offers no icon where there is no Dock to show one', async () => {

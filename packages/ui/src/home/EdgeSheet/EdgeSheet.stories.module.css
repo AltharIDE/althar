@@ -1,0 +1,17 @@
+/* the menu bar's sheet: paper, lifted off whatever is under it */
+.paper {
+  width: 400px;
+  max-width: 100%;
+  border-radius: 12px;
+  background: var(--n-1);
+  box-shadow:
+    0 0 0 0.5px rgba(20, 20, 28, 0.2),
+    var(--lift-dialog);
+}
+/* the island's sheet: the notch's black */
+.ink {
+  width: 460px;
+  max-width: 100%;
+  border-radius: 0 0 26px 26px;
+  background: #000;
+}

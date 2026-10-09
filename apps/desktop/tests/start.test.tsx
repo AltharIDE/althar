@@ -11,6 +11,7 @@ import { HomeView } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
 import { SettingsView } from '../src/renderer/features/settings/SettingsView'
 import { useAppIcon } from '../src/renderer/features/settings/useAppIcon'
+import { useEdgePlace } from '../src/renderer/features/settings/useEdgePlace'
 import { accountEntry, runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { shortFolder } from '../src/renderer/shared/folders'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
@@ -27,7 +28,7 @@ function Start({ onProject }: { onProject: (id: string) => void }) {
 }
 
 function Settings({ onBack = vi.fn() }: { onBack?: () => void }) {
-  return <SettingsView model={useStart()} connections={useConnections()} appIcon={useAppIcon()} onBack={onBack} />
+  return <SettingsView model={useStart()} connections={useConnections()} appIcon={useAppIcon()} edge={useEdgePlace()} onBack={onBack} />
 }
 
 describe('accounts in settings', () => {

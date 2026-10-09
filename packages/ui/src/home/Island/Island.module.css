@@ -1,0 +1,139 @@
+/*
+ * The notch's own black, so the island reads as the screen growing, not a
+ * window. Square at the top, where it meets the screen's edge; round below.
+ */
+.island {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  overflow: hidden;
+  transform: translateX(-50%);
+  border-radius: 0 0 14px 14px;
+  background: #000;
+  color: var(--term-t1);
+  transition:
+    width var(--fold) var(--ease-fold),
+    border-radius var(--fold) var(--ease-fold);
+  --live: var(--live-on-ink);
+  --signal: var(--signal-on-ink);
+}
+.open {
+  border-radius: 0 0 26px 26px;
+}
+/* nothing going on: the notch alone, still there to point at */
+.quiet .wing > * {
+  opacity: 0;
+}
+
+.bar {
+  flex: none;
+  height: var(--notch-h);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+}
+.notch {
+  flex: none;
+  width: var(--notch-w);
+}
+.wing {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.wing > * {
+  transition: opacity var(--base) var(--ease);
+}
+.right {
+  justify-content: flex-end;
+}
+.mark {
+  all: unset;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--term-t1);
+}
+button.mark {
+  cursor: pointer;
+}
+.count {
+  all: unset;
+  cursor: pointer;
+  flex: none;
+  min-width: 14px;
+  min-height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--term-t1);
+}
+.mark:focus-visible,
+.count:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 3px;
+  border-radius: var(--r-sm);
+}
+.said {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--term-t2);
+  animation: said 520ms var(--ease-fold);
+}
+.kind {
+  flex: none;
+  font-weight: 600;
+  color: var(--signal);
+}
+@keyframes said {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+.sheet {
+  display: grid;
+  grid-template-rows: 0fr;
+  min-height: 0;
+  transition: grid-template-rows var(--fold) var(--ease-fold);
+}
+.open .sheet {
+  grid-template-rows: 1fr;
+}
+.inner {
+  min-height: 0;
+  overflow: hidden auto;
+  padding: 0 6px;
+  opacity: 0;
+  transition: opacity var(--base) var(--ease);
+}
+.open .inner {
+  padding-bottom: 8px;
+  opacity: 1;
+  transition-delay: 100ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island,
+  .sheet,
+  .inner {
+    transition: none;
+  }
+  .said {
+    animation: none;
+  }
+}
