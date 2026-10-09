@@ -199,6 +199,43 @@ describe('nudges', () => {
     }).pipe(Effect.provide(withNudges())),
   )
 
+  it.live('say work runs while a plan counts down to its start, and not once it is held', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const instance = yield* Instance
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const task = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Later',
+        draft: true,
+      })
+      const planId = yield* plans.propose({
+        projectId: project.projectId as ProjectId,
+        taskId: task.taskId,
+        steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        reason: null,
+        actorId: instance.personId,
+        end: null,
+        startsIn: Duration.hours(1),
+      })
+      yield* until(
+        Effect.sync(() => busy(events)),
+        (seen) => seen.at(-1) === true,
+        Duration.seconds(10),
+      )
+      yield* plans.hold(planId, instance.personId)
+      yield* until(
+        Effect.sync(() => busy(events)),
+        (seen) => seen.at(-1) === false,
+        Duration.seconds(10),
+      )
+      yield* stop
+    }).pipe(Effect.provide(withNudges())),
+  )
+
   it.live('don’t say again what already waited when Althar started, though they count it', () => {
     const database = join(mkdtempSync(join(tmpdir(), 'althar-nudges-')), 'profile.sqlite')
     return Effect.gen(function* () {

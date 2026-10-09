@@ -353,7 +353,9 @@ ipcMain.handle('althar:preferences', async () => {
 ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unknown) => {
   if (!isPreferenceKey(key)) throw new Error(`Althar has no preference ${String(key)}.`)
   await preferencesRead
-  preferences = { ...preferences, [key]: await writeAppPreference(locations().profile, key, value) }
+  // Merged into the preferences as they stand once it is kept, so changes made together each stay.
+  const kept = await writeAppPreference(locations().profile, key, value)
+  preferences = { ...preferences, [key]: kept }
   awake.wants(preferences)
   app.setBadgeCount(dockCount(waiting, preferences))
   return preferences

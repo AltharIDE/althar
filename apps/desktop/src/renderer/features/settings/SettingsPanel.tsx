@@ -291,6 +291,7 @@ export function SettingsView({
               </ControlModule>
             )}
           </ControlGrid>
+          {failed}
           {start.status !== null && (
             <ControlFoot>
               <span>{text.version(start.status.appVersion)}</span>

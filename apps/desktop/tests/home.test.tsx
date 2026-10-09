@@ -735,9 +735,50 @@ describe('the app’s own preferences in settings', () => {
     const panel = await screen.findByRole('dialog', { name: 'Settings' })
     await waitFor(() => expect(within(panel).getByRole('switch', { name: 'Keep awake' }).getAttribute('aria-checked')).toBe('false'))
     expect(within(panel).getByRole('button', { name: /^Notifications\s*With sound/ })).toBeTruthy()
+    // Said where the switch was pressed, at a glance as well as opened out.
+    await userEvent.click(within(panel).getByRole('switch', { name: 'Keep awake' }))
+    expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(within(panel).getByRole('switch', { name: 'Keep awake' }).getAttribute('aria-checked')).toBe('false'))
     await openModule(/^Notifications/)
     await userEvent.click(within(panel).getByRole('switch', { name: 'Play a sound' }))
     expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
     await waitFor(() => expect(within(panel).getByRole('switch', { name: 'Play a sound' }).getAttribute('aria-checked')).toBe('true'))
+  })
+})
+
+describe('preference changes made together', () => {
+  it('keeps a change made before the first read came, and shows only the latest answer of several', async () => {
+    let answer: (preferences: typeof DEFAULT_PREFERENCES) => void = () => {}
+    const answers: Array<() => void> = []
+    let kept = DEFAULT_PREFERENCES
+    const host = fakeHost({
+      preferences: vi.fn(() => new Promise<typeof DEFAULT_PREFERENCES>((resolve) => void (answer = resolve))),
+      setPreference: vi.fn(
+        (key, value) =>
+          new Promise<typeof DEFAULT_PREFERENCES>((resolve) => {
+            kept = { ...kept, [key]: value }
+            const now = kept
+            answers.push(() => resolve(now))
+          }),
+      ),
+    })
+    withServices(<Settings />, fakeClient().client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    const awake = within(panel).getByRole('switch', { name: 'Keep awake' })
+    await userEvent.click(awake)
+    await waitFor(() => expect(awake.getAttribute('aria-checked')).toBe('false'))
+    // The read that was on its way answers late, with what was there before: the change stands.
+    act(() => answer(DEFAULT_PREFERENCES))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(awake.getAttribute('aria-checked')).toBe('false')
+    // Two changes; the first answers last: the switch shows the second.
+    await userEvent.click(awake)
+    await waitFor(() => expect(awake.getAttribute('aria-checked')).toBe('true'))
+    await act(async () => {
+      answers[2]?.()
+      answers[1]?.()
+      answers[0]?.()
+    })
+    expect(awake.getAttribute('aria-checked')).toBe('true')
   })
 })
