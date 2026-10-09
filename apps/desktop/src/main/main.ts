@@ -102,6 +102,9 @@ const awake = keepingAwake({
   onBattery: () => powerMonitor.isOnBatteryPower(),
 })
 
+/* How many things wait, as the runtime last said, for the Dock's count as it is turned on and off. */
+let waiting = 0
+
 /*
  * The app's own preferences: where each starts until the file is read, then
  * as kept. A change waits for that read, so the read can't undo it.
@@ -110,10 +113,9 @@ let preferences: AppPreferences = DEFAULT_PREFERENCES
 const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
   preferences = kept
   awake.wants(kept)
+  // A count the runtime gave before the file was read is shown again as the person has it.
+  if (waiting > 0) app.setBadgeCount(dockCount(waiting, kept))
 })
-
-/* How many things wait, as the runtime last said, for the Dock's count as it is turned on and off. */
-let waiting = 0
 
 /* Althar's own windows, apart from the edge's pages. */
 const windows = new Set<BrowserWindow>()

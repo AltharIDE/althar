@@ -10,8 +10,8 @@ import { useServices } from '../data/services'
  * the window, kept until a change. A change shows at once, and a read
  * still on its way is dropped so it can't put back what was there before.
  * Changes are ordered across the window, wherever they were made: only the
- * latest one's answer is shown, and if the main process can't keep it, what
- * it last kept comes back and `failed` says so.
+ * latest one's answer is shown. Any change the main process can't keep is
+ * said by `failed`, and what it kept is read again.
  */
 
 const KEY = ['preferences'] as const
@@ -47,7 +47,6 @@ export const usePreferences = (): PreferencesModel => {
           if (latest()) cache.setQueryData(KEY, kept)
         },
         () => {
-          if (!latest()) return
           setFailed(true)
           void cache.invalidateQueries({ queryKey: KEY })
         },

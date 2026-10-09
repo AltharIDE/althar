@@ -782,3 +782,19 @@ describe('preference changes made together', () => {
     expect(awake.getAttribute('aria-checked')).toBe('true')
   })
 })
+
+describe('a change that can’t be kept among several', () => {
+  it('is said even when changes after it were kept, and what was kept is read again', async () => {
+    const host = fakeHost({
+      setPreference: vi.fn(async (key, value) => {
+        if (key === 'notifyCalls') throw new Error('disk full')
+        return { ...DEFAULT_PREFERENCES, notifyCalls: true, [key]: value }
+      }),
+    })
+    withServices(<Settings />, fakeClient().client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await userEvent.click(await within(panel).findByRole('switch', { name: 'Notifications' }))
+    expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(vi.mocked(host.preferences).mock.calls.length).toBeGreaterThan(1))
+  })
+})
