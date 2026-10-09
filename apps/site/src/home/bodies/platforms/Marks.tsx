@@ -47,7 +47,11 @@ function useTurn(on: boolean, every = 2600) {
 /** A system's window buttons, drawn at `size` (the Mac's light's diameter). */
 export function Buttons({ id, size = 14, className }: { id: Id; size?: number; className?: string }) {
   return (
-    <span className={cx(s.buttons, s[`b${id[0]!.toUpperCase()}${id.slice(1)}`], className)} style={{ '--b': `${size}px` } as CSSProperties} aria-hidden="true">
+    <span
+      className={cx(s.buttons, s[`b${id[0]!.toUpperCase()}${id.slice(1)}`], className)}
+      style={{ '--b': `${size}px` } as CSSProperties}
+      aria-hidden="true"
+    >
       <i />
       <i />
       <i />
