@@ -21,6 +21,8 @@ import type { Feed } from './feed'
  * back a grant the runtime knows the folder by.
  */
 export interface Host {
+  /** The system Althar runs on: darwin, win32, linux. */
+  readonly platform: string
   /** Asks the person for a folder, for a project or an agent's account; its grant, or null when they cancel. */
   readonly pickFolder: (purpose?: 'project' | 'account') => Promise<string | null>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */

@@ -30,6 +30,8 @@ ipcRenderer.on('althar:open', (_event, threadId: unknown) => {
 })
 
 contextBridge.exposeInMainWorld('althar', {
+  // Which system it is, for the words the window uses: this Mac, this PC, this computer.
+  platform: process.platform,
   pickFolder: (purpose: 'project' | 'account' = 'project'): Promise<string | null> => ipcRenderer.invoke('althar:pick-folder', purpose),
   // Only a file the person dropped has a path; one the page made has none.
   grantDropped: (file: File): Promise<string | null> => {

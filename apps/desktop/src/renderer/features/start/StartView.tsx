@@ -12,6 +12,7 @@ import type { AccountSignInModel } from '../accounts/useAccountSignIn'
 import { text as rulesText } from '../rules/RulesView'
 import s from './Start.module.css'
 import type { StartModel } from './useStart'
+import { device } from '../../shared/device'
 
 /*
  * Where the window starts. With no project yet, the kit's Start screen, whose
@@ -177,7 +178,13 @@ export function StartView({
       <div className={s.window} {...drop}>
         <TitleBar lights="none">{null}</TitleBar>
         <div className={`${s.scroll} ${s.first}`}>
-          <Start runtimes={runtimesOf(model, accounts)} onCreate={open} onInstall={(id) => void model.install(id)} text={text.first} />
+          <Start
+            runtimes={runtimesOf(model, accounts)}
+            onCreate={open}
+            onInstall={(id) => void model.install(id)}
+            text={{ ...text.first, agents: `Agents on ${device.this}` }}
+            runtimesText={{ missing: `Not installed on ${device.this}` }}
+          />
           <StartError model={model} />
         </div>
       </div>

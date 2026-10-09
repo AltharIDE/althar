@@ -324,6 +324,9 @@ const catchWhatReachesThem = (electronApp: ElectronApplication) =>
     BrowserWindow.getFocusedWindow = () => null
   })
 
+/** Where the system carries an app's count, as Settings names it: the Dock, Linux's launcher. */
+const COUNT = process.platform === 'darwin' ? 'Count them on the Dock icon' : 'Count them on the launcher icon'
+
 /** Plans a task with no review, as the person would, and starts it. */
 const startTask = async (page: Page, title: string, lead: string) => {
   await page.getByRole('button', { name: 'New task' }).click()
@@ -401,7 +404,7 @@ test('tells only what the person keeps on, keeps the Mac awake while work runs, 
     const settings = page.getByRole('dialog', { name: 'Settings' })
     await settings.getByRole('button', { name: /^Notifications/ }).click()
     await settings.getByRole('switch', { name: 'A task is ready for you' }).click()
-    await settings.getByRole('switch', { name: 'Count them on the Dock icon' }).click()
+    await settings.getByRole('switch', { name: COUNT }).click()
     await expect.poll(kept).toContain('"notifyReady": false')
     await expect.poll(kept).toContain('"badge": false')
     await page.screenshot({ path: 'test-results/settings-notifications.png', animations: 'disabled' })
@@ -420,7 +423,7 @@ test('tells only what the person keeps on, keeps the Mac awake while work runs, 
     await expect(settings.getByRole('switch', { name: 'Keep awake' })).toHaveAttribute('aria-checked', 'true')
     await settings.getByRole('button', { name: /^Notifications/ }).click()
     await expect(settings.getByRole('switch', { name: 'A task is ready for you' })).toHaveAttribute('aria-checked', 'false')
-    await expect(settings.getByRole('switch', { name: 'Count them on the Dock icon' })).toHaveAttribute('aria-checked', 'false')
+    await expect(settings.getByRole('switch', { name: COUNT })).toHaveAttribute('aria-checked', 'false')
     await expect(settings.getByRole('switch', { name: 'A call waits on you' })).toHaveAttribute('aria-checked', 'true')
     await page.keyboard.press('Escape')
     await page.keyboard.press('Escape')

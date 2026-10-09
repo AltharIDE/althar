@@ -586,6 +586,7 @@ describe('the start', () => {
 
   it('offers to download an agent that isn’t on this Mac, says it downloads, and why it didn’t finish', async () => {
     let installing = false
+    let finish: () => void = () => {}
     const { client } = fakeClient({
       listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
       status: vi.fn(async () => ({
@@ -593,9 +594,10 @@ describe('the start', () => {
         appVersion: '0.0.0',
         agents: withoutOpenCode.map((agent) => (agent.id === 'opencode' ? { ...agent, download: { size: '45 MB', installing } } : agent)),
       })),
+      // The download runs until the test lets it end, so its row is seen downloading however slow the machine.
       installAgent: vi.fn(async () => {
         installing = true
-        await new Promise((resolve) => setTimeout(resolve, 50))
+        await new Promise<void>((resolve) => (finish = resolve))
         installing = false
         throw new ApiError({ reason: 'InstallFailed', message: 'GitHub couldn’t be reached to find OpenCode.' })
       }),
@@ -606,6 +608,7 @@ describe('the start', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Download' }))
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
     expect(await screen.findByText('Downloading OpenCode, about 45 MB, and checking it')).toBeTruthy()
+    finish()
     expect((await screen.findByRole('alert')).textContent).toBe('GitHub couldn’t be reached to find OpenCode.')
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
   })

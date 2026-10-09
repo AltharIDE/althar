@@ -6,7 +6,9 @@ import { join } from 'node:path'
  * The Mac's own alert sounds, which a notification can play by name: the
  * ones in System Settings › Sound, read from where macOS keeps them. Settings
  * offers them and plays one when it is chosen, so the person hears what a
- * notification will sound like. Nothing is bundled; off a Mac there are none.
+ * notification will sound like. Nothing is bundled. Windows and Linux have
+ * no named sounds a notification can play; there, a notification plays the
+ * system's own sound or none, and `beep` stands in for hearing it.
  */
 
 const SOUNDS = '/System/Library/Sounds'
@@ -24,8 +26,9 @@ export const alertSounds = async (folder = SOUNDS, platform: NodeJS.Platform = p
   }
 }
 
-/** Plays one of them once, as a notification would; anything that isn't one of them is refused. */
-export const playSound = async (name: unknown, folder = SOUNDS): Promise<void> => {
+/** Plays one of them once, as a notification would; the system's own sound by `beep`; anything else is refused. */
+export const playSound = async (name: unknown, folder = SOUNDS, beep: () => void = () => undefined): Promise<void> => {
+  if (name === 'default') return beep()
   const known = await alertSounds(folder)
   if (typeof name !== 'string' || !known.includes(name)) throw new Error(`The Mac has no sound ${String(name)}.`)
   await new Promise<void>((resolve) => execFile('afplay', [join(folder, `${name}.aiff`)], () => resolve()))

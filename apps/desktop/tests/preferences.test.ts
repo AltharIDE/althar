@@ -153,6 +153,8 @@ describe('what the person is told', () => {
   it('is silent with no sound chosen, and plays the one chosen', () => {
     expect(soundOf(DEFAULT_PREFERENCES)).toEqual({ silent: true })
     expect(soundOf({ ...DEFAULT_PREFERENCES, sound: 'Glass' })).toEqual({ silent: false, sound: 'Glass' })
+    // Windows and Linux play their own sound.
+    expect(soundOf({ ...DEFAULT_PREFERENCES, sound: 'default' })).toEqual({ silent: false })
     expect(holds('sound', '../../etc/passwd')).toBe(false)
   })
 
@@ -171,7 +173,10 @@ describe('the Mac’s alert sounds', () => {
     expect(await alertSounds(join(folder, 'gone'), 'darwin')).toEqual([])
   })
 
-  it('play only one of them', async () => {
+  it('play the system’s own by its beep, and only one of them otherwise', async () => {
+    let beeped = 0
+    await playSound('default', profile(), () => void beeped++)
+    expect(beeped).toBe(1)
     await expect(playSound('Sosumi; rm -rf ~', profile())).rejects.toThrow('no sound')
     await expect(playSound(42, profile())).rejects.toThrow('no sound')
   })

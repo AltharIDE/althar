@@ -33,6 +33,8 @@ import {
 
 import { agentLineOf, brandOf } from '../../shared/agents'
 import { appIcons } from '../../shared/appIcons'
+import { SYSTEM_SOUND } from '../../../main/notify'
+import { device, platform } from '../../shared/device'
 import { edgePlaces } from '../../shared/edge'
 import { useEditorList, useEditorPictures } from '../../shared/OpenIn'
 import { useSounds } from '../../shared/useSounds'
@@ -72,10 +74,10 @@ export const text = {
     `${agents === 1 ? '1 agent' : `${agents} agents`} · ${accounts === 1 ? '1 account' : `${accounts} accounts`}`,
   accounts: (n: number) => (n === 1 ? '1 account' : `${n} accounts`),
   signedOut: (account: string) => `${account} signed out`,
-  notHere: 'Not on this Mac',
+  notHere: `Not on ${device.this}`,
   downloading: 'Downloading…',
   out: (account: string, back: string) => `${account} out until ${back}`,
-  connecting: 'Looking at the agents on this Mac…',
+  connecting: `Looking at the agents on ${device.this}…`,
   connected: (n: number) => `${n} connected`,
   icon: 'App icon',
   iconFailed: 'That icon couldn’t be kept. Try again.',
@@ -87,9 +89,18 @@ export const text = {
   awake: 'Keep awake',
   awakeOn: 'While work runs',
   off: 'Off',
-  mac: 'This Mac',
+  mac: device.This,
   notify: 'Notifications',
   silent: 'Silent',
+  withSound: 'With sound',
+  awakeTitle: `Keep ${device.this} awake while work runs`,
+  awakeNote: `Work stops when ${device.the} sleeps. The display can still sleep.`,
+  badge: `Count them on ${device.count ?? 'the icon'}`,
+  soundNote:
+    platform === 'darwin'
+      ? 'One of this Mac’s alert sounds, with each notification.'
+      : 'The system’s own sound, with each notification, or none.',
+  agentHere: (name: string) => `${name} isn’t on ${device.this}`,
   examples: 'With nothing under way yet, here is how a busy moment would look.',
   notifyNote: 'Only while Althar isn’t in front. Never for progress.',
   preferenceFailed: 'That couldn’t be kept. Try again.',
@@ -274,7 +285,15 @@ export function SettingsView({
             />
             <ControlToggle
               title={text.notify}
-              line={notifying ? (preferences.sound ?? text.silent) : text.off}
+              line={
+                notifying
+                  ? preferences.sound === null
+                    ? text.silent
+                    : preferences.sound === SYSTEM_SOUND
+                      ? text.withSound
+                      : preferences.sound
+                  : text.off
+              }
               on={notifying}
               onChange={notifyAll}
               glyph={<Icon name="bell" size={16} />}
@@ -335,6 +354,7 @@ export function SettingsView({
               ) : (
                 <AgentInstall
                   name={chosen.name}
+                  text={{ missing: text.agentHere }}
                   {...(brandOf(chosen.id) === undefined ? {} : { brand: brandOf(chosen.id) })}
                   {...(chosen.download === null ? {} : { size: chosen.download.size })}
                   state={
@@ -401,6 +421,7 @@ export function SettingsView({
                 onChange={(on) => set('keepAwake', on)}
                 onBattery={preferences.awakeOnBattery}
                 onBatteryChange={(on) => set('awakeOnBattery', on)}
+                text={{ title: text.awakeTitle, note: text.awakeNote }}
               />
               {editors.length > 0 && (
                 <OpenFilesIn
@@ -423,13 +444,21 @@ export function SettingsView({
           <ControlSheet>
             <p className={s.quiet}>{text.notifyNote}</p>
             <SettingList>
-              <NotificationSettings value={notifyChoicesOf(preferences)} onChange={(key, on) => set(NOTIFY_KEYS[key], on)} />
-              {sounds.list.length > 0 && (
+              <NotificationSettings
+                value={notifyChoicesOf(preferences)}
+                onChange={(key, on) => set(NOTIFY_KEYS[key], on)}
+                count={device.count !== null}
+                text={{ badge: text.badge }}
+              />
+              {/* A Mac offers its alert sounds by name; Windows and Linux, their own sound or none. */}
+              {(sounds.list.length > 0 || platform !== 'darwin') && (
                 <NotificationSound
                   sounds={sounds.list}
+                  {...(platform === 'darwin' ? {} : { system: SYSTEM_SOUND })}
                   value={preferences.sound}
                   onChange={(sound) => set('sound', sound)}
                   onPlay={sounds.play}
+                  text={{ note: text.soundNote }}
                 />
               )}
             </SettingList>

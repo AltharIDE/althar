@@ -9,11 +9,11 @@ import { usePreferences } from './usePreferences'
  * Opens a task's folder in one of the editors on this Mac, at a file and
  * line: the one Settings says files open in (the first found until one is
  * chosen), or another from its menu, which becomes the one they open in.
- * Finder shows the file.
+ * The system's file manager (Finder, File Explorer, Files) shows the file.
  */
 
 export const text = {
-  in: (name: string) => (name === 'Finder' ? 'Show in Finder' : `Open in ${name}`),
+  in: (name: string) => (['Finder', 'File Explorer', 'Files'].includes(name) ? `Show in ${name}` : `Open in ${name}`),
   more: 'Open in another editor',
 }
 

@@ -4,7 +4,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, r
 import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
-import { type AgentDefinition, type AgentInstall, locate, type Located } from '@althar/provider-adapters'
+import { type AgentDefinition, type AgentDownload, locate, type Located, programName } from '@althar/provider-adapters'
 import { Context, Effect, Layer, Ref, Schema } from 'effect'
 
 /*
@@ -47,7 +47,7 @@ export interface InstallsOptions {
   readonly platform?: string
   readonly arch?: string
   /** Where the person's own commands are looked for: their PATH and the usual places; tests give their own. */
-  readonly search?: { readonly env: { readonly PATH?: string | undefined }; readonly dirs: ReadonlyArray<string> }
+  readonly search?: { readonly env: Readonly<Record<string, string | undefined>>; readonly dirs: ReadonlyArray<string> }
 }
 
 interface Release {
@@ -102,22 +102,26 @@ export class Installs extends Context.Service<
       Effect.gen(function* () {
         const root = options.root
         const fetch = options.fetch ?? globalThis.fetch
-        const target = `${options.platform ?? process.platform}-${options.arch ?? process.arch}`
+        const platform = options.platform ?? process.platform
+        const target = `${platform}-${options.arch ?? process.arch}`
         const installing = yield* Ref.make(new Set<string>())
 
-        /** Where Althar's copy of the agent's command is, whether or not it is there. */
-        const kept = (definition: AgentDefinition, install: AgentInstall) =>
-          root === undefined ? null : join(root, definition.id, 'current', install.command)
+        /** Where Althar's downloaded copy of the agent's command is, whether or not it is there. */
+        const kept = (definition: AgentDefinition, name: string) =>
+          root === undefined ? null : join(root, definition.id, 'current', programName(name, platform))
 
-        const locateOf = (definition: AgentDefinition): Located | null =>
-          definition.install === undefined
-            ? null
-            : options.search === undefined
-              ? locate(definition.install.command, kept(definition, definition.install))
-              : locate(definition.install.command, kept(definition, definition.install), options.search.env, options.search.dirs)
+        const locateOf = (definition: AgentDefinition): Located | null => {
+          const cli = definition.cli
+          if (cli === undefined) return null
+          const copies = { bundled: cli.bundled?.() ?? null, kept: cli.download === undefined ? null : kept(definition, cli.name) }
+          return locate(cli.name, copies, {
+            platform,
+            ...(options.search === undefined ? {} : { env: options.search.env, dirs: options.search.dirs }),
+          })
+        }
 
         /** The agent's latest release, and its file for this device with the digest GitHub gives it. */
-        const latest = (definition: AgentDefinition, install: AgentInstall) =>
+        const latest = (definition: AgentDefinition, install: AgentDownload) =>
           Effect.gen(function* () {
             const asset = install.assets[target]
             if (asset === undefined) return yield* fail(definition.id, `There's no ${definition.name} for this computer to download.`)
@@ -150,7 +154,7 @@ export class Installs extends Context.Service<
             return { tag: body.tag_name, url: found.browser_download_url, digest } satisfies Release
           })
 
-        const download = (definition: AgentDefinition, install: AgentInstall, folder: string) =>
+        const download = (definition: AgentDefinition, name: string, install: AgentDownload, folder: string) =>
           Effect.gen(function* () {
             const release = yield* latest(definition, install)
             const response = yield* Effect.tryPromise({
@@ -171,12 +175,13 @@ export class Installs extends Context.Service<
             writeFileSync(archive, bytes)
             const unpacked = join(folder, 'unpacked')
             mkdirSync(unpacked)
-            // bsdtar, as macOS has, unpacks a zip as well as a gzipped tar.
+            // bsdtar, as macOS and Windows have, unpacks a zip as well as a gzipped tar.
             yield* run('tar', ['-xf', archive, '-C', unpacked]).pipe(
               Effect.mapError((error) => fail(definition.id, `${definition.name}'s download couldn't be unpacked.`, error)),
             )
-            const command = findIn(unpacked, install.command)
-            if (command === null) return yield* fail(definition.id, `${definition.name}'s download has no ${install.command} in it.`)
+            const program = programName(name, platform)
+            const command = findIn(unpacked, program)
+            if (command === null) return yield* fail(definition.id, `${definition.name}'s download has no ${program} in it.`)
             chmodSync(command, 0o755)
             yield* run(command, ['--version'], 30_000).pipe(
               Effect.mapError((error) => fail(definition.id, `The downloaded ${definition.name} wouldn't run on this computer.`, error)),
@@ -186,22 +191,28 @@ export class Installs extends Context.Service<
 
         const install = (definition: AgentDefinition): Effect.Effect<void, InstallFailed> =>
           Effect.gen(function* () {
-            const spec = definition.install
-            if (spec === undefined || root === undefined) return yield* fail(definition.id, `Althar can't download ${definition.name}.`)
+            const cli = definition.cli
+            const spec = cli?.download
+            if (cli === undefined || spec === undefined || root === undefined)
+              return yield* fail(definition.id, `Althar can't download ${definition.name}.`)
             const already = yield* Ref.modify(installing, (now) => [now.has(definition.id), new Set([...now, definition.id])])
             if (already) return yield* fail(definition.id, `${definition.name} is already downloading.`)
             const home = join(root, definition.id)
             const folder = join(home, `.download-${randomUUID()}`)
             yield* Effect.gen(function* () {
               mkdirSync(folder, { recursive: true })
-              const { release, command } = yield* download(definition, spec, folder)
+              const { release, command } = yield* download(definition, cli.name, spec, folder)
               // The version's folder holds the command alone; `current` moves to it in one step.
               const version = join(home, release.tag)
               rmSync(version, { recursive: true, force: true })
               mkdirSync(version)
-              renameSync(command, join(version, spec.command))
+              renameSync(command, join(version, programName(cli.name, platform)))
               const next = join(home, `.current-${randomUUID()}`)
-              symlinkSync(release.tag, next)
+              // A junction on Windows, which needs no administrator, and an absolute target; a relative link elsewhere.
+              if (platform === 'win32') symlinkSync(version, next, 'junction')
+              else symlinkSync(release.tag, next)
+              // Windows can't rename over a junction, so the old one goes first; elsewhere the rename replaces it in one step.
+              if (platform === 'win32') rmSync(join(home, 'current'), { force: true })
               renameSync(next, join(home, 'current'))
               // Versions before the one in use go, with what any earlier download left.
               for (const entry of readdirSync(home))
@@ -224,8 +235,9 @@ export class Installs extends Context.Service<
           state: (definition) =>
             Effect.map(Ref.get(installing), (now) => ({
               located: locateOf(definition),
-              downloadable: definition.install !== undefined && root !== undefined && definition.install.assets[target] !== undefined,
-              size: definition.install?.size ?? null,
+              downloadable:
+                definition.cli?.download !== undefined && root !== undefined && definition.cli.download.assets[target] !== undefined,
+              size: definition.cli?.download?.size ?? null,
               installing: now.has(definition.id),
             })),
           install,

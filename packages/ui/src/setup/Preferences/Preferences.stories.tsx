@@ -246,6 +246,22 @@ export const AllStates: Story = {
             </SettingList>
           ),
         },
+        {
+          state: 'on Windows: no count, the system’s sound',
+          node: (
+            <SettingList>
+              <NotificationSettings value={ALL_ON} onChange={fn()} count={false} />
+              <NotificationSound
+                sounds={[]}
+                system="default"
+                value="default"
+                onChange={fn()}
+                onPlay={fn()}
+                text={{ note: 'The system’s own sound, with each notification, or none.' }}
+              />
+            </SettingList>
+          ),
+        },
         { state: 'the screen round the notch', node: <EdgeScene notch top={island} /> },
         { state: 'the screen with the menu bar', node: <EdgeScene menuItem={menuMark} sheet={sheet} /> },
       ]}

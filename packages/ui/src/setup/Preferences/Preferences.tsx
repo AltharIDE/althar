@@ -219,11 +219,13 @@ export const notificationSettingsText: NotificationSettingsText = {
 export interface NotificationSettingsProps {
   value: NotifyChoices
   onChange: (key: keyof NotifyChoices, on: boolean) => void
+  /** Whether the system can carry a count on the app's icon; without one (Windows), no such row. */
+  count?: boolean
   text?: Partial<NotificationSettingsText>
 }
 
 /** What comes as a notification, and whether the Dock counts it. */
-export function NotificationSettings({ value, onChange, text }: NotificationSettingsProps) {
+export function NotificationSettings({ value, onChange, count = true, text }: NotificationSettingsProps) {
   const t = { ...notificationSettingsText, ...text }
   const row = (key: keyof NotifyChoices, title: string, note?: string) => (
     <SettingSwitch key={key} title={title} note={note} checked={value[key]} onChange={(on) => onChange(key, on)} />
@@ -233,7 +235,7 @@ export function NotificationSettings({ value, onChange, text }: NotificationSett
       {row('calls', t.calls, t.callsNote)}
       {row('ready', t.ready)}
       {row('stopped', t.stopped)}
-      {row('badge', t.badge)}
+      {count && row('badge', t.badge)}
     </>
   )
 }
@@ -242,6 +244,8 @@ export interface NotificationSoundText {
   title: string
   note: string
   none: string
+  /** The system's own sound, where there are no named ones to choose from. */
+  system: string
   play: (sound: string) => string
 }
 
@@ -249,6 +253,7 @@ export const notificationSoundText: NotificationSoundText = {
   title: 'Sound',
   note: 'One of this Mac’s alert sounds, with each notification.',
   none: 'None',
+  system: 'The system’s sound',
   play: (sound) => `Play ${sound}`,
 }
 
@@ -260,29 +265,36 @@ export interface NotificationSoundProps {
   onChange: (sound: string | null) => void
   /** Plays a sound once. Choosing one plays it too, so the person hears what they chose. */
   onPlay?: (sound: string) => void
+  /** Offer the system's own sound, as `system`'s value, for a system without named ones (Windows, Linux). */
+  system?: string
   text?: Partial<NotificationSoundText>
 }
 
 const NONE = '__none'
 
 /** Which sound a notification plays, heard as it is chosen, or none. */
-export function NotificationSound({ sounds, value, onChange, onPlay, text }: NotificationSoundProps) {
+export function NotificationSound({ sounds, value, onChange, onPlay, system, text }: NotificationSoundProps) {
   const t = { ...notificationSoundText, ...text }
+  const named = (sound: string) => (sound === system ? t.system : sound)
   return (
     <SettingRow title={t.title} note={t.note} glyph={<Icon name="sound" size={15} />}>
       {() => (
         <span className={s.sound}>
-          {onPlay && value !== null && <IconButton icon="play" label={t.play(value)} size="small" onClick={() => onPlay(value)} />}
+          {onPlay && value !== null && <IconButton icon="play" label={t.play(named(value))} size="small" onClick={() => onPlay(value)} />}
           <Select
             label={t.title}
-            options={[{ value: NONE, label: t.none }, ...sounds.map((sound) => ({ value: sound, label: sound }))]}
+            options={[
+              { value: NONE, label: t.none },
+              ...(system === undefined ? [] : [{ value: system, label: t.system }]),
+              ...sounds.map((sound) => ({ value: sound, label: sound })),
+            ]}
             value={value ?? NONE}
             onChange={(next) => {
               const sound = next === NONE ? null : next
               onChange(sound)
               if (sound !== null) onPlay?.(sound)
             }}
-            width={132}
+            width={system === undefined ? 132 : 168}
           />
         </span>
       )}

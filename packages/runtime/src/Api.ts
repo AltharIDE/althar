@@ -255,7 +255,7 @@ export const handlers = Api.toLayer(
         return {
           id: entry.definition.id,
           name: entry.definition.name,
-          installed: entry.definition.install === undefined || install.located !== null,
+          installed: entry.definition.cli === undefined || install.located !== null,
           kept: install.located?.whose === 'althar',
           download: install.downloadable && install.size !== null ? { size: install.size, installing: install.installing } : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),

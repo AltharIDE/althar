@@ -378,7 +378,7 @@ ipcMain.handle('althar:editor-picture', async (_event, id: unknown) => {
 
 // The Mac's alert sounds a notification can play, and one played once, as Settings offers them.
 ipcMain.handle('althar:sounds', () => alertSounds())
-ipcMain.handle('althar:play-sound', (_event, name: unknown) => playSound(name))
+ipcMain.handle('althar:play-sound', (_event, name: unknown) => playSound(name, undefined, () => shell.beep()))
 
 // Where Althar shows while the person is in another app, and whether this Mac has a notch to choose the island by.
 ipcMain.handle('althar:edge', () => edge?.state() ?? null)
@@ -413,6 +413,8 @@ void app.whenReady().then(() => {
   // Plugged in or on battery changes whether the Mac is held awake.
   powerMonitor.on('on-battery', awake.powerChanged)
   powerMonitor.on('on-ac', awake.powerChanged)
+  // Linux may not say when the power source changes, so there it is looked at again each minute too.
+  if (process.platform === 'linux') setInterval(awake.powerChanged, 60_000).unref()
   startRuntime()
   openWindow()
   edge = startEdge({

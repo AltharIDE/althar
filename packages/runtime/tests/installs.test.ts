@@ -104,7 +104,7 @@ describe('downloading an agent', () => {
   })
 
   it('says so where there is nothing for this computer, or nowhere to keep it', async () => {
-    const none = using({ fetch: github(archive()).fetch, platform: 'win32' })
+    const none = using({ fetch: github(archive()).fetch, platform: 'freebsd' })
     const state = await none.run(Effect.flatMap(Installs, (installs) => installs.state(opencode)))
     assert.isTrue(Exit.isSuccess(state) && !state.value.downloadable)
     const failed = await none.run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))
@@ -117,7 +117,7 @@ describe('downloading an agent', () => {
       ),
     )
     assert.include(JSON.stringify(cant), "can't download OpenCode")
-    // An agent that ships with Althar is never downloaded.
+    // An agent without a command of its own to find is never downloaded, nor looked for.
     const bundled = await none.run(Effect.flatMap(Installs, (installs) => installs.state(agents.codex)))
     assert.isTrue(Exit.isSuccess(bundled) && !bundled.value.downloadable && bundled.value.located === null)
   })
@@ -196,5 +196,23 @@ describe('downloading an agent', () => {
     )
     expect(Exit.isSuccess(both) && both.value[1].during).toBe(true)
     expect(Exit.isSuccess(both) ? both.value[1].second : '').toContain('already downloading')
+  })
+
+  it('runs Claude Code from the copy that ships with Althar where the person has none, and theirs where they do', async () => {
+    // The SDK ships the build for the computer the tests run on.
+    const { run } = using({ platform: process.platform, arch: process.arch })
+    const shipped = await run(Effect.map(Installs, (installs) => installs.locate(agents['claude-code'])))
+    assert.isTrue(
+      Exit.isSuccess(shipped) && shipped.value?.whose === 'bundled' && shipped.value.command.endsWith('/claude'),
+      JSON.stringify(shipped),
+    )
+    const state = await run(Effect.flatMap(Installs, (installs) => installs.state(agents['claude-code'])))
+    assert.isTrue(Exit.isSuccess(state) && !state.value.downloadable)
+    const theirs = mkdtempSync(join(tmpdir(), 'althar-claude-'))
+    writeFileSync(join(theirs, 'claude'), '#!/bin/sh\necho mine\n')
+    chmodSync(join(theirs, 'claude'), 0o755)
+    const own = using({ platform: process.platform, arch: process.arch, search: { env: { PATH: theirs }, dirs: [] } })
+    const found = await own.run(Effect.map(Installs, (installs) => installs.locate(agents['claude-code'])))
+    assert.deepStrictEqual(Exit.isSuccess(found) ? found.value : null, { command: 'claude', whose: 'theirs' })
   })
 })
