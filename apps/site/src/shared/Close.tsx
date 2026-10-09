@@ -1,23 +1,20 @@
 import { Brand, BrandMark, Logo } from '@althar/ui'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { INSTALL, LINKS } from '../content/facts'
+import { detectOs, type Os, OS_NAME, OsMark } from './OsMark'
 import { BRAND, CLOSE } from '../content/home'
 import { SHIFTS } from './Bar'
 import s from './Close.module.css'
 
-/** The download and the repository, as both developer pages end. */
+/** The download and the repository, as both developer pages end. The download is for the system the page is read on; a phone gets the Mac's. */
 export function Get({ tone }: { tone: 'blue' | 'paper' }) {
+  const [os] = useState<Os>(() => detectOs() ?? 'mac')
   return (
     <div className={tone === 'blue' ? s.getBlue : s.get}>
       <a className={s.primary} href={LINKS.releases}>
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path
-            fill="currentColor"
-            d="M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8 1.6 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9 0 0-2.7-1-2.7-4.1ZM13.9 4.9c.7-.9 1.2-2 1-3.2-1 0-2.3.7-3 1.6-.7.8-1.2 2-1.1 3.1 1.2.1 2.3-.6 3.1-1.5Z"
-          />
-        </svg>
-        Download for macOS
+        <OsMark id={os} size={16} />
+        Download for {OS_NAME[os]}
       </a>
       <a className={s.secondary} href={LINKS.repo}>
         <BrandMark brand={Brand.GitHub} size={16} />

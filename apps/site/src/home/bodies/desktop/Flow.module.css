@@ -1,26 +1,37 @@
 /* From your tracker, to a task, to your host: three columns joined by a line that runs left to right. */
 
-.flow { max-width: 1360px; margin: 56px auto 0; padding: 0 var(--gut); }
+.flow { max-width: 1440px; margin: 72px auto 0; padding: 0 var(--gut); }
 
-.pairs { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 40px; margin: 0; padding: 0; list-style: none; }
-/* Plain words with their marks; the one showing is ink, underlined. */
-.pair {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 0 8px; border: 0; border-bottom: 2px solid transparent;
-  background: none; font: 500 15px var(--font); color: var(--t-3); cursor: pointer;
-  transition: color 200ms ease, border-color 200ms ease;
+/* The routes, as a segmented switch: a raised thumb under the one showing slides to the next. */
+.switch { display: flex; justify-content: center; }
+.pairs {
+  position: relative; display: inline-flex; gap: 2px; padding: 5px; border-radius: 16px;
+  background: rgba(20, 20, 23, 0.045); box-shadow: inset 0 0 0 1px var(--line);
 }
+.thumb {
+  position: absolute; top: 0; left: 0; width: var(--width); height: var(--height); transform: translate(var(--left), var(--top));
+  border-radius: 12px; background: var(--n-1); overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(20, 20, 40, 0.06), 0 2px 4px rgba(20, 20, 40, 0.06), 0 8px 20px rgba(20, 24, 70, 0.08);
+  transition: transform 520ms cubic-bezier(0.22, 1, 0.36, 1), width 520ms cubic-bezier(0.22, 1, 0.36, 1), height 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.pair {
+  position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 9px;
+  padding: 12px 20px; border: 0; border-radius: 12px; background: none;
+  font: 500 14.5px var(--font); color: var(--t-3); cursor: pointer; transition: color 250ms ease;
+}
+.pair svg:not(.to) { opacity: 0.6; transition: opacity 250ms ease; }
 .pair:hover { color: var(--t-1); }
-.on { color: var(--t-1); border-bottom-color: var(--t-1); }
-.to { color: var(--t-4); margin: 0 2px; }
+.on { color: var(--t-1); }
+.on svg:not(.to) { opacity: 1; }
+.to { color: var(--t-4); margin: 0 3px; }
 
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 0.95fr) 44px minmax(0, 1.05fr) 44px minmax(0, 0.82fr);
+  grid-template-columns: minmax(0, 0.95fr) 88px minmax(0, 1.05fr) 88px minmax(0, 0.82fr);
   align-items: center;
-  margin-top: 44px;
+  margin-top: 72px;
 }
-.col { display: grid; gap: 12px; min-width: 0; }
+.col { display: grid; gap: 18px; min-width: 0; }
 .step { display: flex; align-items: center; gap: 8px; margin: 0; font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
 .step b { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--t-1); color: var(--n-1); font-weight: 500; letter-spacing: 0; }
 .card { border-radius: 12px; background: var(--n-1); box-shadow: 0 0 0 1px rgba(20, 20, 40, 0.06), 0 20px 50px rgba(20, 24, 70, 0.1); }
@@ -48,6 +59,6 @@
   .row { grid-template-columns: 1fr; gap: 0; justify-items: stretch; margin-top: 32px; }
   .wire { width: 2px; height: 32px; margin: 10px auto; }
   .wire::after { transform: scaleY(0); transform-origin: 50% 0; }
-  .pairs { gap: 4px 20px; }
-  .pair { font-size: 13px; }
+  .pairs { flex-direction: column; width: 100%; max-width: 360px; }
+  .pair { justify-content: center; font-size: 13.5px; }
 }

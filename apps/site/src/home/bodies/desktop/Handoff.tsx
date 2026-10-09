@@ -20,9 +20,11 @@ const at = (h: number, m: number) => ((h * 60 + m - FROM) / (TO - FROM)) * 100
 
 const TICKS = ['11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00']
 
-export function Handoff() {
+/** `play`, when given, says when it draws in, in place of being seen. */
+export function Handoff({ play }: { play?: boolean } = {}) {
   const ref = useRef<HTMLDivElement>(null)
-  const seen = useSeen(ref, 0.4)
+  const seenSelf = useSeen(ref, 0.4)
+  const seen = play ?? seenSelf
   const cut = at(11, 31)
   const done = at(12, 40)
   return (

@@ -57,9 +57,11 @@ const AGENTS: ReadonlyArray<{ id: Agent; name: string; maker: string; noun: stri
   },
 ]
 
-export function Plans() {
+/** `play`, when given, says when it comes in, in place of being seen. */
+export function Plans({ play }: { play?: boolean } = {}) {
   const ref = useRef<HTMLDivElement>(null)
-  const seen = useSeen(ref, 0.3)
+  const seenSelf = useSeen(ref, 0.3)
+  const seen = play ?? seenSelf
   const total = AGENTS.reduce((n, a) => n + a.plans.length, 0)
   return (
     <div ref={ref} className={cx(s.panel, seen && s.seen)}>

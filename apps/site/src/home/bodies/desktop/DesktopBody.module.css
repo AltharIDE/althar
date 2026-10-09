@@ -1,6 +1,6 @@
 /* Desktop: a claim a screen, each over the app. */
 
-.body { background: var(--n-2); overflow: hidden; }
+.body { background: var(--n-2); overflow-x: clip; }
 
 .scene { padding: 150px 0 0; }
 .head {

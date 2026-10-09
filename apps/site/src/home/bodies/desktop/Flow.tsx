@@ -1,5 +1,5 @@
 import { AcceptCard, Brand, BrandMark, Issue, IssuePriority, IssueStatus, TaskCard, TaskStatus } from '@althar/ui'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { cx } from '../../../lib/cx'
 import { OPUS } from '../../../../../../packages/ui/src/fixtures/models'
@@ -107,6 +107,19 @@ export function Flow() {
   const [at, setAt] = useState(0)
   const [held, setHeld] = useState(false)
   const route = ROUTES[at]!
+  const pairs = useRef<Array<HTMLButtonElement | null>>([])
+  const [thumb, setThumb] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
+
+  // The thumb sits under the route showing, and slides to the next.
+  useLayoutEffect(() => {
+    const place = () => {
+      const el = pairs.current[at]
+      if (el) setThumb({ left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight })
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [at])
 
   // Each route in turn, while it is in view.
   useEffect(() => {
@@ -117,21 +130,42 @@ export function Flow() {
 
   return (
     <div ref={ref} className={cx(s.flow, seen && s.seen)} onPointerEnter={() => setHeld(true)} onPointerLeave={() => setHeld(false)}>
-      <ol className={s.pairs} aria-label="Trackers and code hosts">
-        {ROUTES.map((r, i) => (
-          <li key={r.tracker.name}>
-            <button type="button" className={cx(s.pair, i === at && s.on)} aria-pressed={i === at} onClick={() => setAt(i)}>
+      <div className={s.switch}>
+        <div className={s.pairs} role="group" aria-label="Trackers and code hosts">
+          {thumb && (
+            <span
+              className={s.thumb}
+              style={
+                {
+                  '--left': `${thumb.left}px`,
+                  '--top': `${thumb.top}px`,
+                  '--width': `${thumb.width}px`,
+                  '--height': `${thumb.height}px`,
+                } as CSSProperties
+              }
+              aria-hidden="true"
+            />
+          )}
+          {ROUTES.map((r, i) => (
+            <button
+              key={r.tracker.name}
+              ref={(el) => void (pairs.current[i] = el)}
+              type="button"
+              className={cx(s.pair, i === at && s.on)}
+              aria-pressed={i === at}
+              onClick={() => setAt(i)}
+            >
               <BrandMark brand={r.tracker.brand} size={18} />
-              {r.tracker.name}
-              <span className={s.to} aria-hidden="true">
-                →
-              </span>
+              <span>{r.tracker.name}</span>
+              <svg className={s.to} viewBox="0 0 16 8" width="16" height="8" aria-hidden="true">
+                <path d="M0 4h14M11 1l3 3-3 3" fill="none" stroke="currentColor" strokeWidth="1.3" />
+              </svg>
               <BrandMark brand={r.host.brand} size={18} />
-              {r.host.name}
+              <span>{r.host.name}</span>
             </button>
-          </li>
-        ))}
-      </ol>
+          ))}
+        </div>
+      </div>
 
       <div key={at} className={s.row}>
         <div className={cx(s.col, s.c1)}>

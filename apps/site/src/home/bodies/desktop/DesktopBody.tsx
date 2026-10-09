@@ -1,10 +1,10 @@
-import { Light, Turn, WorkedFor, You } from '@althar/ui'
+import { Turn, WorkedFor, You } from '@althar/ui'
 import { type ReactNode, useRef } from 'react'
 
 import { LINKS } from '../../../content/facts'
 import { cx } from '../../../lib/cx'
 import { Get } from '../../../shared/Close'
-import { DOCS_PLAN, HomeWindow, IslandOpen, Launch, ProjectWindow, TwoLabReview, useAssembling } from '../kit/app'
+import { DOCS_PLAN, HomeWindow, IslandOpen, Launch, ProjectWindow, useAssembling } from '../kit/app'
 import { EdgeTour } from '../kit/EdgeTour'
 import { Desktop, MacWindow } from '../kit/Mac'
 import { useSeen } from '../kit/seen'
@@ -12,8 +12,7 @@ import { Shot } from '../kit/Shot'
 import t from '../kit/type.module.css'
 import s from './DesktopBody.module.css'
 import { Flow } from './Flow'
-import { Handoff } from './Handoff'
-import { Plans } from './Plans'
+import { Trio } from './Trio'
 
 /*
  * Desktop: the product, shown. One claim a screen, in the first screen's
@@ -72,32 +71,6 @@ function Screen({
           {children}
         </Shot>
       </div>
-    </div>
-  )
-}
-
-/** A piece of the app up close, floating in Althar's light. */
-function Close({
-  children,
-  label,
-  w = 720,
-  phoneW = 400,
-  wide,
-}: {
-  children: ReactNode
-  label: string
-  w?: number
-  phoneW?: number
-  wide?: boolean
-}) {
-  return (
-    <div className={cx(s.closeUp, wide && s.wide)}>
-      <div className={s.lit} aria-hidden="true">
-        <Light height={0.5} />
-      </div>
-      <Shot w={w} phoneW={phoneW} label={label} maxScale={1.35} frame={s.card}>
-        <div className={s.pad}>{children}</div>
-      </Shot>
     </div>
   )
 }
@@ -190,53 +163,7 @@ export function DesktopBody() {
         <CoordinatorScene />
       </Scene>
 
-      <Scene
-        id="plans"
-        kicker="Your plans"
-        title={
-          <>
-            Every plan you pay for. <b>All at once.</b>
-          </>
-        }
-        lead="Sign in to each agent as many times as you have plans: work and personal, Max and Pro, a key for OpenCode. Althar uses them all, in the order you set."
-      >
-        <div className={s.lifted}>
-          <div className={s.liftedLight} aria-hidden="true">
-            <Light height={0.6} />
-          </div>
-          <Plans />
-        </div>
-      </Scene>
-
-      <Scene
-        id="limits"
-        kicker="Limits"
-        title={
-          <>
-            Out of usage? <b>It carries on.</b>
-          </>
-        }
-        lead="A plan runs out halfway through a task. The task doesn’t stop: the next agent you’re signed in to picks it up where it was, and you only hear about it if you look."
-      >
-        <div className={s.lanes}>
-          <Handoff />
-        </div>
-      </Scene>
-
-      <Scene
-        id="review"
-        kicker="Review"
-        title={
-          <>
-            Written by one lab. <b>Reviewed by another.</b>
-          </>
-        }
-        lead="Sonnet and Gemini read what Opus wrote. The lead fixes what they find and sends it round again. Only what they can’t settle between them comes to you."
-      >
-        <Close label="A review by Sonnet 5 and Gemini 3 Pro: three findings, two fixed by the lead, one waiting for your call" phoneW={460}>
-          <TwoLabReview />
-        </Close>
-      </Scene>
+      <Trio />
 
       <Scene
         id="edge"
