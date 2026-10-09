@@ -1,15 +1,21 @@
+import { DesktopBody } from './bodies/desktop/DesktopBody'
+import { Nav, NavSpace } from './bodies/nav/Navs'
+import { RunsOn } from './bodies/RunsOn'
 import s from './Home.module.css'
-import { Bodies } from './bodies/Bodies'
+import { Hero } from './Hero'
 
 /*
- * The developer page. The first screen opens in Althar's light, as the app
- * does (Hero). Under it, prototypes of what follows (bodies/).
+ * The developer page: the island for a nav, the first screen in Althar's
+ * light, the systems it runs on, then the product shown (bodies/desktop).
  */
 
 export function Home() {
   return (
     <div className={s.page} id="top">
-      <Bodies />
+      <Nav />
+      <Hero nav={<NavSpace />} />
+      <RunsOn />
+      <DesktopBody />
     </div>
   )
 }

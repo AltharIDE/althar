@@ -99,44 +99,8 @@ const none = () => {}
 
 const TABS = MARKED.map((p) => ({ id: p.id, name: p.name, seed: p.id, ink: p.ink, running: p.running, yours: p.yours ? 1 : 0 }))
 
-/** Which system the window is drawn on: the Mac's lights at the strip's start, or Windows' and GNOME's buttons at its end. */
-export type System = 'mac' | 'windows' | 'linux'
-
-/** The window's own buttons, as Windows and GNOME draw them over the strip's end. */
-function Caption({ system }: { system: System }) {
-  if (system === 'windows')
-    return (
-      <span className={s.captionWin} aria-hidden="true">
-        <i className={s.min} />
-        <i className={s.max} />
-        <i className={s.close} />
-      </span>
-    )
-  if (system === 'linux')
-    return (
-      <span className={s.captionGnome} aria-hidden="true">
-        <i className={s.min} />
-        <i className={s.max} />
-        <i className={s.close} />
-      </span>
-    )
-  return null
-}
-
-export function Tabs({ current, system = 'mac' }: { current: string | null; system?: System }) {
-  return (
-    <div className={s.tabsRow}>
-      <ProjectTabs
-        tabs={TABS.slice(0, 3)}
-        current={current}
-        onSelect={none}
-        onClose={none}
-        yours={3}
-        lights={system === 'mac' ? 'drawn' : 'none'}
-      />
-      <Caption system={system} />
-    </div>
-  )
+export function Tabs({ current }: { current: string | null }) {
+  return <ProjectTabs tabs={TABS.slice(0, 3)} current={current} onSelect={none} onClose={none} yours={3} lights="drawn" />
 }
 
 /* ---- the home: what needs you across every project, what runs, what happened ---- */
@@ -146,14 +110,12 @@ export function HomeWindow({
   style,
   looked = '3 h ago',
   narrow = false,
-  system = 'mac',
 }: {
   className?: string
   style?: CSSProperties
   looked?: string
   /** Laid out for a narrow window: the stream alone. */
   narrow?: boolean
-  system?: System
 }) {
   const needs = [
     <NeedCard
@@ -196,7 +158,7 @@ export function HomeWindow({
   ]
   return (
     <div className={`${s.window} ${narrow ? s.narrow : ''} ${className ?? ''}`} style={style}>
-      {!narrow && <Tabs current={null} system={system} />}
+      {!narrow && <Tabs current={null} />}
       <TitleBar
         lights="none"
         end={

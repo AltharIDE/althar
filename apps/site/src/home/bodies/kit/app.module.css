@@ -59,25 +59,6 @@
 .over { position: relative; width: 100%; height: 100%; }
 .overPanel { position: absolute; top: 76px; right: 14px; z-index: 5; }
 
-/* The tabs' row, with Windows' or GNOME's buttons over its end. */
-.tabsRow { position: relative; flex: none; }
-.captionWin, .captionGnome { position: absolute; top: 0; right: 0; z-index: 3; display: flex; height: 40px; }
-.captionWin i { position: relative; width: 46px; height: 100%; }
-.captionWin i::before { content: ''; position: absolute; left: 50%; top: 50%; translate: -50% -50%; }
-.captionWin .min::before { width: 10px; height: 1px; background: var(--t-1); }
-.captionWin .max::before { width: 9px; height: 9px; box-shadow: inset 0 0 0 1px var(--t-1); }
-.captionWin .close::before, .captionWin .close::after { content: ''; position: absolute; left: 50%; top: 50%; width: 13px; height: 1px; background: var(--t-1); }
-.captionWin .close::before { translate: -50% -50%; rotate: 45deg; }
-.captionWin .close::after { translate: -50% -50%; rotate: -45deg; }
-.captionGnome { align-items: center; gap: 10px; padding-right: 12px; }
-.captionGnome i { position: relative; width: 24px; height: 24px; border-radius: 50%; background: rgba(20, 20, 23, 0.07); }
-.captionGnome i::before, .captionGnome i::after { content: ''; position: absolute; left: 50%; top: 50%; translate: -50% -50%; }
-.captionGnome .min::before { width: 8px; height: 1.5px; background: var(--t-1); translate: -50% 2px; }
-.captionGnome .max::before { width: 7px; height: 7px; box-shadow: inset 0 0 0 1.5px var(--t-1); }
-.captionGnome .close::before, .captionGnome .close::after { width: 9px; height: 1.5px; background: var(--t-1); }
-.captionGnome .close::before { rotate: 45deg; }
-.captionGnome .close::after { rotate: -45deg; }
-
 /* Centered: the conversation alone, in a column down the middle of a wide window. */
 .centered .talk { flex: 1; width: auto; border-right: 0; background: var(--n-1); }
 .centered .talk > * { width: 100%; max-width: 760px; margin-left: auto; margin-right: auto; }
