@@ -2,7 +2,7 @@ import { join } from 'node:path'
 
 import { BrowserWindow, nativeImage, type Rectangle, screen, Tray } from 'electron'
 
-import { DEFAULT_EDGE, type EdgePlace, edgeIn, findNotch, type Notch, readEdge, writeEdge } from './edge'
+import { DEFAULT_EDGE, type EdgePlace, edgeIn, findNotch, type Notch, pointerOn, readEdge, sheetBounds, writeEdge } from './edge'
 
 /*
  * The edge of the screen, drawn (edge.ts holds the choice and finds the
@@ -78,9 +78,12 @@ export const startEdge = (host: EdgeHost): Edge => {
   let tray: Tray | undefined
   let sheet: BrowserWindow | undefined
   let waiting = 0
-  /** Where the island draws, on the screen; and whether the pointer is on it. */
+  /** Where the island draws, in its page; whether the pointer is on it; and the notch its page was drawn for. */
   let drawn: Rectangle | null = null
   let pointed = false
+  let drawnFor: { readonly width: number; readonly height: number } | null = null
+  /** Each look for the notch, counted, so one that answers late can't undo a later one. */
+  let looking = 0
 
   const load = (window: BrowserWindow, query: Record<string, string>) => {
     window.webContents.on('did-finish-load', () => host.connect(window))
@@ -99,7 +102,12 @@ export const startEdge = (host: EdgeHost): Edge => {
   })
 
   const showIsland = (at: Notch) => {
-    if (island !== undefined && !island.isDestroyed()) return island.setBounds(islandBounds(at))
+    const size = { width: Math.round(at.width), height: Math.round(at.height) }
+    // Moved, it keeps its page; a notch of another size (the screen scaled) is drawn afresh.
+    if (island !== undefined && !island.isDestroyed()) {
+      if (drawnFor?.width === size.width && drawnFor.height === size.height) return island.setBounds(islandBounds(at))
+      dropIsland()
+    }
     const made = new BrowserWindow({
       ...shared(host.preload),
       ...islandBounds(at),
@@ -120,22 +128,24 @@ export const startEdge = (host: EdgeHost): Edge => {
     made.on('closed', () => {
       if (island === made) island = undefined
     })
-    load(made, { place: 'island', notchWidth: String(Math.round(at.width)), notchHeight: String(Math.round(at.height)) })
+    load(made, { place: 'island', notchWidth: String(size.width), notchHeight: String(size.height) })
     island = made
+    drawnFor = size
   }
 
   const dropIsland = () => {
     island?.destroy()
     island = undefined
     drawn = null
+    drawnFor = null
     pointed = false
   }
 
   /* Clicks land on the island while the pointer is on what it draws, and go through elsewhere; the page hears which, to open and close. */
   const watch = setInterval(() => {
     if (island === undefined || island.isDestroyed() || drawn === null) return
-    const { x, y } = screen.getCursorScreenPoint()
-    const on = x >= drawn.x && x < drawn.x + drawn.width && y >= drawn.y && y < drawn.y + drawn.height
+    // Against where the window is now, which a change of screens may have moved.
+    const on = pointerOn(drawn, island.getBounds(), screen.getCursorScreenPoint())
     if (on === pointed) return
     pointed = on
     island.setIgnoreMouseEvents(!on, { forward: true })
@@ -152,20 +162,13 @@ export const startEdge = (host: EdgeHost): Edge => {
     return image
   }
 
-  /** Under the mark, kept on its screen; on the screen's top right where the system can't say where the mark is. */
+  /** Beside the mark, on the screen it is on (`sheetBounds`). */
   const sheetPlace = (height: number) => {
-    const mark = tray?.getBounds()
-    const known = mark !== undefined && mark.width > 0
-    const point = known ? { x: mark.x + mark.width / 2, y: mark.y + mark.height } : screen.getCursorScreenPoint()
+    const bounds = tray?.getBounds()
+    const mark = bounds !== undefined && bounds.width > 0 ? bounds : null
+    const point = mark === null ? screen.getCursorScreenPoint() : { x: mark.x + mark.width / 2, y: mark.y + mark.height / 2 }
     const { workArea } = screen.getDisplayNearestPoint(point)
-    const x = known ? point.x - SHEET.width / 2 : workArea.x + workArea.width - SHEET.width
-    return {
-      x: Math.round(Math.min(Math.max(x, workArea.x + SHEET.gap), workArea.x + workArea.width - SHEET.width - SHEET.gap)),
-      // Just under the menu bar: where the system says the mark is may be off on a second screen.
-      y: workArea.y + SHEET.gap,
-      width: SHEET.width,
-      height: Math.min(height, workArea.height - 2 * SHEET.gap),
-    }
+    return sheetBounds({ mark, workArea, size: { width: SHEET.width, height }, gap: SHEET.gap, mac: process.platform === 'darwin' })
   }
 
   const makeSheet = (): BrowserWindow => {
@@ -233,7 +236,10 @@ export const startEdge = (host: EdgeHost): Edge => {
   }
 
   const look = async () => {
-    notch = await findNotch(screen.getPrimaryDisplay().bounds.height)
+    const mine = ++looking
+    const found = await findNotch(screen.getPrimaryDisplay().bounds.height)
+    if (mine !== looking) return
+    notch = found
     apply()
   }
 
@@ -253,10 +259,11 @@ export const startEdge = (host: EdgeHost): Edge => {
 
   return {
     state: () => ({ place: chosen, notch: notch !== null }),
+    // Kept first, so a choice that can't be kept changes nothing, and Settings, going back, says what is so.
     choose: async (place) => {
+      await writeEdge(host.profile(), place)
       chosen = place
       apply()
-      await writeEdge(host.profile(), place)
     },
     waiting: (count) => {
       waiting = count
@@ -264,9 +271,7 @@ export const startEdge = (host: EdgeHost): Edge => {
     },
     owns: (window) => window === island || window === sheet,
     drawn: (window, rect) => {
-      if (window !== island) return
-      const at = window.getBounds()
-      drawn = { x: at.x + rect.x, y: at.y + rect.y, width: rect.width, height: rect.height }
+      if (window === island) drawn = rect
     },
     sized: (window, height) => {
       if (window !== sheet || !Number.isFinite(height) || height <= 0) return

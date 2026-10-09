@@ -258,7 +258,11 @@ const openWindow = () => {
     },
   })
   windows.add(window)
-  window.on('closed', () => windows.delete(window))
+  window.on('closed', () => {
+    windows.delete(window)
+    // Off a Mac, closing Althar's last window quits, as it did before the edge kept pages of its own open.
+    if (windows.size === 0 && process.platform !== 'darwin') app.quit()
+  })
   window.webContents.on('did-finish-load', () => connect(window))
   window.once('ready-to-show', () => window.show())
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.

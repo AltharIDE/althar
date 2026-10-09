@@ -11,7 +11,7 @@ import { follow } from './data/feed'
 import { makeQueryClient } from './data/reads'
 import { ServicesProvider } from './data/services'
 import { EdgeView, type EdgePlaceShown } from './features/edge/EdgeView'
-import { edgeRead, useEdge } from './features/edge/useEdge'
+import { edgeKey, edgeRead, followEdge, useEdge } from './features/edge/useEdge'
 
 /*
  * The edge's entry (features/edge): a page of its own, in the island round
@@ -37,6 +37,11 @@ const open = async () => {
   // Watched from where the first read was: nothing after it is missed.
   const first = await cache.fetchQuery(edgeRead(client)).catch(() => null)
   const feed = follow(client, cache, first?.cursor)
+  followEdge(feed, cache)
+  // The menu bar's sheet is kept hidden between clicks: shown, it reads again, whatever it heard meanwhile.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void cache.invalidateQueries({ queryKey: edgeKey })
+  })
   const element = document.getElementById('root')
   if (element === null) throw new Error('The page has no #root')
   createRoot(element).render(

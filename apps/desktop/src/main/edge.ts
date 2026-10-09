@@ -32,6 +32,47 @@ export interface Notch {
   readonly height: number
 }
 
+/** A rectangle on the screens, in Electron's points. */
+export interface Box {
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+}
+
+/** Whether the pointer is on what the island draws: where it draws in its page, from where its window is now. */
+export const pointerOn = (drawn: Box, window: Box, pointer: { readonly x: number; readonly y: number }) => {
+  const left = window.x + drawn.x
+  const top = window.y + drawn.y
+  return pointer.x >= left && pointer.x < left + drawn.width && pointer.y >= top && pointer.y < top + drawn.height
+}
+
+/**
+ * Where the menu bar's sheet goes: beside the mark, kept on its screen's
+ * work area. On a Mac, just under the menu bar, since the system may say the
+ * mark is a little off on a second screen; elsewhere above a taskbar at the
+ * foot and under one at the top. Without the mark's place, at the top right.
+ */
+export const sheetBounds = (input: {
+  readonly mark: Box | null
+  readonly workArea: Box
+  readonly size: { readonly width: number; readonly height: number }
+  readonly gap: number
+  readonly mac: boolean
+}): Box => {
+  const { mark, workArea, size, gap, mac } = input
+  const height = Math.min(size.height, workArea.height - 2 * gap)
+  const known = mark !== null && mark.width > 0
+  const x = known ? mark.x + mark.width / 2 - size.width / 2 : workArea.x + workArea.width - size.width
+  const atFoot = known && !mac && mark.y + mark.height / 2 > workArea.y + workArea.height / 2
+  return {
+    x: Math.round(Math.min(Math.max(x, workArea.x + gap), workArea.x + workArea.width - size.width - gap)),
+    y: Math.round(atFoot ? workArea.y + workArea.height - height - gap : workArea.y + gap),
+    width: size.width,
+    height,
+  }
+}
+
 /** Where it shows: an island needs a notch to go round, so without one it is the menu bar, whatever was chosen. */
 export const edgeIn = (chosen: EdgePlace, notch: Notch | null): EdgePlace => (notch === null ? 'menu' : chosen)
 

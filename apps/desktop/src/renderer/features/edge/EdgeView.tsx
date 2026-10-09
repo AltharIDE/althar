@@ -73,6 +73,12 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
   const showing = useShowing()
   // Times move only while they show: the island open, or the menu bar's sheet on screen.
   const now = new Date(useNow(showing && (shown.place === 'menu' || open)))
+  // Calls answered here fold to lines while the edge stays open, as on the home; closed, they go.
+  const away = shown.place === 'island' ? !open : !showing
+  const onAway = useEffectEvent(() => model.closed())
+  useEffect(() => {
+    if (away) onAway()
+  }, [away])
   const home = model.home
   const name = (id: string | null) => model.agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   const refs = new Map((home?.projects ?? []).map((project) => [project.id, refOf(project)]))
@@ -150,7 +156,7 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
       ]
     }),
     ...model.answered.map((one) => (
-      <AskAnswered key={one.id} said={one.said} denied={one.denied}>
+      <AskAnswered key={one.id} said={one.said} denied={one.denied} focusOnMount>
         <AskNote>{text.answeredIn(one.project)}</AskNote>
       </AskAnswered>
     )),
@@ -180,6 +186,7 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
       working={work.length}
       needs={needs}
       work={work}
+      failure={model.error}
       onOpenApp={() => host.openInWindow()}
     />
   )
@@ -251,7 +258,10 @@ function Pointed({
   return children(setElement)
 }
 
-/** The menu bar's sheet, telling the main process how tall it draws, so its window fits it. */
+/**
+ * The menu bar's sheet, telling the main process how tall it draws, so its
+ * window fits it; taller than the screen allows, it scrolls in the window.
+ */
 function Measured({ children, onHeight }: { children: ReactNode; onHeight: (height: number) => void }) {
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -264,8 +274,8 @@ function Measured({ children, onHeight }: { children: ReactNode; onHeight: (heig
     return () => observer.disconnect()
   }, [onHeight])
   return (
-    <div ref={box} className={s.menu}>
-      {children}
+    <div className={s.menu}>
+      <div ref={box}>{children}</div>
     </div>
   )
 }

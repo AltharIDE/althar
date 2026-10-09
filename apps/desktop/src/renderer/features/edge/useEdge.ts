@@ -1,23 +1,24 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
+import type { QueryClient } from '@tanstack/react-query'
+
 import type { HomeCall, HomeSnapshot, ProjectSummary } from '@althar/contracts'
 import type { IslandSaying } from '@althar/ui'
 
-import type { Client } from '../../data/client'
-import { HOME, HOME_SHOWN } from '../../data/feed'
+import { type Client, messageOf } from '../../data/client'
+import { type Feed, HOME, HOME_SHOWN } from '../../data/feed'
 import { reads } from '../../data/reads'
-import { useServices, useWatch } from '../../data/services'
+import { useServices } from '../../data/services'
 import { kindWords } from '../../shared/calls'
-import { useWorkActions } from '../board/useWorkActions'
 
 /*
  * The edge's view model: across every project, what waits on the person and
  * what is in progress, as the home reads it, read again whenever something
- * it shows changes. Not a permission the rules answered, which comes with
- * every edit an agent makes and changes nothing here. A call that comes in
- * while the edge is up is said for a moment (`SAY_FOR`); the ones there when
- * it opened are not.
+ * it shows changes (`followEdge`). A call that comes in while the edge is up
+ * is said for a moment (`SAY_FOR`); the ones there when it opened are not.
+ * A call answered here folds to a line until the edge closes, as on the
+ * home; one whose answer didn't go through comes back, with what went wrong.
  */
 
 /** How long a call that just came in is said beside the notch, and rings quicker. */
@@ -28,7 +29,24 @@ const GATHER = 120
 export const edgeKey = ['edge'] as const
 export const edgeRead = (client: Client) => queryOptions({ queryKey: edgeKey, queryFn: () => client.getHome() })
 
-/** A call the person answered from the edge, folded to a line for a moment. */
+/**
+ * Reads the edge again when what it shows changes, a burst of changes once:
+ * not a permission the rules answered, which comes with every edit an agent
+ * makes and changes nothing here. Listened from the moment the feed starts,
+ * before anything is drawn, so a change heard on the way isn't missed.
+ */
+export const followEdge = (feed: Feed, cache: QueryClient) => {
+  let gathering: ReturnType<typeof setTimeout> | undefined
+  return feed.listen((event) => {
+    if (event._tag !== 'Changed' || !HOME.has(event.aggregateType) || HOME_SHOWN.has(event.aggregateType)) return
+    gathering ??= setTimeout(() => {
+      gathering = undefined
+      void cache.invalidateQueries({ queryKey: edgeKey })
+    }, GATHER)
+  })
+}
+
+/** A call the person answered from the edge, folded to a line until it closes. */
 export interface EdgeAnswered {
   readonly id: string
   readonly said: string
@@ -45,6 +63,9 @@ export interface EdgeModel {
   readonly saying: IslandSaying | null
   readonly answered: ReadonlyArray<EdgeAnswered>
   readonly answer: (call: HomeCall, decision: 'allow' | 'reject', said: string) => void
+  /** The edge closed: the answered lines go. */
+  readonly closed: () => void
+  /** Why the last answer didn't go through. */
   readonly error: string | null
 }
 
@@ -66,25 +87,14 @@ const sayingOf = (home: HomeSnapshot, id: string, projects: ReadonlyMap<string, 
 }
 
 export const useEdge = (): EdgeModel => {
-  const { client, cache } = useServices()
-  const actions = useWorkActions()
+  const { client } = useServices()
   const read = useQuery(edgeRead(client))
   const status = useQuery(reads(client).status())
   const home = read.data ?? null
   const [fresh, setFresh] = useState<string | null>(null)
   const [saying, setSaying] = useState<IslandSaying | null>(null)
   const [answered, setAnswered] = useState<ReadonlyArray<EdgeAnswered>>([])
-
-  // Read again when what it shows changes, a burst of changes once.
-  const gathering = useRef<ReturnType<typeof setTimeout>>(undefined)
-  useWatch((event) => {
-    if (event._tag !== 'Changed' || !HOME.has(event.aggregateType) || HOME_SHOWN.has(event.aggregateType)) return
-    gathering.current ??= setTimeout(() => {
-      gathering.current = undefined
-      void cache.invalidateQueries({ queryKey: edgeKey })
-    }, GATHER)
-  })
-  useEffect(() => () => clearTimeout(gathering.current), [])
+  const [error, setError] = useState<string | null>(null)
 
   // What came in since the last read, said for a moment, whatever is read meanwhile; what was there when the edge opened, not.
   const seen = useRef<ReadonlySet<string> | null>(null)
@@ -108,9 +118,13 @@ export const useEdge = (): EdgeModel => {
 
   const answer = (call: HomeCall, decision: 'allow' | 'reject', said: string) => {
     const project = home?.projects.find((one) => one.id === call.projectId)?.name ?? ''
+    setError(null)
     setAnswered((now) => [...now, { id: call.id, said, denied: decision === 'reject', project }])
-    setTimeout(() => setAnswered((now) => now.filter((one) => one.id !== call.id)), SAY_FOR)
-    void actions.answer(call.id, decision)
+    client.answer({ attentionId: call.id, decision }).catch((failure: unknown) => {
+      // It still waits: it comes back, and the edge says why.
+      setAnswered((now) => now.filter((one) => one.id !== call.id))
+      setError(messageOf(failure))
+    })
   }
 
   return {
@@ -120,6 +134,10 @@ export const useEdge = (): EdgeModel => {
     saying,
     answered,
     answer,
-    error: actions.error,
+    closed: () => {
+      setAnswered([])
+      setError(null)
+    },
+    error,
   }
 }

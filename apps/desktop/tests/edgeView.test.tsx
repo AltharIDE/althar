@@ -1,13 +1,29 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { HomeCall, HomeTask, ProjectSummary } from '@althar/contracts'
 
+import { QueryClient } from '@tanstack/react-query'
+import type { WatchEvent } from '@althar/contracts'
+
+import type { Feed } from '../src/renderer/data/feed'
 import { EdgeView, type EdgePlaceShown } from '../src/renderer/features/edge/EdgeView'
-import { useEdge } from '../src/renderer/features/edge/useEdge'
+import { edgeKey, followEdge, useEdge } from '../src/renderer/features/edge/useEdge'
 import { card, change, changed, fakeClient, fakeHost, home, project } from './fixtures'
-import { withServices } from './render'
+import { render } from '@testing-library/react'
+
+import type { Client } from '../src/renderer/data/client'
+import { type Host, ServicesProvider } from '../src/renderer/data/services'
+import { servicesFor } from './render'
+
+/** The edge as its entry starts it: the window's services, and its own reads followed from the start. */
+const withServices = (node: ReactNode, client: Client, host: Host = fakeHost()) => {
+  const services = servicesFor(client, host)
+  followEdge(services.feed, services.cache)
+  return render(<ServicesProvider value={services}>{node}</ServicesProvider>)
+}
 
 /*
  * Althar at the edge of the screen: round the notch, or under the menu bar's
@@ -114,6 +130,34 @@ describe('the edge', () => {
     expect(within(work).getByText('Waits on you')).toBeTruthy()
   })
 
+  it('brings back a call whose answer didn’t go through, and says why', async () => {
+    const { client } = fakeClient({
+      getHome: vi.fn(async () => home({ calls: [permission], projects: [project, halyard] })),
+      answer: vi.fn(async () => {
+        throw new Error('gone')
+      }),
+    })
+    withServices(<Edge shown={{ place: 'menu' }} />, client)
+    const needs = await screen.findByRole('region', { name: /Needs you/ })
+    await userEvent.click(within(needs).getByRole('button', { name: 'Allow once' }))
+    expect((await screen.findByRole('alert')).textContent).toMatch(/runtime didn.t answer/)
+    expect(within(needs).getByRole('button', { name: 'Allow once' })).toBeTruthy()
+    expect(within(needs).queryByText('Allowed npm publish')).toBeNull()
+  })
+
+  it('keeps a call answered here as a line, with focus on it, until the island closes', async () => {
+    const pointed: Array<(on: boolean) => void> = []
+    const host = fakeHost({ onEdgePointed: vi.fn((listener) => (pointed.push(listener), () => {})) })
+    const { client } = fakeClient({ getHome: vi.fn(async () => home({ calls: [permission], projects: [project, halyard] })) })
+    withServices(<Edge />, client, host)
+    await userEvent.click(await screen.findByRole('button', { name: '1 needs you' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Allow once' }))
+    const line = await screen.findByText('Allowed npm publish')
+    expect(line.closest('[tabindex]')).toBe(document.activeElement)
+    act(() => pointed.forEach((listener) => listener(false)))
+    await waitFor(() => expect(screen.queryByText('Allowed npm publish')).toBeNull())
+  })
+
   it('opens a task in Althar’s window by its title or its review, and Althar by its mark', async () => {
     const host = fakeHost()
     const { client } = fakeClient({ getHome: vi.fn(async () => home({ tasks: [ready], projects: [project, halyard] })) })
@@ -162,5 +206,28 @@ describe('the edge', () => {
     expect(await screen.findByRole('region', { name: /In progress/ })).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Althar' })).toBeNull()
     expect(host.edgeSize).toHaveBeenCalled()
+  })
+})
+
+describe('the edge’s reads', () => {
+  it('are read again on what changes the home, from the moment the feed starts, but not on a permission the rules answered', () => {
+    vi.useFakeTimers()
+    try {
+      const listeners: Array<(event: WatchEvent) => void> = []
+      const feed: Feed = { listen: (listener) => (listeners.push(listener), () => {}), stop: () => {} }
+      const cache = new QueryClient()
+      const invalidate = vi.spyOn(cache, 'invalidateQueries')
+      followEdge(feed, cache)
+      listeners.forEach((listener) => listener(changed('decision', 'd1')))
+      vi.advanceTimersByTime(500)
+      expect(invalidate).not.toHaveBeenCalled()
+      listeners.forEach((listener) => listener(changed('attention_request', 'a1')))
+      listeners.forEach((listener) => listener(changed('task', 't1')))
+      vi.advanceTimersByTime(500)
+      expect(invalidate).toHaveBeenCalledTimes(1)
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: edgeKey })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

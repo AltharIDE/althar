@@ -39,15 +39,22 @@ export type EdgeSheetProps = RootProps<
     tone?: 'paper' | 'ink'
     /** Bring Althar's window forward. Without it, there is no foot. */
     onOpenApp?: () => void
+    /** What went wrong, said first: an answer that didn't go through. */
+    failure?: string | null
     text?: Partial<EdgeSheetText>
   }
 >
 
-export function EdgeSheet({ waiting, working, needs, work, tone = 'paper', onOpenApp, className, text, ...rest }: EdgeSheetProps) {
+export function EdgeSheet({ waiting, working, needs, work, tone = 'paper', onOpenApp, failure, className, text, ...rest }: EdgeSheetProps) {
   const t = { ...edgeSheetText, ...text }
   const hasNeeds = needs !== undefined && needs !== null && needs !== false && (!Array.isArray(needs) || needs.length > 0)
   return (
     <div className={cx(s.sheet, tone === 'ink' && s.ink, className)} {...rest}>
+      {failure && (
+        <p role="alert" className={s.failure}>
+          {failure}
+        </p>
+      )}
       {hasNeeds && (
         <HomeSection lane={HomeLane.Yours} count={waiting} className={s.section}>
           {needs}

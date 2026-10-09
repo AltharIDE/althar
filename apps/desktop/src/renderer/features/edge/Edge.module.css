@@ -1,4 +1,6 @@
-/* The menu bar's sheet: its window is paper, and as tall as this. */
+/* The menu bar's sheet: its window is paper, as tall as what it holds up to the screen, and scrolls past that. */
 .menu {
+  height: 100vh;
+  overflow-y: auto;
   background: var(--n-1);
 }

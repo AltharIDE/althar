@@ -57,10 +57,7 @@ rmSync(out, { recursive: true, force: true })
 mkdirSync(stage, { recursive: true })
 cpSync(join(desktop, 'dist'), join(stage, 'dist'), { recursive: true, filter: (path) => !path.endsWith('.map') })
 cpSync(join(desktop, 'resources', 'icons'), join(stage, 'resources', 'icons'), { recursive: true, filter: (path) => !path.endsWith('.md') })
-cpSync(join(desktop, 'resources', 'tray'), join(stage, 'resources', 'tray'), {
-  recursive: true,
-  filter: (path) => path.endsWith('.png') || !path.includes('.'),
-})
+cpSync(join(desktop, 'resources', 'tray'), join(stage, 'resources', 'tray'), { recursive: true })
 writeFileSync(
   join(stage, 'package.json'),
   `${JSON.stringify(

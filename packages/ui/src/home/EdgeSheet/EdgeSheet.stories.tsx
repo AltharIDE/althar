@@ -48,5 +48,8 @@ export const JustAnswered: Story = {
   },
 }
 
+/** An answer that didn't go through: the call is back, and the sheet says why first. */
+export const AnswerFailed: Story = { args: { failure: 'Althar’s runtime didn’t answer. If it keeps happening, restart Althar.' } }
+
 /** Without a way into the app, there is no foot. */
 export const WithoutFoot: Story = { args: { onOpenApp: undefined } }

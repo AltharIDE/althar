@@ -8,7 +8,7 @@ import { LOGO_BORE, LOGO_SECTION } from '@althar/ui'
 
 import { BORE, SECTION } from '../scripts/trayPictures'
 import { readAppIcon, writeAppIcon } from '../src/main/appIcon'
-import { edgeIn, notchIn, readEdge, writeEdge } from '../src/main/edge'
+import { edgeIn, notchIn, pointerOn, readEdge, sheetBounds, writeEdge } from '../src/main/edge'
 
 /*
  * Where Althar shows while the person is in another app: the notch AppKit
@@ -43,6 +43,49 @@ describe('the notch', () => {
     expect(edgeIn('island', notch)).toBe('island')
     expect(edgeIn('menu', notch)).toBe('menu')
     expect(edgeIn('island', null)).toBe('menu')
+  })
+})
+
+describe('the island and the pointer', () => {
+  it('is pointed at by where it draws, from where its window is now', () => {
+    const drawn = { x: 61, y: 0, width: 478, height: 32 }
+    expect(pointerOn(drawn, { x: 436, y: 0, width: 600, height: 640 }, { x: 735, y: 12 })).toBe(true)
+    expect(pointerOn(drawn, { x: 436, y: 0, width: 600, height: 640 }, { x: 735, y: 40 })).toBe(false)
+    // The screens changed and the window moved: the same page, somewhere else.
+    expect(pointerOn(drawn, { x: 1906, y: -983, width: 600, height: 640 }, { x: 735, y: 12 })).toBe(false)
+    expect(pointerOn(drawn, { x: 1906, y: -983, width: 600, height: 640 }, { x: 2205, y: -970 })).toBe(true)
+  })
+})
+
+describe('the menu bar’s sheet', () => {
+  const screen = { x: 0, y: 25, width: 1440, height: 875 }
+  const size = { width: 400, height: 420 }
+
+  it('hangs under the menu bar on a Mac, under the mark, kept on the screen', () => {
+    expect(sheetBounds({ mark: { x: 1100, y: -40, width: 30, height: 24 }, workArea: screen, size, gap: 6, mac: true })).toEqual({
+      x: 915,
+      y: 31,
+      width: 400,
+      height: 420,
+    })
+    expect(sheetBounds({ mark: { x: 1420, y: 0, width: 20, height: 24 }, workArea: screen, size, gap: 6, mac: true }).x).toBe(1034)
+  })
+
+  it('stands over a taskbar at the foot, and goes under one at the top', () => {
+    const foot = { x: 0, y: 0, width: 1920, height: 1032 }
+    expect(sheetBounds({ mark: { x: 1700, y: 1040, width: 24, height: 40 }, workArea: foot, size, gap: 6, mac: false }).y).toBe(606)
+    expect(sheetBounds({ mark: { x: 1700, y: 0, width: 24, height: 24 }, workArea: { ...foot, y: 30 }, size, gap: 6, mac: false }).y).toBe(
+      36,
+    )
+  })
+
+  it('goes to the top right where the mark’s place is unknown, and is never taller than the screen', () => {
+    expect(sheetBounds({ mark: null, workArea: screen, size: { width: 400, height: 2000 }, gap: 6, mac: false })).toEqual({
+      x: 1034,
+      y: 31,
+      width: 400,
+      height: 863,
+    })
   })
 })
 
