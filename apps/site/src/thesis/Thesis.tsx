@@ -1,83 +1,58 @@
-import { Logo } from '@althar/ui'
+import { useEffect, useRef } from 'react'
 
 import source from '../../../../THESIS.md?raw'
 import { LINKS } from '../content/facts'
 import { DATE } from '../content/sheet'
-import { Stamp } from '../shared/sheet'
 import { useCurrent } from '../lib/useCurrent'
-import { Masthead } from '../shared/Masthead'
-import { block, compile, plain } from './prose'
+import { Bar } from '../shared/Bar'
+import { Close } from '../shared/Close'
+import { block, compile } from './prose'
 import s from './Thesis.module.css'
 
 /*
- * The thesis, compiled from THESIS.md at build time and set for reading on
- * the site: the same bar as the landing page, the title with its status
- * stamped as a draft, then the numbered sections in one column with their
- * contents pinned beside it, the one you're in picked out.
+ * The thesis, compiled from THESIS.md at build time. The title, the
+ * hypothesis and the numbered sections share one reading column, with the
+ * contents beside it. Figures in the sections are rails.
  */
 
-const THESIS = compile(source)
+export const THESIS_SOURCE = source
+const THESIS = compile(THESIS_SOURCE)
 const IDS = THESIS.parts.map((p) => p.id)
-
-/*
- * The hypothesis, drawn as the shift it describes: the sentence up to
- * "shifts", then what the shift is from and what it is toward, side by
- * side with an arrow between. Every word stays, in order. If the sentence
- * changes shape, it falls back to a plain paragraph.
- */
-function Hypothesis({ text }: { text: string }) {
-  const m = /^(.*?\bshifts)\s+from\s+(.*?)\s+toward\s+(.*)$/i.exec(text)
-  if (!m) return <p className={s.hypLead}>{text}</p>
-  const [, lead, from, to] = m
-  return (
-    <figure className={s.hypothesis}>
-      <p className={s.hypLead}>{lead}</p>
-      <div className={s.shift}>
-        <p className={s.from}>
-          <span>from </span>
-          {from}
-        </p>
-        <svg className={s.arrow} viewBox="0 0 64 12" aria-hidden="true">
-          <line x1="0" x2="54" y1="6" y2="6" />
-          <path d="M52 1.5 L64 6 L52 10.5 Z" />
-        </svg>
-        <p className={s.to}>
-          <span>toward </span>
-          {to}
-        </p>
-      </div>
-    </figure>
-  )
-}
 
 export function Thesis() {
   const current = useCurrent(IDS)
+  const pin = useRef<HTMLDivElement>(null)
   const [lede, claim, ...rest] = THESIS.intro
+
+  useEffect(() => {
+    const el = pin.current
+    if (!el) return
+    const onScroll = () => {
+      if (window.scrollY > 8) el.dataset.scrolled = ''
+      else delete el.dataset.scrolled
+    }
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
   return (
     <div className={s.page}>
-      <Masthead current="thesis" base="/enterprise" />
+      <div className={s.pin} ref={pin}>
+        <Bar tone="paper" base="/" />
+      </div>
 
       <main id="main" tabIndex={-1}>
-        <header className={s.head}>
-          <p className={s.strip}>
-            <span className={s.stripNo}>Thesis</span>
-            <span>Working research thesis</span>
-            <span className={s.stripNote}>Rev C · {DATE}</span>
+        <div className={s.sheet}>
+          <p className={s.meta}>
+            <span className={s.kicker}>
+              <i aria-hidden="true" />
+              Research / Thesis
+            </span>
+            <span>Rev C · {DATE}</span>
+            <span className={s.draft}>Draft · Working thesis · Expected to change</span>
           </p>
-          <div className={s.headGrid}>
-            <div>
-              <h1 className={s.h1}>{THESIS.title}</h1>
-              {lede && <div className={s.lede}>{block(lede, 'lede')}</div>}
-              {claim && <Hypothesis text={plain(claim).trim()} />}
-            </div>
-            <div className={s.stampSide}>
-              <Stamp lines={['Draft', 'Working thesis', 'Expected to change']} />
-              <p className={s.status}>{THESIS.status.replace(/^Status:\s*Draft\s*[—-]\s*working research thesis,\s*/i, '')}</p>
-            </div>
-          </div>
-        </header>
 
-        <div className={s.body}>
           <nav className={s.contents} aria-label="Contents">
             <p className={s.contentsHead}>Contents</p>
             <ol>
@@ -93,14 +68,19 @@ export function Thesis() {
           </nav>
 
           <article className={s.article}>
+            <header className={s.head}>
+              <h1 className={s.h1}>{THESIS.title}</h1>
+              {lede && <div className={s.lede}>{block(lede, 'lede')}</div>}
+              {claim && <div className={s.openClaim}>{block(claim, 'claim')}</div>}
+            </header>
             <section className={s.intro} aria-label="The hypothesis">
               {rest.map((t, i) => block(t, `i${i}`))}
             </section>
             {THESIS.parts.map((p) => (
               <section key={p.id} id={p.id} className={s.part} aria-labelledby={`${p.id}-h`}>
-                <p className={s.partStrip}>
-                  <span className={s.stripNo}>{p.no}</span>
-                  <span>Thesis</span>
+                <p className={s.partNo}>
+                  <b>{p.no}</b>
+                  Section
                 </p>
                 <h2 id={`${p.id}-h`} className={s.h2}>
                   {p.title}
@@ -115,13 +95,7 @@ export function Thesis() {
         </div>
       </main>
 
-      <footer className={s.foot}>
-        <span className={s.footBrand}>
-          <Logo size={20} /> Althar
-        </span>
-        <span>Issued for comment · {DATE}</span>
-        <a href="/">Back to the site</a>
-      </footer>
+      <Close />
     </div>
   )
 }
