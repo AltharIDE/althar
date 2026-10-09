@@ -53,3 +53,33 @@
 .danger:hover:not(:disabled) {
   background: var(--danger-hover);
 }
+
+/* how far its work has come: a hairline ring in cobalt, round the glyph */
+.button:has(.ring) {
+  position: relative;
+}
+.ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+.ring circle {
+  fill: none;
+  stroke-width: 1.5;
+}
+.ringTrack {
+  stroke: var(--track);
+}
+.ringFill {
+  stroke: var(--live);
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--fast) linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ringFill {
+    transition: none;
+  }
+}

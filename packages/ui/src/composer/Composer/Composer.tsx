@@ -7,6 +7,7 @@ import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Kbd } from '../../primitives/Kbd/Kbd'
 import { cssVars } from '../../lib/cssVars'
+import { useRefocus } from '../../lib/refocus'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import s from './Composer.module.css'
 
@@ -20,6 +21,12 @@ export interface Dictation {
   levels?: readonly number[]
   /** Words heard and not yet settled, shown faint after what is written. For a transcriber that streams. */
   interim?: string
+  /** Writing down what was said, or getting the speech model ready: the microphone turns. */
+  busy?: boolean
+  /** The speech model coming down, from 0 to 1: a ring fills round the microphone. */
+  progress?: number
+  /** The microphone's tray (`tray`) is open. */
+  expanded?: boolean
   onStart: () => void
   onStop: () => void
 }
@@ -48,6 +55,10 @@ export interface ComposerText {
   sendNowKey: string
   newlineNote: string
   dictate: string
+  /** The microphone while what was said is written down, or the speech model is made ready. */
+  dictateBusy: string
+  /** The microphone while the speech model downloads. */
+  dictateProgress: (percent: number) => string
   stopDictating: (elapsed: string) => string
   /** The field's placeholder while dictating. */
   listening: string
@@ -69,6 +80,8 @@ export const composerText: ComposerText = {
   sendNowKey: '⌘↵',
   newlineNote: 'Shift+Enter for a new line',
   dictate: 'Dictate',
+  dictateBusy: 'Writing down what you said',
+  dictateProgress: (percent) => `Dictate. The speech model is downloading, ${percent}%`,
   stopDictating: (elapsed) => `Stop dictating, ${elapsed}`,
   listening: 'Listening…',
   queued: (n) => (n === 1 ? 'Queued; the lead reads it next' : `${n} queued; the lead reads them in order`),
@@ -103,6 +116,8 @@ export interface ComposerProps {
   hint?: string
   /** What floats on the composer's top edge: what the agent listens to, what it left running. */
   above?: ReactNode
+  /** What is joined to the composer's top edge, in the flow: a DictationTray. The field stays usable under it. */
+  tray?: ReactNode
   inputRef?: RefObject<HTMLTextAreaElement | null>
   className?: string
   text?: Partial<ComposerText>
@@ -130,6 +145,7 @@ export function Composer({
   onUnqueue,
   hint,
   above,
+  tray,
   inputRef,
   className,
   text,
@@ -141,6 +157,8 @@ export function Composer({
   const elapsed = dictation?.elapsed ?? null
   const interim = elapsed !== null ? (dictation?.interim ?? '') : ''
   const drafted = value.trim() !== ''
+  /* the microphone takes focus back when its tray closes with focus inside it */
+  const mic = useRefocus<HTMLButtonElement>(tray != null)
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -181,9 +199,10 @@ export function Composer({
     return null
   })()
 
-  return (
+  const floating = above && <div className={s.above}>{above}</div>
+  const form = (
     <form className={cx(s.composer, elapsed !== null && s.recording, className)} onSubmit={submit}>
-      {above && <div className={s.above}>{above}</div>}
+      {tray == null && floating}
       {queued.length > 0 && (
         <section className={s.queue} aria-label={t.queued(queued.length)}>
           <span className={s.queueHead}>
@@ -261,10 +280,33 @@ export function Composer({
               <Icon name="square" size={11} />
             </button>
           ) : (
-            <IconButton icon="mic" label={t.dictate} onClick={dictation.onStart} />
+            <IconButton
+              ref={mic}
+              icon="mic"
+              label={micLabel(dictation, t)}
+              busy={dictation.busy}
+              progress={dictation.busy ? undefined : dictation.progress}
+              aria-expanded={dictation.expanded}
+              onClick={dictation.onStart}
+            />
           ))}
         {action}
       </div>
     </form>
   )
+  if (tray == null) return form
+  /* with a tray, what floats sits above the tray rather than over it */
+  return (
+    <div className={s.stack}>
+      {floating}
+      <div className={s.tray}>{tray}</div>
+      {form}
+    </div>
+  )
+}
+
+function micLabel(d: Dictation, t: ComposerText): string {
+  if (d.busy) return t.dictateBusy
+  if (d.progress !== undefined) return t.dictateProgress(Math.round(Math.max(0, Math.min(1, d.progress)) * 100))
+  return t.dictate
 }
