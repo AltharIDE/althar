@@ -1,4 +1,5 @@
 import { Logo } from '@althar/ui'
+import appIcon from '../../../../../desktop/resources/icons/cobalt.svg?url'
 import type { CSSProperties, ReactNode } from 'react'
 
 import { cx } from '../../../lib/cx'
@@ -18,6 +19,7 @@ export function Desktop({
   app = 'Althar',
   island,
   menu,
+  dock = false,
   compact = false,
   children,
   className,
@@ -25,6 +27,8 @@ export function Desktop({
 }: {
   /** A narrow screen's menu bar: the app's name and the time only. */
   compact?: boolean
+  /** The Dock along the bottom, Althar's icon in it, running. */
+  dock?: boolean
   wallpaper?: Wallpaper
   clock?: string
   /** The app the menu bar names, frontmost. */
@@ -64,6 +68,15 @@ export function Desktop({
         </span>
       </div>
       <div className={s.screen}>{children}</div>
+      {dock && (
+        <div className={s.dock}>
+          {['#5aa9f6', '#f4f4f2', '#3ec46d', '#f2b33d', 'icon', '#22262e', '#e9e6de'].map((c, i) => (
+            <i key={i} className={c === 'icon' ? s.dockOn : undefined} style={c === 'icon' ? undefined : { background: c }}>
+              {c === 'icon' && <img src={appIcon} alt="" />}
+            </i>
+          ))}
+        </div>
+      )}
       {island && <div className={s.edge}>{island}</div>}
       {menu?.open && <div className={s.menuSheet}>{menu.open}</div>}
     </div>
@@ -198,6 +211,90 @@ export function TerminalWindow({ className, style }: { className?: string; style
           </span>
         ))}
       </div>
+    </div>
+  )
+}
+
+/** Windows 11's desktop: the wallpaper, windows on it, and the taskbar along the bottom with Althar's icon in it. */
+export function WindowsDesktop({
+  wallpaper = 'light',
+  clock = ['14:02', '09/10/2026'],
+  children,
+  className,
+}: {
+  wallpaper?: Wallpaper
+  clock?: [string, string]
+  children?: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cx(s.desktop, s.windows, s[wallpaper], className)}>
+      <div className={s.winScreen}>{children}</div>
+      <div className={s.taskbar}>
+        <span className={s.taskIcons}>
+          <i className={s.start}>
+            <b />
+            <b />
+            <b />
+            <b />
+          </i>
+          <i className={s.search} />
+          <i className={s.taskApp} style={{ background: '#f2b33d' }} />
+          <i className={s.taskApp} style={{ background: '#3b7ddd' }} />
+          <i className={cx(s.taskApp, s.taskOn)}>
+            <img src={appIcon} alt="" />
+          </i>
+          <i className={s.taskApp} style={{ background: '#22262e' }} />
+        </span>
+        <span className={s.tray}>
+          <span>{clock[0]}</span>
+          <span>{clock[1]}</span>
+        </span>
+      </div>
+    </div>
+  )
+}
+
+/** GNOME's desktop: the top bar, Activities, the clock in the middle; windows under it. */
+export function LinuxDesktop({
+  wallpaper = 'dark',
+  clock = 'Thu 14:02',
+  children,
+  className,
+}: {
+  wallpaper?: Wallpaper
+  clock?: string
+  children?: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cx(s.desktop, s.gnome, s[wallpaper], className)}>
+      <div className={s.topBar}>
+        <span className={s.activities}>
+          <i />
+          <i />
+          <i />
+        </span>
+        <span>{clock}</span>
+        <span className={s.gnomeStatus}>
+          <i />
+          <i />
+          <i className={s.gnomeBattery} />
+        </span>
+      </div>
+      <div className={s.ubuntuDock}>
+        {['#e95420', '#3b7ddd', 'icon', '#77216f', '#f4f4f2', '#22262e'].map((c, i) => (
+          <i key={i} className={c === 'icon' ? s.dockOn : undefined} style={c === 'icon' ? undefined : { background: c }}>
+            {c === 'icon' && <img src={appIcon} alt="" />}
+          </i>
+        ))}
+        <b className={s.apps}>
+          {Array.from({ length: 9 }, (_, i) => (
+            <em key={i} />
+          ))}
+        </b>
+      </div>
+      <div className={s.gnomeScreen}>{children}</div>
     </div>
   )
 }

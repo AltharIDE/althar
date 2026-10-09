@@ -2,8 +2,8 @@ import { Light } from '@althar/ui'
 import { type ReactNode, useEffect, useRef } from 'react'
 
 import { cx } from '../../../lib/cx'
-import { Shot, type ShotProps } from '../kit/Shot'
-import s from './Slabs.module.css'
+import { Shot, type ShotProps } from './Shot'
+import s from './Slab.module.css'
 
 /*
  * A piece of the app as a slim slab held up at an angle: it shows its edge,

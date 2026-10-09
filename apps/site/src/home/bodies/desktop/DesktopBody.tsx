@@ -1,10 +1,10 @@
-import { Light } from '@althar/ui'
+import { Light, Turn, WorkedFor, You } from '@althar/ui'
 import { type ReactNode, useRef } from 'react'
 
 import { LINKS } from '../../../content/facts'
 import { cx } from '../../../lib/cx'
 import { Get } from '../../../shared/Close'
-import { HomeWindow, IslandOpen, Launch, ProjectWindow, SettingsWindow, TwoLabReview, useAssembling } from '../kit/app'
+import { DOCS_PLAN, HomeWindow, IslandOpen, Launch, ProjectWindow, TwoLabReview, useAssembling } from '../kit/app'
 import { EdgeTour } from '../kit/EdgeTour'
 import { Desktop, MacWindow } from '../kit/Mac'
 import { useSeen } from '../kit/seen'
@@ -13,6 +13,7 @@ import t from '../kit/type.module.css'
 import s from './DesktopBody.module.css'
 import { Flow } from './Flow'
 import { Handoff } from './Handoff'
+import { Plans } from './Plans'
 
 /*
  * Desktop: the product, shown. One claim a screen, in the first screen's
@@ -101,19 +102,44 @@ function Close({
   )
 }
 
-function TeamScene() {
+/*
+ * The coordinator: the project's one conversation, alone, down the middle
+ * of the window. You ask for two things; it reads the repositories and your
+ * rules, says what it makes of it, and puts a team on each task, a step at a
+ * time. The first plan lifts out of the window toward you.
+ */
+function CoordinatorScene() {
   const ref = useRef<HTMLDivElement>(null)
   const seen = useSeen(ref)
   const steps = useAssembling(seen)
+  const docs = useAssembling(seen && steps.length >= 4, DOCS_PLAN)
+  const thread = (
+    <>
+      <You at="10:58">
+        Backfill idempotency keys on the refunds made before PR 1184 (it’s MER-231), and fix the refunds docs while you’re there.
+      </You>
+      <Turn voice="Meridian’s coordinator" at="10:59">
+        <WorkedFor took="14s" summary="Read meridian-api, meridian-web and Meridian’s rules">
+          <p className={s.said}>Read 3 repositories, MER-231 and the project’s rules.</p>
+        </WorkedFor>
+        <p className={s.said}>
+          Two tasks. The backfill writes to money records, so your security review applies and a second lab reviews it. The docs are small:
+          Codex writes them, Sonnet reads them over. Change anyone before they start.
+        </p>
+      </Turn>
+      <Launch steps={steps} />
+      {docs.length > 0 && <Launch task="433" title="Fix the refunds docs" steps={docs} from={false} estimate="About 10 min" />}
+    </>
+  )
   return (
     <div ref={ref} className={s.team}>
       <Screen
-        label="A project in Althar: the conversation, where the lead's plan for task 432 counts down, beside the project's board"
-        phone={{ x: 40, y: 380, w: 560, h: 470 }}
+        label="Meridian's coordinator: you ask for two things, it reads the project and puts a team on each task"
+        phone={{ x: 330, y: 150, w: 780, h: 720 }}
       >
         <Desktop>
           <MacWindow style={{ left: 40, top: 24, width: 1360, height: 826 }}>
-            <ProjectWindow conversation={<Launch steps={steps} />} />
+            <ProjectWindow centered meta="The coordinator · 3 repositories, your rules" thread={thread} />
           </MacWindow>
         </Desktop>
       </Screen>
@@ -153,15 +179,15 @@ export function DesktopBody() {
 
       <Scene
         id="team"
-        kicker="The lead"
+        kicker="The coordinator"
         title={
           <>
-            Say what you want. <b>It picks the team.</b>
+            Say what you want. <b>It puts the team together.</b>
           </>
         }
-        lead="The lead splits the work into steps and gives each one the model that suits it: Opus to write, Codex to dry-run, Sonnet and Gemini to review, the security review your rule asks for. Change anyone, or let it start."
+        lead="Each project has a coordinator that knows its repositories and your rules. Tell it what you want; it splits it into tasks and gives each step the model that suits it, from whichever lab. Change anyone, or let it start."
       >
-        <TeamScene />
+        <CoordinatorScene />
       </Scene>
 
       <Scene
@@ -169,21 +195,17 @@ export function DesktopBody() {
         kicker="Your plans"
         title={
           <>
-            Two Claude plans, three Codex. <b>All at once.</b>
+            Every plan you pay for. <b>All at once.</b>
           </>
         }
-        lead="Althar runs on the sign-ins already on your Mac, as many as you have: work and personal, Max and Pro, any key for OpenCode. Work goes to whichever has room."
+        lead="Sign in to each agent as many times as you have plans: work and personal, Max and Pro, a key for OpenCode. Althar uses them all, in the order you set."
       >
-        <Screen
-          label="Settings open over the home: Codex with three accounts, Claude Code with two, OpenCode with a key and a coding plan"
-          phone={{ x: 420, y: 70, w: 960, h: 620 }}
-        >
-          <Desktop>
-            <MacWindow style={{ left: 70, top: 26, width: 1300, height: 820 }}>
-              <SettingsWindow open="agents" agent="codex" />
-            </MacWindow>
-          </Desktop>
-        </Screen>
+        <div className={s.lifted}>
+          <div className={s.liftedLight} aria-hidden="true">
+            <Light height={0.6} />
+          </div>
+          <Plans />
+        </div>
       </Scene>
 
       <Scene
@@ -209,9 +231,9 @@ export function DesktopBody() {
             Written by one lab. <b>Reviewed by another.</b>
           </>
         }
-        lead="Sonnet and Gemini read what Opus wrote. The lead fixes what they find and sends it round again. Only what they can’t settle comes to you."
+        lead="Sonnet and Gemini read what Opus wrote. The lead fixes what they find and sends it round again. Only what they can’t settle between them comes to you."
       >
-        <Close label="A review by Sonnet 5 and Gemini 3 Pro: three findings, two of them waiting for your call" phoneW={460}>
+        <Close label="A review by Sonnet 5 and Gemini 3 Pro: three findings, two fixed by the lead, one waiting for your call" phoneW={460}>
           <TwoLabReview />
         </Close>
       </Scene>
@@ -225,7 +247,7 @@ export function DesktopBody() {
             Wherever you are, <b>still in reach.</b>
           </>
         }
-        lead="In your editor, in the browser, in a terminal: Althar sits round the notch, or in the menu bar. Point at it to answer a permission or open a pull request without leaving what you’re doing."
+        lead="Althar sits round your Mac’s notch, in whatever you’re doing: point at it to answer a permission or open a pull request, and carry on."
       >
         <EdgeTour />
       </Scene>
@@ -249,7 +271,7 @@ export function DesktopBody() {
             Bring the agents <b>you already pay for.</b>
           </h2>
           <Get tone="paper" />
-          <p className={t.mono}>Free and open source · macOS first</p>
+          <p className={t.mono}>Free and open source · macOS, Windows and Linux</p>
         </div>
         <footer className={s.foot}>
           <a href={LINKS.repo}>GitHub</a>

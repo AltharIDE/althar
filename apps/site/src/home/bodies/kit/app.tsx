@@ -43,6 +43,7 @@ import {
   TitleBar,
   Turn,
   Verdict,
+  FindingState,
   WorkCard,
   WorkStatus,
   You,
@@ -78,7 +79,7 @@ import {
 import { EDGE_NEEDS, EDGE_WORK, edgeRowOf, NOTCH } from '../../../../../../packages/ui/src/fixtures/edge'
 import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../../../../../../packages/ui/src/fixtures/home'
 import { MARKED } from '../../../../../../packages/ui/src/fixtures/marks'
-import { FINDINGS_SEVERAL_YOURS, PROJECT, reviewDoc, STEPS } from '../../../../../../packages/ui/src/fixtures/meridian'
+import { FINDINGS, PROJECT, reviewDoc, STEPS } from '../../../../../../packages/ui/src/fixtures/meridian'
 import { CODEX, GEMINI_PRO, OPUS, QWEN, SONNET } from '../../../../../../packages/ui/src/fixtures/models'
 import { SERVICES } from '../../../../../../packages/ui/src/fixtures/setup'
 import appIcon from '../../../../../desktop/resources/icons/cobalt.svg?url'
@@ -98,8 +99,44 @@ const none = () => {}
 
 const TABS = MARKED.map((p) => ({ id: p.id, name: p.name, seed: p.id, ink: p.ink, running: p.running, yours: p.yours ? 1 : 0 }))
 
-export function Tabs({ current }: { current: string | null }) {
-  return <ProjectTabs tabs={TABS.slice(0, 3)} current={current} onSelect={none} onClose={none} yours={3} lights="drawn" />
+/** Which system the window is drawn on: the Mac's lights at the strip's start, or Windows' and GNOME's buttons at its end. */
+export type System = 'mac' | 'windows' | 'linux'
+
+/** The window's own buttons, as Windows and GNOME draw them over the strip's end. */
+function Caption({ system }: { system: System }) {
+  if (system === 'windows')
+    return (
+      <span className={s.captionWin} aria-hidden="true">
+        <i className={s.min} />
+        <i className={s.max} />
+        <i className={s.close} />
+      </span>
+    )
+  if (system === 'linux')
+    return (
+      <span className={s.captionGnome} aria-hidden="true">
+        <i className={s.min} />
+        <i className={s.max} />
+        <i className={s.close} />
+      </span>
+    )
+  return null
+}
+
+export function Tabs({ current, system = 'mac' }: { current: string | null; system?: System }) {
+  return (
+    <div className={s.tabsRow}>
+      <ProjectTabs
+        tabs={TABS.slice(0, 3)}
+        current={current}
+        onSelect={none}
+        onClose={none}
+        yours={3}
+        lights={system === 'mac' ? 'drawn' : 'none'}
+      />
+      <Caption system={system} />
+    </div>
+  )
 }
 
 /* ---- the home: what needs you across every project, what runs, what happened ---- */
@@ -109,12 +146,14 @@ export function HomeWindow({
   style,
   looked = '3 h ago',
   narrow = false,
+  system = 'mac',
 }: {
   className?: string
   style?: CSSProperties
   looked?: string
   /** Laid out for a narrow window: the stream alone. */
   narrow?: boolean
+  system?: System
 }) {
   const needs = [
     <NeedCard
@@ -157,7 +196,7 @@ export function HomeWindow({
   ]
   return (
     <div className={`${s.window} ${narrow ? s.narrow : ''} ${className ?? ''}`} style={style}>
-      {!narrow && <Tabs current={null} />}
+      {!narrow && <Tabs current={null} system={system} />}
       <TitleBar
         lights="none"
         end={
@@ -216,15 +255,29 @@ export function useAssembling(assemble: boolean, plan: readonly LaunchStep[] = P
   return plan.slice(0, shown)
 }
 
-export function Launch({ steps, wait = 30 }: { steps?: readonly LaunchStep[]; wait?: number }) {
+export function Launch({
+  steps,
+  wait = 30,
+  task = '432',
+  title = 'Backfill idempotency keys on refunds created before PR 1184',
+  from = true,
+  estimate = 'About 40 min · about $2 on your subscriptions',
+}: {
+  steps?: readonly LaunchStep[]
+  wait?: number
+  task?: string
+  title?: string
+  from?: boolean
+  estimate?: string
+}) {
   const plan = steps ?? PLAN_432
   return (
     <TaskLaunch
-      task="432"
-      title="Backfill idempotency keys on refunds created before PR 1184"
-      from={FROM_231}
+      task={task}
+      title={title}
+      {...(from ? { from: FROM_231 } : {})}
       project={PROJECT}
-      estimate="About 40 min · about $2 on your subscriptions"
+      estimate={estimate}
       steps={plan}
       picker={({ agent, owner }) => (
         <ModelPick
@@ -251,19 +304,27 @@ const ASK = 'Backfill idempotency keys on the refunds made before PR 1184. MER-2
 
 export function ProjectWindow({
   conversation,
+  thread,
   talkOnly = false,
+  centered = false,
+  meta = 'Payments API · 3 repositories',
   className,
   style,
 }: {
   /** What the conversation shows under your ask; by default, the lead's plan. */
   conversation?: ReactNode
+  /** The whole conversation, in place of your ask, the reply and `conversation`. */
+  thread?: ReactNode
   /** Only the conversation, as on a narrow window. */
   talkOnly?: boolean
+  /** Only the conversation, in a column down the middle of a wide window. */
+  centered?: boolean
+  meta?: string
   className?: string
   style?: CSSProperties
 }) {
   return (
-    <div className={`${s.window} ${talkOnly ? s.talkOnly : ''} ${className ?? ''}`} style={style}>
+    <div className={`${s.window} ${talkOnly ? s.talkOnly : ''} ${centered ? s.centered : ''} ${className ?? ''}`} style={style}>
       {!talkOnly && <Tabs current="meridian" />}
       <TitleBar
         lights="none"
@@ -274,23 +335,27 @@ export function ProjectWindow({
           </>
         }
       >
-        <RoomSwitch value={talkOnly ? Room.Talk : Room.Both} onChange={none} text={{ key: () => '' }} />
+        <RoomSwitch value={talkOnly || centered ? Room.Talk : Room.Both} onChange={none} text={{ key: () => '' }} />
       </TitleBar>
       <div className={s.rooms}>
         <div className={s.talk}>
-          <ProjectHead title="Meridian" meta="Payments API · 3 repositories" side />
+          <ProjectHead title="Meridian" meta={meta} side={!centered} />
           <div className={s.thread}>
-            <You at="11:01">{ASK}</You>
-            <Turn voice="Meridian’s coordinator" at="11:01">
-              <p className={s.said}>One task. It writes to money records, so your security review applies, and a second lab reviews.</p>
-            </Turn>
-            {conversation ?? <Launch />}
+            {thread ?? (
+              <>
+                <You at="11:01">{ASK}</You>
+                <Turn voice="Meridian’s coordinator" at="11:01">
+                  <p className={s.said}>One task. It writes to money records, so your security review applies, and a second lab reviews.</p>
+                </Turn>
+                {conversation ?? <Launch />}
+              </>
+            )}
           </div>
           <div className={s.composer}>
             <Composer value="" onChange={none} onSubmit={none} placeholder="Tell Meridian what you want done" hint="⌘L" />
           </div>
         </div>
-        {!talkOnly && (
+        {!talkOnly && !centered && (
           <div className={s.board}>
             <MeridianBoard />
           </div>
@@ -621,6 +686,17 @@ export function Handover({ after }: { after: boolean }) {
 
 /* ---- two labs' review of the lead's work ---- */
 
+/** The usual review, simpler: two findings the lead fixed on the second round, and the one the reviewers disagree on, which is yours. */
+const FINDINGS_ONE_YOURS = FINDINGS.map((f) =>
+  f.id === 'f2'
+    ? {
+        ...f,
+        state: FindingState.Yours,
+        ask: 'Sonnet and Gemini disagree, and nothing on the task settles it. One budget, or a bucket for refunds?',
+      }
+    : { ...f, state: FindingState.Fixed, round: 2 },
+)
+
 export function TwoLabReview() {
   return (
     <Review
@@ -631,10 +707,17 @@ export function TwoLabReview() {
       took="4m 20s"
       thread={STEPS.review}
       instructions={{ path: '.althar/review.md', ...reviewDoc }}
-      defaultFindings={FINDINGS_SEVERAL_YOURS}
+      defaultFindings={FINDINGS_ONE_YOURS}
+      defaultOpen
     />
   )
 }
+
+/** The docs task the coordinator hands out beside 432: small, Codex writes, Sonnet reads it over. */
+export const DOCS_PLAN: LaunchStep[] = [
+  { id: 'impl', label: 'Implement', agents: [CODEX], why: 'a docs change; Codex has room', fixed: 'the lead' },
+  { id: 'review', label: 'Review', agents: [SONNET], why: 'a different lab from the lead', optional: true },
+]
 
 /* ---- a rule adds a step ---- */
 

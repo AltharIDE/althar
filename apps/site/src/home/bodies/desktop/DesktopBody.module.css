@@ -27,28 +27,29 @@
 }
 .screen { border-radius: 20px; }
 
-/* ---- the lead's plan: the card, lifted out of the window toward you ---- */
+/* ---- the coordinator's plan: the card, lifted out of the window toward you ---- */
+.said { margin: 0; }
 .team { position: relative; }
 .slab {
   position: absolute;
-  left: max(var(--gut), calc(50% - 640px));
-  bottom: -70px;
-  width: min(700px, 56%);
+  right: max(var(--gut), calc(50% - 660px));
+  bottom: -80px;
+  width: min(640px, 50%);
   perspective: 1800px;
   pointer-events: none;
 }
 .slabCard {
   border-radius: 14px;
-  transform: rotateX(8deg) rotateY(-9deg) rotateZ(0.6deg);
-  transform-origin: 30% 50%;
+  transform: rotateX(8deg) rotateY(9deg) rotateZ(-0.6deg);
+  transform-origin: 70% 50%;
   box-shadow:
-    1px 1px 0 #dfe1f1,
-    2px 2px 0 #d6d9ee,
-    3px 3px 0 #ced1ea,
-    4px 4px 0 #c6cae6,
-    5px 5px 0 #bec2e2,
-    30px 50px 80px rgba(6, 10, 70, 0.28),
-    60px 90px 120px rgba(6, 10, 70, 0.14);
+    -1px 1px 0 #dfe1f1,
+    -2px 2px 0 #d6d9ee,
+    -3px 3px 0 #ced1ea,
+    -4px 4px 0 #c6cae6,
+    -5px 5px 0 #bec2e2,
+    -30px 50px 80px rgba(6, 10, 70, 0.28),
+    -60px 90px 120px rgba(6, 10, 70, 0.14);
   animation: float 9s ease-in-out infinite;
 }
 @keyframes float {
@@ -140,4 +141,13 @@
   .marks svg { width: 30px; height: 30px; }
   .end { padding-top: 120px; }
   .foot { margin-top: 96px; }
+}
+
+/* ---- your plans: the panel lifted a little, in the light ---- */
+.lifted { position: relative; isolation: isolate; max-width: 1180px; margin: 0 auto; padding: 0 var(--gut) 40px; perspective: 2200px; }
+.lifted > div:last-child { transform: rotateX(5deg); transform-origin: 50% 100%; animation: float 9s ease-in-out infinite; }
+.liftedLight { position: absolute; left: 0; right: 0; bottom: -60px; height: 70%; z-index: -1; overflow: hidden; -webkit-mask-image: radial-gradient(60% 70% at 50% 100%, #000 40%, transparent 78%); mask-image: radial-gradient(60% 70% at 50% 100%, #000 40%, transparent 78%); }
+@media (max-width: 900px) {
+  .lifted { padding: 0 0 30px; }
+  .lifted > div:last-child { transform: none; animation: none; }
 }

@@ -1,90 +1,62 @@
-import { type ComponentType, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 
-import { Close } from '../../shared/Close'
 import { Hero } from '../Hero'
-import { Current } from './Current'
-import { Day } from './day/Day'
 import { DesktopBody } from './desktop/DesktopBody'
-import { FloatingNav, heroNavOf, NAVS, type NavId } from './nav/Navs'
+import { Nav, NavSpace } from './nav/Navs'
 import s from './Pick.module.css'
-import { Slabs } from './slabs/Slabs'
+import { Platforms, type PlatformsLook } from './platforms/Platforms'
 
 /*
- * Prototype: the page under the first screen in a few directions, and the
- * nav in a few ways, so each is seen on the real page. `?body=desktop` and
- * `?nav=island` pick them, the strips at the bottom switch them (number keys
- * pick a body, shift with a number a nav), and `?shoot` hides the strips for
- * screenshots.
+ * The developer page as it is being drawn: the island for a nav, the first
+ * screen, a section on the systems Althar runs on, and the product shown
+ * (desktop/). Prototype: the systems section in three ways; `?os=rise`
+ * picks one, the strip at the bottom (or 1–3) switches, and `?shoot` hides
+ * the strip for screenshots.
  */
 
-const BODIES: ReadonlyArray<{ id: string; name: string; Body: ComponentType }> = [
-  { id: 'now', name: 'Now', Body: Current },
-  { id: 'desktop', name: 'Desktop', Body: DesktopBody },
-  { id: 'day', name: 'A day', Body: Day },
-  { id: 'slabs', name: 'Slabs', Body: Slabs },
+const LOOKS: ReadonlyArray<{ id: PlatformsLook; name: string }> = [
+  { id: 'rise', name: 'Rise' },
+  { id: 'morph', name: 'Morph' },
+  { id: 'row', name: 'Row' },
 ]
 
 const param = (name: string) => new URLSearchParams(window.location.search).get(name)
-const bodyFromAddress = () => {
-  const at = BODIES.findIndex((b) => b.id === param('body'))
-  return at < 0 ? 1 : at
-}
-const navFromAddress = (): NavId => NAVS.find((n) => n.id === param('nav'))?.id ?? 'bar'
-const SHIFTED = ['!', '@', '#', '$', '%', '^']
 
 export function Bodies() {
-  const [at, setAt] = useState(bodyFromAddress)
-  const [nav, setNav] = useState(navFromAddress)
+  const [look, setLook] = useState<PlatformsLook>(() => LOOKS.find((l) => l.id === param('os'))?.id ?? 'rise')
   const shoot = param('shoot') !== null
 
-  const remember = (name: string, value: string) => {
+  const pick = (id: PlatformsLook) => {
+    setLook(id)
     const q = new URLSearchParams(window.location.search)
-    q.set(name, value)
+    q.set('os', id)
     window.history.replaceState(null, '', `?${q}`)
-  }
-  const pick = (i: number) => {
-    setAt(i)
-    remember('body', BODIES[i]!.id)
-  }
-  const pickNav = (id: NavId) => {
-    setNav(id)
-    remember('nav', id)
   }
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
-      const shifted = SHIFTED.indexOf(e.key)
-      if (shifted >= 0 && NAVS[shifted]) return pickNav(NAVS[shifted].id)
       const n = Number(e.key)
-      if (Number.isInteger(n) && n >= 0 && n < BODIES.length) pick(n)
+      if (Number.isInteger(n) && n >= 1 && n <= LOOKS.length) pick(LOOKS[n - 1]!.id)
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
   })
 
-  const { Body, id } = BODIES[at]!
   return (
     <>
-      <FloatingNav id={nav} />
-      <Hero nav={heroNavOf(nav)} />
-      <Body key={id} />
-      {id === 'now' && <Close />}
+      <Nav />
+      <Hero nav={<NavSpace />} />
+      <Platforms key={look} look={look} />
+      <DesktopBody />
       {!shoot && (
         <div className={s.dock}>
-          <nav className={s.pick} aria-label="Navs (prototype)">
-            <span className={s.label}>Nav</span>
-            {NAVS.map((n) => (
-              <button key={n.id} type="button" aria-pressed={n.id === nav} onClick={() => pickNav(n.id)}>
-                {n.name}
-              </button>
-            ))}
-          </nav>
-          <nav className={s.pick} aria-label="Directions (prototype)">
-            {BODIES.map((b, i) => (
-              <button key={b.id} type="button" aria-pressed={i === at} onClick={() => pick(i)}>
-                <b>{i}</b>
-                {b.name}
+          <nav className={s.pick} aria-label="Systems section (prototype)">
+            <span className={s.label}>Systems</span>
+            {LOOKS.map((l, i) => (
+              <button key={l.id} type="button" aria-pressed={l.id === look} onClick={() => pick(l.id)}>
+                <b>{i + 1}</b>
+                {l.name}
               </button>
             ))}
           </nav>

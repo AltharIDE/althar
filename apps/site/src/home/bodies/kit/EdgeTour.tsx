@@ -32,7 +32,6 @@ const ISLAND = { x: 450, y: 0, w: 540, h: 600 }
 
 export const EDGE_MOMENTS: ReelMoment[] = [
   {
-    at: 'Round the notch',
     label: 'In your editor',
     stays: 5200,
     render: () => (
@@ -44,7 +43,6 @@ export const EDGE_MOMENTS: ReelMoment[] = [
     ),
   },
   {
-    at: 'Round the notch',
     label: 'In the browser',
     stays: 4400,
     render: () => (
@@ -66,30 +64,28 @@ export const EDGE_MOMENTS: ReelMoment[] = [
     ),
   },
   {
-    at: 'In the menu bar',
-    label: 'In the terminal',
+    label: 'In a terminal',
     stays: 5200,
     render: () => (
-      <Shot w={1440} h={900} phone={{ x: 880, y: 0, w: 540, h: 600 }} label="Althar in the menu bar, open over a terminal" frame={s.screen}>
-        <Desktop wallpaper="dark" app="Terminal" menu={{ open: MENU_SHEET, waiting: EDGE_NEEDS.length }}>
-          <TerminalWindow style={{ left: 120, top: 60, width: 1000, height: 700 }} />
+      <Shot w={1440} h={900} phone={ISLAND} label="The island open over a terminal" frame={s.screen}>
+        <Desktop wallpaper="dark" app="Terminal" island={<IslandOpen />}>
+          <TerminalWindow style={{ left: 120, top: 60, width: 1200, height: 760 }} />
         </Desktop>
       </Shot>
     ),
   },
   {
-    at: 'Round the notch',
-    label: 'Away from it',
-    stays: 4000,
+    label: 'Anywhere else',
+    stays: 4400,
     render: () => (
       <Shot
         w={1440}
         h={900}
         phone={{ x: 360, y: 0, w: 720, h: 560 }}
-        label="An empty desktop, the island counting what waits"
+        label="A permission asked round the notch over an empty desktop"
         frame={s.screen}
       >
-        <Desktop wallpaper="light" app="Finder" island={<IslandOpen open={false} />} />
+        <Desktop wallpaper="light" app="Finder" island={<IslandOpen open={false} saying={{ project: 'Halyard', kind: 'Permission' }} />} />
       </Shot>
     ),
   },
@@ -100,6 +96,26 @@ export function EdgeTour({ tone = 'ink' }: { tone?: 'paper' | 'ink' }) {
     <div className={s.tour}>
       <div className={s.bezel}>
         <Reel moments={EDGE_MOMENTS} tone={tone} />
+      </div>
+      <div className={s.menuNote}>
+        <div className={s.menuWords}>
+          <b>No notch? The menu bar.</b>
+          <span>On a Mac without one, the same list drops from Althar’s mark in the menu bar.</span>
+        </div>
+        <div className={s.menuPicture}>
+          <Shot
+            w={1440}
+            h={900}
+            crop={{ x: 860, y: 0, w: 580, h: 560 }}
+            phone={{ x: 860, y: 0, w: 580, h: 560 }}
+            label="Althar in the menu bar, open"
+            frame={s.menuFrame}
+          >
+            <Desktop wallpaper="dark" app="Terminal" menu={{ open: MENU_SHEET, waiting: EDGE_NEEDS.length }}>
+              <TerminalWindow style={{ left: 120, top: 60, width: 1000, height: 700 }} />
+            </Desktop>
+          </Shot>
+        </div>
       </div>
     </div>
   )

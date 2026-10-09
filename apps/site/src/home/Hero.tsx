@@ -352,10 +352,6 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
 
       <div data-arrive>{nav === undefined ? <Bar tone="paper" /> : nav}</div>
       <header className={s.head}>
-        <p className={s.kicker} data-arrive>
-          <i aria-hidden="true" />
-          {HERO.kicker}
-        </p>
         <h1 ref={headline} className={s.h1}>
           <span className={cx(s.line, s.pay)} data-line>
             <Words text={HERO.pay} />

@@ -9,7 +9,16 @@
 }
 .screen { border-radius: 20px; }
 
+/* The menu bar, as a footnote: words, and the corner of the screen it drops from. */
+.menuNote { display: grid; grid-template-columns: minmax(0, 1fr) 360px; align-items: center; gap: 48px; max-width: 900px; margin: 90px auto 0; padding: 28px; border-radius: 22px; background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.menuWords { display: grid; gap: 8px; }
+.menuWords b { font-family: 'Inter Display', var(--display); font-size: 28px; font-weight: 650; letter-spacing: -0.03em; color: #fff; }
+.menuWords span { font-size: 15.5px; line-height: 1.5; color: rgba(255, 255, 255, 0.66); }
+.menuFrame { border-radius: 12px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 20px 50px rgba(0, 0, 0, 0.5); }
+
 @media (max-width: 700px) {
+  .menuNote { grid-template-columns: 1fr; gap: 20px; margin-top: 56px; padding: 18px; }
+  .menuWords b { font-size: 22px; }
   .tour { max-width: none; margin-top: 40px; }
   .bezel > div > div:first-child { padding: 6px; border-radius: 18px; }
   .screen { border-radius: 12px; }

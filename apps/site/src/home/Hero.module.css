@@ -27,16 +27,9 @@
   align-items: center;
   max-width: var(--max);
   margin: 0 auto;
-  padding: 30px var(--gut) 64px;
+  padding: 30px var(--gut) 120px;
   text-align: center;
 }
-.kicker {
-  display: inline-flex; align-items: center; gap: 9px;
-  font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
-  color: var(--t-2);
-}
-/* It sits where the light fades out, so it is set in ink. */
-.kicker i { width: 6px; height: 6px; border-radius: 50%; background: var(--live); }
 
 /* Inter at its display size, at its lightest; only the agent's name is heavy. */
 .h1 {
