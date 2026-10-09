@@ -1,19 +1,5 @@
 .page { background: var(--n-2); }
-.wrap, .two, .hero { max-width: var(--max); margin: 0 auto; padding-left: var(--gut); padding-right: var(--gut); }
-
-/* ---- the first screen, in cobalt ---- */
-.top { background: var(--live); color: #fff; }
-.hero { padding-top: 40px; padding-bottom: 120px; }
-.kicker { display: flex; align-items: center; gap: 8px; font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255, 255, 255, 0.75); }
-.kicker i { width: 6px; height: 6px; border-radius: 50%; background: #fff; }
-.h1 { margin-top: 24px; font-size: 92px; line-height: 0.98; letter-spacing: -0.058em; font-weight: 700; }
-.h1 > span { display: block; }
-.dim { color: rgba(255, 255, 255, 0.6); }
-.name { white-space: nowrap; }
-.below { display: grid; grid-template-columns: 1fr minmax(0, 590px); gap: 72px; margin-top: 56px; align-items: start; }
-.heroLead { max-width: 470px; font-size: 19px; line-height: 1.55; color: rgba(255, 255, 255, 0.86); }
-.ctas { margin-top: 30px; }
-.fine { margin-top: 16px; font-size: 13px; color: rgba(255, 255, 255, 0.65); }
+.wrap, .two { max-width: var(--max); margin: 0 auto; padding-left: var(--gut); padding-right: var(--gut); }
 
 /* ---- paper sections ---- */
 .section { padding: 120px 0; border-top: 1px solid var(--line); }
@@ -25,14 +11,29 @@
 .h2 span { display: block; }
 .lead { margin-top: 20px; font-size: 17px; line-height: 1.55; color: var(--t-2); }
 
+/* "No new account. No new bill." set as the first screen is: Inter's display cut, a light line over a heavy one. */
+.lit { font-family: 'Inter Display', var(--display); font-size: 66px; line-height: 0.98; letter-spacing: -0.05em; }
+.lit span:first-child { font-weight: 200; color: var(--t-2); }
+.lit span:last-child { font-weight: 720; letter-spacing: -0.056em; }
+
+/* The agents it runs: a row each, its mark and name large, on hairlines. */
+.list { padding-top: 8px; }
 .agents { width: 100%; border-collapse: collapse; font-size: 16px; }
-.agents thead th { padding: 0 0 14px; text-align: left; font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
-.agents tbody th, .agents td { padding: 20px 0; border-top: 1px solid var(--line-2); text-align: left; font-weight: 400; }
-.agents tbody th { width: 220px; }
-.agent { display: flex; align-items: center; gap: 12px; font-weight: 650; font-size: 17px; }
-.agents code { font: 13.5px var(--mono); color: var(--t-2); }
-.whose { display: block; margin-top: 3px; font-size: 13px; color: var(--t-3); }
-.note { margin-top: 18px; font-size: 14px; color: var(--t-3); }
+.agents thead th { padding: 0 0 14px; white-space: nowrap; text-align: left; font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
+.agents tbody th, .agents td { padding: 26px 0; border-top: 1px solid var(--line-2); text-align: left; font-weight: 400; vertical-align: middle; }
+.agents tbody tr:last-child th, .agents tbody tr:last-child td { border-bottom: 1px solid var(--line-2); }
+.agents tbody th { width: 42%; }
+.agent {
+  display: flex; align-items: center; gap: 16px;
+  font-family: 'Inter Display', var(--display); font-weight: 640; font-size: 32px; letter-spacing: -0.04em; line-height: 1;
+  white-space: nowrap;
+}
+.agent svg { flex: none; }
+.signIn { font-size: 16px; color: var(--t-1); }
+.runs { width: 1%; padding-left: 24px; white-space: nowrap; }
+.agents code { font: 13px var(--mono); color: var(--t-2); }
+.whose { display: block; margin-top: 3px; font-size: 12.5px; color: var(--t-3); }
+.note { margin-top: 20px; font-size: 14px; color: var(--t-3); }
 
 .points { margin: 36px 0 0; padding: 0; list-style: none; }
 .points li { display: grid; grid-template-columns: 30px 1fr; padding: 16px 0; border-top: 1px solid var(--line-2); }
@@ -44,19 +45,29 @@
 .loopHead { display: grid; grid-template-columns: 1fr minmax(0, 480px); gap: 60px; align-items: end; margin-bottom: 52px; }
 .loopHead .lead { margin-top: 0; }
 
-@media (max-width: 1100px) {
-  .h1 { font-size: 72px; }
-  .below { grid-template-columns: 1fr; gap: 48px; }
-}
 @media (max-width: 900px) {
   .two, .loopHead { grid-template-columns: 1fr; gap: 40px; }
   .section { padding: 80px 0; }
   .h2 { font-size: 38px; }
 }
+@media (max-width: 1100px) {
+  .agent { font-size: 28px; }
+}
+@media (max-width: 900px) {
+  .lit { font-size: 48px; }
+}
 @media (max-width: 640px) {
-  .hero { padding-bottom: 80px; }
-  .h1 { font-size: 46px; }
-  .heroLead { font-size: 17px; }
-  .agents tbody th { width: auto; }
-  .agents td:last-child, .agents thead th:last-child { display: none; }
+  .lit { font-size: 44px; }
+  /* A phone stacks each agent: its mark and name, then what it signs in with and how it runs. */
+  .agents, .agents tbody, .agents tr, .agents th, .agents td, .agents tbody th { display: block; width: auto; }
+  .agents thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .agents tbody tr { padding: 22px 0; border-top: 1px solid var(--line-2); }
+  .agents tbody tr:last-child { border-bottom: 1px solid var(--line-2); }
+  .agents tbody th, .agents td { padding: 0; border: 0; }
+  .agents tbody tr:last-child th, .agents tbody tr:last-child td { border: 0; }
+  .agent { font-size: 30px; gap: 14px; }
+  .agents .signIn { margin-top: 12px; padding-left: 44px; font-size: 16px; }
+  .agents .runs { margin-top: 4px; padding-left: 44px; white-space: normal; }
+  .runs code, .whose { display: inline; }
+  .whose::before { content: ' · '; }
 }
