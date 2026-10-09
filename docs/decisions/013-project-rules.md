@@ -47,6 +47,9 @@
     - **Commands the person names** by how they start (`npm publish`,
       `terraform *`), to ask about or refuse.
     - **How a task ends** when its plan doesn't say.
+    - **How its branches and pull requests' titles are named,** by a
+      pattern (`{key}`, `{slug}`, `{title}`), over what each repository's
+      docs say.
   - **Precedence.** A request can be several kinds at once: `git push
     --force origin main` is a force push and a push to the default branch.
     Every kind counts.
@@ -83,6 +86,14 @@
     plan's own, else the project's, else a draft where the host is
     connected. A project that wants a pull request but whose repository
     names no host Althar knows ends on its branch.
+  - **Names follow the team, the person's pattern first** (DEV-42). As a
+    task starts, each repository's branch is named by the project's
+    pattern, else by what its CONTRIBUTING.md, AGENTS.md, CLAUDE.md or
+    README spells out, read from its default branch each time, else
+    Althar's own (`althar/<key>-<slug>`); a title the same way as the pull
+    request opens. A doc that offers several patterns is a judgement left
+    to the person. The rules screen says, for each repository, where its
+    names come from.
   - **They hold for what reaches Althar:** what an agent asks to do beyond
     its sandbox, which is the network or outside the task. The screen says
     so.

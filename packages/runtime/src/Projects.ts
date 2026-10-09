@@ -19,6 +19,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 
 import { postCard } from './cards'
 import { RuntimeConfig } from './Config'
+import { branchFor, conventionsOnBase, ruleOf } from './conventions'
 import { type GitFailed, NotARepository, NotFound, ProjectRefused, RepositoriesNeeded } from './errors'
 import { type Fork, forkOf } from './forks'
 import {
@@ -34,7 +35,6 @@ import {
   topLevel,
 } from './git'
 import { Instance } from './Instance'
-import { branchKey } from './Issues'
 import { change, fact, timestamp } from './records'
 
 /*
@@ -484,6 +484,15 @@ export class Projects extends Context.Service<
           })
         })
 
+      /** Where a task starts in a repository: its default branch, or, for a fork whose pull requests open on the repository it came from, that repository's. */
+      const startOf = (binding: { readonly repository: string; readonly base: string | null; readonly changeTarget: string | null }) =>
+        Effect.gen(function* () {
+          const upstream = binding.changeTarget === 'upstream' && (yield* forkAt(binding.repository)) !== null
+          return upstream
+            ? { remote: 'upstream', base: yield* defaultBranch(binding.repository, 'upstream') }
+            : { remote: 'origin', base: binding.base ?? 'main' }
+        })
+
       const createTask = (input: {
         readonly envelope: CommandEnvelope
         readonly projectId: string
@@ -524,6 +533,12 @@ export class Projects extends Context.Service<
           if (unknown.length > 0) return yield* new RepositoriesNeeded({ unknown, choices })
           const chosen = bindings.length === 1 ? bindings : bindings.filter((binding) => named.some((name) => matches(binding, name)))
           if (chosen.length === 0) return yield* new RepositoriesNeeded({ unknown: [], choices })
+          // The person's rule for branch names, if any. Without one, each repository's docs are read once the task is made,
+          // as its worktree is, so nothing waits on git before the task is there.
+          const [rules] = yield* sql<{ pattern: string | null }>`
+            SELECT json_extract(rules, '$.branchPattern') AS pattern FROM policies WHERE project_id = ${first.projectId}
+            ORDER BY revision DESC LIMIT 1`
+          const rule = ruleOf('branch', rules?.pattern ?? undefined)
           const created = yield* commands.execute({
             envelope,
             projectId: first.projectId,
@@ -551,9 +566,10 @@ export class Projects extends Context.Service<
               })}`
               const threadId = yield* newId(Ids.thread)
               yield* sql`INSERT INTO threads ${sql.insert({ id: threadId, projectId: first.projectId, kind: 'task', taskId, createdAt })}`
-              const branch = input.issueKey === undefined ? `althar/${slug}` : `althar/${branchKey(input.issueKey)}-${slug}`
+              // Planned by the rule, else Althar's own until the repository's docs are read.
+              const branch = branchFor(rule, { key: input.issueKey ?? null, slug })
               // A worktree for each repository it changes, side by side in the task's folder (ADR-006).
-              const workspaces: Array<{ id: string; worktree: string }> = []
+              const workspaces: Array<{ id: string; worktree: string; branch: string }> = []
               for (const binding of chosen) {
                 yield* sql`INSERT INTO task_repository_requirements ${sql.insert({
                   id: yield* newId(Ids.taskRequirement),
@@ -578,7 +594,7 @@ export class Projects extends Context.Service<
                   state: 'preparing',
                   createdAt,
                 })}`
-                workspaces.push({ id: workspaceId, worktree })
+                workspaces.push({ id: workspaceId, worktree, branch })
               }
               yield* fact({
                 projectId: first.projectId,
@@ -593,7 +609,7 @@ export class Projects extends Context.Service<
               // A task started by hand shows in the coordinator's thread as its card; a draft's card comes with its plan.
               if (input.draft !== true) yield* postCard(first.projectId, taskId)
               const [made] = workspaces
-              return { taskId, slug, threadId, workspaceId: made?.id ?? '', worktree: made?.worktree ?? '', branch }
+              return { taskId, slug, threadId, workspaceId: made?.id ?? '', worktree: made?.worktree ?? '', branch: made?.branch ?? '' }
             }),
           })
 
@@ -608,17 +624,11 @@ export class Projects extends Context.Service<
               continue
             }
             const binding = bindings.find((candidate) => candidate.id === workspace.bindingId) ?? first
-            // A fork whose pull requests open on the repository it came from starts from that repository's default branch.
-            const upstream = binding.changeTarget === 'upstream' && (yield* forkAt(binding.repository)) !== null
-            const base = upstream ? yield* defaultBranch(binding.repository, 'upstream') : (binding.base ?? 'main')
-            const prepared = yield* Effect.exit(
-              prepareWorktree(
-                binding.repository,
-                base,
-                { worktree: workspace.path, branch: workspace.branch },
-                upstream ? 'upstream' : 'origin',
-              ),
-            )
+            const { remote, base } = yield* startOf(binding)
+            // Named as the repository's docs say, where the person has no rule: read now, from where the task starts.
+            const docs = rule === null ? (yield* conventionsOnBase(binding.repository, base, remote)).branch : null
+            const branch = docs === null ? workspace.branch : branchFor(docs.pattern, { key: input.issueKey ?? null, slug: created.slug })
+            const prepared = yield* Effect.exit(prepareWorktree(binding.repository, base, { worktree: workspace.path, branch }, remote))
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 const done = prepared._tag === 'Success'

@@ -137,6 +137,42 @@ export const AsAltharHasIt: Story = {
   },
 }
 
+/** How its pull requests are named and described: one repository follows its CONTRIBUTING.md, the other says nothing. */
+export const PullRequests: Story = {
+  args: {
+    branches: {
+      value: null,
+      onChange: fn(),
+      exampleOf: (pattern) => pattern.replace('{key}', 'DEV-42').replace('{slug}', 'fix-login'),
+      fallback: 'althar/{key}-{slug}',
+      repositories: [
+        { id: 'api', name: 'api', found: { pattern: 'feature/{key}-{slug}', from: 'CONTRIBUTING.md' } },
+        { id: 'web', name: 'web', found: null },
+      ],
+    },
+    titles: {
+      value: '{key}: {title}',
+      onChange: fn(),
+      exampleOf: (pattern) => pattern.replace('{key}', 'DEV-42').replace('{title}', 'Fix login'),
+      fallback: '{title}',
+      repositories: [
+        { id: 'api', name: 'api', found: null },
+        { id: 'web', name: 'web', found: null },
+      ],
+    },
+    templates: [
+      { id: 'api', name: 'api', path: '.github/pull_request_template.md' },
+      { id: 'web', name: 'web', path: null },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('textbox', { name: 'Branch names' })).toHaveAttribute('placeholder', 'feature/{key}-{slug}')
+    await expect(c.getByText('CONTRIBUTING.md says feature/{key}-{slug}')).toBeInTheDocument()
+    await expect(c.getByText('Makes DEV-42: Fix login')).toBeInTheDocument()
+  },
+}
+
 /** No way to add a rule here: the list is someone else's. */
 export const FixedList: Story = { args: { onAddRule: undefined } }
 
@@ -149,6 +185,7 @@ export const AllStates: Story = {
         { state: 'default', node: <ProjectRules {...args} /> },
         { state: 'allow everything', node: <ProjectRules {...args} {...AllowEverything.args} /> },
         { state: 'careful', node: <ProjectRules {...args} {...Careful.args} /> },
+        { state: 'pull requests', node: <ProjectRules {...args} {...PullRequests.args} /> },
         { state: 'hover', node: <ProjectRules {...args} /> },
         { state: 'focus', node: <ProjectRules {...args} /> },
         {

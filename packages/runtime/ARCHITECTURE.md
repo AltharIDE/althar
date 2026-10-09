@@ -26,7 +26,8 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `Accounts.ts` | Each agent's accounts on this Mac (ADR-012): its usual folder first, homes Althar makes, folders switchers made, found by name |
 | `SignIns.ts` | Whether each account is signed in, from its agent's own status command run in its home, at most once a minute; an agent is signed in where any account is |
 | `Limits.ts` | Which accounts are out of usage and until when, the account a session runs on, and the next free agent to move work on to |
-| `Policies.ts` | A project's rules by revision (ADR-013): its mode, what always asks and what is never allowed, commands named by how they start, how a task ends, what a usage limit does, and agents' accounts |
+| `Policies.ts` | A project's rules by revision (ADR-013): its mode, what always asks and what is never allowed, commands named by how they start, how a task ends, how branches and titles are named, what a usage limit does, and agents' accounts |
+| `conventions.ts` | A team's conventions, as each repository writes them down (DEV-42): naming patterns read from its docs, its pull request template, branch and title names by pattern, and a description kept in its template |
 | `Nudges.ts` | What reaches the person outside the window: each thing that comes to need them, a call or a task ready, and how many wait |
 | `Models.ts` | The models each agent offers and how hard each can think, from its latest session or asked once a launch |
 | `Permissions.ts` | Records permission requests and decisions; asks the person what the rules keep for them |

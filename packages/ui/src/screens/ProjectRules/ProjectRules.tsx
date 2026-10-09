@@ -9,6 +9,7 @@ import { Choices, type ChoiceOption } from '../../primitives/Choices/Choices'
 import { Field, FieldError } from '../../primitives/Field/Field'
 import { FormRow } from '../../primitives/FormRow/FormRow'
 import { Panel } from '../../primitives/Panel/Panel'
+import { NamingRule, type NamingRuleProps, type RepositoryTemplate, TemplateSources } from '../../setup/Conventions/Conventions'
 import s from './ProjectRules.module.css'
 
 /*
@@ -38,6 +39,9 @@ export interface ProjectRulesText {
   reachOption: Record<FindingsReach, Option>
   end: { label: string; note: string }
   endOption: Record<TaskEnd, Option>
+  branches: { label: string; note: string }
+  titles: { label: string; note: string }
+  templates: { label: string; note: string }
   limits: { label: string; note: string }
   limit: Record<LimitPolicy, Option>
   accounts: { label: string; note: string; allowed: (agent: string) => string }
@@ -87,6 +91,12 @@ export const projectRulesText: ProjectRulesText = {
     },
     [TaskEnd.ReadyPr]: { title: 'Open a PR for review', note: 'Requests the usual reviewers as soon as the graph finishes.' },
     [TaskEnd.PushOnly]: { title: 'Push the branch only', note: 'You open the PR when you want one.' },
+  },
+  branches: { label: 'Branch names', note: 'For new tasks. {key} is the issue’s key, {slug} the task’s name' },
+  titles: { label: 'Pull request titles', note: '{key} is the issue’s key, {title} the task’s title' },
+  templates: {
+    label: 'Descriptions',
+    note: 'Written in the repository’s pull request template, where it has one. The boxes are yours to tick',
   },
   limits: { label: 'Usage limits', note: 'When a runtime’s account runs out, for the lead and every step on it' },
   limit: {
@@ -167,6 +177,12 @@ export interface ProjectRulesProps {
   end?: TaskEnd
   defaultEnd?: TaskEnd
   onEndChange?: (value: TaskEnd) => void
+  /** How branches are named: the person's pattern over each repository's. Without it, no such row. */
+  branches?: Omit<NamingRuleProps, 'text'>
+  /** How pull requests are titled, the same way. Without it, no such row. */
+  titles?: Omit<NamingRuleProps, 'text'>
+  /** Each repository's pull request template. Without it, no such row. */
+  templates?: readonly RepositoryTemplate[]
   /** Which usage limit choices to offer, in order. All three, unless given. */
   limitOptions?: readonly LimitPolicy[]
   limits?: LimitPolicy
@@ -185,7 +201,7 @@ export interface ProjectRulesProps {
   text?: Partial<ProjectRulesText>
 }
 
-/** A project's rules for asking you: who answers permissions, what always waits for you, what is never allowed, how review findings reach you, how a task ends, and what a usage limit does. */
+/** A project's rules for asking you: who answers permissions, what always waits for you, what is never allowed, how review findings reach you, how a task ends and how its pull request is named and described, and what a usage limit does. */
 export function ProjectRules({
   project,
   permissionOptions = PERMISSIONS,
@@ -209,6 +225,9 @@ export function ProjectRules({
   end: endProp,
   defaultEnd = TaskEnd.DraftPr,
   onEndChange,
+  branches,
+  titles,
+  templates,
   limitOptions = LIMITS,
   limits: limitsProp,
   defaultLimits = LimitPolicy.Move,
@@ -274,6 +293,24 @@ export function ProjectRules({
       <FormRow label={t.end.label} note={t.end.note}>
         <Choices label={t.end.label} options={options(ENDS, t.endOption)} value={end} onChange={setEnd} />
       </FormRow>
+
+      {branches && (
+        <FormRow label={t.branches.label} note={t.branches.note}>
+          <NamingRule {...branches} text={{ field: t.branches.label }} />
+        </FormRow>
+      )}
+
+      {titles && (
+        <FormRow label={t.titles.label} note={t.titles.note}>
+          <NamingRule {...titles} text={{ field: t.titles.label }} />
+        </FormRow>
+      )}
+
+      {templates && templates.length > 0 && (
+        <FormRow label={t.templates.label} note={t.templates.note}>
+          <TemplateSources repositories={templates} />
+        </FormRow>
+      )}
 
       <FormRow label={t.limits.label} note={t.limits.note}>
         <Choices label={t.limits.label} options={options(limitOptions, t.limit)} value={limits} onChange={setLimits} />
