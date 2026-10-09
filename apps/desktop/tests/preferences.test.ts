@@ -6,7 +6,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { DEFAULT_PREFERENCES, holds, isPreferenceKey, preferencesIn } from '../src/main/appPreferences'
 import { keepingAwake } from '../src/main/awake'
-import { dockCount, tells } from '../src/main/notify'
+import { dockCount, soundOf, tells } from '../src/main/notify'
+import { alertSounds, playSound } from '../src/main/sounds'
 import { readAppPreferences, writeAppPreference } from '../src/main/preferences'
 
 /* The app's own preferences, kept by the main process in the profile's desktop.json, and what it does with them. */
@@ -23,12 +24,12 @@ describe('the app’s preferences kept in the profile', () => {
       notifyReady: true,
       notifyStopped: true,
       badge: true,
-      sound: false,
+      sound: null,
     })
   })
 
   it('read each as kept, and where it starts where what is kept isn’t one it can hold', () => {
-    expect(preferencesIn({ keepAwake: false, sound: 'loud', editor: 'zed', badge: 0, notifyReady: false })).toEqual({
+    expect(preferencesIn({ keepAwake: false, sound: true, editor: 'zed', badge: 0, notifyReady: false })).toEqual({
       ...DEFAULT_PREFERENCES,
       keepAwake: false,
       editor: 'zed',
@@ -43,8 +44,8 @@ describe('the app’s preferences kept in the profile', () => {
     expect(await writeAppPreference(at, 'keepAwake', false)).toBe(false)
     writeFileSync(join(at, 'desktop.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(at, 'desktop.json'), 'utf8')), icon: 'ink' }))
     await writeAppPreference(at, 'editor', 'cursor')
-    await writeAppPreference(at, 'sound', true)
-    expect(await readAppPreferences(at)).toEqual({ ...DEFAULT_PREFERENCES, keepAwake: false, editor: 'cursor', sound: true })
+    await writeAppPreference(at, 'sound', 'Glass')
+    expect(await readAppPreferences(at)).toEqual({ ...DEFAULT_PREFERENCES, keepAwake: false, editor: 'cursor', sound: 'Glass' })
     expect(JSON.parse(readFileSync(join(at, 'desktop.json'), 'utf8'))).toMatchObject({ icon: 'ink', keepAwake: false })
   })
 
@@ -149,8 +150,29 @@ describe('what the person is told', () => {
     expect(tells('call', only('notifyStopped'))).toBe(false)
   })
 
+  it('is silent with no sound chosen, and plays the one chosen', () => {
+    expect(soundOf(DEFAULT_PREFERENCES)).toEqual({ silent: true })
+    expect(soundOf({ ...DEFAULT_PREFERENCES, sound: 'Glass' })).toEqual({ silent: false, sound: 'Glass' })
+    expect(holds('sound', '../../etc/passwd')).toBe(false)
+  })
+
   it('counts on the Dock only while its count is on', () => {
     expect(dockCount(3, DEFAULT_PREFERENCES)).toBe(3)
     expect(dockCount(3, { ...DEFAULT_PREFERENCES, badge: false })).toBe(0)
+  })
+})
+
+describe('the Mac’s alert sounds', () => {
+  it('are the sounds in its folder, by name, in order, and none off a Mac or where the folder is missing', async () => {
+    const folder = profile()
+    for (const name of ['Purr.aiff', 'Glass.aiff', 'notes.txt']) writeFileSync(join(folder, name), '')
+    expect(await alertSounds(folder, 'darwin')).toEqual(['Glass', 'Purr'])
+    expect(await alertSounds(folder, 'linux')).toEqual([])
+    expect(await alertSounds(join(folder, 'gone'), 'darwin')).toEqual([])
+  })
+
+  it('play only one of them', async () => {
+    await expect(playSound('Sosumi; rm -rf ~', profile())).rejects.toThrow('no sound')
+    await expect(playSound(42, profile())).rejects.toThrow('no sound')
   })
 })

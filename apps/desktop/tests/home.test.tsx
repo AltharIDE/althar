@@ -584,6 +584,9 @@ describe('settings', () => {
         .getAllByRole('radio')
         .map((radio) => radio.getAttribute('aria-checked')),
     ).toEqual(['true', 'false'])
+    // Each place as the screen would look; with nothing under way, a busy moment, said as such.
+    expect(within(panel).getByText('With nothing under way yet, here is how a busy moment would look.')).toBeTruthy()
+    expect(places.textContent).toContain('Publish the SDK to npm')
     await userEvent.click(within(places).getByRole('radio', { name: /In the menu bar/ }))
     expect(host.setEdge).toHaveBeenCalledWith('menu')
     expect(
@@ -692,13 +695,13 @@ describe('the app’s own preferences in settings', () => {
     expect(host.setPreference).toHaveBeenLastCalledWith('keepAwake', true)
     await userEvent.click(battery)
     expect(host.setPreference).toHaveBeenLastCalledWith('awakeOnBattery', true)
-    // The first editor found until one is chosen.
-    const editor = within(panel).getByRole('combobox', { name: 'Open files in' })
-    expect(editor.textContent).toContain('Cursor')
-    await userEvent.click(editor)
-    await userEvent.click(await screen.findByRole('option', { name: 'Zed' }))
+    // Each editor by its own icon; the first one found until one is chosen.
+    const editors = within(panel).getByRole('radiogroup', { name: 'Open files in' })
+    expect(within(editors).getByRole('radio', { name: 'Cursor' }).getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(editors.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,cursor'))
+    await userEvent.click(within(editors).getByRole('radio', { name: 'Zed' }))
     expect(host.setPreference).toHaveBeenLastCalledWith('editor', 'zed')
-    await waitFor(() => expect(within(panel).getByRole('combobox', { name: 'Open files in' }).textContent).toContain('Zed'))
+    await waitFor(() => expect(within(editors).getByRole('radio', { name: 'Zed' }).getAttribute('aria-checked')).toBe('true'))
   })
 
   it('turns every kind of notification off and on at once, and each on its own, with the count and a sound', async () => {
@@ -717,16 +720,21 @@ describe('the app’s own preferences in settings', () => {
     expect(host.setPreference).toHaveBeenLastCalledWith('notifyReady', false)
     await userEvent.click(within(panel).getByRole('switch', { name: 'Count them on the Dock icon' }))
     expect(host.setPreference).toHaveBeenLastCalledWith('badge', false)
-    await userEvent.click(within(panel).getByRole('switch', { name: 'Play a sound' }))
-    expect(host.setPreference).toHaveBeenLastCalledWith('sound', true)
+    // The sound is one of the Mac's, heard as it is chosen, and again by its play button.
+    await userEvent.click(within(panel).getByRole('combobox', { name: 'Sound' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Glass' }))
+    expect(host.setPreference).toHaveBeenLastCalledWith('sound', 'Glass')
+    expect(host.playSound).toHaveBeenCalledWith('Glass')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Play Glass' }))
+    expect(host.playSound).toHaveBeenCalledTimes(2)
     await userEvent.click(within(panel).getByRole('button', { name: 'Back to all settings' }))
-    // One kind still on is notifications on.
-    expect(within(panel).getByRole('button', { name: /^Notifications\s*With sound/ })).toBeTruthy()
+    // One kind still on is notifications on, saying its sound.
+    expect(within(panel).getByRole('button', { name: /^Notifications\s*Glass/ })).toBeTruthy()
   })
 
   it('shows what was kept, and goes back to it when a change can’t be kept', async () => {
     const host = fakeHost({
-      preferences: vi.fn(async () => ({ ...DEFAULT_PREFERENCES, keepAwake: false, sound: true })),
+      preferences: vi.fn(async () => ({ ...DEFAULT_PREFERENCES, keepAwake: false, sound: 'Purr' })),
       setPreference: vi.fn(async () => {
         throw new Error('disk full')
       }),
@@ -734,15 +742,17 @@ describe('the app’s own preferences in settings', () => {
     withServices(<Settings />, fakeClient().client, host)
     const panel = await screen.findByRole('dialog', { name: 'Settings' })
     await waitFor(() => expect(within(panel).getByRole('switch', { name: 'Keep awake' }).getAttribute('aria-checked')).toBe('false'))
-    expect(within(panel).getByRole('button', { name: /^Notifications\s*With sound/ })).toBeTruthy()
+    expect(within(panel).getByRole('button', { name: /^Notifications\s*Purr/ })).toBeTruthy()
     // Said where the switch was pressed, at a glance as well as opened out.
     await userEvent.click(within(panel).getByRole('switch', { name: 'Keep awake' }))
     expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
     await waitFor(() => expect(within(panel).getByRole('switch', { name: 'Keep awake' }).getAttribute('aria-checked')).toBe('false'))
     await openModule(/^Notifications/)
-    await userEvent.click(within(panel).getByRole('switch', { name: 'Play a sound' }))
+    await userEvent.click(within(panel).getByRole('switch', { name: 'A task is ready for you' }))
     expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
-    await waitFor(() => expect(within(panel).getByRole('switch', { name: 'Play a sound' }).getAttribute('aria-checked')).toBe('true'))
+    await waitFor(() =>
+      expect(within(panel).getByRole('switch', { name: 'A task is ready for you' }).getAttribute('aria-checked')).toBe('true'),
+    )
   })
 })
 

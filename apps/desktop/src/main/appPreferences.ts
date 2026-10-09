@@ -16,6 +16,12 @@ interface Kind<T> {
 
 const onOff = (starts: boolean): Kind<boolean> => ({ starts, holds: (value): value is boolean => typeof value === 'boolean' })
 
+/** One of the Mac's alert sounds by its name (Glass, Ping); null for none. */
+const sound: Kind<string | null> = {
+  starts: null,
+  holds: (value): value is string | null => value === null || (typeof value === 'string' && /^[A-Za-z][A-Za-z ]{0,39}$/.test(value)),
+}
+
 /** An editor by its id (the runtime's `ListEditors`); null for the first one found. */
 const editor: Kind<string | null> = {
   starts: null,
@@ -37,8 +43,8 @@ export const PREFERENCES = {
   notifyStopped: onOff(true),
   /** How many things wait, on the Dock icon. */
   badge: onOff(true),
-  /** A sound with each notification. */
-  sound: onOff(false),
+  /** The sound each notification plays, one of the Mac's alert sounds; none, silent. */
+  sound,
 } as const
 
 type Kinds = typeof PREFERENCES

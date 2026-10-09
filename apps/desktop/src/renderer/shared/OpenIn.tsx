@@ -32,6 +32,24 @@ export const useEditorList = (): Editors['editors'] => {
   return useQuery({ queryKey: ['editors'], queryFn: () => client.listEditors(), staleTime: Number.POSITIVE_INFINITY }).data ?? []
 }
 
+/** Each editor's icon by its id, read from the main process once for the window; an editor without one has none. */
+export const useEditorPictures = (): Readonly<Record<string, string>> => {
+  const { host } = useServices()
+  const editors = useEditorList()
+  const ids = editors.map((editor) => editor.id)
+  return (
+    useQuery({
+      queryKey: ['editor-pictures', ...ids],
+      queryFn: async () => {
+        const pictures = await Promise.all(ids.map(async (id) => [id, await host.editorPicture(id).catch(() => null)] as const))
+        return Object.fromEntries(pictures.filter((entry): entry is readonly [string, string] => entry[1] !== null))
+      },
+      enabled: ids.length > 0,
+      staleTime: Number.POSITIVE_INFINITY,
+    }).data ?? {}
+  )
+}
+
 /** The editors on this Mac, the one files open in, and opening a task's folder in one. */
 export const useEditors = (taskId: string): Editors => {
   const { client } = useServices()

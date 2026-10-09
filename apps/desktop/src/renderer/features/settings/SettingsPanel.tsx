@@ -22,7 +22,9 @@ import {
   IconButton,
   KeepAwake,
   type MarkGlance,
+  EdgePlaces,
   NotificationSettings,
+  NotificationSound,
   type NotifyChoices,
   OpenFilesIn,
   SettingList,
@@ -31,7 +33,9 @@ import {
 import { agentLineOf, brandOf } from '../../shared/agents'
 import { appIcons } from '../../shared/appIcons'
 import { edgePlaces } from '../../shared/edge'
-import { useEditorList } from '../../shared/OpenIn'
+import { useEditorList, useEditorPictures } from '../../shared/OpenIn'
+import { useSounds } from '../../shared/useSounds'
+import { type EdgeGlance, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { productBrand } from '../../shared/products'
 import { clock } from '../../shared/time'
@@ -82,8 +86,8 @@ export const text = {
   off: 'Off',
   mac: 'This Mac',
   notify: 'Notifications',
-  withSound: 'With sound',
   silent: 'Silent',
+  examples: 'With nothing under way yet, here is how a busy moment would look.',
   notifyNote: 'Only while Althar isn’t in front. Never for progress.',
   preferenceFailed: 'That couldn’t be kept. Try again.',
 }
@@ -94,10 +98,9 @@ const notifyChoicesOf = (preferences: PreferencesModel['preferences']): NotifyCh
   ready: preferences.notifyReady,
   stopped: preferences.notifyStopped,
   badge: preferences.badge,
-  sound: preferences.sound,
 })
 
-const NOTIFY_KEYS = { calls: 'notifyCalls', ready: 'notifyReady', stopped: 'notifyStopped', badge: 'badge', sound: 'sound' } as const
+const NOTIFY_KEYS = { calls: 'notifyCalls', ready: 'notifyReady', stopped: 'notifyStopped', badge: 'badge' } as const
 
 /** An agent at a glance: an account only the person can sign in again, one resting until its usage is back, or how many it has. */
 export const agentGlanceOf = (agent: AgentStatus, now: Date = new Date()): AgentGlance => {
@@ -144,6 +147,8 @@ export interface SettingsPanelProps {
   /** Driven by the home, which opens it by ⌘, as well. */
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** What waits and runs now, as the home has it, for the pictures of the edge of the screen. */
+  glance?: EdgeGlance
 }
 
 /** Settings from the home's bar, with what it shows read here. */
@@ -158,6 +163,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
       coAuthor={useCoAuthor()}
       preferences={usePreferences()}
       editors={useEditorList()}
+      pictures={useEditorPictures()}
+      sounds={useSounds()}
     />
   )
 }
@@ -171,6 +178,9 @@ export function SettingsView({
   coAuthor,
   preferences: kept,
   editors,
+  pictures,
+  sounds,
+  glance,
   open,
   onOpenChange,
 }: SettingsPanelProps & {
@@ -182,6 +192,9 @@ export function SettingsView({
   coAuthor: CoAuthorModel | null
   preferences: PreferencesModel
   editors: ReadonlyArray<{ readonly id: string; readonly name: string }>
+  /** Each editor's icon by its id, as they come. */
+  pictures: Readonly<Record<string, string>>
+  sounds: { readonly list: ReadonlyArray<string>; readonly play: (sound: string) => void }
 }) {
   const [showing, setShowing] = useState<Showing>('all')
   const [agentId, setAgentId] = useState<string | null>(null)
@@ -232,7 +245,7 @@ export function SettingsView({
       trigger={<IconButton icon="gear" label={text.title} kbd={text.kbd} size="small" />}
       open={open}
       onOpenChange={onOpenChange}
-      wide={showing === 'agents' || showing === 'connections'}
+      wide={showing === 'agents' || showing === 'connections' || showing === 'edge'}
       // A sign-in finishing in the browser or Terminal keeps it open when the person comes back to the window.
       holding={accounts.signingIn !== null || connections.signingIn !== null}
       onEscapeKeyDown={(event) => {
@@ -256,7 +269,7 @@ export function SettingsView({
             />
             <ControlToggle
               title={text.notify}
-              line={notifying ? (preferences.sound ? text.withSound : text.silent) : text.off}
+              line={notifying ? (preferences.sound ?? text.silent) : text.off}
               on={notifying}
               onChange={notifyAll}
               glyph={<Icon name="bell" size={16} />}
@@ -337,10 +350,16 @@ export function SettingsView({
       {showing === 'edge' && edge.place !== null && (
         <ControlDetail title={text.edge} onBack={all}>
           <ControlSheet>
-            <p className={s.quiet}>{text.edgeNote}</p>
-            <Choices
+            <p className={s.quiet}>{glance === undefined || glance.lines.length === 0 ? text.examples : text.edgeNote}</p>
+            <EdgePlaces
               label={text.edge}
-              options={edgePlaces.map((one) => ({ value: one.value, title: one.title, note: one.note }))}
+              options={edgePlaces.map((one) => ({
+                value: one.value,
+                title: one.title,
+                note: one.note,
+                picture:
+                  one.value === 'island' ? <IslandPicture glance={shownGlance(glance)} /> : <MenuPicture glance={shownGlance(glance)} />,
+              }))}
               value={edge.place}
               onChange={edge.choose}
             />
@@ -364,7 +383,11 @@ export function SettingsView({
               />
               {editors.length > 0 && (
                 <OpenFilesIn
-                  editors={editors.map((editor) => ({ value: editor.id, label: editor.name }))}
+                  editors={editors.map((editor) => ({
+                    value: editor.id,
+                    label: editor.name,
+                    ...(pictures[editor.id] === undefined ? {} : { picture: <img src={pictures[editor.id]} alt="" /> }),
+                  }))}
                   value={editors.find((editor) => editor.id === preferences.editor)?.id ?? editors[0]?.id ?? null}
                   onChange={(editor) => set('editor', editor)}
                 />
@@ -380,6 +403,14 @@ export function SettingsView({
             <p className={s.quiet}>{text.notifyNote}</p>
             <SettingList>
               <NotificationSettings value={notifyChoicesOf(preferences)} onChange={(key, on) => set(NOTIFY_KEYS[key], on)} />
+              {sounds.list.length > 0 && (
+                <NotificationSound
+                  sounds={sounds.list}
+                  value={preferences.sound}
+                  onChange={(sound) => set('sound', sound)}
+                  onPlay={sounds.play}
+                />
+              )}
             </SettingList>
             {failed}
           </ControlSheet>

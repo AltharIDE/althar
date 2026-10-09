@@ -7,12 +7,18 @@
   grid-template-columns: minmax(0, 1fr) auto;
   column-gap: 16px;
   align-items: start;
-  padding: 11px 0;
+  padding: 12px 0;
 }
-.row + .row {
+.withGlyph {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  column-gap: 12px;
+}
+.row + .row,
+.row + .block,
+.block + .row {
   border-top: 1px solid var(--line);
 }
-/* depends on the row above: set in under its words, without a rule between */
+/* a row that depends on the one above, set in under its words */
 .indent {
   padding-left: 18px;
 }
@@ -20,18 +26,25 @@
   padding-top: 0;
   border-top: 0;
 }
+.glyph {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 99px;
+  background: var(--t-1);
+  color: var(--on-ink);
+}
 .words {
   display: grid;
   gap: 2px;
   min-width: 0;
+  padding-top: 1px;
 }
 .title {
   font-size: 13px;
   font-weight: 600;
   color: var(--t-1);
-}
-.indent .title {
-  font-weight: 500;
 }
 .note {
   font-size: 12px;
@@ -42,4 +55,222 @@
   display: flex;
   align-items: center;
   min-height: 22px;
+}
+.under {
+  grid-column: 2 / -1;
+  margin-top: 10px;
+}
+.withGlyph .under {
+  grid-column: 2 / -1;
+}
+/* what only matters while the row above is on: a well under its words */
+.well {
+  padding: 0 12px;
+  border-radius: 10px;
+  background: var(--frost-well);
+  transition: opacity var(--base) var(--ease);
+}
+.well .row {
+  padding: 10px 0;
+}
+.wellOff {
+  opacity: 0.6;
+}
+
+/* ---- editors, each by its icon ---- */
+.block {
+  display: grid;
+  gap: 10px;
+  padding: 14px 0 6px;
+}
+.editors {
+  margin: 0 -6px;
+  gap: 2px;
+}
+.editors > * {
+  width: 74px;
+  padding: 8px 4px 7px;
+}
+.editors > * > span:first-child {
+  width: 44px;
+  height: 44px;
+}
+.editors img {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+}
+.letter {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--n-4);
+  color: var(--t-2);
+  font: 600 16px/1 var(--font-display);
+}
+
+/* ---- sound ---- */
+.sound {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ---- where Althar shows: a slice of the screen ---- */
+.scene {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  border-radius: 10px 10px 0 0;
+  background: radial-gradient(120% 110% at 50% 125%, color-mix(in oklab, var(--live) 70%, #ffd2b0) 0%, var(--live) 38%, #151a3d 82%);
+}
+.stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.menuBar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  background: rgba(14, 16, 36, 0.38);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+}
+.apple {
+  width: 12px;
+  height: 14px;
+  margin-right: 16px;
+  border-radius: 40% 40% 50% 50%;
+  background: rgba(255, 255, 255, 0.9);
+}
+.menuWords {
+  display: flex;
+  gap: 16px;
+  white-space: nowrap;
+}
+.menuWords b {
+  font-weight: 650;
+}
+.notch {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 180px;
+  height: 32px;
+  translate: -50% 0;
+  border-radius: 0 0 12px 12px;
+  background: #000;
+}
+.menuEnd {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.18);
+}
+/* the whole slice, so what is put at the top places itself in it, as the island does round the notch */
+.top {
+  position: absolute;
+  inset: 0;
+}
+.hung {
+  position: absolute;
+  top: 40px;
+  width: 380px;
+}
+.hungMiddle {
+  left: 50%;
+  translate: -50% 0;
+}
+.hungEnd {
+  right: 10px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--lift-pop);
+}
+
+/* ---- the places, each a picture to choose ---- */
+.places {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.place {
+  display: grid;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow var(--fast) var(--ease);
+}
+.place:hover {
+  box-shadow: 0 0 0 1px var(--line-3);
+}
+.place[aria-checked='true'],
+.place[aria-checked='true']:hover {
+  box-shadow: 0 0 0 2px var(--t-1);
+}
+.place:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+}
+.place .scene {
+  border-radius: 0;
+}
+.placeWords {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px 12px;
+}
+.placeTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.placeNote {
+  padding-left: 20px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.radio {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--t-3);
+}
+.place[aria-checked='true'] .radio {
+  box-shadow: inset 0 0 0 4px var(--t-1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .well,
+  .place {
+    transition: none;
+  }
 }

@@ -30,6 +30,7 @@ import {
   NavArrowRight,
   OpenNewWindow,
   Page,
+  Play,
   PageMinus,
   PagePlus,
   PageRight,
@@ -39,6 +40,7 @@ import {
   Prohibition,
   Quote,
   Search,
+  SoundHigh,
   ServerConnection,
   Settings,
   Square,
@@ -119,6 +121,10 @@ export const ICONS = {
   cup: CoffeeCup,
   /** Notifications. */
   bell: Bell,
+  /** A sound, as a notification plays it. */
+  sound: SoundHigh,
+  /** Plays something once, to hear it. */
+  play: Play,
   /** Waits for something else to merge first. */
   after: GitMerge,
   external: OpenNewWindow,

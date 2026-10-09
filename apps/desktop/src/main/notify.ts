@@ -10,5 +10,9 @@ import type { AppPreferences } from './appPreferences'
 export const tells = (kind: unknown, preferences: AppPreferences): boolean =>
   kind === 'ready' ? preferences.notifyReady : kind === 'stopped' ? preferences.notifyStopped : preferences.notifyCalls
 
+/** How a notification sounds: silent, or the alert sound the person chose. */
+export const soundOf = (preferences: AppPreferences): { readonly silent: boolean; readonly sound?: string } =>
+  preferences.sound === null ? { silent: true } : { silent: false, sound: preferences.sound }
+
 /** What the Dock counts: how many things wait, or nothing while its count is off. */
 export const dockCount = (waiting: number, preferences: AppPreferences): number => (preferences.badge ? waiting : 0)

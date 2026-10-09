@@ -49,6 +49,21 @@ const run = (args: ReadonlyArray<string>) =>
     execFile('open', [...args], (error) => resume(Effect.succeed(error === null)))
   })
 
+/** Where Finder is, for its picture. */
+const FINDER_APP = '/System/Library/CoreServices/Finder.app'
+
+/**
+ * Where an editor found here is, by its id, for the main process to draw its
+ * icon: the first of /Applications and ~/Applications that has it, and
+ * Finder's own place; null for one Althar doesn't know or can't find.
+ */
+export const bundleOf = (id: string, home = homedir(), exists: (path: string) => boolean = existsSync): string | null => {
+  if (id === FINDER.id) return FINDER_APP
+  const known = KNOWN.find((editor) => editor.id === id)
+  if (known === undefined) return null
+  return ['/Applications', join(home, 'Applications')].map((dir) => join(dir, known.app)).find((path) => exists(path)) ?? null
+}
+
 /** The editors found here, in the order they are offered, then Finder; none away from a Mac. */
 export const editorsHere = (
   home = homedir(),

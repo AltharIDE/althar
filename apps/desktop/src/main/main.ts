@@ -10,8 +10,11 @@ import { type AppPreferences, DEFAULT_PREFERENCES, isPreferenceKey } from './app
 import { keepingAwake } from './awake'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
-import { dockCount, tells } from './notify'
+import { dockCount, soundOf, tells } from './notify'
 import { readAppPreferences, writeAppPreference } from './preferences'
+import { alertSounds, playSound } from './sounds'
+// Where each editor is, from the runtime's list of them, so its icon can be drawn here.
+import { bundleOf } from '../runtime/editors'
 
 import {
   app,
@@ -158,7 +161,7 @@ const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
     return
   if (!tells(event.kind, preferences) || BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) return
   const { threadId } = event
-  const notification = new Notification({ title: event.title, body: event.body, silent: !preferences.sound })
+  const notification = new Notification({ title: event.title, body: event.body, ...soundOf(preferences) })
   shown.add(notification)
   notification.on('click', () => {
     shown.delete(notification)
@@ -362,6 +365,20 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   app.setBadgeCount(dockCount(waiting, preferences))
   return preferences
 })
+
+// An editor's icon, as Finder draws it, by its id; null for one not found. Only editors Althar knows are drawn.
+ipcMain.handle('althar:editor-picture', async (_event, id: unknown) => {
+  const path = typeof id === 'string' ? bundleOf(id) : null
+  if (path === null) return null
+  const picture = await nativeImage
+    .createThumbnailFromPath(path, { width: 128, height: 128 })
+    .catch(() => app.getFileIcon(path, { size: 'normal' }))
+  return picture.isEmpty() ? null : picture.toDataURL()
+})
+
+// The Mac's alert sounds a notification can play, and one played once, as Settings offers them.
+ipcMain.handle('althar:sounds', () => alertSounds())
+ipcMain.handle('althar:play-sound', (_event, name: unknown) => playSound(name))
 
 // Where Althar shows while the person is in another app, and whether this Mac has a notch to choose the island by.
 ipcMain.handle('althar:edge', () => edge?.state() ?? null)
