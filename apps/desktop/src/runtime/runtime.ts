@@ -100,6 +100,8 @@ const options = {
   database: databaseIn(profile),
   worktreeRoot: required('ALTHAR_WORKTREES'),
   accountsRoot: join(profile, 'accounts'),
+  // Agents the person asked Althar to download, kept in the profile, never on their PATH.
+  agentsRoot: join(profile, 'agents'),
   openTerminal: openInTerminal,
   openUrl: openInBrowser,
   editors: { list: () => editorsHere(), open: openInEditor },

@@ -4,6 +4,7 @@ import type { AgentStatus, ConnectionList } from '@althar/contracts'
 import {
   type AgentGlance,
   type AgentTab,
+  AgentInstall,
   AgentTabs,
   Choices,
   CoAuthor,
@@ -71,6 +72,8 @@ export const text = {
     `${agents === 1 ? '1 agent' : `${agents} agents`} · ${accounts === 1 ? '1 account' : `${accounts} accounts`}`,
   accounts: (n: number) => (n === 1 ? '1 account' : `${n} accounts`),
   signedOut: (account: string) => `${account} signed out`,
+  notHere: 'Not on this Mac',
+  downloading: 'Downloading…',
   out: (account: string, back: string) => `${account} out until ${back}`,
   connecting: 'Looking at the agents on this Mac…',
   connected: (n: number) => `${n} connected`,
@@ -106,6 +109,8 @@ const NOTIFY_KEYS = { calls: 'notifyCalls', ready: 'notifyReady', stopped: 'noti
 export const agentGlanceOf = (agent: AgentStatus, now: Date = new Date()): AgentGlance => {
   const brand = brandOf(agent.id)
   const base = { id: agent.id, name: agent.name, ...(brand === undefined ? {} : { brand }) }
+  if (agent.download?.installing === true) return { ...base, line: text.downloading, tone: 'quiet' }
+  if (!agent.installed) return { ...base, line: text.notHere, tone: 'quiet' }
   const signedOut = agent.accounts.find((account) => account.signIn === 'signed_out')
   if (signedOut !== undefined) return { ...base, line: text.signedOut(signedOut.name), tone: 'yours' }
   const [resting] = agent.accounts.flatMap((account) => (account.outUntil === null ? [] : [{ name: account.name, back: account.outUntil }]))
@@ -325,7 +330,23 @@ export function SettingsView({
               onValueChange={setAgentId}
               aside={<ModelsView key={chosen.id} agent={chosen} />}
             >
-              <AgentAccounts agent={chosen} start={start} signIn={accounts} />
+              {chosen.installed && chosen.download?.installing !== true ? (
+                <AgentAccounts agent={chosen} start={start} signIn={accounts} />
+              ) : (
+                <AgentInstall
+                  name={chosen.name}
+                  {...(brandOf(chosen.id) === undefined ? {} : { brand: brandOf(chosen.id) })}
+                  {...(chosen.download === null ? {} : { size: chosen.download.size })}
+                  state={
+                    chosen.download?.installing === true
+                      ? { kind: 'installing' }
+                      : start.installFailed[chosen.id] === undefined
+                        ? { kind: 'idle' }
+                        : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
+                  }
+                  onInstall={() => void start.install(chosen.id)}
+                />
+              )}
             </AgentTabs>
           )}
         </ControlDetail>

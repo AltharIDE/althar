@@ -482,7 +482,7 @@ describe('the agents', () => {
         GIT_CONFIG_VALUE_0: '',
         GIT_TERMINAL_PROMPT: '0',
       })
-    }).pipe(Effect.provide(Agents.registry)),
+    }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
   )
 
   it('leave git with no credential helper to ask, whatever the person set', () => {

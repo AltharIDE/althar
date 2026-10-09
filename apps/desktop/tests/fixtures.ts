@@ -63,6 +63,9 @@ export const agents: ReadonlyArray<AgentStatus> = [
     version: '2.1.263',
     ways: ['browser'],
     accounts: [usual('acc_claude', 'signed_in')],
+    installed: true,
+    kept: false,
+    download: null,
   },
   {
     id: 'codex',
@@ -72,6 +75,9 @@ export const agents: ReadonlyArray<AgentStatus> = [
     version: '0.159.3',
     ways: ['browser', 'device'],
     accounts: [usual('acc_codex', 'unknown')],
+    installed: true,
+    kept: false,
+    download: null,
   },
   {
     id: 'opencode',
@@ -81,8 +87,16 @@ export const agents: ReadonlyArray<AgentStatus> = [
     version: null,
     ways: [],
     accounts: [usual('acc_opencode', 'signed_out')],
+    installed: true,
+    kept: false,
+    download: { size: '45 MB', installing: false },
   },
 ]
+
+/** OpenCode not on this Mac, which Althar can download. */
+export const withoutOpenCode: ReadonlyArray<AgentStatus> = agents.map((agent) =>
+  agent.id === 'opencode' ? { ...agent, installed: false, signIn: 'unknown', accounts: [usual('acc_opencode', 'unknown')] } : agent,
+)
 
 export const status: Status = { apiVersion: 1, appVersion: '0.0.0', agents }
 
@@ -489,6 +503,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'finder', name: 'Finder' },
     ]),
     openInEditor: vi.fn(async () => true),
+    installAgent: vi.fn(async () => {}),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
       file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
       lines: [

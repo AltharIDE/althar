@@ -110,6 +110,14 @@ export interface AgentDefinition {
   /** What prints its own version, for Settings; without it, none is shown. */
   readonly version?: (node: string) => LaunchSpec
   /**
+   * Where Althar can download it, for a person who doesn't have it: only an
+   * agent whose license lets anyone fetch and run its releases. Its own
+   * releases on GitHub, the file for each platform and processor, the
+   * command its specs run, which the copy Althar keeps stands in for where
+   * the person has none, and about how big a download it is.
+   */
+  readonly install?: AgentInstall
+  /**
    * What goes in `_meta` on `session/new`, to keep the agent asking whatever
    * its settings say (ADR-007): for a lead, or for a role that only reads
    * (the coordinator, a reviewer), whose writes are refused outright.
@@ -117,6 +125,17 @@ export interface AgentDefinition {
   readonly sessionMeta?: (role?: 'lead' | 'reader') => Readonly<Record<string, unknown>>
   /** What it does differently, for the support matrix. */
   readonly knownGaps: ReadonlyArray<string>
+}
+
+export interface AgentInstall {
+  /** The command its launch, sign-in and version run, as on the person's PATH. */
+  readonly command: string
+  /** Its GitHub repository, owner/name: its latest release is what is downloaded. */
+  readonly repository: string
+  /** The release's file for each `platform-arch`, as Node names them: a zip or a gzipped tar with the command in it. */
+  readonly assets: Readonly<Record<string, string>>
+  /** About how big the download is, as the person reads it. */
+  readonly size: string
 }
 
 /** Shares these names, where the usual folder has them. */
@@ -357,6 +376,18 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     },
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
     version: () => ({ command: 'opencode', args: ['--version'] }),
+    /* MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256. Seen 9 October 2026, v1.18.35. */
+    install: {
+      command: 'opencode',
+      repository: 'anomalyco/opencode',
+      assets: {
+        'darwin-arm64': 'opencode-darwin-arm64.zip',
+        'darwin-x64': 'opencode-darwin-x64.zip',
+        'linux-arm64': 'opencode-linux-arm64.tar.gz',
+        'linux-x64': 'opencode-linux-x64.tar.gz',
+      },
+      size: '45 MB',
+    },
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { once: 'once' } },
     knownGaps: [
       'Provider rate limits come back as errors; API keys have no plan windows.',

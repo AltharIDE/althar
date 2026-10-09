@@ -166,6 +166,7 @@ describe('the API', () => {
               MergeHere: () => Effect.die('unused'),
               PushHere: () => Effect.die('unused'),
               ListEditors: () => Effect.die('unused'),
+              InstallAgent: () => Effect.die('unused'),
               OpenInEditor: () => Effect.die('unused'),
               SetEffort: () => Effect.die('unused'),
               GetModels: () => Effect.die('unused'),

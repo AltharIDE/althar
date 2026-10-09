@@ -35,9 +35,27 @@ export const text = {
 }
 
 /** An agent's sign-in, as a row of the kit's list of agents, with what goes under it: its accounts. */
-export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']): RuntimeEntry => {
+export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail'], failed?: string): RuntimeEntry => {
   const brand = brandOf(agent.id)
   const base = { id: agent.id, name: agent.name, ...(brand === undefined ? {} : { brand }), ...(detail === undefined ? {} : { detail }) }
+  // Not on this Mac: downloading, or the way to have it, where Althar can fetch it.
+  if (agent.download?.installing === true)
+    return {
+      id: base.id,
+      name: base.name,
+      ...(brand === undefined ? {} : { brand }),
+      state: RuntimeState.Installing,
+      download: agent.download.size,
+    }
+  if (!agent.installed)
+    return {
+      id: base.id,
+      name: base.name,
+      ...(brand === undefined ? {} : { brand }),
+      state: RuntimeState.Missing,
+      ...(agent.download === null ? {} : { download: agent.download.size }),
+      ...(failed === undefined ? {} : { failed }),
+    }
   switch (agent.signIn) {
     case 'signed_in':
       return { ...base, state: RuntimeState.Ready }
@@ -50,7 +68,13 @@ export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']
 
 /** The agents on this Mac, each with its accounts to add, sign in, rename, order and remove. */
 export const runtimesOf = (model: StartModel, signIn: AccountSignInModel): ReadonlyArray<RuntimeEntry> =>
-  model.status?.agents.map((agent) => runtimeEntry(agent, <AgentAccounts agent={agent} start={model} signIn={signIn} />)) ?? []
+  model.status?.agents.map((agent) =>
+    runtimeEntry(
+      agent,
+      agent.installed ? <AgentAccounts agent={agent} start={model} signIn={signIn} /> : undefined,
+      model.installFailed[agent.id],
+    ),
+  ) ?? []
 
 /** What went wrong, with a way past an account whose sign-out didn't work. */
 export function StartError({ model }: { model: StartModel }) {
@@ -153,7 +177,7 @@ export function StartView({
       <div className={s.window} {...drop}>
         <TitleBar lights="none">{null}</TitleBar>
         <div className={`${s.scroll} ${s.first}`}>
-          <Start runtimes={runtimesOf(model, accounts)} onCreate={open} text={text.first} />
+          <Start runtimes={runtimesOf(model, accounts)} onCreate={open} onInstall={(id) => void model.install(id)} text={text.first} />
           <StartError model={model} />
         </div>
       </div>

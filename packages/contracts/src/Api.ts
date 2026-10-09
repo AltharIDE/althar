@@ -65,6 +65,12 @@ export const AgentStatus = Schema.Struct({
   ways: Schema.Array(Schema.Literals(['browser', 'device'])),
   /** Its accounts, in the person's order. */
   accounts: Schema.Array(AccountStatus),
+  /** Its command is on this device, the person's or the copy Althar downloaded; an agent that ships with Althar always is. */
+  installed: Schema.Boolean,
+  /** It runs from the copy Althar downloaded, as the person has none of their own. */
+  kept: Schema.Boolean,
+  /** Althar can download it for the person, about this big; null where it can't. `installing` while it does. */
+  download: Schema.NullOr(Schema.Struct({ size: Schema.String, installing: Schema.Boolean })),
 })
 export type AgentStatus = typeof AgentStatus.Type
 
@@ -1303,6 +1309,8 @@ export const Api = RpcGroup.make(
   command('PushHere', { taskId: Schema.String }, Schema.Void),
   /** The editors on this device a task's files open in, by the name people know them. */
   call('ListEditors', {}, Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
+  /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */
+  command('InstallAgent', { agentId: Schema.String }, Schema.Void),
   /** Opens a task's folder in an editor, at one of its files and a line where given; whether it could. The path is the task's, as its changes list it. */
   command(
     'OpenInEditor',

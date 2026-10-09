@@ -24,6 +24,7 @@ import {
   home,
   project,
   usual,
+  withoutOpenCode,
 } from './fixtures'
 import { withServices } from './render'
 
@@ -806,5 +807,20 @@ describe('a change that can’t be kept among several', () => {
     await userEvent.click(await within(panel).findByRole('switch', { name: 'Notifications' }))
     expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
     await waitFor(() => expect(vi.mocked(host.preferences).mock.calls.length).toBeGreaterThan(1))
+  })
+})
+
+describe('an agent that isn’t on this Mac, in settings', () => {
+  it('says so at a glance, and in its tab offers to download it', async () => {
+    const { client } = fakeClient({ status: vi.fn(async () => ({ apiVersion: 1, appVersion: '0.0.0', agents: withoutOpenCode })) })
+    withServices(<Settings />, client, fakeHost())
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    expect(await within(panel).findByText('Not on this Mac')).toBeTruthy()
+    await openModule('Agents')
+    await userEvent.click(within(panel).getByRole('tab', { name: /OpenCode/ }))
+    const install = within(panel).getByRole('region', { name: 'OpenCode isn’t on this Mac' })
+    expect(within(install).getByText(/from GitHub, about 45 MB, check it against the release/)).toBeTruthy()
+    await userEvent.click(within(install).getByRole('button', { name: 'Download OpenCode' }))
+    expect(client.installAgent).toHaveBeenCalledWith('opencode')
   })
 })
