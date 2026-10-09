@@ -1,20 +1,23 @@
 import { useEffect, useRef } from 'react'
 
 import { drawLandscape, drawLight, type Ground, lightOf } from './engrave'
-import s from './Engraving.module.css'
-import { STATEMENT } from './Footers'
+import s from './Footer.module.css'
 import { fitCanvas, Links, Signature, still, useOnScreen, YEAR } from './parts'
 
 /*
- * The footer as a print: the words in cobalt ink over a landscape engraved
- * in the same ink, rising from the page's foot. Far hills, a wooded slope,
- * a headland in the water with an altar on it, and on the altar Althar's
- * light, standing in fine broken lines that drift up and breathe, its
- * streak shimmering in the water. The landscape is drawn once for the
- * width; only the light moves, and only while it is seen.
+ * The page's last word, as a print: the words in cobalt ink over a
+ * landscape engraved in the same ink, rising from the page's foot. Far
+ * hills over a lake, a wooded slope at the left, a hill at the right, a
+ * headland with an altar on it, and on the altar Althar's light, rising
+ * from its table in fine lines that break up as they climb, drift and
+ * breathe, its streak shimmering in the water. Nothing in it reaches into
+ * the words. The landscape is drawn once for the size; only the light
+ * moves, and only while it is seen.
  */
 
-export function Engraving() {
+const STATEMENT = ['The most beautiful', 'IDE ever built', 'at your fingertips'] as const
+
+export function Footer() {
   const box = useRef<HTMLElement>(null)
   const land = useRef<HTMLCanvasElement>(null)
   const glow = useRef<HTMLCanvasElement>(null)
@@ -27,10 +30,17 @@ export function Engraving() {
     const footer = box.current
     if (!el || !footer) return
     return fitCanvas(el, (ctx, w, h) => {
-      // The landscape keeps below the words.
-      const top = footer.getBoundingClientRect().top
-      const ends = [...(words.current?.children ?? [])].map((c) => c.getBoundingClientRect().bottom - top)
-      ground.current = drawLandscape(ctx, w, h, Math.max(0, ...ends) + 36, getComputedStyle(footer).backgroundColor)
+      // The landscape keeps below the words, and nothing in it reaches into them.
+      const box = footer.getBoundingClientRect()
+      const clear = [...(words.current?.querySelectorAll('a, h2, p, li') ?? [])].flatMap((el) => {
+        // The words' own ink, line by line, not the boxes they sit in.
+        const range = document.createRange()
+        range.selectNodeContents(el)
+        return [...range.getClientRects()]
+          .filter((r) => r.width > 0)
+          .map((r) => ({ left: r.left - box.left, right: r.right - box.left, bottom: r.bottom - box.top }))
+      })
+      ground.current = drawLandscape(ctx, w, h, clear, getComputedStyle(footer).backgroundColor)
     })
   }, [])
 
@@ -60,7 +70,7 @@ export function Engraving() {
   }, [on])
 
   return (
-    <footer ref={box} className={s.engraving}>
+    <footer ref={box} className={s.footer}>
       <canvas ref={land} className={s.canvas} aria-hidden="true" />
       <canvas ref={glow} className={s.canvas} aria-hidden="true" />
       <div ref={words} className={s.words}>

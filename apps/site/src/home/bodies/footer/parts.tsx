@@ -86,7 +86,7 @@ export function seeded(seed: number) {
   }
 }
 
-/** Smooth value noise in one and two dimensions, on a seeded lattice. */
+/** Smooth value noise on a seeded lattice, plain and layered. */
 export function noise(seed: number) {
   const r = seeded(seed)
   const size = 256
@@ -107,7 +107,6 @@ export function noise(seed: number) {
     const b = at(xi, yi + 1) + (at(xi + 1, yi + 1) - at(xi, yi + 1)) * u
     return a + (b - a) * v
   }
-  const n1 = (x: number) => n2(x, 0.5)
   /** Layered: big shapes, then smaller ones over them. */
   const fbm = (x: number, y = 0.5, octaves = 4) => {
     let sum = 0
@@ -120,7 +119,7 @@ export function noise(seed: number) {
     }
     return sum / (1 - 0.5 ** octaves)
   }
-  return { n1, n2, fbm }
+  return { n2, fbm }
 }
 
 /** A canvas at the screen's density, sized to its box; calls `draw` with the context in CSS px, again on resize. */

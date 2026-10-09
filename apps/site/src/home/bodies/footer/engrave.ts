@@ -3,14 +3,16 @@ import { LOGO_SECTION } from '@althar/ui'
 import { noise, seeded } from './parts'
 
 /*
- * A landscape engraved in cobalt ink, drawn once for the width it is shown
- * at: far hills, a wooded slope at the left with rocks at its foot, a
- * headland in the water with an altar on it, cypresses, and the water
- * below in broken lines. Everything is small marks, as a print's: crowns of
- * trees in little cups, denser on the side away from the light, rocks in
- * outline, cypresses solid. Where the altar's light stands, the marks thin,
- * so the hills behind it read lit. The light itself is drawn apart, on
- * every frame (drawLight), over this.
+ * A landscape engraved in cobalt ink, drawn once for the size it is shown
+ * at: far hills over a lake, a wooded slope at the left with boulders at
+ * its foot, a hill framing the right, and a headland in the water with an
+ * altar on it, cypresses among the trees. Everything is small marks, as a
+ * print's: crowns of trees as scalloped paper, hatched and crossed on the
+ * side away from the light with the dark among them showing, boulders in
+ * outline, cypresses solid, the water in broken lines. Where the altar's
+ * light stands the marks thin, so the hills behind it read lit, and
+ * nothing tall reaches into the words. The light itself is drawn apart,
+ * on every frame (drawLight), over this.
  */
 
 export const INK = '#1f35c8'
@@ -29,7 +31,20 @@ export interface Ground {
   ax: number
   ground: number
   altarTop: number
+  /** Where the words are: nothing tall may reach into these. */
+  clear: ReadonlyArray<Clear>
 }
+
+/** A box of words, in the canvas's px: its left and right, and its foot. */
+export interface Clear {
+  left: number
+  right: number
+  bottom: number
+}
+
+/** How high something standing between `from` and `to` may reach, to stay under the words: its top's y, or -Infinity where nothing is over it. */
+const ceiling = (clear: ReadonlyArray<Clear>, from: number, to: number, margin: number) =>
+  clear.reduce((y, c) => (to > c.left - margin && from < c.right + margin ? Math.max(y, c.bottom + margin) : y), -Infinity)
 
 const clamp = (x: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, x))
 const smooth = (a: number, b: number, x: number) => {
@@ -38,8 +53,21 @@ const smooth = (a: number, b: number, x: number) => {
 }
 const gauss = (x: number, at: number, wide: number) => Math.exp(-(((x - at) / wide) ** 2))
 
+/** The altar, bottom to top, as width and height at the desktop's size: two steps, the block, a cornice, the table. */
+const ALTAR: ReadonlyArray<readonly [number, number]> = [
+  [104, 9],
+  [88, 8],
+  [62, 38],
+  [78, 8],
+  [70, 5],
+]
+const ALTAR_TALL = ALTAR.reduce((sum, [, bh]) => sum + bh, 0)
+/** How wide the table on top is, where the light stands. */
+const TABLE = ALTAR[ALTAR.length - 1]![0]
+
 /** Where everything stands, for a canvas `w` by `h` whose words end at `sky`: the landscape keeps below them. */
-export function groundOf(w: number, h: number, sky: number): Ground {
+export function groundOf(w: number, h: number, clear: ReadonlyArray<Clear>): Ground {
+  const sky = Math.max(0, ...clear.map((c) => c.bottom)) + 36
   const k = clamp(w / 1440, 0.62, 1.15)
   // On a phone the words span the width, so the tallest cypress must stay under them too.
   const below = Math.min(h - 220, Math.max(sky, h * 0.36))
@@ -48,8 +76,8 @@ export function groundOf(w: number, h: number, sky: number): Ground {
   const water = top + tall * 0.8
   const ax = w * (w < 700 ? 0.66 : 0.64)
   const ground = top + tall * 0.55
-  const altarTop = ground - 69 * k
-  return { w, h, k, top, tall, water, ax, ground, altarTop }
+  const altarTop = ground + 2 - ALTAR_TALL * k
+  return { w, h, k, top, tall, water, ax, ground, altarTop, clear }
 }
 
 interface Crown {
@@ -58,8 +86,8 @@ interface Crown {
   r: number
 }
 
-export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: number, sky: number, paper: string): Ground {
-  const g = groundOf(w, h, sky)
+export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: number, clear: ReadonlyArray<Clear>, paper: string): Ground {
+  const g = groundOf(w, h, clear)
   const { k, top, tall, water, ax, ground } = g
   const rand = seeded(7)
   const { fbm } = noise(11)
@@ -86,7 +114,7 @@ export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: numbe
     shore + 8 - (shore - Y(0.04 + 0.06 * fbm((x / w) * 4 + 2.2))) * Math.pow(smooth(w * 0.7, w * 1.02, x), 0.8)
   const slopeEnd = w * (w < 700 ? 0.42 : 0.36)
   const near = (x: number) =>
-    Y(-0.06 + 0.05 * fbm((x / w) * 5 + 1.3)) + (water - Y(-0.06)) * Math.pow(smooth(-slopeEnd * 0.1, slopeEnd, x), 1.15)
+    Y(0.02 + 0.05 * fbm((x / w) * 5 + 1.3)) + (water - Y(0.02)) * Math.pow(smooth(-slopeEnd * 0.1, slopeEnd, x), 1.15)
   // The headland: a knoll in the water, flat on top where the altar stands.
   const capeHalf = Math.max(w * 0.11, 120 * k)
   const flat = Math.max(w * 0.026, 44 * k)
@@ -99,25 +127,26 @@ export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: numbe
   }
   const inCape = (x: number) => Math.abs(x - ax) < capeHalf
 
-  const outline = (ridge: (x: number) => number, from: number, to: number, floor: number) => {
+  const outline = (ridge: (x: number) => number, from: number, to: number, floor: number, inset = 0) => {
     ctx.beginPath()
     ctx.moveTo(from, floor)
-    for (let x = from; x <= to; x += 4) ctx.lineTo(x, ridge(x))
-    ctx.lineTo(to, ridge(to))
+    for (let x = from; x <= to; x += 4) ctx.lineTo(x, Math.min(floor, ridge(x) + inset))
+    ctx.lineTo(to, Math.min(floor, ridge(to) + inset))
     ctx.lineTo(to, floor)
     ctx.closePath()
   }
   /**
    * Paper under `ridge` down to `floor`, so what is behind stops here, then
    * hatched dark: what shows of it between the crowns is the shade among
-   * the trees. Thinner where the light falls.
+   * the trees. Thinner where the light falls. It starts a little under the
+   * ridge, so the skyline is the crowns' and not a line.
    */
-  const layer = (ridge: (x: number) => number, from: number, to: number, floor: number, dark: number, gap: number) => {
-    outline(ridge, from, to, floor)
+  const layer = (ridge: (x: number) => number, from: number, to: number, floor: number, dark: number, gap: number, inset: number) => {
+    outline(ridge, from, to, floor, inset)
     ctx.fillStyle = paper
     ctx.fill()
     ctx.save()
-    outline(ridge, from, to, floor)
+    outline(ridge, from, to, floor + inset * 0.2, inset * 1.4)
     ctx.clip()
     const across = ctx.createLinearGradient(0, 0, w, 0)
     for (let i = 0; i <= 20; i++) {
@@ -136,19 +165,25 @@ export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: numbe
     ctx.restore()
   }
 
-  /** Crowns of trees over the area from `ridge` down to `floor(x)`, on a jittered grid. */
+  /** Crowns of trees over the area from `ridge` down to `floor(x)`: in staggered rows, so no columns show; a little larger as they come nearer. */
   const crownsUnder = (ridge: (x: number) => number, floor: (x: number) => number, r: number, from = 0, to = w): Crown[] => {
     const out: Crown[] = []
-    const step = r * 1.32
-    for (let gx = from - step; gx < to + step; gx += step) {
-      const x0 = gx + (rand() - 0.5) * step * 0.8
-      const t = ridge(x0)
-      const bottom = floor(x0)
-      for (let gy = t - r * 0.2; gy < bottom + r * 0.4; gy += step * 0.8) {
-        const x = x0 + (rand() - 0.5) * step * 0.5
-        const y = gy + (rand() - 0.5) * step * 0.4
+    const step = r * 1.3
+    let high = Infinity
+    let low = -Infinity
+    for (let x = from; x <= to; x += 6) {
+      high = Math.min(high, ridge(x))
+      low = Math.max(low, floor(x))
+    }
+    let row = 0
+    for (let gy = high; gy < low + r * 0.5; gy += step * 0.74, row++) {
+      const shift = (row % 2) * step * 0.5
+      for (let gx = from - step + shift; gx < to + step; gx += step) {
+        const x = gx + (rand() - 0.5) * step * 0.7
+        const y = gy + (rand() - 0.5) * step * 0.45
         if (y < ridge(x) + r * 0.3 || y > floor(x) + r * 0.5) continue
-        out.push({ x, y, r: r * (0.7 + 0.5 * rand()) })
+        const nearer = clamp((y - high) / Math.max(1, low - high))
+        out.push({ x, y, r: r * (0.68 + 0.5 * rand()) * (0.88 + 0.24 * nearer) })
       }
     }
     return out.sort((a, b) => a.y - b.y)
@@ -241,47 +276,60 @@ export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: numbe
   const grove = (crowns: Crown[], alpha: number, trees: Array<{ x: number; base: number; tall: number; alpha: number }>) => {
     const things: Thing[] = [
       ...crowns.map((c) => ({ y: c.y, draw: () => crown(c, alpha) })),
-      ...trees.map((t) => ({ y: t.base - 4, draw: () => cypress(t.x, t.base, t.tall, t.alpha) })),
+      // Nothing behind the altar stands up in its light.
+      ...trees
+        .filter((t) => t.base > ground || Math.abs(t.x - ax) > column * 1.6)
+        .map((t) => ({ y: t.base - 4, draw: () => cypress(t.x, t.base, t.tall, t.alpha) })),
     ]
     things.sort((a, b) => a.y - b.y)
     for (const t of things) t.draw()
   }
 
-  /** A cypress: a dark flame of a tree, slender, flecked with paper on the side toward the light. */
-  const cypress = (x: number, base: number, tallness: number, alpha: number) => {
-    const wide = tallness / 6
-    const prof = (t: number) => Math.pow(1 - t, 0.9) * (0.78 + 0.22 * Math.sin(Math.PI * Math.min(1, t * 2.6)))
+  /** A cypress: a dark flame of a tree, slender, round at the tip, its foliage in short strokes of paper on the side toward the light, bushes at its foot. */
+  const cypress = (x: number, base: number, high: number, alpha: number) => {
+    // Under the words, it stops short of them.
+    const roof = ceiling(g.clear, x - high / 12, x + high / 12, 14)
+    const tallness = Math.max(high * 0.4, Math.min(high, base - roof))
+    const wide = high / 6
+    const prof = (t: number) => Math.pow(1 - Math.pow(t, 1.15), 0.62) * (0.8 + 0.2 * Math.sin(Math.PI * Math.min(1, t * 2.4)))
+    const side = (sign: number, seed: number) => {
+      const steps = 34
+      for (let i = 0; i <= steps; i++) {
+        const t = sign < 0 ? i / steps : 1 - i / steps
+        const half = (wide / 2) * prof(t)
+        const wob = (fbm(x * 0.013 + t * 7, seed) - 0.5) * half * 0.5
+        ctx.lineTo(x + sign * half + wob, base - tallness * t)
+      }
+    }
     ctx.beginPath()
-    const steps = 30
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps
-      const wob = (fbm(x * 0.01 + t * 6, 2.3) - 0.5) * wide * 0.3
-      ctx.lineTo(x - (wide / 2) * prof(t) + wob, base - tallness * t)
-    }
-    for (let i = steps; i >= 0; i--) {
-      const t = i / steps
-      const wob = (fbm(x * 0.01 + t * 6, 5.1) - 0.5) * wide * 0.3
-      ctx.lineTo(x + (wide / 2) * prof(t) + wob, base - tallness * t)
-    }
+    side(-1, 2.3)
+    side(1, 5.1)
     ctx.closePath()
     ctx.fillStyle = ink(alpha)
     ctx.fill()
+    // Foliage: little scales of paper, overlapping upward, more toward the light.
     ctx.beginPath()
-    const count = Math.round(tallness * wide * 0.07)
+    const count = Math.round(tallness * wide * 0.06)
     for (let i = 0; i < count; i++) {
-      const t = rand() * 0.94
-      const half = (wide / 2) * prof(t) * 0.85
+      const t = 0.04 + rand() * 0.86
+      const half = (wide / 2) * prof(t) * 0.78
       const u = rand() * 2 - 1
-      if (rand() > 0.08 + 0.8 * (1 - (u + 1) / 2) ** 1.5) continue
+      if (rand() > 0.05 + 0.6 * ((1 - u) / 2) ** 1.8) continue
       const px = x + u * half
       const py = base - tallness * t
-      const m = 0.7 + rand() * 1.1
-      ctx.moveTo(px + m, py)
-      ctx.arc(px, py, m, 0, Math.PI * 0.9)
+      const m = (0.8 + rand() * 0.9) * Math.min(1, 0.5 + wide / 28)
+      ctx.moveTo(px - m, py)
+      ctx.arc(px, py, m, Math.PI, Math.PI * 2)
     }
     ctx.strokeStyle = paper
-    ctx.lineWidth = 0.7
+    ctx.lineWidth = 0.6
+    ctx.globalAlpha = 0.8
     ctx.stroke()
+    ctx.globalAlpha = 1
+    // Bushes at its foot, so it grows from the ground and doesn't stand on it.
+    const br = Math.max(4, wide * 0.55)
+    crown({ x: x - wide * 0.45, y: base - br * 0.2, r: br * 0.9 }, alpha)
+    crown({ x: x + wide * 0.5, y: base - br * 0.1, r: br }, alpha)
   }
 
   /** Boulders: paper in outline, a crack, hatched on the shaded side; the dark between them is what lies under. */
@@ -291,7 +339,8 @@ export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: numbe
       for (let gx = from + (rand() - 0.5) * r; gx < to; gx += r * 1.35) {
         const x = gx + (rand() - 0.5) * r * 0.5
         const y = gy + (rand() - 0.5) * r * 0.3
-        if (inside(x, y)) list.push({ x, y, r: r * (0.6 + 0.6 * rand()) })
+        if (inside(x, y))
+          list.push({ x, y, r: r * (0.45 + 0.75 * rand() ** 1.5) * (0.85 + 0.3 * clamp((y - top0) / Math.max(1, bottom - top0))) })
       }
     }
     list.sort((a, b) => a.y - b.y)
@@ -329,7 +378,7 @@ export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: numbe
   }
 
   // Far hills: small, pale crowns, a few far cypresses, standing on the far shore.
-  layer(far, 0, w, horizon, 0.28, 3.2)
+  layer(far, 0, w, horizon, 0.28, 3.2, 5.5 * k * 0.7)
   grove(
     crownsUnder(far, () => horizon - 4 * k, 5.5 * k),
     0.4,
@@ -371,7 +420,7 @@ export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: numbe
   ctx.stroke()
 
   // The hills nearer: the one behind the slope, and the one framing the right.
-  layer(midLeft, 0, w * 0.56, shore + 4, 0.7, 2.4)
+  layer(midLeft, 0, w * 0.56, shore + 2, 0.7, 2.4, 10 * k * 0.7)
   grove(
     crownsUnder(midLeft, () => shore, 10 * k, 0, w * 0.56),
     0.72,
@@ -383,7 +432,7 @@ export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: numbe
       ] as const
     ).map(([f, t]) => ({ x: w * f, base: midLeft(w * f) + 16 * k, tall: tall * t, alpha: 0.8 })),
   )
-  layer(midRight, w * 0.68, w, water + 4, 0.8, 2.2)
+  layer(midRight, w * 0.68, w, water + 2, 0.8, 2.2, 12.5 * k * 0.7)
   grove(
     crownsUnder(midRight, () => water, 12.5 * k, w * 0.68, w),
     0.85,
@@ -399,7 +448,7 @@ export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: numbe
 
   // The near slope at the left: woods above, boulders at its foot.
   const rockLine = (x: number) => water - tall * 0.2 * (1 - x / slopeEnd) - tall * 0.04
-  layer(near, 0, slopeEnd, water + 4, 0.95, 1.9)
+  layer(near, 0, slopeEnd, water + 2, 0.95, 1.9, 16 * k * 0.7)
   grove(
     crownsUnder(near, (x) => Math.min(water, rockLine(x) + 8 * k), 16 * k, 0, slopeEnd),
     1,
@@ -411,59 +460,85 @@ export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: numbe
       ] as const
     ).map(([f, t]) => ({ x: w * f, base: near(w * f) + tall * 0.12, tall: tall * t, alpha: 0.96 })),
   )
-  rocks((x, y) => y > rockLine(x) && y > near(x) + 6 && y < water + 2, 0, slopeEnd, water - tall * 0.3, water + 4, 30 * k)
+  rocks(
+    (x, y) => y > Math.max(rockLine(x), near(x) - 8 * k) && y < water + 2 && x < slopeEnd + 6 * k,
+    0,
+    slopeEnd + 20 * k,
+    water - tall * 0.3,
+    water + 6,
+    30 * k,
+  )
 
-  // The headland: ground hatched, bushes on its flanks, boulders at the water.
+  // The headland: a mound of ground, grass on it in tufts, thinner where the light falls; bushes on its flanks, boulders at the water.
   outline(cape, ax - capeHalf, ax + capeHalf, water + 4)
   ctx.fillStyle = paper
   ctx.fill()
   ctx.save()
   outline(cape, ax - capeHalf, ax + capeHalf, water + 4)
   ctx.clip()
-  const pool = ctx.createRadialGradient(ax, ground, 10 * k, ax, ground, capeHalf)
-  pool.addColorStop(0, ink(0.12))
-  pool.addColorStop(0.3, ink(0.45))
-  pool.addColorStop(1, ink(0.85))
-  ctx.strokeStyle = pool
-  ctx.lineWidth = 0.65
   ctx.beginPath()
-  // The ground: short strokes in rows, like grass on a print, broken.
-  for (let y = ground + 3; y < water + 4; y += 2.4) {
-    let x = ax - capeHalf + rand() * 6
+  for (let y = ground + 2; y < water + 4; y += 2.6 * Math.max(0.85, k)) {
+    let x = ax - capeHalf + rand() * 8
     while (x < ax + capeHalf) {
-      const len = 3 + rand() * 9
-      if (rand() < 0.75) {
+      const len = 2 + rand() * 7
+      const away = clamp(Math.hypot((x - ax) / capeHalf, (y - ground) / (water - ground)) * 1.2)
+      if (rand() < 0.12 + 0.75 * away) {
         ctx.moveTo(x, y)
         ctx.lineTo(x + len, y + (rand() - 0.5) * 1.2)
+        // Now and then a blade standing up.
+        if (rand() < 0.08) {
+          ctx.moveTo(x + len * 0.6, y)
+          ctx.lineTo(x + len * 0.6 + 0.6, y - 1.8)
+        }
       }
-      x += len + 1 + rand() * 4
+      x += len + 1.5 + rand() * 5
     }
   }
+  ctx.strokeStyle = ink(0.7)
+  ctx.lineWidth = 0.6
+  ctx.stroke()
+  // The altar's shadow, falling right across the ground, hatched.
+  const foot = (ALTAR[0]![0] * k) / 2
+  ctx.beginPath()
+  ctx.moveTo(ax + foot * 0.2, ground + 2)
+  ctx.lineTo(ax + foot, ground + 2)
+  ctx.lineTo(ax + foot + 34 * k, ground + 9 * k)
+  ctx.lineTo(ax + foot * 0.4, ground + 9 * k)
+  ctx.closePath()
+  ctx.clip()
+  ctx.beginPath()
+  for (let x = ax - 10; x < ax + foot + 40 * k; x += 1.8) {
+    ctx.moveTo(x, ground)
+    ctx.lineTo(x - 10 * k, ground + 12 * k)
+  }
+  ctx.strokeStyle = ink(0.75)
+  ctx.lineWidth = 0.55
   ctx.stroke()
   ctx.restore()
+  // Its ridge, drawn only across the top, where nothing covers it.
   ctx.beginPath()
-  for (let x = ax - capeHalf; x <= ax + capeHalf; x += 3) ctx.lineTo(x, cape(x))
-  ctx.strokeStyle = ink(0.8)
-  ctx.lineWidth = 1
+  for (let x = ax - flat * 1.4; x <= ax + flat * 1.4; x += 3) ctx.lineTo(x, cape(x) + 0.5)
+  ctx.strokeStyle = ink(0.5)
+  ctx.lineWidth = 0.8
   ctx.stroke()
-  const flank = (x: number) => (Math.abs(x - ax) > flat * 1.6 ? cape(x) + 4 * k : water + 99)
+  const flank = (x: number) => (Math.abs(x - ax) > flat * 1.25 ? cape(x) + 3 * k : water + 99)
   grove(
-    crownsUnder(flank, (x) => Math.min(water - 18 * k, cape(x) + tall * 0.14), 10 * k, ax - capeHalf, ax + capeHalf).filter((c) =>
+    crownsUnder(flank, (x) => Math.min(water - 14 * k, cape(x) + tall * 0.16), 9 * k, ax - capeHalf, ax + capeHalf).filter((c) =>
       inCape(c.x),
     ),
     0.95,
     [
-      { x: ax - flat - 20 * k, base: cape(ax - flat - 20 * k) + 10 * k, tall: tall * 0.3, alpha: 0.96 },
-      { x: ax + flat + 24 * k, base: cape(ax + flat + 24 * k) + 10 * k, tall: tall * 0.23, alpha: 0.96 },
+      { x: ax - flat - 18 * k, base: cape(ax - flat - 18 * k) + 6 * k, tall: tall * 0.3, alpha: 0.96 },
+      { x: ax + flat + 22 * k, base: cape(ax + flat + 22 * k) + 6 * k, tall: tall * 0.23, alpha: 0.96 },
     ],
   )
   rocks(
-    (x, y) => inCape(x) && Math.abs(x - ax) < capeHalf * 0.9 && y > cape(x) + 6 && y > water - tall * 0.08,
+    (x, y) => inCape(x) && Math.abs(x - ax) < capeHalf * 0.92 && y > cape(x) + 4 && y > water - tall * 0.09,
     ax - capeHalf,
     ax + capeHalf,
-    water - tall * 0.1,
-    water + 3,
-    24 * k,
+    water - tall * 0.11,
+    water + 4,
+    22 * k,
   )
 
   drawAltar(ctx, g, paper)
@@ -493,16 +568,9 @@ export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: numbe
 /** The altar on the headland: steps, a block with Althar's mark cut in its face, a cornice and a table, shaded on the right. */
 function drawAltar(ctx: CanvasRenderingContext2D, g: Ground, paper: string) {
   const { ax, ground, k } = g
-  const blocks: Array<[number, number]> = [
-    [104, 9],
-    [88, 8],
-    [62, 38],
-    [78, 8],
-    [70, 5],
-  ]
   let y = ground + 2
   ctx.lineJoin = 'miter'
-  for (const [bw, bh] of blocks) {
+  for (const [bw, bh] of ALTAR) {
     const w = bw * k
     const h = bh * k
     const x = ax - w / 2
@@ -551,18 +619,31 @@ function drawAltar(ctx: CanvasRenderingContext2D, g: Ground, paper: string) {
   ctx.lineJoin = 'round'
 }
 
-/** The light standing on the altar, and its streak in the water: fine broken lines, drifting up, breathing. */
+/** The light standing on the altar, and its streak in the water: fine lines rooted on the table, whole low down and breaking up as they rise, drifting up, breathing. */
 export function lightOf(g: Ground) {
   const rand = seeded(23)
-  const n = Math.round(26 + 22 * g.k)
-  const spread = 26 * g.k
+  const n = Math.round(18 + 14 * g.k)
+  const half = (TABLE * g.k) / 2 - 3
   const lines = Array.from({ length: n }, (_, i) => {
-    // Gathered at the middle, as a column of light is.
-    const u = Math.sqrt(-2 * Math.log(1 - rand() * 0.999)) * Math.cos(2 * Math.PI * rand())
-    const dx = Math.max(-2.2, Math.min(2.2, u)) * spread * 0.5
-    const reach = (0.5 + 0.5 * rand()) * (0.55 + 0.45 * gauss(dx, 0, spread * 0.6))
-    const dash = [10 + rand() * 30, 2 + rand() * 4, 4 + rand() * 16, 2 + rand() * 6, 20 + rand() * 40, 3 + rand() * 5]
-    return { i, dx, reach, dash, speed: 6 + rand() * 14, phase: rand() * Math.PI * 2, period: 3800 + rand() * 4200 }
+    // Across the table, gathered toward its middle, as a column of light is.
+    const u = (i / (n - 1)) * 2 - 1
+    const spread = Math.sign(u) * Math.pow(Math.abs(u), 1.35)
+    const dx = spread * half + (rand() - 0.5) * 1.2
+    const middle = 1 - Math.abs(spread)
+    const reach = (0.55 + 0.45 * rand()) * (0.5 + 0.5 * middle)
+    // How far up it stays whole, as a share of its length.
+    const whole = 0.18 + 0.32 * rand() * (0.5 + middle)
+    const dash = [6 + rand() * 22, 2 + rand() * 3, 3 + rand() * 12, 2 + rand() * 5, 12 + rand() * 30, 3 + rand() * 6]
+    return {
+      dx,
+      reach,
+      whole,
+      dash,
+      width: 0.5 + 0.45 * middle,
+      speed: 8 + rand() * 12,
+      phase: rand() * Math.PI * 2,
+      period: 4200 + rand() * 4200,
+    }
   })
   const ripples = Array.from({ length: 70 }, () => ({ u: rand(), dx: (rand() - 0.5) * 2, len: 3 + rand() * 12, phase: rand() * 6.28 }))
   return { lines, ripples }
@@ -571,25 +652,37 @@ export function lightOf(g: Ground) {
 export function drawLight(ctx: CanvasRenderingContext2D, g: Ground, light: ReturnType<typeof lightOf>, t: number) {
   const { w, h, ax, altarTop, water, k } = g
   ctx.clearRect(0, 0, w, h)
-  ctx.lineWidth = 0.65
   ctx.lineCap = 'butt'
-  const foot = altarTop - 3
+  // On the table's top edge, so the light stands on it.
+  const foot = altarTop + 0.6
   for (const line of light.lines) {
-    const breathe = 1 + 0.14 * Math.sin((t / line.period) * Math.PI * 2 + line.phase)
-    const length = foot * 0.96 * line.reach * breathe
-    // It opens a little as it rises.
+    const breathe = 1 + 0.12 * Math.sin((t / line.period) * Math.PI * 2 + line.phase)
+    // It opens a little as it rises, and stops under any words over it.
     const x0 = ax + line.dx
-    const x1 = ax + line.dx * 1.5
+    const x1 = ax + line.dx * 1.6
+    const roof = Math.max(8, ceiling(g.clear, Math.min(x0, x1), Math.max(x0, x1), 16))
+    const length = Math.min(foot - roof, (foot - roof) * line.reach * breathe)
+    const at = (s: number) => [x0 + (x1 - x0) * s, foot - length * s] as const
     const grad = ctx.createLinearGradient(0, foot, 0, foot - length)
-    grad.addColorStop(0, 'rgba(31, 53, 200, 0.75)')
-    grad.addColorStop(0.25, 'rgba(31, 53, 200, 0.4)')
+    grad.addColorStop(0, 'rgba(31, 53, 200, 0.9)')
+    grad.addColorStop(0.3, 'rgba(31, 53, 200, 0.5)')
     grad.addColorStop(1, 'rgba(31, 53, 200, 0)')
     ctx.strokeStyle = grad
+    ctx.lineWidth = line.width
+    // Whole from the table up...
+    const [mx, my] = at(line.whole)
+    ctx.setLineDash([])
+    ctx.beginPath()
+    ctx.moveTo(x0, foot)
+    ctx.lineTo(mx, my)
+    ctx.stroke()
+    // ...then breaking up, the breaks drifting upward.
+    const [tx, ty] = at(1)
     ctx.setLineDash(line.dash)
     ctx.lineDashOffset = (t / 1000) * line.speed
     ctx.beginPath()
-    ctx.moveTo(x0, foot)
-    ctx.lineTo(x1, foot - length)
+    ctx.moveTo(mx, my)
+    ctx.lineTo(tx, ty)
     ctx.stroke()
   }
   ctx.setLineDash([])
