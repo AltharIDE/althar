@@ -5,6 +5,7 @@ import { useNarrow } from '../kit/narrow'
 import { Reel } from '../kit/Reel'
 import { Shot } from '../kit/Shot'
 import t from '../kit/type.module.css'
+import { IconsLook, RollLook, TitleBarLook } from './Marks'
 import s from './Platforms.module.css'
 
 /*
@@ -20,7 +21,7 @@ import s from './Platforms.module.css'
  *    desktop with Althar on it, named under it.
  */
 
-export type PlatformsLook = 'rise' | 'morph' | 'row'
+export type PlatformsLook = 'rise' | 'morph' | 'row' | 'buttons' | 'icons' | 'roll'
 
 export const SYSTEMS: ReadonlyArray<{ id: System; name: string; note: string }> = [
   { id: 'mac', name: 'macOS', note: 'Apple silicon and Intel' },
@@ -165,6 +166,9 @@ function Row() {
 }
 
 export function Platforms({ look }: { look: PlatformsLook }) {
+  if (look === 'buttons') return <TitleBarLook />
+  if (look === 'icons') return <IconsLook />
+  if (look === 'roll') return <RollLook />
   if (look === 'morph') return <Morph />
   if (look === 'row') return <Row />
   return <Rise />

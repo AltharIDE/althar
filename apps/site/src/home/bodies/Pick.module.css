@@ -35,3 +35,5 @@
   .pick button { padding: 7px 8px; gap: 4px; }
   .pick b { display: none; }
 }
+.group { display: inline-flex; align-items: center; }
+.sep { width: 1px; height: 16px; margin: 0 6px; background: rgba(255, 255, 255, 0.22); }

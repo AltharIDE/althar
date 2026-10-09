@@ -9,15 +9,18 @@ import { Platforms, type PlatformsLook } from './platforms/Platforms'
 /*
  * The developer page as it is being drawn: the island for a nav, the first
  * screen, a section on the systems Althar runs on, and the product shown
- * (desktop/). Prototype: the systems section in three ways; `?os=rise`
- * picks one, the strip at the bottom (or 1–3) switches, and `?shoot` hides
- * the strip for screenshots.
+ * (desktop/). Prototype: the systems section in six ways, three with
+ * pictures of the app and three without; `?os=rise` picks one, the strip at
+ * the bottom (or 1–6) switches, and `?shoot` hides the strip for screenshots.
  */
 
 const LOOKS: ReadonlyArray<{ id: PlatformsLook; name: string }> = [
   { id: 'rise', name: 'Rise' },
   { id: 'morph', name: 'Morph' },
   { id: 'row', name: 'Row' },
+  { id: 'buttons', name: 'Buttons' },
+  { id: 'icons', name: 'Icons' },
+  { id: 'roll', name: 'Roll' },
 ]
 
 const param = (name: string) => new URLSearchParams(window.location.search).get(name)
@@ -54,10 +57,13 @@ export function Bodies() {
           <nav className={s.pick} aria-label="Systems section (prototype)">
             <span className={s.label}>Systems</span>
             {LOOKS.map((l, i) => (
-              <button key={l.id} type="button" aria-pressed={l.id === look} onClick={() => pick(l.id)}>
-                <b>{i + 1}</b>
-                {l.name}
-              </button>
+              <span key={l.id} className={s.group}>
+                {i === 3 && <span className={s.sep} />}
+                <button type="button" aria-pressed={l.id === look} onClick={() => pick(l.id)}>
+                  <b>{i + 1}</b>
+                  {l.name}
+                </button>
+              </span>
             ))}
           </nav>
         </div>
