@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { locate, namesOf, programName, quoted, usingLocated, usualDirs } from '../src/installs'
-import { agents, bundledClaude } from '../src/registry'
+import { agents, bundledClaude, isMusl } from '../src/registry'
 
 /* Finding an agent's command, on a Mac, Windows or Linux: the person's own first, then Althar's copies. */
 
@@ -46,15 +46,30 @@ describe('finding an agent’s command', () => {
 
   it('on Windows, finds a command by PATHEXT’s endings on its Path, always by its full path', () => {
     const env = { Path: 'C:\\Tools;C:\\Users\\me\\AppData\\Roaming\\npm', PATHEXT: '.COM;.EXE;.BAT;.CMD' }
-    expect(namesOf('code', 'win32', env)).toEqual(['code.com', 'code.exe', 'code.bat', 'code.cmd'])
+    expect(namesOf('code', 'win32', env, true)).toEqual(['code.com', 'code.exe', 'code.bat', 'code.cmd'])
     expect(
       locate('opencode', none, {
         env,
         dirs: [],
         platform: 'win32',
-        isExecutable: is('C:\\Users\\me\\AppData\\Roaming\\npm\\opencode.cmd'),
+        isExecutable: is('C:\\Users\\me\\AppData\\Roaming\\npm\\opencode.exe'),
       }),
-    ).toEqual({ command: 'C:\\Users\\me\\AppData\\Roaming\\npm\\opencode.cmd', whose: 'theirs' })
+    ).toEqual({ command: 'C:\\Users\\me\\AppData\\Roaming\\npm\\opencode.exe', whose: 'theirs' })
+    // An npm shim only runs through a shell: an agent, started without one, never takes it; an editor's command may.
+    expect(namesOf('claude', 'win32', env)).toEqual(['claude.com', 'claude.exe'])
+    expect(namesOf('code', 'win32', env, true)).toContain('code.cmd')
+    expect(
+      locate(
+        'claude',
+        { bundled: 'C:\\Althar\\claude.exe', kept: null },
+        {
+          env,
+          dirs: [],
+          platform: 'win32',
+          isExecutable: is('C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd', 'C:\\Althar\\claude.exe'),
+        },
+      ),
+    ).toEqual({ command: 'C:\\Althar\\claude.exe', whose: 'bundled' })
     expect(programName('opencode', 'win32')).toBe('opencode.exe')
     expect(programName('opencode', 'linux')).toBe('opencode')
     expect(usualDirs('win32', 'C:\\Users\\me', { APPDATA: 'C:\\Users\\me\\AppData\\Roaming' })).toContain(
@@ -69,6 +84,9 @@ describe('finding an agent’s command', () => {
     expect(quoted('/a b', 'darwin')).toBe("'/a b'")
     expect(quoted("/o'neil/x", 'linux')).toBe(`'/o'\\''neil/x'`)
     expect(quoted('C:\\Program Files\\x.exe', 'win32')).toBe('"C:\\Program Files\\x.exe"')
+    expect(quoted('C:\\Tools\\x.exe', 'win32')).toBe('C:\\Tools\\x.exe')
+    // Outside Windows a backslash is a shell's escape, so a path with one is quoted.
+    expect(quoted('/Users/me/a\\b/opencode', 'darwin')).toBe("'/Users/me/a\\b/opencode'")
   })
 
   it('points every command the agent runs at it, looked up each time, and names it in what the person runs to sign in', () => {
@@ -99,5 +117,6 @@ describe('finding an agent’s command', () => {
   it('finds the Claude Code the Agent SDK ships for this computer, and none for one it has no build for', () => {
     expect(bundledClaude()).toMatch(/claude-agent-sdk-[a-z0-9-]+\/claude(\.exe)?$/)
     expect(bundledClaude('plan9', 'mips')).toBeNull()
+    expect(isMusl('darwin')).toBe(false)
   })
 })

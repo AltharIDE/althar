@@ -145,19 +145,35 @@ export interface AgentDownload {
   readonly size: string
 }
 
+/** Whether this Linux runs on musl, as Alpine does, rather than glibc: Node's report names glibc's version where there is one. */
+export const isMusl = (platform: string = process.platform): boolean => {
+  if (platform !== 'linux') return false
+  try {
+    const report = process.report?.getReport() as { header?: { glibcVersionRuntime?: string } } | undefined
+    return report?.header?.glibcVersionRuntime === undefined
+  } catch {
+    return false
+  }
+}
+
 /**
  * Claude Code's own program as the Agent SDK ships it, for this platform and
  * processor: the copy its sessions run on (claude-agent-acp starts it), so it
- * is there even where the person never installed Claude Code. Linux tries
- * the glibc build, then musl's. Null where it isn't.
+ * is there even where the person never installed Claude Code. Null where
+ * it isn't.
  */
-export const bundledClaude = (platform: string = process.platform, arch: string = process.arch): string | null => {
+export const bundledClaude = (
+  platform: string = process.platform,
+  arch: string = process.arch,
+  musl: boolean = isMusl(platform),
+): string | null => {
   try {
     const fromAdapter = createRequire(require.resolve('@agentclientprotocol/claude-agent-acp/package.json'))
     // The SDK exports no package.json, so it is found by its entry, as Node resolves it.
     const fromSdk = createRequire(fromAdapter.resolve('@anthropic-ai/claude-agent-sdk'))
     const binary = platform === 'win32' ? 'claude.exe' : 'claude'
-    for (const variant of platform === 'linux' ? ['', '-musl'] : ['']) {
+    // On Linux, the build for its C library first, the other only if that one is missing.
+    for (const variant of platform !== 'linux' ? [''] : musl ? ['-musl', ''] : ['', '-musl']) {
       try {
         return join(dirname(fromSdk.resolve(`@anthropic-ai/claude-agent-sdk-${platform}-${arch}${variant}/package.json`)), binary)
       } catch {
@@ -420,6 +436,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
           'darwin-x64': 'opencode-darwin-x64.zip',
           'linux-arm64': 'opencode-linux-arm64.tar.gz',
           'linux-x64': 'opencode-linux-x64.tar.gz',
+          'linux-arm64-musl': 'opencode-linux-arm64-musl.tar.gz',
+          'linux-x64-musl': 'opencode-linux-x64-musl.tar.gz',
           'win32-arm64': 'opencode-windows-arm64.zip',
           'win32-x64': 'opencode-windows-x64.zip',
         },

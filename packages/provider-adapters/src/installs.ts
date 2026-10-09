@@ -39,17 +39,24 @@ export const usualDirs = (
   ]
 }
 
-/** The names a command goes by: on Windows with each of PATHEXT's endings, as `opencode.exe` or `code.cmd`. */
+/**
+ * The names a command goes by: on Windows with each of PATHEXT's endings, as
+ * `opencode.exe` or `code.cmd`. A `.cmd` or `.bat` only runs through a shell,
+ * so it counts only where the caller runs commands through one (`scripts`);
+ * an agent's process starts without, so for an agent only a program counts.
+ */
 export const namesOf = (
   command: string,
   platform: string = process.platform,
   env: Readonly<Record<string, string | undefined>> = process.env,
+  scripts = false,
 ) =>
   platform === 'win32'
     ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
         .split(';')
-        .filter((ending) => ending !== '')
-        .map((ending) => `${command}${ending.toLowerCase()}`)
+        .map((ending) => ending.toLowerCase())
+        .filter((ending) => ending !== '' && (scripts || ending === '.exe' || ending === '.com'))
+        .map((ending) => `${command}${ending}`)
     : [command]
 
 /** A program's file name on this system: `opencode.exe` on Windows. */
@@ -76,6 +83,8 @@ export interface LocateOptions {
   readonly dirs?: ReadonlyArray<string>
   readonly platform?: string
   readonly isExecutable?: (path: string) => boolean
+  /** On Windows, a `.cmd` or `.bat` counts too: for a caller that runs it through a shell. */
+  readonly scripts?: boolean
 }
 
 /**
@@ -92,7 +101,7 @@ export const locate = (
   const platform = options.platform ?? process.platform
   const env = options.env ?? process.env
   const isExecutable = options.isExecutable ?? executable
-  const names = namesOf(command, platform, env)
+  const names = namesOf(command, platform, env, options.scripts === true)
   const separator = platform === 'win32' ? ';' : delimiter
   const at = (dir: string, name: string) => (platform === 'win32' ? win32.join(dir, name) : join(dir, name))
   const inDirs = (dirs: ReadonlyArray<string>) =>
@@ -108,7 +117,12 @@ export const locate = (
 
 /** A path as a shell reads it as one word: single quotes on a Mac and Linux, double quotes on Windows. */
 export const quoted = (path: string, platform: string = process.platform): string =>
-  /^[\w./:\\-]+$/.test(path) ? path : platform === 'win32' ? `"${path}"` : `'${path.replaceAll("'", `'\\''`)}'`
+  // A backslash is only a separator on Windows; elsewhere the shell would read it as an escape.
+  (platform === 'win32' ? /^[\w./:\\-]+$/ : /^[\w./-]+$/).test(path)
+    ? path
+    : platform === 'win32'
+      ? `"${path}"`
+      : `'${path.replaceAll("'", `'\\''`)}'`
 
 /**
  * The agent, with every command it runs pointed at where its command is,

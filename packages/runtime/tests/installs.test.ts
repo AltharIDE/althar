@@ -49,7 +49,7 @@ const github = (bytes: Buffer, { digest = `sha256:${sha(bytes)}` as string | nul
 
 const using = (options: Partial<InstallsOptions>) => {
   const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
-  const layer = Installs.layer({ root, platform: 'linux', arch: 'x64', search: { env: { PATH: '' }, dirs: [] }, ...options })
+  const layer = Installs.layer({ root, platform: 'linux', arch: 'x64', musl: false, search: { env: { PATH: '' }, dirs: [] }, ...options })
   return { root, run: <A, E>(effect: Effect.Effect<A, E, Installs>) => Effect.runPromiseExit(Effect.provide(effect, layer)) }
 }
 
@@ -76,7 +76,14 @@ describe('downloading an agent', () => {
     const { root, run } = using({ fetch: first.fetch })
     await run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))
     const second = github(archive('2.0.0'), { tag: 'v2.0.0' })
-    const again = Installs.layer({ root, platform: 'linux', arch: 'x64', fetch: second.fetch, search: { env: { PATH: '' }, dirs: [] } })
+    const again = Installs.layer({
+      root,
+      platform: 'linux',
+      arch: 'x64',
+      musl: false,
+      fetch: second.fetch,
+      search: { env: { PATH: '' }, dirs: [] },
+    })
     await Effect.runPromise(
       Effect.provide(
         Effect.flatMap(Installs, (installs) => installs.install(opencode)),
@@ -214,5 +221,14 @@ describe('downloading an agent', () => {
     const own = using({ platform: process.platform, arch: process.arch, search: { env: { PATH: theirs }, dirs: [] } })
     const found = await own.run(Effect.map(Installs, (installs) => installs.locate(agents['claude-code'])))
     assert.deepStrictEqual(Exit.isSuccess(found) ? found.value : null, { command: 'claude', whose: 'theirs' })
+  })
+
+  it('takes the release’s musl build on a musl Linux, as Alpine is', async () => {
+    const bytes = archive()
+    const { fetch, asked } = github(bytes, { asset: 'opencode-linux-x64-musl.tar.gz' })
+    const { run } = using({ fetch, musl: true })
+    const done = await run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))
+    assert.isTrue(Exit.isSuccess(done))
+    assert.lengthOf(asked, 2)
   })
 })

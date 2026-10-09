@@ -90,7 +90,7 @@ export const start = (command: string, args: ReadonlyArray<string>, platform: No
 
 /** Where an editor's command is on Windows or Linux: the person's, on the PATH or where installers put it; null where it isn't. */
 const commandOf = (known: Known, platform: NodeJS.Platform): string | null =>
-  known.cli === undefined ? null : (locate(known.cli.name, { bundled: null, kept: null }, { platform })?.command ?? null)
+  known.cli === undefined ? null : (locate(known.cli.name, { bundled: null, kept: null }, { platform, scripts: true })?.command ?? null)
 
 /** The editors found here, in the order they are offered, then the file manager. */
 export const editorsHere = (

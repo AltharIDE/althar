@@ -4,7 +4,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, r
 import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
-import { type AgentDefinition, type AgentDownload, locate, type Located, programName } from '@althar/provider-adapters'
+import { type AgentDefinition, type AgentDownload, isMusl, locate, type Located, programName } from '@althar/provider-adapters'
 import { Context, Effect, Layer, Ref, Schema } from 'effect'
 
 /*
@@ -46,6 +46,8 @@ export interface InstallsOptions {
   readonly fetch?: Fetch | undefined
   readonly platform?: string
   readonly arch?: string
+  /** A Linux on musl, as Alpine is, which takes the release's musl build where it has one. */
+  readonly musl?: boolean
   /** Where the person's own commands are looked for: their PATH and the usual places; tests give their own. */
   readonly search?: { readonly env: Readonly<Record<string, string | undefined>>; readonly dirs: ReadonlyArray<string> }
 }
@@ -104,6 +106,10 @@ export class Installs extends Context.Service<
         const fetch = options.fetch ?? globalThis.fetch
         const platform = options.platform ?? process.platform
         const target = `${platform}-${options.arch ?? process.arch}`
+        const musl = options.musl ?? isMusl(platform)
+        /** The release's file for this computer: musl's build on a musl Linux where there is one. */
+        const assetOf = (download: AgentDownload) =>
+          musl ? (download.assets[`${target}-musl`] ?? download.assets[target]) : download.assets[target]
         const installing = yield* Ref.make(new Set<string>())
 
         /** Where Althar's downloaded copy of the agent's command is, whether or not it is there. */
@@ -123,7 +129,7 @@ export class Installs extends Context.Service<
         /** The agent's latest release, and its file for this device with the digest GitHub gives it. */
         const latest = (definition: AgentDefinition, install: AgentDownload) =>
           Effect.gen(function* () {
-            const asset = install.assets[target]
+            const asset = assetOf(install)
             if (asset === undefined) return yield* fail(definition.id, `There's no ${definition.name} for this computer to download.`)
             const response = yield* Effect.tryPromise({
               try: () =>
@@ -171,7 +177,7 @@ export class Installs extends Context.Service<
             // Nothing in it runs unless it is exactly the file GitHub says the release has.
             if (createHash('sha256').update(bytes).digest('hex') !== release.digest)
               return yield* fail(definition.id, `${definition.name}'s download didn't match its release, so Althar didn't keep it.`)
-            const archive = join(folder, install.assets[target] ?? 'download')
+            const archive = join(folder, assetOf(install) ?? 'download')
             writeFileSync(archive, bytes)
             const unpacked = join(folder, 'unpacked')
             mkdirSync(unpacked)
@@ -235,8 +241,7 @@ export class Installs extends Context.Service<
           state: (definition) =>
             Effect.map(Ref.get(installing), (now) => ({
               located: locateOf(definition),
-              downloadable:
-                definition.cli?.download !== undefined && root !== undefined && definition.cli.download.assets[target] !== undefined,
+              downloadable: definition.cli?.download !== undefined && root !== undefined && assetOf(definition.cli.download) !== undefined,
               size: definition.cli?.download?.size ?? null,
               installing: now.has(definition.id),
             })),
