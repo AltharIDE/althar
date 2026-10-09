@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 
-import { LINKS } from '../../../content/facts'
 import { cx } from '../../../lib/cx'
 import { Get } from '../../../shared/Close'
 import { HomeWindow, IslandOpen } from '../kit/app'
@@ -138,12 +137,6 @@ export function DesktopBody() {
           <Get tone="paper" />
           <p className={t.mono}>Free and open source · macOS, Windows and Linux</p>
         </div>
-        <footer className={s.foot}>
-          <a href={LINKS.repo}>GitHub</a>
-          <a href="/thesis">Thesis</a>
-          <a href="/shifts">Shifts</a>
-          <span>Althar</span>
-        </footer>
       </section>
     </main>
   )

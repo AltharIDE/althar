@@ -49,7 +49,7 @@
   box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.3), 0 22px 60px rgba(0, 0, 0, 0.45);
   transform-origin: 82% 0; opacity: 0; transform: translateY(-10px) scale(0.96);
 }
-.cursor { position: absolute; left: 0; top: 0; z-index: 5; transform: translate(250px, 420px); opacity: 0; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35)); }
+.cursor { position: absolute; left: 0; top: 0; z-index: 5; transform-origin: 1px 1px; transform: translate(250px, 420px); opacity: 0; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35)); }
 
 /* One loop, 7.5 s, while it is on screen: the pointer comes up to the mark and clicks, the list drops,
    the pointer reads down it, goes back up and clicks again, the list closes, and it rests a moment. */
@@ -62,14 +62,14 @@
 @keyframes point {
   0% { opacity: 0; transform: translate(250px, 430px); animation-timing-function: ease-out; }
   6% { opacity: 1; transform: translate(260px, 400px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); }
-  22% { transform: translate(368px, 12px); animation-timing-function: ease; }
-  24% { transform: translate(368px, 12px) scale(0.85); animation-timing-function: ease; }
-  26% { transform: translate(368px, 12px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); }
+  22% { transform: translate(405px, 17px); animation-timing-function: ease; }
+  24% { transform: translate(405px, 17px) scale(0.85); animation-timing-function: ease; }
+  26% { transform: translate(405px, 17px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); }
   40% { transform: translate(300px, 236px); animation-timing-function: ease-in-out; }
   56% { transform: translate(318px, 330px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); }
-  70% { transform: translate(368px, 12px); animation-timing-function: ease; }
-  72% { transform: translate(368px, 12px) scale(0.85); animation-timing-function: ease; }
-  74% { opacity: 1; transform: translate(368px, 12px); animation-timing-function: ease-in; }
+  70% { transform: translate(405px, 17px); animation-timing-function: ease; }
+  72% { transform: translate(405px, 17px) scale(0.85); animation-timing-function: ease; }
+  74% { opacity: 1; transform: translate(405px, 17px); animation-timing-function: ease-in; }
   86%, 100% { opacity: 0; transform: translate(420px, 120px); }
 }
 @keyframes press {

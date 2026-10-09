@@ -81,22 +81,9 @@
 .marks svg { color: var(--t-1); }
 
 /* ---- the end ---- */
-.end { padding: 190px 0 0; }
+.end { padding: 190px 0 40px; }
 .end .head { gap: 30px; }
 .end .head > div { justify-content: center; }
-.foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px 28px;
-  max-width: var(--max);
-  margin: 150px auto 0;
-  padding: 24px var(--gut) 40px;
-  border-top: 1px solid var(--line-2);
-  font-size: 14px;
-  color: var(--t-3);
-}
-.foot a { color: var(--t-2); text-decoration: none; }
-.foot span { margin-left: auto; font-weight: 650; color: var(--t-1); }
 
 @media (max-width: 700px) {
   .scene { padding-top: 96px; }
@@ -110,7 +97,6 @@
   .marks { gap: 18px 30px; margin-top: 36px; }
   .marks svg { width: 30px; height: 30px; }
   .end { padding-top: 120px; }
-  .foot { margin-top: 96px; }
 }
 
 /* ---- your plans: the panel lifted a little, in the light ---- */
