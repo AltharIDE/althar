@@ -427,12 +427,18 @@ export enum ChangeTarget {
   Fork = 'fork',
 }
 
-/** How another agent would be connected. */
-export enum ConnectKind {
-  /** Installed as its own app or command line, signed in through it. */
-  App = 'app',
-  /** An API, with a key kept in the system keychain. */
+/** A way an agent's account signs in. */
+export enum SignInWay {
+  /** The agent's own sign-in, opened in the browser on this machine, which comes back to it by itself. */
+  Browser = 'browser',
+  /** The agent's own sign-in command, run in a terminal, which may open the browser itself. */
+  Terminal = 'terminal',
+  /** A one-time code, approved in any browser, profile or device. */
+  Code = 'code',
+  /** An API key, billed per use to the key's account. */
   Key = 'key',
-  /** A model server running on this machine. */
-  Local = 'local',
+  /** The provider's console account, signed in through the browser and billed per use. */
+  Console = 'console',
+  /** A folder the agent already signed in with: one an account switcher made, or one the person chooses. */
+  Folder = 'folder',
 }

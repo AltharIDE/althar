@@ -73,6 +73,54 @@ export const SearchingAndPinning: Story = {
   },
 }
 
+/* With models switched off, as a consumer keeps them. */
+const picked = fn()
+
+function Blocking() {
+  const [blocked, setBlocked] = useState<readonly string[]>(['gpt-5.2-codex'])
+  const pick = picked
+  return (
+    <ModelBrowser
+      models={MODEL_LIST}
+      runtimes={RUNTIMES}
+      value="claude-opus-5"
+      pins={[]}
+      defaultEffort={(m) => effortFor(m)}
+      onTogglePin={fn()}
+      onSetDefaultEffort={fn()}
+      onClose={fn()}
+      onPick={pick}
+      blocked={blocked}
+      onToggleBlocked={(id) => setBlocked((now) => (now.includes(id) ? now.filter((one) => one !== id) : [...now, id]))}
+    />
+  )
+}
+
+/** A model switched off is there, quieter, and can't be chosen; Don't use and Use again switch it. */
+export const SwitchingOff: Story = {
+  render: () => <Blocking />,
+  play: async () => {
+    const body = within(document.body)
+    const off = MODEL_LIST.find((m) => m.id === 'gpt-5.2-codex')
+    if (off === undefined) return
+    await expect(body.getByRole('button', { name: `Use ${off.name}` })).toBeDisabled()
+    await expect(body.getByRole('button', { name: `Don’t use ${off.name}` })).toHaveAttribute('aria-pressed', 'true')
+    await userEvent.click(body.getByRole('button', { name: `Don’t use ${off.name}` }))
+    await expect(body.getByRole('button', { name: `Use ${off.name}` })).toBeEnabled()
+    await userEvent.click(body.getByRole('button', { name: 'Don’t use Gemini 3 Pro' }))
+    await expect(body.getByRole('button', { name: 'Use Gemini 3 Pro' })).toBeDisabled()
+    // Nor by a key: Enter on a search that finds only it picks nothing.
+    picked.mockClear()
+    await userEvent.type(body.getByRole('searchbox'), 'gemini 3 pro')
+    await expect(
+      body.getAllByRole('button', { name: /^Use / }).map((button) => button.getAttribute('aria-label') ?? button.textContent),
+    ).toHaveLength(1)
+    await expect(body.getByRole('button', { name: 'Use Gemini 3 Pro' })).toBeDisabled()
+    await userEvent.keyboard('{Enter}')
+    await expect(picked).not.toHaveBeenCalled()
+  },
+}
+
 export const NoMatch: Story = {
   render: () => <Example />,
   play: async () => {

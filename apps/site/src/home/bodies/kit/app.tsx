@@ -3,7 +3,6 @@ import {
   Accounts,
   type AccountEntry,
   AllowedBy,
-  BackCrumb,
   Board,
   BoardColumn,
   BoardLane,
@@ -12,13 +11,11 @@ import {
   Button,
   CallCard,
   ChromeButton,
-  Choices,
   Composer,
   Connections,
   EdgeSheet,
   GraphChanged,
   GraphNodeState,
-  Heading,
   IconButton,
   Island,
   Issue,
@@ -34,7 +31,6 @@ import {
   Review,
   Room,
   RoomSwitch,
-  Runtimes,
   type RuntimeEntry,
   RuntimeState,
   type ServiceConnection,
@@ -51,6 +47,17 @@ import {
   WorkStatus,
   You,
   ModelPick,
+  AgentTabs,
+  ControlAgents,
+  ControlDetail,
+  ControlFoot,
+  ControlGrid,
+  ControlMarks,
+  ControlModule,
+  ControlPicture,
+  ControlToggle,
+  Icon,
+  ModelSwitches,
 } from '@althar/ui'
 import { Home, ProjectRules } from '@althar/ui/screens'
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
@@ -74,6 +81,7 @@ import { MARKED } from '../../../../../../packages/ui/src/fixtures/marks'
 import { FINDINGS_SEVERAL_YOURS, PROJECT, reviewDoc, STEPS } from '../../../../../../packages/ui/src/fixtures/meridian'
 import { CODEX, GEMINI_PRO, OPUS, QWEN, SONNET } from '../../../../../../packages/ui/src/fixtures/models'
 import { SERVICES } from '../../../../../../packages/ui/src/fixtures/setup'
+import appIcon from '../../../../../desktop/resources/icons/cobalt.svg?url'
 import s from './app.module.css'
 
 /*
@@ -328,23 +336,52 @@ export function MeridianBoard() {
 
 /* ---- the agents and every account on them ---- */
 
-const CLAUDE_ACCOUNTS: AccountEntry[] = [
-  { id: 'c_main', name: 'personal', place: { kind: 'usual' }, state: { kind: 'ready', paid: 'plan' } },
-  { id: 'c_work', name: 'work', place: { kind: 'own' }, state: { kind: 'ready', paid: 'plan' } },
+export const CLAUDE_ACCOUNTS: AccountEntry[] = [
+  {
+    id: 'c_main',
+    name: 'Personal',
+    place: { kind: 'usual' },
+    state: { kind: 'ready', paid: 'plan' },
+    who: 'you@hey.com',
+    plan: 'Claude Max',
+  },
+  {
+    id: 'c_work',
+    name: 'Northwind',
+    place: { kind: 'own' },
+    state: { kind: 'out', back: '14:00' },
+    who: 'dana@northwind.io',
+    plan: 'Claude Team',
+  },
 ]
-const CODEX_ACCOUNTS: AccountEntry[] = [
-  { id: 'x_main', name: 'personal', place: { kind: 'usual' }, state: { kind: 'ready', paid: 'plan' } },
-  { id: 'x_work', name: 'work', place: { kind: 'own' }, state: { kind: 'ready', paid: 'plan' } },
+export const CODEX_ACCOUNTS: AccountEntry[] = [
+  {
+    id: 'x_main',
+    name: 'Personal',
+    place: { kind: 'usual' },
+    state: { kind: 'ready', paid: 'plan' },
+    who: 'you@hey.com',
+    plan: 'ChatGPT Pro',
+  },
+  {
+    id: 'x_work',
+    name: 'Northwind',
+    place: { kind: 'own' },
+    state: { kind: 'ready', paid: 'plan' },
+    who: 'dana@northwind.io',
+    plan: 'ChatGPT Team',
+  },
   {
     id: 'x_client',
     name: 'Client',
     place: { kind: 'adopted', folder: '~/.codex-client', from: 'codex-profiles' },
-    state: { kind: 'out', back: '14:00' },
+    state: { kind: 'ready', paid: 'plan' },
+    plan: 'ChatGPT Plus',
   },
 ]
-const OPENCODE_ACCOUNTS: AccountEntry[] = [
-  { id: 'o_router', name: 'OpenRouter', place: { kind: 'usual' }, state: { kind: 'ready', paid: 'key' } },
-  { id: 'o_zai', name: 'Z.ai coding plan', place: { kind: 'own' }, state: { kind: 'ready', paid: 'plan' } },
+export const OPENCODE_ACCOUNTS: AccountEntry[] = [
+  { id: 'o_router', name: 'OpenRouter', place: { kind: 'usual' }, state: { kind: 'ready', paid: 'key' }, who: 'key ····9c1e' },
+  { id: 'o_zai', name: 'Z.ai', place: { kind: 'own' }, state: { kind: 'ready', paid: 'plan' }, plan: 'GLM Coding Plan' },
 ]
 
 export const AGENTS: RuntimeEntry[] = [
@@ -430,40 +467,113 @@ export function ConnectionsList() {
   )
 }
 
-/* ---- Settings, as the app has it ---- */
+/* ---- Settings: the Control Center, from the home's gear ---- */
 
-export function SettingsWindow({ className, style }: { className?: string; style?: CSSProperties }) {
+const AGENT_TABS = [
+  { id: 'claude-code', name: 'Claude Code', brand: Brand.ClaudeCode, line: 'Anthropic · 2.4.1' },
+  { id: 'codex', name: 'Codex', brand: Brand.Codex, line: 'OpenAI · 0.159.3' },
+  { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, line: 'Any provider · 1.4.0' },
+]
+const ACCOUNTS_OF: Record<string, AccountEntry[]> = {
+  'claude-code': CLAUDE_ACCOUNTS,
+  codex: CODEX_ACCOUNTS,
+  opencode: OPENCODE_ACCOUNTS,
+}
+const MODELS_OF: Record<string, { id: string; name: string }[]> = {
+  'claude-code': [
+    { id: 'opus-5', name: 'Opus 5' },
+    { id: 'sonnet-5', name: 'Sonnet 5' },
+    { id: 'haiku-5-5', name: 'Haiku 5.5' },
+  ],
+  codex: [
+    { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
+    { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex' },
+    { id: 'gpt-5-mini', name: 'GPT-5 mini' },
+  ],
+  opencode: [
+    { id: 'gemini-3-pro', name: 'Gemini 3 Pro' },
+    { id: 'glm-4.6', name: 'GLM 4.6' },
+    { id: 'kimi-k2', name: 'Kimi K2' },
+  ],
+}
+
+const ICON = (
+  <span className={s.iconPicture}>
+    <img src={appIcon} alt="" />
+  </span>
+)
+
+/** The panel's look, as the Control Center draws it, without being a popover: for a picture. */
+export function SettingsPanel({ open = 'all', agent = 'codex' }: { open?: 'all' | 'agents'; agent?: string }) {
+  const tab = AGENT_TABS.find((x) => x.id === agent) ?? AGENT_TABS[0]!
   return (
-    <div className={`${s.window} ${className ?? ''}`} style={style}>
-      <TitleBar lights="drawn">
-        <BackCrumb to="Home" title="Settings" onBack={none} />
-      </TitleBar>
-      <div className={s.scroll}>
-        <div className={s.page}>
-          <section className={s.section}>
-            <Heading level={2}>Agents on this Mac</Heading>
-            <Runtimes label="Agents on this Mac" runtimes={AGENTS} onAdd={none} />
-          </section>
-          <section className={s.section}>
-            <Heading level={2}>Code hosts and trackers</Heading>
-            <ConnectionsList />
-          </section>
-          <section className={s.section}>
-            <div className={s.titled}>
-              <Heading level={2}>While you’re in another app</Heading>
-              <p className={s.quiet}>Where Althar shows what needs you and what runs.</p>
-            </div>
-            <Choices
-              label="While you’re in another app"
-              options={[
-                { value: 'island', title: 'Round the notch', note: 'Point at it to see what needs you and what runs.' },
-                { value: 'menu', title: 'In the menu bar', note: 'Click Althar’s mark to see what needs you and what runs.' },
-              ]}
-              value="island"
-              onChange={none}
-            />
-          </section>
-        </div>
+    <div className={`${s.panel} ${open === 'agents' ? s.panelWide : ''}`} role="presentation">
+      {open === 'all' ? (
+        <>
+          <ControlGrid>
+            <ControlModule title="Agents" aside="3 agents · 7 accounts" onClick={none}>
+              <ControlAgents
+                agents={[
+                  { id: 'claude-code', name: 'Claude Code', brand: Brand.ClaudeCode, line: 'Northwind out until 14:00', tone: 'quiet' },
+                  { id: 'codex', name: 'Codex', brand: Brand.Codex, line: '3 accounts' },
+                  { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, line: '2 accounts' },
+                ]}
+              />
+            </ControlModule>
+            <ControlModule title="Code hosts and trackers" span={2} aside="6 connected" onClick={none}>
+              <ControlMarks
+                marks={[
+                  { id: 'github', name: 'GitHub', brand: Brand.GitHub },
+                  { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab },
+                  { id: 'bitbucket', name: 'Bitbucket', brand: Brand.Bitbucket },
+                  { id: 'linear', name: 'Linear', brand: Brand.Linear },
+                  { id: 'jira', name: 'Jira', brand: Brand.Jira },
+                  { id: 'trello', name: 'Trello', brand: Brand.Trello },
+                ]}
+              />
+            </ControlModule>
+            <ControlPicture title="App icon" name="Cobalt" picture={ICON} onClick={none} />
+            <ControlToggle title="Keep awake" line="While work runs" on onChange={none} glyph={<Icon name="clock" size={16} />} />
+            <ControlToggle title="Dictation" line="Off" on={false} onChange={none} glyph={<Icon name="mic" size={16} />} />
+          </ControlGrid>
+          <ControlFoot>
+            <span>Althar 0.1.0</span>
+          </ControlFoot>
+        </>
+      ) : (
+        <ControlDetail title="Agents" aside="3 agents · 7 accounts" onBack={none}>
+          <AgentTabs
+            label="Agents"
+            agents={AGENT_TABS}
+            value={tab.id}
+            onValueChange={none}
+            aside={<ModelSwitches agent={tab.name} models={MODELS_OF[tab.id] ?? []} off={[]} onChange={none} />}
+          >
+            <Accounts agent={tab.name} accounts={ACCOUNTS_OF[tab.id] ?? []} onAdd={none} />
+          </AgentTabs>
+        </ControlDetail>
+      )}
+    </div>
+  )
+}
+
+/** The home with Settings open over it, from the gear, as the app shows it. */
+export function SettingsWindow({
+  open = 'all',
+  agent,
+  className,
+  style,
+}: {
+  open?: 'all' | 'agents'
+  agent?: string
+  className?: string
+  style?: CSSProperties
+}) {
+  return (
+    <div className={`${s.over} ${className ?? ''}`} style={style}>
+      <HomeWindow />
+      <div className={`${s.overPanel} ${open === 'agents' ? s.overWide : ''}`}>
+        <SettingsPanel open={open} {...(agent ? { agent } : {})} />
       </div>
     </div>
   )
@@ -590,8 +700,10 @@ export function IslandOpen({
 }) {
   return (
     <Island notch={NOTCH} waiting={waiting} running={running} open={open} onOpenChange={none} onOpenApp={none} saying={saying ?? null}>
+      {/* Touched up: the ink sheet doesn't yet set the code chip's paper (a task is open for the app). */}
       <EdgeSheet
         tone="ink"
+        style={{ '--n-4': 'rgba(255, 255, 255, 0.1)' } as CSSProperties}
         waiting={EDGE_NEEDS.length}
         working={EDGE_WORK.length}
         needs={EDGE_NEEDS.map((row) => edgeRowOf(row, none))}

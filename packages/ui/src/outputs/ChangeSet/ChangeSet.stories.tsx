@@ -4,6 +4,7 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 import { CHANGE_BRANCH, CHANGE_DRAFT, CHANGE_HELD, CHANGE_MERGED, CHANGE_ONE_REPO, CHANGE_READY } from '../../fixtures/outputs'
 import { States, statesParameters } from '../../storybook/States'
 import { DiffStat } from '../../primitives/FileChanges/FileChanges'
+import { ChangeState } from '../../foundations/vocabulary'
 import { ChangeSet } from './ChangeSet'
 
 const meta = {
@@ -52,15 +53,15 @@ export const Accepting: Story = {
 export const SendingBack: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Send back' }))
+    await userEvent.click(c.getByRole('button', { name: 'Ask for changes' }))
     const field = c.getByRole('textbox')
     await expect(field).toHaveFocus()
     /* sent empty, it says what is missing */
-    await userEvent.click(c.getByRole('button', { name: 'Send back' }))
+    await userEvent.click(c.getByRole('button', { name: 'Send to the lead' }))
     await expect(args.onSendBack).not.toHaveBeenCalled()
     await expect(field).toHaveAttribute('aria-invalid', 'true')
     await userEvent.type(field, 'Keep the old cache for one release')
-    await userEvent.click(c.getByRole('button', { name: 'Send back' }))
+    await userEvent.click(c.getByRole('button', { name: 'Send to the lead' }))
     await expect(args.onSendBack).toHaveBeenCalledWith('Keep the old cache for one release')
     await expect(c.getByRole('button', { name: 'Accept and merge both' })).toBeInTheDocument()
   },
@@ -69,12 +70,31 @@ export const SendingBack: Story = {
 export const Cancelling: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Send back' }))
+    await userEvent.click(c.getByRole('button', { name: 'Ask for changes' }))
     await userEvent.keyboard('{Escape}')
     await expect(c.queryByRole('textbox')).toBeNull()
-    await userEvent.click(c.getByRole('button', { name: 'Send back' }))
+    await userEvent.click(c.getByRole('button', { name: 'Ask for changes' }))
     await userEvent.click(c.getByRole('button', { name: 'Cancel' }))
     await expect(args.onSendBack).not.toHaveBeenCalled()
+  },
+}
+
+/** Merged on this Mac, not on its remote yet: one press pushes it, with the person's own git. */
+export const MergedHere: Story = {
+  args: {
+    ...CHANGE_BRANCH,
+    host: undefined,
+    state: ChangeState.Merged,
+    note: 'Merged into main on this Mac. origin doesn’t have it yet.',
+    onPush: fn(),
+    text: { push: () => 'Push main to origin' },
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Push main to origin' }))
+    await expect(args.onPush).toHaveBeenCalled()
+    await expect(c.getByText('With your own git sign-in, as from a terminal')).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: /^Merge into/ })).toBeNull()
   },
 }
 
@@ -89,6 +109,8 @@ export const AllStates: Story = {
         { state: 'held', node: <ChangeSet {...args} {...CHANGE_HELD} /> },
         { state: 'merged', node: <ChangeSet {...args} {...CHANGE_MERGED} /> },
         { state: 'on its branch', node: <ChangeSet {...args} {...CHANGE_BRANCH} host={undefined} /> },
+        { state: 'merged here, not pushed', node: <ChangeSet {...args} {...MergedHere.args} /> },
+        { state: 'pushing', node: <ChangeSet {...args} {...MergedHere.args} pushing /> },
         { state: 'one repository, same reviewer', node: <ChangeSet {...args} {...CHANGE_ONE_REPO} /> },
         { state: 'read only', node: <ChangeSet {...args} {...ReadOnly.args} /> },
         { state: 'accepting', node: <ChangeSet {...args} accepting /> },

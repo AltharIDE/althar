@@ -14,7 +14,7 @@
 }
 
 /* ---- a Mac's screen ---- */
-.screenWrap { max-width: 1320px; margin: 70px auto 0; padding: 0 var(--gut); }
+.screenWrap { max-width: min(1320px, calc((100svh - 60px) * 1.6 + 2 * var(--gut) + 20px)); margin: 70px auto 0; padding: 0 var(--gut); }
 /* The bezel: black, thin, rounded as a MacBook's screen is. */
 .bezel {
   padding: 10px;
@@ -128,7 +128,7 @@
 
 @media (max-width: 700px) {
   .scene { padding-top: 96px; }
-  .screenWrap { margin-top: 40px; }
+  .screenWrap { max-width: none; margin-top: 40px; }
   .bezel { padding: 6px; border-radius: 18px; }
   .screen { border-radius: 12px; }
   .slab { display: none; }

@@ -1,0 +1,167 @@
+/* A task's outputs before it has made anything: the whole of the face, quiet. */
+.none {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+}
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  color: var(--t-1);
+  text-wrap: balance;
+}
+.note {
+  max-width: 440px;
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+
+/* ---- light: the words over Althar's light ---------------------------------------- */
+.words {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 520px;
+  margin-top: clamp(48px, 18vh, 180px);
+  padding: 0 32px;
+  text-align: center;
+}
+.light .note {
+  text-wrap: balance;
+}
+
+/* ---- trail and outline: a column, the words over what follows -------------------- */
+.column {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  margin-top: clamp(40px, 12vh, 120px);
+  padding: 0 32px;
+  overflow: auto;
+}
+
+.trail {
+  margin-top: 30px;
+  /* the earliest fade out at the foot rather than stop at a line */
+  mask-image: linear-gradient(to bottom, #000 70%, transparent);
+}
+.label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  color: var(--t-3);
+}
+.files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.file {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+  font: 12.5px/1.3 var(--mono);
+  animation: arrive 420ms var(--ease) both;
+}
+.name {
+  flex: none;
+  color: var(--t-1);
+}
+.dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-3);
+}
+@keyframes arrive {
+  from {
+    transform: translateY(-6px);
+    opacity: 0;
+  }
+}
+
+.ahead {
+  margin: 30px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.step {
+  display: flex;
+  gap: 18px;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+.step:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.number {
+  flex: none;
+  width: 22px;
+  font: 300 26px/1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.now .number {
+  color: var(--live);
+}
+.stepWords {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.stepTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.next .stepTitle {
+  color: var(--t-2);
+}
+.done .stepTitle,
+.done .stepNote {
+  color: var(--t-3);
+}
+.when {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--live);
+}
+.done .when {
+  color: var(--t-3);
+}
+.stepNote {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file {
+    animation: none;
+  }
+}

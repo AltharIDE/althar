@@ -5,7 +5,7 @@ import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 
 import { LINKS } from '../../../content/facts'
 import { cx } from '../../../lib/cx'
 import { Get } from '../../../shared/Close'
-import { Handover, HomeWindow, IslandOpen, Launch, Limit, ProjectWindow, SettingsWindow, useAssembling } from '../kit/app'
+import { Handover, HomeWindow, IslandOpen, Launch, Limit, ProjectWindow, SettingsPanel, useAssembling } from '../kit/app'
 import { Desktop, EditorWindow, MacWindow, type Wallpaper } from '../kit/Mac'
 import { Shot } from '../kit/Shot'
 import t from '../kit/type.module.css'
@@ -358,21 +358,22 @@ export function Day() {
   )
 }
 
-/* ---- set up once: Settings, with what each part is for in the margin ---- */
+/* ---- set up once: Settings, the Control Center, with what each part is for beside it ---- */
 
 const NOTES = [
   {
-    top: 5,
     title: 'Every account you have',
-    body: 'Two Claude plans, three Codex accounts, a key for OpenCode. Work goes to whichever has room.',
+    body: 'Two Claude plans, three Codex accounts, a key and a coding plan for OpenCode. Work goes to whichever has room.',
   },
   {
-    top: 62,
     title: 'Your hosts and trackers',
     body: 'GitHub, GitLab and Bitbucket, self-hosted too. Linear, Jira and Trello.',
     marks: [Brand.GitHub, Brand.GitLab, Brand.Bitbucket, Brand.Linear, Brand.Jira, Brand.Trello],
   },
-  { top: 86, title: 'Round the notch', body: 'Or in the menu bar: where it shows you what needs you while you work elsewhere.' },
+  {
+    title: 'The rest is a switch',
+    body: 'Keep the Mac awake while work runs. Talk instead of typing. Round the notch, or in the menu bar.',
+  },
 ]
 
 function SetUp() {
@@ -384,25 +385,36 @@ function SetUp() {
           Set up once
         </p>
         <h2 id="setup-h" className={t.title}>
-          The whole setup. <b>One page.</b>
+          The whole setup. <b>One panel.</b>
         </h2>
       </div>
       <div className={s.annotated}>
-        <div className={s.settings}>
-          <Shot
-            w={760}
-            label="Althar's settings: agents and their accounts, code hosts and trackers, and where it shows"
-            frame={s.settingsFrame}
-            phoneW={420}
-          >
-            <div className={s.settingsWin}>
-              <SettingsWindow />
-            </div>
-          </Shot>
+        <div className={s.panels}>
+          <div className={s.glance}>
+            <Shot
+              w={440}
+              label="Settings at a glance: agents and their accounts, code hosts and trackers, the app icon, and two switches"
+              maxScale={1.15}
+              frame={s.settingsFrame}
+            >
+              <SettingsPanel />
+            </Shot>
+          </div>
+          <div className={s.detail}>
+            <Shot
+              w={900}
+              phoneW={440}
+              label="The agents opened out: Codex with three accounts, and its models"
+              maxScale={1}
+              frame={s.settingsFrame}
+            >
+              <SettingsPanel open="agents" agent="codex" />
+            </Shot>
+          </div>
         </div>
         <ol className={s.notes}>
           {NOTES.map((n, i) => (
-            <li key={n.title} style={{ '--top': `${n.top}%` } as CSSProperties}>
+            <li key={n.title}>
               <span className={s.n}>{String(i + 1).padStart(2, '0')}</span>
               <b>{n.title}</b>
               <span>{n.body}</span>

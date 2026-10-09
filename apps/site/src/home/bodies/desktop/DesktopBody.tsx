@@ -1,27 +1,18 @@
-import { Brand, BrandMark, Light } from '@althar/ui'
+import { Light } from '@althar/ui'
 import { type ReactNode, useRef } from 'react'
 
 import { LINKS } from '../../../content/facts'
 import { cx } from '../../../lib/cx'
 import { Get } from '../../../shared/Close'
-import {
-  ConnectionsList,
-  Handover,
-  HomeWindow,
-  IslandOpen,
-  Launch,
-  Limit,
-  ProjectWindow,
-  Rules,
-  SettingsWindow,
-  TwoLabReview,
-  useAssembling,
-} from '../kit/app'
-import { Desktop, EditorWindow, MacWindow } from '../kit/Mac'
+import { HomeWindow, IslandOpen, Launch, ProjectWindow, SettingsWindow, TwoLabReview, useAssembling } from '../kit/app'
+import { EdgeTour } from '../kit/EdgeTour'
+import { Desktop, MacWindow } from '../kit/Mac'
 import { useSeen } from '../kit/seen'
 import { Shot } from '../kit/Shot'
 import t from '../kit/type.module.css'
 import s from './DesktopBody.module.css'
+import { Flow } from './Flow'
+import { Handoff } from './Handoff'
 
 /*
  * Desktop: the product, shown. One claim a screen, in the first screen's
@@ -135,15 +126,6 @@ function TeamScene() {
   )
 }
 
-const MARKS = [
-  { brand: Brand.GitHub, name: 'GitHub' },
-  { brand: Brand.GitLab, name: 'GitLab' },
-  { brand: Brand.Bitbucket, name: 'Bitbucket' },
-  { brand: Brand.Linear, name: 'Linear' },
-  { brand: Brand.Jira, name: 'Jira' },
-  { brand: Brand.Trello, name: 'Trello' },
-]
-
 export function DesktopBody() {
   return (
     <main id="main" tabIndex={-1} className={s.body}>
@@ -193,12 +175,12 @@ export function DesktopBody() {
         lead="Althar runs on the sign-ins already on your Mac, as many as you have: work and personal, Max and Pro, any key for OpenCode. Work goes to whichever has room."
       >
         <Screen
-          label="Settings: Claude Code with two accounts, Codex with three, OpenCode with a key and a coding plan"
-          phone={{ x: 380, y: 24, w: 680, h: 700 }}
+          label="Settings open over the home: Codex with three accounts, Claude Code with two, OpenCode with a key and a coding plan"
+          phone={{ x: 420, y: 70, w: 960, h: 620 }}
         >
           <Desktop>
-            <MacWindow style={{ left: 300, top: 24, width: 840, height: 900 }}>
-              <SettingsWindow />
+            <MacWindow style={{ left: 70, top: 26, width: 1300, height: 820 }}>
+              <SettingsWindow open="agents" agent="codex" />
             </MacWindow>
           </Desktop>
         </Screen>
@@ -212,27 +194,11 @@ export function DesktopBody() {
             Out of usage? <b>It carries on.</b>
           </>
         }
-        lead="When Claude hits its limit mid-task, Codex picks up the same thread, the same plan and the same branch. It moves back after the reset, if it is still running."
+        lead="A plan runs out halfway through a task. The task doesn’t stop: the next agent you’re signed in to picks it up where it was, and you only hear about it if you look."
       >
-        <Close
-          label="Claude Code's usage limit reached: the lead and the security review are paused, and continue with Codex"
-          w={820}
-          phoneW={420}
-        >
-          <div className={s.handover}>
-            <Limit />
-            <div className={s.cards}>
-              <div>
-                <p className={s.when}>11:31 · Claude Code out</p>
-                <Handover after={false} />
-              </div>
-              <div>
-                <p className={s.when}>11:31 · Codex carries on</p>
-                <Handover after />
-              </div>
-            </div>
-          </div>
-        </Close>
+        <div className={s.lanes}>
+          <Handoff />
+        </div>
       </Scene>
 
       <Scene
@@ -256,19 +222,12 @@ export function DesktopBody() {
         kicker="At the edge of your screen"
         title={
           <>
-            In your editor, <b>still in reach.</b>
+            Wherever you are, <b>still in reach.</b>
           </>
         }
-        lead="Althar sits round the notch, or in the menu bar. Point at it to answer a permission or open a pull request without leaving what you’re doing."
+        lead="In your editor, in the browser, in a terminal: Althar sits round the notch, or in the menu bar. Point at it to answer a permission or open a pull request without leaving what you’re doing."
       >
-        <Screen
-          label="The island round the notch, dropped open over a code editor: two things that need you and four running"
-          phone={{ x: 450, y: 0, w: 540, h: 600 }}
-        >
-          <Desktop wallpaper="dark" app="Code" island={<IslandOpen />}>
-            <EditorWindow style={{ left: 120, top: 50, width: 1200, height: 780 }} />
-          </Desktop>
-        </Screen>
+        <EdgeTour />
       </Scene>
 
       <Scene
@@ -276,39 +235,12 @@ export function DesktopBody() {
         kicker="Connections"
         title={
           <>
-            Your tracker. Your host. <b>Already connected.</b>
+            From your tracker. <b>To your host.</b>
           </>
         }
-        lead="Start a task from a Linear, Jira or Trello issue. It ends as a pull request on GitHub, GitLab or Bitbucket, self-hosted ones included."
+        lead="Hand Althar an issue from Linear, Jira or Trello. It comes back as a pull request on GitHub, GitLab or Bitbucket, self-hosted ones included, reviewed and with its checks run."
       >
-        <ul className={s.marks} aria-label="Code hosts and trackers">
-          {MARKS.map((m) => (
-            <li key={m.name}>
-              <BrandMark brand={m.brand} size={40} />
-              <span>{m.name}</span>
-            </li>
-          ))}
-        </ul>
-        <Close label="Settings: GitHub, GitLab, Bitbucket, Linear, Jira and Trello connected" w={560} phoneW={380}>
-          <ConnectionsList />
-        </Close>
-      </Scene>
-
-      <Scene
-        id="rules"
-        kicker="Rules"
-        title={
-          <>
-            Set it once. <b>It holds for every task.</b>
-          </>
-        }
-        lead="What always waits for you, what never happens, how review findings are settled, and what to do when a plan runs out."
-      >
-        <div className={s.fade}>
-          <Close label="Meridian's rules: when agents need a yes" w={760} phoneW={420} wide>
-            <Rules />
-          </Close>
-        </div>
+        <Flow />
       </Scene>
 
       <section className={s.end} aria-labelledby="end-h">

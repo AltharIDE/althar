@@ -1,0 +1,152 @@
+/* The navs. Each floats at the top of the window but today's bar; the first screen keeps its room. */
+
+.spacer { height: 68px; }
+.phoneOnly, .menubarStatus .phoneOnly, .frostEnd .phoneOnly, .islandEnd .phoneOnly { display: none; }
+
+.brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 650; font-size: 18px; letter-spacing: -0.01em; color: var(--t-1); text-decoration: none; }
+.logo { --logo-point: var(--live); }
+
+.download {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 34px; padding: 0 14px; border-radius: 8px;
+  background: var(--t-1); color: #fff;
+  font: 600 13.5px var(--font); text-decoration: none; white-space: nowrap;
+}
+.download:hover { background: #000; }
+
+.menuButton {
+  height: 34px; padding: 0 12px; border: 0; border-radius: 8px;
+  background: none; box-shadow: inset 0 0 0 1px var(--line-3);
+  font: 600 13.5px var(--font); color: var(--t-1); cursor: pointer;
+}
+
+/* The phone's sheet of links, under whichever nav opened it. */
+.sheet {
+  display: grid; grid-template-rows: 0fr; overflow: hidden;
+  transition: grid-template-rows 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.sheet > nav { min-height: 0; display: grid; padding: 0 var(--gut); }
+.sheetOpen { grid-template-rows: 1fr; }
+.sheetOpen > nav { padding-bottom: 14px; }
+.sheet a {
+  display: flex; align-items: center; gap: 10px; padding: 14px 0;
+  border-top: 1px solid var(--line-2);
+  font-family: 'Inter Display', var(--display); font-size: 24px; font-weight: 300; letter-spacing: -0.03em;
+  color: var(--t-1); text-decoration: none;
+}
+.sheetInk a { color: #fff; border-top-color: rgba(255, 255, 255, 0.14); }
+
+/* ---- Frost ---- */
+.frost {
+  position: fixed; inset: 0 0 auto; z-index: 40;
+  transition: background 300ms ease, box-shadow 300ms ease, backdrop-filter 300ms ease;
+}
+.frosted { background: rgba(244, 242, 236, 0.78); backdrop-filter: blur(20px) saturate(1.6); box-shadow: 0 1px 0 var(--line-2); }
+.frostRow { display: flex; align-items: center; gap: 28px; max-width: var(--max); height: 64px; margin: 0 auto; padding: 0 var(--gut); }
+.frostLinks { display: flex; gap: 26px; margin: 0 auto; font-size: 14px; }
+.frostLinks a { color: var(--t-2); text-decoration: none; }
+.frostLinks a:hover { color: var(--t-1); }
+.frostEnd { display: flex; align-items: center; gap: 14px; }
+.github { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; color: var(--t-1); }
+.github:hover { background: rgba(20, 20, 23, 0.06); }
+
+/* ---- Island: black, hanging from the top edge, drawing in as you read ---- */
+.islandWrap { position: fixed; inset: 0 0 auto; z-index: 40; display: flex; justify-content: center; pointer-events: none; }
+.island {
+  pointer-events: auto;
+  width: 330px; overflow: hidden;
+  border-radius: 0 0 22px 22px; background: #000; color: #fff;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  transition: width 520ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.islandWide { width: min(860px, calc(100vw - 24px)); border-radius: 0 0 26px 26px; }
+.islandBar { display: flex; align-items: center; gap: 22px; height: 52px; padding: 0 10px 0 20px; white-space: nowrap; }
+.islandMark { display: inline-flex; align-items: center; gap: 8px; color: #fff; text-decoration: none; font-weight: 650; font-size: 15px; --logo-point: #9aa6ff; }
+.islandLinks { display: flex; gap: 22px; margin-right: auto; font-size: 13.5px; opacity: 0; transition: opacity 260ms ease; }
+.islandWide .islandLinks { opacity: 1; transition-delay: 160ms; }
+.islandLinks a { color: rgba(255, 255, 255, 0.72); text-decoration: none; }
+.islandLinks a:hover { color: #fff; }
+.islandEnd { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.islandGithub { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: rgba(255, 255, 255, 0.8); }
+.islandGithub:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.islandDownload {
+  display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 15px; border-radius: 17px;
+  background: #fff; color: #000; font: 600 13px var(--font); text-decoration: none;
+}
+.islandDownload i { width: 6px; height: 6px; border-radius: 50%; background: var(--live); }
+.islandMenu { height: 32px; border-radius: 16px; color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3); }
+.islandOpen { width: min(860px, calc(100vw - 16px)); }
+
+/* ---- Menu bar ---- */
+.menubar {
+  position: fixed; inset: 0 0 auto; z-index: 40;
+  background: rgba(244, 242, 236, 0.62); backdrop-filter: blur(24px) saturate(1.8);
+  box-shadow: 0 1px 0 var(--line);
+}
+.menubarRow { display: flex; align-items: center; justify-content: space-between; height: 34px; padding: 0 14px; font: 500 13.5px/1 var(--font); color: var(--t-1); }
+.menus, .menubarStatus { display: flex; align-items: center; gap: 4px; }
+.menubarMark { display: grid; place-items: center; width: 30px; height: 24px; border-radius: 5px; color: var(--t-1); --logo-point: var(--live); }
+.menubarApp { padding: 5px 9px; border-radius: 5px; font-weight: 700; color: var(--t-1); text-decoration: none; }
+.menubarLinks { display: flex; }
+.menubarLinks a, .menubarItem { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 5px; color: var(--t-1); text-decoration: none; }
+.menubarLinks a:hover, .menubarItem:hover, .menubarApp:hover, .menubarMark:hover { background: rgba(20, 20, 23, 0.08); }
+.menubarDownload { color: var(--live); font-weight: 600; }
+.menubarClock { padding: 0 6px 0 10px; font-variant-numeric: tabular-nums; color: var(--t-2); }
+
+/* ---- Edge: the name, the download, and Menu ---- */
+.edge {
+  position: fixed; inset: 0 0 auto; z-index: 42;
+  display: flex; align-items: center; justify-content: space-between;
+  height: 68px; padding: 0 max(var(--gut), calc((100vw - var(--max)) / 2 + var(--gut)));
+  transition: background 300ms ease, box-shadow 300ms ease;
+}
+.edgeScrolled { background: rgba(244, 242, 236, 0.82); backdrop-filter: blur(18px); box-shadow: 0 1px 0 var(--line-2); }
+.edgeOpen { background: transparent; backdrop-filter: none; box-shadow: none; }
+.edgeEnd { display: flex; align-items: center; gap: 12px; }
+.edgeMenu {
+  display: inline-flex; align-items: center; gap: 10px; height: 34px; padding: 0 4px 0 12px;
+  border: 0; background: none; font: 600 14px var(--font); color: var(--t-1); cursor: pointer;
+}
+.edgeMenu i { position: relative; width: 22px; height: 10px; }
+.edgeMenu i::before, .edgeMenu i::after { content: ''; position: absolute; left: 0; right: 0; height: 1.5px; background: currentColor; transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1), top 320ms ease; }
+.edgeMenu i::before { top: 1px; }
+.edgeMenu i::after { top: 8px; }
+.edgeOpen .edgeMenu i::before { top: 4.5px; transform: rotate(45deg); }
+.edgeOpen .edgeMenu i::after { top: 4.5px; transform: rotate(-45deg); }
+
+.overlay {
+  position: fixed; inset: 0; z-index: 41;
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 90px max(var(--gut), calc((100vw - var(--max)) / 2 + var(--gut))) 40px;
+  background: rgba(244, 242, 236, 0.96); backdrop-filter: blur(24px);
+  opacity: 0; visibility: hidden; transition: opacity 320ms ease, visibility 0s linear 320ms;
+}
+.overlayOpen { opacity: 1; visibility: visible; transition: opacity 320ms ease; }
+.overlayLinks { display: grid; }
+.overlayLinks a {
+  display: flex; align-items: baseline; gap: 22px; padding: 10px 0;
+  font-family: 'Inter Display', var(--display); font-weight: 200; font-size: clamp(44px, 7.4vw, 104px); line-height: 1; letter-spacing: -0.05em;
+  color: var(--t-1); text-decoration: none;
+  opacity: 0; transform: translateY(16px);
+  transition: opacity 400ms ease, transform 600ms cubic-bezier(0.22, 1, 0.36, 1), font-weight 300ms ease;
+}
+.overlayOpen .overlayLinks a { opacity: 1; transform: none; }
+.overlayLinks a:hover { font-weight: 720; letter-spacing: -0.056em; }
+.overlayLinks span { font: 500 12px var(--mono); letter-spacing: 0.04em; color: var(--live); transform: translateY(-0.8em); }
+.overlayFoot { display: flex; flex-wrap: wrap; align-items: center; gap: 22px; margin-top: 48px; }
+.overlayFoot a:last-child { display: inline-flex; align-items: center; gap: 8px; color: var(--t-1); font-weight: 600; font-size: 14px; text-decoration: none; }
+
+@media (max-width: 900px) {
+  .frostLinks, .islandLinks, .menubarLinks, .wideOnly { display: none; }
+  .phoneOnly, .menubarStatus .phoneOnly, .frostEnd .phoneOnly, .islandEnd .phoneOnly { display: inline-flex; align-items: center; }
+  .frostEnd .download { display: none; }
+  .frostRow { justify-content: space-between; }
+  .islandWide, .island { width: min(380px, calc(100vw - 24px)); }
+  .islandOpen { width: calc(100vw - 16px); }
+  .islandGithub { display: none; }
+  .islandBar { gap: 10px; }
+  .menubarRow { padding: 0 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .island, .islandLinks, .sheet, .overlay, .overlayLinks a { transition: none; }
+}

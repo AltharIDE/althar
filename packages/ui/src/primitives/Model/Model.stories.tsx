@@ -1,11 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { expect, userEvent, within } from 'storybook/test'
 
 import { MODEL_LIST, OPUS, UNKNOWN_MODEL } from '../../fixtures/models'
 import { Model, WithModels } from './Model'
 import { States } from '../../storybook/States'
 
 const meta = {
-  title: 'Foundations/Model',
+  title: 'Primitives/Model',
   component: Model,
   args: { model: OPUS, short: false, strong: false },
   argTypes: {
@@ -19,6 +20,18 @@ export const Full: Story = {}
 export const Short: Story = { args: { short: true } }
 /** Who is speaking, at the head of a turn. */
 export const Strong: Story = { args: { strong: true } }
+/** How it is reached, on hover: the agent that runs it, and the account; read out after its name. */
+export const Via: Story = {
+  args: { model: { ...OPUS, via: 'via Claude Code · work' } },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(', via Claude Code · work')).toBeInTheDocument()
+    await userEvent.hover(c.getByText(OPUS.name))
+    await expect(await within(document.body).findByRole('tooltip')).toHaveTextContent('via Claude Code · work')
+  },
+}
+/** Short, the full name comes with it on hover. */
+export const ShortVia: Story = { args: { model: { ...OPUS, via: 'via Claude Code' }, short: true } }
 /** A model with no mark prints its name alone. */
 export const NoMark: Story = { args: { model: UNKNOWN_MODEL } }
 
@@ -51,6 +64,7 @@ export const AllStates: Story = {
         { state: 'short', node: <Model model={OPUS} short /> },
         { state: 'strong', node: <Model model={OPUS} strong /> },
         { state: 'no mark', node: <Model model={UNKNOWN_MODEL} /> },
+        { state: 'via', node: <Model model={{ ...OPUS, via: 'via Claude Code · work' }} /> },
         { state: 'long name', node: <Model model={MODEL_LIST.find((x) => x.id === 'llama-4-maverick') ?? OPUS} /> },
       ]}
     />

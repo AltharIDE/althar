@@ -76,44 +76,14 @@
 /* ---- set up once ---- */
 .setup { padding-top: 170px; }
 .setupHead { display: grid; justify-items: center; gap: 22px; max-width: 1000px; margin: 0 auto; padding: 0 var(--gut); text-align: center; }
-.annotated {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 56px;
-  max-width: 1180px;
-  margin: 70px auto 0;
-  padding: 0 var(--gut);
-}
-.settings { position: relative; }
-.settingsFrame {
-  border-radius: 14px;
-  box-shadow: 0 0 0 1px rgba(20, 20, 40, 0.08), 0 30px 80px rgba(20, 24, 70, 0.16);
-}
-.settingsWin { height: 100%; }
-.notes { position: relative; margin: 0; padding: 0; list-style: none; }
-.notes li {
-  position: absolute;
-  top: var(--top);
-  left: 0;
-  right: 0;
-  display: grid;
-  gap: 6px;
-  padding-top: 12px;
-  border-top: 1px solid var(--t-1);
-  font-size: 14.5px;
-  line-height: 1.5;
-  color: var(--t-2);
-}
-/* A hairline from the note across to what it is about. */
-.notes li::before {
-  content: '';
-  position: absolute;
-  top: -1px;
-  right: 100%;
-  width: 56px;
-  border-top: 1px dashed var(--line-3);
-}
+.annotated { max-width: 1240px; margin: 64px auto 0; padding: 0 var(--gut); }
+/* The panel at a glance, and the agents opened out from it, overlapping a little, the way it opens. */
+.panels { position: relative; display: grid; grid-template-columns: 380px minmax(0, 1fr); align-items: start; gap: 32px; }
+.glance { position: relative; margin-top: 48px; }
+.detail { min-width: 0; }
+.settingsFrame { border-radius: 20px; box-shadow: 0 0 0 1px rgba(20, 20, 40, 0.07), 0 30px 80px rgba(20, 24, 70, 0.16), 0 8px 20px rgba(20, 24, 70, 0.06); }
+.notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 36px; margin: 56px 0 0; padding: 0; list-style: none; }
+.notes li { display: grid; gap: 6px; align-content: start; padding-top: 14px; border-top: 1px solid var(--t-1); font-size: 14.5px; line-height: 1.5; color: var(--t-2); }
 .notes b { font-size: 17px; letter-spacing: -0.01em; color: var(--t-1); }
 .n { font: 500 11px var(--mono); color: var(--live); }
 .noteMarks { display: flex; gap: 10px; margin-top: 6px; color: var(--t-1); }
@@ -126,10 +96,9 @@
 .foot span { margin-left: auto; }
 
 @media (max-width: 900px) {
-  .annotated { grid-template-columns: 1fr; gap: 0; }
-  .notes { display: grid; gap: 26px; margin-top: 36px; }
-  .notes li { position: static; }
-  .notes li::before { display: none; }
+  .panels { grid-template-columns: 1fr; gap: 24px; }
+  .glance { margin: 0; }
+  .notes { grid-template-columns: 1fr; gap: 26px; margin-top: 40px; }
 }
 @media (max-width: 700px) {
   .film { padding-top: 96px; }

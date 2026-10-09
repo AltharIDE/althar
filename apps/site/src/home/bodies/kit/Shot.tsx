@@ -44,6 +44,23 @@ export interface ShotProps {
 
 const NARROW = 700
 
+/*
+ * The app's components keep what is current in view (a tab scrolls itself
+ * into its strip; an opened panel takes focus), which in a picture would
+ * scroll the page. Inside a picture, those do nothing.
+ */
+if (typeof window !== 'undefined') {
+  const inPicture = (el: Element) => el.closest('[data-picture]') !== null
+  const scrollIntoView = Element.prototype.scrollIntoView
+  Element.prototype.scrollIntoView = function (this: Element, arg?: boolean | ScrollIntoViewOptions) {
+    if (!inPicture(this)) scrollIntoView.call(this, arg)
+  }
+  const focus = HTMLElement.prototype.focus
+  HTMLElement.prototype.focus = function (this: HTMLElement, options?: FocusOptions) {
+    if (!inPicture(this)) focus.call(this, options)
+  }
+}
+
 export function Shot({ w, h, phoneW, phone, crop, align = 'center', maxScale = 2, label, className, frame, children }: ShotProps) {
   const box = useRef<HTMLDivElement>(null)
   const stage = useRef<HTMLDivElement>(null)
@@ -93,6 +110,7 @@ export function Shot({ w, h, phoneW, phone, crop, align = 'center', maxScale = 2
         <div
           ref={stage}
           className={cx(s.stage, 'ch-root')}
+          data-picture
           inert
           aria-hidden="true"
           style={{

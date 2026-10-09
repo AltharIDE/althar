@@ -1,17 +1,18 @@
-/* Prototype only: the strip that switches between directions. */
+/* Prototype only: the strips that switch the nav and the direction. */
+.dock {
+  position: fixed; left: 50%; bottom: 18px; z-index: 50;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  max-width: calc(100vw - 16px); transform: translateX(-50%);
+}
+.label { padding: 0 8px 0 9px; font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255, 255, 255, 0.5); }
 .pick {
-  position: fixed;
-  left: 50%;
-  bottom: 18px;
-  z-index: 50;
   display: flex;
   align-items: center;
   gap: 2px;
-  max-width: calc(100vw - 16px);
+  max-width: 100%;
   overflow-x: auto;
   scrollbar-width: none;
   padding: 4px;
-  transform: translateX(-50%);
   border-radius: 12px;
   background: rgba(20, 20, 23, 0.86);
   backdrop-filter: blur(12px);
@@ -29,7 +30,8 @@
 .pick button[aria-pressed='true'] { background: rgba(255, 255, 255, 0.14); color: #fff; }
 .pick b { font: 500 11px var(--mono); opacity: 0.6; }
 @media (max-width: 640px) {
-  .pick { bottom: 10px; font-size: 11.5px; }
+  .dock { bottom: 10px; }
+  .pick { font-size: 11.5px; }
   .pick button { padding: 7px 8px; gap: 4px; }
   .pick b { display: none; }
 }

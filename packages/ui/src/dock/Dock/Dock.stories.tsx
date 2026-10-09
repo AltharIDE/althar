@@ -107,7 +107,7 @@ export const EscapingANote: Story = {
   args: { peek: 'accept' },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Send back' }))
+    await userEvent.click(c.getByRole('button', { name: 'Ask for changes' }))
     await expect(c.getByRole('textbox')).toHaveFocus()
     await userEvent.keyboard('{Escape}')
     await expect(c.queryByRole('textbox')).toBeNull()

@@ -14,7 +14,7 @@ import {
   spring,
   springEasing,
 } from '@althar/ui/opening'
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { type ReactNode, useEffect, useLayoutEffect, useRef } from 'react'
 
 import { HERO } from '../content/home'
 import { cx } from '../lib/cx'
@@ -157,7 +157,7 @@ const arrive = (within: HTMLElement, at: number) => {
   }
 }
 
-export function Hero() {
+export function Hero({ nav }: { nav?: ReactNode } = {}) {
   const root = useRef<HTMLDivElement>(null)
   const columns = useRef<Array<HTMLCanvasElement | null>>([])
   const grain = useRef<HTMLDivElement>(null)
@@ -350,9 +350,7 @@ export function Hero() {
       </div>
       <canvas ref={mark} className={s.mark} aria-hidden="true" />
 
-      <div data-arrive>
-        <Bar tone="paper" />
-      </div>
+      <div data-arrive>{nav === undefined ? <Bar tone="paper" /> : nav}</div>
       <header className={s.head}>
         <p className={s.kicker} data-arrive>
           <i aria-hidden="true" />

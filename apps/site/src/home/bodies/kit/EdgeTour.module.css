@@ -1,0 +1,16 @@
+/* As large as the window's height lets the screen and its places be seen together. */
+.tour { max-width: min(1320px, calc((100svh - 130px) * 1.6 + 2 * var(--gut) + 20px)); margin: 70px auto 0; padding: 0 var(--gut); }
+/* The screen's bezel wraps the pictures; the moments sit under it, outside. */
+.bezel > div > div:first-child {
+  padding: 10px;
+  border-radius: 30px;
+  background: #000;
+  box-shadow: inset 0 0 0 1px #2a2a32, 0 40px 120px rgba(0, 0, 0, 0.6);
+}
+.screen { border-radius: 20px; }
+
+@media (max-width: 700px) {
+  .tour { max-width: none; margin-top: 40px; }
+  .bezel > div > div:first-child { padding: 6px; border-radius: 18px; }
+  .screen { border-radius: 12px; }
+}

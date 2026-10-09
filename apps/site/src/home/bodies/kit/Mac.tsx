@@ -1,3 +1,4 @@
+import { Logo } from '@althar/ui'
 import type { CSSProperties, ReactNode } from 'react'
 
 import { cx } from '../../../lib/cx'
@@ -16,6 +17,7 @@ export function Desktop({
   clock = 'Thu 14:02',
   app = 'Althar',
   island,
+  menu,
   compact = false,
   children,
   className,
@@ -29,6 +31,8 @@ export function Desktop({
   app?: string
   /** What hangs from the notch: an Island. Without it, the menu bar has none. */
   island?: ReactNode
+  /** Althar in the menu bar instead: its mark among the status items, and what drops from it when open. */
+  menu?: { open: ReactNode | null; waiting: number }
   children?: ReactNode
   className?: string
   style?: CSSProperties
@@ -49,12 +53,19 @@ export function Desktop({
           )}
         </span>
         <span className={s.status}>
+          {menu && (
+            <span className={cx(s.statusItem, menu.open != null && s.statusOn)}>
+              <Logo size={14} />
+              {menu.waiting > 0 && <i className={s.statusDot} />}
+            </span>
+          )}
           {!compact && <i className={s.battery} />}
           <span>{clock}</span>
         </span>
       </div>
       <div className={s.screen}>{children}</div>
       {island && <div className={s.edge}>{island}</div>}
+      {menu?.open && <div className={s.menuSheet}>{menu.open}</div>}
     </div>
   )
 }
@@ -108,6 +119,84 @@ export function EditorWindow({ className, style }: { className?: string; style?:
             </span>
           ))}
         </div>
+      </div>
+    </div>
+  )
+}
+
+/** A browser's window, for behind Althar: tabs, an address, and a page, its text as bars. */
+export function BrowserWindow({
+  className,
+  style,
+  url = 'github.com/meridian/meridian-api/pull/1191',
+}: {
+  className?: string
+  style?: CSSProperties
+  url?: string
+}) {
+  return (
+    <div className={cx(s.window, s.browser, className)} style={style}>
+      <div className={s.browserTabs}>
+        <span className={s.lights}>
+          <i />
+          <i />
+          <i />
+        </span>
+        <span className={cx(s.tab, s.tabOn)}>Pull request #1191 · meridian-api</span>
+        <span className={s.tab}>Refunds · Stripe Docs</span>
+        <span className={s.tab}>Partner dashboard</span>
+      </div>
+      <div className={s.address}>
+        <span>{url}</span>
+      </div>
+      <div className={s.page}>
+        <div className={s.pageHead}>
+          <b>Return 409 when a refund idempotency key is reused</b>
+          <span>#1191 · althar wants to merge 3 commits into main</span>
+        </div>
+        <div className={s.pageBody}>
+          {[88, 72, 0, 64, 80, 52, 0, 76, 60, 84, 0, 46, 70, 0, 82, 66, 74, 0, 58, 86, 40, 0, 70, 62].map((w, i) => (
+            <i key={i} style={{ width: w ? `${w}%` : 0 }} />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** A terminal's window, for behind Althar. */
+export function TerminalWindow({ className, style }: { className?: string; style?: CSSProperties }) {
+  const lines = [
+    ['$', 'bun test refunds'],
+    ['', ' ✓ refunds › 409 on a reused key (12 ms)'],
+    ['', ' ✓ refunds › retries keep the key (8 ms)'],
+    ['', ' ✓ limit › refunds share the partner budget (21 ms)'],
+    ['', ''],
+    ['', ' 48 pass · 0 fail · 1.21s'],
+    ['$', 'git log --oneline -3'],
+    ['', 'a91f2c0 Return 409 when a refund key is reused'],
+    ['', '7d03e11 Rate-limit refunds like charges'],
+    ['', '19ba7f4 Backfill idempotency keys before 1184'],
+    ['$', ''],
+  ]
+  return (
+    <div className={cx(s.window, s.terminal, className)} style={style}>
+      <div className={s.editorBar}>
+        <span className={s.lights}>
+          <i />
+          <i />
+          <i />
+        </span>
+        <span className={s.editorTitle}>meridian-api — zsh</span>
+      </div>
+      <div className={s.termBody}>
+        {lines.map(([p, l], i) => (
+          <span key={i}>
+            {p && <b>{p} </b>}
+            {l}
+            {i === lines.length - 1 && <em className={s.cursor} />}
+          </span>
+        ))}
       </div>
     </div>
   )

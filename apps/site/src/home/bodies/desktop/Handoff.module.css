@@ -1,0 +1,81 @@
+/* One task on two plans: lanes on a clock, drawn in as they come into view. */
+
+.handoff {
+  max-width: 1080px;
+  margin: 70px auto 0;
+  padding: 36px 40px 34px;
+  border-radius: 24px;
+  background: var(--n-1);
+  box-shadow: 0 0 0 1px rgba(20, 20, 40, 0.06), 0 30px 80px rgba(20, 24, 70, 0.1);
+}
+.head { display: flex; align-items: baseline; gap: 12px; font-size: 17px; letter-spacing: -0.01em; }
+.task { font: 500 12px var(--mono); color: var(--t-3); }
+
+.chart { position: relative; margin-top: 30px; padding-bottom: 34px; }
+.lane { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: center; gap: 24px; height: 76px; }
+.lane + .lane { border-top: 1px solid var(--line); }
+.who { display: flex; align-items: center; gap: 11px; margin: 0; min-width: 0; font-size: 15px; white-space: nowrap; }
+.who > span { display: grid; gap: 1px; min-width: 0; }
+.who span span { overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; color: var(--t-3); }
+
+.track { position: relative; height: 100%; }
+.bar {
+  position: absolute; top: 50%; height: 12px; margin-top: -6px; border-radius: 6px;
+  transform: scaleX(0); transform-origin: 0 50%;
+  transition: transform 1500ms cubic-bezier(0.45, 0, 0.2, 1);
+}
+.ink { background: var(--t-1); }
+.live { background: var(--live); box-shadow: 0 0 0 4px rgba(43, 59, 255, 0.1); }
+.second { transition-delay: 1900ms; transition-duration: 1800ms; }
+/* Resting until the reset: faint, hatched. */
+.rest {
+  position: absolute; top: 50%; height: 12px; margin-top: -6px; border-radius: 0 6px 6px 0;
+  background: repeating-linear-gradient(-45deg, var(--line-3) 0 2px, transparent 2px 6px);
+  opacity: 0; transition: opacity 700ms ease 1500ms;
+}
+.restLabel, .ready {
+  position: absolute; top: calc(50% + 12px); white-space: nowrap;
+  font-size: 12.5px; color: var(--t-3);
+  opacity: 0; transition: opacity 600ms ease;
+}
+.restLabel { transition-delay: 1700ms; }
+.ready { display: inline-flex; align-items: center; gap: 7px; top: 50%; margin-top: -9px; transform: translateX(10px); color: var(--signal); font-weight: 550; transition-delay: 3700ms; }
+.ready i { width: 8px; height: 8px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.14); }
+
+/* The moment it moved: a line down both lanes, from the chart's top. */
+.overlay { position: absolute; left: 244px; right: 0; top: -8px; bottom: 0; pointer-events: none; }
+.event {
+  position: absolute; top: 0; bottom: 26px;
+  border-left: 1px dashed var(--t-2);
+  opacity: 0; transition: opacity 500ms ease 1500ms;
+}
+.eventLabel { position: absolute; bottom: 100%; left: -1px; padding-bottom: 6px; white-space: nowrap; font-size: 13px; color: var(--t-2); transform: translateY(-2px); }
+.eventLabel time { font: 500 12px var(--mono); color: var(--t-1); margin-right: 6px; }
+
+.ticks { position: absolute; left: 0; right: 0; bottom: 0; height: 20px; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line-2); }
+.ticks li { position: absolute; top: 6px; transform: translateX(-50%); font: 11px var(--mono); color: var(--t-4); }
+.ticks li:first-child { transform: none; }
+.ticks li:last-child { transform: translateX(-100%); }
+
+.seen .bar { transform: scaleX(1); }
+.seen .rest, .seen .restLabel, .seen .ready, .seen .event { opacity: 1; }
+
+.same { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; margin: 34px 0 0; padding: 22px 0 0; list-style: none; border-top: 1px solid var(--line-2); }
+.same li { display: grid; gap: 4px; align-content: start; }
+.same b { font-family: 'Inter Display', var(--display); font-size: 20px; font-weight: 650; letter-spacing: -0.025em; }
+.same span { font-size: 14px; color: var(--t-2); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bar, .rest, .restLabel, .ready, .event { transition: none; }
+}
+@media (max-width: 700px) {
+  .handoff { margin-top: 40px; padding: 24px 18px 22px; border-radius: 18px; }
+  .head { flex-direction: column; gap: 4px; font-size: 16px; }
+  .lane { grid-template-columns: 1fr; gap: 6px; height: auto; padding: 12px 0 26px; }
+  .track { height: 22px; }
+  .overlay { left: 0; }
+  .ticks li:nth-child(even) { display: none; }
+  .chart { margin-top: 64px; }
+  .eventLabel { white-space: normal; width: 230px; font-size: 12.5px; }
+  .same { grid-template-columns: 1fr; gap: 14px; }
+}

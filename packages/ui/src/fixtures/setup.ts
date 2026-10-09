@@ -1,11 +1,13 @@
 import { useState } from 'react'
 
 import { Brand } from '../foundations/brands/brands'
-import { ConnectKind, RuntimeState, SourceOrigin } from '../foundations/vocabulary'
+import { RuntimeState, SourceOrigin } from '../foundations/vocabulary'
 import type { SelectOption } from '../primitives/Select/Select'
 import type { AccountEntry, FoundFolder } from '../setup/Accounts/Accounts'
-import type { ConnectOption } from '../setup/ConnectAgent/ConnectAgent'
+import type { AgentTab } from '../setup/AgentTabs/AgentTabs'
 import type { ServiceConnection, ServiceOption } from '../setup/Connections/Connections'
+import type { AgentGlance, MarkGlance } from '../setup/ControlCenter/ControlCenter'
+import type { SwitchedModel } from '../setup/ModelSwitches/ModelSwitches'
 import type { RuntimeEntry } from '../setup/Runtimes/Runtimes'
 import type { SourceEntry } from '../setup/SourceMap/SourceMap'
 
@@ -34,17 +36,6 @@ export const EVERY_STATE: RuntimeEntry[] = [
   { ...GEMINI_CLI, state: RuntimeState.SignedOut, waiting: 2 },
   { ...OLLAMA, state: RuntimeState.Outdated, version: '0.3.2', needs: '0.5' },
   { id: 'aider', name: 'Aider', state: RuntimeState.Checking },
-]
-
-/* The other ways to connect an agent, as this Mac finds them. */
-export const CONNECT: ConnectOption[] = [
-  { id: 'cursor', name: 'Cursor', brand: Brand.Cursor, kind: ConnectKind.App, state: 'Not installed' },
-  { id: 'copilot', name: 'GitHub Copilot', brand: Brand.GitHubCopilot, kind: ConnectKind.App, state: 'Not installed' },
-  { id: 'anthropic', name: 'Anthropic API', brand: Brand.Anthropic, kind: ConnectKind.Key },
-  { id: 'openai', name: 'OpenAI API', brand: Brand.OpenAI, kind: ConnectKind.Key },
-  { id: 'openrouter', name: 'OpenRouter', brand: Brand.OpenRouter, kind: ConnectKind.Key },
-  { id: 'ollama', name: 'Ollama', brand: Brand.Ollama, kind: ConnectKind.Local, state: 'Running · 3 models', ready: true },
-  { id: 'lm-studio', name: 'LM Studio', brand: Brand.LMStudio, kind: ConnectKind.Local, state: 'Not running' },
 ]
 
 export const ROLES: SelectOption<string>[] = [
@@ -264,10 +255,24 @@ export const CONNECTED: ServiceConnection[] = [
   { id: 'conn_3', service: 'linear', account: 'You', needsSignIn: true },
 ]
 
-/** Codex with four accounts: its usual folder, one Althar made, one codex-profiles made that is out of usage, and one signed out. */
+/** Codex with five accounts: its usual folder, one Althar made, one codex-profiles made that is out of usage, one signed out, and a key, billed per use, last. */
 export const ACCOUNTS: AccountEntry[] = [
-  { id: 'acc_usual', name: 'main', place: { kind: 'usual' }, state: { kind: 'ready', paid: 'plan' } },
-  { id: 'acc_work', name: 'work', place: { kind: 'own' }, state: { kind: 'ready', paid: 'plan' } },
+  {
+    id: 'acc_usual',
+    name: 'Personal',
+    place: { kind: 'usual' },
+    state: { kind: 'ready', paid: 'plan' },
+    who: 'you@meridian.dev',
+    plan: 'ChatGPT Pro',
+  },
+  {
+    id: 'acc_work',
+    name: 'Northwind',
+    place: { kind: 'own' },
+    state: { kind: 'ready', paid: 'plan' },
+    who: 'dana@northwind.io',
+    plan: 'ChatGPT Team',
+  },
   {
     id: 'acc_client',
     name: 'Client',
@@ -275,10 +280,42 @@ export const ACCOUNTS: AccountEntry[] = [
     state: { kind: 'out', back: '14:00' },
   },
   { id: 'acc_side', name: 'side', place: { kind: 'own' }, state: { kind: 'signedOut' } },
+  { id: 'acc_key', name: 'API key', place: { kind: 'own' }, state: { kind: 'ready', paid: 'key' }, who: 'OpenAI key ····4f2a' },
 ]
 
 /** Folders account switchers keep Codex accounts in, not added yet. */
 export const FOUND: FoundFolder[] = [
   { id: 'grant_personal', name: 'personal', folder: '~/.codex-personal', from: 'codex-profiles' },
   { id: 'grant_side', name: 'side', folder: '~/.local/share/codex-accounts/accounts/side', from: 'codex-account-switcher' },
+]
+
+/** The agents on this Mac, as Settings shows them one at a time. */
+export const AGENT_TABS: AgentTab[] = [
+  { ...CLAUDE_CODE, line: 'Anthropic · 2.4.1' },
+  { ...CODEX, line: 'OpenAI · 0.159.3', yours: true },
+  { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, line: 'Any provider · 1.4.0' },
+]
+
+/** The same agents at a glance, in the Control Center's Agents module: one word each on where it stands. */
+export const AGENT_GLANCES: AgentGlance[] = [
+  { ...CLAUDE_CODE, line: 'Acme out until 14:20', tone: 'quiet' },
+  { ...CODEX, line: 'Northwind signed out', tone: 'yours' },
+  { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, line: '1 account' },
+]
+
+/** Code hosts and trackers at a glance: faint where not connected, a dot where one needs signing in again. */
+export const MARK_GLANCES: MarkGlance[] = [
+  { id: 'github', name: 'GitHub', brand: Brand.GitHub },
+  { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab, faint: true },
+  { id: 'bitbucket', name: 'Bitbucket', brand: Brand.Bitbucket, faint: true },
+  { id: 'linear', name: 'Linear', brand: Brand.Linear, yours: true },
+  { id: 'jira', name: 'Jira', brand: Brand.Jira, faint: true },
+  { id: 'trello', name: 'Trello', brand: Brand.Trello, faint: true },
+]
+
+/** Codex's models. */
+export const CODEX_MODELS: SwitchedModel[] = [
+  { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
+  { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex' },
+  { id: 'gpt-5-mini', name: 'GPT-5 mini' },
 ]

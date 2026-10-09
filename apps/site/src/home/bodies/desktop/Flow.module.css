@@ -1,0 +1,53 @@
+/* From your tracker, to a task, to your host: three columns joined by a line that runs left to right. */
+
+.flow { max-width: 1360px; margin: 56px auto 0; padding: 0 var(--gut); }
+
+.pairs { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 40px; margin: 0; padding: 0; list-style: none; }
+/* Plain words with their marks; the one showing is ink, underlined. */
+.pair {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 0 8px; border: 0; border-bottom: 2px solid transparent;
+  background: none; font: 500 15px var(--font); color: var(--t-3); cursor: pointer;
+  transition: color 200ms ease, border-color 200ms ease;
+}
+.pair:hover { color: var(--t-1); }
+.on { color: var(--t-1); border-bottom-color: var(--t-1); }
+.to { color: var(--t-4); margin: 0 2px; }
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) 44px minmax(0, 1.05fr) 44px minmax(0, 0.82fr);
+  align-items: center;
+  margin-top: 44px;
+}
+.col { display: grid; gap: 12px; min-width: 0; }
+.step { display: flex; align-items: center; gap: 8px; margin: 0; font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
+.step b { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--t-1); color: var(--n-1); font-weight: 500; letter-spacing: 0; }
+.card { border-radius: 12px; background: var(--n-1); box-shadow: 0 0 0 1px rgba(20, 20, 40, 0.06), 0 20px 50px rgba(20, 24, 70, 0.1); }
+
+/* The line between columns, drawn in as each comes in. */
+.wire { position: relative; height: 2px; margin-top: 24px; background: var(--line-2); overflow: hidden; }
+.wire::after { content: ''; position: absolute; inset: 0; background: var(--live); transform: scaleX(0); transform-origin: 0 50%; }
+.seen .wire::after { animation: run 600ms cubic-bezier(0.45, 0, 0.2, 1) forwards; }
+.seen .w1::after { animation-delay: 500ms; }
+.seen .w2::after { animation-delay: 1500ms; }
+@keyframes run { to { transform: none; } }
+
+.c1, .c2, .c3 { opacity: 0; transform: translateY(10px); }
+.seen .c1, .seen .c2, .seen .c3 { animation: rise 600ms cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.seen .c2 { animation-delay: 1000ms; }
+.seen .c3 { animation-delay: 2000ms; }
+@keyframes rise { to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .c1, .c2, .c3 { opacity: 1; transform: none; }
+  .seen .c1, .seen .c2, .seen .c3, .seen .wire::after { animation: none; }
+  .wire::after { transform: none; }
+}
+@media (max-width: 900px) {
+  .row { grid-template-columns: 1fr; gap: 0; justify-items: stretch; margin-top: 32px; }
+  .wire { width: 2px; height: 32px; margin: 10px auto; }
+  .wire::after { transform: scaleY(0); transform-origin: 50% 0; }
+  .pairs { gap: 4px 20px; }
+  .pair { font-size: 13px; }
+}
