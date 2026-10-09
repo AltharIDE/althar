@@ -1,0 +1,143 @@
+/* Desktop: a claim a screen, each over the app. */
+
+.body { background: var(--n-2); overflow: hidden; }
+
+.scene { padding: 150px 0 0; }
+.head {
+  display: grid;
+  justify-items: center;
+  gap: 22px;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 var(--gut);
+  text-align: center;
+}
+
+/* ---- a Mac's screen ---- */
+.screenWrap { max-width: 1320px; margin: 70px auto 0; padding: 0 var(--gut); }
+/* The bezel: black, thin, rounded as a MacBook's screen is. */
+.bezel {
+  padding: 10px;
+  border-radius: 30px;
+  background: #0c0c10;
+  box-shadow:
+    inset 0 0 0 1px #2a2a30,
+    0 40px 90px rgba(18, 20, 40, 0.22),
+    0 12px 30px rgba(18, 20, 40, 0.12);
+}
+.screen { border-radius: 20px; }
+
+/* ---- the lead's plan: the card, lifted out of the window toward you ---- */
+.team { position: relative; }
+.slab {
+  position: absolute;
+  left: max(var(--gut), calc(50% - 640px));
+  bottom: -70px;
+  width: min(700px, 56%);
+  perspective: 1800px;
+  pointer-events: none;
+}
+.slabCard {
+  border-radius: 14px;
+  transform: rotateX(8deg) rotateY(-9deg) rotateZ(0.6deg);
+  transform-origin: 30% 50%;
+  box-shadow:
+    1px 1px 0 #dfe1f1,
+    2px 2px 0 #d6d9ee,
+    3px 3px 0 #ced1ea,
+    4px 4px 0 #c6cae6,
+    5px 5px 0 #bec2e2,
+    30px 50px 80px rgba(6, 10, 70, 0.28),
+    60px 90px 120px rgba(6, 10, 70, 0.14);
+  animation: float 9s ease-in-out infinite;
+}
+@keyframes float {
+  50% { translate: 0 -8px; }
+}
+@media (prefers-reduced-motion: reduce) { .slabCard { animation: none; } }
+
+/* ---- a piece up close, in the light ---- */
+.closeUp {
+  position: relative;
+  max-width: 1180px;
+  margin: 64px auto 0;
+  padding: 90px var(--gut) 100px;
+  isolation: isolate;
+}
+.lit {
+  position: absolute;
+  inset: 0 var(--gut);
+  z-index: -1;
+  border-radius: 28px;
+  background: #efede7;
+  overflow: hidden;
+}
+.card {
+  border-radius: 14px;
+  background: var(--n-1);
+  box-shadow: 0 0 0 1px rgba(20, 20, 40, 0.06), 0 30px 70px rgba(20, 24, 70, 0.18), 0 8px 20px rgba(20, 24, 70, 0.08);
+}
+.pad { padding: 10px; }
+
+/* The limit: the card, then the task before and after. */
+.handover { display: grid; gap: 22px; }
+.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 0 6px 6px; }
+.when { margin: 0 0 8px; font: 500 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--t-3); }
+
+/* Rules: long, so it fades away under its last lines. */
+.fade .card { max-height: 760px; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
+
+/* ---- the edge of the screen: a dark scene ---- */
+.ink { margin-top: 150px; padding-bottom: 150px; background: #0b0c12; }
+.ink .head h2 { color: #fff; }
+.ink .head p { color: rgba(255, 255, 255, 0.7); }
+.ink .head p:first-child i { background: #9aa6ff; }
+.ink .bezel { background: #000; box-shadow: inset 0 0 0 1px #2a2a32, 0 40px 120px rgba(0, 0, 0, 0.6); }
+
+/* ---- the code hosts and trackers, as their marks ---- */
+.marks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 18px 52px;
+  max-width: 900px;
+  margin: 56px auto 0;
+  padding: 0 var(--gut);
+  list-style: none;
+}
+.marks li { display: grid; justify-items: center; gap: 10px; font: 500 12px var(--mono); letter-spacing: 0.04em; color: var(--t-3); }
+.marks svg { color: var(--t-1); }
+
+/* ---- the end ---- */
+.end { padding: 190px 0 0; }
+.end .head { gap: 30px; }
+.end .head > div { justify-content: center; }
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 28px;
+  max-width: var(--max);
+  margin: 150px auto 0;
+  padding: 24px var(--gut) 40px;
+  border-top: 1px solid var(--line-2);
+  font-size: 14px;
+  color: var(--t-3);
+}
+.foot a { color: var(--t-2); text-decoration: none; }
+.foot span { margin-left: auto; font-weight: 650; color: var(--t-1); }
+
+@media (max-width: 700px) {
+  .scene { padding-top: 96px; }
+  .screenWrap { margin-top: 40px; }
+  .bezel { padding: 6px; border-radius: 18px; }
+  .screen { border-radius: 12px; }
+  .slab { display: none; }
+  .cards { grid-template-columns: 1fr; }
+  .closeUp { margin-top: 36px; padding: 40px 12px 48px; }
+  .lit { inset: 0; border-radius: 0; }
+  .ink { margin-top: 96px; padding-bottom: 96px; }
+  .marks { gap: 18px 30px; margin-top: 36px; }
+  .marks svg { width: 30px; height: 30px; }
+  .end { padding-top: 120px; }
+  .foot { margin-top: 96px; }
+}

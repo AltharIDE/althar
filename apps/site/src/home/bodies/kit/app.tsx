@@ -1,0 +1,626 @@
+import {
+  AcceptCard,
+  Accounts,
+  type AccountEntry,
+  AllowedBy,
+  BackCrumb,
+  Board,
+  BoardColumn,
+  BoardLane,
+  BoardList,
+  Brand,
+  Button,
+  CallCard,
+  ChromeButton,
+  Choices,
+  Composer,
+  Connections,
+  EdgeSheet,
+  GraphChanged,
+  GraphNodeState,
+  Heading,
+  IconButton,
+  Island,
+  Issue,
+  Logo,
+  NeedCard,
+  NeedChange,
+  NeedCommand,
+  NeedOptions,
+  NextRow,
+  ProjectHead,
+  ProjectTabs,
+  RateLimit,
+  Review,
+  Room,
+  RoomSwitch,
+  Runtimes,
+  type RuntimeEntry,
+  RuntimeState,
+  type ServiceConnection,
+  type ServiceOption,
+  SettledRow,
+  TaskCard,
+  TaskLaunch,
+  type LaunchStep,
+  TaskStatus,
+  TitleBar,
+  Turn,
+  Verdict,
+  WorkCard,
+  WorkStatus,
+  You,
+  ModelPick,
+} from '@althar/ui'
+import { Home, ProjectRules } from '@althar/ui/screens'
+import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
+
+// Prototype: the kit's demo world, read from its source. Ported, the site would keep its own copy.
+import { CALLS, NEXT, READY_TWO_REPOS, RUNNING as BOARD_RUNNING, SETTLED } from '../../../../../../packages/ui/src/fixtures/board'
+import {
+  FROM_231,
+  MER_231,
+  PLAN_432,
+  STAGES,
+  T432,
+  ALWAYS_ASK,
+  ALWAYS_ON,
+  NEVER,
+  NEVER_ON,
+} from '../../../../../../packages/ui/src/fixtures/coordinator'
+import { EDGE_NEEDS, EDGE_WORK, edgeRowOf, NOTCH } from '../../../../../../packages/ui/src/fixtures/edge'
+import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../../../../../../packages/ui/src/fixtures/home'
+import { MARKED } from '../../../../../../packages/ui/src/fixtures/marks'
+import { FINDINGS_SEVERAL_YOURS, PROJECT, reviewDoc, STEPS } from '../../../../../../packages/ui/src/fixtures/meridian'
+import { CODEX, GEMINI_PRO, OPUS, QWEN, SONNET } from '../../../../../../packages/ui/src/fixtures/models'
+import { SERVICES } from '../../../../../../packages/ui/src/fixtures/setup'
+import s from './app.module.css'
+
+/*
+ * The app, as the pictures show it: whole windows and single pieces, drawn
+ * by @althar/ui's own components with the kit's demo world (Meridian, a
+ * payments API, and task 432, the refunds backfill from Linear's MER-231),
+ * touched up where a picture wants it: every account a person might have,
+ * all six code hosts and trackers connected.
+ */
+
+const none = () => {}
+
+/* ---- the frame every window shares: the tabs, with the system's lights drawn ---- */
+
+const TABS = MARKED.map((p) => ({ id: p.id, name: p.name, seed: p.id, ink: p.ink, running: p.running, yours: p.yours ? 1 : 0 }))
+
+export function Tabs({ current }: { current: string | null }) {
+  return <ProjectTabs tabs={TABS.slice(0, 3)} current={current} onSelect={none} onClose={none} yours={3} lights="drawn" />
+}
+
+/* ---- the home: what needs you across every project, what runs, what happened ---- */
+
+export function HomeWindow({
+  className,
+  style,
+  looked = '3 h ago',
+  narrow = false,
+}: {
+  className?: string
+  style?: CSSProperties
+  looked?: string
+  /** Laid out for a narrow window: the stream alone. */
+  narrow?: boolean
+}) {
+  const needs = [
+    <NeedCard
+      key="publish"
+      kind={PUBLISH.kind}
+      project={PUBLISH.project}
+      task={PUBLISH.task}
+      title={PUBLISH.title}
+      at={PUBLISH.at}
+      detail={<NeedCommand command={PUBLISH.command} agent={PUBLISH.agent} step={PUBLISH.step} />}
+      actions={
+        <>
+          <Button size="small">Deny</Button>
+          <Button size="small" variant="signal">
+            Allow once
+          </Button>
+        </>
+      }
+    />,
+    <NeedCard
+      key="accept"
+      kind={READY.kind}
+      project={READY.project}
+      task={READY.task}
+      title={READY.title}
+      at={READY.at}
+      detail={<NeedChange {...READY.change} />}
+      actions={<Button size="small">Review</Button>}
+    />,
+    <NeedCard
+      key="decision"
+      kind={DECISION.kind}
+      project={DECISION.project}
+      task={DECISION.task}
+      title={DECISION.title}
+      at={DECISION.at}
+      detail={<NeedOptions options={DECISION.options} />}
+      actions={<Button size="small">Decide</Button>}
+    />,
+  ]
+  return (
+    <div className={`${s.window} ${narrow ? s.narrow : ''} ${className ?? ''}`} style={style}>
+      {!narrow && <Tabs current={null} />}
+      <TitleBar
+        lights="none"
+        end={
+          <>
+            <WorkStatus running={RUNNING.length} yours={3} />
+            <IconButton icon="gear" label="Settings" kbd="⌘," size="small" />
+          </>
+        }
+      >
+        <span className={s.brand}>
+          <Logo size={15} />
+          Althar
+        </span>
+      </TitleBar>
+      <div className={s.body}>
+        <Home
+          waiting={3}
+          needs={needs}
+          running={RUNNING}
+          since={SINCE}
+          looked={looked}
+          projects={PROJECT_LIST}
+          onOpenTask={none}
+          onOpenEvent={none}
+          onOpenProject={none}
+          onTalk={none}
+          onOpenFolder={none}
+        />
+      </div>
+    </div>
+  )
+}
+
+/* ---- where task 432 comes from: Linear's MER-231 ---- */
+
+export function Issue231() {
+  return <Issue {...MER_231} />
+}
+
+/* ---- the lead's plan for task 432: its team, step by step ---- */
+
+/** The plan, put together a step at a time when `assemble` is set, as the lead does it. */
+export function useAssembling(assemble: boolean, plan: readonly LaunchStep[] = PLAN_432) {
+  const [shown, setShown] = useState(assemble ? 0 : plan.length)
+  useEffect(() => {
+    if (!assemble) return setShown(plan.length)
+    setShown(0)
+    let n = 0
+    const timer = window.setInterval(() => {
+      n += 1
+      setShown(n)
+      if (n >= plan.length) window.clearInterval(timer)
+    }, 520)
+    return () => window.clearInterval(timer)
+  }, [assemble, plan])
+  return plan.slice(0, shown)
+}
+
+export function Launch({ steps, wait = 30 }: { steps?: readonly LaunchStep[]; wait?: number }) {
+  const plan = steps ?? PLAN_432
+  return (
+    <TaskLaunch
+      task="432"
+      title="Backfill idempotency keys on refunds created before PR 1184"
+      from={FROM_231}
+      project={PROJECT}
+      estimate="About 40 min · about $2 on your subscriptions"
+      steps={plan}
+      picker={({ agent, owner }) => (
+        <ModelPick
+          variant="field"
+          placement="below"
+          owner={owner}
+          model={agent}
+          pinned={[]}
+          effort="High"
+          defaultEffort="High"
+          onChange={none}
+          onEffort={none}
+        />
+      )}
+      wait={wait}
+      onStart={none}
+    />
+  )
+}
+
+/* ---- a project, its conversation beside its board, as Both shows it ---- */
+
+const ASK = 'Backfill idempotency keys on the refunds made before PR 1184. MER-231 has the details.'
+
+export function ProjectWindow({
+  conversation,
+  talkOnly = false,
+  className,
+  style,
+}: {
+  /** What the conversation shows under your ask; by default, the lead's plan. */
+  conversation?: ReactNode
+  /** Only the conversation, as on a narrow window. */
+  talkOnly?: boolean
+  className?: string
+  style?: CSSProperties
+}) {
+  return (
+    <div className={`${s.window} ${talkOnly ? s.talkOnly : ''} ${className ?? ''}`} style={style}>
+      {!talkOnly && <Tabs current="meridian" />}
+      <TitleBar
+        lights="none"
+        end={
+          <>
+            {!talkOnly && <WorkStatus running={4} yours={2} />}
+            <ChromeButton icon="plus" label="New task" />
+          </>
+        }
+      >
+        <RoomSwitch value={talkOnly ? Room.Talk : Room.Both} onChange={none} text={{ key: () => '' }} />
+      </TitleBar>
+      <div className={s.rooms}>
+        <div className={s.talk}>
+          <ProjectHead title="Meridian" meta="Payments API · 3 repositories" side />
+          <div className={s.thread}>
+            <You at="11:01">{ASK}</You>
+            <Turn voice="Meridian’s coordinator" at="11:01">
+              <p className={s.said}>One task. It writes to money records, so your security review applies, and a second lab reviews.</p>
+            </Turn>
+            {conversation ?? <Launch />}
+          </div>
+          <div className={s.composer}>
+            <Composer value="" onChange={none} onSubmit={none} placeholder="Tell Meridian what you want done" hint="⌘L" />
+          </div>
+        </div>
+        {!talkOnly && (
+          <div className={s.board}>
+            <MeridianBoard />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ---- Meridian's board ---- */
+
+export function MeridianBoard() {
+  return (
+    <Board label="Meridian’s work">
+      <BoardColumn lane={BoardLane.Next} count={NEXT.length}>
+        <BoardList>
+          {NEXT.map((x, i) => (
+            <NextRow key={x.task} {...x} place={i + 1} />
+          ))}
+        </BoardList>
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Running} count={BOARD_RUNNING.length}>
+        {BOARD_RUNNING.map((x) => (
+          <WorkCard key={x.task} {...x} />
+        ))}
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Yours} count={CALLS.length}>
+        <AcceptCard {...READY_TWO_REPOS} />
+        {CALLS.slice(0, 2).map((x) => (
+          <CallCard key={x.title} {...x} />
+        ))}
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Settled} count={SETTLED.length}>
+        <BoardList>
+          {SETTLED.map((x) => (
+            <SettledRow key={x.task} {...x} />
+          ))}
+        </BoardList>
+      </BoardColumn>
+    </Board>
+  )
+}
+
+/* ---- the agents and every account on them ---- */
+
+const CLAUDE_ACCOUNTS: AccountEntry[] = [
+  { id: 'c_main', name: 'personal', place: { kind: 'usual' }, state: { kind: 'ready', paid: 'plan' } },
+  { id: 'c_work', name: 'work', place: { kind: 'own' }, state: { kind: 'ready', paid: 'plan' } },
+]
+const CODEX_ACCOUNTS: AccountEntry[] = [
+  { id: 'x_main', name: 'personal', place: { kind: 'usual' }, state: { kind: 'ready', paid: 'plan' } },
+  { id: 'x_work', name: 'work', place: { kind: 'own' }, state: { kind: 'ready', paid: 'plan' } },
+  {
+    id: 'x_client',
+    name: 'Client',
+    place: { kind: 'adopted', folder: '~/.codex-client', from: 'codex-profiles' },
+    state: { kind: 'out', back: '14:00' },
+  },
+]
+const OPENCODE_ACCOUNTS: AccountEntry[] = [
+  { id: 'o_router', name: 'OpenRouter', place: { kind: 'usual' }, state: { kind: 'ready', paid: 'key' } },
+  { id: 'o_zai', name: 'Z.ai coding plan', place: { kind: 'own' }, state: { kind: 'ready', paid: 'plan' } },
+]
+
+export const AGENTS: RuntimeEntry[] = [
+  {
+    id: 'claude-code',
+    name: 'Claude Code',
+    brand: Brand.ClaudeCode,
+    version: '2.4.1',
+    state: RuntimeState.Ready,
+    account: 'Max · 2 accounts',
+    detail: <Accounts agent="Claude Code" accounts={CLAUDE_ACCOUNTS} onAdd={none} />,
+  },
+  {
+    id: 'codex',
+    name: 'Codex',
+    brand: Brand.Codex,
+    version: '0.52.0',
+    state: RuntimeState.Ready,
+    account: 'Pro · 3 accounts',
+    detail: <Accounts agent="Codex" accounts={CODEX_ACCOUNTS} onAdd={none} />,
+  },
+  {
+    id: 'opencode',
+    name: 'OpenCode',
+    version: '1.0.4',
+    state: RuntimeState.Ready,
+    account: 'Any key, or a local model',
+    detail: <Accounts agent="OpenCode" accounts={OPENCODE_ACCOUNTS} onAdd={none} />,
+  },
+]
+
+/* ---- the code hosts and trackers, all six ---- */
+
+const SERVICE = (id: string) => SERVICES.find((x) => x.id === id)!
+
+export const ALL_SERVICES: ServiceOption[] = [
+  SERVICE('github'),
+  {
+    id: 'gitlab',
+    name: 'GitLab',
+    brand: Brand.GitLab,
+    what: 'Merge requests and issues',
+    hostedUrl: 'https://gitlab.com',
+    selfHosted: true,
+    browserSignIn: false,
+    tokenHelp: 'https://gitlab.com/-/user_settings/personal_access_tokens',
+  },
+  {
+    id: 'bitbucket',
+    name: 'Bitbucket',
+    brand: Brand.Bitbucket,
+    what: 'Pull requests',
+    hostedUrl: 'https://bitbucket.org',
+    selfHosted: true,
+    browserSignIn: false,
+    tokenHelp: 'https://bitbucket.org/account/settings/app-passwords/',
+  },
+  SERVICE('linear'),
+  SERVICE('jira_cloud'),
+  SERVICE('trello'),
+]
+
+export const ALL_CONNECTED: ServiceConnection[] = [
+  { id: 'c1', service: 'github', account: 'you' },
+  { id: 'c2', service: 'gitlab', account: 'you', instance: 'https://git.meridian.dev' },
+  { id: 'c3', service: 'bitbucket', account: 'you' },
+  { id: 'c4', service: 'linear', account: 'You' },
+  { id: 'c5', service: 'jira_cloud', account: 'you@meridian.dev', instance: 'https://meridian.atlassian.net' },
+  { id: 'c6', service: 'trello', account: 'You' },
+]
+
+export function ConnectionsList() {
+  return (
+    <Connections
+      label="Code hosts and trackers"
+      services={ALL_SERVICES}
+      connections={ALL_CONNECTED}
+      onSignIn={none}
+      onCancelSignIn={none}
+      onToken={none}
+      onDisconnect={none}
+    />
+  )
+}
+
+/* ---- Settings, as the app has it ---- */
+
+export function SettingsWindow({ className, style }: { className?: string; style?: CSSProperties }) {
+  return (
+    <div className={`${s.window} ${className ?? ''}`} style={style}>
+      <TitleBar lights="drawn">
+        <BackCrumb to="Home" title="Settings" onBack={none} />
+      </TitleBar>
+      <div className={s.scroll}>
+        <div className={s.page}>
+          <section className={s.section}>
+            <Heading level={2}>Agents on this Mac</Heading>
+            <Runtimes label="Agents on this Mac" runtimes={AGENTS} onAdd={none} />
+          </section>
+          <section className={s.section}>
+            <Heading level={2}>Code hosts and trackers</Heading>
+            <ConnectionsList />
+          </section>
+          <section className={s.section}>
+            <div className={s.titled}>
+              <Heading level={2}>While you’re in another app</Heading>
+              <p className={s.quiet}>Where Althar shows what needs you and what runs.</p>
+            </div>
+            <Choices
+              label="While you’re in another app"
+              options={[
+                { value: 'island', title: 'Round the notch', note: 'Point at it to see what needs you and what runs.' },
+                { value: 'menu', title: 'In the menu bar', note: 'Click Althar’s mark to see what needs you and what runs.' },
+              ]}
+              value="island"
+              onChange={none}
+            />
+          </section>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ---- a usage limit, mid-task ---- */
+
+export function Limit() {
+  return (
+    <RateLimit
+      runtime="Claude Code"
+      resets="14:00, in 2h 10m"
+      options={[
+        { model: CODEX, note: 'Codex · work · 38% of this week used' },
+        { model: GEMINI_PRO, note: 'OpenCode · OpenRouter key' },
+        { model: QWEN, note: 'OpenCode · this Mac, slower' },
+        { model: SONNET, note: 'same limit, resets 14:00', busy: true },
+      ]}
+      affects={[
+        { id: 'lead', label: 'the lead', model: OPUS },
+        { id: 'sec', label: 'Security review', model: SONNET },
+      ]}
+      onSwap={none}
+    />
+  )
+}
+
+/** Task 431 on the board: its lead out of usage, then carried on by Codex. */
+export function Handover({ after }: { after: boolean }) {
+  return (
+    <WorkCard
+      task="431"
+      kind="Delivery"
+      title="Refunds rate-limit like charges"
+      status={after ? TaskStatus.Running : TaskStatus.Paused}
+      steps={['Triage', 'Implement', 'Review', 'Verify', 'Draft PR']}
+      at={1}
+      elapsed={after ? '32m' : '31m'}
+      lead={after ? CODEX : OPUS}
+      onStep={[SONNET, GEMINI_PRO]}
+      {...(after ? {} : { note: 'Claude Code’s limit · back at 14:00' })}
+    />
+  )
+}
+
+/* ---- two labs' review of the lead's work ---- */
+
+export function TwoLabReview() {
+  return (
+    <Review
+      n={3}
+      of={6}
+      reviewers={[{ model: SONNET }, { model: GEMINI_PRO }]}
+      verdict={Verdict.Changes}
+      took="4m 20s"
+      thread={STEPS.review}
+      instructions={{ path: '.althar/review.md', ...reviewDoc }}
+      defaultFindings={FINDINGS_SEVERAL_YOURS}
+    />
+  )
+}
+
+/* ---- a rule adds a step ---- */
+
+export function RuleAdded() {
+  return (
+    <GraphChanged
+      rev={2}
+      summary="Security review added"
+      settled
+      defaultOpen
+      nodes={[
+        { id: 'impl', label: 'Implement', state: GraphNodeState.Done },
+        { id: 'dry', label: 'Dry run on a copy', state: GraphNodeState.Done },
+        { id: 'review', label: 'Review', state: GraphNodeState.Now },
+        { id: 'sec', label: 'Security review', state: GraphNodeState.Added },
+        { id: 'pr', label: 'Draft PR', state: GraphNodeState.Next },
+      ]}
+      ops={['Added Security review after Review: the change writes to money records.', 'Draft PR now waits on Security review.']}
+      cause={{ by: AllowedBy.Rule, rule: 'a security review whenever money records change' }}
+      project={PROJECT}
+    />
+  )
+}
+
+/* ---- task 432 over time, as its card tells it ---- */
+
+export function Task432({ stage = STAGES.length - 1 }: { stage?: number }) {
+  const now = STAGES[Math.min(stage, STAGES.length - 1)]!
+  return (
+    <TaskCard
+      task={T432.task}
+      title={T432.title}
+      status={now.status}
+      steps={T432.steps}
+      at={now.step}
+      started={now.started}
+      lead={T432.lead}
+      branch={T432.branch}
+      from={T432.from}
+      now={now.now}
+    />
+  )
+}
+
+/* ---- ready for you: two pull requests, checks passed ---- */
+
+export function Ready() {
+  return <AcceptCard {...READY_TWO_REPOS} />
+}
+
+/* ---- the island, round the notch, and what drops from it ---- */
+
+export function IslandOpen({
+  open = true,
+  saying,
+  waiting = EDGE_NEEDS.length,
+  running = EDGE_WORK.length,
+}: {
+  open?: boolean
+  saying?: { project: string; kind: string }
+  waiting?: number
+  running?: number
+}) {
+  return (
+    <Island notch={NOTCH} waiting={waiting} running={running} open={open} onOpenChange={none} onOpenApp={none} saying={saying ?? null}>
+      <EdgeSheet
+        tone="ink"
+        waiting={EDGE_NEEDS.length}
+        working={EDGE_WORK.length}
+        needs={EDGE_NEEDS.map((row) => edgeRowOf(row, none))}
+        work={EDGE_WORK.map((row) => edgeRowOf(row, none))}
+        onOpenApp={none}
+      />
+    </Island>
+  )
+}
+
+/* ---- the project's rules ---- */
+
+export function Rules() {
+  return (
+    <ProjectRules
+      project="Meridian"
+      always={ALWAYS_ASK}
+      defaultAlwaysOn={ALWAYS_ON}
+      never={NEVER}
+      defaultNeverOn={NEVER_ON}
+      learned="6 of 10 so far"
+      onAddRule={none}
+      onPermissionsChange={none}
+      onAlwaysOnChange={none}
+      onNeverOnChange={none}
+      onAddNever={none}
+      onReachChange={none}
+    />
+  )
+}
+
+export { TaskStatus }

@@ -1,0 +1,32 @@
+/* The bodies' type, set as the first screen is: Inter's display cut, light, with the words that matter heavy. */
+
+.title {
+  margin: 0;
+  font-family: 'Inter Display', var(--display);
+  font-weight: 200;
+  font-size: clamp(40px, 6.2vw, 92px);
+  line-height: 0.98;
+  letter-spacing: -0.05em;
+  color: var(--t-1);
+  text-wrap: balance;
+}
+.title b { font-weight: 720; letter-spacing: -0.056em; }
+.title i { font-style: italic; letter-spacing: -0.045em; padding-right: 0.03em; }
+
+.big { font-size: clamp(46px, 8vw, 128px); line-height: 0.94; }
+.mid { font-size: clamp(34px, 4.4vw, 64px); line-height: 1; }
+
+.lead { margin: 0; max-width: 560px; font-size: 18px; line-height: 1.5; letter-spacing: -0.01em; color: var(--t-2); text-wrap: pretty; }
+
+.kicker {
+  display: inline-flex; align-items: center; gap: 9px; margin: 0;
+  font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3);
+}
+.kicker i { width: 6px; height: 6px; border-radius: 50%; background: var(--live); }
+.kicker b { color: var(--live); font-weight: 500; }
+
+.mono { font: 12.5px/1.5 var(--mono); color: var(--t-3); }
+
+@media (max-width: 640px) {
+  .lead { font-size: 16.5px; }
+}
