@@ -127,6 +127,13 @@ export const AgentModels = Schema.Struct({
 })
 export type AgentModels = typeof AgentModels.Type
 
+/** The person's settings for the app as a whole. */
+export const AppSettings = Schema.Struct({
+  /** Althar as co-author of what it sends to a code host, on unless turned off; `line` is the trailer each commit gets. */
+  coAuthor: Schema.Struct({ on: Schema.Boolean, line: Schema.String }),
+})
+export type AppSettings = typeof AppSettings.Type
+
 export const Status = Schema.Struct({
   apiVersion: Schema.Number,
   appVersion: Schema.String,
@@ -1164,6 +1171,9 @@ export const Api = RpcGroup.make(
   command('SetDefaultEffort', { agentId: Schema.String, model: Schema.String, effort: Schema.String }, Schema.Void),
   /** Switches one of an agent's models off, or on again: one switched off is never planned, and no picker offers it. */
   command('SetModelBlocked', { agentId: Schema.String, model: Schema.String, blocked: Schema.Boolean }, Schema.Void),
+  call('GetSettings', {}, AppSettings),
+  /** Turns Althar's co-authoring of commits and pull requests on or off; the agents' own credit lines go either way. */
+  command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
   command('Send', { threadId: Schema.String, body: Schema.String, disposition: Disposition }, Schema.Void),

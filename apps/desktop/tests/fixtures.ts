@@ -504,6 +504,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getModels: vi.fn(async () => models),
     setDefaultEffort: vi.fn(async () => {}),
     setModelBlocked: vi.fn(async () => {}),
+    getSettings: vi.fn(async () => ({
+      coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
+    })),
+    setCoAuthor: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     stopSession: vi.fn(async () => {}),
     send: vi.fn(async () => {}),

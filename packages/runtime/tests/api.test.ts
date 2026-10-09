@@ -478,6 +478,22 @@ describe('accounts, through the API', () => {
   )
 })
 
+describe('settings, through the API', () => {
+  it.live('has Althar as co-author until the person turns it off, and keeps that', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        const line = 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>'
+        assert.deepStrictEqual(yield* client.GetSettings({}), { coAuthor: { on: true, line } })
+        yield* client.SetCoAuthor({ commandId: commandId(), on: false })
+        assert.deepStrictEqual(yield* client.GetSettings({}), { coAuthor: { on: false, line } })
+        yield* client.SetCoAuthor({ commandId: commandId(), on: true })
+        assert.isTrue((yield* client.GetSettings({})).coAuthor.on)
+      }),
+    ),
+  )
+})
+
 describe('project rules, through the API', () => {
   it.live('reads a project’s rules, and changes them in part as the person', () =>
     Effect.scoped(

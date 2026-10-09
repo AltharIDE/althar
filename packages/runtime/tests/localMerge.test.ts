@@ -8,6 +8,7 @@ import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
+import { coAuthorLine } from '../src/credit'
 import { NotFound } from '../src/errors'
 import { applyMerges, planMerge } from '../src/localMerge'
 import { Projects } from '../src/Projects'
@@ -85,7 +86,10 @@ describe('merging a task here', () => {
         merged,
         [{ repository: 'althar-repo', branch: 'main', already: false }].map((one) => ({ ...one, repository: merged[0]?.repository ?? '' })),
       )
-      assert.strictEqual(git(root, 'rev-parse', 'main'), head)
+      // The task's commit, credited to Althar as co-author, and the task's branch with it.
+      assert.strictEqual(git(root, 'rev-parse', 'main'), git(worktree, 'rev-parse', 'HEAD'))
+      assert.strictEqual(git(root, 'show', '-s', '--format=%B', 'main'), `Write retry.ts\n\n${coAuthorLine}`)
+      assert.notStrictEqual(git(root, 'rev-parse', 'main'), head)
       // The person's checkout moved with it.
       assert.isTrue(existsSync(join(root, 'retry.ts')))
       assert.strictEqual(yield* stateOf(task.taskId), 'done')
@@ -119,7 +123,10 @@ describe('merging a task here', () => {
       ])
       const changes = yield* Changes
       assert.deepStrictEqual(yield* changes.pushHere(task.taskId), [{ branch: 'main', remote: 'origin/main' }])
-      assert.strictEqual(git(remote, 'rev-parse', 'main'), head)
+      // The task's commit as it merged: credited, Althar its co-author.
+      assert.strictEqual(git(remote, 'rev-parse', 'main'), git(worktrees[0]?.path ?? '', 'rev-parse', 'HEAD'))
+      assert.notStrictEqual(git(remote, 'rev-parse', 'main'), head)
+      assert.include(git(remote, 'log', '-1', '--format=%B', 'main'), coAuthorLine)
       assert.deepStrictEqual(yield* mergedOf, [
         { repository: slug, name: root.split('/').at(-1) ?? '', branch: 'main', remote: 'origin/main', ahead: 0 },
       ])
@@ -199,7 +206,8 @@ describe('merging a task here', () => {
         pushed.map((one) => one.remote),
         ['origin/main'],
       )
-      assert.strictEqual(git(remotes[0] ?? '', 'rev-parse', 'main'), head)
+      assert.strictEqual(git(remotes[0] ?? '', 'rev-parse', 'main'), git(worktrees[0]?.path ?? '', 'rev-parse', 'HEAD'))
+      assert.notStrictEqual(git(remotes[0] ?? '', 'rev-parse', 'main'), head)
       assert.notStrictEqual(git(remotes[1] ?? '', 'rev-parse', 'main'), theirs)
     }).pipe(Effect.provide(withQueries())),
   )
@@ -216,7 +224,8 @@ describe('merging a task here', () => {
       yield* mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }])
       const parents = git(root, 'rev-list', '--parents', '-n', '1', 'main').split(' ')
       assert.lengthOf(parents, 3)
-      assert.strictEqual(parents[2], head)
+      assert.strictEqual(parents[2], git(worktree, 'rev-parse', 'HEAD'))
+      assert.include(git(root, 'show', '-s', '--format=%B', 'main^2'), coAuthorLine)
       assert.include(git(root, 'show', '--format=%B', '-s', 'main'), 'Add a retry')
       assert.include(git(root, 'ls-tree', '--name-only', 'main'), 'retry.ts')
       // The person's own branch and files are as they were.
@@ -241,6 +250,9 @@ describe('merging a task here', () => {
       git(worktree, 'reset', '-q', '--hard', 'HEAD~2')
       const moved = yield* Effect.flip(mergeHere(task.taskId, [{ repository: slug, head: fresh }]))
       assert.strictEqual(cantOf(moved)[1], 'changed')
+      // Asked without the head seen in it, a repository hasn't been seen.
+      const unseen = yield* Effect.flip(mergeHere(task.taskId, []))
+      assert.strictEqual(cantOf(unseen)[1], 'changed')
 
       const clean = commit(worktree, 'retry.ts', 'retry\n')
       writeFileSync(join(root, 'README.md'), '# Not yet\n')
@@ -280,9 +292,10 @@ describe('merging a task here', () => {
           ['web', 'main', false],
         ],
       )
+      // Refused, nothing was rewritten under the heads seen; merged, each main is its task branch, credited.
       assert.deepStrictEqual(
         roots.map((root) => git(root, 'rev-parse', 'main')),
-        heads.map((one) => one.head),
+        worktrees.map((worktree) => git(worktree.path, 'rev-parse', 'HEAD')),
       )
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),

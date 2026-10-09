@@ -27,6 +27,7 @@ export const keys = {
   /** A project's repositories, as this Mac has them: read again whenever the project changes. */
   repositories: (projectId: string) => ['repositories', projectId] as const,
   connections: ['connections'] as const,
+  settings: ['settings'] as const,
 }
 
 /**
@@ -103,6 +104,7 @@ export const reads = (client: Client) => ({
   repositories: (projectId: string) =>
     queryOptions({ queryKey: keys.repositories(projectId), queryFn: () => client.getRepositories(projectId) }),
   connections: () => queryOptions({ queryKey: keys.connections, queryFn: () => client.listConnections() }),
+  settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
 })
 
 export type Reads = ReturnType<typeof reads>

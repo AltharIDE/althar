@@ -4,12 +4,23 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { Logo } from '../../foundations/Logo/Logo'
-import { ACCOUNTS, AGENT_GLANCES, AGENT_TABS, CODEX_MODELS, MARK_GLANCES } from '../../fixtures/setup'
+import {
+  ACCOUNTS,
+  AGENT_GLANCES,
+  AGENT_TABS,
+  CO_AUTHOR_TRAILER,
+  CODEX_MODELS,
+  CONNECTED,
+  MARK_GLANCES,
+  SERVICES,
+} from '../../fixtures/setup'
 import { Choices, type ChoiceOption } from '../../primitives/Choices/Choices'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { States } from '../../storybook/States'
 import { Accounts } from '../Accounts/Accounts'
 import { AgentTabs } from '../AgentTabs/AgentTabs'
+import { CoAuthor } from '../CoAuthor/CoAuthor'
+import { Connections } from '../Connections/Connections'
 import { ModelSwitches } from '../ModelSwitches/ModelSwitches'
 import {
   ControlAgents,
@@ -52,7 +63,7 @@ const ICONS: ChoiceOption<Ground>[] = [
   { value: 'ink', title: 'Ink', picture: ground('var(--t-1)', '#f4f1e8') },
 ]
 
-type Open = 'all' | 'agents' | 'icon'
+type Open = 'all' | 'agents' | 'hosts' | 'icon'
 
 /* Settings as a consumer composes it: the modules, and each opened out in place. */
 function Settings({ start = 'all', ...args }: Partial<ControlCenterProps> & { start?: Open }) {
@@ -60,6 +71,7 @@ function Settings({ start = 'all', ...args }: Partial<ControlCenterProps> & { st
   const [agent, setAgent] = useState('codex')
   const [icon, setIcon] = useState<Ground>('cobalt')
   const [awake, setAwake] = useState(true)
+  const [credit, setCredit] = useState(true)
   const chosen = ICONS.find((x) => x.value === icon) ?? COBALT
   const back = () => setOpen('all')
   return (
@@ -81,7 +93,7 @@ function Settings({ start = 'all', ...args }: Partial<ControlCenterProps> & { st
             <ControlModule title="Agents" aside="3 agents · 6 accounts" onClick={() => setOpen('agents')}>
               <ControlAgents agents={AGENT_GLANCES} />
             </ControlModule>
-            <ControlModule title="Code hosts and trackers" span={2} aside="2 connected" onClick={fn()}>
+            <ControlModule title="Code hosts and trackers" span={2} aside="2 connected" onClick={() => setOpen('hosts')}>
               <ControlMarks marks={MARK_GLANCES} />
             </ControlModule>
             <ControlPicture title="App icon" name={chosen.title} picture={chosen.picture} onClick={() => setOpen('icon')} />
@@ -111,6 +123,24 @@ function Settings({ start = 'all', ...args }: Partial<ControlCenterProps> & { st
           >
             <Accounts agent={AGENT_TABS.find((x) => x.id === agent)?.name ?? ''} accounts={ACCOUNTS} onSignIn={fn()} onAdd={fn()} />
           </AgentTabs>
+        </ControlDetail>
+      )}
+      {open === 'hosts' && (
+        <ControlDetail title="Code hosts and trackers" aside="2 connected" onBack={back}>
+          <ControlSheet>
+            <Connections
+              label="Code hosts and trackers"
+              services={SERVICES}
+              connections={CONNECTED}
+              onSignIn={fn()}
+              onCancelSignIn={fn()}
+              onToken={fn()}
+              onDisconnect={fn()}
+            />
+          </ControlSheet>
+          <ControlSheet>
+            <CoAuthor on={credit} onChange={setCredit} trailer={CO_AUTHOR_TRAILER} />
+          </ControlSheet>
         </ControlDetail>
       )}
       {open === 'icon' && (
@@ -174,6 +204,20 @@ export const OpeningAModule: Story = {
     await expect(p.getByRole('button', { name: /^App icon/ })).toHaveTextContent('Ink')
     await userEvent.keyboard('{Escape}')
     await expect(args.onOpenChange).toHaveBeenCalledWith(false)
+  },
+}
+
+/** The code hosts opened out: what is connected, and under it whether Althar signs the work it sends there. */
+export const CodeHosts: Story = {
+  render: (args) => <Settings start="hosts" onOpenChange={args.onOpenChange} />,
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body)
+    const panel = await page.findByRole('dialog', { name: 'Settings' })
+    const p = within(panel)
+    const credit = p.getByRole('switch', { name: 'Althar as co-author' })
+    await expect(credit).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(credit)
+    await expect(p.getByText(/no marketing budget/)).toBeInTheDocument()
   },
 }
 

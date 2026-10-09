@@ -26,6 +26,7 @@ import { Changes } from './Changes'
 import { NotFound } from './errors'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
+import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
 import { Folders } from './Folders'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
@@ -513,6 +514,11 @@ export const handlers = Api.toLayer(
         once(commandId, api(models.setDefaultEffort({ agentId, model, effort }))),
       SetModelBlocked: ({ commandId, agentId, model, blocked }) =>
         once(commandId, api(models.setModelBlocked({ agentId, model, blocked }))),
+      GetSettings: () =>
+        api(Effect.map(coAuthorOn, (on) => ({ coAuthor: { on, line: coAuthorLine } }))).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+        ),
+      SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       Interrupt: ({ commandId, threadId }) => once(commandId, api(sessions.interrupt(threadId))),
       StopSession: ({ commandId, threadId }) => once(commandId, api(sessions.stop(threadId))),
       Send: ({ commandId, threadId, body, disposition }) =>
