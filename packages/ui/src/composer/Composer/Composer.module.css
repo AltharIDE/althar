@@ -116,13 +116,14 @@
   flex: none;
 }
 
-/* a tray joined to the top edge, in the flow: inset a little, so the composer reads as what it belongs to */
+/* the composer with what sits on its top edge: what floats over the thread, and a tray joined to it in the flow */
 .stack {
   position: relative;
   display: flex;
   flex-direction: column;
 }
 
+/* a tray is inset a little, so the composer reads as what it belongs to */
 .tray {
   margin: 0 10px;
 }

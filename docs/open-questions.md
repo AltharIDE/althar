@@ -9,6 +9,32 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## Dictation, 10 October
+
+- [x] **Where speech is turned into text.** On this machine only, with a
+  model downloaded on the first press; never a hosted service or the
+  person's own key (ADR-017).
+- [ ] **Code words.** Parakeet hears "use effect" for `useEffect` and
+  spells unusual names as it can. sherpa-onnx can bias a transducer towards
+  given phrases (hotwords, with modified beam search), which needs the
+  model's BPE vocabulary; the project's name, its branches, file and symbol
+  names could feed it. Leaning: try it on recordings of real dictation
+  before building it.
+- [ ] **Words as you speak.** Today the text arrives when you stop.
+  NVIDIA's Nemotron streaming models (0.6B, English, and a multilingual one
+  since August) can show words as they are said; the kit's composer already
+  draws faint unsettled words. A second model to download, or one instead
+  of Parakeet?
+- [ ] **Removing the model.** It stays in the profile once downloaded
+  (670 MB). Settings has no way to see or remove it yet. Leaning: a line
+  under a Dictation section, in the calm Settings style: its size, and
+  Remove.
+- [ ] **A shortcut to dictate.** Holding a key, as Claude Code's `/voice`
+  holds Space, or a chord to toggle. Which key, and does it work while the
+  window isn't focused?
+- [ ] **Windows on Arm.** sherpa-onnx has no prebuilt binary for it yet;
+  the microphone would not show there until it does.
+
 ## A project's menu, 8 October
 
 - [ ] **A project's intent.** The older Rooms prototype's project menu had

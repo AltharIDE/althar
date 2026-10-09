@@ -3,6 +3,7 @@ import { type CSSProperties, useEffect, useState } from 'react'
 import {
   ActionButton,
   Composer,
+  DictationTray,
   LinkButton,
   ResizeHandle,
   SidePanel,
@@ -20,6 +21,7 @@ import {
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
+import { useDictation } from '../../shared/dictation/useDictation'
 import { shortFolder } from '../../shared/folders'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
@@ -165,6 +167,7 @@ export function ProjectView({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
   const [draft, setDraft] = useState('')
+  const voice = useDictation(setDraft)
   const [pick, setPick] = useState<Choice | null>(null)
   // What opens beside the conversation: a task you plan, or the connections.
   const [panel, setPanel] = useState<'task' | 'connections' | null>(newTask ? 'task' : null)
@@ -229,6 +232,9 @@ export function ProjectView({
       <Composer
         value={draft}
         onChange={setDraft}
+        inputRef={voice.inputRef}
+        dictation={voice.dictation}
+        tray={voice.tray && <DictationTray {...voice.tray} />}
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}

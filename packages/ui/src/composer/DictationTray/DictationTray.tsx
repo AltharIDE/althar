@@ -16,6 +16,8 @@ export type DictationState =
   | { kind: DictationSetup.Downloading; got: string; size: string; left?: string; progress: number }
   | { kind: DictationSetup.Preparing }
   | { kind: DictationSetup.Stopped; got: string; size: string; progress: number }
+  /** `need`: what the model still needs; `free`: what the disk has. */
+  | { kind: DictationSetup.NoRoom; need: string; free: string }
   | { kind: DictationSetup.Denied }
   | { kind: DictationSetup.NoMicrophone }
   /** `said`: how long the kept recording is, when there is one. */
@@ -42,6 +44,8 @@ export interface DictationTrayText {
   stopped: string
   stoppedNote: (got: string, size: string) => string
   retry: string
+  noRoom: string
+  noRoomNote: (need: string, free: string) => string
   denied: string
   deniedNote: string
   openPrivacy: string
@@ -72,6 +76,8 @@ export const dictationTrayText: DictationTrayText = {
   stopped: 'The download stopped',
   stoppedNote: (got, size) => `At ${got} of ${size}. It carries on from there.`,
   retry: 'Try again',
+  noRoom: 'Not enough space for the speech model',
+  noRoomNote: (need, free) => `It needs ${need}; ${free} is free. Make room, then try again.`,
   denied: 'Althar can’t use the microphone',
   deniedNote: 'Turn on Althar in System Settings › Privacy & Security › Microphone, then press the microphone again.',
   openPrivacy: 'Open System Settings',
@@ -92,7 +98,7 @@ export type DictationTrayProps = RootProps<
     onDownload?: () => void
     /** Stops the download and keeps nothing of it. */
     onCancel?: () => void
-    /** Carries on a stopped download, or writes down a kept recording again. */
+    /** Carries on a stopped download (or one there wasn't room for), or writes down a kept recording again. */
     onRetry?: () => void
     /** Opens the system's settings for the microphone (denied) or for sound (no microphone). */
     onOpenSettings?: () => void
@@ -143,7 +149,8 @@ export function DictationTray({
   useEffect(() => {
     if (!ASKS.has(state.kind)) return
     const at = document.activeElement
-    const near = root.current?.parentElement
+    // Near is what the tray sits on, such as the composer and its microphone (`data-tray-host`), or else its parent.
+    const near = root.current?.closest('[data-tray-host]') ?? root.current?.parentElement
     const typing = at instanceof HTMLTextAreaElement || at instanceof HTMLInputElement
     if (!at || at === document.body || (!typing && near?.contains(at))) first.current?.focus()
   }, [state.kind])
@@ -198,6 +205,21 @@ export function DictationTray({
           note: t.stoppedNote(state.got, state.size),
           bar: state.progress,
           stopped: true,
+          actions: (
+            <>
+              {onRetry && (
+                <Button ref={first} size="small" onClick={onRetry}>
+                  {t.retry}
+                </Button>
+              )}
+              {onCancel && <LinkButton onClick={onCancel}>{t.cancel}</LinkButton>}
+            </>
+          ),
+        }
+      case DictationSetup.NoRoom:
+        return {
+          head: t.noRoom,
+          note: t.noRoomNote(state.need, state.free),
           actions: (
             <>
               {onRetry && (

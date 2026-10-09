@@ -449,6 +449,8 @@ export enum DictationSetup {
   Preparing = 'preparing',
   /** The download stopped partway; it carries on from there. */
   Stopped = 'stopped',
+  /** There isn't room on the disk for the speech model. */
+  NoRoom = 'noRoom',
   /** The microphone was refused; only the system's settings can change that. */
   Denied = 'denied',
   /** There is no microphone to listen with. */

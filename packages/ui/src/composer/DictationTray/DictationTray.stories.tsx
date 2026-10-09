@@ -49,6 +49,8 @@ export const Downloading: Story = { args: { state: DOWNLOADING } }
 export const Preparing: Story = { args: { state: { kind: DictationSetup.Preparing } } }
 /** The connection dropped partway; it carries on from where it stopped. */
 export const Stopped: Story = { args: { state: STOPPED } }
+/** The disk hasn't room for what is left of the model. */
+export const NoRoom: Story = { args: { state: { kind: DictationSetup.NoRoom, need: '670 MB', free: '212 MB' } } }
 /** The microphone was refused before: only System Settings can change it. */
 export const Denied: Story = { args: { state: { kind: DictationSetup.Denied } } }
 export const NoMicrophone: Story = { args: { state: { kind: DictationSetup.NoMicrophone } } }
@@ -133,6 +135,7 @@ export const AllStates: Story = {
         { state: 'downloading', node: <DictationTray {...args} state={DOWNLOADING} /> },
         { state: 'preparing', node: <DictationTray {...args} state={{ kind: DictationSetup.Preparing }} /> },
         { state: 'stopped', node: <DictationTray {...args} state={STOPPED} /> },
+        { state: 'no room', node: <DictationTray {...args} state={{ kind: DictationSetup.NoRoom, need: '670 MB', free: '212 MB' }} /> },
         { state: 'denied', node: <DictationTray {...args} state={{ kind: DictationSetup.Denied }} /> },
         { state: 'no microphone', node: <DictationTray {...args} state={{ kind: DictationSetup.NoMicrophone }} /> },
         { state: 'failed', node: <DictationTray {...args} state={{ kind: DictationSetup.Failed, said: '0:12' }} /> },

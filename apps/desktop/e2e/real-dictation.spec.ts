@@ -1,0 +1,62 @@
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { expect, test } from '@playwright/test'
+
+import { repository } from '../tests/repository'
+import { chooseFolder, launch } from './support'
+
+/*
+ * Dictation with the real speech model, in the built app: a recording plays
+ * into the window's microphone, and the speech process writes it down with
+ * sherpa-onnx. The model is 670 MB, so it runs only when asked:
+ * ALTHAR_REAL_SPEECH names a folder holding the model's folder
+ * (parakeet-tdt-0.6b-v3-int8, with ready.json in it), ALTHAR_REAL_VOICE a
+ * recording of someone speaking (WAV), and ALTHAR_REAL_WORDS a word they say.
+ */
+
+const models = process.env.ALTHAR_REAL_SPEECH
+const voice = process.env.ALTHAR_REAL_VOICE
+const words = process.env.ALTHAR_REAL_WORDS ?? ''
+
+test.skip(models === undefined || voice === undefined, 'Set ALTHAR_REAL_SPEECH and ALTHAR_REAL_VOICE to run it with the real model')
+
+test('writes down a real voice with the real model', async () => {
+  test.setTimeout(120_000)
+  const home = mkdtempSync(join(tmpdir(), 'althar-speech-'))
+  const meridian = repository(home, 'meridian')
+  mkdirSync(join(home, 'profile', 'speech'), { recursive: true })
+  symlinkSync(join(models ?? '', 'parakeet-tdt-0.6b-v3-int8'), join(home, 'profile', 'speech', 'parakeet-tdt-0.6b-v3-int8'))
+  const { electronApp, page } = await launch(home, { ALTHAR_FAKE_MICROPHONE: '1' })
+  try {
+    await chooseFolder(electronApp, meridian)
+    await page.getByRole('button', { name: /Open a folder/ }).click()
+    // The recording, played into the microphone once, then silence: Chromium's own fake microphone only beeps.
+    await page.evaluate(
+      async (wav) => {
+        const bytes = Uint8Array.from(atob(wav), (c) => c.charCodeAt(0))
+        navigator.mediaDevices.getUserMedia = async () => {
+          const context = new AudioContext()
+          const source = context.createBufferSource()
+          source.buffer = await context.decodeAudioData(bytes.buffer.slice(0))
+          const out = context.createMediaStreamDestination()
+          source.connect(out)
+          source.start()
+          return out.stream
+        }
+      },
+      readFileSync(voice ?? '').toString('base64'),
+    )
+    const box = page.getByRole('textbox', { name: /^Tell .* something/ })
+    await page.getByRole('button', { name: 'Dictate', exact: true }).click()
+    const stop = page.getByRole('button', { name: /^Stop dictating/ })
+    await expect(stop).toHaveAccessibleName('Stop dictating, 0:05', { timeout: 15_000 })
+    await stop.click()
+    await expect(box).toHaveValue(new RegExp(words, 'i'), { timeout: 60_000 })
+    await page.screenshot({ path: 'test-results/dictation-real.png', animations: 'disabled' })
+    process.stdout.write(`Heard: ${await box.inputValue()}\n`)
+  } finally {
+    await electronApp.close()
+  }
+})

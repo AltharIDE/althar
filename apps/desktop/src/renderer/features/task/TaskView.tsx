@@ -5,6 +5,7 @@ import {
   ChangeView,
   ChromeButton,
   Composer,
+  DictationTray,
   Issue,
   LinkButton,
   type ModelInfo,
@@ -22,6 +23,7 @@ import {
 import { useModels } from '../../data/models'
 import { modelInfo, waitsWords } from '../../shared/agents'
 import { contextMeter } from '../../shared/ContextMeter'
+import { useDictation } from '../../shared/dictation/useDictation'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
@@ -182,6 +184,7 @@ export function TaskView({
   nav?: ReactNode
 }) {
   const [draft, setDraft] = useState('')
+  const voice = useDictation(setDraft)
   const [pick, setPick] = useState<Choice | null>(null)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
   const [face, setFace] = useState<Face | null>(null)
@@ -309,6 +312,9 @@ export function TaskView({
       <Composer
         value={draft}
         onChange={setDraft}
+        inputRef={voice.inputRef}
+        dictation={voice.dictation}
+        tray={voice.tray && <DictationTray {...voice.tray} />}
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}

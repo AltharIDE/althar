@@ -13,6 +13,49 @@ import type { Feed } from './feed'
  * fakes of the client and the host.
  */
 
+/** Where dictation stands, as the main process reads it. */
+export interface DictationState {
+  /** The system it runs on, for the words that name its settings. */
+  readonly platform: string
+  /** Whether the system lets Althar use the microphone: yes, it would ask first (macOS, once), or it said no. */
+  readonly microphone: 'granted' | 'ask' | 'denied'
+  /** The speech model: all here and checked, or how much of it is, in bytes; and whether it is coming down now. */
+  readonly model: { readonly ready: boolean; readonly got: number; readonly size: number; readonly downloading: boolean }
+  /** Whether the system has settings Althar can open (macOS and Windows). */
+  readonly settings: boolean
+}
+
+/** Why the model's download stopped short. */
+export type DownloadStop =
+  | { readonly reason: 'network' }
+  | { readonly reason: 'corrupt' }
+  | { readonly reason: 'space'; readonly need: number; readonly free: number }
+
+/** How the model's download goes, as every window hears it. */
+export type DictationEvent =
+  | { readonly type: 'progress'; readonly got: number; readonly size: number }
+  | { readonly type: 'downloaded' }
+  | { readonly type: 'stopped'; readonly stop: DownloadStop; readonly got: number; readonly size: number }
+  | { readonly type: 'cancelled' }
+
+/** Dictation, through the main process: the microphone's permission, the speech model, and writing down what was said (ADR-017). */
+export interface DictationHost {
+  readonly state: () => Promise<DictationState>
+  /** Asks the system for the microphone where it asks; whether it may be used. */
+  readonly allow: () => Promise<boolean>
+  /** Starts bringing the model down, or carries on from where it stopped. How it goes comes as events. */
+  readonly download: () => Promise<void>
+  /** Stops the download and keeps nothing of it. */
+  readonly cancel: () => Promise<void>
+  /** Loads the model, so the first words are written down without the wait. */
+  readonly prepare: () => Promise<void>
+  /** What was said, as text: 16 kHz mono samples, or whatever rate they were recorded at. */
+  readonly transcribe: (samples: Float32Array, sampleRate: number) => Promise<string>
+  /** Opens the system's microphone privacy or sound settings; false where there are none to open. */
+  readonly openSettings: (pane: 'privacy' | 'sound') => Promise<boolean>
+  readonly onEvent: (listener: (event: unknown) => void) => () => void
+}
+
 /**
  * What only the app's main process can do. The window never handles a path:
  * the main process shows the picker, or is told what was dropped, and hands
@@ -41,6 +84,8 @@ export interface Host {
   readonly edgeSize: (height: number) => void
   /** From the edge: brings Althar's window forward, on a thread, or as it was. */
   readonly openInWindow: (threadId?: string) => void
+  /** Dictation; absent where a page can't dictate. */
+  readonly dictation?: DictationHost
 }
 
 export interface Services {

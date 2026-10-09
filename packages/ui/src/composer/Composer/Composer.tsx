@@ -199,108 +199,102 @@ export function Composer({
     return null
   })()
 
-  const floating = above && <div className={s.above}>{above}</div>
-  const form = (
-    <form className={cx(s.composer, elapsed !== null && s.recording, className)} onSubmit={submit}>
-      {tray == null && floating}
-      {queued.length > 0 && (
-        <section className={s.queue} aria-label={t.queued(queued.length)}>
-          <span className={s.queueHead}>
-            <Icon name="clock" size={11} />
-            {t.queued(queued.length)}
-          </span>
-          <ol className={s.queueList}>
-            {queued.map((q) => (
-              <li key={q.id} className={s.queued}>
-                <span className={s.queuedText}>{q.text}</span>
-                {onEditQueued && (
-                  <LinkButton className={s.queuedEdit} onClick={() => onEditQueued(q.id)}>
-                    {t.editQueued}
-                  </LinkButton>
-                )}
-                {onUnqueue && <IconButton icon="close" size="small" label={t.unqueue(q.text)} onClick={() => onUnqueue(q.id)} />}
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
-      <div className={s.field}>
-        {/* the words still arriving, faint after what is written; the field's own text shows through clear */}
-        {interim && (
-          <div className={s.interim} aria-hidden="true">
-            <span className={s.written}>{value}</span>
-            {value && !/\s$/.test(value) ? ' ' : ''}
-            {interim}
-          </div>
-        )}
-        <textarea
-          ref={ref}
-          rows={1}
-          value={value}
-          placeholder={shownPlaceholder}
-          aria-label={placeholder}
-          aria-describedby={note ? hintId : undefined}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
-            if ((e.metaKey || e.ctrlKey) && canSendNow) {
-              e.preventDefault()
-              sendNow()
-              return
-            }
-            submit(e)
-          }}
-        />
-      </div>
-      <div className={s.bar}>
-        {picker}
-        <span className={s.space} />
-        {note && (
-          <span id={hintId} className={s.note}>
-            {note}
-          </span>
-        )}
-        {canSendNow && (
-          <Tooltip label={t.sendNowNote}>
-            <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey}>
-              {t.sendNow}
-            </ActionButton>
-          </Tooltip>
-        )}
-        {meter}
-        {dictation &&
-          (elapsed !== null ? (
-            <button type="button" className={s.recButton} onClick={dictation.onStop} aria-label={t.stopDictating(elapsed)}>
-              <span className={s.wave} aria-hidden="true">
-                {(dictation.levels ?? QUIET).map((l, i) => (
-                  <i key={i} style={cssVars({ '--l': Math.max(0, Math.min(1, l)) })} />
-                ))}
-              </span>
-              {elapsed}
-              <Icon name="square" size={11} />
-            </button>
-          ) : (
-            <IconButton
-              ref={mic}
-              icon="mic"
-              label={micLabel(dictation, t)}
-              busy={dictation.busy}
-              progress={dictation.busy ? undefined : dictation.progress}
-              aria-expanded={dictation.expanded}
-              onClick={dictation.onStart}
-            />
-          ))}
-        {action}
-      </div>
-    </form>
-  )
-  if (tray == null) return form
-  /* with a tray, what floats sits above the tray rather than over it */
+  /* One shape whether or not a tray shows, so the field is never rebuilt under the cursor as one comes and goes. What floats sits above the tray, not over it. */
   return (
-    <div className={s.stack}>
-      {floating}
-      <div className={s.tray}>{tray}</div>
-      {form}
+    <div className={s.stack} data-tray-host="">
+      {above && <div className={s.above}>{above}</div>}
+      {tray != null && <div className={s.tray}>{tray}</div>}
+      <form className={cx(s.composer, elapsed !== null && s.recording, className)} onSubmit={submit}>
+        {queued.length > 0 && (
+          <section className={s.queue} aria-label={t.queued(queued.length)}>
+            <span className={s.queueHead}>
+              <Icon name="clock" size={11} />
+              {t.queued(queued.length)}
+            </span>
+            <ol className={s.queueList}>
+              {queued.map((q) => (
+                <li key={q.id} className={s.queued}>
+                  <span className={s.queuedText}>{q.text}</span>
+                  {onEditQueued && (
+                    <LinkButton className={s.queuedEdit} onClick={() => onEditQueued(q.id)}>
+                      {t.editQueued}
+                    </LinkButton>
+                  )}
+                  {onUnqueue && <IconButton icon="close" size="small" label={t.unqueue(q.text)} onClick={() => onUnqueue(q.id)} />}
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+        <div className={s.field}>
+          {/* the words still arriving, faint after what is written; the field's own text shows through clear */}
+          {interim && (
+            <div className={s.interim} aria-hidden="true">
+              <span className={s.written}>{value}</span>
+              {value && !/\s$/.test(value) ? ' ' : ''}
+              {interim}
+            </div>
+          )}
+          <textarea
+            ref={ref}
+            rows={1}
+            value={value}
+            placeholder={shownPlaceholder}
+            aria-label={placeholder}
+            aria-describedby={note ? hintId : undefined}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+              if ((e.metaKey || e.ctrlKey) && canSendNow) {
+                e.preventDefault()
+                sendNow()
+                return
+              }
+              submit(e)
+            }}
+          />
+        </div>
+        <div className={s.bar}>
+          {picker}
+          <span className={s.space} />
+          {note && (
+            <span id={hintId} className={s.note}>
+              {note}
+            </span>
+          )}
+          {canSendNow && (
+            <Tooltip label={t.sendNowNote}>
+              <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey}>
+                {t.sendNow}
+              </ActionButton>
+            </Tooltip>
+          )}
+          {meter}
+          {dictation &&
+            (elapsed !== null ? (
+              <button type="button" className={s.recButton} onClick={dictation.onStop} aria-label={t.stopDictating(elapsed)}>
+                <span className={s.wave} aria-hidden="true">
+                  {(dictation.levels ?? QUIET).map((l, i) => (
+                    <i key={i} style={cssVars({ '--l': Math.max(0, Math.min(1, l)) })} />
+                  ))}
+                </span>
+                {elapsed}
+                <Icon name="square" size={11} />
+              </button>
+            ) : (
+              <IconButton
+                ref={mic}
+                icon="mic"
+                label={micLabel(dictation, t)}
+                busy={dictation.busy}
+                progress={dictation.busy ? undefined : dictation.progress}
+                aria-expanded={dictation.expanded}
+                onClick={dictation.onStart}
+              />
+            ))}
+          {action}
+        </div>
+      </form>
     </div>
   )
 }
