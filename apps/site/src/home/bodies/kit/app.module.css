@@ -22,10 +22,6 @@
 .composer { flex: none; padding: 12px 24px 20px; }
 .board { display: flex; flex: 1; flex-direction: column; min-width: 0; overflow: hidden; padding: 16px 0 0 16px; --lane-min: 186px; }
 
-/* Wide, only the conversation: a column down the middle, as wide as the plan it holds (712px, and the thread's padding). */
-.centered .rooms { justify-content: center; }
-.centered .talk { width: 760px; max-width: 100%; border-left: 1px solid var(--line); }
-
 /* Narrow: only the conversation, the whole width. */
 .talkOnly .talk { flex: 1; width: auto; min-width: 0; border-right: 0; }
 .talkOnly .thread { padding: 4px 16px 0; }

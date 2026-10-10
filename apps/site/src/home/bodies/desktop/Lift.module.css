@@ -24,7 +24,7 @@
 .screenFrame { border-radius: 20px; }
 
 /* The plan, out of the window: laid out at its size, moved and turned by the scroll. */
-.card { position: absolute; left: 0; top: 0; z-index: 2; transform-origin: 0 0; opacity: 0; pointer-events: none; will-change: transform; --k: 0; }
+.card { position: absolute; left: 0; top: 0; z-index: 2; transform-origin: 0 0; visibility: hidden; will-change: transform; --k: 0; }
 .cardFace {
   border-radius: 12px;
   background: var(--n-1);

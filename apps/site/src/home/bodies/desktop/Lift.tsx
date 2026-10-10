@@ -184,8 +184,7 @@ export function Lift() {
       const scale = lerp(fromS, toS, k)
       const lifted = k > 0.002
       sp.style.visibility = lifted ? 'hidden' : 'visible'
-      // Opacity, not visibility: the picture inside sets its own visibility, which would show through a hidden parent.
-      cd.style.opacity = lifted ? '1' : '0'
+      cd.style.visibility = lifted ? 'visible' : 'hidden'
       cd.style.setProperty('--k', k.toFixed(4))
       cd.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${scale.toFixed(4)}) perspective(1600px) rotateY(${(14 * k).toFixed(2)}deg) rotateX(${(6 * k).toFixed(2)}deg)`
     }
