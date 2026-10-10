@@ -168,6 +168,21 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.repositories('p1'))?.isInvalidated).toBe(true)
   })
 
+  it('reads a project’s rules again when they change, as an answer kept as a rule changes them, only while they show', async () => {
+    const { client, cache, emit, read } = opened()
+    await cache.fetchQuery(read.rules('p1'))
+    const showing = new QueryObserver(cache, read.rules('p1'))
+    const stop = showing.subscribe(() => undefined)
+    emit(changed('policy', 'pol1', null, 'p1'))
+    await settle()
+    expect(client.getProjectRules).toHaveBeenCalledTimes(2)
+    stop()
+    emit(changed('policy', 'pol2', null, 'p1'))
+    await settle()
+    expect(client.getProjectRules).toHaveBeenCalledTimes(2)
+    expect(cache.getQueryState(keys.rules('p1'))?.isInvalidated).toBe(true)
+  })
+
   it('reads once more what was being read when a change touched it', async () => {
     const { client, cache, emit, read } = opened()
     const first = later<ProjectList>()

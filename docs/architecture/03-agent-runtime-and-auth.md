@@ -739,8 +739,20 @@ including the always-ask list
   ([ADR-013](../decisions/013-project-rules.md)). With the default mode,
   nearly everything is allowed without the user; only what the rules keep for
   the user becomes an attention request. The rules see what reaches
-  Althar, which is what agents ask to do beyond their sandbox. Every answer is recorded on the task, and the thread shows allowed
-  requests as one quiet line.
+  Althar, which is what agents ask to do beyond their sandbox. Every answer is recorded on the task. What the
+  project's allow rules let through shows under its turn as one quiet line,
+  saying which rule; the person's Allow always and Deny always keep such a
+  rule in the project ([ADR-018](../decisions/018-allow-always-keeps-a-rule.md)),
+  and the agent is still sent its narrowest option.
+- Where the project has the coordinator decide, it judges what no rule
+  answers, in a fresh session ([ADR-019](../decisions/019-coordinator-judges-permissions.md)).
+  The order is: what no project can change; what is never allowed; allowing
+  everything; what always asks, held for the person, which the coordinator
+  never answers; the allow rules; the coordinator; the person. An allow rule
+  answers first, so no judgment is spent on what a rule covers, and what the
+  rules can't tell goes to the person. The thread keeps the two receipts
+  apart: the rules' quiet line under a turn, and the coordinator's
+  "By the coordinator: …" with its reason.
 - A session with a read-only role, such as the coordinator or a review step,
   starts in the agent's read-only mode where it has one (for example Claude
   Code's plan mode, Codex's read-only sandbox, or OpenCode's plan agent), and

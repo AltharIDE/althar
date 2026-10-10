@@ -1,4 +1,4 @@
-import type { FileMention, Picture, ThreadItem, Unfurl } from '@althar/contracts'
+import type { AllowedBy, FileMention, Picture, ThreadItem, Unfurl } from '@althar/contracts'
 import { Delivery, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
@@ -36,6 +36,8 @@ export type Part =
       readonly state: ToolState
       /** The whole command, when it runs one: what the row opens to, and what Copy takes. */
       readonly command: string | null
+      /** The project's rule that let it through without asking (ADR-018), where one did. */
+      readonly allowedBy?: AllowedBy
       /** For a command: its output so far, or how much it printed once it ended (handed.ts). */
       readonly ran: Ran | null
       /** How a command ended, where it says. */
@@ -244,6 +246,7 @@ const partOf = (
         target: targetOf(item.content, worktree),
         state,
         command: item.content.command,
+        ...(item.content.allowedBy === undefined ? {} : { allowedBy: item.content.allowedBy }),
         ran: ranOf(item.content, state, outputs.get(item.id)),
         exit: item.content.exit,
         touches: [...item.content.locations.map((location) => location.path), ...item.content.files.map((file) => file.path)],

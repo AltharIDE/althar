@@ -17,6 +17,8 @@ const PAGES: Record<string, ComponentType> = {
   '/docs': Docs,
   /** The earlier, enterprise-facing page: kept for the company version, linked from nowhere. */
   '/enterprise': EnterpriseHome,
+  /** The link previews, drawn for scripts/og.ts to screenshot: in development only, and not in the build. */
+  ...(import.meta.env.DEV ? { '/og': lazy(() => import('./og/Og').then((m) => ({ default: m.Og }))) } : {}),
 }
 
 /** The developer page at the root, and the other pages by path. Any other path is the developer page. */

@@ -91,11 +91,19 @@ Decided in [ADR-013](decisions/013-project-rules.md).
   the repository, shared with the team, applying them once the folder is
   trusted.
   - Leaning: with the cloud, alongside rules an organisation manages.
-- [ ] **An allowlist for "Ask me".** Asking about everything, a person will
+- [x] **An allowlist for "Ask me".** Asking about everything, a person will
   want some commands let through, as Cursor's and Roo's allowlists do.
+  Settled on 10 October 2026 in
+  [ADR-018](decisions/018-allow-always-keeps-a-rule.md) (DEV-21): allow
+  rules by kind, by how a command starts, or exactly, kept by Allow always
+  on a call and listed as "Always allowed" on the rules screen, where each
+  can be taken off. What always asks or is never allowed still wins, and
+  an allow rule answers before the coordinator is asked to judge.
 - [x] **Who judges permission requests.** The coordinator, using its agent
   and model in a fresh read-only session, with task context and human fallback.
-  Decided in [ADR-019](decisions/019-coordinator-judges-permissions.md).
+  Decided in [ADR-019](decisions/019-coordinator-judges-permissions.md). It
+  judges only what no rule answers: never, what always asks and the allow
+  rules all come first (ADR-018).
 - [ ] **The network.** Rules on domains, as Codex's network proxy and Claude
   Code's `WebFetch(domain:…)` have.
 
@@ -455,10 +463,18 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   allow and deny lists, protection for dotfiles and deletions), Project rules
   covered who answers and what asks. It now also has a **Never** list: hard
   refusals that hold even with everything allowed. Still open:
-  - **Allow rules.** Under "Ask me", nothing is pre-approved, so `bun test`
-    would ask every time. Leaning: one rule list where each rule is allow,
-    ask or never, and "Allow always" on a permission card (ACP's
-    `allow_always`) writes an allow rule into it.
+  - ~~**Allow rules.** Under "Ask me", nothing is pre-approved, so `bun test`
+    would ask every time.~~ Settled in
+    [ADR-018](decisions/018-allow-always-keeps-a-rule.md): command rules
+    carry allow beside ask and never, and kinds can be always allowed;
+    Allow always on a card writes one (Althar's own, never the agent's
+    `allow_always`).
+  - **Rules from the coordinator's answers.** Where the coordinator decides,
+    an allow rule answers before it (ADR-018, ADR-019), but the coordinator
+    keeps none itself and judges each request afresh. When it allows the same
+    command again and again, should Althar offer the person the allow rule
+    that would spare those judgments? Leaning: a quiet suggestion on the
+    rules screen, kept only by the person.
   - **Patterns.** Rules are plain sentences now. Leaning: each rule has a
     kind and a pattern (command prefix, path glob, domain, MCP server and
     tool), with the sentence as its label.
@@ -508,10 +524,14 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   which the person sets on the plan's card; the coordinator proposes neither,
   so a step starts on the agent's own. Does the coordinator recommend effort
   per step, or always start at the model's default?
-- [ ] **Allow all, with always-ask items in the stack.** "Allow all 7"
+- [x] **Allow all, with always-ask items in the stack.** "Allow all 7"
   currently covers pushing to main too. Should items the rules keep for you
   be left out of Allow all?
   *Prototype:* Permissions → "Many at once".
+  Settled for now on 10 October 2026 (DEV-21,
+  [ADR-018](decisions/018-allow-always-keeps-a-rule.md)): Allow all allows
+  every card in the stack once, the always-ask ones too, since each was kept
+  for the person and they see the count. It never keeps a rule.
 - [x] **Pasted links.** Settled on 1 October 2026: issues and pull requests
   from the connected code hosts and trackers unfurl, through Althar's own
   connectors, not MCP servers

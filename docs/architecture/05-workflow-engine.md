@@ -430,7 +430,11 @@ person ([03](03-agent-runtime-and-auth.md), Permission routing).
 With **The coordinator decides** selected, the coordinator answers requests
 outside the explicit always-ask and never rules in a fresh session, after
 routine reads, searches and own-file edits pass through without a judgment
-([ADR-019](../decisions/019-coordinator-judges-permissions.md)). It uses the
+([ADR-019](../decisions/019-coordinator-judges-permissions.md)). The project's
+allow rules answer before it: what one covers is let through by the rule,
+with no judgment, and a call the coordinator leaves to the person offers Allow
+always, so the next one needs no judgment either
+([ADR-018](../decisions/018-allow-always-keeps-a-rule.md)). It uses the
 coordinator's agent and model, with the task's recent context, only where the
 registry has verified settings that remove its tools (currently Claude Code).
 Other agents fall back to the person. At most two judgments run at once, and
@@ -442,7 +446,8 @@ latency; the thread shows who decided, and the home counts coordinator answers.
 Existing modes remain: allow what no rule keeps, ask the person, or allow
 everything subject to never rules ([ADR-013](../decisions/013-project-rules.md)).
 Existing projects keep their mode. The project's rules are checked again before
-a coordinator decision is committed, so a rule changed while it thinks wins.
+a coordinator decision is committed, so a rule changed while it thinks wins,
+an allow rule kept meanwhile included.
 
 **Usage limits pause an account, not an agent.** A limit belongs to one of an
 agent's accounts ([ADR-012](../decisions/012-several-accounts-per-agent.md)),

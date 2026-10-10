@@ -627,6 +627,119 @@ describe('coordinator permission judgments', () => {
     )
   })
 
+  describe('with allow rules (ADR-018)', () => {
+    const allowAll = '{"decision":"allow","reason":"Needed for the task."}'
+
+    it.live('answers what an allow rule covers by the rule without a judgment, and still brings what always asks to the person', () => {
+      let calls = 0
+      return Effect.gen(function* () {
+        const { context, permissions, policies, instance, sql } = yield* setup
+        yield* policies.set(
+          context.projectId,
+          {
+            alwaysAsk: ['deploy'],
+            commands: [
+              { pattern: 'npm test', decision: 'allow' },
+              { pattern: 'npm publish', decision: 'allow' },
+            ],
+          },
+          instance.personId,
+        )
+        // Covered by a rule: allowed by it, citing it, and the coordinator never asked.
+        assert.strictEqual((yield* permissions.decide(context, request('npm test -- --run', 'ruled'))).decision, 'allow')
+        assert.strictEqual(calls, 0)
+        const [ruled] = yield* sql<{ rule: string | null; actor: string }>`SELECT rule, decided_by_actor_id AS actor FROM decisions`
+        assert.deepStrictEqual(JSON.parse(ruled?.rule ?? 'null'), [{ pattern: 'npm test', match: 'prefix' }])
+        assert.strictEqual(ruled?.actor, instance.systemId)
+        assert.lengthOf(yield* sql`SELECT id FROM record_events WHERE type = 'permission_request.judged'`, 0)
+        // What always asks reaches the person, held for them, though an allow rule names it; still no judgment.
+        const held = yield* Effect.forkChild(permissions.decide(context, request('npm publish', 'held')))
+        assert.include(yield* answerPerson, '"held":true')
+        assert.strictEqual((yield* Fiber.join(held)).decision, 'reject')
+        assert.strictEqual(calls, 0)
+        // What no rule answers is judged.
+        assert.strictEqual((yield* permissions.decide(context, request('npm run build', 'judged'))).decision, 'allow')
+        assert.strictEqual(calls, 1)
+      }).pipe(
+        Effect.provide(
+          runtime(':memory:', {
+            judgment: async () => {
+              calls++
+              return allowAll
+            },
+          }),
+        ),
+      )
+    })
+
+    it.live('lets an allow rule kept while the coordinator judges answer, rather than its judgment', () => {
+      let respond: ((answer: string) => void) | undefined
+      return Effect.gen(function* () {
+        const { context, permissions, policies, instance, sql } = yield* setup
+        const pending = yield* Effect.forkChild(permissions.decide(context, request('npm test')))
+        yield* until(
+          Effect.sync(() => [respond !== undefined]),
+          (rows) => rows[0] === true,
+        )
+        yield* policies.set(context.projectId, { commands: [{ pattern: 'npm test', decision: 'allow' }] }, instance.personId)
+        respond?.('{"decision":"deny","reason":"Not needed."}')
+        const decision = yield* Fiber.join(pending)
+        assert.strictEqual(decision.decision, 'allow')
+        const [row] = yield* sql<{ rule: string | null; actor: string }>`SELECT rule, decided_by_actor_id AS actor FROM decisions`
+        assert.deepStrictEqual(JSON.parse(row?.rule ?? 'null'), [{ pattern: 'npm test', match: 'prefix' }])
+        assert.strictEqual(row?.actor, instance.systemId)
+        const [judged] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'permission_request.judged'`
+        assert.isFalse(JSON.parse(judged?.payload ?? '{}').applied)
+      }).pipe(
+        Effect.provide(
+          runtime(':memory:', {
+            judgment: () =>
+              new Promise((resolve) => {
+                respond = resolve
+              }),
+          }),
+        ),
+      )
+    })
+
+    it.live('offers Allow always on a call the coordinator leaves to the person, and the rule kept answers the next one unjudged', () => {
+      let calls = 0
+      return Effect.gen(function* () {
+        const { context, permissions, policies, sql } = yield* setup
+        const pending = yield* Effect.forkChild(permissions.decide(context, request('npm test', 'left')))
+        const [attention] = yield* until(
+          sql<{ id: string; payload: string }>`SELECT id, payload FROM attention_requests WHERE state = 'open'`,
+          (rows) => rows.length === 1,
+        )
+        const payload = JSON.parse(attention?.payload ?? '{}')
+        assert.isFalse(payload.held)
+        assert.include(payload.always.allow, 'prefix')
+        yield* permissions.answer({
+          envelope: yield* Runtime.envelope('attention.answer', {}),
+          attentionId: attention?.id ?? '',
+          decision: 'allow',
+          always: 'prefix',
+        })
+        assert.strictEqual((yield* Fiber.join(pending)).decision, 'allow')
+        assert.deepStrictEqual(
+          ((yield* policies.current(context.projectId)).rules.commands ?? []).filter((rule) => rule.decision === 'allow'),
+          [{ pattern: 'npm test', decision: 'allow' }],
+        )
+        assert.strictEqual((yield* permissions.decide(context, request('npm test -- --run', 'next'))).decision, 'allow')
+        assert.strictEqual(calls, 1)
+      }).pipe(
+        Effect.provide(
+          runtime(':memory:', {
+            judgment: async () => {
+              calls++
+              return '{"decision":"ask","reason":"The person should decide."}'
+            },
+          }),
+        ),
+      )
+    })
+  })
+
   it.live('does not truncate a large action into an unsafe approval', () =>
     Effect.gen(function* () {
       const { context, policies } = yield* setup

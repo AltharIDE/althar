@@ -451,6 +451,55 @@ describe('the API', () => {
     ),
   )
 
+  it.live('keeps an always answer as a rule, and a call the rules screen now covers is answered by it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask' })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Look' })
+        yield* client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'large' })
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        const run = (command: string) =>
+          client.Send({ commandId: commandId(), threadId: task.threadId, body: `${scenarios.run}${command}`, disposition: 'after_current' })
+
+        yield* run('git status')
+        const waiting = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
+        assert.deepStrictEqual(waiting.attention[0]?.always?.allow, ['exact', 'prefix'])
+        yield* client.Answer({ commandId: commandId(), attentionId: waiting.attention[0]?.id ?? '', decision: 'allow', always: 'prefix' })
+        const rules = yield* client.GetProjectRules({ projectId: project.id })
+        assert.deepStrictEqual(rules.commands, [{ pattern: 'git status', decision: 'allow' }])
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.attention.length === 0)
+
+        // Taken off on the rules screen, the next asks; put back there, the call waiting is answered by it.
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, commands: [] })
+        yield* run('git status -s')
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
+        yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          commands: [{ pattern: 'git status -s', decision: 'allow', match: 'exact' }],
+        })
+        const after = yield* eventually(
+          client.GetThread({ threadId: task.threadId }),
+          (thread) =>
+            idle(thread) && thread.attention.length === 0 && thread.items.filter((item) => item.kind === 'tool_call').length === 2,
+        )
+        const last = after.items.filter((item) => item.kind === 'tool_call').at(-1)
+        assert.deepStrictEqual(last?.kind === 'tool_call' ? last.content.allowedBy : undefined, {
+          pattern: 'git status -s',
+          match: 'exact',
+        })
+        assert.deepStrictEqual((yield* client.GetProjectRules({ projectId: project.id })).alwaysAllow, [])
+        // An always that wasn't offered says so in words.
+        const refused = yield* Effect.flip(
+          client.Answer({ commandId: commandId(), attentionId: 'att_missing', decision: 'allow', always: 'kind' }),
+        )
+        assert.strictEqual(refused.reason, 'NotFound')
+      }),
+    ),
+  )
+
   it.live('reads a folder the person chose, and opens the repositories they kept in it, never a path outside what they chose', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -659,9 +708,11 @@ describe('project rules, through the API', () => {
         const { conventions, ...rules } = yield* client.GetProjectRules({ projectId: project.id })
         assert.deepStrictEqual(rules, {
           projectId: project.id,
+          revision: 1,
           permissions: 'rules',
           alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
           never: [],
+          alwaysAllow: [],
           commands: [],
           end: null,
           usageLimit: 'move',
@@ -712,6 +763,46 @@ describe('project rules, through the API', () => {
         assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
         const missing = yield* Effect.flip(client.GetProjectRules({ projectId: 'proj_missing' }))
         assert.strictEqual(missing.reason, 'NotFound')
+      }),
+    ),
+  )
+
+  it.live('refuses a list changed against rules that moved on since, and an allow over what comes first', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const seen = yield* client.GetProjectRules({ projectId: project.id })
+        const changed = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          commands: [{ pattern: 'bun test', decision: 'never' }],
+          expectedRevision: seen.revision,
+        })
+        assert.strictEqual(changed.revision, seen.revision + 1)
+        // The same list again, as read before that change: refused, and what changed is kept.
+        const stale = yield* Effect.flip(
+          client.SetProjectRules({ commandId: commandId(), projectId: project.id, commands: [], expectedRevision: seen.revision }),
+        )
+        assert.strictEqual(stale.reason, 'RulesChanged')
+        const allowed = yield* Effect.flip(
+          client.SetProjectRules({
+            commandId: commandId(),
+            projectId: project.id,
+            commands: [{ pattern: 'bun test', decision: 'allow' }],
+            expectedRevision: changed.revision,
+          }),
+        )
+        assert.deepStrictEqual(
+          [allowed.reason, allowed.message],
+          [
+            'RuleOnAnotherList',
+            'Commands starting “bun test” are on “Never”, which comes first, so nothing changed. Take them off “Never” first.',
+          ],
+        )
+        assert.deepStrictEqual((yield* client.GetProjectRules({ projectId: project.id })).commands, [
+          { pattern: 'bun test', decision: 'never' },
+        ])
       }),
     ),
   )

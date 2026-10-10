@@ -144,6 +144,15 @@ export const words = (
         return `${text(error, 'agentName')} isn't signed in, so the coordinator can't start on it. Pick another agent for the coordinator, or sign in with its own tool.`
       case 'AttentionClosed':
         return 'That call was already answered, or the agent took it back.'
+      case 'RuleOnAnotherList': {
+        const words = fieldOf(error, 'exact') === true ? `“${text(error, 'pattern')}”` : `Commands starting “${text(error, 'pattern')}”`
+        const list = text(error, 'list') === 'never' ? '“Never”' : '“Always ask me”'
+        return `${words} ${fieldOf(error, 'exact') === true ? 'is' : 'are'} on ${list}, which comes first, so nothing changed. Take ${fieldOf(error, 'exact') === true ? 'it' : 'them'} off ${list} first.`
+      }
+      case 'RulesChanged':
+        return "The project's rules changed meanwhile, so that change wasn't made. They're shown as they are now: make it again if it's still wanted."
+      case 'AlwaysNotOffered':
+        return "That can't be kept as a rule for this request. Answer it once instead."
       case 'AlreadyDelivered':
         return "The agent already has that message, so it can't be taken back."
       case 'GitFailed': {
@@ -254,6 +263,9 @@ export const expected = new Set([
   'SessionRunning',
   'NoSession',
   'AttentionClosed',
+  'AlwaysNotOffered',
+  'RuleOnAnotherList',
+  'RulesChanged',
   'AlreadyDelivered',
   'CommandIdReused',
 ])

@@ -3,10 +3,10 @@ import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
-import { NotFound } from './errors'
+import { NotFound, RuleOnAnotherList, RulesChanged } from './errors'
 import { Instance } from './Instance'
 import { fact, timestamp } from './records'
-import { type ProjectRuleSet, type RuleId, RULES } from './rules'
+import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rules'
 
 /*
  * A project's rules (the glossary's project rules; docs/architecture/05,
@@ -28,8 +28,19 @@ export const ProjectRules = Schema.Struct({
   alwaysAsk: Schema.Array(Schema.String),
   /** The kinds refused outright, by id. */
   never: Schema.optional(Schema.Array(Schema.String)),
-  /** Commands the person named, by how they start: asked about, or refused. */
-  commands: Schema.optional(Schema.Array(Schema.Struct({ pattern: Schema.String, decision: Schema.Literals(['ask', 'never']) }))),
+  /** The kinds let through without asking, by id (ADR-018): what Allow always kept by kind. */
+  alwaysAllow: Schema.optional(Schema.Array(Schema.String)),
+  /** Commands the person named, by how they start or exactly: asked about, refused, or let through (ADR-018). */
+  commands: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        pattern: Schema.String,
+        decision: Schema.Literals(['ask', 'never', 'allow']),
+        /** By the whole line; by how it starts without it. */
+        match: Schema.optional(Schema.Literals(['prefix', 'exact'])),
+      }),
+    ),
+  ),
   /** How a task ends when its plan doesn't say: a draft pull request, one ready for review, or its branch alone. */
   end: Schema.optional(Schema.Literals(['draft', 'ready', 'none'])),
   /**
@@ -65,8 +76,42 @@ export const ruleSetOf = (rules: ProjectRules): ProjectRuleSet => ({
   mode: rules.permissions ?? 'rules',
   ask: rules.alwaysAsk.every(isRule) ? rules.alwaysAsk.filter(isRule) : RULES,
   never: (rules.never ?? []).filter(isRule),
+  allow: (rules.alwaysAllow ?? []).filter(isRule),
   commands: rules.commands ?? [],
 })
+
+/** A rule an "always" answer keeps (ADR-018): a kind, or a command by how it starts or exactly, let through or never allowed. */
+export type Remembered = AlwaysRule
+
+/**
+ * The rules with one kept: a never in place of an allow for the same words,
+ * an allow only where nothing is kept for them, and a kind on its list (a
+ * never takes it off the allowed).
+ */
+export const withRemembered = (rules: ProjectRules, rule: Remembered): ProjectRules => {
+  if ('kind' in rule) {
+    const allow = rules.alwaysAllow ?? []
+    const never = rules.never ?? []
+    return rule.decision === 'allow'
+      ? { ...rules, alwaysAllow: allow.includes(rule.kind) ? allow : [...allow, rule.kind] }
+      : {
+          ...rules,
+          never: never.includes(rule.kind) ? never : [...never, rule.kind],
+          alwaysAllow: allow.filter((kind) => kind !== rule.kind),
+        }
+  }
+  const same = (each: NonNullable<ProjectRules['commands']>[number]) =>
+    each.pattern === rule.pattern && (each.match ?? 'prefix') === rule.match
+  // Kept already; or an allow over the same words that always ask or are never allowed, which a card can't loosen.
+  if ((rules.commands ?? []).some((each) => same(each) && (each.decision === rule.decision || rule.decision === 'allow'))) return rules
+  return {
+    ...rules,
+    commands: [
+      ...(rules.commands ?? []).filter((each) => !same(each)),
+      { pattern: rule.pattern, decision: rule.decision, ...(rule.match === 'exact' ? { match: 'exact' as const } : {}) },
+    ],
+  }
+}
 
 /** What of a project's rules can be taken back with null: to deciding by the code host, or to what the repositories say. */
 type Clearable = 'end' | 'branchPattern' | 'titlePattern'
@@ -94,7 +139,10 @@ export class Policies extends Context.Service<
     /** The project's rules now, by revision: its first, the MVP's, made when it has none. */
     current(
       projectId: ProjectId,
-    ): Effect.Effect<{ readonly id: string; readonly rules: ProjectRules }, SqlError.SqlError | Schema.SchemaError>
+    ): Effect.Effect<
+      { readonly id: string; readonly revision: number; readonly rules: ProjectRules },
+      SqlError.SqlError | Schema.SchemaError
+    >
     /** The rules a revision holds, as a run cites them. */
     rulesOf(policyId: string): Effect.Effect<ProjectRules, SqlError.SqlError | NotFound>
     /** A new revision of the project's rules, with what the person changed, recorded as theirs. */
@@ -103,12 +151,21 @@ export class Policies extends Context.Service<
       usageLimit: UsageLimit,
       actorId: ActorId,
     ): Effect.Effect<void, SqlError.SqlError | Schema.SchemaError | NotFound>
-    /** A new revision of the project's rules with what the person changed, recorded as theirs: none where nothing changed. */
+    /**
+     * A new revision of the project's rules with what the person changed,
+     * recorded as theirs: none where nothing changed. Given the revision the
+     * change was made against, it is refused where the rules have moved on
+     * since, so a list replaced whole never drops a rule kept meanwhile. An
+     * allow for words the rules ask about or never allow is refused.
+     */
     set(
       projectId: string,
       change: RulesChange,
       actorId: ActorId,
-    ): Effect.Effect<ProjectRules, SqlError.SqlError | Schema.SchemaError | NotFound>
+      expectedRevision?: number,
+    ): Effect.Effect<ProjectRules, SqlError.SqlError | Schema.SchemaError | NotFound | RulesChanged | RuleOnAnotherList>
+    /** A new revision of the project's rules with a rule an "always" answer keeps, recorded as whoever answered: none where it holds already. */
+    remember(projectId: string, rule: Remembered, actorId: ActorId): Effect.Effect<void, SqlError.SqlError | Schema.SchemaError | NotFound>
     /** A new revision of the project's rules for agents' accounts, recorded as the person's. */
     setAccounts(
       projectId: string,
@@ -146,16 +203,16 @@ export class Policies extends Context.Service<
             payload: { revision, rules },
             actorId,
           })
-          return { id, rules }
+          return { id, revision, rules }
         })
 
       const current = (projectId: ProjectId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const latest = Effect.map(
-            sql<{ id: string; rules: string }>`
-              SELECT id, rules FROM policies WHERE project_id = ${projectId} ORDER BY revision DESC LIMIT 1`,
-            ([row]) => (row === undefined ? undefined : { id: row.id, rules: decode(row.rules) }),
+            sql<{ id: string; revision: number; rules: string }>`
+              SELECT id, revision, rules FROM policies WHERE project_id = ${projectId} ORDER BY revision DESC LIMIT 1`,
+            ([row]) => (row === undefined ? undefined : { id: row.id, revision: row.revision, rules: decode(row.rules) }),
           )
           const known = yield* latest
           if (known !== undefined) return known
@@ -169,7 +226,11 @@ export class Policies extends Context.Service<
 
       /** A new revision of the project's rules, where the change makes one: none for what it says already. */
       // Read, changed and written together, so two changes made at once each build on the other.
-      const revise = (projectId: string, actorId: ActorId, change: (rules: ProjectRules) => ProjectRules | undefined) =>
+      const revise = <E = never>(
+        projectId: string,
+        actorId: ActorId,
+        change: (rules: ProjectRules, revision: number) => ProjectRules | undefined | Effect.Effect<ProjectRules | undefined, E>,
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           yield* sql.withTransaction(
@@ -177,12 +238,10 @@ export class Policies extends Context.Service<
               const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
               if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
               const now = yield* current(project.id)
-              const next = change(now.rules)
+              const changed = change(now.rules, now.revision)
+              const next = Effect.isEffect(changed) ? yield* changed : changed
               if (next === undefined) return
-              const [last] = yield* sql<{
-                revision: number
-              }>`SELECT max(revision) AS revision FROM policies WHERE project_id = ${projectId}`
-              yield* insert(project.id, (last?.revision ?? 0) + 1, next, actorId)
+              yield* insert(project.id, now.revision + 1, next, actorId)
             }),
           )
         })
@@ -200,19 +259,36 @@ export class Policies extends Context.Service<
           ),
         setUsageLimit: (projectId, usageLimit, actorId) =>
           provide(revise(projectId, actorId, (rules) => (usageLimitOf(rules) === usageLimit ? undefined : { ...rules, usageLimit }))),
-        set: (projectId, change, actorId) =>
+        set: (projectId, change, actorId, expectedRevision) =>
           provide(
             Effect.gen(function* () {
+              // A rule by how a command starts reads its words; an exact one keeps the line as it is, quotes and all.
               const commands = change.commands?.flatMap((rule) => {
-                const pattern = rule.pattern.trim().replace(/\s+/g, ' ')
-                return pattern === '' ? [] : [{ pattern, decision: rule.decision }]
+                const exact = rule.match === 'exact'
+                const pattern = exact ? rule.pattern.trim() : rule.pattern.trim().replace(/\s+/g, ' ')
+                return pattern === '' ? [] : [{ pattern, decision: rule.decision, ...(exact ? { match: 'exact' as const } : {}) }]
               })
               let next: ProjectRules | undefined
               // What isn't given stays as it is; what can be taken back goes with null.
               const rest = Object.fromEntries(
                 Object.entries(change).filter(([key, value]) => value !== undefined && !CLEARABLE.includes(key as Clearable)),
               ) as Partial<ProjectRules>
-              yield* revise(projectId, actorId, (rules) => {
+              yield* revise<RulesChanged | RuleOnAnotherList>(projectId, actorId, (rules, revision) => {
+                // Made against rules that have moved on since: what moved them would be lost.
+                if (expectedRevision !== undefined && revision !== expectedRevision)
+                  return Effect.fail(new RulesChanged({ projectId, revision, expected: expectedRevision }))
+                // An allow for words the rules ask about or never allow would replace what comes first, or sit beside it doing nothing.
+                const held = (commands ?? []).flatMap((rule) => {
+                  if (rule.decision !== 'allow') return []
+                  const same = (other: NonNullable<ProjectRules['commands']>[number]) =>
+                    other.pattern === rule.pattern && (other.match ?? 'prefix') === (rule.match ?? 'prefix')
+                  const kept = [...(rules.commands ?? []), ...(commands ?? [])].find((other) => other.decision !== 'allow' && same(other))
+                  return kept === undefined || kept.decision === 'allow' ? [] : [{ rule, list: kept.decision }]
+                })[0]
+                if (held !== undefined)
+                  return Effect.fail(
+                    new RuleOnAnotherList({ pattern: held.rule.pattern, exact: held.rule.match === 'exact', list: held.list }),
+                  )
                 const kept: Record<string, unknown> = { ...rules }
                 for (const key of CLEARABLE) {
                   const value = change[key]
@@ -230,6 +306,13 @@ export class Policies extends Context.Service<
                 return same(changed) === same(rules) ? undefined : changed
               })
               return next ?? (yield* current(projectId as ProjectId)).rules
+            }),
+          ),
+        remember: (projectId, rule, actorId) =>
+          provide(
+            revise(projectId, actorId, (rules) => {
+              const next = withRemembered(rules, rule)
+              return JSON.stringify(next) === JSON.stringify(rules) ? undefined : { ...next, source: 'person' }
             }),
           ),
         setAccounts: (projectId, accounts, actorId) =>

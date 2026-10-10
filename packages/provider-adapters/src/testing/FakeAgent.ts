@@ -75,6 +75,12 @@ export const scenarios = {
   handsBack: 'hands-back',
   /** A command whose output streams until the turn is cancelled. */
   streams: 'streams',
+  /**
+   * Followed by a command, `run git status --short`: runs it, asking first
+   * with Codex's command options, each time as a tool call of its own, and
+   * says what was chosen (`chosen=allow_once`).
+   */
+  run: 'run ',
 } as const
 
 /** A 480 × 300 PNG of a page, as a screenshot tool hands it back. */
@@ -183,6 +189,8 @@ interface SessionState {
   markers: Set<string>
   /** Markers it has played once already, such as `[lead:hang-once]`. */
   played: Set<string>
+  /** Commands it has run with `run`, so each is a tool call of its own. */
+  runs: number
 }
 
 /** What `[lead:explore]` reads, in order. */
@@ -545,6 +553,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         })(),
         markers: new Set(),
         played: new Set(),
+        runs: 0,
       }
       sessions.set(sessionId, session)
       return {
@@ -656,7 +665,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return ended()
       }
       if (text === scenarios.stubborn) session.stubborn = true
-      const scenario = resumed ? scenarios.stubborn : text.startsWith('run ') ? scenarios.commandChoices : text
+      const scenario = resumed ? scenarios.stubborn : text.startsWith(scenarios.run) ? scenarios.commandChoices : text
 
       switch (scenario) {
         case scenarios.commandChoices:
@@ -664,9 +673,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         case scenarios.fileEdit:
         case scenarios.stubborn: {
           const command = scenario === scenarios.commandChoices || scenario === scenarios.deniedThenWait
-          const line = text.startsWith('run ') ? text.slice(4) : 'make deploy'
+          const run = text.startsWith(scenarios.run)
+          const line = run ? text.slice(scenarios.run.length) : 'make deploy'
+          // Each command it is told to run is a tool call of its own, so a thread can hold several.
+          if (run) session.runs += 1
           const toolCall = {
-            toolCallId: 'call-2',
+            toolCallId: run ? `run-${session.runs}` : 'call-2',
             title: command ? `Run ${line}` : 'Edit app.ts',
             kind: command ? ('execute' as const) : ('edit' as const),
             // As agents do, the command itself, which the title only describes.
@@ -676,7 +688,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           const chosen = await ask(toolCall, command ? commandOptions : fileEditOptions)
           await update({
             sessionUpdate: 'tool_call_update',
-            toolCallId: 'call-2',
+            toolCallId: toolCall.toolCallId,
             status: chosen.startsWith('allow') ? 'completed' : 'failed',
           })
           await say(`chosen=${chosen}`)

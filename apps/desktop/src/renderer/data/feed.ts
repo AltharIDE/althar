@@ -93,6 +93,8 @@ const wholeReads = (event: Changed): ReadonlyArray<Due> => [
   ...(event.projectId !== null && REPOSITORIES.has(event.aggregateType)
     ? [{ key: keys.repositories(event.projectId), offScreen: false }]
     : []),
+  // Its rules, which an answer can change too (Allow always, Deny always), only while they show.
+  ...(event.projectId !== null && event.aggregateType === 'policy' ? [{ key: keys.rules(event.projectId), offScreen: false }] : []),
 ]
 
 /** The threads in the cache a change moves: its own, a coordinator's whose cards or head it changes, and, renamed, every one of its project's. */

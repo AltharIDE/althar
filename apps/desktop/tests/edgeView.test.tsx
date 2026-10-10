@@ -98,7 +98,9 @@ describe('the edge', () => {
 
     await userEvent.click(within(asks).getByRole('button', { name: 'Allow once' }))
     expect(client.answer).toHaveBeenCalledWith(expect.objectContaining({ attentionId: 'a1', decision: 'allow' }))
-    expect(await screen.findByText('Allowed npm publish')).toBeTruthy()
+    // The line stays where it was, quiet: allowed, once.
+    expect(await screen.findByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })).toBeTruthy()
+    expect(within(screen.getByRole('article', { name: 'Run npm publish' })).queryByRole('button', { name: 'Allow once' })).toBeNull()
   })
 
   it('says why a stuck task waits and what a change is, and counts the work held and stopped', async () => {
@@ -143,7 +145,7 @@ describe('the edge', () => {
     )
     expect((await screen.findByRole('alert')).textContent).toMatch(/runtime didn.t answer/)
     expect(within(screen.getByRole('article', { name: 'Run npm publish' })).getByRole('button', { name: 'Allow once' })).toBeTruthy()
-    expect(screen.queryByText('Allowed npm publish')).toBeNull()
+    expect(screen.queryByText('Allowed')).toBeNull()
   })
 
   it('keeps a call answered here as a line, with focus on it, until the island closes', async () => {
@@ -153,10 +155,10 @@ describe('the edge', () => {
     withServices(<Edge />, client, host)
     await userEvent.click(await screen.findByRole('button', { name: '1 needs you' }))
     await userEvent.click(screen.getByRole('button', { name: 'Allow once' }))
-    const line = await screen.findByText('Allowed npm publish')
-    expect(line.closest('[tabindex]')).toBe(document.activeElement)
+    const line = await screen.findByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })
+    await waitFor(() => expect(line).toBe(document.activeElement))
     act(() => pointed.forEach((listener) => listener(false)))
-    await waitFor(() => expect(screen.queryByText('Allowed npm publish')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Allowed')).toBeNull())
   })
 
   it('opens a task in Althar’s window by its title or its review, and Althar by its mark', async () => {
