@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
-import { type AgentStatus, type NameKind, patternProblem, type ProjectRulesView } from '@althar/contracts'
+import { ApiError, type AgentStatus, type NameKind, patternProblem, type ProjectRulesView } from '@althar/contracts'
 
 import { messageOf, type ProjectRulesChange } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -12,7 +12,15 @@ import { useServices } from '../../data/services'
  * each change saved at once as a new revision, and the agents with their
  * accounts, for the accounts row. A pattern for names is saved only once
  * Althar can follow it; until then the screen says why it can't.
+ *
+ * A change that replaces a list names the revision it was made against, so
+ * a rule a permission card kept meanwhile isn't dropped (ADR-017): the
+ * runtime refuses it, and the screen reads the rules again. The screen's own
+ * changes go one after another, each against the revision the last left.
  */
+
+/** What of the rules is replaced whole when it changes: a list. */
+const LISTS = ['alwaysAsk', 'never', 'alwaysAllow', 'commands'] as const
 
 export interface RulesModel {
   readonly project: string | null
@@ -36,15 +44,29 @@ export const useRules = (projectId: string): RulesModel => {
   const [failed, setError] = useState<string | null>(null)
   const error = failed ?? (rulesRead.error === null ? null : messageOf(rulesRead.error))
 
+  // The changes on their way, one after another.
+  const queue = useRef<Promise<unknown>>(Promise.resolve())
   const change = useCallback(
     (next: Omit<ProjectRulesChange, 'projectId'>) => {
       setError(null)
       const key = keys.rules(projectId)
       cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, ...next }))
-      client.setProjectRules({ projectId, ...next }).then(
-        (kept) => cache.setQueryData(key, kept),
-        (failure: unknown) => setError(messageOf(failure)),
-      )
+      const replaces = LISTS.some((list) => next[list] !== undefined)
+      queue.current = queue.current.then(() => {
+        // Against the rules as the last change left them, or as last read.
+        const revision = cache.getQueryData<ProjectRulesView>(key)?.revision
+        return client
+          .setProjectRules({ projectId, ...next, ...(replaces && revision !== undefined ? { expectedRevision: revision } : {}) })
+          .then(
+            (kept) => void cache.setQueryData(key, kept),
+            (failure: unknown) => {
+              setError(messageOf(failure))
+              // Moved on meanwhile: read them as they are, for the person to make the change again.
+              if (failure instanceof ApiError && failure.reason === 'RulesChanged')
+                void cache.invalidateQueries({ queryKey: key, exact: true })
+            },
+          )
+      })
     },
     [client, cache, projectId],
   )

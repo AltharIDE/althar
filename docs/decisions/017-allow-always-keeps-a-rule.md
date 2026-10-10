@@ -36,19 +36,24 @@
     or as what a package runner or a shell runs for it), or be only of kinds
     always allowed. A command that only changes folder or only looks (the
     reader rules' list) rides along with the rest, so `bun test 2>&1 | tail`
-    is covered by `bun test`; it never makes a rule of its own, and a
-    redirect on it is a write like any other (`cd . > ~/.zshrc`). A line
-    whose commands only show when it runs (`$(…)`, `eval`) is never covered.
+    is covered by `bun test`; it never makes a rule of its own. A rule
+    covers how a command starts, never where its output goes: a redirect is a
+    write like any other, on any command (`git status > ~/.zshrc`), and so
+    is one a shell wrapper carries (`sh -c '…' > ~/.zshrc`), which needs
+    writing outside always allowed. A line whose commands only show when it
+    runs (`$(…)`, `eval`) is never covered.
   - **A call offers only an always that would hold.** As it asks, the runtime
     works out what an always would keep (the exact command, how its command
     starts, the kind it is) and, by trying each against the rules, which
     scopes Allow always and Deny always would hold by. Something held for the
     person offers no Allow always: the always-ask list would win next time.
-    The call carries this; the answer names only the scope, and the runtime
-    keeps the rule that scope gives, nothing the window sends, after trying
-    it again against the rules as they are by then: an always the rules now
-    override is refused. An allow never takes the place of an ask or a never
-    for the same words.
+    The call carries this, and keeps the words it offered; the answer names
+    only the scope, and the runtime keeps exactly the rule offered by it,
+    nothing the window sends, after trying it again inside the transaction
+    that records the answer, against the rules as they are then: one the
+    rules now override is refused, and nothing is recorded. An allow never
+    takes the place of an ask or a never for the same words, from a card or
+    the rules screen.
   - **Allow always writes an allow rule; Deny always writes to the never
     list** (a never command rule, or the kind on the never list), as a
     revision of the rules recorded as the person's, in the same transaction as
@@ -57,6 +62,9 @@
     answer or the rules screen: a call they no longer keep for the person is
     answered by them, so the other cards of a stack an Allow always covers go.
     A call made while they changed is decided again as it starts to wait.
+  - **The rules screen names the revision it read** when it replaces a
+    list, so a rule a card kept meanwhile isn't dropped: the change is
+    refused, and the screen reads the rules again.
   - **The record says which rule answered:** the decision keeps the allow
     rules that let a request through (`decisions.rule`) and the revision they
     are in (`decisions.policy_id`); the person's always answer keeps the rule

@@ -23,7 +23,9 @@ describe('a project’s rules', () => {
     const always = await screen.findByRole('group', { name: 'Always ask me' })
     expect(within(always).getByRole('checkbox', { name: 'Force pushes' })).toBeTruthy()
     const never = screen.getByRole('group', { name: 'Never' })
-    expect((within(never).getByRole('checkbox', { name: 'Running npm publish' }) as HTMLButtonElement).dataset.state).toBe('checked')
+    expect((within(never).getByRole('checkbox', { name: 'Commands starting “npm publish”' }) as HTMLButtonElement).dataset.state).toBe(
+      'checked',
+    )
 
     await userEvent.click(within(always).getByRole('checkbox', { name: 'Force pushes' }))
     await waitFor(() =>
@@ -31,17 +33,24 @@ describe('a project’s rules', () => {
         projectId: 'p1',
         alwaysAsk: ['default-branch', 'many-branches', 'delete-branch', 'deploy', 'outside'],
         commands: [{ pattern: 'npm publish', decision: 'never' }],
+        expectedRevision: 1,
       }),
     )
     // Unticking a command the person named takes it away.
-    await userEvent.click(within(never).getByRole('checkbox', { name: 'Running npm publish' }))
-    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', never: [], commands: [] }))
+    await userEvent.click(within(never).getByRole('checkbox', { name: 'Commands starting “npm publish”' }))
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', never: [], commands: [], expectedRevision: 1 }),
+    )
 
     // The first list's button adds to it.
     await userEvent.click(screen.getAllByRole('button', { name: 'Add a rule' })[0]!)
     await userEvent.type(screen.getByRole('textbox', { name: 'A command, as it starts' }), 'terraform *{Enter}')
     await waitFor(() =>
-      expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', commands: [{ pattern: 'terraform *', decision: 'ask' }] }),
+      expect(client.setProjectRules).toHaveBeenLastCalledWith({
+        projectId: 'p1',
+        commands: [{ pattern: 'terraform *', decision: 'ask' }],
+        expectedRevision: 1,
+      }),
     )
 
     await userEvent.click(screen.getByRole('radio', { name: /Allow everything/ }))
@@ -78,11 +87,11 @@ describe('a project’s rules', () => {
       within(allowed)
         .getAllByRole('listitem')
         .map((item) => item.textContent),
-    ).toEqual(['Deploying and publishing', 'Running git status', 'Running exactly bun test src/a.test.ts'])
+    ).toEqual(['Deploying and publishing', 'Commands starting “git status”', 'Exactly “bun test src/a.test.ts”'])
     // An exact rule for the same words is a rule of its own, in its own list.
-    expect(within(screen.getByRole('group', { name: 'Never' })).getByRole('checkbox', { name: 'Running exactly git status' })).toBeTruthy()
+    expect(within(screen.getByRole('group', { name: 'Never' })).getByRole('checkbox', { name: 'Exactly “git status”' })).toBeTruthy()
 
-    await userEvent.click(within(allowed).getByRole('button', { name: 'Remove Running git status' }))
+    await userEvent.click(within(allowed).getByRole('button', { name: 'Remove Commands starting “git status”' }))
     await waitFor(() =>
       expect(client.setProjectRules).toHaveBeenLastCalledWith({
         projectId: 'p1',
@@ -91,6 +100,7 @@ describe('a project’s rules', () => {
           { pattern: 'git status', decision: 'never', match: 'exact' },
           { pattern: 'bun test src/a.test.ts', decision: 'allow', match: 'exact' },
         ],
+        expectedRevision: 1,
       }),
     )
     await userEvent.click(
@@ -106,6 +116,77 @@ describe('a project’s rules', () => {
         expect.objectContaining({ commands: expect.arrayContaining([{ pattern: 'npm test', decision: 'allow' }]) }),
       ),
     )
+  })
+
+  it('changes nothing when a command on a list that comes first is added to Always allowed, and says why beside it', async () => {
+    const { client } = fakeClient({
+      getProjectRules: vi.fn(async () => ({
+        ...projectRules,
+        commands: [
+          { pattern: 'bun test', decision: 'never' as const },
+          { pattern: 'npm test', decision: 'ask' as const },
+        ],
+      })),
+    })
+    withServices(<Rules />, client)
+    await screen.findByRole('group', { name: 'Never' })
+    await userEvent.click(screen.getAllByRole('button', { name: 'Add a rule' })[2]!)
+    const field = screen.getByRole('textbox', { name: 'A command, as it starts' })
+    await userEvent.type(field, 'bun test{Enter}')
+    expect(screen.getByRole('alert').textContent).toBe(
+      '“bun test” is on “Never”, which comes first, so nothing changed. Take it off “Never” first.',
+    )
+    await userEvent.clear(field)
+    await userEvent.type(field, 'npm  test{Enter}')
+    expect(screen.getByRole('alert').textContent).toContain('is on “Always ask me”, which comes first')
+    expect(client.setProjectRules).not.toHaveBeenCalled()
+    // Any other command is added.
+    await userEvent.clear(field)
+    await userEvent.type(field, 'cargo build{Enter}')
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith(
+        expect.objectContaining({ commands: expect.arrayContaining([{ pattern: 'cargo build', decision: 'allow' }]) }),
+      ),
+    )
+  })
+
+  it('names the revision it read when it changes a list, and reads the rules again when they had moved on', async () => {
+    const getProjectRules = vi.fn(async () => ({ ...projectRules, revision: 3 }))
+    const { client } = fakeClient({ getProjectRules })
+    vi.mocked(client.setProjectRules).mockRejectedValueOnce(
+      new ApiError({ reason: 'RulesChanged', message: "The project's rules changed meanwhile, so that change wasn't made." }),
+    )
+    withServices(<Rules />, client)
+    const always = await screen.findByRole('group', { name: 'Always ask me' })
+    await userEvent.click(within(always).getByRole('checkbox', { name: 'Force pushes' }))
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: 3 })))
+    expect(await screen.findByText("The project's rules changed meanwhile, so that change wasn't made.")).toBeTruthy()
+    await waitFor(() => expect(getProjectRules.mock.calls.length).toBeGreaterThan(1))
+    // A change of one setting alone replaces no list, so it names none.
+    await userEvent.click(screen.getByRole('radio', { name: /Push the branch only/ }))
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', end: 'none' }))
+  })
+
+  it('sends quick changes one after another, each against the rules the last one left', async () => {
+    let revision = 3
+    const { client } = fakeClient({ getProjectRules: vi.fn(async () => ({ ...projectRules, revision })) })
+    vi.mocked(client.setProjectRules).mockImplementation(async ({ projectId, expectedRevision: _, ...change }) => {
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      revision += 1
+      return { ...projectRules, ...change, projectId, revision }
+    })
+    withServices(<Rules />, client)
+    const always = await screen.findByRole('group', { name: 'Always ask me' })
+    await userEvent.click(within(always).getByRole('checkbox', { name: 'Force pushes' }))
+    await userEvent.click(within(always).getByRole('checkbox', { name: 'Deploying and publishing' }))
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(client.setProjectRules).mock.calls.map(([change]) => change.expectedRevision)).toEqual([3, 4])
+    expect(vi.mocked(client.setProjectRules).mock.calls[1]?.[0].alwaysAsk).toEqual([
+      'default-branch',
+      'many-branches',
+      'delete-branch',
+      'outside',
+    ])
   })
 
   it('says nothing is always allowed yet, and how a rule gets there', async () => {

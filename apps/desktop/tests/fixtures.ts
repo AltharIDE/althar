@@ -41,6 +41,7 @@ export const usual = (id: string, signIn: AgentStatus['signIn']): AgentStatus['a
 /** A project's first rules, as the runtime keeps them. */
 export const projectRules: ProjectRulesView = {
   projectId: 'p1',
+  revision: 1,
   permissions: 'rules',
   alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
   never: [],
