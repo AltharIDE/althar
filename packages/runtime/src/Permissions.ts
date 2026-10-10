@@ -12,7 +12,7 @@ import {
 } from '@althar/domain'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
 import { answerFor, type PermissionDecision, type PermissionMeanings, type PermissionRequest } from '@althar/provider-adapters'
-import { Context, Crypto, Deferred, Effect, Layer, Schema } from 'effect'
+import { Cause, Context, Crypto, Deferred, Effect, Fiber, Layer, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { AttentionClosed, NotFound } from './errors'
@@ -20,8 +20,10 @@ import { currentBranch } from './git'
 import { Instance } from './Instance'
 import { Live } from './Live'
 import { Policies, ruleSetOf } from './Policies'
+import { PermissionJudge } from './PermissionJudge'
 import { change, fact, timestamp } from './records'
 import { commandOf, decide, decideReader, essentials, pathsOf, type RuleContext } from './rules'
+import { addItem } from './threads'
 
 /*
  * Permission requests, answered from the project rules (ADR-007). Every
@@ -75,7 +77,7 @@ export const moveSession = (sessionId: string, to: ProviderSessionState, set: Re
     return yield* change('provider_sessions', sessionId, { ...set, state: to })
   })
 
-type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | Live | Policies
+type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | Live | Policies | PermissionJudge
 
 export class Permissions extends Context.Service<
   Permissions,
@@ -100,7 +102,9 @@ export class Permissions extends Context.Service<
       const instance = yield* Instance
       const policies = yield* Policies
       const live = yield* Live
+      const judge = yield* PermissionJudge
       const waiting = new Map<string, Waiting>()
+      const deciding = new Map<Fiber.Fiber<PermissionDecision>, string>()
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
       const recordDecision = (input: {
@@ -189,128 +193,227 @@ export class Permissions extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const requestId = yield* newId(Ids.permissionRequest)
-          const digest = actionDigest(request)
-          const kept = essentials(request.rawInput)
-          yield* sql.withTransaction(
-            Effect.gen(function* () {
-              yield* sql`INSERT INTO permission_requests ${sql.insert({
-                id: requestId,
-                projectId: requestContext.projectId,
-                providerSessionId: requestContext.sessionId,
-                toolCallId: request.toolCallId,
-                toolKind: request.kind,
-                title: request.title,
-                // The rules read the whole input; the record keeps its command and paths (07), and names what it left out.
-                rawInput: JSON.stringify(kept.cut.length === 0 ? kept.input : { ...kept.input, _cut: kept.cut }),
-                options: JSON.stringify(request.options),
-                actionDigest: digest,
-                state: 'open',
-                receivedAt: yield* timestamp,
-              })}`
-              yield* fact({
-                projectId: requestContext.projectId,
-                aggregateType: 'permission_request',
-                aggregateId: requestId,
-                revision: 1,
-                type: 'permission_request.received',
-                payload: { title: request.title, kind: request.kind },
-                actorId: instance.systemId,
-              })
-            }),
-          )
-          // A role that only reads is answered at once: allowed, or refused with a reason it reads.
-          if (requestContext.rules.role === 'reader') {
-            const read = decideReader(request)
-            const decision: PermissionDecision =
-              read.verdict === 'allow'
-                ? { decision: 'allow', reason: 'This role may do this.' }
-                : { decision: 'reject', reason: read.reason }
+          return yield* Effect.gen(function* () {
+            const digest = actionDigest(request)
+            const kept = essentials(request.rawInput)
             yield* sql.withTransaction(
-              recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
-            )
-            return decision
-          }
-          const rules = requestContext.rules.context
-          // Where a push without a destination goes depends on the branch checked out now.
-          const current = request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(rules.worktree) : undefined
-          // The project's rules as they are now: a change the person makes applies to the next request.
-          const project = ruleSetOf((yield* policies.current(requestContext.projectId)).rules)
-          const verdict = decide(request, { ...rules, project, ...(current === undefined ? {} : { currentBranch: current }) })
-          // What the rules refuse outright, such as an agent changing things on the code host, is answered at once with what to do instead.
-          if (verdict.verdict === 'deny') {
-            const decision: PermissionDecision = { decision: 'reject', reason: verdict.reason }
-            yield* sql.withTransaction(
-              recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
-            )
-            return decision
-          }
-          if (verdict.verdict === 'allow') {
-            const decision: PermissionDecision = { decision: 'allow', reason: 'Allowed by the project rules.' }
-            yield* sql.withTransaction(
-              recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
-            )
-            return decision
-          }
-
-          const attentionId = yield* newId(Ids.attentionRequest)
-          yield* sql.withTransaction(
-            Effect.gen(function* () {
-              yield* sql`INSERT INTO attention_requests ${sql.insert({
-                id: attentionId,
-                projectId: requestContext.projectId,
-                taskId: requestContext.taskId,
-                permissionRequestId: requestId,
-                kind: 'permission',
-                addresseeActorId: instance.personId,
-                payload: JSON.stringify({
+              Effect.gen(function* () {
+                yield* sql`INSERT INTO permission_requests ${sql.insert({
+                  id: requestId,
+                  projectId: requestContext.projectId,
+                  providerSessionId: requestContext.sessionId,
+                  toolCallId: request.toolCallId,
+                  toolKind: request.kind,
                   title: request.title,
-                  kind: request.kind,
-                  command: commandOf(request),
-                  paths: pathsOf(request),
-                  reason: verdict.reason,
+                  // The rules read the whole input; the record keeps its command and paths (07), and names what it left out.
+                  rawInput: JSON.stringify(kept.cut.length === 0 ? kept.input : { ...kept.input, _cut: kept.cut }),
+                  options: JSON.stringify(request.options),
+                  actionDigest: digest,
+                  state: 'open',
+                  receivedAt: yield* timestamp,
+                })}`
+                yield* fact({
+                  projectId: requestContext.projectId,
+                  aggregateType: 'permission_request',
+                  aggregateId: requestId,
+                  revision: 1,
+                  type: 'permission_request.received',
+                  payload: { title: request.title, kind: request.kind },
+                  actorId: instance.systemId,
+                })
+              }),
+            )
+            // A role that only reads is answered at once: allowed, or refused with a reason it reads.
+            if (requestContext.rules.role === 'reader') {
+              const read = decideReader(request)
+              const decision: PermissionDecision =
+                read.verdict === 'allow'
+                  ? { decision: 'allow', reason: 'This role may do this.' }
+                  : { decision: 'reject', reason: read.reason }
+              yield* sql.withTransaction(
+                recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
+              )
+              return decision
+            }
+            const rules = requestContext.rules.context
+            // Where a push without a destination goes depends on the branch checked out now.
+            const current = request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(rules.worktree) : undefined
+            // The project's rules as they are now: a change the person makes applies to the next request.
+            const policy = yield* policies.current(requestContext.projectId)
+            const project = ruleSetOf(policy.rules)
+            const ruleContext = { ...rules, project, ...(current === undefined ? {} : { currentBranch: current }) }
+            let verdict = decide(request, ruleContext)
+            if (verdict.verdict === 'judge') {
+              const judgment = yield* judge.judge({ ...requestContext, request, rules: project, workspace: ruleContext })
+              // A destination such as HEAD can change while the coordinator thinks. Git stays outside the transaction.
+              const branchNow = request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(rules.worktree) : undefined
+              // Re-read the rules and commit the answer together: a concurrent edit cannot slip past this check.
+              const result = yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  const latest = yield* policies.current(requestContext.projectId)
+                  const changed = latest.id !== policy.id
+                  const next = decide(request, {
+                    ...rules,
+                    project: ruleSetOf(latest.rules),
+                    ...(branchNow === undefined ? {} : { currentBranch: branchNow }),
+                  })
+                  const applied = !changed && next.verdict === 'judge' && judgment.decision !== 'ask'
+                  const revision = yield* change('permission_requests', requestId, { state: 'open' })
+                  yield* fact({
+                    projectId: requestContext.projectId,
+                    aggregateType: 'permission_request',
+                    aggregateId: requestId,
+                    revision,
+                    type: 'permission_request.judged',
+                    actorId: instance.coordinatorId,
+                    payload: { ...judgment, policyId: policy.id, applied },
+                  })
+                  if (applied) {
+                    const decision: PermissionDecision = {
+                      decision: judgment.decision === 'allow' ? 'allow' : 'reject',
+                      reason: judgment.reason,
+                    }
+                    yield* recordDecision({
+                      context: requestContext,
+                      request,
+                      requestId,
+                      digest,
+                      decision,
+                      actorId: instance.coordinatorId,
+                    })
+                    yield* addItem(requestContext, 'notice', {
+                      source: 'runtime',
+                      severity: 'info',
+                      about: 'permission',
+                      requestId,
+                      title: `${judgment.decision === 'allow' ? 'Allowed' : 'Denied'} by the coordinator: ${judgment.reason}`,
+                      description: request.title,
+                    })
+                    return { decision, verdict: undefined }
+                  }
+                  return {
+                    decision: undefined,
+                    verdict:
+                      next.verdict === 'judge'
+                        ? {
+                            verdict: 'ask' as const,
+                            reason: changed
+                              ? 'The project rules changed while the coordinator was deciding. Please decide this request.'
+                              : judgment.reason,
+                          }
+                        : next,
+                  }
                 }),
-                actionDigest: digest,
-                state: 'open',
-                createdAt: yield* timestamp,
-              })}`
-              yield* fact({
-                projectId: requestContext.projectId,
-                aggregateType: 'attention_request',
-                aggregateId: attentionId,
-                revision: 1,
-                type: 'attention_request.opened',
-                payload: { reason: verdict.reason },
-                actorId: instance.systemId,
-              })
-              yield* moveSession(requestContext.sessionId, 'waiting_approval')
-            }),
-          )
-          const waiter: Waiting = {
-            deferred: yield* Deferred.make<PermissionDecision>(),
-            context: requestContext,
-            request,
-            requestId,
-            digest,
-          }
-          waiting.set(attentionId, waiter)
-          yield* live.publish({
-            _tag: 'AttentionNeeded',
-            threadId: requestContext.threadId,
-            attentionId,
-            title: request.title,
-            reason: verdict.reason,
-          })
-          return yield* Deferred.await(waiter.deferred).pipe(
-            Effect.onExit((exit) => (exit._tag === 'Success' ? Effect.void : Effect.ignore(run(withdraw(attentionId, waiter))))),
+              )
+              if (result.decision !== undefined) return result.decision
+              verdict = result.verdict
+            }
+            // What the rules refuse outright, such as an agent changing things on the code host, is answered at once with what to do instead.
+            if (verdict.verdict === 'deny') {
+              const decision: PermissionDecision = { decision: 'reject', reason: verdict.reason }
+              yield* sql.withTransaction(
+                recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
+              )
+              return decision
+            }
+            if (verdict.verdict === 'allow') {
+              const decision: PermissionDecision = { decision: 'allow', reason: 'Allowed by the project rules.' }
+              yield* sql.withTransaction(
+                recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
+              )
+              return decision
+            }
+
+            const attentionId = yield* newId(Ids.attentionRequest)
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                yield* sql`INSERT INTO attention_requests ${sql.insert({
+                  id: attentionId,
+                  projectId: requestContext.projectId,
+                  taskId: requestContext.taskId,
+                  permissionRequestId: requestId,
+                  kind: 'permission',
+                  addresseeActorId: instance.personId,
+                  payload: JSON.stringify({
+                    title: request.title,
+                    kind: request.kind,
+                    command: commandOf(request),
+                    paths: pathsOf(request),
+                    reason: verdict.reason,
+                  }),
+                  actionDigest: digest,
+                  state: 'open',
+                  createdAt: yield* timestamp,
+                })}`
+                yield* fact({
+                  projectId: requestContext.projectId,
+                  aggregateType: 'attention_request',
+                  aggregateId: attentionId,
+                  revision: 1,
+                  type: 'attention_request.opened',
+                  payload: { reason: verdict.reason },
+                  actorId: instance.systemId,
+                })
+                yield* moveSession(requestContext.sessionId, 'waiting_approval')
+              }),
+            )
+            const waiter: Waiting = {
+              deferred: yield* Deferred.make<PermissionDecision>(),
+              context: requestContext,
+              request,
+              requestId,
+              digest,
+            }
+            waiting.set(attentionId, waiter)
+            yield* live.publish({
+              _tag: 'AttentionNeeded',
+              threadId: requestContext.threadId,
+              attentionId,
+              title: request.title,
+              reason: verdict.reason,
+            })
+            return yield* Deferred.await(waiter.deferred).pipe(
+              Effect.onExit((exit) => (exit._tag === 'Success' ? Effect.void : Effect.ignore(run(withdraw(attentionId, waiter))))),
+            )
+          }).pipe(
+            Effect.onInterrupt(() =>
+              sql
+                .withTransaction(
+                  Effect.gen(function* () {
+                    const [row] = yield* sql<{ state: string }>`SELECT state FROM permission_requests WHERE id = ${requestId}`
+                    if (row?.state !== 'open') return
+                    const revision = yield* change('permission_requests', requestId, { state: 'cancelled' })
+                    yield* fact({
+                      projectId: requestContext.projectId,
+                      aggregateType: 'permission_request',
+                      aggregateId: requestId,
+                      revision,
+                      type: 'permission_request.cancelled',
+                      actorId: instance.systemId,
+                    })
+                  }),
+                )
+                .pipe(Effect.orDie),
+            ),
           )
         })
 
       return Permissions.of({
         decide: (requestContext, request) =>
-          // A request the store couldn't record, or rules that failed, get a rejection: nothing runs that wasn't allowed.
-          run(decideRequest(requestContext, request)).pipe(
-            Effect.catchCause(() => Effect.succeed<PermissionDecision>({ decision: 'reject', reason: 'Althar could not decide.' })),
-          ),
+          Effect.gen(function* () {
+            // Track the whole callback, including its commit, until the adapter gets the answer.
+            const fiber = yield* Effect.forkChild(
+              run(decideRequest(requestContext, request)).pipe(
+                Effect.catchCause((cause) =>
+                  Cause.hasInterrupts(cause)
+                    ? Effect.interrupt
+                    : Effect.succeed<PermissionDecision>({ decision: 'reject', reason: 'Althar could not decide.' }),
+                ),
+              ),
+            )
+            deciding.set(fiber, requestContext.sessionId)
+            return yield* Fiber.join(fiber).pipe(Effect.ensuring(Effect.sync(() => deciding.delete(fiber))))
+          }),
 
         answer: ({ envelope, attentionId, decision, reason }) =>
           run(
@@ -373,11 +476,19 @@ export class Permissions extends Context.Service<
 
         withdrawAll: (sessionId) =>
           run(
-            Effect.forEach(
-              [...waiting].filter(([, waiter]) => waiter.context.sessionId === sessionId),
-              // Withdrawn here, before the session's end is recorded; the waiting decision then ends too.
-              ([attentionId, waiter]) => Effect.andThen(Effect.ignore(withdraw(attentionId, waiter)), Deferred.interrupt(waiter.deferred)),
-              { discard: true },
+            Effect.andThen(
+              Effect.forEach(
+                [...deciding].filter(([, ofSession]) => ofSession === sessionId),
+                ([fiber]) => Fiber.interrupt(fiber),
+                { discard: true },
+              ),
+              Effect.forEach(
+                [...waiting].filter(([, waiter]) => waiter.context.sessionId === sessionId),
+                // Withdrawn here, before the session's end is recorded; the waiting decision then ends too.
+                ([attentionId, waiter]) =>
+                  Effect.andThen(Effect.ignore(withdraw(attentionId, waiter)), Deferred.interrupt(waiter.deferred)),
+                { discard: true },
+              ),
             ),
           ),
       })

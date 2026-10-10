@@ -425,23 +425,21 @@ reviewers get the context.
 **Permissions are answered below the user where possible.** Althar is the
 ACP client that answers `session/request_permission`, and every session starts
 in a mode that asks, so it can answer from policy before anything reaches a
-person ([03](03-agent-runtime-and-auth.md), Permission routing). The leaning:
+person ([03](03-agent-runtime-and-auth.md), Permission routing).
 
-- project rules answer first;
-- the lead answers requests from its steps that the rules don't cover;
-- only what the project's always-ask list reserves (production, staging,
-  pushes to main, spending over a threshold, and similar) becomes an attention
-  request;
-- everything allowed without the user is recorded on the task and shown as one
-  quiet line.
+With **The coordinator decides** selected, the coordinator answers requests
+outside the explicit always-ask and never rules in a fresh read-only session
+([ADR-018](../decisions/018-coordinator-judges-permissions.md)). It uses the
+coordinator's agent and model, with the task's recent context; it has no tools
+and does not wait for the coordinator's conversation to become idle. Readers
+remain read-only. Invalid, uncertain, failed or timed-out judgments go to the
+person. Each answer records its reason, cost when reported, token usage and
+latency; the thread shows who decided, and the home counts coordinator answers.
 
-Open: whether the lead or a separate cheap judge model answers. For now a
-project's rules answer ([ADR-013](../decisions/013-project-rules.md)):
-- a mode for what no rule keeps (allowed, asked about, or everything allowed);
-- the kinds that always ask and those never allowed;
-- commands the person named by how they start.
-
-The lead does not answer yet.
+Existing modes remain: allow what no rule keeps, ask the person, or allow
+everything subject to never rules ([ADR-013](../decisions/013-project-rules.md)).
+Existing projects keep their mode. The project's rules are checked again before
+a coordinator decision is committed, so a rule changed while it thinks wins.
 
 **Usage limits pause an account, not an agent.** A limit belongs to one of an
 agent's accounts ([ADR-012](../decisions/012-several-accounts-per-agent.md)),

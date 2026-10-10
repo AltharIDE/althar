@@ -208,8 +208,8 @@ export enum TaskEnd {
 export enum PermissionPolicy {
   /** What no rule keeps is allowed: the always-ask list waits for you, the never list is refused. */
   Rules = 'rules',
-  /** The lead allows what the task needs and passes the rest to you. */
-  Lead = 'lead',
+  /** The coordinator decides within the project’s rules and asks you when unsure. */
+  Coordinator = 'coordinator',
   /** Nothing asks; every request is still recorded. */
   AllowAll = 'all',
   /** Anything no rule covers waits for you. */

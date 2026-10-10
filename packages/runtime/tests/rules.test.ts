@@ -36,6 +36,24 @@ const request = (fields: Partial<PermissionRequest>): PermissionRequest => ({
 
 const run = (command: string, overrides: Partial<RuleContext> = {}) => decide(request({ title: command }), { ...context, ...overrides })
 
+describe('the coordinator decides', () => {
+  const project: ProjectRuleSet = { mode: 'coordinator', ask: ['deploy'], never: ['force-push'], commands: [] }
+
+  it('judges requests outside the explicit lists', () => {
+    assert.strictEqual(run('npm test', { project }).verdict, 'judge')
+    assert.strictEqual(run('git push origin althar/retry', { project }).verdict, 'judge')
+  })
+
+  it('cannot override always-ask, never, command rules, or the code-host boundary', () => {
+    assert.strictEqual(run('npm publish', { project }).verdict, 'ask')
+    assert.strictEqual(run('git push --force origin main', { project }).verdict, 'deny')
+    assert.strictEqual(run('gh pr merge 12', { project }).verdict, 'deny')
+    assert.strictEqual(run('npm test', { project: { ...project, commands: [{ pattern: 'npm test', decision: 'ask' }] } }).verdict, 'ask')
+    assert.strictEqual(run('npm test', { project: { ...project, commands: [{ pattern: 'npm test', decision: 'never' }] } }).verdict, 'deny')
+    assert.strictEqual(run('git push origin $(git branch --show-current)', { project }).verdict, 'ask')
+  })
+})
+
 describe('a code host, reached only through Althar', () => {
   it.each([
     ['gh pr view 12', undefined],

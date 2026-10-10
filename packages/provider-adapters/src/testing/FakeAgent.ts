@@ -97,6 +97,15 @@ export const codexLikeMeanings = {
 }
 
 export interface FakeAgentOptions {
+  /** A scripted response to a permission judgment, with the actual session settings exposed to the test. */
+  readonly judgment?: (input: {
+    readonly prompt: string
+    readonly mode: string
+    readonly model: string
+    readonly effort: string
+    readonly mcpServers: number
+    readonly askToWrite: () => Promise<string>
+  }) => Promise<string>
   /** What `exit` does. The process entry point exits the process. */
   readonly exit?: () => void
   /**
@@ -576,6 +585,27 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         session.abort = undefined
         if (answer === undefined) return 'withdrawn'
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
+      }
+
+      if (text.startsWith('You are the project coordinator, judging one permission request')) {
+        const reply =
+          options.judgment === undefined
+            ? '{"decision":"allow","reason":"This action is needed for the task."}'
+            : await options.judgment({
+                prompt: text,
+                mode: session.mode,
+                model: session.model,
+                effort: session.effort,
+                mcpServers: session.mcpServers,
+                askToWrite: () =>
+                  ask(
+                    { toolCallId: 'judge-write', title: 'Write a file', kind: 'edit', rawInput: { path: '/tmp/judge-write.txt' } },
+                    commandOptions,
+                  ),
+              })
+        await update({ sessionUpdate: 'usage_update', used: 100, size: 10000, cost: { amount: 0.002, currency: 'USD' } })
+        await say(reply)
+        return ended({ inputTokens: 100, outputTokens: 20, totalTokens: 120 })
       }
 
       // A lead that stalls or loops, where a marker says so.

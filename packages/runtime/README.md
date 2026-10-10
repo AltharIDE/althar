@@ -23,7 +23,7 @@ Effect.runPromise(Effect.scoped(program).pipe(Effect.provide(Runtime.layer({ dat
 
 - **`Projects`** opens a folder in a git repository as a project, or finds the one it already is, and creates tasks. A task gets its thread and a worktree at `<worktreeRoot>/<project>/<task>/<repository>`, on the branch `althar/<task>` (ADR-006).
 - **`Sessions`** starts an agent on a task's thread, in the task's worktree and in the mode that asks. It accepts input into the thread's queue, delivers it a turn at a time (an `interrupt_and_continue` input stops the turn and goes first), changes the model, hands the thread to another agent with a brief (ADR-005), and stops sessions.
-- **`Permissions`** answers every permission request from the rules. What the always-ask list keeps for the person becomes an attention request, answered with `answer`.
+- **`Permissions`** applies project rules to every permission request, asks the coordinator in its opt-in mode, and falls back to the person when needed. Always-ask items become attention requests, answered with `answer`. `PermissionJudge` runs a fresh, bounded read-only coordinator session and records the reason and usage.
 - **`Live`** streams what is happening now: agent events, turns, sessions, and questions for the person.
 - **`Coordinator`** is the project's coordinator. `say` starts it, on the agent the person last used, with what they said; it answers questions and turns changes into tasks with Althar's tools.
 - **`Plans`** proposes a task's plan (its steps and who does each), and holds, changes or starts it; left alone, it starts when its countdown ends.
