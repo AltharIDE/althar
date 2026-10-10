@@ -184,7 +184,7 @@ export const handlers = Api.toLayer(
       issue === undefined ? Effect.succeed(undefined) : issues.read(issue, projectId)
 
     /** A project's rules as its rules screen shows them, with what each of its repositories says on its default branch. */
-    const rulesView = (projectId: string, rules: ProjectRules) =>
+    const rulesView = (projectId: string, { rules, revision }: { readonly rules: ProjectRules; readonly revision: number }) =>
       Effect.gen(function* () {
         const repositories = yield* sql<{ name: string; path: string; base: string | null }>`
           SELECT b.display_name AS name, l.path, b.default_base_ref AS base FROM repository_bindings b
@@ -201,10 +201,10 @@ export const handlers = Api.toLayer(
             })),
           { concurrency: 4 },
         )
-        return { ...rulesFields(projectId, rules), conventions }
+        return { ...rulesFields(projectId, rules), revision, conventions }
       })
 
-    const rulesFields = (projectId: string, rules: ProjectRules): Omit<ProjectRulesView, 'conventions'> => {
+    const rulesFields = (projectId: string, rules: ProjectRules): Omit<ProjectRulesView, 'conventions' | 'revision'> => {
       const set = ruleSetOf(rules)
       const accounts = accountsOf(rules)
       return {
@@ -709,10 +709,10 @@ export const handlers = Api.toLayer(
             const sql = yield* SqlClient.SqlClient
             const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
             if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
-            return yield* rulesView(projectId, (yield* policies.current(project.id)).rules)
+            return yield* rulesView(projectId, yield* policies.current(project.id))
           }),
         ),
-      SetProjectRules: ({ commandId, projectId, rotateAccounts, onlyAccounts, ...change }) =>
+      SetProjectRules: ({ commandId, projectId, rotateAccounts, onlyAccounts, expectedRevision, ...change }) =>
         once(
           commandId,
           api(
@@ -729,10 +729,10 @@ export const handlers = Api.toLayer(
                           : { only: (onlyAccounts === undefined ? now.only : onlyAccounts) ?? {} }),
                       },
                     }
-              const rules = yield* policies.set(projectId, { ...change, ...accounts }, instance.personId)
+              yield* policies.set(projectId, { ...change, ...accounts }, instance.personId, expectedRevision)
               // A call still waiting that the rules no longer keep for the person is answered by them.
               yield* permissions.reconsider(projectId)
-              return yield* rulesView(projectId, rules)
+              return yield* rulesView(projectId, yield* policies.current(projectId as ProjectId))
             }),
           ),
         ),

@@ -192,4 +192,75 @@ describe('a project’s rules, as kept', () => {
       assert.deepStrictEqual(set.alwaysAllow, ['deploy'])
     }).pipe(Effect.provide(runtime())),
   )
+
+  it.effect('refuse an allow for words the rules ask about or never allow, as a card would', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      yield* policies.set(project.projectId, { commands: [{ pattern: 'bun test', decision: 'never' }] }, instance.personId)
+      // In place of the never, or beside it: the never stays.
+      for (const commands of [
+        [{ pattern: 'bun test', decision: 'allow' as const }],
+        [
+          { pattern: 'bun test', decision: 'never' as const },
+          { pattern: 'bun test', decision: 'allow' as const },
+        ],
+      ]) {
+        const refused = yield* Effect.flip(policies.set(project.projectId, { commands }, instance.personId))
+        assert.deepStrictEqual([refused._tag, refused._tag === 'RuleOnAnotherList' ? refused.list : null], ['RuleOnAnotherList', 'never'])
+      }
+      assert.deepStrictEqual((yield* policies.current(project.projectId as ProjectId)).rules.commands, [
+        { pattern: 'bun test', decision: 'never' },
+      ])
+      // The same words exactly are another rule.
+      const exact = yield* policies.set(
+        project.projectId,
+        {
+          commands: [
+            { pattern: 'bun test', decision: 'never' },
+            { pattern: 'bun test', decision: 'allow', match: 'exact' },
+          ],
+        },
+        instance.personId,
+      )
+      assert.lengthOf(exact.commands ?? [], 2)
+      const asked = yield* Effect.flip(
+        policies.set(
+          project.projectId,
+          {
+            commands: [
+              { pattern: 'npm test', decision: 'ask' },
+              { pattern: 'npm  test', decision: 'allow' },
+            ],
+          },
+          instance.personId,
+        ),
+      )
+      assert.strictEqual(asked._tag === 'RuleOnAnotherList' ? asked.list : null, 'ask')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.effect('refuse a change made against rules that have moved on since, and keep what moved them', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const projectId = project.projectId as ProjectId
+      const seen = yield* policies.current(projectId)
+      // A card keeps a rule while the rules screen still shows what it read.
+      yield* policies.remember(projectId, { decision: 'allow', pattern: 'git status', match: 'prefix' }, instance.personId)
+      const refused = yield* Effect.flip(policies.set(projectId, { commands: [] }, instance.personId, seen.revision))
+      assert.deepStrictEqual(
+        [refused._tag, refused._tag === 'RulesChanged' ? [refused.expected, refused.revision] : null],
+        ['RulesChanged', [seen.revision, seen.revision + 1]],
+      )
+      assert.deepStrictEqual((yield* policies.current(projectId)).rules.commands, [{ pattern: 'git status', decision: 'allow' }])
+      // Against the rules as they are, it goes through.
+      yield* policies.set(projectId, { commands: [] }, instance.personId, seen.revision + 1)
+      assert.deepStrictEqual((yield* policies.current(projectId)).rules.commands, [])
+    }).pipe(Effect.provide(runtime())),
+  )
 })

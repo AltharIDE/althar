@@ -284,6 +284,8 @@ export type RepositoryConventions = typeof RepositoryConventions.Type
 /** A project's rules, as its rules screen shows them. */
 export const ProjectRulesView = Schema.Struct({
   projectId: Schema.String,
+  /** Which revision of the rules these are: a change that replaces a list names it, so one made meanwhile isn't lost. */
+  revision: Schema.Number,
   /** What happens to what no rule keeps: allowed (`rules`), asked about (`ask`); or everything allowed (`allow`), short of `never`. */
   permissions: Schema.Literals(['rules', 'ask', 'allow']),
   alwaysAsk: Schema.Array(RuleKind),
@@ -1338,6 +1340,8 @@ export const Api = RpcGroup.make(
       /** Null goes back to what each repository says. */
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
+      /** The revision the change was made against: refused (`RulesChanged`) where the rules have moved on since. */
+      expectedRevision: Schema.optional(Schema.Number),
     },
     ProjectRulesView,
   ),

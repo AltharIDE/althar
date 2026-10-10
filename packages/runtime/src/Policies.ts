@@ -3,7 +3,7 @@ import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
-import { NotFound } from './errors'
+import { NotFound, RuleOnAnotherList, RulesChanged } from './errors'
 import { Instance } from './Instance'
 import { fact, timestamp } from './records'
 import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rules'
@@ -139,7 +139,10 @@ export class Policies extends Context.Service<
     /** The project's rules now, by revision: its first, the MVP's, made when it has none. */
     current(
       projectId: ProjectId,
-    ): Effect.Effect<{ readonly id: string; readonly rules: ProjectRules }, SqlError.SqlError | Schema.SchemaError>
+    ): Effect.Effect<
+      { readonly id: string; readonly revision: number; readonly rules: ProjectRules },
+      SqlError.SqlError | Schema.SchemaError
+    >
     /** The rules a revision holds, as a run cites them. */
     rulesOf(policyId: string): Effect.Effect<ProjectRules, SqlError.SqlError | NotFound>
     /** A new revision of the project's rules, with what the person changed, recorded as theirs. */
@@ -148,12 +151,19 @@ export class Policies extends Context.Service<
       usageLimit: UsageLimit,
       actorId: ActorId,
     ): Effect.Effect<void, SqlError.SqlError | Schema.SchemaError | NotFound>
-    /** A new revision of the project's rules with what the person changed, recorded as theirs: none where nothing changed. */
+    /**
+     * A new revision of the project's rules with what the person changed,
+     * recorded as theirs: none where nothing changed. Given the revision the
+     * change was made against, it is refused where the rules have moved on
+     * since, so a list replaced whole never drops a rule kept meanwhile. An
+     * allow for words the rules ask about or never allow is refused.
+     */
     set(
       projectId: string,
       change: RulesChange,
       actorId: ActorId,
-    ): Effect.Effect<ProjectRules, SqlError.SqlError | Schema.SchemaError | NotFound>
+      expectedRevision?: number,
+    ): Effect.Effect<ProjectRules, SqlError.SqlError | Schema.SchemaError | NotFound | RulesChanged | RuleOnAnotherList>
     /** A new revision of the project's rules with a rule an "always" answer keeps, recorded as whoever answered: none where it holds already. */
     remember(projectId: string, rule: Remembered, actorId: ActorId): Effect.Effect<void, SqlError.SqlError | Schema.SchemaError | NotFound>
     /** A new revision of the project's rules for agents' accounts, recorded as the person's. */
@@ -193,16 +203,16 @@ export class Policies extends Context.Service<
             payload: { revision, rules },
             actorId,
           })
-          return { id, rules }
+          return { id, revision, rules }
         })
 
       const current = (projectId: ProjectId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const latest = Effect.map(
-            sql<{ id: string; rules: string }>`
-              SELECT id, rules FROM policies WHERE project_id = ${projectId} ORDER BY revision DESC LIMIT 1`,
-            ([row]) => (row === undefined ? undefined : { id: row.id, rules: decode(row.rules) }),
+            sql<{ id: string; revision: number; rules: string }>`
+              SELECT id, revision, rules FROM policies WHERE project_id = ${projectId} ORDER BY revision DESC LIMIT 1`,
+            ([row]) => (row === undefined ? undefined : { id: row.id, revision: row.revision, rules: decode(row.rules) }),
           )
           const known = yield* latest
           if (known !== undefined) return known
@@ -216,7 +226,11 @@ export class Policies extends Context.Service<
 
       /** A new revision of the project's rules, where the change makes one: none for what it says already. */
       // Read, changed and written together, so two changes made at once each build on the other.
-      const revise = (projectId: string, actorId: ActorId, change: (rules: ProjectRules) => ProjectRules | undefined) =>
+      const revise = <E = never>(
+        projectId: string,
+        actorId: ActorId,
+        change: (rules: ProjectRules, revision: number) => ProjectRules | undefined | Effect.Effect<ProjectRules | undefined, E>,
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           yield* sql.withTransaction(
@@ -224,12 +238,10 @@ export class Policies extends Context.Service<
               const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
               if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
               const now = yield* current(project.id)
-              const next = change(now.rules)
+              const changed = change(now.rules, now.revision)
+              const next = Effect.isEffect(changed) ? yield* changed : changed
               if (next === undefined) return
-              const [last] = yield* sql<{
-                revision: number
-              }>`SELECT max(revision) AS revision FROM policies WHERE project_id = ${projectId}`
-              yield* insert(project.id, (last?.revision ?? 0) + 1, next, actorId)
+              yield* insert(project.id, now.revision + 1, next, actorId)
             }),
           )
         })
@@ -247,7 +259,7 @@ export class Policies extends Context.Service<
           ),
         setUsageLimit: (projectId, usageLimit, actorId) =>
           provide(revise(projectId, actorId, (rules) => (usageLimitOf(rules) === usageLimit ? undefined : { ...rules, usageLimit }))),
-        set: (projectId, change, actorId) =>
+        set: (projectId, change, actorId, expectedRevision) =>
           provide(
             Effect.gen(function* () {
               // A rule by how a command starts reads its words; an exact one keeps the line as it is, quotes and all.
@@ -261,7 +273,22 @@ export class Policies extends Context.Service<
               const rest = Object.fromEntries(
                 Object.entries(change).filter(([key, value]) => value !== undefined && !CLEARABLE.includes(key as Clearable)),
               ) as Partial<ProjectRules>
-              yield* revise(projectId, actorId, (rules) => {
+              yield* revise<RulesChanged | RuleOnAnotherList>(projectId, actorId, (rules, revision) => {
+                // Made against rules that have moved on since: what moved them would be lost.
+                if (expectedRevision !== undefined && revision !== expectedRevision)
+                  return Effect.fail(new RulesChanged({ projectId, revision, expected: expectedRevision }))
+                // An allow for words the rules ask about or never allow would replace what comes first, or sit beside it doing nothing.
+                const held = (commands ?? []).flatMap((rule) => {
+                  if (rule.decision !== 'allow') return []
+                  const same = (other: NonNullable<ProjectRules['commands']>[number]) =>
+                    other.pattern === rule.pattern && (other.match ?? 'prefix') === (rule.match ?? 'prefix')
+                  const kept = [...(rules.commands ?? []), ...(commands ?? [])].find((other) => other.decision !== 'allow' && same(other))
+                  return kept === undefined || kept.decision === 'allow' ? [] : [{ rule, list: kept.decision }]
+                })[0]
+                if (held !== undefined)
+                  return Effect.fail(
+                    new RuleOnAnotherList({ pattern: held.rule.pattern, exact: held.rule.match === 'exact', list: held.list }),
+                  )
                 const kept: Record<string, unknown> = { ...rules }
                 for (const key of CLEARABLE) {
                   const value = change[key]

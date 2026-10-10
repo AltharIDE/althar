@@ -552,6 +552,7 @@ describe('project rules, through the API', () => {
         const { conventions, ...rules } = yield* client.GetProjectRules({ projectId: project.id })
         assert.deepStrictEqual(rules, {
           projectId: project.id,
+          revision: 1,
           permissions: 'rules',
           alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
           never: [],
@@ -606,6 +607,46 @@ describe('project rules, through the API', () => {
         assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
         const missing = yield* Effect.flip(client.GetProjectRules({ projectId: 'proj_missing' }))
         assert.strictEqual(missing.reason, 'NotFound')
+      }),
+    ),
+  )
+
+  it.live('refuses a list changed against rules that moved on since, and an allow over what comes first', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const seen = yield* client.GetProjectRules({ projectId: project.id })
+        const changed = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          commands: [{ pattern: 'bun test', decision: 'never' }],
+          expectedRevision: seen.revision,
+        })
+        assert.strictEqual(changed.revision, seen.revision + 1)
+        // The same list again, as read before that change: refused, and what changed is kept.
+        const stale = yield* Effect.flip(
+          client.SetProjectRules({ commandId: commandId(), projectId: project.id, commands: [], expectedRevision: seen.revision }),
+        )
+        assert.strictEqual(stale.reason, 'RulesChanged')
+        const allowed = yield* Effect.flip(
+          client.SetProjectRules({
+            commandId: commandId(),
+            projectId: project.id,
+            commands: [{ pattern: 'bun test', decision: 'allow' }],
+            expectedRevision: changed.revision,
+          }),
+        )
+        assert.deepStrictEqual(
+          [allowed.reason, allowed.message],
+          [
+            'RuleOnAnotherList',
+            'Commands starting “bun test” are on “Never”, which comes first, so nothing changed. Take them off “Never” first.',
+          ],
+        )
+        assert.deepStrictEqual((yield* client.GetProjectRules({ projectId: project.id })).commands, [
+          { pattern: 'bun test', decision: 'never' },
+        ])
       }),
     ),
   )
