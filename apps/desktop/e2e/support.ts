@@ -1,10 +1,26 @@
 import { join } from 'node:path'
 
-import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
+import { _electron as electron, type ElectronApplication, expect, type Page } from '@playwright/test'
 
 /* What the end-to-end tests share: the app launched on a profile of its own, with the fake agents, and the person's ways in. */
 
 const app = join(import.meta.dirname, '..')
+
+/** The hidden menu can finish opening before the main window. Wait for the renderer we intend to drive. */
+export const mainWindow = async (electronApp: ElectronApplication) => {
+  let page: Page | undefined
+  await expect
+    .poll(
+      () => {
+        page = electronApp.windows().find((window) => new URL(window.url()).pathname.endsWith('/renderer/index.html'))
+        return page !== undefined
+      },
+      { message: 'Althar main renderer opens', timeout: 30_000 },
+    )
+    .toBe(true)
+  if (page === undefined) throw new Error('Althar main renderer did not open')
+  return page
+}
 
 export const launch = async (home: string, env: Record<string, string> = {}, { onboarding = false } = {}) => {
   const electronApp = await electron.launch({
@@ -17,12 +33,18 @@ export const launch = async (home: string, env: Record<string, string> = {}, { o
       ...env,
     },
   })
-  const page = await electronApp.firstWindow()
-  // Most journeys begin after setup; onboarding tests exercise these steps explicitly.
-  if (!onboarding) {
-    await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  try {
+    const page = await mainWindow(electronApp)
+    // Most journeys begin after setup; onboarding tests exercise these steps explicitly.
+    if (!onboarding) {
+      await page.getByRole('button', { name: 'Continue', exact: true }).click()
+    }
+    return { electronApp, page }
+  } catch (error) {
+    // The caller cannot clean up a launch that never returned its app.
+    await electronApp.close()
+    throw error
   }
-  return { electronApp, page }
 }
 
 /** Answers the folder picker with `path`, as if the person chose it. */
