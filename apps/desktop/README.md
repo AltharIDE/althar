@@ -49,7 +49,7 @@ is hidden on every window, as Electron would otherwise draw it above the
 app's own chrome. Sign-ins are sealed in the desktop's keyring;
 where Electron wouldn't find one, the app asks for libsecret, which
 gnome-keyring, KeePassXC and KWallet all serve — see
-[ADR-019](../../docs/decisions/019-linux-windows-packages-and-the-keyring.md).
+[ADR-021](../../docs/decisions/021-linux-windows-packages-and-the-keyring.md).
 
 The packaged app is checked on a real desktop, not under CI's Xvfb:
 `scripts/x11-smoke.sh` needs `xdotool`, `xprop` and `wmctrl` on a running X11
@@ -66,7 +66,7 @@ are its own environment's (git inside, the device outside, the window's entry
 and the narrow permissions). The sandbox is deliberately narrow — network, a
 display, the GPU, the keyring, and through `org.freedesktop.Flatpak` the
 person's own tools — and everything about what it reaches and what it does
-not is in [ADR-018](../../docs/decisions/018-what-the-flatpak-reaches.md). In
+not is in [ADR-020](../../docs/decisions/020-what-the-flatpak-reaches.md). In
 short:
 
 - The person's own agents and editors are found and run on the device through

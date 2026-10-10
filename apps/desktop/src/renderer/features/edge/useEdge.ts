@@ -12,6 +12,7 @@ import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { kindWords } from '../../shared/calls'
 import { refOf } from '../home/HomeView'
+import type { AnsweredCall } from '../home/needs'
 
 /*
  * The edge's view model: across every project, what waits on the person and
@@ -47,13 +48,8 @@ export const followEdge = (feed: Feed, cache: QueryClient) => {
   })
 }
 
-/** A call the person answered from the edge, folded to a line until it closes. */
-export interface EdgeAnswered {
-  readonly id: string
-  readonly said: string
-  readonly denied: boolean
-  readonly project: string
-}
+/** A call the person answered from the edge, its line kept where it was, quiet, until the edge closes. */
+export type EdgeAnswered = AnsweredCall
 
 export interface EdgeModel {
   readonly home: HomeSnapshot | null
@@ -61,7 +57,7 @@ export interface EdgeModel {
   readonly agents: ReadonlyArray<{ readonly id: string; readonly name: string }>
   readonly saying: IslandSaying | null
   readonly answered: ReadonlyArray<EdgeAnswered>
-  readonly answer: (call: HomeCall, decision: 'allow' | 'reject', said: string) => void
+  readonly answer: (call: HomeCall, decision: 'allow' | 'reject') => void
   /** The edge closed: the answered lines go. */
   readonly closed: () => void
   /** Why the last answer didn't go through. */
@@ -110,13 +106,12 @@ export const useEdge = (): EdgeModel => {
   }, [home])
   useEffect(() => () => clearTimeout(said.current), [])
 
-  const answer = (call: HomeCall, decision: 'allow' | 'reject', said: string) => {
-    const project = home?.projects.find((one) => one.id === call.projectId)?.name ?? ''
+  const answer = (call: HomeCall, decision: 'allow' | 'reject') => {
     setError(null)
-    setAnswered((now) => [...now, { id: call.id, said, denied: decision === 'reject', project }])
+    setAnswered((now) => [...now, { call, reply: { decision } }])
     client.answer({ attentionId: call.id, decision }).catch((failure: unknown) => {
       // It still waits: it comes back, and the edge says why.
-      setAnswered((now) => now.filter((one) => one.id !== call.id))
+      setAnswered((now) => now.filter((one) => one.call.id !== call.id))
       setError(messageOf(failure))
     })
   }

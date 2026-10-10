@@ -1,4 +1,4 @@
-# ADR-018: What the Flatpak reaches, and what it does not
+# ADR-020: What the Flatpak reaches, and what it does not
 
 - **Status:** Accepted
 - **Date:** 2026-10-10

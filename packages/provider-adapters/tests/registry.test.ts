@@ -96,4 +96,21 @@ describe('the agent registry', () => {
       assert.strictEqual(new Set(ids).size, ids.length, agent.id)
     }
   })
+
+  it('removes all Claude judge tools and user hooks, separately from reader sessions', () => {
+    assert.deepStrictEqual(agents['claude-code'].permissionJudge?.sessionMeta, {
+      claudeCode: {
+        options: {
+          tools: [],
+          settingSources: [],
+          allowDangerouslySkipPermissions: false,
+          strictMcpConfig: true,
+          settings: { disableAllHooks: true },
+        },
+      },
+    })
+    // Neither provider's read-only mode is proof that it cannot read the rest of the disk.
+    assert.isUndefined(agents.codex.permissionJudge)
+    assert.isUndefined(agents.opencode.permissionJudge)
+  })
 })

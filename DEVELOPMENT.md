@@ -90,7 +90,7 @@ distribution (the packaged app, not a dev build):
 | X11 | `apps/desktop/scripts/x11-smoke.sh` under a real X server and window manager (`DISPLAY=:0 ALTHAR_BIN=/usr/bin/althar`, with `ALTHAR_ARGS=--no-sandbox` where the desktop runs as root) | the window's identity, its own buttons, moving, resizing, maximizing, closing |
 | Wayland | run the packaged app on a GNOME or KDE Wayland session | the same through the compositor, and the window's own chrome under it |
 | packages | `bun run package` in `apps/desktop`, then install the deb or rpm (or run the AppImage) | the packaged app, its entry in the menu, its icon, and a sign-in being sealed |
-| Flatpak | `apps/desktop/scripts/flatpak.sh`, then `apps/desktop/scripts/flatpak-smoke.sh` | the sandbox's own environment, the device's own tools, the keyring over the secret service (see [ADR-018](docs/decisions/018-what-the-flatpak-reaches.md); the Flatpak is experimental until a task has run under GNOME and KDE) |
+| Flatpak | `apps/desktop/scripts/flatpak.sh`, then `apps/desktop/scripts/flatpak-smoke.sh` | the sandbox's own environment, the device's own tools, the keyring over the secret service (see [ADR-020](docs/decisions/020-what-the-flatpak-reaches.md); the Flatpak is experimental until a task has run under GNOME and KDE) |
 | keyring | a GNOME session (gnome-keyring) and a KDE one (KWallet 5.97+) | sealing a sign-in, and reopening it after a restart |
 
 CI runs the end-to-end suite with the fake agent under Xvfb instead; the legs

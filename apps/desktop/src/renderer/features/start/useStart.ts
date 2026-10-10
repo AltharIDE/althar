@@ -42,7 +42,10 @@ export interface StartModel {
   /** Leaves a repository out of the project being formed. */
   readonly leaveOut: (path: string) => void
   /** Makes the project being formed, with its name and who answers when agents need a yes; null when it couldn't. */
-  readonly create: (project: { readonly name: string; readonly permissions: 'rules' | 'ask' | 'allow' }) => Promise<ProjectSummary | null>
+  readonly create: (project: {
+    readonly name: string
+    readonly permissions: 'rules' | 'coordinator' | 'ask' | 'allow'
+  }) => Promise<ProjectSummary | null>
   readonly creating: boolean
   readonly cancelForming: () => void
   /** Asks each agent again how its accounts are signed in. */
@@ -197,7 +200,7 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
   }, [client, host])
 
   const create = useCallback(
-    async (project: { readonly name: string; readonly permissions: 'rules' | 'ask' | 'allow' }) => {
+    async (project: { readonly name: string; readonly permissions: 'rules' | 'coordinator' | 'ask' | 'allow' }) => {
       if (forming === null) return null
       if (forming.repositories.length === 0) {
         setError('Keep at least one repository.')

@@ -1,4 +1,4 @@
-# ADR-019: Linux windows, packages and the keyring
+# ADR-021: Linux windows, packages and the keyring
 
 - **Status:** Accepted
 - **Date:** 2026-10-10
@@ -6,7 +6,7 @@
 - **Context:** Althar was a Mac app. Off a Mac it has no system title bar and
   no system menu bar, several ways to install exist, Linux sign-ins need a
   keyring Electron does not always find, and a Flatpak's sandbox is narrower
-  than anything the app had run in (ADR-018). The window's chrome, the
+  than anything the app had run in (ADR-020). The window's chrome, the
   packages, the keyring and the sandbox are decided here together, since they
   meet on the same screens.
 - **Decision:**
@@ -41,7 +41,7 @@
     else of the keychain's gets the generic sentence.
   - **The Flatpak is experimental.** It carries the app and the toolchain for
     its own work in a narrow sandbox (network, display, GPU, the keyring, the
-    device's own tools through `flatpak-spawn` — ADR-018), its worktrees live
+    device's own tools through `flatpak-spawn` — ADR-020), its worktrees live
     beside its profile, and `scripts/flatpak-smoke.sh` checks its own
     environment. It is called experimental until a whole task has been run
     under GNOME and KDE.

@@ -110,8 +110,10 @@ export interface HomeRun {
 export interface HomeNeed {
   key: string
   project: ProjectRef
-  /** A NeedLine, or an AskAnswered line for a call just answered. */
+  /** A NeedLine, settled where it was for a call just answered. */
   line: ReactNode
+  /** Just answered: it stays where it was, but no longer counts as waiting. */
+  answered?: boolean
 }
 
 /** Something the loop did, as its line is given it. */
@@ -208,7 +210,8 @@ export function Home({
   }))
   const sinceLine = since.length > 0 && <Since since={since} looked={looked} t={t} {...(onOpenEvent ? { onOpenEvent } : {})} />
   const groups = groupsOf(needs)
-  const whose = groups.map((group) => group.project)
+  // Whose calls still wait, for the heading, its marks and its wash: not a project whose only line was just answered.
+  const whose = groupsOf(needs.filter((need) => need.answered !== true)).map((group) => group.project)
 
   return (
     <div className={cx(s.home, className)}>

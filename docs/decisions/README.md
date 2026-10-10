@@ -25,5 +25,7 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [015](015-coordinator-picks-models.md) | The coordinator picks models; agents are only ways to them |
 | [016](016-push-without-a-connection.md) | Pushing is git; a connection is what comes after |
 | [017](017-dictation-on-this-machine.md) | Dictation runs on this machine, with a model downloaded on the first press |
-| [018](018-what-the-flatpak-reaches.md) | What the Flatpak reaches, and what it does not |
-| [019](019-linux-windows-packages-and-the-keyring.md) | Linux windows, packages and the keyring |
+| [018](018-allow-always-keeps-a-rule.md) | Allow always keeps a rule in the project |
+| [019](019-coordinator-judges-permissions.md) | The coordinator judges permission requests in fresh read-only sessions |
+| [020](020-what-the-flatpak-reaches.md) | What the Flatpak reaches, and what it does not |
+| [021](021-linux-windows-packages-and-the-keyring.md) | Linux windows, packages and the keyring |

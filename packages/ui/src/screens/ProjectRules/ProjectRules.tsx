@@ -8,6 +8,7 @@ import { CheckList, type CheckItem } from '../../primitives/CheckList/CheckList'
 import { Choices, type ChoiceOption } from '../../primitives/Choices/Choices'
 import { Field, FieldError } from '../../primitives/Field/Field'
 import { FormRow } from '../../primitives/FormRow/FormRow'
+import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Panel } from '../../primitives/Panel/Panel'
 import { NamingRule, type NamingRuleProps, type RepositoryTemplate, TemplateSources } from '../../setup/Conventions/Conventions'
 import s from './ProjectRules.module.css'
@@ -32,6 +33,8 @@ export interface ProjectRulesText {
   permission: Record<PermissionPolicy, Option>
   always: { label: string; note: string; overridden: string }
   never: { label: string; note: string }
+  /** What is let through without asking: each rule, and how it goes. */
+  alwaysAllowed: { label: string; note: string; empty: string; remove: (rule: string) => string }
   addRule: string
   /** The form a rule is added with: a command, by how it starts. */
   rule: { field: string; placeholder: string; note: string; empty: string; add: string; cancel: string }
@@ -59,15 +62,21 @@ export const projectRulesText: ProjectRulesText = {
       title: 'Allow, except what you keep',
       note: 'Agents carry on without stopping. What “Always ask me” lists waits for you; what “Never” lists is refused.',
     },
-    [PermissionPolicy.Lead]: {
-      title: 'The agent in charge decides',
-      note: 'Steps ask the lead. It allows what the task needs and passes the rest to you.',
+    [PermissionPolicy.Coordinator]: {
+      title: 'The coordinator decides',
+      note: 'The coordinator allows or denies requests within the project’s rules, with a reason. Anything it can’t decide waits for you.',
     },
     [PermissionPolicy.AllowAll]: { title: 'Allow everything', note: 'Nothing asks. Every request is still recorded on its task.' },
     [PermissionPolicy.Ask]: { title: 'Ask me', note: 'Anything no rule covers waits for you.' },
   },
   always: { label: 'Always ask me', note: 'Whoever would answer, these wait for you', overridden: 'Off while everything is allowed' },
   never: { label: 'Never', note: 'Refused without asking anyone, even with everything allowed. Only this list changes it' },
+  alwaysAllowed: {
+    label: 'Always allowed',
+    note: 'Let through without asking. What “Always ask me” or “Never” lists comes first',
+    empty: 'Nothing yet. A permission answered with “always allow” adds its rule here.',
+    remove: (rule) => `Remove ${rule}`,
+  },
   addRule: 'Add a rule',
   rule: {
     field: 'A command, as it starts',
@@ -125,7 +134,7 @@ export const projectRulesText: ProjectRulesText = {
   foot: 'Graph changes inside a run’s budget apply at once, with 10 seconds to undo. Changes beyond it always ask.',
 }
 
-const PERMISSIONS = [PermissionPolicy.Lead, PermissionPolicy.AllowAll, PermissionPolicy.Ask] as const
+const PERMISSIONS = [PermissionPolicy.Coordinator, PermissionPolicy.AllowAll, PermissionPolicy.Ask] as const
 type Rotation = 'first' | 'next'
 const REACHES = [FindingsReach.Stuck, FindingsReach.All, FindingsReach.Learn] as const
 const ENDS = [TaskEnd.DraftPr, TaskEnd.ReadyPr, TaskEnd.PushOnly] as const
@@ -158,16 +167,30 @@ export interface ProjectRulesProps {
   alwaysOn?: readonly string[]
   defaultAlwaysOn?: readonly string[]
   onAlwaysOnChange?: (value: readonly string[]) => void
-  /** Adds a rule to `always`: a command, by how it starts. The button is shown only with it. */
-  onAddRule?: (pattern: string) => void
+  /** Adds a rule to `always`: a command, by how it starts. The button is shown only with it. Returns why it can't be, said beside the field, which stays open. */
+  onAddRule?: (pattern: string) => string | undefined
   /** What is refused outright, whoever would answer and whatever the policy: the project's own list. Without it, no such row. */
   never?: readonly CheckItem[]
   /** The ids in `never` that are on. */
   neverOn?: readonly string[]
   defaultNeverOn?: readonly string[]
   onNeverOnChange?: (value: readonly string[]) => void
-  /** Adds a rule to `never`: a command, by how it starts. The button is shown only with it. */
-  onAddNever?: (pattern: string) => void
+  /** Adds a rule to `never`: a command, by how it starts. The button is shown only with it. Returns why it can't be, as `onAddRule`. */
+  onAddNever?: (pattern: string) => string | undefined
+  /**
+   * What is let through without asking, short of what always asks or is
+   * never allowed: the rules a permission answered with "always allow" kept,
+   * and those added here, in words. Without it, no such row.
+   */
+  alwaysAllowed?: readonly CheckItem[]
+  /** Takes a rule off `alwaysAllowed`. Without it, the list can't be changed here. */
+  onRemoveAlwaysAllowed?: (id: string) => void
+  /**
+   * Adds a rule to `alwaysAllowed`: a command, by how it starts. The button
+   * is shown only with it. Returns why it can't be, as when the command is on
+   * a list that comes first, said beside the field, which stays open.
+   */
+  onAddAlwaysAllowed?: (pattern: string) => string | undefined
   reach?: FindingsReach
   defaultReach?: FindingsReach
   /** Without it, no review findings row. */
@@ -206,7 +229,7 @@ export function ProjectRules({
   project,
   permissionOptions = PERMISSIONS,
   permissions: permissionsProp,
-  defaultPermissions = PermissionPolicy.Lead,
+  defaultPermissions = PermissionPolicy.Coordinator,
   onPermissionsChange,
   always,
   alwaysOn: alwaysOnProp,
@@ -218,6 +241,9 @@ export function ProjectRules({
   defaultNeverOn = [],
   onNeverOnChange,
   onAddNever,
+  alwaysAllowed,
+  onRemoveAlwaysAllowed,
+  onAddAlwaysAllowed,
   reach: reachProp,
   defaultReach = FindingsReach.Stuck,
   onReachChange,
@@ -275,6 +301,15 @@ export function ProjectRules({
           <div className={s.checks}>
             <CheckList label={t.never.label} items={never} value={neverOn} onChange={setNeverOn} />
             {onAddNever && <AddRule t={t} onAdd={onAddNever} />}
+          </div>
+        </FormRow>
+      )}
+
+      {alwaysAllowed && (
+        <FormRow label={t.alwaysAllowed.label} note={allowAll ? `${t.alwaysAllowed.note}. ${t.always.overridden}` : t.alwaysAllowed.note}>
+          <div className={s.checks}>
+            <AllowedRules rules={alwaysAllowed} t={t} {...(onRemoveAlwaysAllowed ? { onRemove: onRemoveAlwaysAllowed } : {})} />
+            {onAddAlwaysAllowed && <AddRule t={t} onAdd={onAddAlwaysAllowed} />}
           </div>
         </FormRow>
       )}
@@ -343,11 +378,60 @@ export function ProjectRules({
   )
 }
 
-/** "Add a rule", then a command by how it starts, added as the list's. */
-function AddRule({ t, onAdd }: { t: ProjectRulesText; onAdd: (pattern: string) => void }) {
+/**
+ * The rules that let requests through, each with a way to take it off.
+ * Taking one off moves focus to the next one's button, or the last one's,
+ * so it isn't lost with the button pressed.
+ */
+function AllowedRules({ rules, onRemove, t }: { rules: readonly CheckItem[]; onRemove?: (id: string) => void; t: ProjectRulesText }) {
+  const box = useRef<HTMLDivElement>(null)
+  const removed = useRef<number | null>(null)
+  useEffect(() => {
+    const at = removed.current
+    if (at === null) return
+    removed.current = null
+    const buttons = box.current?.querySelectorAll<HTMLElement>('li button')
+    const next = buttons?.[Math.min(at, buttons.length - 1)]
+    // With none left, focus goes to the line that says so.
+    const landing = next ?? box.current?.querySelector<HTMLElement>('p')
+    landing?.focus()
+  }, [rules])
+  return (
+    <div ref={box}>
+      {rules.length === 0 ? (
+        <p className={s.empty} tabIndex={-1}>
+          {t.alwaysAllowed.empty}
+        </p>
+      ) : (
+        <ul className={s.allowed} aria-label={t.alwaysAllowed.label}>
+          {rules.map((rule, index) => (
+            <li key={rule.id} className={s.allowedRule}>
+              <span>{rule.label}</span>
+              {onRemove && (
+                <IconButton
+                  icon="close"
+                  size="small"
+                  label={t.alwaysAllowed.remove(rule.label)}
+                  onClick={() => {
+                    removed.current = index
+                    onRemove(rule.id)
+                  }}
+                />
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** "Add a rule", then a command by how it starts, added as the list's, or why it can't be, beside the field. */
+function AddRule({ t, onAdd }: { t: ProjectRulesText; onAdd: (pattern: string) => string | undefined }) {
   const [open, setOpen] = useState(false)
   const [pattern, setPattern] = useState('')
   const [empty, setEmpty] = useState(false)
+  const [refused, setRefused] = useState<string | null>(null)
   const fieldId = useId()
   const noteId = useId()
   const errorId = useId()
@@ -366,13 +450,17 @@ function AddRule({ t, onAdd }: { t: ProjectRulesText; onAdd: (pattern: string) =
     setOpen(false)
     setPattern('')
     setEmpty(false)
+    setRefused(null)
   }
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (pattern.trim() === '') return setEmpty(true)
-    onAdd(pattern.trim())
-    close()
+    const problem = onAdd(pattern.trim())
+    if (problem === undefined) return close()
+    setRefused(problem)
+    field.current?.focus()
   }
+  const problem = empty ? t.rule.empty : refused
   return (
     <form className={s.rule} onSubmit={submit}>
       <label className={s.label} htmlFor={fieldId}>
@@ -385,11 +473,12 @@ function AddRule({ t, onAdd }: { t: ProjectRulesText; onAdd: (pattern: string) =
           className={s.pattern}
           value={pattern}
           placeholder={t.rule.placeholder}
-          invalid={empty}
-          aria-describedby={[noteId, empty ? errorId : ''].filter(Boolean).join(' ')}
+          invalid={problem !== null}
+          aria-describedby={[noteId, problem === null ? '' : errorId].filter(Boolean).join(' ')}
           onChange={(event) => {
             setPattern(event.target.value)
             setEmpty(false)
+            setRefused(null)
           }}
           onKeyDown={(event) => {
             if (event.key === 'Escape') close()
@@ -402,7 +491,7 @@ function AddRule({ t, onAdd }: { t: ProjectRulesText; onAdd: (pattern: string) =
           {t.rule.cancel}
         </Button>
       </span>
-      {empty && <FieldError id={errorId}>{t.rule.empty}</FieldError>}
+      {problem !== null && <FieldError id={errorId}>{problem}</FieldError>}
       <span id={noteId} className={s.note}>
         {t.rule.note}
       </span>

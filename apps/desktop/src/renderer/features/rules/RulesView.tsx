@@ -25,7 +25,15 @@ export const text = {
     deploy: 'Deploying and publishing',
     outside: 'Writing outside the task’s worktree',
   } satisfies Record<RuleKind, string>,
-  command: (pattern: string) => `Running ${pattern}`,
+  /** A command rule by how a command starts, as the permission card says it. */
+  command: (pattern: string) => `Commands starting “${pattern}”`,
+  /** A command rule for this whole line, not how it starts. */
+  exactly: (pattern: string) => `Exactly “${pattern}”`,
+  /** Why a command can't be always allowed: a list that comes first has it. */
+  onOtherList: (pattern: string, list: 'ask' | 'never') => {
+    const named = list === 'never' ? '“Never”' : '“Always ask me”'
+    return `“${pattern}” is on ${named}, which comes first, so nothing changed. Take it off ${named} first.`
+  },
   /** The task a pattern's example is made for. */
   example: { key: 'PROJ-123', slug: 'fix-login', title: 'Fix login' },
   /** The kit's words where Althar does less, or says it more exactly. */
@@ -65,32 +73,74 @@ const KINDS = Object.keys(text.kinds) as ReadonlyArray<RuleKind>
 
 const toEnd = { draft: TaskEnd.DraftPr, ready: TaskEnd.ReadyPr, none: TaskEnd.PushOnly } as const
 
-const toPolicy = { rules: PermissionPolicy.Rules, ask: PermissionPolicy.Ask, allow: PermissionPolicy.AllowAll } as const
+const toPolicy = {
+  rules: PermissionPolicy.Rules,
+  coordinator: PermissionPolicy.Coordinator,
+  ask: PermissionPolicy.Ask,
+  allow: PermissionPolicy.AllowAll,
+} as const
 const fromPolicy = (policy: PermissionPolicy): ProjectRulesView['permissions'] =>
-  policy === PermissionPolicy.Ask ? 'ask' : policy === PermissionPolicy.AllowAll ? 'allow' : 'rules'
+  policy === PermissionPolicy.Coordinator
+    ? 'coordinator'
+    : policy === PermissionPolicy.Ask
+      ? 'ask'
+      : policy === PermissionPolicy.AllowAll
+        ? 'allow'
+        : 'rules'
 
-/** A command rule's id in the lists. */
-const commandId = (pattern: string) => `command:${pattern}`
+/** A command rule's id in the lists: by how it starts, or exactly, and its words. */
+const commandId = (rule: CommandRule) => `command:${rule.match ?? 'prefix'}:${rule.pattern}`
+
+/** A command rule in words. */
+const commandLabel = (rule: CommandRule) => (rule.match === 'exact' ? text.exactly(rule.pattern) : text.command(rule.pattern))
+
+/** The commands the person named for a list, as its items. */
+const commandItems = (commands: ReadonlyArray<CommandRule>, decision: CommandRule['decision']) =>
+  commands.filter((rule) => rule.decision === decision).map((rule) => ({ id: commandId(rule), label: commandLabel(rule) }))
 
 /** A list's items: the kinds, then the commands the person named for it. */
 const itemsOf = (commands: ReadonlyArray<CommandRule>, decision: CommandRule['decision']) => [
   ...KINDS.map((kind) => ({ id: kind, label: text.kinds[kind] })),
-  ...commands
-    .filter((rule) => rule.decision === decision)
-    .map((rule) => ({ id: commandId(rule.pattern), label: text.command(rule.pattern) })),
+  ...commandItems(commands, decision),
 ]
 
 /** What a list being changed means for the rules: its kinds, and its commands, those unticked gone. */
 const listChange = (rules: ProjectRulesView, decision: CommandRule['decision'], ids: ReadonlyArray<string>) => ({
   kinds: KINDS.filter((kind) => ids.includes(kind)),
-  commands: rules.commands.filter((rule) => rule.decision !== decision || ids.includes(commandId(rule.pattern))),
+  commands: rules.commands.filter((rule) => rule.decision !== decision || ids.includes(commandId(rule))),
 })
 
-/** Adds a command to a list, once. */
-const withCommand = (rules: ProjectRulesView, pattern: string, decision: CommandRule['decision']) => [
-  ...rules.commands.filter((rule) => rule.pattern !== pattern),
-  { pattern, decision },
+/** A command's words as a rule by how it starts keeps them. */
+const tidy = (pattern: string) => pattern.trim().replace(/\s+/g, ' ')
+
+/**
+ * Adds a command to a list by how it starts, once, in place of a rule for
+ * the same start on another list; or why it can't be: an allow never takes
+ * the place of what always asks or is never allowed, which come first.
+ */
+const withCommand = (
+  rules: ProjectRulesView,
+  typed: string,
+  decision: CommandRule['decision'],
+): { readonly commands: ReadonlyArray<CommandRule> } | { readonly problem: string } => {
+  const pattern = tidy(typed)
+  const same = rules.commands.filter((rule) => rule.pattern === pattern && rule.match !== 'exact')
+  const held = decision === 'allow' ? same.find((rule) => rule.decision !== 'allow') : undefined
+  if (held !== undefined && held.decision !== 'allow') return { problem: text.onOtherList(pattern, held.decision) }
+  return { commands: [...rules.commands.filter((rule) => !same.includes(rule)), { pattern, decision }] }
+}
+
+/** What is always allowed, as its list shows it: the kinds, then the commands, as Allow always kept them or the person added them. */
+const alwaysAllowedOf = (rules: ProjectRulesView) => [
+  ...rules.alwaysAllow.map((kind) => ({ id: kind, label: text.kinds[kind] })),
+  ...commandItems(rules.commands, 'allow'),
 ]
+
+/** The rules without one of what is always allowed, by its id in the list. */
+const withoutAllowed = (rules: ProjectRulesView, id: string) => ({
+  alwaysAllow: rules.alwaysAllow.filter((kind) => kind !== id),
+  commands: rules.commands.filter((rule) => rule.decision !== 'allow' || commandId(rule) !== id),
+})
 
 /** Althar's own patterns, where a repository's docs say nothing and the person set none. */
 const OWN = { branch: 'althar/{key}-{slug}', title: '{title}' } as const
@@ -111,6 +161,12 @@ export const agentAccountsOf = (agents: ReadonlyArray<AgentStatus>) =>
 
 export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => void }) {
   const { rules } = model
+  /** Saves a command added to a list, or says beside the field why it can't be. */
+  const add = (added: ReturnType<typeof withCommand>) => {
+    if ('problem' in added) return added.problem
+    model.change({ commands: added.commands })
+    return undefined
+  }
   return (
     <div className={s.window}>
       <main className={s.scroll}>
@@ -127,26 +183,26 @@ export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => 
         ) : (
           <ProjectRules
             project={model.project ?? ''}
-            permissionOptions={[PermissionPolicy.Rules, PermissionPolicy.Ask, PermissionPolicy.AllowAll]}
+            permissionOptions={[PermissionPolicy.Rules, PermissionPolicy.Coordinator, PermissionPolicy.Ask, PermissionPolicy.AllowAll]}
             permissions={toPolicy[rules.permissions]}
             onPermissionsChange={(policy) => model.change({ permissions: fromPolicy(policy) })}
             always={itemsOf(rules.commands, 'ask')}
-            alwaysOn={[
-              ...rules.alwaysAsk,
-              ...rules.commands.filter((rule) => rule.decision === 'ask').map((rule) => commandId(rule.pattern)),
-            ]}
+            alwaysOn={[...rules.alwaysAsk, ...rules.commands.filter((rule) => rule.decision === 'ask').map(commandId)]}
             onAlwaysOnChange={(ids) => {
               const { kinds, commands } = listChange(rules, 'ask', ids)
               model.change({ alwaysAsk: kinds, commands })
             }}
-            onAddRule={(pattern) => model.change({ commands: withCommand(rules, pattern, 'ask') })}
+            onAddRule={(pattern) => add(withCommand(rules, pattern, 'ask'))}
             never={itemsOf(rules.commands, 'never')}
-            neverOn={[...rules.never, ...rules.commands.filter((rule) => rule.decision === 'never').map((rule) => commandId(rule.pattern))]}
+            neverOn={[...rules.never, ...rules.commands.filter((rule) => rule.decision === 'never').map(commandId)]}
             onNeverOnChange={(ids) => {
               const { kinds, commands } = listChange(rules, 'never', ids)
               model.change({ never: kinds, commands })
             }}
-            onAddNever={(pattern) => model.change({ commands: withCommand(rules, pattern, 'never') })}
+            onAddNever={(pattern) => add(withCommand(rules, pattern, 'never'))}
+            alwaysAllowed={alwaysAllowedOf(rules)}
+            onRemoveAlwaysAllowed={(id) => model.change(withoutAllowed(rules, id))}
+            onAddAlwaysAllowed={(pattern) => add(withCommand(rules, pattern, 'allow'))}
             end={rules.end === null ? TaskEnd.DraftPr : toEnd[rules.end]}
             onEndChange={(end) => model.change({ end })}
             branches={{

@@ -286,6 +286,27 @@ describe('AgentConnection', () => {
       }),
     )
 
+    it.live('runs the command it is given, asking first, as a tool call of its own each time', () =>
+      withConnection(
+        fake,
+        (connection, permissions) =>
+          Effect.gen(function* () {
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+            const first = yield* Stream.runCollect(session.prompt(`${scenarios.run}git status --short`))
+            yield* Stream.runCollect(session.prompt(`${scenarios.run}git status`))
+            assert.strictEqual(text(first), 'chosen=allow_once')
+            assert.deepStrictEqual(
+              (yield* Ref.get(permissions)).map((request) => [request.toolCallId, request.kind, request.rawInput]),
+              [
+                ['run-1', 'execute', { command: 'git status --short' }],
+                ['run-2', 'execute', { command: 'git status' }],
+              ],
+            )
+          }),
+        allow,
+      ),
+    )
+
     it.live("picks the rejection that carries on, by the agent's option meanings", () =>
       Effect.gen(function* () {
         const { events } = yield* turn(scenarios.commandChoices, reject)
@@ -323,6 +344,23 @@ describe('AgentConnection', () => {
       }),
     )
 
+    for (const scenario of [scenarios.commandChoices, scenarios.fileEdit])
+      it.live(`delivers the coordinator's reason even when refusal carries on: ${scenario}`, () =>
+        Effect.gen(function* () {
+          const { events } = yield* turn(scenario, () =>
+            Effect.succeed({
+              decision: 'reject',
+              reason: 'This is outside the requested task.',
+              decidedBy: 'coordinator',
+            }),
+          )
+          assert.lengthOf(find(events, 'Resumed'), 1)
+          assert.include(find(events, 'Resumed')[0]?.reason ?? '', 'not allowed by the coordinator: This is outside the requested task.')
+          assert.include(text(events), 'carrying on without it')
+          assert.strictEqual(stopReason(events), 'end_turn')
+        }),
+      )
+
     it.live('stops resuming an agent that keeps asking', () =>
       Effect.gen(function* () {
         const { events } = yield* turn(scenarios.stubborn, reject)
@@ -330,6 +368,31 @@ describe('AgentConnection', () => {
         assert.lengthOf(find(events, 'Resumed'), 3)
         assert.strictEqual(stopReason(events), 'cancelled')
       }),
+    )
+
+    it.live('does not deliver pending coordinator feedback after the person cancels', () =>
+      withConnection(
+        fake,
+        (connection) =>
+          Effect.gen(function* () {
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+            const events: Array<SessionEvent> = []
+            const pending = yield* Effect.forkChild(
+              Stream.runForEach(session.prompt(scenarios.deniedThenWait), (event) =>
+                Effect.sync(() => {
+                  events.push(event)
+                }),
+              ),
+            )
+            while (!events.some((event) => event._tag === 'AgentMessage' && event.text === 'chosen=decline'))
+              yield* Effect.sleep('5 millis')
+            yield* session.interrupt
+            yield* Fiber.join(pending)
+            assert.lengthOf(find(events, 'Resumed'), 0)
+            assert.strictEqual(stopReason(events), 'cancelled')
+          }),
+        () => Effect.succeed({ decision: 'reject', reason: 'Outside the task.', decidedBy: 'coordinator' }),
+      ),
     )
 
     it.live('answers a waiting request itself when it cancels the turn', () =>

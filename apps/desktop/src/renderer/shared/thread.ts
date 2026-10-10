@@ -1,4 +1,4 @@
-import type { ThreadItem, Unfurl } from '@althar/contracts'
+import type { AllowedBy, ThreadItem, Unfurl } from '@althar/contracts'
 import { Delivery, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { took } from './time'
@@ -29,6 +29,8 @@ export type Part =
       readonly state: ToolState
       /** The whole command, when it runs one: what the row opens to, and what Copy takes. */
       readonly command: string | null
+      /** The project's rule that let it through without asking (ADR-018), where one did. */
+      readonly allowedBy?: AllowedBy
     }
   | {
       readonly kind: 'plan'
@@ -226,6 +228,7 @@ const partOf = (
         target: targetOf(item.content, worktree),
         state,
         command: item.content.command,
+        ...(item.content.allowedBy === undefined ? {} : { allowedBy: item.content.allowedBy }),
       }
     }
     case 'plan':
