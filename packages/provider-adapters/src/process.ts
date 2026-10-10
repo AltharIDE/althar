@@ -158,10 +158,13 @@ export const spawnOwned = (
     Effect.gen(function* () {
       const exited = yield* Deferred.make<ProcessExit>()
       const stopped = yield* Deferred.make<StopReport>()
-      const env = childEnvironment(spec)
+      const inherited = childEnvironment(spec)
+      // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled; what it runs may inherit more of Althar's environment, as reaching the device needs.
+      const launched = spec.onDevice === undefined ? spec : spec.onDevice({ cwd, env: inherited })
+      const env = launched === spec ? inherited : childEnvironment(launched)
       const child = yield* Effect.try({
-        try: () => spawn(spec.command, [...spec.args], { cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'], env }),
-        catch: (cause) => new AgentStartFailed({ command: spec.command, reason: String(cause) }),
+        try: () => spawn(launched.command, [...launched.args], { cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'], env }),
+        catch: (cause) => new AgentStartFailed({ command: launched.command, reason: String(cause) }),
       })
       let stderr = ''
       child.stderr.on('data', (chunk: Buffer) => {
@@ -170,7 +173,7 @@ export const spawnOwned = (
       child.once('exit', (code, signal) => Deferred.doneUnsafe(exited, Effect.succeed({ code, signal })))
       const pid = yield* Effect.callback<number, AgentStartFailed>((resume) => {
         child.once('spawn', () => resume(Effect.succeed(child.pid ?? 0)))
-        child.once('error', (error) => resume(Effect.fail(new AgentStartFailed({ command: spec.command, reason: error.message }))))
+        child.once('error', (error) => resume(Effect.fail(new AgentStartFailed({ command: launched.command, reason: error.message }))))
       })
       const osStartedAt = yield* osStartTime(pid)
       let sequence = 0

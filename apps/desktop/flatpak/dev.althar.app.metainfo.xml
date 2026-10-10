@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.althar.app</id>
+  <name>Althar</name>
+  <summary>Run software projects with AI coding agents</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <launchable type="desktop-id">dev.althar.app.desktop</launchable>
+  <description>
+    <p>Althar is an environment for running software projects with AI coding agents.</p>
+    <p>It keeps the project in one place: its rules, knowledge, decisions, tasks and history, and hands the work to whichever agents suit it, such as Claude Code, Codex or OpenCode.</p>
+  </description>
+  <categories>
+    <category>Development</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.0.0" date="2026-10-10"/>
+  </releases>
+</component>

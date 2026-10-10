@@ -59,6 +59,11 @@ export interface DictationHost {
 }
 
 /**
+ * What the window's own buttons ask the main process to do where the system draws none (window-chrome).
+ */
+export type WindowAction = 'close' | 'minimize' | 'toggle-maximize'
+
+/**
  * What only the app's main process can do. The window never handles a path:
  * the main process shows the picker, or is told what was dropped, and hands
  * back a grant the runtime knows the folder by.
@@ -79,8 +84,14 @@ export interface FoundRepositories {
 }
 
 export interface Host {
-  /** The system Althar runs on: darwin, win32, linux. */
+  /** The system Althar runs on: darwin, win32, linux; off a Mac the window's chrome is the app's own. */
   readonly platform: string
+  /** Closes, minimizes, or maximizes and restores the window itself. */
+  readonly window: (action: WindowAction) => void
+  /** Whether the window is maximized now, for the buttons' maximize or restore. */
+  readonly maximized: () => Promise<boolean>
+  /** Calls `listener` as the window is maximized or restored, until the returned function is called. */
+  readonly onMaximized: (listener: (maximized: boolean) => void) => () => void
   /** Asks the person for a folder, for a project or an agent's account; its grant, or null when they cancel. */
   readonly pickFolder: (purpose?: 'project' | 'account') => Promise<string | null>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */

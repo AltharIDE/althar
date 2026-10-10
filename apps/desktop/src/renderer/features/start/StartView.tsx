@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect } from 'react'
 
 import type { AgentStatus, ProjectSummary } from '@althar/contracts'
-import { Button, PermissionPolicy, type RuntimeEntry, RuntimeState, SourceOrigin, TitleBar } from '@althar/ui'
+import { Button, PermissionPolicy, type RuntimeEntry, RuntimeState, SourceOrigin } from '@althar/ui'
 import { NewProject, Start } from '@althar/ui/screens'
 
 import { brandOf } from '../../shared/agents'
@@ -14,6 +14,7 @@ import s from './Start.module.css'
 import { useFirstProject } from './useFirstProject'
 import type { StartModel } from './useStart'
 import { device, platform } from '../../shared/device'
+import { BareBar } from '../tabs/TabsFrame'
 
 /*
  * Where the window starts. With no project yet, the kit's Start screen: the
@@ -131,7 +132,8 @@ export function StartView({
   if (model.forming !== null) {
     const { forming } = model
     return (
-      <div className={s.window}>
+      <div className={`${s.window} ${s.bare}`}>
+        <BareBar className={s.over} />
         <div className={`${s.scroll} ${s.first}`}>
           <NewProject
             defaultName={forming.name}
@@ -206,9 +208,7 @@ function First({
   const error = project.error ?? model.error
   return (
     <div className={`${s.window} ${s.bare}`}>
-      <TitleBar lights="none" className={s.over}>
-        {null}
-      </TitleBar>
+      <BareBar className={s.over} />
       <Start
         // Still asking until the runtime answers, or says it can't.
         runtimes={model.status === null && model.error === null ? null : runtimesOf(model, accounts)}

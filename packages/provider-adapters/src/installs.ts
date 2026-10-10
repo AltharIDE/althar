@@ -2,7 +2,7 @@ import { accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, win32 } from 'node:path'
 
-import type { AgentDefinition, LaunchSpec } from './registry'
+import type { AgentDefinition, LaunchSpec, OutOnDevice } from './registry'
 
 /*
  * Finding an agent's command, on a Mac, Windows or Linux (ADR-012's "the
@@ -76,6 +76,12 @@ export interface Located {
   readonly command: string
   /** Whose it is: the person's own, the copy that ships with Althar, or the one Althar downloaded. */
   readonly whose: 'theirs' | 'bundled' | 'althar'
+  /**
+   * Where this copy is not here but out on the device (a Flatpak's host, where
+   * the person's own install lives): given the spec that names it, how that
+   * spec runs out there (`Installs.ts`'s `onDevice`).
+   */
+  readonly out?: (spec: LaunchSpec) => OutOnDevice
 }
 
 export interface LocateOptions {
@@ -138,7 +144,9 @@ export const usingLocated = (definition: AgentDefinition, find: () => Located | 
     (...args: A): LaunchSpec => {
       const spec = make(...args)
       const found = spec.command === cli.name ? find() : null
-      return found === null ? spec : { ...spec, command: found.command }
+      if (found === null) return spec
+      const named = { ...spec, command: found.command }
+      return found.out === undefined ? named : { ...named, onDevice: found.out(named) }
     }
   const { signIn } = definition
   return {

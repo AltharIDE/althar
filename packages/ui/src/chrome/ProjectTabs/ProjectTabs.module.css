@@ -26,27 +26,13 @@
   margin-right: -6px;
   padding-left: 4px;
 }
+/* macOS keeps the system's lights' place: the dots are taken but empty */
 .lights i {
   width: 12px;
   height: 12px;
   border-radius: 99px;
   visibility: hidden;
 }
-.drawn i {
-  visibility: visible;
-  background: var(--traffic);
-  transition: background var(--base) var(--ease);
-}
-.strip:hover .drawn i:nth-child(1) {
-  background: #e0685c;
-}
-.strip:hover .drawn i:nth-child(2) {
-  background: #dfa53f;
-}
-.strip:hover .drawn i:nth-child(3) {
-  background: #62b04f;
-}
-
 .nav {
   flex: 1;
   min-width: 0;
@@ -212,7 +198,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .drawn i,
+  .lights button,
   .tab,
   .yours,
   .close {

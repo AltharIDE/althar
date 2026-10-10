@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { locate, namesOf, programName, quoted, usingLocated, usualDirs } from '../src/installs'
-import { agents, bundledClaude, isMusl } from '../src/registry'
+import { agents, bundledClaude, isMusl, type LaunchSpec, type OutOnDevice } from '../src/registry'
 
 /* Finding an agent's command, on a Mac, Windows or Linux: the person's own first, then Althar's copies. */
 
@@ -102,6 +102,27 @@ describe('finding an agent’s command', () => {
     found = { command: 'opencode', whose: 'theirs' }
     expect(pointed.signIn.login).toBe('opencode auth login')
     expect(usingLocated(agents.codex, () => found)).toBe(agents.codex)
+  })
+
+  it('carries a copy that lives out on the device with the spec that names it, so an executor runs it there', () => {
+    const seen: Array<{ command: string; args: ReadonlyArray<string> }> = []
+    const out: (spec: LaunchSpec) => OutOnDevice = (spec) => (at) => {
+      seen.push({ command: spec.command, args: spec.args })
+      return { command: 'flatpak-spawn', args: ['--host', spec.command, ...spec.args], env: { A: at.env.A ?? 'b' } }
+    }
+    const pointed = usingLocated(agents.opencode, () => ({ command: '/device/opencode', whose: 'theirs', out }))
+    const spec = pointed.launch('node')
+    expect(spec.command).toBe('/device/opencode')
+    expect(spec.onDevice?.({ cwd: '/w', env: {} })).toEqual({
+      command: 'flatpak-spawn',
+      args: ['--host', '/device/opencode', 'acp'],
+      env: { A: 'b' },
+    })
+    expect(seen).toEqual([{ command: '/device/opencode', args: ['acp'] }])
+    // What the person runs to sign in names the same copy, where their shell finds it.
+    expect(pointed.signIn.login).toBe('/device/opencode auth login')
+    // A copy here is as it was: no carrying anywhere.
+    expect(usingLocated(agents.opencode, () => ({ command: '/kept/opencode', whose: 'althar' })).launch('node').onDevice).toBeUndefined()
   })
 
   it('points Claude Code’s sign-in, status and version, never its adapter, at the copy that ships', () => {

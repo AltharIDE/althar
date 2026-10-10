@@ -1,11 +1,14 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
+import type { WindowAction } from '../renderer/data/services'
+
 /*
  * The window's bridge to the main process, and nothing more: the port to the
  * runtime, handed on to the page, folders the person chose, by the picker or
  * a drop or among the repositories main found, each as a grant, the thread a notification they clicked opens,
- * the icon they gave the app, the app's own preferences, and where Althar
- * shows at the edge of the screen. The edge's own pages say through it where they draw, and what to
+ * the icon they gave the app, the app's own preferences, where Althar
+ * shows at the edge of the screen, which platform the window runs on, and the window's own buttons
+ * (close, minimize, maximize). The edge's own pages say through it where they draw, and what to
  * open in the window, and hear whether the pointer is on the island. And
  * dictation: where the speech model and the microphone stand, the model's
  * download, and what was said, sent to be written down. The page never sees or sends a
@@ -20,6 +23,12 @@ ipcRenderer.on('althar:port', (event) => {
 const pointing = new Set<(on: boolean) => void>()
 ipcRenderer.on('althar:edge-pointed', (_event, on: unknown) => {
   if (typeof on === 'boolean') for (const listener of pointing) listener(on)
+})
+
+/* Whether the window is maximized, on the window's own buttons' account. */
+const maximized = new Set<(maximized: boolean) => void>()
+ipcRenderer.on('althar:maximized', (_event, on: unknown) => {
+  if (typeof on === 'boolean') for (const listener of maximized) listener(on)
 })
 
 /* A thread a notification the person clicked opens: held until the page listens, as a window that just opened doesn't yet. */
@@ -41,8 +50,14 @@ ipcRenderer.on('althar:dictation', (_event, message: unknown) => {
 })
 
 contextBridge.exposeInMainWorld('althar', {
-  // Which system it is, for the words the window uses: this Mac, this PC, this computer.
+  // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
+  window: (action: WindowAction): void => ipcRenderer.send('althar:window', action),
+  maximized: (): Promise<boolean> => ipcRenderer.invoke('althar:maximized'),
+  onMaximized: (listener: (maximized: boolean) => void): (() => void) => {
+    maximized.add(listener)
+    return () => void maximized.delete(listener)
+  },
   pickFolder: (purpose: 'project' | 'account' = 'project'): Promise<string | null> => ipcRenderer.invoke('althar:pick-folder', purpose),
   // Only a file the person dropped has a path; one the page made has none.
   grantDropped: (file: File): Promise<string | null> => {

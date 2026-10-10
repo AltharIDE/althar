@@ -50,6 +50,8 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     // A repository added, with its role; then left out again.
     await menu(page, /Repositories/)
     await expect(page.getByRole('heading', { name: 'Repositories' })).toBeVisible()
+    // A screen on a tabbed route puts nothing of its own at the top: one bar, one set of buttons.
+    await expect(page.getByRole('button', { name: 'Close the window' })).toHaveCount(1)
     await chooseFolder(electronApp, web)
     await page.getByRole('button', { name: 'Add a folder' }).click()
     const list = page.getByRole('list', { name: 'Repositories' })

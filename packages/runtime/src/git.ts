@@ -13,8 +13,22 @@ import { GitFailed } from './errors'
  * prompt: a command that would ask for a password fails instead. They run
  * with the repository's hooks off (docs/architecture/07): adding a worktree
  * would otherwise run its `post-checkout` hook, code from the repository, on
- * the person's machine.
+ * the person's machine. A picked folder's path is the document portal's FUSE
+ * mount inside a Flatpak, where a process cwd makes getcwd fail — a worktree
+ * couldn't be added there — so exactly there the repository is given with
+ * `-C`; everywhere else the process starts in it, as it always has.
  */
+
+/** Where a picked folder is inside a Flatpak: the document portal's FUSE mount, where a cwd makes getcwd fail. */
+const PORTAL = '/run/flatpak/doc'
+
+/**
+ * How a git command runs in `cwd`: with `-C` rather than as the process's own
+ * working directory for the portal's FUSE mount, and as the process's own
+ * working directory everywhere else.
+ */
+export const gitIn = (cwd: string, args: ReadonlyArray<string>): { readonly args: ReadonlyArray<string>; readonly cwd?: string } =>
+  cwd === PORTAL || cwd.startsWith(`${PORTAL}/`) ? { args: ['-C', cwd, ...args] } : { args, cwd }
 
 export const git = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> => gitWithin(60_000, cwd, ...args)
 
@@ -28,10 +42,16 @@ export const gitOutcome = (
   ...args: ReadonlyArray<string>
 ): Effect.Effect<{ readonly code: number; readonly stdout: string }> =>
   Effect.callback<{ readonly code: number; readonly stdout: string }>((resume) => {
+    const at = gitIn(cwd, ['-c', 'core.hooksPath=/dev/null', ...args])
     execFile(
       'git',
-      ['-c', 'core.hooksPath=/dev/null', ...args],
-      { cwd, timeout: 60_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' } },
+      [...at.args],
+      {
+        ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
+        timeout: 60_000,
+        maxBuffer: 16 * 1024 * 1024,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+      },
       (error, stdout) =>
         resume(Effect.succeed({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 128, stdout: stdout.trim() })),
     )
@@ -51,10 +71,16 @@ const run = (
   input?: string,
 ): Effect.Effect<string, GitFailed> =>
   Effect.callback<string, GitFailed>((resume) => {
+    const at = gitIn(cwd, ['-c', 'core.hooksPath=/dev/null', ...args])
     const child = execFile(
       'git',
-      ['-c', 'core.hooksPath=/dev/null', ...args],
-      { cwd, timeout, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...env } },
+      [...at.args],
+      {
+        ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
+        timeout,
+        maxBuffer: 16 * 1024 * 1024,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...env },
+      },
       (error, stdout, stderr) =>
         resume(
           error === null

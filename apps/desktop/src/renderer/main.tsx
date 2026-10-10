@@ -12,6 +12,7 @@ import { Launch, OpenFailed } from '@althar/ui/screens'
 import { receivePort } from './data/client'
 import { openWindow } from './data/open'
 import { ServicesProvider } from './data/services'
+import { useMaximized } from './shared/useWindowChrome'
 
 /*
  * The window's entry. The launch plays at once, while the window waits for
@@ -48,6 +49,31 @@ const openedBefore = (() => {
   }
 })()
 
+/** The launch's place when the window couldn't open: its own bar carries the window's buttons, so its third says maximize or restore. */
+function FailedOpen({ reason }: { reason: string }) {
+  // Subscribed only while this screen is the one shown, not for the window's whole life.
+  const maximized = useMaximized(window.althar)
+  const darwin = window.althar.platform === 'darwin'
+  return (
+    <OpenFailed
+      reason={reason}
+      onRetry={() => window.location.reload()}
+      // Off a Mac the window's own buttons sit in this bar too, so the window can still be closed here.
+      lights={darwin ? 'space' : 'drawn'}
+      {...(darwin
+        ? {}
+        : {
+            window: {
+              onClose: () => window.althar.window('close'),
+              onMinimize: () => window.althar.window('minimize'),
+              onToggleMaximize: () => window.althar.window('toggle-maximize'),
+              maximized,
+            },
+          })}
+    />
+  )
+}
+
 function Window() {
   const [opened, setOpened] = useState<Awaited<typeof opening> | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
@@ -60,7 +86,7 @@ function Window() {
       ),
     [],
   )
-  if (failed !== null) return <OpenFailed reason={failed} onRetry={() => window.location.reload()} />
+  if (failed !== null) return <FailedOpen reason={failed} />
   return (
     <Launch ready={opened !== null} quick={openedBefore}>
       {opened !== null && (
