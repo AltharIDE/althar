@@ -4,7 +4,7 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
-import { Policies, type ProjectRules, ruleSetOf } from '../src/Policies'
+import { Policies, type ProjectRules, ruleSetOf, withRemembered } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { RULES } from '../src/rules'
@@ -21,7 +21,7 @@ describe('a project’s rules, as kept', () => {
       source: 'mvp',
       alwaysAsk: ['push to the default branch', 'force push', 'merge', 'deploy', 'write outside the worktree'],
     }
-    assert.deepStrictEqual(ruleSetOf(mvp), { mode: 'rules', ask: RULES, never: [], commands: [] })
+    assert.deepStrictEqual(ruleSetOf(mvp), { mode: 'rules', ask: RULES, never: [], allow: [], commands: [] })
     assert.deepStrictEqual(
       ruleSetOf({
         source: 'person',
@@ -30,7 +30,13 @@ describe('a project’s rules, as kept', () => {
         never: ['force-push', 'nonsense'],
         commands: [{ pattern: 'npm publish', decision: 'never' }],
       }),
-      { mode: 'ask', ask: ['deploy', 'outside'], never: ['force-push'], commands: [{ pattern: 'npm publish', decision: 'never' }] },
+      {
+        mode: 'ask',
+        ask: ['deploy', 'outside'],
+        never: ['force-push'],
+        allow: [],
+        commands: [{ pattern: 'npm publish', decision: 'never' }],
+      },
     )
   })
 
@@ -117,6 +123,68 @@ describe('a project’s rules, as kept', () => {
       )
       const refused = yield* Effect.flip(policies.set('proj_missing', { permissions: 'allow' }, instance.personId))
       assert.strictEqual(refused._tag, 'NotFound')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it('keep a rule an always answer saves: a command in place of one for the same words, a kind on its list and off the other', () => {
+    const first: ProjectRules = { source: 'person', alwaysAsk: [], commands: [{ pattern: 'git status', decision: 'never' }] }
+    const allowed = withRemembered(first, { decision: 'allow', pattern: 'git status', match: 'prefix' })
+    assert.deepStrictEqual(allowed.commands, [{ pattern: 'git status', decision: 'allow' }])
+    // The same rule again changes nothing; the same words exactly are another rule.
+    assert.strictEqual(withRemembered(allowed, { decision: 'allow', pattern: 'git status', match: 'prefix' }), allowed)
+    assert.deepStrictEqual(withRemembered(allowed, { decision: 'never', pattern: 'git status', match: 'exact' }).commands, [
+      { pattern: 'git status', decision: 'allow' },
+      { pattern: 'git status', decision: 'never', match: 'exact' },
+    ])
+    const kinds = withRemembered(withRemembered(first, { decision: 'allow', kind: 'deploy' }), { decision: 'allow', kind: 'deploy' })
+    assert.deepStrictEqual(kinds.alwaysAllow, ['deploy'])
+    const refused = withRemembered(kinds, { decision: 'never', kind: 'deploy' })
+    assert.deepStrictEqual([refused.never, refused.alwaysAllow], [['deploy'], []])
+    assert.strictEqual(withRemembered(refused, { decision: 'never', kind: 'deploy' }).never, refused.never)
+    assert.deepStrictEqual(ruleSetOf({ ...kinds, alwaysAllow: ['deploy', 'nonsense'] }).allow, ['deploy'])
+  })
+
+  it.effect('remember a rule as a revision recorded as whoever answered, and none where it holds already', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const projectId = project.projectId as ProjectId
+      yield* policies.remember(projectId, { decision: 'allow', pattern: 'git status', match: 'prefix' }, instance.personId)
+      yield* policies.remember(projectId, { decision: 'allow', pattern: 'git status', match: 'prefix' }, instance.personId)
+      const { rules } = yield* policies.current(projectId)
+      assert.deepStrictEqual([rules.source, rules.commands], ['person', [{ pattern: 'git status', decision: 'allow' }]])
+      assert.lengthOf(yield* sql`SELECT id FROM policies WHERE project_id = ${projectId}`, 2)
+      const refused = yield* Effect.flip(policies.remember('proj_missing', { decision: 'never', kind: 'deploy' }, instance.personId))
+      assert.strictEqual(refused._tag, 'NotFound')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.effect('tidy command rules as they are set: one by how it starts by its words, an exact one as it was', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const set = yield* policies.set(
+        project.projectId,
+        {
+          alwaysAllow: ['deploy'],
+          commands: [
+            { pattern: '  bun   test ', decision: 'allow' },
+            { pattern: ' echo "a  b" ', decision: 'allow', match: 'exact' },
+            { pattern: '  ', decision: 'allow', match: 'exact' },
+          ],
+        },
+        instance.personId,
+      )
+      assert.deepStrictEqual(set.commands, [
+        { pattern: 'bun test', decision: 'allow' },
+        { pattern: 'echo "a  b"', decision: 'allow', match: 'exact' },
+      ])
+      assert.deepStrictEqual(set.alwaysAllow, ['deploy'])
     }).pipe(Effect.provide(runtime())),
   )
 })

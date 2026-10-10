@@ -15,19 +15,36 @@ import { answerFor, type PermissionDecision, type PermissionMeanings, type Permi
 import { Context, Crypto, Deferred, Effect, Layer, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { AttentionClosed, NotFound } from './errors'
+import { AlwaysNotOffered, AttentionClosed, NotFound } from './errors'
 import { currentBranch } from './git'
 import { Instance } from './Instance'
 import { Live } from './Live'
-import { Policies, ruleSetOf } from './Policies'
+import { Policies, type Remembered, ruleSetOf } from './Policies'
 import { change, fact, timestamp } from './records'
-import { commandOf, decide, decideReader, essentials, pathsOf, type RuleContext } from './rules'
+import {
+  type AllowRule,
+  type Always,
+  type AlwaysScope,
+  alwaysOf,
+  commandOf,
+  decide,
+  decideReader,
+  essentials,
+  pathsOf,
+  type RuleContext,
+  sayAllowRule,
+  type Verdict,
+} from './rules'
 
 /*
  * Permission requests, answered from the project rules (ADR-007). Every
  * request is recorded, and so is every decision, with the option sent to the
- * agent. What the rules keep for the person becomes an attention request, and
- * the agent waits until the person answers or the turn is cancelled.
+ * agent, and, where the project's allow rules answered, the rules and the
+ * revision they belong to. What the rules keep for the person becomes an
+ * attention request, and the agent waits until the person answers or the
+ * turn is cancelled. An answer can keep a rule (ADR-017): Allow always and
+ * Deny always save one to the project, and every request still waiting is
+ * decided again by the rules as they now are.
  */
 
 /** Where a request comes from, and what the rules need to decide it. */
@@ -49,7 +66,33 @@ interface Waiting {
   readonly request: PermissionRequest
   readonly requestId: string
   readonly digest: string
+  /** What an "always" answer would keep, as the person was offered it. */
+  readonly always: Always
 }
+
+/** The rule an "always" answer by this scope keeps, where it was offered: let through, or never allowed. */
+export const rememberedOf = (always: Always, decision: 'allow' | 'reject', scope: AlwaysScope): Remembered | undefined => {
+  const offered = decision === 'allow' ? always.allow : always.deny
+  if (!offered.includes(scope)) return undefined
+  const kept = decision === 'allow' ? ('allow' as const) : ('never' as const)
+  switch (scope) {
+    case 'exact':
+      return always.command === null ? undefined : { decision: kept, pattern: always.command, match: 'exact' }
+    case 'prefix':
+      return always.prefix === null ? undefined : { decision: kept, pattern: always.prefix, match: 'prefix' }
+    case 'kind':
+      return always.kind === null ? undefined : { decision: kept, kind: always.kind }
+  }
+}
+
+/** What a waiting request's call keeps of what an "always" would save, as its payload holds it. */
+const alwaysPayload = (always: Always) => ({
+  command: always.command,
+  prefix: always.prefix,
+  kind: always.kind,
+  allow: always.allow,
+  deny: always.deny,
+})
 
 /** A digest of what the action does, so a decision is tied to exactly this action. */
 export const actionDigest = (request: PermissionRequest) =>
@@ -82,15 +125,18 @@ export class Permissions extends Context.Service<
   {
     /** Decides a request: the adapter's `onPermission`. */
     decide(context: RequestContext, request: PermissionRequest): Effect.Effect<PermissionDecision>
-    /** The person's answer to an attention request. */
+    /** The person's answer to an attention request; with `always`, the rule it keeps, by the scope they chose of those offered. */
     answer(input: {
       readonly envelope: CommandEnvelope
       readonly attentionId: string
       readonly decision: 'allow' | 'reject'
       readonly reason?: string
-    }): Effect.Effect<void, AttentionClosed | NotFound>
+      readonly always?: AlwaysScope
+    }): Effect.Effect<void, AttentionClosed | NotFound | AlwaysNotOffered>
     /** Withdraws every request a session is still waiting on, as when its agent has gone. */
     withdrawAll(sessionId: string): Effect.Effect<void>
+    /** Decides again every request of a project still waiting on the person, by its rules as they now are: what they no longer keep for the person is answered. */
+    reconsider(projectId: string): Effect.Effect<void>
   }
 >()('@althar/runtime/Permissions') {
   static readonly layer: Layer.Layer<Permissions, never, Store> = Layer.effect(
@@ -111,6 +157,10 @@ export class Permissions extends Context.Service<
         readonly decision: PermissionDecision
         readonly actorId: ActorId
         readonly commandId?: CommandEnvelope['commandId']
+        /** The project's allow rules that answered, and the revision of the rules they are in. */
+        readonly cited?: { readonly rules: ReadonlyArray<AllowRule>; readonly policyId: string }
+        /** The rule the person's "always" answer kept. */
+        readonly saved?: Remembered
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -125,6 +175,8 @@ export class Permissions extends Context.Service<
             agentOptionId: answer.optionId,
             reason: input.decision.reason ?? null,
             decidedByActorId: input.actorId,
+            rule: input.cited === undefined ? null : JSON.stringify(input.cited.rules),
+            policyId: input.cited?.policyId ?? null,
             actionDigest: input.digest,
             decidedAt: yield* timestamp,
           })}`
@@ -134,7 +186,14 @@ export class Permissions extends Context.Service<
             aggregateId: id,
             revision: 1,
             type: 'decision.made',
-            payload: { outcome: input.decision.decision, optionId: answer.optionId, scope: answer.scope, reason: input.decision.reason },
+            payload: {
+              outcome: input.decision.decision,
+              optionId: answer.optionId,
+              scope: answer.scope,
+              reason: input.decision.reason,
+              ...(input.cited === undefined ? {} : { rules: input.cited.rules }),
+              ...(input.saved === undefined ? {} : { saved: input.saved }),
+            },
             actorId: input.actorId,
             ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
           })
@@ -147,6 +206,21 @@ export class Permissions extends Context.Service<
             type: 'permission_request.decided',
             actorId: input.actorId,
           })
+        })
+
+      /**
+       * A session waiting on the person goes back to work once nothing it
+       * asked still waits; one already at work stays as it is.
+       */
+      const release = (sessionId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [session] = yield* sql<{ state: string }>`SELECT state FROM provider_sessions WHERE id = ${sessionId}`
+          if (session?.state !== 'waiting_approval') return
+          const [open] = yield* sql<{ count: number }>`
+            SELECT count(*) AS count FROM attention_requests a JOIN permission_requests r ON r.id = a.permission_request_id
+            WHERE r.provider_session_id = ${sessionId} AND a.state = 'open'`
+          if ((open?.count ?? 0) === 0) yield* moveSession(sessionId, 'active')
         })
 
       /** Ends a wait without a decision: the turn was cancelled or the session ended. Only the first call does anything. */
@@ -176,14 +250,103 @@ export class Permissions extends Context.Service<
                 type: 'permission_request.cancelled',
                 actorId: instance.systemId,
               })
-              const [session] = yield* sql<{ state: string }>`SELECT state FROM provider_sessions WHERE id = ${waiter.context.sessionId}`
-              if (session?.state === 'waiting_approval') yield* moveSession(waiter.context.sessionId, 'active')
+              yield* release(waiter.context.sessionId)
               return true
             }),
           )
           if (withdrawn)
             yield* live.publish({ _tag: 'AttentionClosed', threadId: waiter.context.threadId, attentionId, outcome: 'withdrawn' })
         })
+
+      /** A task's request as the project's rules decide it now, with the context they read it in and the revision they are. */
+      const judge = (requestContext: RequestContext, request: PermissionRequest) =>
+        Effect.gen(function* () {
+          const rules = requestContext.rules.role === 'task' ? requestContext.rules.context : { worktree: '', defaultBranch: '' }
+          // Where a push without a destination goes depends on the branch checked out now.
+          const current = request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(rules.worktree) : undefined
+          // The project's rules as they are now: a change the person makes applies to the next request.
+          const policy = yield* policies.current(requestContext.projectId)
+          const context: RuleContext = {
+            ...rules,
+            project: ruleSetOf(policy.rules),
+            ...(current === undefined ? {} : { currentBranch: current }),
+          }
+          return { context, verdict: decide(request, context), policyId: policy.id }
+        })
+
+      /** What the rules answer, as the decision sent: refused with why, or allowed, by the allow rules that did where they did. */
+      const decisionOf = (
+        verdict: Exclude<Verdict, { readonly verdict: 'ask' }>,
+        policyId: string,
+      ): {
+        readonly decision: PermissionDecision
+        readonly cited?: { readonly rules: ReadonlyArray<AllowRule>; readonly policyId: string }
+      } => {
+        if (verdict.verdict === 'deny') return { decision: { decision: 'reject', reason: verdict.reason } }
+        const [first] = verdict.rules ?? []
+        return first === undefined || verdict.rules === undefined
+          ? { decision: { decision: 'allow', reason: 'Allowed by the project rules.' } }
+          : {
+              decision: { decision: 'allow', reason: `Always allowed: ${sayAllowRule(first)}.` },
+              cited: { rules: verdict.rules, policyId },
+            }
+      }
+
+      /**
+       * Answers a request still waiting as the rules now say, as the person
+       * would have: its call answered, the decision recorded as the rules',
+       * the session back at work, and the agent told. Only the first answer
+       * to a call does anything.
+       */
+      const settle = (
+        attentionId: string,
+        waiter: Waiting,
+        decided: {
+          readonly decision: PermissionDecision
+          readonly cited?: { readonly rules: ReadonlyArray<AllowRule>; readonly policyId: string }
+        },
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const settled = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [attention] = yield* sql<{ state: string }>`SELECT state FROM attention_requests WHERE id = ${attentionId}`
+              if (attention?.state !== 'open') return false
+              const revision = yield* change('attention_requests', attentionId, { state: 'answered', answeredAt: yield* timestamp })
+              yield* fact({
+                projectId: waiter.context.projectId,
+                aggregateType: 'attention_request',
+                aggregateId: attentionId,
+                revision,
+                type: 'attention_request.answered',
+                actorId: instance.systemId,
+              })
+              yield* recordDecision({
+                ...waiter,
+                decision: decided.decision,
+                actorId: instance.systemId,
+                ...(decided.cited === undefined ? {} : { cited: decided.cited }),
+              })
+              yield* release(waiter.context.sessionId)
+              return true
+            }),
+          )
+          if (!settled) return
+          waiting.delete(attentionId)
+          yield* Deferred.succeed(waiter.deferred, decided.decision)
+          yield* live.publish({ _tag: 'AttentionClosed', threadId: waiter.context.threadId, attentionId, outcome: 'answered' })
+        })
+
+      const reconsider = (projectId: string) =>
+        Effect.forEach(
+          [...waiting].filter(([, waiter]) => waiter.context.projectId === projectId && waiter.context.rules.role === 'task'),
+          ([attentionId, waiter]) =>
+            Effect.gen(function* () {
+              const { verdict, policyId } = yield* judge(waiter.context, waiter.request)
+              if (verdict.verdict !== 'ask') yield* settle(attentionId, waiter, decisionOf(verdict, policyId))
+            }).pipe(Effect.ignore),
+          { discard: true },
+        )
 
       const decideRequest = (requestContext: RequestContext, request: PermissionRequest) =>
         Effect.gen(function* () {
@@ -230,27 +393,25 @@ export class Permissions extends Context.Service<
             )
             return decision
           }
-          const rules = requestContext.rules.context
-          // Where a push without a destination goes depends on the branch checked out now.
-          const current = request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(rules.worktree) : undefined
-          // The project's rules as they are now: a change the person makes applies to the next request.
-          const project = ruleSetOf((yield* policies.current(requestContext.projectId)).rules)
-          const verdict = decide(request, { ...rules, project, ...(current === undefined ? {} : { currentBranch: current }) })
+          const { context: ruleContext, verdict, policyId } = yield* judge(requestContext, request)
           // What the rules refuse outright, such as an agent changing things on the code host, is answered at once with what to do instead.
-          if (verdict.verdict === 'deny') {
-            const decision: PermissionDecision = { decision: 'reject', reason: verdict.reason }
+          if (verdict.verdict !== 'ask') {
+            const { decision, cited } = decisionOf(verdict, policyId)
             yield* sql.withTransaction(
-              recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
+              recordDecision({
+                context: requestContext,
+                request,
+                requestId,
+                digest,
+                decision,
+                actorId: instance.systemId,
+                ...(cited === undefined ? {} : { cited }),
+              }),
             )
             return decision
           }
-          if (verdict.verdict === 'allow') {
-            const decision: PermissionDecision = { decision: 'allow', reason: 'Allowed by the project rules.' }
-            yield* sql.withTransaction(
-              recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
-            )
-            return decision
-          }
+          // What isn't held for the person is where a judge would answer first (DEV-22: the lead decides); for now it waits for the person.
+          const always = alwaysOf(request, ruleContext)
 
           const attentionId = yield* newId(Ids.attentionRequest)
           yield* sql.withTransaction(
@@ -268,6 +429,8 @@ export class Permissions extends Context.Service<
                   command: commandOf(request),
                   paths: pathsOf(request),
                   reason: verdict.reason,
+                  held: verdict.held,
+                  always: alwaysPayload(always),
                 }),
                 actionDigest: digest,
                 state: 'open',
@@ -282,7 +445,8 @@ export class Permissions extends Context.Service<
                 payload: { reason: verdict.reason },
                 actorId: instance.systemId,
               })
-              yield* moveSession(requestContext.sessionId, 'waiting_approval')
+              const [session] = yield* sql<{ state: string }>`SELECT state FROM provider_sessions WHERE id = ${requestContext.sessionId}`
+              if (session?.state !== 'waiting_approval') yield* moveSession(requestContext.sessionId, 'waiting_approval')
             }),
           )
           const waiter: Waiting = {
@@ -291,6 +455,7 @@ export class Permissions extends Context.Service<
             request,
             requestId,
             digest,
+            always,
           }
           waiting.set(attentionId, waiter)
           yield* live.publish({
@@ -312,7 +477,7 @@ export class Permissions extends Context.Service<
             Effect.catchCause(() => Effect.succeed<PermissionDecision>({ decision: 'reject', reason: 'Althar could not decide.' })),
           ),
 
-        answer: ({ envelope, attentionId, decision, reason }) =>
+        answer: ({ envelope, attentionId, decision, reason, always }) =>
           run(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
@@ -331,12 +496,18 @@ export class Permissions extends Context.Service<
                   }),
                 })
               }
+              // An "always" keeps the rule the person was offered by that scope, and nothing they weren't.
+              const saved = always === undefined ? undefined : rememberedOf(waiter.always, decision, always)
+              if (always !== undefined && saved === undefined) return yield* new AlwaysNotOffered({ attentionId, scope: always })
               const answered: PermissionDecision = { decision, ...(reason === undefined ? {} : { reason }) }
               yield* commands.execute({
                 envelope,
                 projectId: waiter.context.projectId,
                 result: Schema.Void,
                 handle: Effect.gen(function* () {
+                  // Answered meanwhile by the rules, as when another answer kept a rule that covers it.
+                  const [attention] = yield* sql<{ state: string }>`SELECT state FROM attention_requests WHERE id = ${attentionId}`
+                  if (attention?.state !== 'open') return yield* new AttentionClosed({ attentionId })
                   const revision = yield* change('attention_requests', attentionId, { state: 'answered', answeredAt: yield* timestamp })
                   yield* fact({
                     projectId: waiter.context.projectId,
@@ -353,13 +524,18 @@ export class Permissions extends Context.Service<
                     decision: answered,
                     actorId: envelope.actorId,
                     commandId: envelope.commandId,
+                    ...(saved === undefined ? {} : { saved }),
                   })
-                  yield* moveSession(waiter.context.sessionId, 'active')
+                  yield* release(waiter.context.sessionId)
+                  // The rule goes in with the answer, as a revision of the project's rules recorded as the person's.
+                  if (saved !== undefined) yield* policies.remember(waiter.context.projectId, saved, envelope.actorId)
                 }),
               })
               waiting.delete(attentionId)
               yield* Deferred.succeed(waiter.deferred, answered)
               yield* live.publish({ _tag: 'AttentionClosed', threadId: waiter.context.threadId, attentionId, outcome: 'answered' })
+              // A rule kept answers every other request it now covers, or refuses.
+              if (saved !== undefined) yield* reconsider(waiter.context.projectId)
             }).pipe(
               Effect.catchTags({
                 SqlError: Effect.die,
@@ -370,6 +546,8 @@ export class Permissions extends Context.Service<
               }),
             ),
           ),
+
+        reconsider: (projectId) => run(reconsider(projectId)),
 
         withdrawAll: (sessionId) =>
           run(

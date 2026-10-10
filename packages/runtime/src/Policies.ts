@@ -28,8 +28,19 @@ export const ProjectRules = Schema.Struct({
   alwaysAsk: Schema.Array(Schema.String),
   /** The kinds refused outright, by id. */
   never: Schema.optional(Schema.Array(Schema.String)),
-  /** Commands the person named, by how they start: asked about, or refused. */
-  commands: Schema.optional(Schema.Array(Schema.Struct({ pattern: Schema.String, decision: Schema.Literals(['ask', 'never']) }))),
+  /** The kinds let through without asking, by id (ADR-017): what Allow always kept by kind. */
+  alwaysAllow: Schema.optional(Schema.Array(Schema.String)),
+  /** Commands the person named, by how they start or exactly: asked about, refused, or let through (ADR-017). */
+  commands: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        pattern: Schema.String,
+        decision: Schema.Literals(['ask', 'never', 'allow']),
+        /** By the whole line; by how it starts without it. */
+        match: Schema.optional(Schema.Literals(['prefix', 'exact'])),
+      }),
+    ),
+  ),
   /** How a task ends when its plan doesn't say: a draft pull request, one ready for review, or its branch alone. */
   end: Schema.optional(Schema.Literals(['draft', 'ready', 'none'])),
   /**
@@ -65,8 +76,39 @@ export const ruleSetOf = (rules: ProjectRules): ProjectRuleSet => ({
   mode: rules.permissions ?? 'rules',
   ask: rules.alwaysAsk.every(isRule) ? rules.alwaysAsk.filter(isRule) : RULES,
   never: (rules.never ?? []).filter(isRule),
+  allow: (rules.alwaysAllow ?? []).filter(isRule),
   commands: rules.commands ?? [],
 })
+
+/** A rule an "always" answer keeps (ADR-017): a kind, or a command by how it starts or exactly, let through or never allowed. */
+export type Remembered =
+  | { readonly decision: 'allow' | 'never'; readonly kind: RuleId }
+  | { readonly decision: 'allow' | 'never'; readonly pattern: string; readonly match: 'prefix' | 'exact' }
+
+/** The rules with one kept: a command in place of any rule for the same words, a kind on its list and off the other. */
+export const withRemembered = (rules: ProjectRules, rule: Remembered): ProjectRules => {
+  if ('kind' in rule) {
+    const allow = rules.alwaysAllow ?? []
+    const never = rules.never ?? []
+    return rule.decision === 'allow'
+      ? { ...rules, alwaysAllow: allow.includes(rule.kind) ? allow : [...allow, rule.kind] }
+      : {
+          ...rules,
+          never: never.includes(rule.kind) ? never : [...never, rule.kind],
+          alwaysAllow: allow.filter((kind) => kind !== rule.kind),
+        }
+  }
+  const same = (each: NonNullable<ProjectRules['commands']>[number]) =>
+    each.pattern === rule.pattern && (each.match ?? 'prefix') === rule.match
+  if ((rules.commands ?? []).some((each) => same(each) && each.decision === rule.decision)) return rules
+  return {
+    ...rules,
+    commands: [
+      ...(rules.commands ?? []).filter((each) => !same(each)),
+      { pattern: rule.pattern, decision: rule.decision, ...(rule.match === 'exact' ? { match: 'exact' as const } : {}) },
+    ],
+  }
+}
 
 /** What of a project's rules can be taken back with null: to deciding by the code host, or to what the repositories say. */
 type Clearable = 'end' | 'branchPattern' | 'titlePattern'
@@ -109,6 +151,8 @@ export class Policies extends Context.Service<
       change: RulesChange,
       actorId: ActorId,
     ): Effect.Effect<ProjectRules, SqlError.SqlError | Schema.SchemaError | NotFound>
+    /** A new revision of the project's rules with a rule an "always" answer keeps, recorded as whoever answered: none where it holds already. */
+    remember(projectId: string, rule: Remembered, actorId: ActorId): Effect.Effect<void, SqlError.SqlError | Schema.SchemaError | NotFound>
     /** A new revision of the project's rules for agents' accounts, recorded as the person's. */
     setAccounts(
       projectId: string,
@@ -203,9 +247,11 @@ export class Policies extends Context.Service<
         set: (projectId, change, actorId) =>
           provide(
             Effect.gen(function* () {
+              // A rule by how a command starts reads its words; an exact one keeps the line as it is, quotes and all.
               const commands = change.commands?.flatMap((rule) => {
-                const pattern = rule.pattern.trim().replace(/\s+/g, ' ')
-                return pattern === '' ? [] : [{ pattern, decision: rule.decision }]
+                const exact = rule.match === 'exact'
+                const pattern = exact ? rule.pattern.trim() : rule.pattern.trim().replace(/\s+/g, ' ')
+                return pattern === '' ? [] : [{ pattern, decision: rule.decision, ...(exact ? { match: 'exact' as const } : {}) }]
               })
               let next: ProjectRules | undefined
               // What isn't given stays as it is; what can be taken back goes with null.
@@ -230,6 +276,13 @@ export class Policies extends Context.Service<
                 return same(changed) === same(rules) ? undefined : changed
               })
               return next ?? (yield* current(projectId as ProjectId)).rules
+            }),
+          ),
+        remember: (projectId, rule, actorId) =>
+          provide(
+            revise(projectId, actorId, (rules) => {
+              const next = withRemembered(rules, rule)
+              return JSON.stringify(next) === JSON.stringify(rules) ? undefined : { ...next, source: 'person' }
             }),
           ),
         setAccounts: (projectId, accounts, actorId) =>

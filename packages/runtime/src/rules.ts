@@ -28,8 +28,15 @@ import type { PermissionRequest } from '@althar/provider-adapters'
  */
 
 export type Verdict =
-  | { readonly verdict: 'allow' }
-  | { readonly verdict: 'ask'; readonly reason: string }
+  /** Allowed: by the project's allow rules where `rules` names them (ADR-017), else because nothing keeps it. */
+  | { readonly verdict: 'allow'; readonly rules?: ReadonlyArray<AllowRule> }
+  /**
+   * It waits: for the person where it is `held` (a kind on the always-ask
+   * list, or a command the project asks about), which only the person
+   * answers; otherwise because the rules can't tell what it does, or the
+   * project asks about everything, which a judge could answer one day.
+   */
+  | { readonly verdict: 'ask'; readonly reason: string; readonly held: boolean }
   | { readonly verdict: 'deny'; readonly reason: string }
 
 /**
@@ -59,7 +66,21 @@ interface Kept {
 
 const kept = (reason: string, rule: RuleId | 'unclear'): Kept => ({ reason, rule })
 
-/** A project's rules, as the rules read them (ADR-013, Policies). */
+/**
+ * A command the person named (ADR-013, ADR-017): asked about, refused, or
+ * let through. By how it starts (`npm publish`, `terraform *`), or, where
+ * `match` says so, as this exact line.
+ */
+export interface CommandRule {
+  readonly pattern: string
+  readonly decision: 'ask' | 'never' | 'allow'
+  readonly match?: 'prefix' | 'exact' | undefined
+}
+
+/** What let a request through without asking (ADR-017): a kind the project always allows, or a command rule. */
+export type AllowRule = { readonly kind: RuleId } | { readonly pattern: string; readonly match: 'prefix' | 'exact' }
+
+/** A project's rules, as the rules read them (ADR-013, ADR-017, Policies). */
 export interface ProjectRuleSet {
   /**
    * What happens to what no rule keeps: it is allowed (`rules`), it waits
@@ -71,28 +92,41 @@ export interface ProjectRuleSet {
   readonly ask: ReadonlyArray<RuleId>
   /** The kinds refused outright, whoever would answer. */
   readonly never: ReadonlyArray<RuleId>
-  /** Commands the person named, by how they start (`npm publish`, `terraform *`): asked about, or refused. */
-  readonly commands: ReadonlyArray<{ readonly pattern: string; readonly decision: 'ask' | 'never' }>
+  /** The kinds let through without asking, short of what always asks or is never allowed. */
+  readonly allow: ReadonlyArray<RuleId>
+  /** Commands the person named: asked about, refused, or let through. */
+  readonly commands: ReadonlyArray<CommandRule>
 }
+
+const exactly = (rule: CommandRule) => rule.match === 'exact'
+
+/** A command rule as it reads in a sentence. */
+const commandWords = (rule: CommandRule) => (exactly(rule) ? `exactly \`${rule.pattern}\`` : `commands starting \`${rule.pattern}\``)
+
+/** An allow rule as it reads in a sentence: a kind's words, or a command rule's. */
+export const sayAllowRule = (rule: AllowRule): string =>
+  'kind' in rule ? RULE_WORDS[rule.kind] : commandWords({ pattern: rule.pattern, decision: 'allow', match: rule.match })
 
 /** A project's rules in a few sentences, for an agent that plans work under them. */
 export const sayRules = (rules: ProjectRuleSet): string => {
-  const named = (decision: 'ask' | 'never') =>
-    rules.commands.flatMap((command) => (command.decision === decision ? [`commands starting \`${command.pattern}\``] : []))
+  const named = (decision: CommandRule['decision']) =>
+    rules.commands.flatMap((command) => (command.decision === decision ? [commandWords(command)] : []))
   const asks = [...rules.ask.map((id) => RULE_WORDS[id]), ...named('ask')]
   const never = [...rules.never.map((id) => RULE_WORDS[id]), ...named('never')]
+  const allowed = [...rules.allow.map((id) => RULE_WORDS[id]), ...named('allow')]
   return [
     rules.mode === 'ask'
       ? "Agents may read anything and change a task's own files; everything else waits for the person."
       : rules.mode === 'allow' || asks.length === 0
         ? 'Agents may do anything.'
         : `Agents may do anything but these, which wait for the person: ${asks.join('; ')}.`,
+    ...(rules.mode === 'allow' || allowed.length === 0 ? [] : [`Allowed without asking: ${allowed.join('; ')}.`]),
     ...(never.length === 0 ? [] : [`Never allowed: ${never.join('; ')}.`]),
   ].join(' ')
 }
 
 /** The MVP's rules, a project's first: everything allowed but every kind above, which asks. */
-export const MVP_RULES: ProjectRuleSet = { mode: 'rules', ask: RULES, never: [], commands: [] }
+export const MVP_RULES: ProjectRuleSet = { mode: 'rules', ask: RULES, never: [], allow: [], commands: [] }
 
 export interface RuleContext {
   /** Where the agent works: the task's worktree, a folder in it, or the task's folder that holds its worktrees. */
@@ -116,7 +150,7 @@ export interface RuleContext {
 }
 
 const ALLOW: Verdict = { verdict: 'allow' }
-const ask = (reason: string): Verdict => ({ verdict: 'ask', reason })
+const ask = (reason: string, held: boolean): Verdict => ({ verdict: 'ask', reason, held })
 
 // ---- Code hosts --------------------------------------------------------------
 
@@ -685,16 +719,22 @@ const writes = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
   return targets
 }
 
-/** What a command line does that the rules keep for the person: every kind, in every command of it. */
-const commandKinds = (text: string, context: RuleContext): ReadonlyArray<Kept> => {
+/** One command of a line, and what of it the rules keep for the person. */
+interface CommandKinds {
+  readonly words: ReadonlyArray<string>
+  readonly kinds: ReadonlyArray<Kept>
+}
+
+/** Each command of a line, as the shell would run them, with every kind each one is. */
+const eachCommand = (text: string, context: RuleContext): { readonly opaque: boolean; readonly commands: ReadonlyArray<CommandKinds> } => {
   const { commands, opaque } = parseCommandLine(text)
-  const found: Array<Kept> = []
-  if (opaque && /\bpush\b|\bdeploy\b|\bpublish\b|\bmerge\b/.test(text))
-    found.push(kept(`Althar can't tell what this command does until it runs, so it asks.`, 'unclear'))
   const where = places(context)
   let cwd = context.worktree
+  const each: Array<CommandKinds> = []
   for (const words of commands) {
-    if (commandsIn(words).some(deploys)) found.push(kept('Deploying or publishing always asks.', 'deploy'))
+    const kinds: Array<Kept> = []
+    each.push({ words, kinds })
+    if (commandsIn(words).some(deploys)) kinds.push(kept('Deploying or publishing always asks.', 'deploy'))
     if (words[0] === 'cd') {
       cwd = locate(where, cwd, words[1] ?? '~')
       continue
@@ -703,21 +743,32 @@ const commandKinds = (text: string, context: RuleContext): ReadonlyArray<Kept> =
     if (git !== undefined) {
       const repository = [locate(where, cwd, git.cwd), ...git.elsewhere.map((path) => locate(where, cwd, path))]
       if (repository.some((path) => outside(where, path)))
-        found.push(kept(`Git in another folder always asks: ${repository.find((path) => outside(where, path))}`, 'outside'))
-      if (git.subcommand === 'push') found.push(...pushKinds(git.args, context))
+        kinds.push(kept(`Git in another folder always asks: ${repository.find((path) => outside(where, path))}`, 'outside'))
+      if (git.subcommand === 'push') kinds.push(...pushKinds(git.args, context))
       if (git.subcommand === 'worktree' || git.subcommand === 'clone') {
         const target = writes([
           'touch',
           ...git.args.filter((arg) => !['add', 'remove', 'prune', 'move', 'lock', 'unlock'].includes(arg)),
         ]).find((path) => outside(where, locate(where, cwd, path)))
-        if (target !== undefined) found.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
+        if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
       }
       continue
     }
     const target = writes(words).find((path) => outside(where, locate(where, cwd, path)))
-    if (target !== undefined) found.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
+    if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
   }
-  return found
+  return { opaque, commands: each }
+}
+
+/** What a command line does that the rules keep for the person: every kind, in every command of it. */
+const commandKinds = (text: string, context: RuleContext): ReadonlyArray<Kept> => {
+  const { commands, opaque } = eachCommand(text, context)
+  return [
+    ...(opaque && /\bpush\b|\bdeploy\b|\bpublish\b|\bmerge\b/.test(text)
+      ? [kept(`Althar can't tell what this command does until it runs, so it asks.`, 'unclear')]
+      : []),
+    ...commands.flatMap((command) => command.kinds),
+  ]
 }
 
 /** Escapes a string for a regular expression. */
@@ -745,20 +796,77 @@ export const matchesPattern = (pattern: string, words: ReadonlyArray<string>): b
 const namesProgram = (text: string, program: string) =>
   program !== '' && new RegExp(`(^|[\\s/;&|()$\`"'])${literal(program)}(?=$|[\\s;&|()\`"'])`).test(text)
 
+/** Whether a command starts as a rule's pattern says: as itself, or as what a package runner or interpreter runs for it. */
+const startsAs = (pattern: string, words: ReadonlyArray<string>) => commandsIn(words).some((each) => matchesPattern(pattern, each))
+
 /**
- * The project's command rule a command line meets, a refusal before an ask:
- * each command in it is read on its own, as a shell would run it, and as
- * what a package runner runs for it (`npx prisma …`). A line whose commands
- * only show when it runs, that names a pattern's program, meets that pattern.
+ * The project's command rule a command line meets that asks or refuses, a
+ * refusal before an ask: an exact rule by the whole line; a rule by how a
+ * command starts by each command in it, read on its own, as a shell would
+ * run it, and as what a package runner runs for it (`npx prisma …`). A line
+ * whose commands only show when it runs, that names a pattern's program,
+ * meets that pattern.
  */
 const commandRule = (text: string, rules: ProjectRuleSet['commands']) => {
   const { commands, opaque } = parseCommandLine(text)
-  const met = rules.filter(
-    (rule) =>
-      commands.some((words) => commandsIn(words).some((each) => matchesPattern(rule.pattern, each))) ||
-      (opaque && namesProgram(text, rule.pattern.trim().split(/\s+/)[0] ?? '')),
+  const met = rules.filter((rule) =>
+    rule.decision === 'allow'
+      ? false
+      : exactly(rule)
+        ? text.trim() === rule.pattern
+        : commands.some((words) => startsAs(rule.pattern, words)) ||
+          (opaque && namesProgram(text, rule.pattern.trim().split(/\s+/)[0] ?? '')),
   )
   return met.find((rule) => rule.decision === 'never') ?? met[0]
+}
+
+/**
+ * The allow rules that cover what would make a request ask (ADR-017), or
+ * none where they don't cover all of it. A command line is covered by an
+ * exact rule as a whole, or command by command: each that would ask starts
+ * as an allow rule says, or is only of kinds the project always allows. A
+ * command that only changes folder or only looks rides along with the rest,
+ * as reads do. A line whose commands only show when it runs is never
+ * covered: what it would run isn't known. Anything else is covered by the
+ * kinds it is, every one of them always allowed.
+ */
+const allowedBy = (
+  request: PermissionRequest,
+  context: RuleContext,
+  project: ProjectRuleSet,
+  found: ReadonlyArray<Kept>,
+): ReadonlyArray<AllowRule> | undefined => {
+  const rules = project.commands.filter((rule) => rule.decision === 'allow')
+  if (rules.length === 0 && project.allow.length === 0) return undefined
+  const byKinds = (kinds: ReadonlyArray<Kept>): ReadonlyArray<AllowRule> | undefined =>
+    kinds.length > 0 && kinds.every((each) => each.rule !== 'unclear' && project.allow.includes(each.rule))
+      ? kinds.flatMap((each) => (each.rule === 'unclear' ? [] : [{ kind: each.rule }]))
+      : undefined
+  if (request.kind !== 'execute' && request.kind !== 'other') return byKinds(found)
+  const text = commandOf(request)
+  const { commands, opaque } = eachCommand(text, context)
+  if (opaque) return undefined
+  const whole = rules.find((rule) => exactly(rule) && rule.pattern === text.trim())
+  if (whole !== undefined) return [{ pattern: whole.pattern, match: 'exact' }]
+  const used: Array<AllowRule> = []
+  for (const { words, kinds } of commands) {
+    // Under "Ask me" every command asks; otherwise only what the rules can't tell.
+    const asks = project.mode === 'ask' ? words[0] !== 'cd' : kinds.some((each) => each.rule === 'unclear')
+    if (!asks) continue
+    const rule = rules.find((each) => !exactly(each) && startsAs(each.pattern, words))
+    if (rule !== undefined) {
+      used.push({ pattern: rule.pattern, match: 'prefix' })
+      continue
+    }
+    // One that only looks needs no rule of its own beside the rest.
+    if (project.mode === 'ask' && readerWordsReason(words) === undefined) continue
+    const covered = byKinds(kinds)
+    if (covered === undefined) return undefined
+    used.push(...covered)
+  }
+  // Each rule once, in the order it was met.
+  const once = used.filter((rule, index) => used.findIndex((other) => JSON.stringify(other) === JSON.stringify(rule)) === index)
+  return once.length === 0 ? undefined : once
 }
 
 const CHANGES: ReadonlyArray<PermissionRequest['kind']> = ['edit', 'delete', 'move']
@@ -791,10 +899,13 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
  * - with everything allowed, anything else is allowed, short of what the
  *   rules can't read where the project never allows something: that is
  *   refused, with how to run it so they can;
- * - a kind on the always-ask list, one the rules can't tell, or a command
- *   the project asks about, waits for the person;
- * - a project that asks about everything asks about the rest, except reads
- *   and changes to the task's own files, which every agent's sandbox keeps;
+ * - a kind on the always-ask list, or a command the project asks about, is
+ *   held for the person, whatever else would answer;
+ * - what would ask otherwise (what the rules can't tell, or, where the
+ *   project asks about everything, anything but reads and changes to the
+ *   task's own files, which every agent's sandbox keeps) is let through
+ *   where the project's allow rules cover it (ADR-017), saying which;
+ * - the rest of that waits for the person;
  * - anything else is allowed.
  */
 export const decide = (request: PermissionRequest, context: RuleContext): Verdict => {
@@ -824,13 +935,120 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
       : ALLOW
   }
   const asked = found.find((each) => each.rule === 'unclear' || project.ask.includes(each.rule))
-  if (asked !== undefined) return ask(asked.reason)
-  if (named !== undefined) return ask(`The project's rules ask before \`${named.pattern.trim()}\`.`)
+  // What always asks waits for the person, whatever the allow rules say.
+  if (asked !== undefined && found.some((each) => each.rule !== 'unclear' && project.ask.includes(each.rule)))
+    return ask(asked.reason, true)
+  if (named !== undefined) return ask(asked?.reason ?? `The project's rules ask before \`${named.pattern.trim()}\`.`, true)
   // Reads, and changes to the task's own files, go through, as they would in any agent's sandbox.
   const ownFiles = CHANGES.includes(request.kind) && found.length === 0
-  if (project.mode === 'ask' && !LOOKS.includes(request.kind) && !ownFiles)
-    return ask("This project asks you before anything an agent does beyond the task's own files.")
-  return ALLOW
+  const reason =
+    asked?.reason ??
+    (project.mode === 'ask' && !LOOKS.includes(request.kind) && !ownFiles
+      ? "This project asks you before anything an agent does beyond the task's own files."
+      : undefined)
+  if (reason === undefined) return ALLOW
+  const rules = allowedBy(request, context, project, found)
+  if (rules !== undefined) return { verdict: 'allow', rules }
+  return ask(reason, false)
+}
+
+/** How far an "always" answer reaches (ADR-017): this exact command, commands that start the same way, or the kind it is. */
+export type AlwaysScope = 'exact' | 'prefix' | 'kind'
+
+/** What an "always" answer to a request would keep in the project's rules, and the scopes each answer holds for. */
+export interface Always {
+  /** The command, as an exact rule keeps it; none where it runs none, or is too long to keep. */
+  readonly command: string | null
+  /** How its command starts, as a rule by its start keeps it; none where nothing reads as one. */
+  readonly prefix: string | null
+  /** The kind it is, the first the rules found. */
+  readonly kind: RuleId | null
+  /** The scopes an allow rule would let it through by next time; none where something else keeps it for the person. */
+  readonly allow: ReadonlyArray<AlwaysScope>
+  /** The scopes a never rule would refuse it by. */
+  readonly deny: ReadonlyArray<AlwaysScope>
+}
+
+/** Programs whose first word is a subcommand: without one, how a command starts says too little to keep. */
+const SUBCOMMANDED = new Set([
+  'git',
+  'npm',
+  'pnpm',
+  'yarn',
+  'bun',
+  'npx',
+  'bunx',
+  'pnpx',
+  'uvx',
+  'docker',
+  'kubectl',
+  'cargo',
+  'go',
+  'uv',
+  'deno',
+  'make',
+  'just',
+])
+
+/**
+ * How a command starts, as a rule would keep it: its program by name, and
+ * its subcommand where it has one (`git status`, `bun test`), or the
+ * script an interpreter runs (`node scripts/build.js`). None where only
+ * the program would be left of a tool with subcommands, which says too
+ * little: `git -C sub status`.
+ */
+const prefixOf = (words: ReadonlyArray<string>): string | null => {
+  const [program = '', next] = words
+  const name = program.slice(program.lastIndexOf('/') + 1)
+  if (name === '') return null
+  if (INTERPRETERS.includes(name)) return next !== undefined && !next.startsWith('-') ? `${name} ${next}` : null
+  if (next !== undefined && /^[a-z][a-z-]{0,22}[a-z0-9]?$/.test(next)) return `${name} ${next}`
+  return SUBCOMMANDED.has(name) ? null : name
+}
+
+/**
+ * What Allow always and Deny always would keep for a request that waits
+ * (ADR-017), and the scopes each would hold for: an allow rule only where
+ * it would let this request through next time, and a never rule where it
+ * would refuse it. The command an always is about is the first that keeps
+ * the line for the person, else the first that runs something.
+ */
+export const alwaysOf = (request: PermissionRequest, context: RuleContext): Always => {
+  const project = context.project ?? MVP_RULES
+  const runs = request.kind === 'execute' || request.kind === 'other'
+  const text = runs ? commandOf(request).trim() : ''
+  const command = text !== '' && text.length <= COMMAND_KEPT ? text : null
+  const found = keptOf(request, context)
+  const kind = found.flatMap((each) => (each.rule === 'unclear' ? [] : [each.rule]))[0] ?? null
+  const commands = runs ? eachCommand(text, context).commands.filter((each) => each.words[0] !== 'cd') : []
+  const named = (words: ReadonlyArray<string>) =>
+    project.commands.some((rule) => rule.decision !== 'allow' && !exactly(rule) && startsAs(rule.pattern, words))
+  const subject =
+    commands.find((each) => each.kinds.length > 0 || named(each.words)) ??
+    commands.find((each) => readerWordsReason(each.words) !== undefined) ??
+    commands[0]
+  const prefix = subject === undefined ? null : prefixOf(subject.words)
+  const scopes = (decision: 'allow' | 'never'): ReadonlyArray<AlwaysScope> =>
+    (['exact', 'prefix', 'kind'] as const).filter((scope) => {
+      const rule = ((): Partial<ProjectRuleSet> | undefined => {
+        switch (scope) {
+          case 'exact':
+            return command === null ? undefined : { commands: [...project.commands, { pattern: command, decision, match: 'exact' }] }
+          case 'prefix':
+            return prefix === null ? undefined : { commands: [...project.commands, { pattern: prefix, decision }] }
+          case 'kind':
+            return kind === null
+              ? undefined
+              : decision === 'allow'
+                ? { allow: [...project.allow, kind] }
+                : { never: [...project.never, kind] }
+        }
+      })()
+      if (rule === undefined) return false
+      const verdict = decide(request, { ...context, project: { ...project, ...rule } })
+      return decision === 'allow' ? verdict.verdict === 'allow' && verdict.rules !== undefined : verdict.verdict === 'deny'
+    })
+  return { command, prefix, kind, allow: scopes('allow'), deny: scopes('never') }
 }
 
 // ---- Roles that only read ----------------------------------------------------
@@ -1226,43 +1444,49 @@ const gitReason = (words: ReadonlyArray<string>): string | undefined => {
   return `\`git ${call.subcommand}\` can change the repository, and this role only reads.`
 }
 
+/** Why one command would change something or run another program, or nothing when it only looks. */
+const readerWordsReason = (words: ReadonlyArray<string>): string | undefined => {
+  const program = (words[0] ?? '').split('/').at(-1) ?? ''
+  const written = writes(words).filter((target) => target !== '/dev/null')
+  if (written.length > 0) return `It would write to ${written[0]}, and this role only reads.`
+  const reads = READS[program]
+  if (reads === undefined) return `\`${program}\` isn't on the list of commands that only look, and this role only reads.`
+  const args = words.slice(1)
+  const reason = ((): string | undefined => {
+    switch (reads) {
+      case 'any':
+        return undefined
+      case 'git':
+        return gitReason(words)
+      case 'env':
+        return args.length > 0 ? '`env` runs another command, and this role only reads.' : undefined
+      case 'find': {
+        const action = args.find((arg) => arg.startsWith('-') && !FIND_LOOKS.has(arg))
+        return action === undefined ? undefined : `\`find ${action}\` isn't a test that only looks, and this role only reads.`
+      }
+      case 'sed': {
+        const flags = args.filter((arg) => arg.startsWith('-'))
+        const [script] = args.filter((arg) => !arg.startsWith('-'))
+        if (flags.some((flag) => !['-n', '-E', '-r', '--quiet', '--silent'].includes(flag)))
+          return '`sed` with those flags can edit files or run commands, and this role only reads.'
+        return script !== undefined && SED_PRINTS.test(script.replaceAll(' ', ''))
+          ? undefined
+          : '`sed` may only print lines here, as in `sed -n 1,40p`, and this role only reads.'
+      }
+      default:
+        return flagsReason(program, reads, args)
+    }
+  })()
+  return reason === undefined || reason.endsWith('only reads.') ? reason : `${reason.slice(0, -1)}, and this role only reads.`
+}
+
 /** Why a command a reader wants to run would change something, or nothing when it only looks. */
 const readerCommandReason = (text: string): string | undefined => {
   const { commands, opaque } = parseCommandLine(text)
   if (opaque) return "Althar can't tell what this command does until it runs, and this role only reads."
   for (const words of commands) {
-    const program = (words[0] ?? '').split('/').at(-1) ?? ''
-    const written = writes(words).filter((target) => target !== '/dev/null')
-    if (written.length > 0) return `It would write to ${written[0]}, and this role only reads.`
-    const reads = READS[program]
-    if (reads === undefined) return `\`${program}\` isn't on the list of commands that only look, and this role only reads.`
-    const args = words.slice(1)
-    const reason = ((): string | undefined => {
-      switch (reads) {
-        case 'any':
-          return undefined
-        case 'git':
-          return gitReason(words)
-        case 'env':
-          return args.length > 0 ? '`env` runs another command, and this role only reads.' : undefined
-        case 'find': {
-          const action = args.find((arg) => arg.startsWith('-') && !FIND_LOOKS.has(arg))
-          return action === undefined ? undefined : `\`find ${action}\` isn't a test that only looks, and this role only reads.`
-        }
-        case 'sed': {
-          const flags = args.filter((arg) => arg.startsWith('-'))
-          const [script] = args.filter((arg) => !arg.startsWith('-'))
-          if (flags.some((flag) => !['-n', '-E', '-r', '--quiet', '--silent'].includes(flag)))
-            return '`sed` with those flags can edit files or run commands, and this role only reads.'
-          return script !== undefined && SED_PRINTS.test(script.replaceAll(' ', ''))
-            ? undefined
-            : '`sed` may only print lines here, as in `sed -n 1,40p`, and this role only reads.'
-        }
-        default:
-          return flagsReason(program, reads, args)
-      }
-    })()
-    if (reason !== undefined) return reason.endsWith('only reads.') ? reason : `${reason.slice(0, -1)}, and this role only reads.`
+    const reason = readerWordsReason(words)
+    if (reason !== undefined) return reason
   }
   return undefined
 }

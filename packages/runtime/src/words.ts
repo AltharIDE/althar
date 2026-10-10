@@ -140,6 +140,8 @@ export const words = (
         return `${text(error, 'agentName')} isn't signed in, so the coordinator can't start on it. Pick another agent for the coordinator, or sign in with its own tool.`
       case 'AttentionClosed':
         return 'That call was already answered, or the agent took it back.'
+      case 'AlwaysNotOffered':
+        return "That can't be kept as a rule for this request. Answer it once instead."
       case 'AlreadyDelivered':
         return "The agent already has that message, so it can't be taken back."
       case 'GitFailed': {
@@ -249,6 +251,7 @@ export const expected = new Set([
   'SessionRunning',
   'NoSession',
   'AttentionClosed',
+  'AlwaysNotOffered',
   'AlreadyDelivered',
   'CommandIdReused',
 ])

@@ -212,6 +212,7 @@ export const handlers = Api.toLayer(
         permissions: set.mode,
         alwaysAsk: set.ask,
         never: set.never,
+        alwaysAllow: set.allow,
         commands: set.commands,
         end: rules.end ?? null,
         usageLimit: usageLimitOf(rules),
@@ -600,14 +601,15 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      Answer: ({ commandId, attentionId, decision, reason }) =>
+      Answer: ({ commandId, attentionId, decision, reason, always }) =>
         api(
           Effect.gen(function* () {
             yield* permissions.answer({
-              envelope: yield* envelope('attention.answer', { attentionId, decision, reason }, commandId),
+              envelope: yield* envelope('attention.answer', { attentionId, decision, reason, always }, commandId),
               attentionId,
               decision,
               ...(reason === undefined ? {} : { reason }),
+              ...(always === undefined ? {} : { always }),
             })
           }),
         ),
@@ -728,6 +730,8 @@ export const handlers = Api.toLayer(
                       },
                     }
               const rules = yield* policies.set(projectId, { ...change, ...accounts }, instance.personId)
+              // A call still waiting that the rules no longer keep for the person is answered by them.
+              yield* permissions.reconsider(projectId)
               return yield* rulesView(projectId, rules)
             }),
           ),

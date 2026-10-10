@@ -62,6 +62,11 @@ export const scenarios = {
   settings: 'settings',
   /** The process exits mid-turn. Only when the agent runs as a process. */
   exit: 'exit',
+  /**
+   * Followed by a command, `run git status --short`: runs it, asking first
+   * with Codex's command options, each time as a tool call of its own.
+   */
+  run: 'run ',
 } as const
 
 export const USAGE_LIMIT_MESSAGE = 'Claude AI usage limit reached|1759075200'
@@ -147,6 +152,8 @@ interface SessionState {
   markers: Set<string>
   /** Markers it has played once already, such as `[lead:hang-once]`. */
   played: Set<string>
+  /** Commands it has run with `run`, so each is a tool call of its own. */
+  runs: number
 }
 
 /** What `[lead:explore]` reads, in order. */
@@ -507,6 +514,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         })(),
         markers: new Set(),
         played: new Set(),
+        runs: 0,
       }
       sessions.set(sessionId, session)
       return {
@@ -597,6 +605,21 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       }
       if (text === scenarios.stubborn) session.stubborn = true
       const scenario = resumed ? scenarios.stubborn : text
+
+      if (scenario.startsWith(scenarios.run)) {
+        const command = scenario.slice(scenarios.run.length)
+        session.runs += 1
+        const toolCall = { toolCallId: `run-${session.runs}`, title: `Run ${command}`, kind: 'execute' as const, rawInput: { command } }
+        await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
+        const chosen = await ask(toolCall, commandOptions)
+        await update({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: toolCall.toolCallId,
+          status: chosen.startsWith('allow') ? 'completed' : 'failed',
+        })
+        await say(`ran=${chosen}`)
+        return session.cancelled || chosen === 'cancelled' ? { stopReason: 'cancelled' } : ended()
+      }
 
       switch (scenario) {
         case scenarios.commandChoices:
