@@ -74,7 +74,7 @@ export function Body() {
           <dl className={cx(s.facts, s.wideOnly)}>
             <div>
               <dt>Open source</dt>
-              <dd>Meant to be, from the coordinator to every adapter. The licence is still to be chosen.</dd>
+              <dd>From the coordinator to every adapter, under the Apache License 2.0.</dd>
             </div>
             <div>
               <dt>On your machine</dt>

@@ -185,9 +185,9 @@ describe('the board', () => {
     // Ready on its branch, with no pull request: the branch, and how big its change is.
     expect(within(work).getByText('althar/tidy-the-docs')).toBeTruthy()
     expect(within(work).getByText('PR #7 merged')).toBeTruthy()
-    // Two running (one of them waiting on you), and three things that need you.
-    expect(screen.getByText('2 running')).toBeTruthy()
+    // Three things that need you; what runs isn't counted in the bar.
     expect(screen.getByRole('button', { name: '3 need you' })).toBeTruthy()
+    expect(screen.queryByText(/running/)).toBeNull()
   })
 
   it('opens the first thing that needs you in its task, from the bar, and shows the rest when pointed at', async () => {

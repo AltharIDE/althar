@@ -1,5 +1,5 @@
 import { type AgentStatus, type CommandRule, fillPattern, type ProjectRulesView, type RuleKind } from '@althar/contracts'
-import { BackCrumb, LimitPolicy, PermissionPolicy, TaskEnd, TitleBar } from '@althar/ui'
+import { BackCrumb, LimitPolicy, PermissionPolicy, TaskEnd } from '@althar/ui'
 import { ProjectRules, projectRulesText } from '@althar/ui/screens'
 
 import { PartPending, pendingText } from '../../shared/Pending'
@@ -158,10 +158,10 @@ export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => 
   }
   return (
     <div className={s.window}>
-      <TitleBar lights="none">
-        <BackCrumb to={model.project ?? text.back} onBack={onBack} />
-      </TitleBar>
       <main className={s.scroll}>
+        <div className={s.back}>
+          <BackCrumb to={model.project ?? text.back} onBack={onBack} />
+        </div>
         {model.error !== null && (
           <p className={s.error} role="alert">
             {model.error}

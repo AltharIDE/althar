@@ -11,7 +11,7 @@
   max-height: 100%;
   overflow: hidden;
   transform: translateX(-50%);
-  border-radius: 0 0 14px 14px;
+  border-radius: 0 0 13px 13px;
   background: #000;
   color: var(--term-t1);
   transition:
@@ -21,7 +21,7 @@
   --signal: var(--signal-on-ink);
 }
 .open {
-  border-radius: 0 0 26px 26px;
+  border-radius: 0 0 22px 22px;
 }
 /* nothing going on: the notch alone, still there to point at */
 .quiet .wing > * {
@@ -33,7 +33,7 @@
   height: var(--notch-h);
   display: flex;
   align-items: center;
-  padding: 0 14px;
+  padding: 0 12px;
 }
 .notch {
   flex: none;
@@ -44,7 +44,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   white-space: nowrap;
 }
 .wing > * {
@@ -58,10 +58,14 @@
   flex: none;
   display: grid;
   place-items: center;
-  color: var(--term-t1);
+  /* faint: the count says what matters */
+  color: var(--term-t3);
 }
 button.mark {
   cursor: pointer;
+}
+button.mark:hover {
+  color: var(--term-t1);
 }
 .count {
   all: unset;
@@ -72,11 +76,11 @@ button.mark {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 7px;
+  gap: 6px;
   font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: var(--term-t1);
+  color: var(--signal);
 }
 .mark:focus-visible,
 .count:focus-visible {
@@ -84,19 +88,12 @@ button.mark {
   outline-offset: 3px;
   border-radius: var(--r-sm);
 }
+/* a call coming in: its project's mark on the left, its kind on the right */
 .said {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--term-t2);
+  display: flex;
+  align-items: center;
+  gap: 7px;
   animation: said 520ms var(--ease-fold);
-}
-.kind {
-  flex: none;
-  font-weight: 600;
-  color: var(--signal);
 }
 @keyframes said {
   from {

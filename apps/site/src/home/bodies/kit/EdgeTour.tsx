@@ -2,7 +2,8 @@ import { EdgeSheet, Logo } from '@althar/ui'
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 
 // Prototype: the kit's demo world, read from its source.
-import { EDGE_NEEDS, EDGE_WORK, edgeRowOf } from '../../../../../../packages/ui/src/fixtures/edge'
+import { EDGE_NEEDS, EDGE_WORK, edgeLineOf } from '../../../../../../packages/ui/src/fixtures/edge'
+import { HALYARD, MERIDIAN } from '../../../../../../packages/ui/src/fixtures/home'
 import { IslandOpen } from './app'
 import { BrowserWindow, Desktop, EditorWindow, TerminalWindow, type Wallpaper } from './Mac'
 import { useNarrow } from './Narrow'
@@ -51,9 +52,8 @@ const MENU_SHEET = (
   <EdgeSheet
     tone="paper"
     waiting={EDGE_NEEDS.length}
-    working={EDGE_WORK.length}
-    needs={EDGE_NEEDS.map((row) => edgeRowOf(row, none))}
-    work={EDGE_WORK.map((row) => edgeRowOf(row, none))}
+    needs={EDGE_NEEDS.map((call) => edgeLineOf(call, none))}
+    work={EDGE_WORK}
     onOpenApp={none}
   />
 )
@@ -121,7 +121,7 @@ export const EDGE_MOMENTS: ReelMoment[] = [
         label="A pull request ready for you, said round the notch over a browser"
         wallpaper="light"
         app="Chrome"
-        island={<IslandOpen open={false} saying={{ project: 'Meridian', kind: 'Ready to accept' }} />}
+        island={<IslandOpen open={false} saying={{ project: MERIDIAN, kind: 'Ready to accept' }} />}
         window={(style) => <BrowserWindow style={style} />}
         at={{ left: 90, top: 40, width: 1260, height: 800 }}
       />
@@ -149,7 +149,7 @@ export const EDGE_MOMENTS: ReelMoment[] = [
         label="A permission asked round the notch over an empty desktop"
         wallpaper="light"
         app="Finder"
-        island={<IslandOpen open={false} saying={{ project: 'Halyard', kind: 'Permission' }} />}
+        island={<IslandOpen open={false} saying={{ project: HALYARD, kind: 'Permission' }} />}
       />
     ),
   },

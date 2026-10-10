@@ -10,6 +10,7 @@ import { useBoard } from '../src/renderer/features/board/useBoard'
 import { connectionsOf, ConnectionsView, servicesOf } from '../src/renderer/features/connections/ConnectionsView'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
+import { useProjectMenu } from '../src/renderer/features/project/useProjectMenu'
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
@@ -461,7 +462,15 @@ describe('a task’s pull request', () => {
 })
 
 function Project() {
-  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onTask={vi.fn()} />
+  return (
+    <ProjectView
+      model={useProject('p1')}
+      board={useBoard('p1')}
+      connections={useConnections()}
+      menu={{ model: useProjectMenu('p1', vi.fn()), onRepositories: vi.fn(), onRules: vi.fn() }}
+      onTask={vi.fn()}
+    />
+  )
 }
 
 const issue: IssueSummary = {
@@ -476,7 +485,7 @@ const issue: IssueSummary = {
 }
 
 describe('a project, reaching outside', () => {
-  it('says nothing of an unconnected host up front, and connects it from the project’s menu, beside the conversation', async () => {
+  it('says nothing of an unconnected host up front, and connects it from the project’s menu in the bar', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
         coordinatorSnapshot({ host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: false } }),
@@ -486,7 +495,7 @@ describe('a project, reaching outside', () => {
     await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
     // Pushing needs no connection, so nothing stands in the way of the conversation.
     expect(screen.queryByText(/isn't connected to GitHub/)).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'meridian options' }))
+    await userEvent.click(screen.getByRole('button', { name: 'More for this project' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Connect GitHub' }))
     const panel = await screen.findByRole('complementary', { name: 'Code hosts and trackers' })
     expect(within(panel).getByText('GitHub')).toBeTruthy()
