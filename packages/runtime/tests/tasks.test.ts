@@ -94,10 +94,10 @@ const command = (type: string) => Runtime.envelope(type, {})
 
 /**
  * A gate on one of the runtime's own git commands, for a race that needs
- * something to wait in the middle: armed, the next command whose words
- * include `words` waits until the gate opens, and says it was caught. Git
- * is found through a wrapper put first on the path, which runs the real one;
- * the path is put back when the test ends.
+ * something to wait in the middle: armed, the `nth` command from then whose
+ * words include `words` waits until the gate opens, says it was caught, and
+ * says when it is done. Git is found through a wrapper put first on the
+ * path, which runs the real one; the path is put back when the test ends.
  */
 const gitGate = (words: string) =>
   Effect.acquireRelease(
@@ -109,7 +109,15 @@ const gitGate = (words: string) =>
         [
           '#!/bin/sh',
           `case "$*" in *"${words}"*)`,
-          `  if mv "${dir}/armed" "${dir}/caught" 2>/dev/null; then while [ ! -e "${dir}/open" ]; do sleep 0.02; done; fi ;;`,
+          `  if [ -e "${dir}/armed" ]; then`,
+          `    n=$(($(cat "${dir}/armed") - 1))`,
+          `    if [ "$n" -le 0 ]; then`,
+          `      rm -f "${dir}/armed"; touch "${dir}/caught"`,
+          `      while [ ! -e "${dir}/open" ]; do sleep 0.02; done`,
+          `      "${real}" "$@"; status=$?; touch "${dir}/done"; exit $status`,
+          `    fi`,
+          `    echo "$n" > "${dir}/armed"`,
+          `  fi ;;`,
           'esac',
           `exec "${real}" "$@"`,
           '',
@@ -120,9 +128,10 @@ const gitGate = (words: string) =>
       process.env.PATH = `${dir}:${path ?? ''}`
       return {
         path,
-        arm: () => writeFileSync(join(dir, 'armed'), ''),
+        arm: (nth = 1) => writeFileSync(join(dir, 'armed'), String(nth)),
         caught: () => existsSync(join(dir, 'caught')),
         open: () => writeFileSync(join(dir, 'open'), ''),
+        done: () => existsSync(join(dir, 'done')),
       }
     }),
     (gate) =>
@@ -317,6 +326,35 @@ describe('a task’s course', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('resumes a later round of review with what the lead settled before it', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const sql = yield* SqlClient.SqlClient
+      // The first round finds something, the lead settles it, and the reviewer works on the second round until it is stopped.
+      const { task, planId, actor } = yield* planned('Tighten the types [lead:finish] [review:findings] [review:wait-later]', [
+        implement(),
+        reviewBy(),
+      ])
+      yield* plans.start(planId, actor)
+      const secondRound = sql<{ id: string; state: string }>`
+        SELECT a.id, a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'review' AND n.iteration = 1`
+      yield* until(secondRound, (rows) => rows.some((row) => row.state === 'running'))
+      yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      // The round runs again, on a fresh reviewer told what the lead settled.
+      yield* until(secondRound, (rows) => rows.length === 2 && rows.some((row) => row.state === 'running'))
+      const [review] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step'`
+      const told = yield* until(
+        Effect.map(turns(review?.id ?? ''), (all) =>
+          all.filter((turn) => turn.prompt?.includes('The lead settled your findings') === true),
+        ),
+        (rows) => rows.length >= 2,
+      )
+      assert.include(told.at(-1)?.prompt, 'Fixed the heading.')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('stops a task waiting on the person, withdrawing its call, and resumes it on another agent', () =>
     Effect.gen(function* () {
       const plans = yield* Plans
@@ -400,9 +438,10 @@ describe('a task’s course', () => {
       assert.strictEqual(git(root, 'rev-parse', '--verify', '--quiet', `refs/heads/${before.branch}`).length, 40)
       const [kept] = yield* sql<{ settledAt: string | null }>`SELECT settled_at FROM tasks WHERE id = ${task.taskId}`
       assert.isNotNull(kept?.settledAt)
-      // Abandoned again, nothing changes; and an abandoned task is neither stopped nor resumed.
+      // Abandoned again, nothing changes; and an abandoned task is neither stopped nor resumed, asked of it or of its run.
       yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
       yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      yield* (yield* Runs).resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
       assert.strictEqual((yield* runOf(task.taskId)).state, 'suspended')
 
       // The person deleted its folder meanwhile: reopening puts it back, on its branch, with what it had committed.
@@ -523,6 +562,15 @@ describe('a task’s course', () => {
       assert.isFalse(yield* onThread(thread?.id ?? ''))
       assert.deepStrictEqual((yield* attempts(task.taskId)).at(-1), ['review', 0, 'cancelled', true])
       assert.strictEqual((yield* runOf(task.taskId)).state, 'suspended')
+      // Resumed, the review starts on its planned reviewer, as it never had one.
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      const [reviewing] = yield* until(
+        sql<{ agentId: string }>`
+          SELECT s.agent_id FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN provider_sessions s ON s.id = a.provider_session_id
+          WHERE n.node_key = 'review' AND a.state = 'running'`,
+        (rows) => rows.length === 1,
+      )
+      assert.strictEqual(reviewing?.agentId, 'codex')
     }).pipe(Effect.provide(withQueries({ each: { codex: { slowStart: 1_500 } } }))),
   )
 
@@ -732,6 +780,41 @@ describe('a task’s course', () => {
         SELECT count(*) AS n FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result' AND json_extract(content, '$.step') = 'implement'`
       assert.strictEqual(reported[0]?.n, 1)
     }).pipe(Effect.scoped, Effect.provide(withQueries({ stopGrace: Duration.millis(500) }))),
+  )
+
+  it.live(
+    'admits no next step for a report read before its task was stopped and resumed',
+    () =>
+      Effect.gen(function* () {
+        const plans = yield* Plans
+        const tasks = yield* Tasks
+        const sql = yield* SqlClient.SqlClient
+        // The review finds something; the lead settles it, and Althar's look at what settling changed, the third look at the
+        // worktree's tree (after the review's copy and settling's start), waits: the task is stopped and resumed meanwhile.
+        const gate = yield* gitGate('write-tree')
+        const { task, planId, actor } = yield* planned('Tighten the types [lead:finish] [review:findings]', [implement(), reviewBy()])
+        gate.arm(3)
+        yield* plans.start(planId, actor)
+        yield* until(
+          Effect.sync(() => (gate.caught() ? [true] : [])),
+          (rows) => rows.length === 1,
+        )
+        yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+        yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+        // The settling read before the stop goes on while the resumed one runs: it finds its run resumed since, and admits no
+        // round of its own. Only the resumed settling's second round runs.
+        gate.open()
+        yield* until(
+          Effect.sync(() => (gate.done() ? [true] : [])),
+          (rows) => rows.length === 1,
+        )
+        yield* standsAt(task.threadId, (now) => now.phase === 'ready', Duration.seconds(40))
+        const secondRounds = yield* sql<{ id: string }>`
+        SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'review' AND n.iteration = 1`
+        assert.strictEqual(secondRounds.length, 1)
+        assert.strictEqual((yield* runOf(task.taskId)).state, 'succeeded')
+      }).pipe(Effect.scoped, Effect.provide(withQueries({ stopGrace: Duration.millis(500) }))),
+    60_000,
   )
 
   it.live('resumes only once stopping has stopped the lead, so the resumed step keeps its lead', () =>

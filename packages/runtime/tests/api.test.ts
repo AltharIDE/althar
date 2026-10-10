@@ -1048,6 +1048,11 @@ describe('the coordinator, through the API', () => {
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id })
         const again = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
         assert.strictEqual(again.session?.agentId, 'codex')
+        // On an agent picked with no model or effort of its own, as the window sends one: its own.
+        yield* client.StopTask({ commandId: commandId(), taskId: task.id })
+        yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'claude-code', model: null, effort: null })
+        const picked = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
+        assert.strictEqual(picked.session?.agentId, 'claude-code')
         assert.strictEqual(
           (yield* Effect.flip(client.AbandonTask({ commandId: commandId(), taskId: 'task_missing' }))).message,
           "That task isn't there any more.",
@@ -1414,6 +1419,8 @@ describe('words', () => {
       'The task’s worktree and its branch are both gone, so it can’t be reopened on them.',
     )
     assert.strictEqual(said(new TaskRefused({ taskId: 't', why: 'abandoned' })), 'The task is abandoned. Reopen it to carry on.')
+    // One with a reason these words don't know says only that it can't be done.
+    assert.strictEqual(said({ _tag: 'TaskRefused', why: 'something new' }), "Althar can't change the task that way.")
     // A merge that conflicts carries its files, for the window to have the lead settle them.
     assert.deepStrictEqual(words(new CantMerge({ taskId: 't', why: 'conflicts', detail: 'README.md' }), name), {
       reason: 'CantMerge',
