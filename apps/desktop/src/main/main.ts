@@ -8,6 +8,7 @@ import { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, isPreferenceKey } from './appPreferences'
 import { keepingAwake } from './awake'
+import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
 import { dockCount, soundOf, tells } from './notify'
@@ -31,7 +32,6 @@ import {
   powerSaveBlocker,
   protocol,
   safeStorage,
-  session,
   shell,
   type UtilityProcess,
   utilityProcess,
@@ -54,6 +54,7 @@ import {
  * (appPreferences.ts) and acts on them: the Mac kept awake while work runs
  * (awake.ts), and which notifications show, with a sound or not, and the
  * Dock's count (notify.ts).
+ * Dictation's microphone, model and speech process are in dictation.ts.
  */
 
 const here = import.meta.dirname
@@ -64,6 +65,19 @@ const RESTARTS_PER_MINUTE = 3
 
 let runtime: UtilityProcess | undefined
 let quitting = false
+let dictation: ReturnType<typeof startDictation> | undefined
+
+/*
+ * The end-to-end tests' stand-ins for dictation: a fake speech model
+ * (ALTHAR_FAKE_SPEECH), and a microphone the system is never asked about
+ * (ALTHAR_FAKE_MICROPHONE, and with the fake model), Chromium's own.
+ */
+const fakeSpeech = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_SPEECH === '1'
+const fakeMicrophone = fakeSpeech || (__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_MICROPHONE === '1')
+if (fakeMicrophone) {
+  app.commandLine.appendSwitch('use-fake-device-for-media-stream')
+  app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
+}
 const restarts: Array<number> = []
 
 /** The profile and worktrees, as the command-line client has them, so both see the same projects. */
@@ -96,9 +110,6 @@ const resize: Resize = (bytes, type, width) => {
   const smaller = picture.resize({ width, quality: 'good' })
   return type === 'image/jpeg' ? { bytes: smaller.toJPEG(85), type } : { bytes: smaller.toPNG(), type: 'image/png' }
 }
-
-/** What the window may do of what a page can ask: write what the person copies to the clipboard (Copy), never read it. */
-const WINDOW_MAY: ReadonlySet<string> = new Set(['clipboard-sanitized-write'])
 
 /** Grants the runtime has yet to confirm, by request. */
 const granting = new Map<string, (grant: string | null) => void>()
@@ -451,10 +462,16 @@ ipcMain.on('althar:edge-open', (_event, threadId: unknown) => {
 })
 
 void app.whenReady().then(() => {
-  // The window asks for nothing but to put what the person copies on the clipboard: no notifications, camera,
-  // microphone or anything else a page can ask for. Althar's own notifications come from here, as the runtime says something needs the person.
-  session.defaultSession.setPermissionRequestHandler((_contents, permission, done) => done(WINDOW_MAY.has(permission)))
-  session.defaultSession.setPermissionCheckHandler((_contents, permission) => WINDOW_MAY.has(permission))
+  // The window asks for nothing but the microphone, to dictate, and to put what the person copies on the clipboard (dictation.ts holds
+  // both): no notifications, camera or anything else a page can ask for. Althar's own notifications come from here, as the runtime says
+  // something needs the person.
+  dictation = startDictation({
+    script: join(here, '../speech/speech.js'),
+    models: () => join(locations().profile, 'speech'),
+    mine: (contents) => [...windows].some((window) => !window.isDestroyed() && window.webContents === contents),
+    fakeModel: fakeSpeech,
+    fakeMicrophone,
+  })
   // The pictures agents handed back, from the artifact store the runtime keeps in the profile, by digest.
   protocol.handle(PICTURE_SCHEME, servePicture(join(locations().profile, 'artifacts'), resize))
   void showChosenIcon()
@@ -487,6 +504,7 @@ app.on('before-quit', (event) => {
   if (quitting || runtime === undefined) return
   event.preventDefault()
   quitting = true
+  dictation?.stop()
   const child = runtime
   const timer = setTimeout(() => {
     child.kill()

@@ -583,6 +583,57 @@ describe('accounts, through the API', () => {
   )
 })
 
+describe('a project’s vocabulary, through the API', () => {
+  it.live('says the names its code uses that have parts, its files’ among them, and not plain words', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const repo = repository()
+        mkdirSync(join(repo, 'src'))
+        writeFileSync(
+          join(repo, 'src', 'RefundLedger.ts'),
+          'export class RefundLedger {\n  idempotency_key = MAX_RETRIES\n  useEffect() { return this.idempotency_key }\n}\nconst a-b = plain\n',
+        )
+        writeFileSync(join(repo, 'src', 'charges-api.ts'), 'export const settleCharge = () => handleCharge()\n')
+        writeFileSync(join(repo, 'image.png'), Buffer.from([0, 1, 2, 3]))
+        const run = (...args: Array<string>) =>
+          execFileSync('git', args, {
+            cwd: repo,
+            env: {
+              ...process.env,
+              GIT_AUTHOR_NAME: 'T',
+              GIT_AUTHOR_EMAIL: 't@a.test',
+              GIT_COMMITTER_NAME: 'T',
+              GIT_COMMITTER_EMAIL: 't@a.test',
+            },
+          })
+        run('add', '.')
+        run('commit', '-q', '-m', 'Ledger')
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repo) })
+        const words = yield* client.GetVocabulary({ projectId: project.id })
+        for (const word of [
+          'RefundLedger',
+          'RefundLedger.ts',
+          'idempotency_key',
+          'useEffect',
+          'MAX_RETRIES',
+          'settleCharge',
+          'handleCharge',
+          'charges-api',
+          'charges-api.ts',
+        ])
+          assert.include(words, word)
+        for (const word of ['README', 'plain', 'export', 'image.png', 'a-b']) assert.notInclude(words, word)
+        // Used most, said first.
+        assert.isBelow(words.indexOf('RefundLedger'), words.indexOf('settleCharge'))
+
+        const missing = yield* Effect.flip(client.GetVocabulary({ projectId: 'proj_missing' }))
+        assert.strictEqual(missing.reason, 'NotFound')
+      }),
+    ),
+  )
+})
+
 describe('settings, through the API', () => {
   it.live('has Althar as co-author until the person turns it off, and keeps that', () =>
     Effect.scoped(

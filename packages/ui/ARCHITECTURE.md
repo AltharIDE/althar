@@ -13,7 +13,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `foundations` | Tokens, icons, brand marks, project marks, Althar's light and its halftone mark, and the domain vocabularies. |
 | `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), `Model` (a model's mark and name, and how it is reached on hover), and Ask, which every part that asks a person shares. |
 | `thread` | What appears in a conversation: turns, tool calls, steps, permissions, questions, Stuck, documents. |
-| `composer` | What writes into a conversation: Composer, ModelPick, ContextRing, Listening, Running. |
+| `composer` | What writes into a conversation: Composer, DictationTray, ModelPick, ContextRing, Listening, Running. |
 | `coordinator` | What the coordinator shows about tasks: Issue, TaskLaunch, TaskCard, TaskMark, TaskHeld. |
 | `board` | The project's work in lanes: Board, BoardColumn, and a card or row for each lane. |
 | `dock` | What opens beside the board: Dock and a peek for each kind of card. |
@@ -220,7 +220,6 @@ These are known departures from the principles above, with the way back:
 - **The workbench** is not yet in the package, so neither is `bun run workbench`. The prototype's specimen, once migrated to these components, is the catalogue it should hold.
 - **Plays that need a browser.** Testing Library in jsdom does not know `inert`, and cannot click a label that forwards a pointer event. Five plays run in Storybook only; they are listed in `tests/stories.test.tsx`.
 - **The marks generator is not in the repository.** `brands.ts` says to regenerate rather than edit by hand, but the script that writes it lives outside the repo. It should move to `packages/ui/scripts/marks` as a Bun script that reads `simple-icons` and `@lobehub/icons-static-svg`.
-- **Dictation recording is red.** The Composer's recording state uses `--danger`, which is kept for deletions and failures. It needs its own treatment.
 - **Accessibility lint warnings.** `vp check` warns about some deliberate patterns: forms and panels that listen for their own keys (number keys, Escape), focusable scroll regions, a `role="status"` where the rule prefers `<output>`, `role="group"` on a group that is not a form's fieldset, and a searchable Select's combobox, whose options its field reaches by `aria-activedescendant` rather than focus. Each one has been reviewed. The warnings stay visible rather than being disabled.
 - **Code colouring is built in only for TypeScript and JavaScript.** Other languages show plain unless the consumer passes a highlighter to CodeBlock. A real grammar-based highlighter belongs to the consumer until one is chosen for the package.
 - **Images in markdown are shown as their words.** Markdown does not fetch images from a message; a consumer that wants them has no way in yet.

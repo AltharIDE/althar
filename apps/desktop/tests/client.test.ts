@@ -241,6 +241,7 @@ describe('the client', () => {
           MarkReady: () => Effect.die('unused'),
           SetUsageLimit: () => Effect.die('unused'),
           GetProjectRules: () => Effect.die('unused'),
+          GetVocabulary: () => Effect.die('unused'),
           RenameProject: () => Effect.die('unused'),
           RemoveProject: () => Effect.die('unused'),
           GetRepositories: () => Effect.die('unused'),
