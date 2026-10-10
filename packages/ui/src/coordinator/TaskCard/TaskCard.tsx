@@ -1,7 +1,7 @@
 import { useId, type ReactNode, type Ref } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
-import { Model, type ModelInfo } from '../../primitives/Model/Model'
+import { Model, type ModelInfo } from '../../foundations/Model/Model'
 import { TaskStatus } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
@@ -158,8 +158,9 @@ export function TaskCard({
           </>
         )}
         {onOpen && (
-          <Button variant={yours ? 'signal' : 'default'} trailingIcon="arrow" className={s.open} onClick={() => onOpen(task)}>
+          <Button variant={yours ? 'signal' : 'default'} className={s.open} onClick={() => onOpen(task)}>
             {yours ? t.answer : t.open}
+            <Icon name="arrow" size={11} />
           </Button>
         )}
       </div>

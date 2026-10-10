@@ -2,14 +2,3 @@
   flex: none;
   fill: currentColor;
 }
-
-.chip {
-  flex: none;
-  display: inline-grid;
-  place-items: center;
-  background: var(--paper);
-  color: var(--t-1);
-  box-shadow:
-    inset 0 0 0 1px var(--line-2),
-    var(--lift-card);
-}

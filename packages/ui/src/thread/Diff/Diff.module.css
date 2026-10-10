@@ -29,26 +29,26 @@
   user-select: none;
 }
 .add {
-  background: var(--add-line);
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
   color: var(--add-ink);
 }
 .add .n {
-  background: var(--add-gutter);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
   color: var(--add-ink-2);
 }
 .add .sign {
-  color: var(--add-sign);
+  color: var(--ok);
 }
 .del {
-  background: var(--del-line);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
   color: var(--del-ink);
 }
 .del .n {
-  background: var(--del-gutter);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
   color: var(--del-ink-2);
 }
 .del .sign {
-  color: var(--del-sign);
+  color: var(--danger);
 }
 .line mark {
   border-radius: 3px;
@@ -56,38 +56,10 @@
   color: inherit;
 }
 .add mark {
-  background: var(--add-word);
+  background: color-mix(in srgb, var(--ok) 30%, transparent);
 }
 .del mark {
-  background: var(--del-word);
-}
-/* a folded stretch of unchanged lines: the whole row opens it */
-.fold {
-  display: block;
-  width: 100%;
-  padding: 3px 0 3px 60px;
-  border: 0;
-  background: var(--n-1);
-  box-shadow:
-    inset 0 1px 0 var(--line),
-    inset 0 -1px 0 var(--line);
-  font: inherit;
-  font-family: var(--font);
-  font-size: 11.5px;
-  color: var(--t-3);
-  text-align: left;
-  cursor: pointer;
-}
-.fold:hover {
-  background: var(--n-2);
-  color: var(--t-1);
-}
-.fold:focus-visible {
-  outline: 2px solid var(--signal);
-  outline-offset: -2px;
-}
-.both .fold {
-  padding-left: 102px;
+  background: color-mix(in srgb, var(--danger) 26%, transparent);
 }
 .hunk {
   color: var(--t-3);

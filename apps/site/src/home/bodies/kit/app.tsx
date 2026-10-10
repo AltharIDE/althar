@@ -1,24 +1,16 @@
 import {
   AcceptCard,
-  Accounts,
-  type AccountEntry,
-  AllowedBy,
   Board,
   BoardColumn,
   BoardLane,
   BoardList,
-  Brand,
   Button,
   CallCard,
   ChromeButton,
   Composer,
-  Connections,
   EdgeSheet,
-  GraphChanged,
-  GraphNodeState,
   IconButton,
   Island,
-  Issue,
   Logo,
   NeedCard,
   NeedChange,
@@ -27,19 +19,12 @@ import {
   NextRow,
   ProjectHead,
   ProjectTabs,
-  RateLimit,
   Review,
   Room,
   RoomSwitch,
-  type RuntimeEntry,
-  RuntimeState,
-  type ServiceConnection,
-  type ServiceOption,
   SettledRow,
-  TaskCard,
   TaskLaunch,
   type LaunchStep,
-  TaskStatus,
   TitleBar,
   Turn,
   Verdict,
@@ -48,49 +33,25 @@ import {
   WorkStatus,
   You,
   ModelPick,
-  AgentTabs,
-  ControlAgents,
-  ControlDetail,
-  ControlFoot,
-  ControlGrid,
-  ControlMarks,
-  ControlModule,
-  ControlPicture,
-  ControlToggle,
-  Icon,
-  ModelSwitches,
 } from '@althar/ui'
-import { Home, ProjectRules } from '@althar/ui/screens'
+import { Home } from '@althar/ui/screens'
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
 // Prototype: the kit's demo world, read from its source. Ported, the site would keep its own copy.
 import { CALLS, NEXT, READY_TWO_REPOS, RUNNING as BOARD_RUNNING, SETTLED } from '../../../../../../packages/ui/src/fixtures/board'
-import {
-  FROM_231,
-  MER_231,
-  PLAN_432,
-  STAGES,
-  T432,
-  ALWAYS_ASK,
-  ALWAYS_ON,
-  NEVER,
-  NEVER_ON,
-} from '../../../../../../packages/ui/src/fixtures/coordinator'
+import { FROM_231, PLAN_432 } from '../../../../../../packages/ui/src/fixtures/coordinator'
 import { EDGE_NEEDS, EDGE_WORK, edgeRowOf, NOTCH } from '../../../../../../packages/ui/src/fixtures/edge'
 import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../../../../../../packages/ui/src/fixtures/home'
 import { MARKED } from '../../../../../../packages/ui/src/fixtures/marks'
 import { FINDINGS, PROJECT, reviewDoc, STEPS } from '../../../../../../packages/ui/src/fixtures/meridian'
-import { CODEX, GEMINI_PRO, OPUS, QWEN, SONNET } from '../../../../../../packages/ui/src/fixtures/models'
-import { SERVICES } from '../../../../../../packages/ui/src/fixtures/setup'
-import appIcon from '../../../../../desktop/resources/icons/cobalt.svg?url'
+import { CODEX, GEMINI_PRO, SONNET } from '../../../../../../packages/ui/src/fixtures/models'
 import s from './app.module.css'
 
 /*
  * The app, as the pictures show it: whole windows and single pieces, drawn
  * by @althar/ui's own components with the kit's demo world (Meridian, a
  * payments API, and task 432, the refunds backfill from Linear's MER-231),
- * touched up where a picture wants it: every account a person might have,
- * all six code hosts and trackers connected.
+ * touched up where a picture wants it.
  */
 
 const none = () => {}
@@ -190,12 +151,6 @@ export function HomeWindow({
       </div>
     </div>
   )
-}
-
-/* ---- where task 432 comes from: Linear's MER-231 ---- */
-
-export function Issue231() {
-  return <Issue {...MER_231} />
 }
 
 /* ---- the lead's plan for task 432: its team, step by step ---- */
@@ -376,291 +331,6 @@ export function MeridianBoard() {
   )
 }
 
-/* ---- the agents and every account on them ---- */
-
-export const CLAUDE_ACCOUNTS: AccountEntry[] = [
-  {
-    id: 'c_main',
-    name: 'Personal',
-    place: { kind: 'usual' },
-    state: { kind: 'ready', paid: 'plan' },
-    who: 'you@hey.com',
-    plan: 'Claude Max',
-  },
-  {
-    id: 'c_work',
-    name: 'Northwind',
-    place: { kind: 'own' },
-    state: { kind: 'out', back: '14:00' },
-    who: 'dana@northwind.io',
-    plan: 'Claude Team',
-  },
-]
-export const CODEX_ACCOUNTS: AccountEntry[] = [
-  {
-    id: 'x_main',
-    name: 'Personal',
-    place: { kind: 'usual' },
-    state: { kind: 'ready', paid: 'plan' },
-    who: 'you@hey.com',
-    plan: 'ChatGPT Pro',
-  },
-  {
-    id: 'x_work',
-    name: 'Northwind',
-    place: { kind: 'own' },
-    state: { kind: 'ready', paid: 'plan' },
-    who: 'dana@northwind.io',
-    plan: 'ChatGPT Team',
-  },
-  {
-    id: 'x_client',
-    name: 'Client',
-    place: { kind: 'adopted', folder: '~/.codex-client', from: 'codex-profiles' },
-    state: { kind: 'ready', paid: 'plan' },
-    plan: 'ChatGPT Plus',
-  },
-]
-export const OPENCODE_ACCOUNTS: AccountEntry[] = [
-  { id: 'o_router', name: 'OpenRouter', place: { kind: 'usual' }, state: { kind: 'ready', paid: 'key' }, who: 'key ····9c1e' },
-  { id: 'o_zai', name: 'Z.ai', place: { kind: 'own' }, state: { kind: 'ready', paid: 'plan' }, plan: 'GLM Coding Plan' },
-]
-
-export const AGENTS: RuntimeEntry[] = [
-  {
-    id: 'claude-code',
-    name: 'Claude Code',
-    brand: Brand.ClaudeCode,
-    version: '2.4.1',
-    state: RuntimeState.Ready,
-    account: 'Max · 2 accounts',
-    detail: <Accounts agent="Claude Code" accounts={CLAUDE_ACCOUNTS} onAdd={none} />,
-  },
-  {
-    id: 'codex',
-    name: 'Codex',
-    brand: Brand.Codex,
-    version: '0.52.0',
-    state: RuntimeState.Ready,
-    account: 'Pro · 3 accounts',
-    detail: <Accounts agent="Codex" accounts={CODEX_ACCOUNTS} onAdd={none} />,
-  },
-  {
-    id: 'opencode',
-    name: 'OpenCode',
-    version: '1.0.4',
-    state: RuntimeState.Ready,
-    account: 'Any key, or a local model',
-    detail: <Accounts agent="OpenCode" accounts={OPENCODE_ACCOUNTS} onAdd={none} />,
-  },
-]
-
-/* ---- the code hosts and trackers, all six ---- */
-
-const SERVICE = (id: string) => SERVICES.find((x) => x.id === id)!
-
-export const ALL_SERVICES: ServiceOption[] = [
-  SERVICE('github'),
-  {
-    id: 'gitlab',
-    name: 'GitLab',
-    brand: Brand.GitLab,
-    what: 'Merge requests and issues',
-    hostedUrl: 'https://gitlab.com',
-    selfHosted: true,
-    browserSignIn: false,
-    tokenHelp: 'https://gitlab.com/-/user_settings/personal_access_tokens',
-  },
-  {
-    id: 'bitbucket',
-    name: 'Bitbucket',
-    brand: Brand.Bitbucket,
-    what: 'Pull requests',
-    hostedUrl: 'https://bitbucket.org',
-    selfHosted: true,
-    browserSignIn: false,
-    tokenHelp: 'https://bitbucket.org/account/settings/app-passwords/',
-  },
-  SERVICE('linear'),
-  SERVICE('jira_cloud'),
-  SERVICE('trello'),
-]
-
-export const ALL_CONNECTED: ServiceConnection[] = [
-  { id: 'c1', service: 'github', account: 'you' },
-  { id: 'c2', service: 'gitlab', account: 'you', instance: 'https://git.meridian.dev' },
-  { id: 'c3', service: 'bitbucket', account: 'you' },
-  { id: 'c4', service: 'linear', account: 'You' },
-  { id: 'c5', service: 'jira_cloud', account: 'you@meridian.dev', instance: 'https://meridian.atlassian.net' },
-  { id: 'c6', service: 'trello', account: 'You' },
-]
-
-export function ConnectionsList() {
-  return (
-    <Connections
-      label="Code hosts and trackers"
-      services={ALL_SERVICES}
-      connections={ALL_CONNECTED}
-      onSignIn={none}
-      onCancelSignIn={none}
-      onToken={none}
-      onDisconnect={none}
-    />
-  )
-}
-
-/* ---- Settings: the Control Center, from the home's gear ---- */
-
-const AGENT_TABS = [
-  { id: 'claude-code', name: 'Claude Code', brand: Brand.ClaudeCode, line: 'Anthropic · 2.4.1' },
-  { id: 'codex', name: 'Codex', brand: Brand.Codex, line: 'OpenAI · 0.159.3' },
-  { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, line: 'Any provider · 1.4.0' },
-]
-const ACCOUNTS_OF: Record<string, AccountEntry[]> = {
-  'claude-code': CLAUDE_ACCOUNTS,
-  codex: CODEX_ACCOUNTS,
-  opencode: OPENCODE_ACCOUNTS,
-}
-const MODELS_OF: Record<string, { id: string; name: string }[]> = {
-  'claude-code': [
-    { id: 'opus-5', name: 'Opus 5' },
-    { id: 'sonnet-5', name: 'Sonnet 5' },
-    { id: 'haiku-5-5', name: 'Haiku 5.5' },
-  ],
-  codex: [
-    { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
-    { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex' },
-    { id: 'gpt-5-mini', name: 'GPT-5 mini' },
-  ],
-  opencode: [
-    { id: 'gemini-3-pro', name: 'Gemini 3 Pro' },
-    { id: 'glm-4.6', name: 'GLM 4.6' },
-    { id: 'kimi-k2', name: 'Kimi K2' },
-  ],
-}
-
-const ICON = (
-  <span className={s.iconPicture}>
-    <img src={appIcon} alt="" />
-  </span>
-)
-
-/** The panel's look, as the Control Center draws it, without being a popover: for a picture. */
-export function SettingsPanel({ open = 'all', agent = 'codex' }: { open?: 'all' | 'agents'; agent?: string }) {
-  const tab = AGENT_TABS.find((x) => x.id === agent) ?? AGENT_TABS[0]!
-  return (
-    <div className={`${s.panel} ${open === 'agents' ? s.panelWide : ''}`} role="presentation">
-      {open === 'all' ? (
-        <>
-          <ControlGrid>
-            <ControlModule title="Agents" aside="3 agents · 7 accounts" onClick={none}>
-              <ControlAgents
-                agents={[
-                  { id: 'claude-code', name: 'Claude Code', brand: Brand.ClaudeCode, line: 'Northwind out until 14:00', tone: 'quiet' },
-                  { id: 'codex', name: 'Codex', brand: Brand.Codex, line: '3 accounts' },
-                  { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, line: '2 accounts' },
-                ]}
-              />
-            </ControlModule>
-            <ControlModule title="Code hosts and trackers" span={2} aside="6 connected" onClick={none}>
-              <ControlMarks
-                marks={[
-                  { id: 'github', name: 'GitHub', brand: Brand.GitHub },
-                  { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab },
-                  { id: 'bitbucket', name: 'Bitbucket', brand: Brand.Bitbucket },
-                  { id: 'linear', name: 'Linear', brand: Brand.Linear },
-                  { id: 'jira', name: 'Jira', brand: Brand.Jira },
-                  { id: 'trello', name: 'Trello', brand: Brand.Trello },
-                ]}
-              />
-            </ControlModule>
-            <ControlPicture title="App icon" name="Cobalt" picture={ICON} onClick={none} />
-            <ControlToggle title="Keep awake" line="While work runs" on onChange={none} glyph={<Icon name="clock" size={16} />} />
-            <ControlToggle title="Dictation" line="Off" on={false} onChange={none} glyph={<Icon name="mic" size={16} />} />
-          </ControlGrid>
-          <ControlFoot>
-            <span>Althar 0.1.0</span>
-          </ControlFoot>
-        </>
-      ) : (
-        <ControlDetail title="Agents" aside="3 agents · 7 accounts" onBack={none}>
-          <AgentTabs
-            label="Agents"
-            agents={AGENT_TABS}
-            value={tab.id}
-            onValueChange={none}
-            aside={<ModelSwitches agent={tab.name} models={MODELS_OF[tab.id] ?? []} off={[]} onChange={none} />}
-          >
-            <Accounts agent={tab.name} accounts={ACCOUNTS_OF[tab.id] ?? []} onAdd={none} />
-          </AgentTabs>
-        </ControlDetail>
-      )}
-    </div>
-  )
-}
-
-/** The home with Settings open over it, from the gear, as the app shows it. */
-export function SettingsWindow({
-  open = 'all',
-  agent,
-  className,
-  style,
-}: {
-  open?: 'all' | 'agents'
-  agent?: string
-  className?: string
-  style?: CSSProperties
-}) {
-  return (
-    <div className={`${s.over} ${className ?? ''}`} style={style}>
-      <HomeWindow />
-      <div className={`${s.overPanel} ${open === 'agents' ? s.overWide : ''}`}>
-        <SettingsPanel open={open} {...(agent ? { agent } : {})} />
-      </div>
-    </div>
-  )
-}
-
-/* ---- a usage limit, mid-task ---- */
-
-export function Limit() {
-  return (
-    <RateLimit
-      runtime="Claude Code"
-      resets="14:00, in 2h 10m"
-      options={[
-        { model: CODEX, note: 'Codex · work · 38% of this week used' },
-        { model: GEMINI_PRO, note: 'OpenCode · OpenRouter key' },
-        { model: QWEN, note: 'OpenCode · this Mac, slower' },
-        { model: SONNET, note: 'same limit, resets 14:00', busy: true },
-      ]}
-      affects={[
-        { id: 'lead', label: 'the lead', model: OPUS },
-        { id: 'sec', label: 'Security review', model: SONNET },
-      ]}
-      onSwap={none}
-    />
-  )
-}
-
-/** Task 431 on the board: its lead out of usage, then carried on by Codex. */
-export function Handover({ after }: { after: boolean }) {
-  return (
-    <WorkCard
-      task="431"
-      kind="Delivery"
-      title="Refunds rate-limit like charges"
-      status={after ? TaskStatus.Running : TaskStatus.Paused}
-      steps={['Triage', 'Implement', 'Review', 'Verify', 'Draft PR']}
-      at={1}
-      elapsed={after ? '32m' : '31m'}
-      lead={after ? CODEX : OPUS}
-      onStep={[SONNET, GEMINI_PRO]}
-      {...(after ? {} : { note: 'Claude Code’s limit · back at 14:00' })}
-    />
-  )
-}
-
 /* ---- two labs' review of the lead's work ---- */
 
 /** The usual review, simpler: two findings the lead fixed on the second round, and the one the reviewers disagree on, which is yours. */
@@ -696,55 +366,6 @@ export const DOCS_PLAN: LaunchStep[] = [
   { id: 'review', label: 'Review', agents: [SONNET], why: 'a different lab from the lead', optional: true },
 ]
 
-/* ---- a rule adds a step ---- */
-
-export function RuleAdded() {
-  return (
-    <GraphChanged
-      rev={2}
-      summary="Security review added"
-      settled
-      defaultOpen
-      nodes={[
-        { id: 'impl', label: 'Implement', state: GraphNodeState.Done },
-        { id: 'dry', label: 'Dry run on a copy', state: GraphNodeState.Done },
-        { id: 'review', label: 'Review', state: GraphNodeState.Now },
-        { id: 'sec', label: 'Security review', state: GraphNodeState.Added },
-        { id: 'pr', label: 'Draft PR', state: GraphNodeState.Next },
-      ]}
-      ops={['Added Security review after Review: the change writes to money records.', 'Draft PR now waits on Security review.']}
-      cause={{ by: AllowedBy.Rule, rule: 'a security review whenever money records change' }}
-      project={PROJECT}
-    />
-  )
-}
-
-/* ---- task 432 over time, as its card tells it ---- */
-
-export function Task432({ stage = STAGES.length - 1 }: { stage?: number }) {
-  const now = STAGES[Math.min(stage, STAGES.length - 1)]!
-  return (
-    <TaskCard
-      task={T432.task}
-      title={T432.title}
-      status={now.status}
-      steps={T432.steps}
-      at={now.step}
-      started={now.started}
-      lead={T432.lead}
-      branch={T432.branch}
-      from={T432.from}
-      now={now.now}
-    />
-  )
-}
-
-/* ---- ready for you: two pull requests, checks passed ---- */
-
-export function Ready() {
-  return <AcceptCard {...READY_TWO_REPOS} />
-}
-
 /* ---- the island, round the notch, and what drops from it ---- */
 
 export function IslandOpen({
@@ -773,26 +394,3 @@ export function IslandOpen({
     </Island>
   )
 }
-
-/* ---- the project's rules ---- */
-
-export function Rules() {
-  return (
-    <ProjectRules
-      project="Meridian"
-      always={ALWAYS_ASK}
-      defaultAlwaysOn={ALWAYS_ON}
-      never={NEVER}
-      defaultNeverOn={NEVER_ON}
-      learned="6 of 10 so far"
-      onAddRule={none}
-      onPermissionsChange={none}
-      onAlwaysOnChange={none}
-      onNeverOnChange={none}
-      onAddNever={none}
-      onReachChange={none}
-    />
-  )
-}
-
-export { TaskStatus }

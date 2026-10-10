@@ -69,32 +69,6 @@
 .close {
   margin-left: auto;
 }
-/* what else opens it, at the right, then Close */
-.actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.closeAfter {
-  margin-left: 0;
-}
-/* generated files, after the written ones: listed quieter, under their own word */
-.group {
-  margin: 12px 10px 4px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--t-3);
-}
-.made .path,
-.made .dir {
-  color: var(--t-3);
-}
-div.made {
-  display: grid;
-  justify-items: start;
-  gap: 8px;
-}
 .body {
   display: grid;
   grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);

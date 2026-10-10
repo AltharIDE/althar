@@ -1,4 +1,4 @@
-import type { ModelInfo } from '../../primitives/Model/Model'
+import type { ModelInfo } from '../../foundations/Model/Model'
 import { Brand } from '../../foundations/brands/brands'
 import { CheckState, RuntimeState, SourceOrigin, TaskStatus, Wait } from '../../foundations/vocabulary'
 import type { ChangeCheck } from '../../primitives/Checks/Checks'

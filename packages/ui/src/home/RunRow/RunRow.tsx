@@ -1,4 +1,4 @@
-import { Model, type ModelInfo } from '../../primitives/Model/Model'
+import { Model, type ModelInfo } from '../../foundations/Model/Model'
 import { TaskStatus } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'

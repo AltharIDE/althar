@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
-import { Model, type ModelInfo } from '../../primitives/Model/Model'
+import { Model, type ModelInfo } from '../../foundations/Model/Model'
 import { StepState, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'

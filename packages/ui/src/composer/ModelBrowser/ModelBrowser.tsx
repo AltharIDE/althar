@@ -5,7 +5,7 @@ import { unreachable } from '../../foundations/vocabulary'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import type { Brand } from '../../foundations/brands/brands'
 import { BrandMark } from '../../foundations/Marks/Marks'
-import { Model, type ModelInfo } from '../../primitives/Model/Model'
+import { Model, type ModelInfo } from '../../foundations/Model/Model'
 import { cx } from '../../lib/cx'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Kbd } from '../../primitives/Kbd/Kbd'
@@ -39,10 +39,6 @@ export interface ModelBrowserText {
   defaultEffort: (model: string) => string
   pin: (model: string) => string
   pinTitle: (pinned: boolean) => string
-  block: (model: string) => string
-  blockTitle: (blocked: boolean) => string
-  /** A model switched off, beside its name. */
-  off: string
   /** A context window, in thousands of tokens. */
   context: (k: number) => string
   /** A model whose runtime doesn't say its context window. */
@@ -70,9 +66,6 @@ export const modelBrowserText: ModelBrowserText = {
   defaultEffort: (model) => `Default effort for ${model}`,
   pin: (model) => `Pin ${model}`,
   pinTitle: (pinned) => (pinned ? 'Unpin' : 'Pin'),
-  block: (model) => `Don’t use ${model}`,
-  blockTitle: (blocked) => (blocked ? 'Use again' : 'Don’t use'),
-  off: 'not used',
   context: (k) => (k >= 1000 ? `${k / 1000}M` : `${k}k`),
   noContext: '—',
   empty: (q) => `No model matches “${q}”.`,
@@ -95,10 +88,6 @@ export interface ModelBrowserProps {
   onPick: (id: string) => void
   onClose: () => void
   onTogglePin: (id: string) => void
-  /** The models switched off, by id: no plan picks them, and choosing one here waits until it is switched on again. */
-  blocked?: readonly string[]
-  /** Switches a model off, or on again. Without it, there is no such control. */
-  onToggleBlocked?: (id: string) => void
   onSetDefaultEffort: (id: string, level: string) => void
   /** Add a runtime. Without it, there is no such row. */
   onConnect?: () => void
@@ -136,8 +125,6 @@ export function ModelBrowser({
   onPick,
   onClose,
   onTogglePin,
-  blocked = [],
-  onToggleBlocked,
   onSetDefaultEffort,
   onConnect,
   text,
@@ -173,8 +160,7 @@ export function ModelBrowser({
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     /* a select in a row handles its own arrows, and they bubble here through its portal */
     if (e.defaultPrevented) return
-    // A model switched off can't be used: the arrows pass over it.
-    const uses = [...(list.current?.querySelectorAll<HTMLButtonElement>('[data-use]:not(:disabled)') ?? [])]
+    const uses = [...(list.current?.querySelectorAll<HTMLButtonElement>('[data-use]') ?? [])]
     const focused = document.activeElement
     const at = focused instanceof HTMLButtonElement ? uses.indexOf(focused) : -1
     switch (e.key) {
@@ -188,8 +174,7 @@ export function ModelBrowser({
         else uses[at - 1]?.focus()
         break
       case 'Enter': {
-        // The first that can be used: one switched off is never picked, by a press or a key.
-        const first = rows.find((row) => !blocked.includes(row.id))
+        const first = rows[0]
         if (focused === search.current && first) {
           e.preventDefault()
           onPick(first.id)
@@ -301,25 +286,22 @@ export function ModelBrowser({
                 {rows.map((m) => {
                   const c = runtimes.find((x) => x.id === m.runtime)
                   const pinned = pins.includes(m.id)
-                  const off = blocked.includes(m.id)
                   const inUse = m.id === value
                   const level = defaultEffort(m)
                   const via = `${ids}-${m.id}-via`
                   const ctx = `${ids}-${m.id}-ctx`
                   return (
-                    <li key={m.id} data-id={m.id} className={cx(s.row, off && s.off)}>
+                    <li key={m.id} data-id={m.id} className={s.row}>
                       <button
                         type="button"
                         data-use
                         className={s.use}
-                        disabled={off}
                         onClick={() => onPick(m.id)}
                         aria-label={t.use(m.name, inUse)}
                         aria-describedby={`${via} ${ctx}`}
                       >
                         <Model model={m} />
                         {inUse && <span className={s.inUse}>{t.inUse}</span>}
-                        {off && <span className={s.inUse}>{t.off}</span>}
                       </button>
                       <span className={s.via} id={via}>
                         {c ? (
@@ -344,30 +326,16 @@ export function ModelBrowser({
                       ) : (
                         <span className={s.none}>—</span>
                       )}
-                      <span className={s.actions}>
-                        {onToggleBlocked && (
-                          <Tooltip label={t.blockTitle(off)} align="end">
-                            <Toggle.Root
-                              className={s.pin}
-                              pressed={off}
-                              onPressedChange={() => onToggleBlocked(m.id)}
-                              aria-label={t.block(m.name)}
-                            >
-                              <Icon name="stop" size={13} />
-                            </Toggle.Root>
-                          </Tooltip>
-                        )}
-                        <Tooltip label={t.pinTitle(pinned)} kbd={t.keys.pin} align="end">
-                          <Toggle.Root
-                            className={s.pin}
-                            pressed={pinned}
-                            onPressedChange={() => onTogglePin(m.id)}
-                            aria-label={t.pin(m.name)}
-                          >
-                            <Icon name="pin" size={13} />
-                          </Toggle.Root>
-                        </Tooltip>
-                      </span>
+                      <Tooltip label={t.pinTitle(pinned)} kbd={t.keys.pin} align="end">
+                        <Toggle.Root
+                          className={s.pin}
+                          pressed={pinned}
+                          onPressedChange={() => onTogglePin(m.id)}
+                          aria-label={t.pin(m.name)}
+                        >
+                          <Icon name="pin" size={13} />
+                        </Toggle.Root>
+                      </Tooltip>
                     </li>
                   )
                 })}

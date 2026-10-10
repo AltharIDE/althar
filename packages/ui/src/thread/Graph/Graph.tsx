@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
-import { Model, type ModelInfo } from '../../primitives/Model/Model'
+import { Model, type ModelInfo } from '../../foundations/Model/Model'
 import { AllowedBy, GraphAnswer, GraphNodeState, unreachable } from '../../foundations/vocabulary'
 import { cssVars } from '../../lib/cssVars'
 import { useControlled } from '../../lib/controlled'

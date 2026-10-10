@@ -32,8 +32,6 @@ export interface PopoverProps {
   onOpenChange?: (open: boolean) => void
   /** Escape, before it closes the panel: prevent the default to take a step back inside it instead, out of a form it opened. */
   onEscapeKeyDown?: (e: KeyboardEvent) => void
-  /** A press or focus outside, before it closes the panel: prevent the default to keep it open while something in it is under way. */
-  onInteractOutside?: (e: Event) => void
   className?: string
 }
 
@@ -56,7 +54,6 @@ export function Popover({
   defaultOpen,
   onOpenChange,
   onEscapeKeyDown,
-  onInteractOutside,
   className,
 }: PopoverProps) {
   return (
@@ -76,7 +73,6 @@ export function Popover({
             if (e.target instanceof Element && e.target.closest('[data-own-escape]')) e.preventDefault()
             onEscapeKeyDown?.(e)
           }}
-          onInteractOutside={onInteractOutside}
           onOpenAutoFocus={(e) => {
             if (initialFocus !== 'panel') return
             e.preventDefault()

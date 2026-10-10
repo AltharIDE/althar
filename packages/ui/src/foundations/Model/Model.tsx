@@ -1,10 +1,8 @@
 import { useMemo, type ReactNode } from 'react'
 
-import type { Brand } from '../../foundations/brands/brands'
-import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
-import { Tooltip } from '../HoverCard/HoverCard'
-import { VisuallyHidden } from '../VisuallyHidden/VisuallyHidden'
+import type { Brand } from '../brands/brands'
+import { BrandMark } from '../Marks/Marks'
 import s from './Model.module.css'
 
 /** A model as the consumer knows it, resolved from whatever runtime offers it. */
@@ -22,8 +20,6 @@ export interface ModelInfo {
   /** Effort levels in the runtime's own words, lowest first. Empty: no effort control. */
   efforts: readonly string[]
   note?: string
-  /** How it is reached, shown on hover: via Claude Code · work. Who runs a model is a detail; the model is what counts. */
-  via?: string
 }
 
 export interface ModelProps {
@@ -35,17 +31,14 @@ export interface ModelProps {
   className?: string
 }
 
-/** A model: its mark and its name, and how it is reached on hover. */
+/** A model: its mark and its name. */
 export function Model({ model, short, strong, className }: ModelProps) {
-  const label = (
-    <span className={cx(s.model, strong && s.strong, className)} title={short && model.via === undefined ? model.name : undefined}>
+  return (
+    <span className={cx(s.model, strong && s.strong, className)} title={short ? model.name : undefined}>
       {model.mark && <BrandMark brand={model.mark} />}
       <span>{short ? model.short : model.name}</span>
-      {model.via !== undefined && <VisuallyHidden>, {model.via}</VisuallyHidden>}
     </span>
   )
-  if (model.via === undefined) return label
-  return <Tooltip label={short ? `${model.name}, ${model.via}` : model.via}>{label}</Tooltip>
 }
 
 const escape = (id: string) => id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

@@ -31,16 +31,6 @@ export const Switching: Story = {
   },
 }
 
-/** Without shortcuts, as where the window's tabs have ⌘ and a number: pointed at, a view says nothing it doesn't already show. */
-export const NoShortcuts: Story = {
-  args: { text: { key: () => '' } },
-  play: async ({ canvasElement }) => {
-    await userEvent.hover(within(canvasElement).getByRole('radio', { name: 'Board' }))
-    await new Promise((resolve) => setTimeout(resolve, 900))
-    await expect(within(document.body).queryByRole('tooltip')).toBeNull()
-  },
-}
-
 export const AllStates: Story = {
   parameters: statesOn({
     hover: '[role="radio"]:nth-child(2)',

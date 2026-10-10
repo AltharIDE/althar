@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { Brand, BRANDS } from '../brands/brands'
 import { labBrand, sourceBrand } from '../brands/resolve'
 import { Lab, SourceKind } from '../vocabulary'
-import { BrandChip, BrandMark } from './Marks'
+import { BrandMark } from './Marks'
 import s from './Marks.stories.module.css'
 import { States } from '../../storybook/States'
 
@@ -81,12 +81,7 @@ export const Everything: Story = {
   ),
 }
 
-/** On a paper tile, beside a product's name: an agent in Settings, a code host. Without a mark, a plug. */
-export const Chip: Story = {
-  render: () => <BrandChip brand={Brand.ClaudeCode} size={44} />,
-}
-
-/** A mark at each size, in each ink it is drawn in, Linear's on its own card, and on a chip. */
+/** A mark at each size, in each ink it is drawn in, and Linear's on its own card. */
 export const AllStates: Story = {
   render: () => (
     <States
@@ -120,9 +115,6 @@ export const AllStates: Story = {
           ),
         },
         { state: 'two-tone', node: <BrandMark brand={Brand.LMStudio} size={16} /> },
-        { state: 'chip', node: <BrandChip brand={Brand.ClaudeCode} /> },
-        { state: 'chip, small', node: <BrandChip brand={Brand.Codex} size={24} /> },
-        { state: 'chip, no mark', node: <BrandChip /> },
       ]}
     />
   ),

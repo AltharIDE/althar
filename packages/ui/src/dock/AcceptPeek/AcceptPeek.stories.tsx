@@ -41,11 +41,11 @@ export const Accepting: Story = {
 export const SendingBack: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.click(c.getByRole('button', { name: 'Send back' }))
     await userEvent.type(c.getByRole('textbox', { name: 'What should change?' }), 'Return 422, not 409')
-    await userEvent.click(c.getByRole('button', { name: 'Send to the lead' }))
+    await userEvent.click(c.getByRole('button', { name: 'Send back' }))
     await expect(args.onSendBack).toHaveBeenCalledWith('Return 422, not 409')
-    await userEvent.click(c.getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.click(c.getByRole('button', { name: 'Send back' }))
     await userEvent.click(c.getByRole('button', { name: 'Cancel' }))
     await expect(c.getByRole('button', { name: 'Accept and merge' })).toBeInTheDocument()
   },

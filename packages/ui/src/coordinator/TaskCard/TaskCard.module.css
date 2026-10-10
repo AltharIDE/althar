@@ -120,6 +120,7 @@
 }
 .open {
   margin-left: auto;
+  gap: 6px;
 }
 
 /* arriving from the plan: the card lands, then the track fills in step by step */

@@ -43,12 +43,10 @@ export function RoomSwitch({ value, onChange, news, className, text }: RoomSwitc
   const t = { ...roomSwitchText, ...text }
   const options: SegmentedOption<Room>[] = ROOMS.map((room, i) => {
     const dot = dotOf(room, news)
-    const key = t.key(i + 1)
     return {
       value: room,
       label: t.room[room],
-      // Its name is on it; a tooltip only says its shortcut, where it has one.
-      ...(key === '' ? {} : { tooltip: { label: t.room[room], kbd: key } }),
+      tooltip: { label: t.room[room], ...(t.key(i + 1) === '' ? {} : { kbd: t.key(i + 1) }) },
       dot,
       dotLabel: dot === undefined ? undefined : t.news,
     }

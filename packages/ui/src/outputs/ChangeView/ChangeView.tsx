@@ -1,5 +1,5 @@
 import { Dialog } from 'radix-ui'
-import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type KeyboardEvent, useEffect, useRef } from 'react'
 
 import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
@@ -29,8 +29,6 @@ export interface ViewedFile {
   binary?: boolean
   /** Some of its change isn't committed yet. */
   uncommitted?: boolean
-  /** Made by a tool, not written: a lockfile, a snapshot, a build's output. It goes last, its diff folded until asked for. */
-  generated?: boolean
 }
 
 /** The file you're on: its diff while it's read, once it's read, or why it couldn't be. */
@@ -58,10 +56,6 @@ export interface ChangeViewText {
   tryAgain: string
   truncated: string
   list: string
-  /** Where generated files are listed, after the rest. */
-  generatedList: string
-  generated: (add: number, del: number) => string
-  showGenerated: string
 }
 
 export const changeViewText: ChangeViewText = {
@@ -82,9 +76,6 @@ export const changeViewText: ChangeViewText = {
   tryAgain: 'Try again',
   truncated: 'Cut short here. The rest is in the file.',
   list: 'Changed files',
-  generatedList: 'Generated',
-  generated: (add, del) => `Made by a tool, not written: ${add} lines added, ${del} removed. Its diff is folded.`,
-  showGenerated: 'Show the diff',
 }
 
 export interface ChangeViewProps {
@@ -99,8 +90,6 @@ export interface ChangeViewProps {
   view: FileView
   onRetry?: () => void
   onClose: () => void
-  /** What else opens it, beside Close: an editor, at the file. */
-  actions?: ReactNode
   /**
    * space: the system draws its lights over the window's top row, as on
    * macOS, so the view stays below that row; none: it may reach the top.
@@ -118,24 +107,8 @@ const split = (path: string) => {
 }
 
 /** A task's change over the whole window. A modal dialog: mount it to open it. */
-export function ChangeView({
-  branch,
-  base,
-  files: given,
-  selected,
-  onSelect,
-  view,
-  onRetry,
-  onClose,
-  actions,
-  lights = 'none',
-  text,
-}: ChangeViewProps) {
+export function ChangeView({ branch, base, files, selected, onSelect, view, onRetry, onClose, lights = 'none', text }: ChangeViewProps) {
   const t = { ...changeViewText, ...text }
-  // What was written first, what a tool made after: the eye starts on the work.
-  const written = given.filter((file) => file.generated !== true)
-  const made = given.filter((file) => file.generated === true)
-  const files = [...written, ...made]
   const current = files.find((file) => file.path === selected) ?? files[0]
   const add = files.reduce((sum, file) => sum + file.add, 0)
   const del = files.reduce((sum, file) => sum + file.del, 0)
@@ -153,8 +126,6 @@ export function ChangeView({
   }
   const keys = (event: KeyboardEvent) => {
     const target = event.target as HTMLElement
-    // Keys a menu opened from it handled, bubbling here through its portal, aren't the view's.
-    if (event.defaultPrevented || !(dialog.current?.contains(target) ?? false)) return
     if (event.metaKey || event.ctrlKey || event.altKey || target.isContentEditable || target.tagName === 'INPUT') return
     if (event.key === 'j' || event.key === 'ArrowDown') step(1)
     else if (event.key === 'k' || event.key === 'ArrowUp') step(-1)
@@ -189,9 +160,8 @@ export function ChangeView({
               {t.files(files.length)}
               <Delta {...counts(add, del)} />
             </span>
-            {actions && <span className={s.actions}>{actions}</span>}
             <Dialog.Close asChild>
-              <ActionButton icon="close" kbd={t.closeKey} className={cx(s.close, actions !== undefined && s.closeAfter)}>
+              <ActionButton icon="close" kbd={t.closeKey} className={s.close}>
                 {t.close}
               </ActionButton>
             </Dialog.Close>
@@ -202,16 +172,15 @@ export function ChangeView({
             <div className={s.body}>
               <nav className={s.files} aria-label={t.list}>
                 <ul>
-                  {files.map((file, index) => {
+                  {files.map((file) => {
                     const { dir, name } = split(file.path)
                     const on = file.path === current.path
                     const status = file.status === 'modified' ? null : t.status[file.status]
                     return (
                       <li key={file.path}>
-                        {index === written.length && written.length > 0 && <p className={s.group}>{t.generatedList}</p>}
                         <button
                           type="button"
-                          className={cx(s.file, on && s.on, file.generated === true && s.made)}
+                          className={cx(s.file, on && s.on)}
                           aria-current={on ? 'true' : undefined}
                           onClick={() => onSelect(file.path)}
                         >
@@ -237,7 +206,7 @@ export function ChangeView({
                   {current.from && <span className={s.from}>{t.movedFrom(current.from)}</span>}
                 </div>
                 {current.uncommitted && <p className={s.note}>{t.uncommittedNote}</p>}
-                <FileBody key={current.path} file={current} view={view} t={t} {...(onRetry === undefined ? {} : { onRetry })} />
+                <FileBody file={current} view={view} t={t} {...(onRetry === undefined ? {} : { onRetry })} />
               </section>
             </div>
           )}
@@ -248,18 +217,7 @@ export function ChangeView({
 }
 
 function FileBody({ file, view, t, onRetry }: { file: ViewedFile; view: FileView; t: ChangeViewText; onRetry?: () => void }) {
-  // A generated file's diff stays folded until asked for: its lines are a tool's, not the work's.
-  const [shown, setShown] = useState(file.generated !== true)
   if (file.binary) return <p className={s.quiet}>{t.binary}</p>
-  if (!shown)
-    return (
-      <div className={s.made}>
-        <p className={s.quiet}>{t.generated(file.add, file.del)}</p>
-        <Button size="small" onClick={() => setShown(true)}>
-          {t.showGenerated}
-        </Button>
-      </div>
-    )
   switch (view.state) {
     case 'loading':
       return (
@@ -283,7 +241,7 @@ function FileBody({ file, view, t, onRetry }: { file: ViewedFile; view: FileView
       if (view.lines.length === 0) return <p className={s.quiet}>{file.from ? t.moved(file.from) : t.empty}</p>
       return (
         <>
-          <Diff lines={view.lines} label={file.path} oldNumbers fold={3} className={s.diff} />
+          <Diff lines={view.lines} label={file.path} oldNumbers className={s.diff} />
           {view.truncated && <p className={s.quiet}>{t.truncated}</p>}
         </>
       )

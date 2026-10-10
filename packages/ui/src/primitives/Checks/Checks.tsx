@@ -1,5 +1,5 @@
 import { Icon } from '../../foundations/Icon/Icon'
-import { Model, type ModelInfo } from '../Model/Model'
+import { Model, type ModelInfo } from '../../foundations/Model/Model'
 import { CheckState, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { LiveDot } from '../LiveDot/LiveDot'
@@ -86,11 +86,7 @@ export function Checks({ checks, className, text }: ChecksProps) {
                 </span>
               )}
             </span>
-            {c.detail && (
-              <span className={s.detail} title={c.detail}>
-                {c.detail}
-              </span>
-            )}
+            {c.detail && <span className={s.detail}>{c.detail}</span>}
           </span>
         </li>
       ))}

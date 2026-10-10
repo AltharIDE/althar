@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { Model, type ModelInfo } from '../../primitives/Model/Model'
+import { Model, type ModelInfo } from '../../foundations/Model/Model'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
 import { cx } from '../../lib/cx'
 import { Kbd } from '../../primitives/Kbd/Kbd'

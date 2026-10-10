@@ -32,8 +32,6 @@ export interface MenuProps {
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
-  /** Whether closing gives focus back to the trigger: not where what was chosen took it on, such as a field to type in. */
-  returnFocus?: () => boolean
   className?: string
 }
 
@@ -48,7 +46,6 @@ export function Menu({
   open,
   defaultOpen,
   onOpenChange,
-  returnFocus,
   className,
 }: MenuProps) {
   const noteId = useId()
@@ -66,9 +63,6 @@ export function Menu({
           sideOffset={6}
           collisionPadding={8}
           loop
-          onCloseAutoFocus={(event) => {
-            if (returnFocus !== undefined && !returnFocus()) event.preventDefault()
-          }}
           className={cx('ch-root', s.menu, className)}
           style={width ? { width } : undefined}
         >

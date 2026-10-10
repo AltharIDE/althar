@@ -9,7 +9,7 @@ const meta = {
   component: NoteForm,
   decorators: [(Story) => <div style={{ maxWidth: 520, display: 'flex' }}>{Story()}</div>],
   args: {
-    text: { placeholder: 'What should change? The lead picks it up with this note', submit: 'Send to the lead' },
+    text: { placeholder: 'What should change? The lead picks it up with this note', submit: 'Send back' },
     onSubmit: fn(),
     onCancel: fn(),
   },
@@ -24,7 +24,7 @@ export const Empty: Story = {}
 export const Missing: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Send to the lead' }))
+    await userEvent.click(c.getByRole('button', { name: 'Send back' }))
     await expect(args.onSubmit).not.toHaveBeenCalled()
     await expect(c.getByRole('textbox')).toHaveAttribute('aria-invalid', 'true')
     await expect(c.getByRole('textbox')).toHaveAccessibleDescription('Write a note first')
@@ -40,7 +40,7 @@ export const Sending: Story = {
     const c = within(canvasElement)
     await expect(c.getByRole('textbox')).toHaveFocus()
     await userEvent.type(c.getByRole('textbox'), 'Keep the old cache')
-    await userEvent.click(c.getByRole('button', { name: 'Send to the lead' }))
+    await userEvent.click(c.getByRole('button', { name: 'Send back' }))
     await expect(args.onSubmit).toHaveBeenCalledWith('Keep the old cache')
   },
 }

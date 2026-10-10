@@ -1,5 +1,5 @@
 import { Icon } from '../../foundations/Icon/Icon'
-import { Model, type ModelInfo } from '../../primitives/Model/Model'
+import { Model, type ModelInfo } from '../../foundations/Model/Model'
 import { TaskStatus, TrackStep, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { TaskGlyph } from '../../primitives/TaskGlyph/TaskGlyph'

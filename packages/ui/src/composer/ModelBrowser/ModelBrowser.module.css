@@ -139,7 +139,7 @@
 .cols,
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.3fr) 56px 104px 62px;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.3fr) 56px 104px 32px;
   align-items: center;
   gap: 10px;
 }
@@ -250,18 +250,4 @@
 }
 .footRight {
   margin-left: auto;
-}
-
-/* its actions at the row's end: switching it off, and pinning it */
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 2px;
-}
-/* a model switched off: there, quieter, not to be chosen */
-.off .use {
-  cursor: default;
-}
-.off .use > :first-child {
-  opacity: 0.5;
 }

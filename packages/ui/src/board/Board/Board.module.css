@@ -154,11 +154,7 @@ span.you {
 }
 
 .cardTitle {
-  /* two lines at most: the whole of it on hover */
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  display: block;
   font-size: 13.5px;
   line-height: 1.36;
   font-weight: 550;
