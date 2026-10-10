@@ -42,6 +42,8 @@ export const scenarios = {
    * withdraws the request, as the real agents do.
    */
   commandChoices: 'command-choices',
+  /** Carries on after a permission answer until the client cancels. */
+  deniedThenWait: 'denied-then-wait',
   /** A file edit, with Codex's options: the only rejection stops the turn. */
   fileEdit: 'file-edit',
   /** Like `fileEdit`, but it asks again every time the turn is resumed. */
@@ -104,6 +106,7 @@ export interface FakeAgentOptions {
     readonly model: string
     readonly effort: string
     readonly mcpServers: number
+    readonly meta: Readonly<Record<string, unknown>> | undefined
     readonly askToWrite: () => Promise<string>
   }) => Promise<string>
   /** What `exit` does. The process entry point exits the process. */
@@ -148,6 +151,7 @@ interface SessionState {
   abort: AbortController | undefined
   directories: number
   mcpServers: number
+  meta: Readonly<Record<string, unknown>> | undefined
   /** Where the session works, for a step that writes. */
   cwd: string
   /** Althar's tools, when the session was given them over HTTP. */
@@ -507,6 +511,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         abort: undefined,
         directories: params.additionalDirectories?.length ?? 0,
         mcpServers: params.mcpServers.length,
+        meta: params._meta ?? undefined,
         cwd: params.cwd,
         tools: (() => {
           const server = params.mcpServers.find((candidate) => 'type' in candidate && candidate.type === 'http')
@@ -597,6 +602,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
                 model: session.model,
                 effort: session.effort,
                 mcpServers: session.mcpServers,
+                meta: session.meta,
                 askToWrite: () =>
                   ask(
                     { toolCallId: 'judge-write', title: 'Write a file', kind: 'edit', rawInput: { path: '/tmp/judge-write.txt' } },
@@ -620,25 +626,27 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return ended()
       }
 
-      const resumed = text.includes("not allowed by the project's rules")
+      const resumed = /not allowed by (the project's rules|the coordinator)/.test(text)
       if (resumed && !session.stubborn) {
         await say('carrying on without it')
         return ended()
       }
       if (text === scenarios.stubborn) session.stubborn = true
-      const scenario = resumed ? scenarios.stubborn : text
+      const scenario = resumed ? scenarios.stubborn : text.startsWith('run ') ? scenarios.commandChoices : text
 
       switch (scenario) {
         case scenarios.commandChoices:
+        case scenarios.deniedThenWait:
         case scenarios.fileEdit:
         case scenarios.stubborn: {
-          const command = scenario === scenarios.commandChoices
+          const command = scenario === scenarios.commandChoices || scenario === scenarios.deniedThenWait
+          const line = text.startsWith('run ') ? text.slice(4) : 'make deploy'
           const toolCall = {
             toolCallId: 'call-2',
-            title: command ? 'Run make deploy' : 'Edit app.ts',
+            title: command ? `Run ${line}` : 'Edit app.ts',
             kind: command ? ('execute' as const) : ('edit' as const),
             // As agents do, the command itself, which the title only describes.
-            ...(command ? { rawInput: { command: 'make deploy' } } : {}),
+            ...(command ? { rawInput: { command: line } } : {}),
           }
           await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
           const chosen = await ask(toolCall, command ? commandOptions : fileEditOptions)
@@ -648,6 +656,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             status: chosen.startsWith('allow') ? 'completed' : 'failed',
           })
           await say(`chosen=${chosen}`)
+          if (scenario === scenarios.deniedThenWait) while (!session.cancelled) await pause(10)
           return session.cancelled || chosen === 'cancel' || chosen === 'cancelled' ? { stopReason: 'cancelled' } : ended()
         }
         case scenarios.question: {

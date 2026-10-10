@@ -76,11 +76,13 @@ test('the coordinator answers a task permission, leaves always-ask items to the 
 
     await say(page, 'tool')
     await expect(page.getByText('chosen=allow-once')).toBeVisible()
-    await page
-      .getByRole('button', { name: /^Worked for/ })
-      .last()
-      .click()
-    await expect(page.getByText(/Allowed by the coordinator: This action is needed for the task/)).toBeVisible()
+    await expect(page.getByText(/By the coordinator:/)).toHaveCount(0)
+
+    await say(page, 'run npm test')
+    await expect(page.getByText('chosen=allow_once')).toBeVisible()
+    await expect(
+      page.getByText('Allowed Run npm test By the coordinator: This action is needed for the task.', { exact: true }),
+    ).toBeVisible()
     await expect(page.getByText('Needs your permission')).toHaveCount(0)
     await page.screenshot({ path: 'test-results/coordinator-permission.png', animations: 'disabled' })
 
@@ -88,7 +90,7 @@ test('the coordinator answers a task permission, leaves always-ask items to the 
     await say(page, 'command-choices')
     await expect(page.getByText('Needs your permission')).toBeVisible()
     await page.getByRole('button', { name: /^Allow/ }).click()
-    await expect(page.getByText('chosen=allow_once')).toBeVisible()
+    await expect(page.getByText('chosen=allow_once')).toHaveCount(2)
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
     await page.getByRole('button', { name: /since you looked/ }).click()
     await expect(page.getByText('Coordinator answered 1 permission ask')).toBeVisible()

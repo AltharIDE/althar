@@ -95,7 +95,7 @@ One pull request each:
      Settings (⌘,). Not yet: a card for an agent that is signed out.
 
    Added on 2026-10-10: the coordinator answers permission requests in its
-   opt-in mode, with recorded reasons and human fallback ([ADR-018](../decisions/018-coordinator-judges-permissions.md)).
+   opt-in mode, with recorded reasons and human fallback ([ADR-019](../decisions/019-coordinator-judges-permissions.md)).
 
    Decided on 2026-10-04:
    - **No "send back" step.** The task's chat is how the person sends work

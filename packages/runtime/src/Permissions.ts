@@ -53,6 +53,12 @@ interface Waiting {
   readonly digest: string
 }
 
+/** A quiet receipt is bounded; the decision and judgment ledger retain the full text. */
+const receiptLine = (text: string, limit = 200) => {
+  const line = text.replace(/\s+/g, ' ').trim()
+  return line.length > limit ? `${line.slice(0, limit - 1)}…` : line
+}
+
 /** A digest of what the action does, so a decision is tied to exactly this action. */
 export const actionDigest = (request: PermissionRequest) =>
   createHash('sha256')
@@ -272,6 +278,7 @@ export class Permissions extends Context.Service<
                     const decision: PermissionDecision = {
                       decision: judgment.decision === 'allow' ? 'allow' : 'reject',
                       reason: judgment.reason,
+                      ...(judgment.decision === 'deny' ? { decidedBy: 'coordinator' as const } : {}),
                     }
                     yield* recordDecision({
                       context: requestContext,
@@ -286,8 +293,8 @@ export class Permissions extends Context.Service<
                       severity: 'info',
                       about: 'permission',
                       requestId,
-                      title: `${judgment.decision === 'allow' ? 'Allowed' : 'Denied'} by the coordinator: ${judgment.reason}`,
-                      description: request.title,
+                      title: `${judgment.decision === 'allow' ? 'Allowed' : 'Denied'} ${receiptLine(request.title, 120)}`,
+                      description: receiptLine(`By the coordinator: ${judgment.reason}`),
                     })
                     return { decision, verdict: undefined }
                   }

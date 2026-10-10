@@ -831,11 +831,11 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   const asked = found.find((each) => each.rule === 'unclear' || project.ask.includes(each.rule))
   if (asked !== undefined) return ask(asked.reason)
   if (named !== undefined) return ask(`The project's rules ask before \`${named.pattern.trim()}\`.`)
-  if (project.mode === 'coordinator') return { verdict: 'judge', reason: 'The coordinator decides within the project rules.' }
   // Reads, and changes to the task's own files, go through, as they would in any agent's sandbox.
   const ownFiles = CHANGES.includes(request.kind) && found.length === 0
-  if (project.mode === 'ask' && !LOOKS.includes(request.kind) && !ownFiles)
-    return ask("This project asks you before anything an agent does beyond the task's own files.")
+  const routine = LOOKS.includes(request.kind) || ownFiles
+  if (project.mode === 'coordinator' && !routine) return { verdict: 'judge', reason: 'The coordinator decides within the project rules.' }
+  if (project.mode === 'ask' && !routine) return ask("This project asks you before anything an agent does beyond the task's own files.")
   return ALLOW
 }
 

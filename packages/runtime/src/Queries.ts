@@ -1229,7 +1229,8 @@ export class Queries extends Context.Service<
           const answered = yield* sql<{ actorId: string; count: number; first: string }>`
             SELECT d.decided_by_actor_id AS actor_id, count(*) AS count, min(d.decided_at) AS first
             FROM decisions d JOIN projects p ON p.id = d.project_id
-            WHERE p.archived_at IS NULL AND d.decided_by_actor_id IN (${instance.systemId}, ${instance.coordinatorId}) AND d.decided_at > ${from}
+            WHERE p.archived_at IS NULL AND d.permission_request_id IS NOT NULL
+              AND d.decided_by_actor_id IN (${instance.systemId}, ${instance.coordinatorId}) AND d.decided_at > ${from}
             GROUP BY d.decided_by_actor_id`
           for (const group of answered) {
             const by = group.actorId === instance.coordinatorId ? 'coordinator' : 'rules'

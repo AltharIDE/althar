@@ -44,6 +44,16 @@ describe('the coordinator decides', () => {
     assert.strictEqual(run('git push origin althar/retry', { project }).verdict, 'judge')
   })
 
+  it('allows routine reads, searches and own-file edits without a judgment', () => {
+    for (const kind of ['read', 'search', 'edit', 'delete', 'move'] as const) {
+      const action = request({ kind, paths: [`${worktree}/src/app.ts`], rawInput: { path: `${worktree}/src/app.ts` } })
+      assert.strictEqual(decide(action, { ...context, project }).verdict, 'allow', kind)
+    }
+    const outside = request({ kind: 'edit', paths: ['/elsewhere/app.ts'] })
+    assert.strictEqual(decide(outside, { ...context, project }).verdict, 'judge')
+    assert.strictEqual(decide(outside, { ...context, project: { ...project, ask: ['outside'] } }).verdict, 'ask')
+  })
+
   it('cannot override always-ask, never, command rules, or the code-host boundary', () => {
     assert.strictEqual(run('npm publish', { project }).verdict, 'ask')
     assert.strictEqual(run('git push --force origin main', { project }).verdict, 'deny')

@@ -95,7 +95,7 @@ Decided in [ADR-013](decisions/013-project-rules.md).
   want some commands let through, as Cursor's and Roo's allowlists do.
 - [x] **Who judges permission requests.** The coordinator, using its agent
   and model in a fresh read-only session, with task context and human fallback.
-  Decided in [ADR-018](decisions/018-coordinator-judges-permissions.md).
+  Decided in [ADR-019](decisions/019-coordinator-judges-permissions.md).
 - [ ] **The network.** Rules on domains, as Codex's network proxy and Claude
   Code's `WebFetch(domain:…)` have.
 
@@ -440,7 +440,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 - [x] **Permissions: who answers.** The coordinator answers requests outside
   explicit always-ask and never rules when its mode is selected. Its failures
   and uncertainty reach the person; readers remain read-only. See
-  [ADR-018](decisions/018-coordinator-judges-permissions.md).
+  [ADR-019](decisions/019-coordinator-judges-permissions.md).
 - [ ] **Project rules: when and where they are set.** Leaning, as mocked in
   the kit's NewProject: creating a project asks one thing, who answers when
   agents need a yes (default "The agent in charge decides"), and every other rule starts

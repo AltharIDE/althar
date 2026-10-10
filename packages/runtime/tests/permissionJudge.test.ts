@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Ids } from '@althar/domain'
+import { Ids, newId } from '@althar/domain'
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { codexLikeMeanings, fakeAgent, fakeAgentMain, scenarios } from '@althar/provider-adapters/testing'
 import { Duration, Effect, Fiber, Layer, Schema } from 'effect'
@@ -71,8 +71,76 @@ const answerPerson = Effect.gen(function* () {
 })
 
 describe('coordinator permission judgments', () => {
-  for (const kind of ['read', 'edit', 'other'] as const)
-    it.live(`judges ${kind} requests using the complete action`, () => {
+  it.live('asks the person before launching a judge that cannot disable its tools', () => {
+    const { permissionJudge: _, ...unsupported } = definition('claude-code')
+    let calls = 0
+    return Effect.gen(function* () {
+      const { context, permissions } = yield* setup
+      const pending = yield* Effect.forkChild(permissions.decide(context, request()))
+      assert.include(yield* answerPerson, 'cannot judge without tools')
+      assert.strictEqual((yield* Fiber.join(pending)).decision, 'reject')
+      assert.strictEqual(calls, 0)
+    }).pipe(
+      Effect.provide(
+        runtime(
+          ':memory:',
+          {},
+          {
+            agents: Layer.succeed(
+              Agents,
+              Agents.from(
+                [unsupported, definition('codex')].map((definition) => ({
+                  definition,
+                  transport: () => ({
+                    _tag: 'InProcess',
+                    agent: fakeAgent({
+                      judgment: async () => {
+                        calls++
+                        return '{}'
+                      },
+                    }),
+                  }),
+                })),
+              ),
+            ),
+          },
+        ),
+      ),
+    )
+  })
+
+  it.live('limits a burst of judgments to two active sessions', () => {
+    let active = 0
+    let peak = 0
+    let calls = 0
+    return Effect.gen(function* () {
+      const { context, permissions } = yield* setup
+      const answers = yield* Effect.all(
+        Array.from({ length: 6 }, (_, i) => permissions.decide(context, request('npm test', `call-${i}`))),
+        {
+          concurrency: 'unbounded',
+        },
+      )
+      assert.strictEqual(calls, 6)
+      assert.strictEqual(peak, 2)
+      assert.isTrue(answers.every((answer) => answer.decision === 'allow'))
+    }).pipe(
+      Effect.provide(
+        runtime(':memory:', {
+          judgment: async () => {
+            calls++
+            peak = Math.max(peak, ++active)
+            await new Promise((resolve) => setTimeout(resolve, 50))
+            active--
+            return '{"decision":"allow","reason":"Needed for the task."}'
+          },
+        }),
+      ),
+    )
+  })
+
+  for (const kind of ['read', 'search', 'edit', 'other'] as const)
+    it.live(`handles ${kind} requests without judging routine file work`, () => {
       const prompts: Array<string> = []
       return Effect.gen(function* () {
         const { context, permissions } = yield* setup
@@ -84,8 +152,8 @@ describe('coordinator permission judgments', () => {
           paths: kind === 'other' ? [] : ['README.md'],
         }
         assert.strictEqual((yield* permissions.decide(context, action)).decision, 'allow')
-        assert.lengthOf(prompts, 1)
-        assert.include(prompts[0] ?? '', JSON.stringify(action))
+        assert.lengthOf(prompts, kind === 'other' ? 1 : 0)
+        if (kind === 'other') assert.include(prompts[0] ?? '', JSON.stringify(action))
       }).pipe(
         Effect.provide(
           runtime(':memory:', {
@@ -97,6 +165,19 @@ describe('coordinator permission judgments', () => {
         ),
       )
     })
+
+  for (const response of [
+    '```json\n{"decision":"allow","reason":"Needed for the task."}\n```',
+    'Allowing.\n{"decision":"allow","reason":"Needed for the task."}',
+    '```\n{"decision":"allow","reason":"The script prints {ok}."}\n```\nThat is my decision.',
+  ])
+    it.live(`accepts a wrapped answer: ${response.slice(0, 18)}`, () =>
+      Effect.gen(function* () {
+        const { context, permissions, sql } = yield* setup
+        assert.strictEqual((yield* permissions.decide(context, request())).decision, 'allow')
+        assert.lengthOf(yield* sql`SELECT id FROM attention_requests`, 0)
+      }).pipe(Effect.provide(runtime(':memory:', { judgment: async () => response }))),
+    )
 
   it.live('asks the person when a policy edit still leaves the action for the coordinator', () => {
     let respond: ((answer: string) => void) | undefined
@@ -295,10 +376,33 @@ describe('coordinator permission judgments', () => {
         assert.lengthOf(yield* sql`SELECT id FROM attention_requests`, 0)
         assert.isTrue(
           (yield* items(context.threadId)).some(
-            (item) => item.content.title === 'Allowed by the coordinator: Needed to verify the checkout.',
+            (item) =>
+              item.content.title === 'Allowed npm test' &&
+              item.content.description === 'By the coordinator: Needed to verify the checkout.',
           ),
         )
         const queries = yield* Queries
+        // Other kinds of attention answers must never inflate permission counts.
+        const attentionId = yield* newId(Ids.attentionRequest)
+        yield* sql`INSERT INTO attention_requests ${sql.insert({
+          id: attentionId,
+          projectId: context.projectId,
+          taskId: context.taskId,
+          kind: 'stuck',
+          state: 'answered',
+          addresseeActorId: instance.personId,
+          createdAt: new Date().toISOString(),
+          answeredAt: new Date().toISOString(),
+        })}`
+        yield* sql`INSERT INTO decisions ${sql.insert({
+          id: yield* newId(Ids.decision),
+          attentionRequestId: attentionId,
+          projectId: context.projectId,
+          outcome: 'allow',
+          scope: 'once',
+          decidedByActorId: instance.coordinatorId,
+          decidedAt: new Date().toISOString(),
+        })}`
         const home = yield* queries.home('2000-01-01T00:00:00.000Z')
         assert.strictEqual(home.events.find((event) => event.kind === 'answered')?.count, 1)
         assert.lengthOf(yield* sql`SELECT id FROM provider_sessions`, 2)
@@ -307,11 +411,12 @@ describe('coordinator permission judgments', () => {
           Queries.layer.pipe(
             Layer.provideMerge(
               runtime(':memory:', {
-                judgment: async ({ prompt, mode, model, mcpServers, askToWrite }) => {
+                judgment: async ({ prompt, mode, model, mcpServers, meta, askToWrite }) => {
                   prompts.push(prompt)
                   assert.strictEqual(mode, 'read-only')
                   assert.strictEqual(model, 'small')
                   assert.strictEqual(mcpServers, 0)
+                  assert.deepStrictEqual(meta, { fake: { tools: [] } })
                   assert.strictEqual(await askToWrite(), 'decline')
                   return '{"decision":"allow","reason":"Needed to verify the checkout."}'
                 },
@@ -341,22 +446,63 @@ describe('coordinator permission judgments', () => {
   it.live('records a denial and sends the narrow refusal to the task', () =>
     Effect.gen(function* () {
       const { context, permissions, sql, instance } = yield* setup
-      assert.deepStrictEqual(yield* permissions.decide(context, request()), { decision: 'reject', reason: 'Not needed for this task.' })
+      assert.deepStrictEqual(yield* permissions.decide(context, request()), {
+        decision: 'reject',
+        reason: 'Not needed for this task.',
+        decidedBy: 'coordinator',
+      })
       const [row] = yield* sql<{
         option: string
         actor: string
       }>`SELECT agent_option_id AS option, decided_by_actor_id AS actor FROM decisions`
       assert.deepStrictEqual(row, { option: 'decline', actor: instance.coordinatorId })
       assert.isTrue(
-        (yield* items(context.threadId)).some((item) => item.content.title === 'Denied by the coordinator: Not needed for this task.'),
+        (yield* items(context.threadId)).some(
+          (item) =>
+            item.content.title === 'Denied npm test' && item.content.description === 'By the coordinator: Not needed for this task.',
+        ),
       )
     }).pipe(Effect.provide(runtime(':memory:', { judgment: async () => '{"decision":"deny","reason":"Not needed for this task."}' }))),
   )
+
+  it.live('explains a coordinator denial to the lead over ACP', () =>
+    Effect.gen(function* () {
+      const { context, sessions } = yield* setup
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId: context.threadId,
+        body: 'run npm test',
+        disposition: 'after_current',
+      })
+      yield* until(turns(context.threadId), (rows) => rows.length === 2 && rows.every((row) => row.state === 'completed'))
+      const thread = yield* items(context.threadId)
+      assert.isTrue(thread.some((item) => String(item.content.description).includes('not allowed by the coordinator: Outside the task.')))
+      assert.isTrue(thread.some((item) => item.content.text === 'carrying on without it'))
+    }).pipe(Effect.provide(runtime(':memory:', { judgment: async () => '{"decision":"deny","reason":"Outside the task."}' }))),
+  )
+
+  it.live('keeps the receipt short and the full reason in the ledger', () => {
+    const reason = 'This request exceeds the scope of the task. '.repeat(15).trim()
+    return Effect.gen(function* () {
+      const { context, permissions, sql } = yield* setup
+      const action = { ...request(), title: 'A long action '.repeat(30) }
+      yield* permissions.decide(context, action)
+      const [receipt] = (yield* items(context.threadId)).filter((item) => item.content.about === 'permission')
+      assert.isAtMost(String(receipt?.content.title).length, 127)
+      assert.strictEqual(String(receipt?.content.description).length, 200)
+      assert.isTrue(String(receipt?.content.description).endsWith('…'))
+      const [stored] = yield* sql<{ reason: string }>`SELECT reason FROM decisions`
+      assert.strictEqual(stored?.reason, reason)
+      const [judged] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'permission_request.judged'`
+      assert.strictEqual(JSON.parse(judged?.payload ?? '{}').reason, reason)
+    }).pipe(Effect.provide(runtime(':memory:', { judgment: async () => JSON.stringify({ decision: 'deny', reason }) })))
+  })
 
   for (const [label, response] of [
     ['uncertainty', '{"decision":"ask","reason":"The destination is unclear."}'],
     ['invalid JSON', 'Sure, go ahead.'],
     ['invalid decision', '{"decision":"yes","reason":"fine"}'],
+    ['conflicting objects', '{"decision":"allow","reason":"fine"}\n{"decision":"deny","reason":"unsafe"}'],
     ['missing reason', '{"decision":"allow"}'],
     ['empty reason', '{"decision":"allow","reason":"  "}'],
     ['oversized reason', JSON.stringify({ decision: 'allow', reason: 'x'.repeat(1001) })],
@@ -380,7 +526,7 @@ describe('coordinator permission judgments', () => {
     return Effect.gen(function* () {
       const { context, permissions } = yield* setup
       const pending = yield* Effect.forkChild(permissions.decide(context, request()))
-      assert.include(yield* answerPerson, 'could not decide')
+      assert.include(yield* answerPerson, 'timed out')
       assert.strictEqual((yield* Fiber.join(pending)).decision, 'reject')
       assert.isAtLeast(closed, 1)
     }).pipe(
@@ -419,26 +565,33 @@ describe('coordinator permission judgments', () => {
     )
   })
 
-  it.live('cancels an in-flight judgment without applying an answer or opening an ask', () => {
-    let entered = false
+  it.live('cancels running and queued judgments without applying an answer or opening an ask', () => {
+    let entered = 0
     return Effect.gen(function* () {
       const { context, permissions, sql } = yield* setup
-      const pending = yield* Effect.forkChild(permissions.decide(context, request()))
+      const pending = yield* Effect.forkChild(
+        Effect.all(
+          Array.from({ length: 4 }, (_, i) => permissions.decide(context, request('npm test', `cancel-${i}`))),
+          { concurrency: 'unbounded' },
+        ),
+      )
       yield* until(
         Effect.sync(() => [entered]),
-        (rows) => rows[0] === true,
+        (rows) => rows[0] === 2,
       )
       yield* permissions.withdrawAll(context.sessionId)
       yield* Fiber.await(pending)
       assert.lengthOf(yield* sql`SELECT id FROM decisions`, 0)
       assert.lengthOf(yield* sql`SELECT id FROM attention_requests`, 0)
-      const [row] = yield* sql<{ state: string }>`SELECT state FROM permission_requests`
-      assert.strictEqual(row?.state, 'cancelled')
+      const rows = yield* sql<{ state: string }>`SELECT state FROM permission_requests`
+      assert.lengthOf(rows, 4)
+      assert.isTrue(rows.every((row) => row.state === 'cancelled'))
+      assert.strictEqual(entered, 2)
     }).pipe(
       Effect.provide(
         runtime(':memory:', {
           judgment: () => {
-            entered = true
+            entered++
             return new Promise(() => {})
           },
         }),

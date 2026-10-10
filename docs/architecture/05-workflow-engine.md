@@ -428,10 +428,13 @@ in a mode that asks, so it can answer from policy before anything reaches a
 person ([03](03-agent-runtime-and-auth.md), Permission routing).
 
 With **The coordinator decides** selected, the coordinator answers requests
-outside the explicit always-ask and never rules in a fresh read-only session
-([ADR-018](../decisions/018-coordinator-judges-permissions.md)). It uses the
-coordinator's agent and model, with the task's recent context; it has no tools
-and does not wait for the coordinator's conversation to become idle. Readers
+outside the explicit always-ask and never rules in a fresh session, after
+routine reads, searches and own-file edits pass through without a judgment
+([ADR-019](../decisions/019-coordinator-judges-permissions.md)). It uses the
+coordinator's agent and model, with the task's recent context, only where the
+registry has verified settings that remove its tools (currently Claude Code).
+Other agents fall back to the person. At most two judgments run at once, and
+none waits for the coordinator's conversation to become idle. Readers
 remain read-only. Invalid, uncertain, failed or timed-out judgments go to the
 person. Each answer records its reason, cost when reported, token usage and
 latency; the thread shows who decided, and the home counts coordinator answers.

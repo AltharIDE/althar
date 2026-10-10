@@ -78,6 +78,7 @@ export const definition = (id: string, signedOut: ReadonlyArray<string> = [], pe
   // Shares everything in its usual folder but its sign-in, as OpenCode's data folder does.
   home: { variable: 'FAKE_HOME', usual: () => join(fakeHomes, id), shared: (names) => names.filter((name) => name !== 'auth.json') },
   permissions: codexLikeMeanings,
+  permissionJudge: { sessionMeta: { fake: { tools: [] } } },
   // One fake agent passes session options, as Claude Code's entry does.
   ...(id === 'claude-code' ? { sessionMeta: () => ({ fake: { asks: true } }) } : {}),
   knownGaps: [],

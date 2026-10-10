@@ -385,7 +385,7 @@ describe('the home', () => {
       what: 'Coordinator answered 1 permission ask',
     })
     expect(lineOf({ kind: 'answered', id: 'c', at, count: 3, by: 'coordinator' }, projects, now)).toMatchObject({
-      what: 'Coordinators answered 3 permission asks',
+      what: 'Coordinator answered 3 permission asks',
     })
   })
 

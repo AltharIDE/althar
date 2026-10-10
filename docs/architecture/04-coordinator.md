@@ -27,7 +27,7 @@ See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
 - follows the work, and passes messages to a task's lead;
 - judges task permission requests when the project selects that mode, in a
   fresh read-only session using its agent and model, without delaying the
-  conversation ([ADR-018](../decisions/018-coordinator-judges-permissions.md)).
+  conversation ([ADR-019](../decisions/019-coordinator-judges-permissions.md)).
 
 It never edits a repository, runs builds or tests, or merges, even for a
 one-line change. A change is always a task with a lead.

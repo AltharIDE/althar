@@ -37,7 +37,7 @@ export const Everywhere: Story = { args: strip(ANSWERED) }
 
 /** Permission requests settled by coordinators while the person was away. */
 export const CoordinatorDecisions: Story = {
-  args: { icon: 'lock', what: 'Coordinators answered 3 permission asks', detail: 'within the projects’ rules', at: 'since 2h ago' },
+  args: { icon: 'lock', what: 'Coordinator answered 3 permission asks', detail: 'within the projects’ rules', at: 'since 2h ago' },
 }
 
 /** It opens what it happened to: the task, or its pull request. What happened is the target, stretched over the row. */

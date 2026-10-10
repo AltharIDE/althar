@@ -31,7 +31,7 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `Nudges.ts` | What reaches the person outside the window: each thing that comes to need them, a call or a task ready, and how many wait |
 | `Models.ts` | The models each agent offers and how hard each can think, from its latest session or asked once a launch |
 | `Permissions.ts` | Records requests and decisions, applies rules before coordinator judgments, and asks the person on reserved requests or judgment failure |
-| `PermissionJudge.ts` | A bounded fresh read-only coordinator session, with task context, validated answers and usage metrics (ADR-018) |
+| `PermissionJudge.ts` | At most two fresh coordinator judgments, requiring verified tool removal, with task context, validated answers and usage metrics (ADR-019) |
 | `coordinatorChoice.ts` | The shared agent and model selection for coordinator conversations and judgments |
 | `rules.ts` | The rules: what no project can change (credentials, the code host), each kind of request they keep for the person, and the project's rules on top, never before ask before allow; for a role that only reads, only what reads. Commands are read as a shell would split them |
 | `threads.ts` | Turns agent events into thread items; writes the thread as text for a brief |
