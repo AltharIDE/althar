@@ -17,6 +17,7 @@ From the repository root, run `bun install`. Then run these from `apps/site`:
 | `bun run preview` | Serve the build at `http://localhost:4320` |
 | `bun run check` | Format, lint and TypeScript checks |
 | `bun run test` | Unit tests (`tests/`) |
+| `bun run og` | Draw the link-preview images into `public/og/` |
 
 `?t=6.5` in the address holds every timeline on the page at that second, for looking at one frame. The coordinator's plan card keeps its own clock, as it does in the app.
 
@@ -53,7 +54,8 @@ From a machine logged in with `bunx wrangler login`, `bun run deploy` builds and
 - `src/content/`: what the site says. `home.ts` is the developer page's copy, `agents.ts` the agents Althar runs and how they sign in, `shifts.ts` the shifts with their sources, `pages.ts` each page's title and description, and `facts.ts` the links and install lines. The enterprise page's content is `meridian.ts`, `site.ts` and `sheet.ts`. Change the facts here, not in a component.
 - `src/lib/`: `motion.ts` (the timeline player and easing), `useCurrent.ts` (which part is on screen), `meta.ts` (writes a page's meta into its HTML at build), `cx.ts`.
 - `/wallpaper/<file>.jpg`: the wallpapers, which are the brand pack's (`brand/export/wallpaper`). They aren't kept here: `vite.config.ts` serves them from there in development and copies them into `dist/wallpaper/` in the build. Draw them with `bun --filter @althar/brand export:wallpapers`, then copy its `aurora-card.png` to `public/og/wallpaper.png`. `tests/wallpaper.test.ts` fails if the page links a file the pack doesn't have, or if the card differs.
-- `public/og/`: the link-preview images, 1200×630. Their sources are `althar-designs/althar-readme/og/` (`node og/shoot.mjs <this folder>`); re-shoot `shifts.png` when the shifts grow.
+- `src/og/`: the link-preview cards, drawn as the footer's print: the words in cobalt ink over the engraving, with the altar's light rising beside them. `cards.tsx` holds each card's words. In development, `/og?page=home` shows one card on its own, and `/og` shows them all; the route isn't in the build.
+- `public/og/`: the link-preview images, 1200×630. `bun run og` draws `home.png`, `shifts.png` and `thesis.png` from `src/og/` (at twice the size, scaled down, as palette PNGs); run it after changing a card's words or the engraving. `/docs` and `/enterprise` use the home card; `wallpaper.png` is the brand pack's.
 
 The developer page's drafts are in `althar-designs/althar-dev/` (`a.html` is the one this page follows). The enterprise page's earlier concepts are archived in `althar-designs/prototypes/_archive/landing-concepts-2026-09-29/`.
 
