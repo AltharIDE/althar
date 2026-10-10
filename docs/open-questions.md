@@ -9,6 +9,28 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## Questions agents ask, 10 October
+
+- [x] **What a question waits on.** The thread, not the session: it outlives
+  a restart, the agent going and a switch of agent, and its answer is told
+  to the agent on the thread next ([ADR-021](decisions/021-a-question-outlives-its-session.md)).
+- [x] **Which steps may ask.** The lead and the coordinator; a reviewer is
+  given no way to (ADR-021).
+- [ ] **Answering from the home or the edge.** Today a question's line opens
+  the task, where it is answered. A single question with a few short options
+  could be answered on its line, as a permission is. Leaning: yes, for one
+  question with up to three options; anything else opens the task.
+- [ ] **Codex and OpenCode ask in words.** Codex offers request_user_input
+  only in its Plan mode; told to use it in the default mode, it once ended
+  its turn with nothing said. OpenCode keeps its question tool off over ACP.
+  A lead that asks in words ends its turn, is reminded to report, and then
+  its step needs the person. Should Althar turn Codex's tool on
+  (`tools.experimental_request_user_input`), or read a question out of a
+  lead's last words?
+- [ ] **Writing while a question waits.** A message the person queues waits
+  behind the question, since the turn is blocked on it. Should what they
+  write answer it, in their own words?
+
 ## Dictation, 10 October
 
 - [x] **Where speech is turned into text.** On this machine only, with a
