@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Althar's interface primitives (the thread, the coordinator's cards, the composer), with a Storybook and a workbench.",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
