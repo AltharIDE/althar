@@ -13,12 +13,13 @@ import s from './Nav.module.css'
  */
 
 const PAGES = [
+  { href: '/', name: 'Home' },
   { href: '/shifts', name: 'Shifts' },
   { href: '/thesis', name: 'Thesis' },
   { href: '/docs', name: 'Docs' },
 ]
 
-const here = (href: string) => typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === href
+const here = (href: string) => typeof window !== 'undefined' && (window.location.pathname.replace(/\/+$/, '') || '/') === href
 
 /** Whether the page has scrolled past `past` px. */
 function useScrolled(past = 40) {
