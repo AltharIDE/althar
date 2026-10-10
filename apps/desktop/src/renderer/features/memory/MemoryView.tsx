@@ -1,5 +1,5 @@
 import type { MemoryDetail } from '@althar/contracts'
-import { BackCrumb, Button, TitleBar } from '@althar/ui'
+import { BackCrumb, Button } from '@althar/ui'
 
 import { PartPending } from '../../shared/Pending'
 import s from './Memory.module.css'
@@ -17,10 +17,10 @@ export function MemoryView({
   const entry = model.detail
   return (
     <div className={s.window}>
-      <TitleBar lights="none">
-        <BackCrumb to={model.project} onBack={onBack} />
-      </TitleBar>
       <main className={s.main}>
+        <div className={s.back}>
+          <BackCrumb to={model.project} onBack={onBack} />
+        </div>
         <header>
           <h1>Project memory</h1>
           <p>

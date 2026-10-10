@@ -2,8 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { TitleBar } from '../../chrome/TitleBar/TitleBar'
-import { WorkStatus } from '../../chrome/WorkStatus/WorkStatus'
+import { ProjectTabs } from '../../chrome/ProjectTabs/ProjectTabs'
 import {
   DECISION,
   HALYARD,
@@ -20,14 +19,16 @@ import {
   STUCK,
   TESSERA,
 } from '../../fixtures/home'
-import { Logo } from '../../foundations/Logo/Logo'
+import { MARKED, SEEDS } from '../../fixtures/marks'
+import { ProjectInk } from '../../foundations/ProjectMark/drawing'
 import { TaskStatus } from '../../foundations/vocabulary'
-import { NeedCard, NeedChange, NeedCommand, NeedOptions } from '../../home/NeedCard/NeedCard'
+import { NeedLine } from '../../home/NeedLine/NeedLine'
+import type { ProjectRef } from '../../home/ProjectWord/ProjectWord'
 import { AskAnswered, AskNote } from '../../primitives/Ask/Ask'
 import { Button } from '../../primitives/Button/Button'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { States } from '../../storybook/States'
-import { Home, type HomeProject, type HomeProps } from './Home'
+import { Home, type HomeProject, type HomeProps, type HomeRun } from './Home'
 import s from './Home.stories.module.css'
 
 const meta = {
@@ -40,7 +41,6 @@ const meta = {
     since: SINCE,
     looked: '3 h ago',
     projects: PROJECT_LIST,
-    onOpenTask: fn(),
     onOpenEvent: fn(),
     onOpenProject: fn(),
     onTalk: fn(),
@@ -50,31 +50,29 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/* ---- the window around the home: its bar, as the app draws it ---- */
+/* ---- the window around the home: its one bar, as the app draws it ---- */
 
-function Window({ running, waiting, onYours, children }: { running: number; waiting: number; onYours?: () => void; children: ReactNode }) {
+function Window({ waiting, children }: { waiting: number; children: ReactNode }) {
   return (
     <div className={s.window}>
-      <TitleBar
+      <ProjectTabs
         lights="drawn"
-        end={
-          <>
-            <WorkStatus running={running} yours={waiting} {...(onYours ? { onYours } : {})} />
-            <IconButton icon="gear" label="Settings" kbd="⌘," size="small" />
-          </>
-        }
-      >
-        <span className={s.brand}>
-          <Logo size={15} />
-          Althar
-        </span>
-      </TitleBar>
+        tabs={MARKED.map((p) => ({ id: p.id, name: p.name, seed: p.id, ink: p.ink, running: p.running, yours: 0 }))}
+        current={null}
+        yours={waiting}
+        onSelect={fn()}
+        onClose={fn()}
+        end={<IconButton icon="gear" label="Settings" kbd="⌘," size="small" />}
+      />
       <div className={s.body}>{children}</div>
     </div>
   )
 }
 
 /* ---- what waits on you, answered where it is or opened as the task ---- */
+
+/** Opens a call's task, by its call. */
+const openTask = fn()
 
 interface Said {
   said: string
@@ -91,20 +89,19 @@ function Day({ troubled = false, ...props }: Omit<HomeProps, 'needs' | 'waiting'
       return rest
     })
 
-  const cards: { id: string; project: string; node: ReactNode }[] = [
+  const cards: { id: string; project: ProjectRef; node: ReactNode }[] = [
     ...(troubled
       ? [
           {
             id: 'signin',
-            project: SIGNED_OUT.project.seed,
+            project: SIGNED_OUT.project,
             node: (
-              <NeedCard
+              <NeedLine
                 kind={SIGNED_OUT.kind}
                 project={SIGNED_OUT.project}
                 task={SIGNED_OUT.task}
                 title={SIGNED_OUT.title}
-                at={SIGNED_OUT.at}
-                detail={SIGNED_OUT.because}
+                brief={SIGNED_OUT.because}
                 actions={
                   <Button
                     size="small"
@@ -120,15 +117,14 @@ function Day({ troubled = false, ...props }: Omit<HomeProps, 'needs' | 'waiting'
           },
           {
             id: 'stuck',
-            project: STUCK.project.seed,
+            project: STUCK.project,
             node: (
-              <NeedCard
+              <NeedLine
                 kind={STUCK.kind}
                 project={STUCK.project}
                 task={STUCK.task}
                 title={STUCK.title}
-                at={STUCK.at}
-                detail={STUCK.because}
+                brief={STUCK.because}
                 actions={
                   <>
                     <Button
@@ -153,15 +149,14 @@ function Day({ troubled = false, ...props }: Omit<HomeProps, 'needs' | 'waiting'
       : []),
     {
       id: 'publish',
-      project: PUBLISH.project.seed,
+      project: PUBLISH.project,
       node: (
-        <NeedCard
+        <NeedLine
           kind={PUBLISH.kind}
           project={PUBLISH.project}
           task={PUBLISH.task}
           title={PUBLISH.title}
-          at={PUBLISH.at}
-          detail={<NeedCommand command={PUBLISH.command} agent={PUBLISH.agent} step={PUBLISH.step} />}
+          command={PUBLISH.command}
           actions={
             <>
               <Button
@@ -187,18 +182,17 @@ function Day({ troubled = false, ...props }: Omit<HomeProps, 'needs' | 'waiting'
       : [
           {
             id: 'accept',
-            project: READY.project.seed,
+            project: READY.project,
             node: (
-              <NeedCard
+              <NeedLine
                 kind={READY.kind}
                 project={READY.project}
                 task={READY.task}
                 title={READY.title}
-                at={READY.at}
-                onOpen={() => props.onOpenTask?.('accept')}
-                detail={<NeedChange {...READY.change} />}
+                onOpen={() => openTask('accept')}
+                brief={`${READY.change.repo} #${READY.change.number} · checks passed · +${READY.change.add} −${READY.change.del}`}
                 actions={
-                  <Button size="small" onClick={() => props.onOpenTask?.('accept')}>
+                  <Button size="small" onClick={() => openTask('accept')}>
                     Review
                   </Button>
                 }
@@ -207,18 +201,17 @@ function Day({ troubled = false, ...props }: Omit<HomeProps, 'needs' | 'waiting'
           },
           {
             id: 'decision',
-            project: DECISION.project.seed,
+            project: DECISION.project,
             node: (
-              <NeedCard
+              <NeedLine
                 kind={DECISION.kind}
                 project={DECISION.project}
                 task={DECISION.task}
                 title={DECISION.title}
-                at={DECISION.at}
-                onOpen={() => props.onOpenTask?.('decision')}
-                detail={<NeedOptions options={DECISION.options} />}
+                onOpen={() => openTask('decision')}
+                brief={DECISION.options.map((o) => o.label).join('  or  ')}
                 actions={
-                  <Button size="small" onClick={() => props.onOpenTask?.('decision')}>
+                  <Button size="small" onClick={() => openTask('decision')}>
                     Decide
                   </Button>
                 }
@@ -229,23 +222,27 @@ function Day({ troubled = false, ...props }: Omit<HomeProps, 'needs' | 'waiting'
   ]
   const waiting = cards.filter((c) => !answers[c.id])
   // each project's dot and count follow the calls this day shows
-  const projects = props.projects.map((p) => ({ ...p, yours: waiting.filter((c) => c.project === p.id).length }))
+  const projects = props.projects.map((p) => ({ ...p, yours: waiting.filter((c) => c.project.seed === p.id).length }))
 
   return (
-    <Window running={props.running.length} waiting={waiting.length}>
+    <Window waiting={waiting.length}>
       <Home
         {...props}
         projects={projects}
         waiting={waiting.length}
-        needs={cards.map(({ id, node }) => {
+        needs={cards.map(({ id, project, node }) => {
           const said = answers[id]
-          return said ? (
-            <AskAnswered key={id} said={said.said} denied={said.denied ?? false} onUndo={() => undo(id)} focusOnMount>
-              <AskNote>{said.note}</AskNote>
-            </AskAnswered>
-          ) : (
-            <div key={id}>{node}</div>
-          )
+          return {
+            key: id,
+            project,
+            line: said ? (
+              <AskAnswered said={said.said} denied={said.denied ?? false} onUndo={() => undo(id)} focusOnMount>
+                <AskNote>{said.note}</AskNote>
+              </AskAnswered>
+            ) : (
+              node
+            ),
+          }
         })}
       />
     </Window>
@@ -255,12 +252,12 @@ function Day({ troubled = false, ...props }: Omit<HomeProps, 'needs' | 'waiting'
 /** A busy afternoon: three calls across projects, five tasks running, and what the loop did in the three hours since you looked. Answer the permission where it is; Review and Decide open the task. */
 export const Busy: Story = {
   render: (args) => <Day {...args} />,
-  play: async ({ canvasElement, args }) => {
+  play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Allow once' }))
     await expect(await canvas.findByText('Allowed npm publish')).toBeInTheDocument()
     await userEvent.click(canvas.getByRole('button', { name: 'Decide' }))
-    await expect(args.onOpenTask).toHaveBeenCalledWith('decision')
+    await expect(openTask).toHaveBeenCalledWith('decision')
   },
 }
 
@@ -268,7 +265,7 @@ export const Busy: Story = {
 export const Quiet: Story = {
   args: { needs: [], running: RUNNING_QUIET, since: SINCE_QUIET, looked: 'last night, 23:40', projects: PROJECTS_QUIET },
   render: (args) => (
-    <Window running={args.running.length} waiting={0}>
+    <Window waiting={0}>
       <Home {...args} waiting={0} />
     </Window>
   ),
@@ -278,13 +275,41 @@ export const Quiet: Story = {
 export const SomethingWrong: Story = {
   args: {
     running: RUNNING.map((run) =>
-      run.id === 'm424'
-        ? { ...run, status: TaskStatus.Yours, note: 'Stuck: waits on you' }
-        : run.id === 't88'
-          ? { ...run, status: TaskStatus.Paused, note: 'Waits for Codex to sign in' }
-          : run,
+      run.id === 'm424' ? { ...run, status: TaskStatus.Yours } : run.id === 't88' ? { ...run, status: TaskStatus.Paused } : run,
     ),
   },
+  render: (args) => <Day {...args} troubled />,
+}
+
+/* ---- a heavy day: many projects, many tasks in progress ---- */
+
+const INKS = Object.values(ProjectInk)
+const MANY_PROJECTS: HomeProject[] = [
+  ...PROJECT_LIST,
+  ...SEEDS.slice(4).map((seed, i) => ({
+    id: seed,
+    project: { seed, ink: INKS[i % INKS.length]!, name: seed.charAt(0).toUpperCase() + seed.slice(1).replace(/-/g, ' ') },
+    yours: 0,
+    note: i % 3 === 0 ? 'Last task last week' : 'Last task 11 days ago',
+  })),
+]
+/** Two tasks or so in most of the busy projects, a few held or stopped. */
+const MANY_RUNNING: HomeRun[] = MANY_PROJECTS.slice(0, 12).flatMap((p, i) =>
+  Array.from({ length: (i % 3) + 1 }, (_, k) => {
+    const base = RUNNING[(i + k) % RUNNING.length]!
+    return {
+      ...base,
+      id: `${p.id}-${k}`,
+      project: p.project,
+      ...(i === 6 && k === 0 ? { status: TaskStatus.Paused } : {}),
+      ...(i === 9 && k === 1 ? { status: TaskStatus.Stopped } : {}),
+    }
+  }),
+)
+
+/** Sixteen projects and two dozen tasks: the middle is still only what needs you, gathered by project; the side list scrolls and the quiet projects fold away. */
+export const HeavyDay: Story = {
+  args: { running: MANY_RUNNING, projects: MANY_PROJECTS },
   render: (args) => <Day {...args} troubled />,
 }
 
@@ -298,7 +323,6 @@ export const WithoutOpeningAFolder: Story = {
 const fresh = (id: string, project: typeof MERIDIAN): HomeProject => ({
   id,
   project,
-  running: 0,
   yours: 0,
   note: 'No tasks yet',
   fresh: true,
@@ -306,7 +330,7 @@ const fresh = (id: string, project: typeof MERIDIAN): HomeProject => ({
 
 function Resting(args: HomeProps) {
   return (
-    <Window running={0} waiting={0}>
+    <Window waiting={0}>
       <Home {...args} waiting={0} running={[]} />
     </Window>
   )
@@ -342,7 +366,7 @@ export const AtRestAllQuiet: Story = {
 function WorkComing(args: HomeProps) {
   const [working, setWorking] = useState(false)
   return (
-    <Window running={working ? 1 : 0} waiting={0}>
+    <Window waiting={0}>
       <div className={s.toggle}>
         <Button size="small" onClick={() => setWorking((now) => !now)}>
           {working ? 'Settle the task' : 'Start a task'}
@@ -376,7 +400,7 @@ export const AllStates: Story = {
           state: 'quiet',
           node: (
             <div className={s.cell}>
-              <Window running={1} waiting={0}>
+              <Window waiting={0}>
                 <Home {...args} {...Quiet.args} waiting={0} />
               </Window>
             </div>

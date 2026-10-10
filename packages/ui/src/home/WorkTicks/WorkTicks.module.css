@@ -1,0 +1,23 @@
+.ticks {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.tick {
+  flex: none;
+  width: 12px;
+  height: 4px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--t-1) 34%, transparent);
+}
+/* standing still: held for a reset, stopped, or waiting */
+.still {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--t-4);
+}
+.more {
+  margin-left: 3px;
+  font: 500 10.5px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}

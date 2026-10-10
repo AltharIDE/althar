@@ -1,60 +1,26 @@
 import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from 'react'
 
-import type { HomeTask } from '@althar/contracts'
-import {
-  AskAnswered,
-  AskNote,
-  Button,
-  EdgeRow,
-  EdgeSheet,
-  Island,
-  ISLAND_HOVER,
-  NeedCommand,
-  type NotchSize,
-  type ProjectRef,
-  TaskStatus,
-} from '@althar/ui'
+import { AskAnswered, AskNote, EdgeSheet, Island, ISLAND_HOVER, type NotchSize } from '@althar/ui'
 
 import { useServices } from '../../data/services'
-import { waitsWords } from '../../shared/agents'
-import { kindWords } from '../../shared/calls'
-import { productName } from '../../shared/products'
-import { ago, clock, running, useNow } from '../../shared/time'
-import { trackOf } from '../board/BoardView'
 import { refOf, text as homeText } from '../home/HomeView'
-import { text as stuckText } from '../task/StuckCall'
+import { needLineOf, needsOf, workOf } from '../home/needs'
 import s from './Edge.module.css'
 import type { EdgeModel } from './useEdge'
 
 /*
  * Althar at the edge of the screen, while the person works in another app:
- * the home in small. Round the notch it is the kit's Island, and its sheet
- * in ink; in the menu bar, the sheet on paper under Althar's mark. What
- * waits on the person comes first, answered here when a click will do, and
- * opened in Althar's window when it needs reading; then what is in
- * progress. Anything's title opens its task in the window.
+ * only what needs them. Round the notch it is the kit's Island, the notch
+ * alone until something waits, and its sheet in ink; in the menu bar, the
+ * sheet on paper under Althar's mark. What waits is listed as the home lists
+ * it, answered here when a click will do and opened in Althar's window when
+ * it needs reading; the work in progress is one line at the foot. Anything's
+ * title opens its task in the window.
  */
 
-export const text = {
-  ...homeText,
-  /** A ready task's pull request: its host, its number, and its lines. */
-  change: (host: string, number: string, add: number | null, del: number | null) =>
-    add === null || del === null ? `${host} ${number}` : `${host} ${number} · +${add} −${del}`,
-}
+export const text = homeText
 
 export type EdgePlaceShown = { readonly place: 'island'; readonly notch: NotchSize } | { readonly place: 'menu' }
-
-/** Where a task in progress stands: running, held for a usage limit, stopped, or waiting on a call. */
-const statusOf = (task: HomeTask): TaskStatus => {
-  switch (task.phase) {
-    case 'waiting':
-      return TaskStatus.Yours
-    case 'stopped':
-      return TaskStatus.Stopped
-    default:
-      return task.waits === null ? TaskStatus.Running : TaskStatus.Paused
-  }
-}
 
 /** Whether the page is on screen: the menu bar's sheet is kept, hidden, between clicks. */
 const useShowing = () => {
@@ -71,8 +37,6 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
   const { host } = useServices()
   const [open, setOpen] = useState(false)
   const showing = useShowing()
-  // Times move only while they show: the island open, or the menu bar's sheet on screen.
-  const now = new Date(useNow(showing && (shown.place === 'menu' || open)))
   // Calls answered here fold to lines while the edge stays open, as on the home; closed, they go.
   const away = shown.place === 'island' ? !open : !showing
   const onAway = useEffectEvent(() => model.closed())
@@ -85,76 +49,22 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
   const tasks = home?.tasks ?? []
   const calls = (home?.calls ?? []).filter((call) => !model.answered.some((one) => one.id === call.id))
   const ready = tasks.filter((task) => task.phase === 'ready')
-  const working = tasks.filter((task) => task.phase !== 'ready')
+  // What has a call above isn't counted again in the work.
+  const called = new Set((home?.calls ?? []).map((call) => call.threadId))
+  const working = tasks.filter((task) => task.phase !== 'ready' && !called.has(task.threadId) && refs.has(task.projectId))
   const waiting = calls.length + ready.length
-  const underway = working.filter((task) => task.phase === 'running' && task.waits === null).length
   const openThread = (threadId: string) => host.openInWindow(threadId)
 
-  const row = (id: string, project: ProjectRef, props: Omit<Parameters<typeof EdgeRow>[0], 'project'>) => (
-    <EdgeRow key={id} project={project} fresh={model.fresh === id} {...props} />
-  )
-
   const needs: ReadonlyArray<ReactNode> = [
-    ...calls.flatMap((call) => {
-      const project = refs.get(call.projectId)
-      if (project === undefined) return []
-      const shared = { status: TaskStatus.Yours, meta: ago(call.createdAt, now), onOpen: () => openThread(call.threadId) }
-      const what = call.command ?? call.title
-      return [
-        call.stuck === null
-          ? row(call.id, project, {
-              ...shared,
-              kind: kindWords.permission,
-              title: call.title,
-              detail: <NeedCommand command={what} />,
-              actions: (
-                <>
-                  <Button size="small" onClick={() => model.answer(call, 'reject', text.denied(what))}>
-                    {text.deny}
-                  </Button>
-                  <Button size="small" variant="signal" onClick={() => model.answer(call, 'allow', text.allowed(what))}>
-                    {text.allow}
-                  </Button>
-                </>
-              ),
-            })
-          : row(call.id, project, {
-              ...shared,
-              kind: kindWords.stuck,
-              title: call.taskTitle,
-              detail: stuckText.what(call.stuck, name(call.stuck.agentId) || 'The agent'),
-              actions: (
-                <Button size="small" onClick={shared.onOpen}>
-                  {text.look}
-                </Button>
-              ),
-            }),
-      ]
-    }),
-    ...ready.flatMap((task) => {
-      const project = refs.get(task.projectId)
-      if (project === undefined) return []
-      const change = task.change
-      return [
-        row(task.taskId, project, {
-          status: TaskStatus.Yours,
-          kind: kindWords.ready,
-          title: task.title,
-          detail:
-            change !== null
-              ? text.change(productName(change.product), `${change.prefix}${change.number}`, change.additions, change.deletions)
-              : task.changed === null
-                ? text.onBranch
-                : text.branchSize(task.changed.files, task.changed.add, task.changed.del),
-          onOpen: () => openThread(task.threadId),
-          actions: (
-            <Button size="small" onClick={() => openThread(task.threadId)}>
-              {text.review}
-            </Button>
-          ),
-        }),
-      ]
-    }),
+    ...needsOf({ calls, ready, refs, agentName: name }).map((need) =>
+      needLineOf(need, {
+        onOpen: openThread,
+        onAnswer: (call, _project, decision) => {
+          const what = call.command ?? call.title
+          model.answer(call, decision, decision === 'allow' ? text.allowed(what) : text.denied(what))
+        },
+      }),
+    ),
     ...model.answered.map((one) => (
       <AskAnswered key={one.id} said={one.said} denied={one.denied} focusOnMount>
         <AskNote>{text.answeredIn(one.project)}</AskNote>
@@ -162,30 +72,12 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
     )),
   ]
 
-  const work = working.flatMap((task) => {
-    const project = refs.get(task.projectId)
-    if (project === undefined) return []
-    const status = statusOf(task)
-    const { steps, at } = trackOf(task)
-    const lead = name(task.lead)
-    const meta =
-      task.waits !== null
-        ? waitsWords(name(task.waits.agentId), clock(task.waits.until, now))
-        : status === TaskStatus.Stopped
-          ? text.stopped
-          : status === TaskStatus.Yours
-            ? text.waiting
-            : [steps[at], lead, task.startedAt === null ? '' : running(task.startedAt, now.toISOString())].filter(Boolean).join(' · ')
-    return [row(task.taskId, project, { status, title: task.title, meta, onOpen: () => openThread(task.threadId) })]
-  })
-
   const sheet = (
     <EdgeSheet
       tone={shown.place === 'island' ? 'ink' : 'paper'}
       waiting={waiting}
-      working={work.length}
       needs={needs}
-      work={work}
+      work={workOf(working)}
       failure={model.error}
       onOpenApp={() => host.openInWindow()}
     />
@@ -199,7 +91,6 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
             ref={ref}
             notch={shown.notch}
             waiting={waiting}
-            running={underway}
             saying={model.saying}
             open={open}
             onOpenChange={setOpen}

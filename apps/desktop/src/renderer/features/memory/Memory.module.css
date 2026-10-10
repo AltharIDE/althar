@@ -1,5 +1,6 @@
 .window { height: 100%; display: flex; flex-direction: column; background: var(--n-2); }
 .main { flex: 1; min-height: 0; overflow: auto; padding: 28px 40px; color: var(--t-1); font-size: 13px; }
+.back { margin-bottom: 24px; }
 .main h1 { font-size: 22px; font-weight: 550; margin: 0 0 8px; }
 .main h2 { font-size: 17px; font-weight: 550; }
 .main h3 { font-size: 12px; margin-top: 24px; }

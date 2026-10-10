@@ -1,4 +1,4 @@
-/* The home: the stream, and the projects beside it. */
+/* The home: what waits on you in the middle, the projects at the side. */
 .home {
   display: flex;
   height: 100%;
@@ -6,78 +6,161 @@
   background: var(--n-2);
 }
 .stream {
+  position: relative;
   flex: 1;
   min-width: 0;
   overflow-y: auto;
 }
-/* named for the outline only; the sections say what the page holds */
+/* named for the outline only; what it holds says the rest */
 .title {
   margin: 0;
 }
 .column {
   display: flex;
   flex-direction: column;
-  gap: 40px;
-  max-width: 780px;
+  gap: 32px;
+  max-width: 820px;
   margin: 0 auto;
-  padding: 40px 40px 80px;
+  padding: 56px 40px 30vh;
 }
-.cards {
+/*
+ * The colour comes from the projects that need you: a wash of up to three
+ * of their inks behind the heading, each from its own side, fading into
+ * the page well before the calls end.
+ */
+.washed {
+  background-image:
+    radial-gradient(ellipse 34% 70% at 14% -18%, color-mix(in srgb, var(--wash-1, transparent) 20%, transparent), transparent 70%),
+    radial-gradient(ellipse 34% 70% at 50% -18%, color-mix(in srgb, var(--wash-2, transparent) 20%, transparent), transparent 70%),
+    radial-gradient(ellipse 34% 70% at 86% -18%, color-mix(in srgb, var(--wash-3, transparent) 20%, transparent), transparent 70%);
+  background-repeat: no-repeat;
+  background-size: 100% 460px;
+}
+.needs {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 22px;
 }
-.rows,
-.events,
-.list {
+/* how many wait on you, beside the marks of where */
+.head {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 6px;
+  padding: 0 4px;
+}
+.stack {
+  flex: none;
+  display: flex;
+}
+.stack > * {
+  border-radius: 10px;
+  box-shadow: 0 0 0 3px var(--n-2);
+}
+.stack > * + * {
+  margin-left: -10px;
+}
+.headWords {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.yours {
   margin: 0;
-  padding: 0;
+  font: 640 30px/1.15 var(--font-display);
+  letter-spacing: -0.028em;
+  color: var(--t-1);
+}
+.where {
+  font-size: 13.5px;
+  color: var(--t-2);
+}
+/* one project's calls, under its mark and name */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+
+/* what the loop did: one ruled line, opening to a line each */
+.since {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.sinceLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 44px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  color: var(--t-2);
+  text-align: left;
+}
+.sinceLine:hover {
+  color: var(--t-1);
+}
+.sinceLine:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: -1.5px;
+  border-radius: 6px;
+}
+.sinceWords {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.events {
+  margin: 0;
+  padding: 0 0 12px;
   list-style: none;
-}
-/* running rows sit on hairlines, which step aside for the row under the pointer */
-.rows > li {
-  position: relative;
-}
-.rows > li + li::before {
-  content: '';
-  position: absolute;
-  inset: 0 10px auto;
-  height: 1px;
-  background: var(--line);
-}
-.rows > li:hover::before,
-.rows > li:hover + li::before {
-  opacity: 0;
 }
 
 .projects {
   flex: none;
-  width: 360px;
-  overflow-y: auto;
-  padding: 36px 20px 40px;
+  width: 320px;
+  padding: 48px 16px 0 8px;
   box-shadow: inset 1px 0 0 var(--line);
-}
-.projectsHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 24px;
-  padding: 0 2px 12px 4px;
-}
-.projectsTitle {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--t-1);
-}
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 
 /* ---- at rest (HomeRest) ---- */
+/* the marks of the projects where work is moving, standing in for Althar's */
+.marks {
+  display: flex;
+  justify-content: center;
+  gap: 22px;
+}
+.markOne {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--t-2);
+}
+/* What the loop did, as the same line, under the words. */
+.restSince {
+  width: 100%;
+  max-width: 560px;
+  text-align: left;
+}
+.restSince .since {
+  background: color-mix(in srgb, var(--n-2) 80%, transparent);
+}
 /* One width for every way, the widest's. */
 .ways {
   display: inline-flex;
@@ -101,16 +184,4 @@
   text-align: center;
   font-size: 12px;
   color: var(--t-3);
-}
-/* The last few lines the loop wrote, on paper over the light. */
-.restSince {
-  width: 100%;
-  max-width: 540px;
-  margin: 0;
-  padding: 6px;
-  list-style: none;
-  border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--paper) 72%, transparent);
-  box-shadow: inset 0 0 0 1px var(--line);
-  text-align: left;
 }

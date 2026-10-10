@@ -5,12 +5,18 @@
   background: var(--n-2);
 }
 
-/* The bar stays; what is under it scrolls, with the scrollbar at the window's edge. */
+/* Under the window's bar it scrolls, with the scrollbar at the window's edge. */
 .scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 32px max(40px, calc((100% - 760px) / 2)) 64px;
+  padding: 18px max(40px, calc((100% - 760px) / 2)) 64px;
+}
+
+/* the way back, at the top of the page */
+.back {
+  display: flex;
+  margin: 0 0 18px;
 }
 
 .repositories {

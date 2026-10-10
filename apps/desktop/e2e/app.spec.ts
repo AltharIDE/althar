@@ -209,7 +209,7 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
 
     // Its remote is on GitHub, which isn't connected yet: nothing says so up front, and the project's menu connects it.
     await expect(page.getByText(/isn't connected to GitHub/)).toHaveCount(0)
-    await page.getByRole('button', { name: 'meridian options' }).click()
+    await page.getByRole('button', { name: 'More for this project' }).click()
     await page.getByRole('menuitem', { name: 'Connect GitHub' }).click()
 
     // GitHub has no sign-in of Althar's in this build, so it takes a token.

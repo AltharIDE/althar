@@ -4,10 +4,12 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { FROM_231, PLAN_432, PLAN_433 } from '../../fixtures/coordinator'
 import { PROJECT } from '../../fixtures/meridian'
-import { effortFor, model, useModelPrefs } from '../../fixtures/models'
+import { CODEX, effortFor, model, OPUS, useModelPrefs } from '../../fixtures/models'
 import { ModelPick } from '../../composer/ModelPick/ModelPick'
 import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
+import { Turn } from '../../thread/Turn/Turn'
+import { You } from '../../thread/You/You'
 import { TaskLaunch, type LaunchPick, type LaunchStep } from './TaskLaunch'
 
 /** The consumer's picker for one agent of a step: the composer's own, bordered. */
@@ -175,6 +177,28 @@ export const AgentOut: Story = {
       estimate="About 25 min of work"
       limited={{ name: 'Claude Code', until: '14:00' }}
     />
+  ),
+}
+
+/** A lead and one reviewer from another maker: the plan the coordinator proposes most days. */
+const PLAN_ASKED: LaunchStep[] = [
+  { id: 'impl', label: 'Implement', agents: [OPUS], why: 'recommended · writes to money records', fixed: 'the lead' },
+  { id: 'review', label: 'Review', agents: [CODEX], why: 'a different maker from the lead', optional: true },
+]
+
+/** Where a plan comes from: what you asked, the coordinator's answer, and the plan under it. */
+export const InTheConversation: Story = {
+  render: () => (
+    <>
+      <You at="11:01">
+        Refunds created before PR 1184 have no idempotency key. Backfill them, and dry-run it on a copy before anything writes.
+      </You>
+      <Turn voice="Coordinator" at="11:01">
+        One task. Opus 5 writes the backfill and its dry run, and Codex reviews it, since it writes to money records. It starts on its own
+        unless you change it.
+      </Turn>
+      <Launch plan={PLAN_ASKED} from={undefined} estimate="About 30 min · about $1 on your subscriptions" />
+    </>
   ),
 }
 
