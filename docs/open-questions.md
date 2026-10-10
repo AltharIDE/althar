@@ -579,11 +579,11 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 ## Chat primitives
 
 - [ ] **What agents can hand back.** Images, markdown documents, other files
-  (the file card), tables and command output are built (ADR-017). Still
+  (the file card), tables and command output are built (ADR-019). Still
   open: screen recordings of a UI flow, and generated PDFs. Do those get the
   file card, or their own viewers?
 - [ ] **How long what agents hand back is kept.** Pictures and command output
-  are kept in the artifact store, by digest, with nothing swept yet (ADR-017).
+  are kept in the artifact store, by digest, with nothing swept yet (ADR-019).
   How long does each kind stay: for the task's life, a set time, or until the
   profile is cleaned? Leaning: mark-and-sweep from the thread items, with
   logs going first, once a task is settled.

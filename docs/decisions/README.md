@@ -25,4 +25,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [015](015-coordinator-picks-models.md) | The coordinator picks models; agents are only ways to them |
 | [016](016-push-without-a-connection.md) | Pushing is git; a connection is what comes after |
 | [017](017-dictation-on-this-machine.md) | Dictation runs on this machine, with a model downloaded on the first press |
-| [017](017-what-agents-hand-back.md) | What agents hand back is kept in the artifact store, by digest |
+| [019](019-what-agents-hand-back.md) | What agents hand back is kept in the artifact store, by digest |

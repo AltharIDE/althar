@@ -1,4 +1,4 @@
-# ADR-017: What agents hand back is kept in the artifact store, by digest
+# ADR-019: What agents hand back is kept in the artifact store, by digest
 
 - **Status:** Accepted
 - **Date:** 2026-10-10
