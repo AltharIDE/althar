@@ -18,3 +18,6 @@ export const kindWords = {
 /** A call's kind, in its word: an agent's question, a step that is stuck, else a permission. */
 export const callKindOf = (call: { readonly kind: string; readonly stuck: unknown }): string =>
   call.kind === 'question' ? kindWords.question : call.stuck === null ? kindWords.permission : kindWords.stuck
+
+/** Where a call waits, in words: its task, or the conversation with the coordinator, for a question the coordinator asks. */
+export const whereOf = (call: { readonly taskTitle: string | null }): string => call.taskTitle ?? 'Coordinator'

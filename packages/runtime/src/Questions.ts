@@ -227,7 +227,9 @@ export class Questions extends Context.Service<
           for (const field of payload.fields) {
             const said = input.answers[field.id]
             const values = (said?.values ?? []).filter((value) => field.options.some((option) => option.value === value))
-            const words = takesWords(field) ? (said?.words?.trim() ?? '') : ''
+            const written = takesWords(field) ? (said?.words?.trim() ?? '') : ''
+            // A number asked for is a number: other words would reach the agent as nothing.
+            const words = field.type === 'number' && !Number.isFinite(Number(written)) ? '' : written
             const picked = field.multiple ? values : values.slice(0, 1)
             if (picked.length === 0 && words === '')
               return yield* new QuestionUnanswered({ attentionId: input.attentionId, field: field.id })

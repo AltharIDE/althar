@@ -178,6 +178,8 @@ export const ProjectSummary = Schema.Struct({
   rotateAccounts: Schema.Boolean,
   /** The accounts each agent may use here, by agent; null for every one. */
   onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+  /** The thread of its conversation with the coordinator: what opens a call of the coordinator's there. */
+  coordinatorThreadId: Schema.optional(Schema.NullOr(Schema.String)),
 })
 export type ProjectSummary = typeof ProjectSummary.Type
 
@@ -1076,10 +1078,11 @@ export type BoardTask = typeof BoardTask.Type
 /** A call that waits on the person, with the task it holds. */
 export const BoardCall = Schema.Struct({
   ...AttentionRequest.fields,
-  taskId: Schema.String,
+  /** The task it waits in; null for a question the coordinator asks, which waits in its conversation. */
+  taskId: Schema.NullOr(Schema.String),
   threadId: Schema.String,
-  taskTitle: Schema.String,
-  taskSlug: Schema.String,
+  taskTitle: Schema.NullOr(Schema.String),
+  taskSlug: Schema.NullOr(Schema.String),
 })
 export type BoardCall = typeof BoardCall.Type
 

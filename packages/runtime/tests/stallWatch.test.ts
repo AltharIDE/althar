@@ -126,6 +126,15 @@ describe('a turn that stalls', () => {
     assert.deepStrictEqual(tags(looks(9_030, 9_630)), ['CarryOn'])
   })
 
+  it('watches the next session on the thread though a question the last one asked still waits', () => {
+    const { watch, looks } = watching()
+    watch.observe(started('u1'), 0)
+    watch.observe({ _tag: 'AttentionNeeded', threadId: T, attentionId: 'q1', title: 'Which database?', reason: 'The agent asks.' }, 0)
+    watch.observe({ _tag: 'SessionEnded', threadId: T, sessionId: 's1', state: 'completed' }, 100)
+    watch.observe(started('u2'), 200)
+    assert.deepStrictEqual(tags(looks(200, 800)), ['CarryOn'])
+  })
+
   it("doesn't count the machine's sleep as silence", () => {
     const { watch, looks } = watching()
     watch.observe(started('u1'), 0)

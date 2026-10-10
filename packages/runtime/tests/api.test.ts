@@ -1279,7 +1279,7 @@ describe('the coordinator, through the API', () => {
         const board = yield* client.GetBoard({ projectId: project.id })
         assert.deepStrictEqual(
           board.calls.map((waits) => [waits.id, waits.kind, waits.taskTitle, waits.threadId]),
-          [[call?.id, 'stuck', 'Nobody home', task.threadId]],
+          [[call?.id ?? '', 'stuck', 'Nobody home', task.threadId]],
         )
         assert.deepInclude(board.tasks[0], { taskId: task.id, phase: 'waiting', state: 'open', changed: null })
         const answering = { commandId: commandId(), attentionId: call?.id ?? '', answer: { kind: 'retry' as const, agentId: 'codex' } }

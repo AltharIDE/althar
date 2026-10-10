@@ -8,6 +8,8 @@ import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { AttentionClosed, QuestionUnanswered } from '../src/errors'
+import { Coordinator } from '../src/Coordinator'
+import { Instance } from '../src/Instance'
 import { callWords } from '../src/Nudges'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -291,6 +293,69 @@ describe('questions an agent asks the person', () => {
       assert.deepStrictEqual(offered.slice(0, 2), [{ form: {} }, null])
     }),
   )
+
+  it("from the coordinator wait in its conversation, and are on the home with its project's thread", () =>
+    Effect.gen(function* () {
+      const coordinator = yield* Coordinator
+      const projects = yield* Projects
+      const queries = yield* Queries
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const threadId = yield* coordinator.thread(project.projectId)
+      const tell = (body: string) =>
+        Effect.gen(function* () {
+          yield* coordinator.say({
+            envelope: yield* Runtime.envelope('thread.send', { body }),
+            threadId,
+            body,
+            disposition: 'after_current',
+          })
+        })
+      // Its first turn is its brief with what was said; the question comes in the next.
+      yield* tell('hello')
+      yield* until(turns(threadId), (rows) => rows.length >= 1 && rows.every((row) => !['pending', 'delivered'].includes(row.state)))
+      yield* tell(scenarios.question)
+      const question = yield* openQuestion(threadId)
+      const home = yield* Effect.orDie(queries.home())
+      assert.deepStrictEqual(
+        home.calls.map((call) => [call.id, call.kind, call.taskId, call.threadId, call.title]),
+        [[question.id, 'question', null, threadId, 'Which database?']],
+      )
+      const listed = yield* Effect.orDie(queries.projects)
+      assert.strictEqual(listed.projects.find((one) => one.id === project.projectId)?.coordinatorThreadId, threadId)
+      const shownThere = (yield* Effect.orDie(queries.coordinator(project.projectId))).items.filter((item) => item.kind === 'question')
+      assert.lengthOf(shownThere, 1)
+      assert.deepStrictEqual(yield* answer(question.id, { database: { values: ['postgres'] } }), { told: true })
+      yield* until(replies(threadId), (said) => said.includes('answer={"database":"postgres"}'))
+    }).pipe(Effect.provide(withQueries())))
+
+  it('take a number only as a number', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      const { task: created } = yield* task()
+      const [row] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${created.taskId}`
+      const retries = { id: 'retries', question: 'How many retries?', type: 'number', options: [], multiple: false, required: true }
+      yield* sql`INSERT INTO attention_requests ${sql.insert({
+        id: 'attn_retries',
+        projectId: row?.projectId ?? '',
+        taskId: created.taskId,
+        kind: 'question',
+        addresseeActorId: instance.personId,
+        payload: JSON.stringify({
+          threadId: created.threadId,
+          sessionId: 'gone',
+          itemId: 'gone',
+          toolCallId: null,
+          message: 'One thing.',
+          fields: [retries],
+        }),
+        state: 'open',
+        createdAt: new Date().toISOString(),
+      })}`
+      assert.instanceOf(yield* Effect.flip(answer('attn_retries', { retries: { values: [], words: 'three' } })), QuestionUnanswered)
+      const told = yield* answer('attn_retries', { retries: { values: [], words: '3' } })
+      assert.deepStrictEqual(told.told ? null : told.body.split('\n').slice(1), ['How many retries? 3'])
+    }).pipe(Effect.provide(withQueries())))
 
   it('say what they ask when they nudge the person', () => {
     const fields = [{ question: 'Which database should the cache use?' }]

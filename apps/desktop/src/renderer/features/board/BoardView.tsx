@@ -16,7 +16,7 @@ import {
 
 import { waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
-import { kindWords } from '../../shared/calls'
+import { kindWords, whereOf } from '../../shared/calls'
 import { productBrand, productName } from '../../shared/products'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -215,7 +215,7 @@ export const callCardOf = (waiting: BoardCall, name: (id: string | null) => stri
       kind: kindWords.question,
       title: waiting.title,
       options: only === undefined || more.length > 0 ? [] : only.options.map((option) => option.label),
-      from: waiting.taskTitle,
+      from: whereOf(waiting),
       at: ago(waiting.createdAt),
       text: { decide: text.answer },
     }
@@ -229,7 +229,7 @@ export const callCardOf = (waiting: BoardCall, name: (id: string | null) => stri
           ? stuckText.publishing(stuck)
           : stuckText.what(stuck, name(stuck.agentId) || 'The agent'),
       options: [],
-      from: waiting.taskTitle,
+      from: whereOf(waiting),
       at: ago(waiting.createdAt),
     }
   }
@@ -238,7 +238,7 @@ export const callCardOf = (waiting: BoardCall, name: (id: string | null) => stri
     title: waiting.title,
     because: waiting.reason,
     options: [text.allow, text.deny],
-    from: waiting.taskTitle,
+    from: whereOf(waiting),
     at: ago(waiting.createdAt),
   }
 }

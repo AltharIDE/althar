@@ -511,7 +511,8 @@ export class Queries extends Context.Service<
                   WHERE e.run_id = r.id AND a.state = 'admitted')) AS ready,
             coalesce((SELECT json_extract(r.rules, '$.usageLimit') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 'move') AS usage_limit,
             coalesce((SELECT json_extract(r.rules, '$.accounts.rotate') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 0) AS rotate_accounts,
-            (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts
+            (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts,
+            (SELECT t.id FROM threads t WHERE t.project_id = p.id AND t.kind = 'coordinator' AND t.owner_actor_id = ${instance.personId}) AS coordinator_thread_id
           FROM projects p WHERE p.archived_at IS NULL ORDER BY p.created_at DESC, p.id DESC`
         return {
           cursor: at,
@@ -1160,22 +1161,30 @@ export class Queries extends Context.Service<
       const callsIn = (projectId: string | null) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          const where = projectId === null ? sql`p.archived_at IS NULL` : sql`a.project_id = ${projectId}`
+          // A task's calls, and the questions a project's coordinator asks in its conversation.
           const calls = yield* sql<{
             id: string
             kind: string
             payload: string
             createdAt: string
             projectId: string
-            taskId: string
+            taskId: string | null
             threadId: string
-            taskTitle: string
-            taskSlug: string
+            taskTitle: string | null
+            taskSlug: string | null
           }>`
-            SELECT a.id, a.kind, a.payload, a.created_at, a.project_id, k.id AS task_id, t.id AS thread_id, k.title AS task_title, k.slug AS task_slug
-            FROM attention_requests a JOIN tasks k ON k.id = a.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-            JOIN projects p ON p.id = a.project_id
-            WHERE ${projectId === null ? sql`p.archived_at IS NULL` : sql`a.project_id = ${projectId}`} AND a.state = 'open'
-            ORDER BY a.created_at, a.id`
+            SELECT id, kind, payload, created_at, project_id, task_id, thread_id, task_title, task_slug FROM (
+              SELECT a.id, a.kind, a.payload, a.created_at, a.project_id, k.id AS task_id, t.id AS thread_id, k.title AS task_title, k.slug AS task_slug
+              FROM attention_requests a JOIN tasks k ON k.id = a.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+              JOIN projects p ON p.id = a.project_id
+              WHERE ${where} AND a.state = 'open'
+              UNION ALL
+              SELECT a.id, a.kind, a.payload, a.created_at, a.project_id, NULL, t.id, NULL, NULL
+              FROM attention_requests a JOIN threads t ON t.id = json_extract(a.payload, '$.threadId') AND t.kind = 'coordinator'
+              JOIN projects p ON p.id = a.project_id
+              WHERE ${where} AND a.state = 'open' AND a.task_id IS NULL AND a.kind = 'question')
+            ORDER BY created_at, id`
           return calls.map((call) => ({
             projectId: call.projectId,
             call: {

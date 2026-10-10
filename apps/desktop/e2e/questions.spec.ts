@@ -65,10 +65,12 @@ test('asks the person a question on the home, keeps it across a restart, and car
     if (shots) await page.screenshot({ path: join(shots, 'app-thread-question.png') })
     await page.getByRole('radio', { name: /sqlite/ }).click()
     await page.getByRole('button', { name: /^Answer/ }).click()
-    await expect(page.getByText('told=Which database? sqlite')).toBeVisible({ timeout: 20_000 })
-    await expect(page.getByText('Needs your answer')).toHaveCount(0)
     await expect(page.getByText('Ready for you', { exact: true })).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByText('Needs your answer')).toHaveCount(0)
     if (shots) await page.screenshot({ path: join(shots, 'app-thread-question-answered.png') })
+    // What the lead was told folds with the work that led to its step's result.
+    await page.getByRole('button', { name: /^Worked for/ }).click()
+    await expect(page.getByText('told=Which database? sqlite')).toBeVisible()
   } finally {
     await electronApp.close()
   }
