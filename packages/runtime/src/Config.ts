@@ -23,6 +23,12 @@ export interface RuntimeOptions {
    * Without it, everything is looked for and run here, as always.
    */
   readonly onDevice?: OnDevice
+  /**
+   * Where the models probe may start an agent whose copy lives outside the
+   * sandbox (a Flatpak): a folder the device sees at the same path too.
+   * Without it, the system's temporary folder (`Models.ts`).
+   */
+  readonly probeRoot?: string
   /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
   readonly openTerminal?: (line: string) => Effect.Effect<boolean>
   /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */

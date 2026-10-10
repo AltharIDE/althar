@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,7 +8,7 @@ import { type AgentDefinition, type AgentSession, type ConfigOption, connect } f
 import { Context, type Crypto, Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
-import { type AgentEntry, Agents } from './Config'
+import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { UnknownAgent } from './errors'
 import { Instance } from './Instance'
 import { blockedModelsOf, defaultEffortsOf, setDefaultEffort, setModelBlocked } from './preferences'
@@ -45,7 +45,7 @@ export interface AgentModels {
   readonly probing: boolean
 }
 
-type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | SignIns
+type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | SignIns | RuntimeConfig
 
 export interface OfferedModel {
   readonly id: string
@@ -176,6 +176,9 @@ export class Models extends Context.Service<
   static readonly layer: Layer.Layer<Models, never, Store> = Layer.effect(
     Models,
     Effect.gen(function* () {
+      const config = yield* RuntimeConfig
+      // Where the probe starts: an agent whose copy lives outside the sandbox (a Flatpak) needs a folder the device sees too.
+      const probeBase = config.probeRoot ?? tmpdir()
       const sql = yield* SqlClient.SqlClient
       const agents = yield* Agents
       const signIns = yield* SignIns
@@ -196,7 +199,10 @@ export class Models extends Context.Service<
        */
       const probe = (entry: AgentEntry, asOf = forgotten.get(entry.definition.id) ?? 0) =>
         Effect.acquireUseRelease(
-          Effect.sync(() => mkdtempSync(join(tmpdir(), 'althar-models-'))),
+          Effect.sync(() => {
+            mkdirSync(probeBase, { recursive: true })
+            return mkdtempSync(join(probeBase, 'althar-models-'))
+          }),
           (folder) =>
             Effect.gen(function* () {
               const { definition } = entry

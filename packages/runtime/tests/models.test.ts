@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -54,12 +54,19 @@ const thread = Effect.gen(function* () {
 })
 
 /** A runtime with these agents: `process` runs as a real process, and `missing` can't be started. */
-const withAgents = (ids: ReadonlyArray<string>, define: (agentId: string) => AgentDefinition, fake: FakeAgentOptions = {}) =>
+const withAgents = (
+  ids: ReadonlyArray<string>,
+  define: (agentId: string) => AgentDefinition,
+  fake: FakeAgentOptions = {},
+  /** Anything else the runtime takes, such as where the models probe may start. */
+  extra: Partial<Runtime.RuntimeLayerOptions> = {},
+) =>
   Runtime.layer({
     database: ':memory:',
     worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
+    ...extra,
     agents: Layer.succeed(
       Agents,
       Agents.from(
@@ -112,6 +119,17 @@ describe('the models each agent offers', () => {
       assert.lengthOf(yield* sql`SELECT id FROM provider_sessions`, 0)
     }).pipe(Effect.provide(runtime())),
   )
+
+  it.live('starts the models probe in the folder it is told, for a copy that lives outside the sandbox', () => {
+    // A folder that isn't there yet, as a Flatpak gives it: the probe makes it, and starts the agent there.
+    const probeRoot = join(mkdtempSync(join(tmpdir(), 'althar-probe-')), 'probe')
+    return Effect.gen(function* () {
+      const models = yield* Models
+      const known = yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
+      assert.isTrue(existsSync(probeRoot))
+      assert.deepStrictEqual(known[0]?.models.map((model) => model.id).toSorted(), ['large', 'small'])
+    }).pipe(Effect.provide(withAgents(['process'], (agentId) => definition(agentId), {}, { probeRoot })))
+  })
 
   it.live('are read from an agent’s latest session until it is asked, with what it was set to', () =>
     Effect.gen(function* () {

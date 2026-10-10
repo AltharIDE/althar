@@ -162,7 +162,7 @@ const program = Effect.gen(function* () {
     services(
       fake === undefined
         ? {
-            ...(device === undefined ? options : { ...options, onDevice: device.onDevice }),
+            ...(device === undefined ? options : { ...options, onDevice: device.onDevice, probeRoot: join(profile, 'probe') }),
             clientIds,
             secrets,
             fetch: appFetch,
