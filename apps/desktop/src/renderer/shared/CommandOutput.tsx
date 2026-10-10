@@ -39,8 +39,11 @@ export function CommandOutput({ threadId, itemId, ran, exit, command }: CommandO
     ) : (
       <RunningUnheard threadId={threadId} itemId={itemId} shown={shown} />
     )
-  if (!ran.output.kept) return <Terminal {...shown} {...ended} lines={[]} {...(ran.output.lines > 0 ? { error: text.notKept } : {})} />
-  return <KeptOutput threadId={threadId} itemId={itemId} output={ran.output} shown={shown} ended={ended} />
+  // What the tool said of a failure or a stop, after what it printed.
+  const failed = ran.output.error === null ? {} : { failure: ran.output.error }
+  if (!ran.output.kept)
+    return <Terminal {...shown} {...ended} {...failed} lines={[]} {...(ran.output.lines > 0 ? { error: text.notKept } : {})} />
+  return <KeptOutput threadId={threadId} itemId={itemId} output={ran.output} shown={shown} ended={{ ...ended, ...failed }} />
 }
 
 /** What a running command has printed so far: the line still being written ends in the cursor. */
@@ -70,7 +73,7 @@ function KeptOutput({
   itemId: string
   output: Kept
   shown: { readonly command?: string }
-  ended: { readonly exit?: number }
+  ended: { readonly exit?: number; readonly failure?: string }
 }) {
   const { client } = useServices()
   const read = useQuery(reads(client).output(threadId, itemId))

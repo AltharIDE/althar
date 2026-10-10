@@ -533,6 +533,8 @@ export const CommandOutput = Schema.Struct({
   lines: Schema.Number,
   bytes: Schema.Number,
   dropped: Schema.Number,
+  /** What the tool said of how it ended, where it failed or was stopped: its error, apart from what it printed. */
+  error: Schema.NullOr(Schema.String),
 })
 export type CommandOutput = typeof CommandOutput.Type
 

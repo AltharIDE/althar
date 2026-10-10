@@ -125,7 +125,7 @@ describe('a command in its tool call', () => {
       title: 'npm test',
       toolKind: 'execute',
       status: 'failed',
-      output: { kept: true, lines: 2, bytes: 10, dropped: 0 },
+      output: { kept: true, lines: 2, bytes: 10, dropped: 0, error: null },
       exit: 1,
     })
     expect(turnOf([ended]).parts[0]).toMatchObject({ ran: { kind: 'ended', output: { lines: 2 } }, exit: 1, state: ToolState.Failed })
@@ -155,7 +155,10 @@ describe('a command in its tool call', () => {
     const running = items.tool({ toolKind: 'execute', status: 'in_progress' })
     const outputs = withOutput(new Map(), { itemId: running.id, text: 'a', dropped: 0 })
     expect(outputsCaughtUp(outputs, [running])).toBe(outputs)
-    const ended = { ...running, content: { ...running.content, output: { kept: true, lines: 1, bytes: 1, dropped: 0 } } } as ThreadItem
+    const ended = {
+      ...running,
+      content: { ...running.content, output: { kept: true, lines: 1, bytes: 1, dropped: 0, error: null } },
+    } as ThreadItem
     expect(outputsCaughtUp(outputs, [ended, items.says('x')]).size).toBe(0)
   })
 })

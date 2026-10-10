@@ -55,7 +55,12 @@ export interface KeptOutput {
   readonly bytes: number
   /** Lines from its start that weren't kept. */
   readonly dropped: number
+  /** What the tool said of how it ended, where it failed or was stopped, to its first ERROR_KEPT characters. */
+  readonly error: string | null
 }
+
+/** How much of what a tool said of a failure is kept, beside its output. */
+export const ERROR_KEPT = 2_000
 
 /** Where what is handed back lands: the item, its project, and the folders the agent works in. */
 export interface HandedPlace {
@@ -307,6 +312,8 @@ export class Output {
   /** It came in chunks from the agent's terminal, rather than as the tool's own words. */
   terminal = false
   exit: number | null = null
+  /** What the tool said of how it ended, where it failed or was stopped: its error, not its output. */
+  error: string | null = null
   changed = false
   /** How many bytes the text is, as UTF-8. */
   private bytes = 0
@@ -360,6 +367,18 @@ const unfenced = (text: string) => {
   return fenced === null ? text : `${fenced[1] ?? ''}\n`
 }
 
+/** The whole of what a command printed, where OpenCode's raw output says it: `metadata.output`. */
+export const printedIn = (rawOutput: unknown): string | null => {
+  const metadata = recordIn(recordIn(rawOutput).metadata)
+  return typeof metadata.output === 'string' ? metadata.output : null
+}
+
+/** What OpenCode's error report says went wrong: `error`. */
+export const errorIn = (rawOutput: unknown): string | null => {
+  const error = recordIn(rawOutput).error
+  return typeof error === 'string' && error !== '' ? error : null
+}
+
 /** The exit code OpenCode puts in a command's raw output: `metadata.exit`. */
 export const exitIn = (rawOutput: unknown): number | null => {
   if (typeof rawOutput !== 'object' || rawOutput === null) return null
@@ -373,7 +392,12 @@ export const exitIn = (rawOutput: unknown): number | null => {
 export const keepOutput = (place: HandedPlace, output: Output) =>
   Effect.gen(function* () {
     const bytes = new TextEncoder().encode(output.text)
-    const counted = { lines: countLines(output.text), bytes: bytes.length, dropped: output.dropped }
+    const counted = {
+      lines: countLines(output.text),
+      bytes: bytes.length,
+      dropped: output.dropped,
+      error: output.error === null ? null : output.error.slice(0, ERROR_KEPT),
+    }
     if (output.text === '') return { artifactId: null, sha256: null, ...counted } satisfies KeptOutput
     const artifacts = yield* Artifacts
     const kept = yield* artifacts.keep({
@@ -434,5 +458,6 @@ export const outputOf = (value: unknown): CommandOutput | null => {
     lines: numberIn(output.lines) ?? 0,
     bytes: numberIn(output.bytes) ?? 0,
     dropped: numberIn(output.dropped) ?? 0,
+    error: stringIn(output.error),
   }
 }

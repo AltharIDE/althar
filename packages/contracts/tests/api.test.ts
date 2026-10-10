@@ -51,7 +51,7 @@ describe('the API', () => {
           { digest: null, mediaType: 'image/png', bytes: 30_000_000, width: null, height: null, name: 'big.png', unkept: 'too_large' },
         ],
         files: [{ path: '/w/docs/plan.md', how: 'wrote', mediaType: null, bytes: null, title: null }],
-        output: { kept: true, lines: 12, bytes: 420, dropped: 0 },
+        output: { kept: true, lines: 12, bytes: 420, dropped: 0, error: 'Interrupted' },
         exit: 1,
       },
     })

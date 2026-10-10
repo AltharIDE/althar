@@ -56,6 +56,8 @@ export interface TerminalProps {
   loading?: boolean
   /** What it printed couldn't be read, in words: shown in its place. */
   error?: string
+  /** What the tool said of how it ended, where it failed or was stopped: after what it printed, as a failure. */
+  failure?: string
   /** Which lines read as errors. By default, isTerminalError. */
   isError?: (line: string) => boolean
   text?: Partial<TerminalText>
@@ -75,6 +77,7 @@ export function Terminal({
   live,
   loading = false,
   error,
+  failure,
   isError = isTerminalError,
   text,
 }: TerminalProps) {
@@ -90,7 +93,7 @@ export function Terminal({
       </Line>
     )
   }
-  const quiet = lines.length === 0 && earlier.length === 0 && live === undefined && !loading && error === undefined
+  const quiet = lines.length === 0 && earlier.length === 0 && live === undefined && !loading && error === undefined && failure === undefined
   return (
     <div className={s.term} aria-busy={loading || live !== undefined || undefined}>
       <pre className={s.out}>
@@ -126,6 +129,7 @@ export function Terminal({
           </span>
         )}
         {error !== undefined && <Line className={s.said}>{error}</Line>}
+        {failure !== undefined && <Line className={s.err}>{failure}</Line>}
         {quiet && <Line className={s.said}>{t.empty}</Line>}
       </pre>
       {code !== undefined && (

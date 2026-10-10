@@ -160,7 +160,7 @@ describe('the API', () => {
         const printed = ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n 52 passed\n'
         assert.deepStrictEqual(
           [ran?.content.exit, ran?.content.output],
-          [0, { kept: true, lines: 3, bytes: Buffer.byteLength(printed), dropped: 0 }],
+          [0, { kept: true, lines: 3, bytes: Buffer.byteLength(printed), dropped: 0, error: null }],
         )
         assert.deepStrictEqual(yield* client.ReadOutput({ threadId: task.threadId, itemId: ran?.id ?? '' }), { text: printed, dropped: 0 })
         const lint = tools.find((item) => item.content.command === 'npm run lint')

@@ -62,7 +62,7 @@ const handing = (overrides: Partial<ThreadSnapshot> = {}) =>
         toolKind: 'execute',
         command: 'npm test',
         status: 'completed',
-        output: { kept: true, lines: 2, bytes: 40, dropped: 0 },
+        output: { kept: true, lines: 2, bytes: 40, dropped: 0, error: null },
         exit: 0,
       }),
       items.tool({
@@ -70,7 +70,7 @@ const handing = (overrides: Partial<ThreadSnapshot> = {}) =>
         toolKind: 'execute',
         command: 'npm run lint',
         status: 'failed',
-        output: { kept: false, lines: 3, bytes: 60, dropped: 0 },
+        output: { kept: false, lines: 3, bytes: 60, dropped: 0, error: null },
         exit: 1,
       }),
       items.tool({ title: 'browser_take_screenshot', toolKind: 'other', pictures: [picture('a'.repeat(64), 'before.png')] }),
@@ -102,6 +102,32 @@ describe('what an agent hands back, on a task', () => {
     await user.click(screen.getByRole('button', { name: /Run npm run lint/ }))
     expect(await screen.findByText(outputText.notKept)).toBeTruthy()
     expect(screen.getByText('exit 1')).toBeTruthy()
+  })
+
+  it('shows what a stopped command printed, and what the tool said of it after', async () => {
+    const user = userEvent.setup()
+    const stopped = snapshot({
+      items: [
+        items.you('Build it'),
+        items.tool({
+          title: 'npm run build',
+          toolKind: 'execute',
+          command: 'npm run build',
+          status: 'failed',
+          output: { kept: true, lines: 2, bytes: 30, dropped: 0, error: 'Tool execution aborted' },
+          exit: null,
+        }),
+      ],
+    })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => stopped),
+      readOutput: vi.fn(async () => ({ text: 'compiling\nwarning: unused import\n', dropped: 0 })),
+    })
+    withServices(<Task />, client)
+    await user.click(await screen.findByRole('button', { name: /Worked for/ }))
+    await user.click(screen.getByRole('button', { name: /Run npm run build/ }))
+    expect(await screen.findByText('warning: unused import')).toBeTruthy()
+    expect(screen.getByText('Tool execution aborted')).toBeTruthy()
   })
 
   it('says why what a command printed couldn’t be read', async () => {

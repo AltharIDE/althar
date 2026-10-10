@@ -307,7 +307,8 @@ describe('a command’s output', () => {
       yield* record.record({
         _tag: 'ToolCallUpdate',
         toolCallId: 'words',
-        status: 'failed',
+        // A command that exits with a code of its own is a completed call to OpenCode, the code in its metadata.
+        status: 'completed',
         content: [{ _tag: 'Text', text: ' M a\n?? b\n' }],
         rawOutput: { output: ' M a\n?? b\n', metadata: { exit: 3 } },
       })
@@ -336,6 +337,54 @@ describe('a command’s output', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('keeps what a command printed when OpenCode says it failed or was stopped, and what it said of that beside it', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const record = recorder(where)
+      // Its output so far, whole each time; then its error report, which is the error and not its output.
+      yield* record.record({ _tag: 'ToolCall', toolCallId: 'aborted', title: 'npm run build', kind: 'execute', status: 'pending' })
+      yield* record.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'aborted',
+        status: 'in_progress',
+        content: [{ _tag: 'Text', text: 'compiling\nwarning: unused import\n' }],
+        rawOutput: { output: '', metadata: { output: 'compiling\nwarning: unused import\n' } },
+      })
+      yield* record.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'aborted',
+        status: 'failed',
+        content: [{ _tag: 'Text', text: 'Tool execution aborted' }],
+        rawOutput: { error: 'Tool execution aborted', metadata: {} },
+      })
+      const aborted = yield* toolItem(where.threadId, 'aborted')
+      assert.deepInclude(aborted?.output as object, { lines: 2, error: 'Tool execution aborted' })
+      const kept = (yield* artifactRows).find((row) => row.kind === 'log')
+      const bytes = yield* (yield* Artifacts).read(kept?.sha256 ?? '')
+      assert.strictEqual(new TextDecoder().decode(bytes ?? new Uint8Array()), 'compiling\nwarning: unused import\n')
+      // An error report that carries its output whole, in its metadata: that is its output.
+      yield* record.record({ _tag: 'ToolCall', toolCallId: 'failed', title: 'npm test', kind: 'execute', status: 'pending' })
+      yield* record.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'failed',
+        status: 'failed',
+        content: [{ _tag: 'Text', text: 'Command timed out' }],
+        rawOutput: { error: 'Command timed out', metadata: { output: 'a\nb\nc\n' } },
+      })
+      assert.deepInclude((yield* toolItem(where.threadId, 'failed'))?.output as object, { lines: 3, error: 'Command timed out' })
+      // On success, its metadata's output is the whole of it, over the words it gave.
+      yield* record.record({ _tag: 'ToolCall', toolCallId: 'ok', title: 'ls', kind: 'execute', status: 'pending' })
+      yield* record.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'ok',
+        status: 'completed',
+        content: [{ _tag: 'Text', text: 'b\n\n<bash_metadata>truncated</bash_metadata>' }],
+        rawOutput: { output: 'b', metadata: { output: 'a\nb\n', exit: 0 } },
+      })
+      assert.deepInclude((yield* toolItem(where.threadId, 'ok'))?.output as object, { lines: 2, error: null })
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('says a command printed nothing, keeps what a stopped turn left, and keeps a long one’s end', () =>
     Effect.gen(function* () {
       const where = yield* place
@@ -353,6 +402,7 @@ describe('a command’s output', () => {
         lines: 0,
         bytes: 0,
         dropped: 0,
+        error: null,
       })
       yield* record.record({ _tag: 'ToolCall', toolCallId: 'dev', title: 'npm run dev', kind: 'execute', status: 'in_progress' })
       yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'dev', terminal: { output: 'ready\n' } })
@@ -527,13 +577,14 @@ describe('what an item keeps, as a screen reads it', () => {
     )
     assert.isNull(outputOf(undefined))
     assert.isNull(outputOf(null))
-    assert.deepStrictEqual(outputOf({ sha256: 'a'.repeat(64), lines: 2, bytes: 4, dropped: 1 }), {
+    assert.deepStrictEqual(outputOf({ sha256: 'a'.repeat(64), lines: 2, bytes: 4, dropped: 1, error: 'Aborted' }), {
       kept: true,
       lines: 2,
       bytes: 4,
       dropped: 1,
+      error: 'Aborted',
     })
-    assert.deepStrictEqual(outputOf('odd'), { kept: false, lines: 0, bytes: 0, dropped: 0 })
+    assert.deepStrictEqual(outputOf('odd'), { kept: false, lines: 0, bytes: 0, dropped: 0, error: null })
   })
 
   it('finds OpenCode’s exit code only where it is', () => {

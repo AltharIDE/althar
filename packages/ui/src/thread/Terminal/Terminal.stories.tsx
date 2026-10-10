@@ -64,6 +64,15 @@ export const Long: Story = {
     exit: 0,
   },
 }
+/** Stopped or failed, with what the tool said of it after what it printed. */
+export const FailedWithWhy: Story = {
+  args: { command: 'npm run build', lines: ['compiling', 'warning: unused import'], exit: undefined, failure: 'Tool execution aborted' },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('warning: unused import')).toBeInTheDocument()
+    await expect(c.getByText('Tool execution aborted')).toBeInTheDocument()
+  },
+}
 /** Longer than Althar keeps: its start wasn't kept, and says how much. */
 export const StartNotKept: Story = {
   args: { lines: TEST_OUTPUT, earlier: TEST_EARLIER, omitted: 1204, exit: 0 },
@@ -96,6 +105,7 @@ export const AllStates: Story = {
         { state: 'empty', node: <Terminal command="git add -A" lines={[]} exit={0} /> },
         { state: 'loading', node: <Terminal lines={[]} loading /> },
         { state: 'read failed', node: <Terminal lines={[]} exit={0} error="Althar didn’t keep what this printed." /> },
+        { state: 'failed, with why', node: <Terminal lines={['compiling']} failure="Tool execution aborted" /> },
         { state: 'start not kept', node: <Terminal lines={TEST_OUTPUT} earlier={TEST_EARLIER} omitted={1204} exit={0} /> },
         { state: 'without the command', node: <Terminal lines={TEST_OUTPUT} exit={0} /> },
         {

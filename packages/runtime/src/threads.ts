@@ -4,7 +4,19 @@ import type { Handed, SessionEvent } from '@althar/provider-adapters'
 import { Clock, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { exitIn, type FileMention, handedByTool, handedNow, type HandedNow, type KeptPicture, keepOutput, Output, together } from './handed'
+import {
+  errorIn,
+  exitIn,
+  type FileMention,
+  handedByTool,
+  handedNow,
+  type HandedNow,
+  type KeptPicture,
+  keepOutput,
+  Output,
+  printedIn,
+  together,
+} from './handed'
 import { change, timestamp } from './records'
 import { essentials } from './rules'
 
@@ -217,9 +229,15 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       outputs.set(toolCallId, output)
       if (event.terminal?.output !== undefined) output.add(event.terminal.output)
       else if (!output.terminal && kind === 'execute') {
-        // OpenCode says a command's output as the tool's own words, whole each time.
+        // OpenCode says a command's output as the tool's own words, whole each time, and whole in its raw output's metadata where it has it.
+        // Its error report is the error, not its output: what it printed stays, and the error is kept beside it.
         const words = content.flatMap((entry) => (entry._tag === 'Text' ? [entry.text] : []))
-        if (words.length > 0) output.replace(words.join('\n'))
+        const raw = event._tag === 'ToolCallUpdate' ? event.rawOutput : undefined
+        const whole = printedIn(raw)
+        const failed = event.status === 'failed'
+        if (whole !== null) output.replace(whole)
+        else if (!failed && words.length > 0) output.replace(words.join('\n'))
+        if (failed) output.error = errorIn(raw) ?? (words.length > 0 ? words.join('\n') : null)
       }
       const exit = event.terminal?.exit?.code ?? (event._tag === 'ToolCallUpdate' ? exitIn(event.rawOutput) : null)
       if (exit !== null) output.exit = exit
