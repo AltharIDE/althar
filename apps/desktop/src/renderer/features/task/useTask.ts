@@ -48,7 +48,8 @@ export interface TaskModel {
   /**
    * Says something to the lead. With no lead working, `start` names the one
    * to start: the message is its first turn, with its brief. A task stopped
-   * in the middle of its step resumes with it, on that one.
+   * in the middle of its step resumes with it, on that one; an abandoned one
+   * is reopened first.
    */
   readonly send: (body: string, start?: Choice) => Promise<void>
   readonly sendNow: (body: string) => Promise<void>
@@ -277,11 +278,16 @@ export const useTask = (threadId: string): TaskModel => {
     readFiles,
     send: (body, start) =>
       shown(body, 'after_current', async () => {
+        // Abandoned, what the person says reopens it first, as its menu would; refused, nothing is sent.
+        const reopening = snapshot?.task.actions.includes('reopen') === true
+        if (reopening && snapshot !== null) await client.reopenTask(snapshot.task.id)
         // Queued first, so the lead that starts reads it in its first turn rather than after one of its own.
         await client.send({ threadId, body, disposition: 'after_current' })
         if (start === undefined || snapshot === null) return
+        // Reopened, it stands where it was, which only the runtime knows: read again.
+        const actions = reopening ? (await client.getThread(threadId, { limit: 0 })).task.actions : snapshot.task.actions
         // Stopped in the middle of its step, the task carries that step on, with what the person said first.
-        if (snapshot.task.actions.includes('resume'))
+        if (actions.includes('resume'))
           await client.resumeTask({ taskId: snapshot.task.id, agentId: start.agentId, model: start.model, effort: start.effort })
         else await client.startSession(startOf(threadId, start))
       }),

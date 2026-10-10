@@ -785,6 +785,74 @@ describe('a task', () => {
     expect(still.said).toContain('It has no worktree to leave behind.')
   })
 
+  it('reopens an abandoned task when the person writes to it, then gives the lead their words first', async () => {
+    const base = snapshot()
+    const lead = { agentId: 'claude-code', model: 'opus', account: null }
+    const abandoned = thread({ task: { ...base.task, phase: 'settled', state: 'abandoned', actions: ['reopen'], lead }, session: null })
+    // Reopened, it stands where it was: stopped in the middle of its step, or with nothing to carry on.
+    const reopened = (actions: ThreadSnapshot['task']['actions']) =>
+      thread({ task: { ...base.task, phase: 'stopped', state: 'open', actions, lead }, session: null })
+    const writes = async (after: ThreadSnapshot) => {
+      let open = false
+      const { client } = fakeClient({
+        getThread: vi.fn(async () => (open ? after : abandoned)),
+        reopenTask: vi.fn(async () => {
+          open = true
+        }),
+      })
+      const view = withServices(<Task />, client)
+      await waitFor(() => expect(client.status).toHaveBeenCalled())
+      await userEvent.type(await screen.findByRole('textbox', { name: /^Tell .* something$/ }), 'Carry on{Enter}')
+      await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Carry on', disposition: 'after_current' }))
+      // Reopened first, as its menu would: the message goes to an open task.
+      expect(client.reopenTask).toHaveBeenCalledWith('t1')
+      expect(vi.mocked(client.reopenTask).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.send).mock.invocationCallOrder[0] ?? 0)
+      return { client, view }
+    }
+    const resumed = await writes(reopened(['resume', 'abandon']))
+    await waitFor(() =>
+      expect(resumed.client.resumeTask).toHaveBeenCalledWith({ taskId: 't1', agentId: 'claude-code', model: 'opus', effort: null }),
+    )
+    expect(resumed.client.startSession).not.toHaveBeenCalled()
+    resumed.view.unmount()
+    const started = await writes(reopened(['abandon']))
+    await waitFor(() =>
+      expect(started.client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'opus' }),
+    )
+    expect(started.client.resumeTask).not.toHaveBeenCalled()
+  })
+
+  it('says why an abandoned task can’t be reopened when the person writes to it, and sends nothing', async () => {
+    const base = snapshot()
+    const abandoned = thread({
+      task: {
+        ...base.task,
+        phase: 'settled',
+        state: 'abandoned',
+        actions: ['reopen'],
+        lead: { agentId: 'claude-code', model: 'opus', account: null },
+      },
+      session: null,
+    })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => abandoned),
+      reopenTask: vi.fn(async () =>
+        Promise.reject(
+          new ApiError({
+            reason: 'TaskRefused',
+            message: 'The task’s worktree and its branch are both gone, so it can’t be reopened on them.',
+          }),
+        ),
+      ),
+    })
+    withServices(<Task />, client)
+    await waitFor(() => expect(client.status).toHaveBeenCalled())
+    await userEvent.type(await screen.findByRole('textbox', { name: /^Tell .* something$/ }), 'Carry on{Enter}')
+    expect(await screen.findByText(/can’t be reopened on them/)).toBeTruthy()
+    expect(client.send).not.toHaveBeenCalled()
+    expect(client.startSession).not.toHaveBeenCalled()
+  })
+
   it('resumes a task stopped in the middle of its step with what the person says, on the lead picked', async () => {
     const base = snapshot()
     const stopped = thread({
