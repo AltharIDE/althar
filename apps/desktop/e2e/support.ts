@@ -43,11 +43,14 @@ export const launch = async (home: string, env: Record<string, string> = {}) => 
   return { electronApp, page: await mainWindow(electronApp) }
 }
 
-/** Answers the folder picker with `path`, as if the person chose it. */
-export const chooseFolder = (electronApp: ElectronApplication, path: string) =>
-  electronApp.evaluate(({ dialog }, chosen) => {
-    dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [chosen] })) as typeof dialog.showOpenDialog
-  }, path)
+/** Answers the folder picker with `path`, or several, as if the person chose them. */
+export const chooseFolder = (electronApp: ElectronApplication, path: string | ReadonlyArray<string>) =>
+  electronApp.evaluate(
+    ({ dialog }, chosen) => {
+      dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: chosen })) as typeof dialog.showOpenDialog
+    },
+    typeof path === 'string' ? [path] : [...path],
+  )
 
 /** Makes the first project of the folder at `path`, added from the first screen as the person would. */
 export const openFirstProject = async (electronApp: ElectronApplication, page: Page, path: string) => {

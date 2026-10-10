@@ -204,7 +204,7 @@ describe('the Talk room', () => {
   it('talks to the coordinator on the agent last used, or on another the person picks', async () => {
     const { client } = fakeClient()
     withServices(<Project />, client)
-    expect(await screen.findByText('Ask the coordinator about the project, or say what should change.')).toBeTruthy()
+    expect(await screen.findByText('Ask the coordinator about meridian, or say what should change.')).toBeTruthy()
     const box = screen.getByRole('textbox', { name: 'Tell the coordinator something' })
     await userEvent.type(box, 'Add a retry{Enter}')
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Add a retry', disposition: 'after_current' }))

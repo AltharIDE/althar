@@ -1,0 +1,12 @@
+/* The page fills the tab; it scrolls in its halves, not as a whole. */
+.window {
+  height: 100%;
+  min-height: 0;
+  background: var(--n-2);
+}
+
+/* The code hosts and trackers, over the page, as a project's menu opens them. */
+.connecting {
+  top: 10vh;
+  max-height: 80vh;
+}

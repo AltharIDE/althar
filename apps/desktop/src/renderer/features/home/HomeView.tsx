@@ -6,7 +6,7 @@ import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type
 
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import { ago, clock, useNow } from '../../shared/time'
-import { BarEnd } from '../tabs/TabsFrame'
+import { BarEnd, useNewTab } from '../tabs/TabsFrame'
 import type { EdgeGlance } from '../settings/EdgePicture'
 import { SettingsPanel } from '../settings/SettingsPanel'
 import type { StartModel } from '../start/useStart'
@@ -23,7 +23,8 @@ import { type AnsweredCall, needLineOf, needsOf, needText, workOf } from './need
  * gear: how much needs you is the stream's first word, and which agents are
  * signed in is for settings, not the home. A task that waits on you is in
  * what needs you, not again in what is in progress. There is no composer:
- * coordinators belong to projects.
+ * coordinators belong to projects. A new project starts in a tab of its own,
+ * from the projects' +, or with folders dropped on the home.
  */
 
 export const text = {
@@ -131,14 +132,12 @@ export function HomeView({
   // What waits now, and how much is in progress, for Settings' pictures of the edge of the screen.
   const glance: EdgeGlance = { waiting, needs: needs.filter((need) => need.answer === undefined).slice(0, 3), work: workOf(working) }
 
-  const openFolder = () => void start.openFolder().then((opened) => opened !== null && onProject(opened.id))
-  // ⌘N opens a folder, and ⌘, opens and closes settings. ⌘ and a number belongs to the window's tabs.
+  const newTab = useNewTab()
+  // ⌘, opens and closes settings. ⌘N and ⌘ and a number belong to the window's tabs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return
-      if (event.key === 'n') openFolder()
-      else if (event.key === ',') setSettings((now) => !now)
-      else return
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key !== ',') return
+      setSettings((now) => !now)
       event.preventDefault()
     }
     window.addEventListener('keydown', onKey)
@@ -195,8 +194,8 @@ export function HomeView({
     onDragOver: (event: DragEvent) => event.preventDefault(),
     onDrop: (event: DragEvent) => {
       event.preventDefault()
-      const file = event.dataTransfer.files[0]
-      if (file !== undefined) void start.openDropped(file).then((opened) => opened !== null && onProject(opened.id))
+      const files = [...event.dataTransfer.files]
+      if (files.length > 0) newTab.start(files)
     },
   }
   const error = start.error ?? model.error
@@ -228,7 +227,7 @@ export function HomeView({
             }}
             onOpenProject={onProject}
             onTalk={onTalk}
-            onOpenFolder={openFolder}
+            onNewProject={() => newTab.start()}
           />
         )}
       </div>

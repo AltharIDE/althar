@@ -1,15 +1,13 @@
 import { type ReactNode, useEffect } from 'react'
 
-import type { AgentStatus, ProjectSummary } from '@althar/contracts'
-import { Button, PermissionPolicy, type RuntimeEntry, RuntimeState, SourceOrigin, TitleBar } from '@althar/ui'
-import { NewProject, Start } from '@althar/ui/screens'
+import type { AgentStatus } from '@althar/contracts'
+import { Button, type RuntimeEntry, RuntimeState, TitleBar } from '@althar/ui'
+import { Start } from '@althar/ui/screens'
 
 import { brandOf } from '../../shared/agents'
-import { shortFolder } from '../../shared/folders'
 import { HomePending } from '../../shared/Pending'
 import { AgentAccounts } from '../accounts/AgentAccounts'
 import type { AccountSignInModel } from '../accounts/useAccountSignIn'
-import { text as rulesText } from '../rules/RulesView'
 import s from './Start.module.css'
 import { useFirstProject } from './useFirstProject'
 import type { StartModel } from './useStart'
@@ -19,18 +17,11 @@ import { device, platform } from '../../shared/device'
  * Where the window starts. With no project yet, the kit's Start screen: the
  * agents answering round the mark, and the repositories found where people
  * keep code, ticked into the first project (useFirstProject). Once there are
- * projects, the home, whose Open a folder reads the folder first; one of
- * several repositories asks which to keep.
+ * projects, the home, where a new project starts in a tab of its own.
  */
 
 export const text = {
   removeAnyway: 'Remove anyway',
-  /** A folder of several repositories, before it is a project: what was found, and the answers Althar gives. */
-  forming: {
-    because: (name: string, n: number) => `Althar found ${n} git repositories in ${name}. Leave out any its tasks shouldn’t change.`,
-    sources: { label: 'Repositories', note: 'The ones its tasks may change. You can add others from elsewhere.' },
-    foot: 'Althar read these folders and changed nothing in them. Tasks work in worktrees of their own.',
-  },
   /** The kit's first screen, in this computer's words, with the keys this system has. */
   first: () => {
     const key = platform === 'darwin' ? '⌘' : 'Ctrl+'
@@ -115,52 +106,8 @@ export function StartView({
   /** The home, once there are projects. */
   home: () => ReactNode
 }) {
-  const opened = (project: ProjectSummary | null) => {
-    if (project !== null) onProject(project.id)
-  }
-  const modes = {
-    [PermissionPolicy.Rules]: 'rules',
-    [PermissionPolicy.Coordinator]: 'coordinator',
-    [PermissionPolicy.Ask]: 'ask',
-    [PermissionPolicy.AllowAll]: 'allow',
-  } as const
   // With no project, or none read because the runtime didn't answer, the first screen, which says what went wrong.
   const first = (model.projects !== null && model.projects.length === 0) || (model.projects === null && model.error !== null)
-
-  // A folder of several repositories: which to keep, the project's name, and who answers when agents need a yes.
-  if (model.forming !== null) {
-    const { forming } = model
-    return (
-      <div className={s.window}>
-        <div className={`${s.scroll} ${s.first}`}>
-          <NewProject
-            defaultName={forming.name}
-            because={text.forming.because(forming.name, forming.repositories.length)}
-            sources={forming.repositories.map((kept) => ({
-              id: kept.path,
-              name: kept.name,
-              where: shortFolder(kept.path),
-              origin: SourceOrigin.Existing,
-              ...(kept.branch === null ? {} : { branch: kept.branch }),
-              ...(kept.remote === null ? {} : { remote: kept.remote }),
-              role: '',
-            }))}
-            onRemove={model.leaveOut}
-            onChooseFolders={() => void model.addFolders()}
-            defaultPermissions={PermissionPolicy.Rules}
-            permissionOptions={[PermissionPolicy.Rules, PermissionPolicy.Coordinator, PermissionPolicy.Ask, PermissionPolicy.AllowAll]}
-            onCreate={({ name, permissions }) =>
-              void model.create({ name, permissions: modes[permissions as keyof typeof modes] ?? 'rules' }).then(opened)
-            }
-            onCancel={model.cancelForming}
-            creating={model.creating}
-            {...(model.error === null ? {} : { error: model.error })}
-            text={{ sources: text.forming.sources, foot: text.forming.foot, permission: rulesText.screen.permission }}
-          />
-        </div>
-      </div>
-    )
-  }
 
   if (first) return <First model={model} accounts={accounts} onProject={onProject} />
 

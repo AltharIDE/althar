@@ -45,7 +45,7 @@ import {
  * runtime to stop its sessions before the app goes. Folders reach the runtime
  * from here, never from the window, which gets a grant for each: one the
  * person picked or dropped, or one of the repositories it found where people
- * keep code (repositories.ts), for the first screen to offer. It seals and
+ * keep code (repositories.ts), for the first screen and a new project to offer. It seals and
  * opens the runtime's secrets, such as a code host's token, with Electron's
  * safeStorage, whose key the keychain keeps for this app alone: the runtime
  * keeps them sealed and never holds the key. It gives the Dock the icon the
@@ -372,6 +372,16 @@ ipcMain.handle('althar:pick-folder', async (event, purpose: unknown) => {
   return path === undefined ? null : allowFolder(path)
 })
 
+// Folders for a new project, several at once: a grant for each, in the order chosen.
+ipcMain.handle('althar:pick-folders', async (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  const options = { properties: ['openDirectory' as const, 'multiSelections' as const], message: 'Choose the project’s folders' }
+  const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
+  if (result.canceled) return []
+  const grants = await Promise.all(result.filePaths.map(allowFolder))
+  return grants.filter((grant) => grant !== null)
+})
+
 // A folder dropped on the window, by the path the preload read from the drop: only a folder on disk gets a grant.
 ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   if (typeof path !== 'string' || path === '') return null
@@ -379,10 +389,10 @@ ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   return found?.isDirectory() === true ? allowFolder(path) : null
 })
 
-/* The repositories the first screen offers, by the id the window has for each: only these are granted by id. */
+/* The repositories the first screen and a new project offer, by the id the window has for each: only these are granted by id. */
 const foundHere = new Map<string, string>()
 
-// The repositories where people keep code on this computer, for the first screen: each by an id, never by its path.
+// The repositories where people keep code on this computer, for the first screen and a new project: each by an id, never by its path.
 ipcMain.handle('althar:find-repositories', async () => {
   // The end-to-end tests give a home of their own, so what the tester keeps isn't offered.
   const home = process.env.ALTHAR_CODE_HOME || homedir()
@@ -395,7 +405,7 @@ ipcMain.handle('althar:find-repositories', async () => {
   })
 })
 
-// A grant for one of them, once the person ticks it and makes the project: one main found, and nothing else.
+// A grant for one of them, once the person ticks or adds it: one main found, and nothing else.
 ipcMain.handle('althar:grant-found', async (_event, id: unknown) => {
   const path = typeof id === 'string' ? foundHere.get(id) : undefined
   return path === undefined ? null : allowFolder(path)

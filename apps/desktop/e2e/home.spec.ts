@@ -36,9 +36,13 @@ test('comes back to what runs and what waits across projects, with the projects 
     await expect(page.getByRole('heading', { name: 'Nothing needs you' })).toBeVisible()
     await expect(page.getByText('1 task moving in 1 project.')).toBeVisible()
 
-    // Another project, opened from the home, with a task that is soon ready.
+    // Another project, made in a tab of its own from the home, with a task that is soon ready.
+    await page.getByRole('complementary', { name: 'Projects' }).getByRole('button', { name: 'New project' }).click()
+    await page.getByRole('textbox', { name: 'Name' }).fill('halyard')
     await chooseFolder(electronApp, halyard)
-    await page.getByRole('button', { name: 'Open a folder' }).click()
+    await page.getByRole('button', { name: 'Choose a folder…' }).click()
+    await expect(page.getByRole('list', { name: 'Its folders' }).getByText('halyard', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: /^Create halyard/ }).click()
     await expect(page.getByRole('heading', { name: 'halyard', level: 1 })).toBeVisible()
     await startTask(page, 'Name the limits better', '[lead:finish] [lead:edit]')
     await expect(page.getByText('Ready', { exact: true }).first()).toBeVisible()

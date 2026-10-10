@@ -56,7 +56,7 @@ export const text = {
   project: 'Project',
   conversation: 'Conversation',
   coordinator: 'Coordinator',
-  empty: 'Ask the coordinator about the project, or say what should change.',
+  empty: (project: string) => `Ask the coordinator about ${project}, or say what should change.`,
   placeholder: 'Tell the coordinator something',
   handsOver: (agent: string) => `hands the conversation to ${agent}`,
   /** Another agent's model, picked: nothing happens until the person says something. */
@@ -327,7 +327,7 @@ export function ProjectView({
                       {text.earlier}
                     </ThreadDivider>
                   )}
-                  {coordinator.items.length === 0 && model.streaming.size === 0 && <p className={s.quiet}>{text.empty}</p>}
+                  {coordinator.items.length === 0 && model.streaming.size === 0 && <p className={s.quiet}>{text.empty(name)}</p>}
                   {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
                   <ThreadShellProvider value={shown.shell}>
                     <ThreadBlocks

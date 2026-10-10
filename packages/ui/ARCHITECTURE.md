@@ -11,7 +11,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | Layer | What it holds |
 | --- | --- |
 | `foundations` | Tokens, icons, brand marks, project marks, Althar's light and its halftone mark, and the domain vocabularies. |
-| `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), `Model` (a model's mark and name, and how it is reached on hover), and Ask, which every part that asks a person shares. |
+| `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), `Model` (a model's mark and name, and how it is reached on hover), InkSwatches (the inks a project's mark can be drawn in), and Ask, which every part that asks a person shares. |
 | `thread` | What appears in a conversation: turns, tool calls, steps, permissions (a card, a stack with Allow all, their answers in small for a call on the home, and what a rule allowed), questions, Stuck, documents. |
 | `composer` | What writes into a conversation: Composer, DictationTray, ModelPick, ContextRing, Listening, Running. |
 | `coordinator` | What the coordinator shows about tasks: Issue, TaskLaunch, TaskCard, TaskMark, TaskHeld. |
@@ -21,7 +21,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `outputs` | What a task made: ChangeSet, ArtifactCard, ChangeView, and NoOutputs (where its lead has looked, before it has made anything). |
 | `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu, and the questions they ask first: RenameProject, RemoveProject, AbandonTask. |
 | `setup` | What comes before a project, what sets one up, and Settings: Runtimes, AgentInstall (an agent not on this device, and downloading it), SourceMap, Accounts and AccountSignIn, Connections, AgentTabs, ModelSwitches, ControlCenter, Preferences (the app's own: KeepAwake, OpenFilesIn, NotificationSettings, as rows of a SettingList that sit in any frame), and Conventions (NamingRule, TemplateSources). |
-| `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), Start (the first screen: the agents answering round the mark, and picking the first project's repositories), Home, NewProject, ProjectRules. |
+| `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), Start (the first screen: the agents answering round the mark, and picking the first project's repositories), Home, NewProject (a project before it is made, in a tab of its own: its name and mark, its colour, its folders as read, what this computer has named like it, and what reading them found), ProjectRules. |
 
 The rules between them:
 
@@ -154,8 +154,8 @@ A pattern that appears in two components becomes one part, so the two cannot dri
 | FileChanges, Delta, DiffStat | Files a change touched, with lines added and removed | ChangeSet, AcceptPeek, and a tool call's meta |
 | Checks | A change's checks and reviews | ChangeSet, AcceptPeek |
 | NoteForm | A one-line note sent with an action | ChangeSet, AcceptPeek, Review, Stuck |
-| Field | One line of text to type | NoteForm, SourceMap, NewProject, and every other typed answer |
-| Panel, FormRow | A sheet of settings, and its label-beside-control rows | ProjectRules, NewProject |
+| Field | One line of text to type | NoteForm, SourceMap, and every other typed answer |
+| Panel, FormRow | A sheet of settings, and its label-beside-control rows | ProjectRules |
 | KeyValues | A small definition list | External, GraphProposal |
 | StepRow | A step's row, its track and its thread link | Step, Review |
 | StepTrack | A task's steps as a row of bars | TaskCard, WorkCard, TaskHeader |
@@ -169,6 +169,7 @@ The helpers, in `src/lib`:
 - `useOnScreen`: a clock that runs only while someone can see it.
 - `useStickToBottom`: a thread that follows new content until you scroll away.
 - `useRefocus`: focus back on the button a form replaced, when the form closes.
+- `useDragOver`: folders held over a screen that takes them, Start's and NewProject's.
 - `safeHref`: the one test for whether an address becomes a link.
 
 ### Accessibility is part of the component

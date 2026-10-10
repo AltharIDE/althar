@@ -453,10 +453,10 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   explicit always-ask and never rules when its mode is selected. Its failures
   and uncertainty reach the person; readers remain read-only. See
   [ADR-019](decisions/019-coordinator-judges-permissions.md).
-- [ ] **Project rules: when and where they are set.** Leaning, as mocked in
-  the kit's NewProject: creating a project asks one thing, who answers when
-  agents need a yes (default "The agent in charge decides"), and every other rule starts
-  at its default. Can a task tighten the rules but never loosen them? Where
+- [ ] **Project rules: when and where they are set.** Leaning: creating a
+  project asks only its name, its colour and its folders, and every rule
+  starts at its default; who answers when agents need a yes is the first a
+  person changes, on the rules screen. Can a task tighten the rules but never loosen them? Where
   are they stored? (See Memory below.)
 - [ ] **Kinds of permission.** Commands, web fetches, MCP tools, writes
   outside the workspace, spending, messages to people. Should each kind have

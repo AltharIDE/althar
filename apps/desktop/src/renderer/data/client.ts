@@ -23,6 +23,7 @@ import {
   type OutputText,
   type Product,
   type ChangeTarget,
+  type ProjectInk,
   type ProjectList,
   type ProjectRepository,
   type ProjectSummary,
@@ -69,10 +70,17 @@ export interface Client {
    * Opens the folder a grant names: one the person chose in the picker or
    * dropped on the window. A folder of several repositories opens with the
    * ones the person kept, each by the grant of the folder it was found in.
+   * A project made on purpose comes with the id the window made for it
+   * (`newProjectId`), and the ink the person saw.
    */
   readonly openProject: (
     grant: string,
-    options?: { readonly name?: string; readonly repositories?: ReadonlyArray<{ readonly grant: string; readonly path: string }> },
+    options?: {
+      readonly name?: string
+      readonly repositories?: ReadonlyArray<{ readonly grant: string; readonly path: string }>
+      readonly projectId?: string
+      readonly ink?: ProjectInk
+    },
   ) => Promise<ProjectSummary>
   readonly listTasks: (projectId: string) => Promise<TaskList>
   readonly createTask: (input: {
@@ -276,6 +284,20 @@ export const messageOf = (error: unknown): string =>
 /** A new command id, as the contract has them. */
 export const newCommandId = (): string => `cmd_${globalThis.crypto.randomUUID().replaceAll('-', '')}`
 
+/**
+ * A new project's id, as the runtime makes them: `proj_` and a UUIDv7, so
+ * ids sort by when they were made. The window makes one for a project before
+ * it is made, to draw its mark from as it is named.
+ */
+export const newProjectId = (now: number = Date.now()): string => {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
+  // 48 bits of milliseconds, then the version and the variant over the random rest.
+  for (let i = 0; i < 6; i++) bytes[i] = Math.floor(now / 2 ** (8 * (5 - i))) % 256
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x70
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80
+  return `proj_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
 /** Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it. */
 const settle = <A>(effect: Effect.Effect<A, unknown>): Promise<A> =>
   Effect.runPromiseExit(effect).then((exit) => {
@@ -320,6 +342,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
           grant,
           ...(options.name === undefined ? {} : { name: options.name }),
           ...(options.repositories === undefined ? {} : { repositories: options.repositories }),
+          ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
+          ...(options.ink === undefined ? {} : { ink: options.ink }),
         }),
       ),
     listTasks: (projectId) => settle(api.ListTasks({ projectId })),

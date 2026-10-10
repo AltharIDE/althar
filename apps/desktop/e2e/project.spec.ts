@@ -1,4 +1,5 @@
-import { mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,9 +9,11 @@ import { repository } from '../tests/repository'
 import { chooseFolder, launch, openFirstProject } from './support'
 
 /*
- * A project after it is made, from its bar's menu: renamed, a repository
- * added and left out, and removed from Althar, each showing in the tabs and
- * the home at once, with the person's folders left exactly as they were.
+ * A project made in a tab of its own, named first and then given its
+ * folders; and a project after it is made, from its bar's menu: renamed, a
+ * repository added and left out, and removed from Althar, each showing in
+ * the tabs and the home at once, with the person's folders left exactly as
+ * they were.
  */
 
 const menu = async (page: Page, item: string | RegExp) => {
@@ -77,6 +80,70 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await expect(tabs.getByRole('button', { name: /^Refunds v2/ })).toBeHidden()
     await expect(page.getByRole('button', { name: /Add a folder/ })).toBeVisible()
     expect([asLeft(meridian), asLeft(web)]).toEqual(before)
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('makes a project in a tab of its own: named first, then its folders, found here and chosen, and made into its tab', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const meridian = repository(home, 'meridian')
+  // Where people keep code: Northwind's repositories, on GitHub and GitLab, and one of nobody's.
+  const projects = join(home, 'Projects')
+  mkdirSync(projects)
+  const app = repository(projects, 'northwind-app')
+  execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:northwind-co/app.git'], { cwd: app })
+  const ops = repository(home, 'northwind-ops')
+  execFileSync('git', ['remote', 'add', 'origin', 'git@gitlab.com:northwind/ops.git'], { cwd: ops })
+  repository(projects, 'dotfiles')
+  const { electronApp, page } = await launch(home)
+  const tabs = page.getByRole('navigation', { name: 'Projects' })
+  try {
+    await openFirstProject(electronApp, page, meridian)
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+
+    // The + opens a tab of its own, named as it is typed, on what this computer has named like it.
+    await tabs.getByRole('button', { name: 'New project' }).click()
+    const name = page.getByRole('textbox', { name: 'Name' })
+    await expect(name).toBeFocused()
+    await name.fill('Northwind')
+    await expect(tabs.getByRole('button', { name: /^Northwind/ })).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByRole('heading', { name: /named like Northwind/ })).toBeVisible()
+    await page.getByRole('button', { name: 'Add northwind-app' }).click()
+    const folders = page.getByRole('list', { name: 'Its folders' })
+    await expect(folders.getByText('northwind-co/app')).toBeVisible()
+    // One from anywhere, by the picker.
+    await chooseFolder(electronApp, ops)
+    await page.getByRole('button', { name: 'Choose a folder…' }).click()
+    await expect(folders.getByText('northwind/ops')).toBeVisible()
+    const read = page.getByRole('region', { name: 'What Althar read' })
+    await expect(read.getByText(/is on GitLab, which isn’t connected/)).toBeVisible()
+    await expect(read.getByRole('button', { name: 'Connect GitHub' })).toBeVisible()
+    await expect(page.getByText('2 repositories')).toBeVisible()
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: 'test-results/new-project.png' })
+
+    // Away and back, it is as it was.
+    await tabs.getByRole('button', { name: /^meridian/ }).click()
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await tabs.getByRole('button', { name: /^Northwind/ }).click()
+    await expect(folders.getByRole('listitem')).toHaveCount(2)
+
+    // Made, its tab is the project's, open on its conversation.
+    await page.getByRole('button', { name: /^Create Northwind/ }).click()
+    await expect(page.getByRole('heading', { name: 'Northwind', level: 1 })).toBeVisible()
+    await expect(tabs.getByRole('button', { name: /^Northwind/ })).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByRole('textbox', { name: /^Tell .* something/ })).toBeVisible()
+    await page.screenshot({ path: 'test-results/new-project-made.png' })
+
+    // Another, left with Escape: nothing is made, and the tab before it has the window.
+    await page.keyboard.press('Meta+n')
+    await expect(page.getByRole('textbox', { name: 'Name' })).toBeFocused()
+    await page.keyboard.type('Scratch')
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('heading', { name: 'Northwind', level: 1 })).toBeVisible()
+    await expect(tabs.getByRole('button', { name: /^Scratch/ })).toHaveCount(0)
+    await expect(tabs.getByRole('listitem')).toHaveCount(3)
   } finally {
     await electronApp.close()
   }

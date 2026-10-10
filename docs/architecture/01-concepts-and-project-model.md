@@ -153,6 +153,20 @@ The fast path must not create a hidden “single repository project” subtype.
 
 ### Create a project
 
+The deliberate path opens a tab of its own, as a browser opens a new tab,
+and starts with the name: the project is named first, then given its
+folders. The window makes the project's id before the project exists, so its
+mark, drawn from the id, is the one it keeps; the runtime refuses an id
+already taken. Its colour is offered as the runtime would pick it, and can
+be changed. Folders come from the system's picker, several at once, dropped
+on the window, or, one press away, from the repositories found where people
+keep code, those named like the project first. Each is read as it is added,
+and what reading them found is said before anything is made: the code host
+each is on and whether Althar is connected to it, as whom, and any already
+in another project. A project made on purpose is new even where its first
+folder is another project's; that folder stays the other project's to find.
+Closing the tab makes nothing.
+
 The deliberate path lets a user:
 
 - name the outcome or body of work;

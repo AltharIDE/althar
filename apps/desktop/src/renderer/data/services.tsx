@@ -83,9 +83,11 @@ export interface Host {
   readonly platform: string
   /** Asks the person for a folder, for a project or an agent's account; its grant, or null when they cancel. */
   readonly pickFolder: (purpose?: 'project' | 'account') => Promise<string | null>
+  /** Asks the person for folders for a new project, several at once; a grant for each, none when they cancel. */
+  readonly pickFolders: () => Promise<ReadonlyArray<string>>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */
   readonly grantDropped: (file: File) => Promise<string | null>
-  /** The git repositories where people usually keep code on this computer, newest work first, and where it looked. */
+  /** The git repositories where people usually keep code on this computer, newest work first, and where it looked; a new project offers them too. */
   readonly findRepositories: () => Promise<FoundRepositories>
   /** A grant for a repository it found, by its id; null for one it didn't. */
   readonly grantFound: (id: string) => Promise<string | null>

@@ -12,6 +12,7 @@ import { HomeView, lineOf, refOf } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
 import { agentGlanceOf, marksOf, SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
 import { useStart } from '../src/renderer/features/start/useStart'
+import { NewTabContext } from '../src/renderer/features/tabs/TabsFrame'
 import {
   agents,
   card,
@@ -399,18 +400,28 @@ describe('the home', () => {
     expect(screen.queryByRole('button', { name: /^Talk to/ })).toBeNull()
   })
 
-  it('says what went wrong opening a folder, and opens one dropped', async () => {
-    const { client } = fakeClient({ openProject: vi.fn(async () => Promise.reject(new Error('boom'))) })
-    const host = fakeHost()
-    const view = withServices(<Home />, client, host)
+  it('starts a new project in a tab of its own, with any folders dropped on it', async () => {
+    const start = vi.fn()
+    const tab = { start, made: vi.fn(), close: vi.fn() }
+    const view = withServices(
+      <NewTabContext.Provider value={tab}>
+        <Home />
+      </NewTabContext.Provider>,
+      fakeClient().client,
+    )
     await screen.findByRole('complementary', { name: 'Projects' })
-    await userEvent.click(screen.getByRole('button', { name: 'Open a folder' }))
-    expect(await screen.findByRole('alert')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'New project' }))
+    expect(start).toHaveBeenCalledWith()
     const root = view.container.firstElementChild as Element
+    const folder = new File([], 'northwind')
     fireEvent.dragOver(root)
-    fireEvent.drop(root, { dataTransfer: { files: [new File([], 'x')] } })
+    fireEvent.drop(root, { dataTransfer: { files: [folder] } })
     fireEvent.drop(root, { dataTransfer: { files: [] } })
-    await waitFor(() => expect(host.grantDropped).toHaveBeenCalledTimes(1))
+    expect(start).toHaveBeenCalledTimes(2)
+    expect(start).toHaveBeenLastCalledWith([folder])
+    // ⌘N is the window's tabs', not the home's.
+    fireEvent.keyDown(window, { key: 'n', metaKey: true })
+    expect(start).toHaveBeenCalledTimes(2)
   })
 
   it('says what the loop did in a line each', () => {
