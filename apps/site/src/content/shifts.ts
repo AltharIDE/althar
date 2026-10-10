@@ -45,7 +45,100 @@ export interface Shift {
   source: { name: string; url: string }
 }
 
+/** A change that is announced but hasn't happened yet. `date` is the day it takes effect. */
+export interface Upcoming extends Shift {
+  /** The day it was announced, YYYY-MM-DD. */
+  announced: string
+}
+
 export const SHIFTS: readonly Shift[] = [
+  {
+    id: 'gpt-5-4-cyber-removed',
+    date: '2026-10-01',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'gpt-5.4-cyber removed from the API',
+    what: 'Removed on the date OpenAI gave in September. Its notice points users to the most capable cyber model available to them.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
+  },
+  {
+    id: 'gpt-5-3-codex-retiring',
+    date: '2026-10-01',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'gpt-5.3-codex and gpt-5.1 leave the API in April 2027',
+    what: 'Also gpt-5.4-nano. Removal on 1 April 2027, with six months’ notice. The replacements are GPT-6 models.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
+  },
+  {
+    id: 'copilot-seats-paid-up-front',
+    date: '2026-10-01',
+    kind: ShiftKind.Pricing,
+    who: 'GitHub',
+    title: 'Copilot Business and Enterprise seats are paid up front',
+    what: 'For card and PayPal customers, each assigned seat is charged at the start of the cycle and needs payment before access. Invoice billing is not covered.',
+    source: {
+      name: 'GitHub Changelog',
+      url: 'https://github.blog/changelog/2026-08-28-upcoming-changes-to-github-copilot-policies-and-billing/',
+    },
+  },
+  {
+    id: 'sonnet-4-5-deprecated',
+    date: '2026-09-30',
+    kind: ShiftKind.Access,
+    who: 'Anthropic',
+    title: 'Claude Sonnet 4.5 is deprecated',
+    what: 'It retires from the Claude API on 30 November 2026. Anthropic’s replacement is Sonnet 5.5.',
+    source: { name: 'Claude Platform docs', url: 'https://platform.claude.com/docs/en/about-claude/model-deprecations' },
+  },
+  {
+    id: 'managed-agents-dynamic-workflows',
+    date: '2026-10-09',
+    kind: ShiftKind.Tools,
+    who: 'Anthropic',
+    title: 'Dynamic workflows for Managed Agents, in beta',
+    what: 'An agent can write a program that runs many agents in phases and combines their results, for work like reviewing hundreds of documents.',
+    source: { name: 'Claude Platform release notes', url: 'https://platform.claude.com/docs/en/release-notes/overview' },
+  },
+  {
+    id: 'usage-policy-november',
+    date: '2026-10-09',
+    kind: ShiftKind.Access,
+    who: 'Anthropic',
+    title: 'Revised usage policy takes effect 12 November',
+    what: 'It bans sustained, needless abuse of Claude and tightens the rules on influence operations. Anthropic says the abuse rule targets only extreme cases.',
+    source: {
+      name: 'The Register',
+      url: 'https://www.theregister.com/ai-and-ml/2026/10/09/anthropic-asks-users-to-stop-being-mean-to-claude/5302218',
+    },
+  },
+  {
+    id: 'gemini-universal-agent',
+    date: '2026-10-08',
+    kind: ShiftKind.Tools,
+    who: 'Google',
+    title: 'Gemini, a universal agent for the workplace',
+    what: 'Works in Gmail, Docs, Drive and Sheets, generates and runs code, and can start sub-agents that work for days. Availability is not yet stated.',
+    source: { name: 'CBS News', url: 'https://www.cbsnews.com/news/google-gemini-ai-workplace-agent/' },
+  },
+  {
+    id: 'claude-haiku-5-5-api',
+    date: '2026-10-07',
+    kind: ShiftKind.Model,
+    who: 'Anthropic',
+    title: 'Claude Haiku 5.5 in the API',
+    what: 'A 1M-token context window and 128k output. Code written for Haiku 4.5 can return 400 errors on it, so check before switching.',
+    source: { name: 'Claude Platform release notes', url: 'https://platform.claude.com/docs/en/release-notes/overview' },
+  },
+  {
+    id: 'reflection-beam',
+    date: '2026-10-05',
+    kind: ShiftKind.OpenModel,
+    who: 'Reflection AI',
+    title: 'Reflection announces Beam, an open-weight model',
+    what: '501 billion parameters, 23 billion active, with a 1M-token window, for coding and agent work. Weights are due later this month; the claims are unverified.',
+    source: { name: 'AI Business', url: 'https://aibusiness.com/foundation-models/reflection-s-beam-model-signals-deepening-split' },
+  },
   {
     id: 'claude-haiku-5-5-copilot',
     date: '2026-10-07',
@@ -285,5 +378,119 @@ export const SHIFTS: readonly Shift[] = [
     title: 'Qwen3.8-Max',
     what: 'Alibaba’s new flagship: a 2.4-trillion-parameter model with a million-token window.',
     source: { name: 'DataNorth', url: 'https://datanorth.ai/news/alibaba-releases-qwen3-8-max' },
+  },
+]
+
+/*
+ * Upcoming: removals, retirements and new terms that are announced but not
+ * yet in effect, soonest first as written. The page hides one once its day has
+ * passed; move it into SHIFTS then, with what actually happened.
+ */
+export const UPCOMING: readonly Upcoming[] = [
+  {
+    id: 'gpt-5-5-leaves',
+    date: '2026-10-14',
+    announced: '2026-09-16',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'GPT-5.5 leaves ChatGPT and Codex',
+    what: 'Retired from ChatGPT, ChatGPT Work and Codex on every plan. The API is not affected, but Codex settings that pin it need to move first.',
+    source: {
+      name: 'BusinessToday',
+      url: 'https://www.businesstoday.in/technology/artificial-intelligence/story/openai-to-retire-gpt-5-5-from-chatgpt-work-and-codex-on-october-14-what-changes-to-expect-555782-2026-09-16',
+    },
+  },
+  {
+    id: 'openai-legacy-models-leave',
+    date: '2026-10-23',
+    announced: '2026-04-22',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'o1, o3-mini, GPT-4 and gpt-3.5-turbo leave the API',
+    what: 'Also o4-mini and the fine-tuned versions of these models. OpenAI’s replacements are GPT-5.6 models.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
+  },
+  {
+    id: 'chatgpt-pro-allowance-ends',
+    date: '2026-10-29',
+    announced: '2026-09-29',
+    kind: ShiftKind.Limits,
+    who: 'OpenAI',
+    title: 'ChatGPT Pro $200 subscribers lose the old allowance',
+    what: 'People already on the plan keep their old allowance until this day, then get the reopened plan’s, which is roughly half.',
+    source: { name: 'Kingy AI', url: 'https://kingy.ai/news/chatgpt-pro-200-usage-cut/' },
+  },
+  {
+    id: 'usage-policy-takes-effect',
+    date: '2026-11-12',
+    announced: '2026-10-09',
+    kind: ShiftKind.Access,
+    who: 'Anthropic',
+    title: 'Anthropic’s revised usage policy takes effect',
+    what: 'It bans sustained, needless abuse of Claude and tightens the rules on influence operations.',
+    source: {
+      name: 'The Register',
+      url: 'https://www.theregister.com/ai-and-ml/2026/10/09/anthropic-asks-users-to-stop-being-mean-to-claude/5302218',
+    },
+  },
+  {
+    id: 'cursor-openai-access-ends',
+    date: '2026-11-12',
+    announced: '2026-08-29',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'Cursor loses direct access to OpenAI’s models',
+    what: 'OpenAI’s upcoming models won’t go to Cursor either, now that SpaceX owns it.',
+    source: { name: 'CNBC', url: 'https://www.cnbc.com/2026/08/29/openai-cursor-spacex-model-access.html' },
+  },
+  {
+    id: 'sonnet-4-5-retires',
+    date: '2026-11-30',
+    announced: '2026-09-30',
+    kind: ShiftKind.Access,
+    who: 'Anthropic',
+    title: 'Claude Sonnet 4.5 retires from the Claude API',
+    what: 'Requests to it will fail after this day. Anthropic’s replacement is Sonnet 5.5.',
+    source: { name: 'Claude Platform docs', url: 'https://platform.claude.com/docs/en/about-claude/model-deprecations' },
+  },
+  {
+    id: 'openai-evals-prompts-agent-builder',
+    date: '2026-11-30',
+    announced: '2026-06-03',
+    kind: ShiftKind.Tools,
+    who: 'OpenAI',
+    title: 'Evals, reusable prompts and Agent Builder shut down',
+    what: 'Existing evals turn read-only on 31 October. OpenAI points to Promptfoo for evals and the Agents SDK for Agent Builder.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
+  },
+  {
+    id: 'gpt-5-o3-snapshots-leave',
+    date: '2026-12-11',
+    announced: '2026-06-11',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'GPT-5 and o3 snapshots leave the API',
+    what: 'Covers gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-pro, o3 and o3-pro. OpenAI’s replacements are GPT-5.6 models.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
+  },
+  {
+    id: 'openai-fine-tuning-ends',
+    date: '2027-01-06',
+    announced: '2026-05-07',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'OpenAI stops new fine-tuning jobs',
+    what: 'Existing customers can no longer create fine-tuning jobs. Fine-tuned models keep running until their base model is deprecated.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
+  },
+  {
+    id: 'gpt-5-3-codex-leaves',
+    date: '2027-04-01',
+    announced: '2026-10-01',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'gpt-5.3-codex, gpt-5.1 and gpt-5.4-nano leave the API',
+    what: 'Six months’ notice. OpenAI’s replacements are GPT-6 models.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
   },
 ]
