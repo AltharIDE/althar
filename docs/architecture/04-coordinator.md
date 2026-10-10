@@ -17,8 +17,10 @@ See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
 - plans work, drafts tasks, and orders a batch of them;
 - triages and refines tickets, once a tracker connector exists
   ([06](06-integrations-and-skills.md));
-- recommends a lead per task, with its reasons ([05](05-workflow-engine.md));
-- shows a task's plan before it starts: steps, an agent per step, optional
+- recommends a lead model per task, with its reasons, from the models it can
+  use now and what is known of each ([05](05-workflow-engine.md),
+  [ADR-015](../decisions/015-coordinator-picks-models.md));
+- shows a task's plan before it starts: steps, a model per step, optional
   steps, and a short countdown after which the plan starts on its own. In the
   MVP the plan is always one fixed graph with its choices filled in
   ([MVP plan](../plans/mvp.md)); composing a graph per task comes next;
@@ -82,8 +84,9 @@ provisional.
 | `list_tasks`, `read_task` | Status, plan, steps, lead, change | Read |
 | `read_thread` | Earlier turns of a task's thread or its own, by range | Read |
 | `read_change` | A task's diff and checks | Read |
-| `draft_task` | Creates a task in draft, with its repositories and intent | Command |
-| `propose_plan` | Steps, an agent per step, optional steps | Command |
+| `draft_task` | Creates a task in draft, with its repositories and intent: a title of a few words (at most 60 characters), and what the person last said to it kept as what they asked for, which the task's thread opens with and its lead reads | Command |
+| `list_models` | The models it can use now, by maker, with their scores | Query |
+| `propose_plan` | Steps, a model per step, optional steps | Command |
 | `start_task` | Starts a planned task, through the countdown | Command |
 | `order_tasks` | Orders a batch | Command |
 | `message_lead` | Sends a message to a task's lead, queued or as an interrupt | Command |

@@ -100,6 +100,98 @@ export const commitTree = (cwd: string, tree: string, parent: string, message: s
     GIT_COMMITTER_EMAIL: 'althar@localhost',
   })
 
+/** Who made a commit, and when, as git keeps it: `1760000000 +0200` for a date. */
+export interface Signature {
+  readonly name: string
+  readonly email: string
+  readonly date: string
+}
+
+/** A commit as git keeps it: its tree, its parents, who made it and committed it, and its message exactly. */
+export interface CommitRecord {
+  readonly tree: string
+  readonly parents: ReadonlyArray<string>
+  readonly author: Signature
+  readonly committer: Signature
+  readonly message: string
+  /**
+   * It has what making it again would lose: a message in an encoding other
+   * than UTF-8, which reads here as UTF-8, or a signed tag it merged.
+   */
+  readonly keeps: boolean
+  /** It was signed, whatever git does by default here now. */
+  readonly signed: boolean
+}
+
+const signatureOf = (line: string): Signature | null => {
+  const match = /^(.*) <(.*)> (\d+ [+-]\d{4})$/.exec(line)
+  return match === null ? null : { name: match[1] ?? '', email: match[2] ?? '', date: match[3] ?? '' }
+}
+
+/** A commit's record, read from its object, so its message is what was written. */
+export const commitRecord = (cwd: string, commit: string): Effect.Effect<CommitRecord, GitFailed> =>
+  Effect.flatMap(run(60_000, cwd, ['cat-file', 'commit', commit], {}, false), (raw) => {
+    const split = raw.indexOf('\n\n')
+    const headers = (split === -1 ? raw : raw.slice(0, split)).split('\n')
+    const field = (name: string) => headers.filter((line) => line.startsWith(`${name} `)).map((line) => line.slice(name.length + 1))
+    const author = signatureOf(field('author')[0] ?? '')
+    const committer = signatureOf(field('committer')[0] ?? '')
+    const tree = field('tree')[0]
+    if (author === null || committer === null || tree === undefined)
+      return Effect.fail(new GitFailed({ args: ['cat-file', 'commit', commit], cwd, stderr: 'A commit git could not be read.' }))
+    const encoding = field('encoding')[0]?.toLowerCase()
+    const keeps = (encoding !== undefined && encoding !== 'utf-8' && encoding !== 'utf8') || field('mergetag').length > 0
+    const signed = field('gpgsig').length > 0 || field('gpgsig-sha256').length > 0
+    return Effect.succeed({
+      tree,
+      parents: field('parent'),
+      author,
+      committer,
+      message: split === -1 ? '' : raw.slice(split + 2),
+      keeps,
+      signed,
+    })
+  })
+
+/** Whether the person has git sign every commit here (`commit.gpgSign`), which `commit-tree` doesn't do by itself. */
+export const signsCommits = (cwd: string) =>
+  Effect.map(gitOutcome(cwd, 'config', '--type=bool', '--get', 'commit.gpgsign'), (outcome) => outcome.stdout === 'true')
+
+/**
+ * The same commit made again with another message, or other parents: its
+ * tree, its author and committer and their dates kept, so only what changed
+ * differs. The message goes in as written. Signed, where the person has git
+ * sign their commits, with their key, as `git commit` would.
+ */
+export const recommit = (cwd: string, record: CommitRecord, parents: ReadonlyArray<string>, message: string, sign = false) =>
+  run(
+    60_000,
+    cwd,
+    ['commit-tree', record.tree, ...parents.flatMap((parent) => ['-p', parent]), ...(sign ? ['-S'] : []), '-F', '-'],
+    {
+      GIT_AUTHOR_NAME: record.author.name,
+      GIT_AUTHOR_EMAIL: record.author.email,
+      GIT_AUTHOR_DATE: `@${record.author.date}`,
+      GIT_COMMITTER_NAME: record.committer.name,
+      GIT_COMMITTER_EMAIL: record.committer.email,
+      GIT_COMMITTER_DATE: `@${record.committer.date}`,
+    },
+    true,
+    message,
+  )
+
+/** The commit a remote's branch is on, asked of the remote by URL, as a push would be: null where it has no such branch, or can't be asked. */
+export const remoteTip = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string) =>
+  run(
+    60_000,
+    cwd,
+    ['ls-remote', '--heads', target.url, `refs/heads/${branch}`],
+    target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
+  ).pipe(
+    Effect.map((listed) => /^[0-9a-f]{40,64}/.exec(listed)?.[0] ?? null),
+    Effect.orElseSucceed(() => null),
+  )
+
 /** The top of the repository a path is in. */
 export const topLevel = (path: string) => git(path, 'rev-parse', '--show-toplevel')
 
@@ -216,12 +308,12 @@ export const remoteUrls = (cwd: string) =>
     ),
   ])
 
-/** Each remote by name, with its fetch URL without credentials, in the order git lists them. */
-export const namedRemotes = (cwd: string) =>
+/** Each remote by name, with its fetch URL (or the URLs it pushes to) without credentials, in the order git lists them. */
+export const namedRemotes = (cwd: string, which: 'fetch' | 'push' = 'fetch') =>
   Effect.map(git(cwd, 'remote', '-v'), (output) =>
     output
       .split('\n')
-      .filter((line) => line.endsWith('(fetch)'))
+      .filter((line) => line.endsWith(`(${which})`))
       .map((line) => {
         const [name = '', url = ''] = line.split(/\s+/)
         return { name, url: redactUrl(url) }
@@ -267,3 +359,18 @@ export const pushTo = (
     ['push', '--quiet', '--no-verify', target.url, `${commit}:refs/heads/${branch}`],
     target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
   )
+
+/**
+ * The remote a repository's work goes to, as the person's own git would
+ * send it: the one its default branch follows, else `origin`, else its only
+ * remote; null where it has none, or several and no way to tell. A default
+ * branch that follows a branch here (`.`), or a bare URL, follows no remote.
+ */
+export const remoteOf = (cwd: string, base: string) =>
+  Effect.gen(function* () {
+    const remotes = yield* namedRemotes(cwd).pipe(Effect.orElseSucceed(() => []))
+    const names = [...new Set(remotes.map((remote) => remote.name))]
+    const followed = yield* gitOutcome(cwd, 'for-each-ref', '--format=%(upstream:remotename)', `refs/heads/${base}`)
+    if (followed.code === 0 && names.includes(followed.stdout)) return followed.stdout
+    return names.includes('origin') ? 'origin' : names.length === 1 ? (names[0] ?? null) : null
+  })

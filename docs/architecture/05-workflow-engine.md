@@ -487,9 +487,10 @@ attention request. Parallel writers wait for per-branch workspaces and an
 explicit merge or select step.
 
 **Lead recommendation.** The coordinator ([04](04-coordinator.md)) recommends
-a lead model per task. It
-weighs the kind of work, past outcomes on similar tasks, runtime availability
-and usage limits, and cost. The user can override it. The recommendation and
+a lead model per task, never an agent: an agent is only a way to a model
+([ADR-015](../decisions/015-coordinator-picks-models.md)). It
+weighs the kind of work, each model's scores, past outcomes on similar tasks,
+runtime availability and usage limits, and cost. The user can override it. The recommendation and
 its reasons are recorded on the task.
 
 ## Implementing, verifying, and reviewing
@@ -523,8 +524,9 @@ run only read-only commands (diff, search, log). Running tests belongs to
 verification: tests write caches and snapshots into the workspace, and would
 duplicate it.
 
-**The default reviewer** runs on a different provider from the lead when one is
-available, on that provider's strongest available model. The plan shows the
+**The default reviewer** runs on a model from a different maker than the
+lead's when one can be used, picked by what the review needs
+([ADR-015](../decisions/015-coordinator-picks-models.md)). The plan shows the
 choice, and it can be changed. If the lead and reviewer end up the same model,
 the thread says so quietly.
 

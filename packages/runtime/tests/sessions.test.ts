@@ -352,6 +352,44 @@ describe('sessions', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('hands the thread over with what the person said: the new lead takes it first, after its brief, and the old one never does', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const { task: created } = yield* task('Add the retry helper')
+      const first = yield* begin(created.threadId, 'claude-code')
+      yield* say(created.threadId, scenarios.hello)
+      yield* ended(created.threadId, 1)
+      const body = 'Use the helper we already have'
+      const second = yield* sessions.switchAgent({
+        threadId: created.threadId,
+        agentId: 'opencode',
+        model: 'large',
+        message: { envelope: yield* Runtime.envelope('thread.send', { threadId: created.threadId, body }), body },
+      })
+      yield* settled(created.threadId, 3)
+      // What the person said is in the thread, and was given to the new lead alone, with its brief and in place of carrying on.
+      const items = yield* threadItems(created.threadId)
+      assert.deepStrictEqual(
+        items.filter((item) => item.kind === 'user_message').map((item) => item.content.text),
+        [scenarios.hello, body],
+      )
+      const given = yield* sql<{ sessionId: string; prompt: string }>`
+        SELECT d.provider_session_id AS session_id, d.prompt FROM turn_deliveries d JOIN turn_delivery_inputs di ON di.delivery_id = d.id
+        JOIN user_inputs u ON u.id = di.user_input_id WHERE u.body = ${body}`
+      assert.deepStrictEqual(
+        given.map((turn) => turn.sessionId),
+        [second],
+      )
+      assert.include(given[0]?.prompt, 'You are taking over a task from Fake claude-code')
+      assert.isTrue(given[0]?.prompt.endsWith(body))
+      assert.notInclude(given[0]?.prompt, 'Carry on with the task from where it stands.')
+      assert.notStrictEqual(first, second)
+      // It is on the model asked for from the moment it starts.
+      assert.strictEqual((yield* session(second))?.model, 'large')
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('records a usage limit against the account, with when it resets', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient

@@ -7,7 +7,7 @@
 import { useState } from 'react'
 
 import type { RuntimeInfo } from '../composer/ModelBrowser/ModelBrowser'
-import type { ModelInfo } from '../foundations/Model/Model'
+import type { ModelInfo } from '../primitives/Model/Model'
 import { Brand } from '../foundations/brands/brands'
 import { labBrand } from '../foundations/brands/resolve'
 import { Lab } from '../foundations/vocabulary'

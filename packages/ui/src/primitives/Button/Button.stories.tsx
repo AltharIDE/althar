@@ -20,7 +20,8 @@ export const Quiet: Story = { args: { variant: 'quiet', children: 'Hold' } }
 export const Danger: Story = { args: { variant: 'danger', children: 'Remove project' } }
 /** Inside a row of a thread or a card, beside 11–12px text. */
 export const Small: Story = { args: { size: 'small', children: 'Undo' } }
-export const WithIcon: Story = { args: { icon: 'arrow', children: 'Open task' } }
+export const WithIcon: Story = { args: { icon: 'plus', children: 'New task' } }
+export const WithTrailingIcon: Story = { args: { trailingIcon: 'arrow', children: 'Open task' } }
 export const WithShortcut: Story = { args: { kbd: '↵', children: 'Send' } }
 export const Disabled: Story = { args: { disabled: true } }
 export const Busy: Story = {

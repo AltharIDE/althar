@@ -91,6 +91,50 @@ export const Installing: Story = {
   },
 }
 
+const OPENCODE_MISSING: RuntimeEntry = { id: 'opencode', name: 'OpenCode', state: RuntimeState.Missing, download: '45 MB' }
+
+/** Not installed, and Althar can fetch it: a download, said plainly, beside its own instructions; then downloading, or why it stopped. */
+export const Downloading: Story = {
+  args: { runtimes: [OPENCODE_MISSING], onInstall: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/latest release from GitHub, about 45 MB/)).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Download' }))
+    await expect(args.onInstall).toHaveBeenCalledWith('opencode')
+  },
+}
+
+export const DownloadStates: Story = {
+  render: (args) => (
+    <States
+      size="wide"
+      cells={[
+        { state: 'can download', node: <Runtimes {...args} onInstall={fn()} runtimes={[OPENCODE_MISSING]} /> },
+        {
+          state: 'downloading',
+          node: (
+            <Runtimes
+              {...args}
+              onInstall={fn()}
+              runtimes={[{ id: 'opencode', name: 'OpenCode', state: RuntimeState.Installing, download: '45 MB' }]}
+            />
+          ),
+        },
+        {
+          state: 'didn’t finish',
+          node: (
+            <Runtimes
+              {...args}
+              onInstall={fn()}
+              runtimes={[{ ...OPENCODE_MISSING, failed: 'GitHub couldn’t be reached to find OpenCode.' }]}
+            />
+          ),
+        },
+      ]}
+    />
+  ),
+}
+
 /** Without handlers, rows only say where each stands. */
 export const ReadOnly: Story = {
   args: { runtimes: EVERY_STATE, onSignIn: undefined, onCancel: undefined, onCheck: undefined, onHelp: undefined, onAdd: undefined },

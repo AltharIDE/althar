@@ -4,7 +4,7 @@ import type { ProjectId } from '@althar/domain'
 import type { SessionEvent } from '@althar/provider-adapters'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Exit, Stream } from 'effect'
+import { Effect, Exit, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents, WebCrypto } from '../src/Config'
@@ -183,7 +183,7 @@ describe('the runtime helpers', () => {
       assert.strictEqual(codex.definition.name, 'Codex')
       assert.strictEqual(codex.transport('/tmp')._tag, 'Process')
       assert.instanceOf(yield* Effect.flip(agents.get('gemini')), UnknownAgent)
-    }).pipe(Effect.provide(Agents.registry)),
+    }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
   )
 
   it.live('lets a client subscribe before anything happens, and miss nothing', () =>

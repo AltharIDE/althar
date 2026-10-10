@@ -1,11 +1,12 @@
-import type { ChangeSummary, ChangedFile, ThreadSnapshot } from '@althar/contracts'
+import type { ChangeSummary, ChangedFile, TaskRepositoryMerged, ThreadSnapshot } from '@althar/contracts'
 import { Button, type ChangeCheck, ChangeSet, ChangeState, CheckState, type ModelInfo, type PullRequest, ThreadMeasure } from '@althar/ui'
 
-import { modelInfo } from '../../shared/agents'
+import { type NameModel, useModelNames } from '../../shared/modelNames'
 import { checkOf } from '../../shared/checks'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
 import s from './Task.module.css'
+import { device } from '../../shared/device'
 
 /*
  * A task's outputs: what it changed, as one change set, for deciding whether
@@ -20,7 +21,11 @@ export const text = {
   title: 'What it changed',
   draftNote: 'Its checks run on it; mark it ready when you are',
   readyNote: 'Nothing merges until you accept it',
-  branchNote: 'Nothing was pushed; it merges here, on this Mac',
+  branchNote: 'Not merged yet',
+  /** Pushed without a connection: what connecting would add, in the host's name. */
+  connectAfterPush: (host: string) =>
+    `Connected to ${host}, Althar would open the pull request itself, bring its checks and reviews back to the lead, and merge it there when you accept it.`,
+  connect: (host: string) => `Connect ${host}`,
   sofar: 'Its branch so far',
   closed: (change: ChangeSummary, host: string) => `${change.short} ${change.prefix}${change.number} was closed on ${host}.`,
   markReady: 'Mark ready for review',
@@ -32,8 +37,52 @@ export const text = {
     n === 1 ? `One commit isn’t on the ${change.noun} yet.` : `${n} commits aren’t on the ${change.noun} yet.`,
   openOn: (host: string) => `Open on ${host}`,
   review: (round: number) => (round === 0 ? 'Review' : `Review · round ${round + 1}`),
+  conflicts: (into: string, files: string) => `It conflicts with ${into} as it is now, in ${files}.`,
+  /** Merged and pushed, with nothing left between it and its base: said in a line. */
+  mergedAll: (merged: ReadonlyArray<TaskRepositoryMerged>) => {
+    const into = [...new Set(merged.map((one) => one.branch))].join(' and ')
+    const remotes = [...new Set(merged.flatMap((one) => (one.remote === null ? [] : [one.remote.slice(0, one.remote.indexOf('/'))])))].join(
+      ' and ',
+    )
+    return remotes === '' ? `Merged into ${into} on ${device.this}.` : `Merged into ${into}, and pushed to ${remotes}.`
+  },
+  repositories: (n: number) => (n === 1 ? 'Repository' : 'Repositories'),
+  /** Merged here: whether its remote has it yet. */
+  merged: (merged: ReadonlyArray<TaskRepositoryMerged>) => {
+    const into = [...new Set(merged.map((one) => one.branch))].join(' and ')
+    const names = [...new Set(merged.flatMap((one) => (one.remote === null ? [] : [one.remote.slice(0, one.remote.indexOf('/'))])))]
+    const remotes = names.join(' and ')
+    if (merged.some((one) => one.ahead > 0))
+      return `Into ${into} on ${device.this}. ${remotes} ${names.length > 1 ? 'don’t' : 'doesn’t'} have it yet.`
+    if (merged.every((one) => one.remote === null)) return `Into ${into} on ${device.this}. It has no remote to push to.`
+    return `Into ${into}, and pushed to ${remotes}.`
+  },
+  pushHere: (merged: ReadonlyArray<TaskRepositoryMerged>) => {
+    const behind = merged.filter((one) => one.ahead > 0 && one.remote !== null)
+    const [only] = behind
+    return behind.length === 1 && only !== undefined
+      ? `Push ${only.branch} to ${only.remote?.slice(0, only.remote.indexOf('/')) ?? ''}`
+      : 'Push to each remote'
+  },
+  resolve: 'Ask the lead to resolve it',
+  /** What a review that asked for changes found; its words are in the conversation. */
+  found: (n: number) => (n === 1 ? '1 finding' : `${n} findings`),
   diffKey: '⌘D',
 }
+
+/**
+ * Where merging here conflicts, as Althar says it ("web: README.md; api:
+ * a.ts" in a task of several, the files alone in one), with the branch each
+ * merges into.
+ */
+export const conflictsOf = (conflict: string, here: ReadonlyArray<{ readonly name: string; readonly branch: string }>) =>
+  conflict.split('; ').map((part) => {
+    const at = part.indexOf(': ')
+    const repository = at > 0 ? here.find((one) => one.name === part.slice(0, at)) : undefined
+    return repository === undefined
+      ? { name: null, branch: here[0]?.branch ?? 'main', files: part }
+      : { name: repository.name, branch: repository.branch, files: part.slice(at + 2) }
+  })
 
 /** A repository by its name alone: `web` for `meridian/web`. */
 const nameOf = (repository: string) => repository.slice(repository.lastIndexOf('/') + 1)
@@ -46,18 +95,24 @@ const filesIn = (files: ReadonlyArray<ChangedFile>, name: string, several: boole
     del: file.del,
   }))
 
+/** The model a reviewer ran on, as the plan named it. */
+const reviewModelOf = (snapshot: ThreadSnapshot, agentId: string) =>
+  snapshot.task.steps.find((step) => step.key === 'review' && step.agentId === agentId)?.model ?? null
+
 /** What its reviews said, as checks: the last round of each step that reviewed it. */
-const reviewsOf = (snapshot: ThreadSnapshot, agentName: (id: string | null) => string): ReadonlyArray<ChangeCheck> => {
+const reviewsOf = (snapshot: ThreadSnapshot, named: NameModel): ReadonlyArray<ChangeCheck> => {
   const last = snapshot.items.findLast((item) => item.kind === 'step_result' && item.content.step === 'review')
   if (last?.kind !== 'step_result') return []
-  const { round, verdict, summary, agentId } = last.content
+  const { round, verdict, findings, agentId } = last.content
+  const asked = verdict === 'changes_requested'
   return [
     {
       id: `review-${round}`,
       name: text.review(round),
-      state: verdict === 'changes_requested' ? CheckState.Failed : CheckState.Passed,
-      ...(agentId === null ? {} : { by: [modelInfo({ id: agentId, name: agentName(agentId) }, null)] }),
-      ...(summary === '' ? {} : { detail: summary.split('\n')[0] ?? '' }),
+      state: asked ? CheckState.Failed : CheckState.Passed,
+      ...(agentId === null ? {} : { by: [named(agentId, reviewModelOf(snapshot, agentId))] }),
+      // How it went, not what it said: the reviewer's words are in the conversation.
+      ...(asked && findings.length > 0 ? { detail: text.found(findings.length) } : {}),
     },
   ]
 }
@@ -65,7 +120,6 @@ const reviewsOf = (snapshot: ThreadSnapshot, agentName: (id: string | null) => s
 export function Outputs({
   snapshot,
   lead,
-  agentName,
   pending,
   error,
   onAccept,
@@ -75,12 +129,26 @@ export function Outputs({
   onMarkReady,
   onSendBack,
   onOpenFile,
+  conflict = null,
+  onResolve,
+  onPushHere,
+  onPushBranch,
+  onConnect,
 }: {
   snapshot: ThreadSnapshot
   lead: ModelInfo
-  agentName: (id: string | null) => string
   pending: boolean
   error: string | null
+  /** The files merging it here conflicts in, after a merge refused for that. */
+  conflict?: string | null
+  /** Asks the lead to bring its branch up to date, settling the conflict. */
+  onResolve?: () => void
+  /** Pushes what it merged here to the remotes its branches follow. */
+  onPushHere?: () => void
+  /** Pushes its branch to its repositories' remotes, with the person's own git, no connection needed. */
+  onPushBranch: () => void
+  /** Opens where the project's code host is connected. */
+  onConnect: () => void
   /** Accepts its pull requests: each merged on its host in turn, at the head shown, stopping at the first refused. */
   onAccept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => void
   onMergeHere: () => void
@@ -92,6 +160,7 @@ export function Outputs({
   onOpenFile: (path?: string) => void
 }) {
   const { task } = snapshot
+  const named = useModelNames()
   const ready = task.phase === 'ready'
   const base = (task.baseRef ?? '').replace(/^origin\//, '')
   const reviewers = [
@@ -100,11 +169,12 @@ export function Outputs({
         item.kind === 'step_result' && item.content.step === 'review' && item.content.agentId !== null ? [item.content.agentId] : [],
       ),
     ),
-  ].map((id) => modelInfo({ id, name: agentName(id) }, null))
-  const reviews = reviewsOf(snapshot, agentName)
+  ].map((id) => named(id, reviewModelOf(snapshot, id)))
+  const reviews = reviewsOf(snapshot, named)
   const open = task.changes.filter((change) => change.state !== 'closed')
   const closed = task.changes.filter((change) => change.state === 'closed')
-  const several = open.length + task.here.length > 1
+  // Its repositories: those with a pull request, those still to merge here, and those merged here already.
+  const several = open.length + task.here.length + task.merged.length > 1
   const [first] = open
   const common = { title: task.title, branch: task.branch ?? '', base, commits: task.commits, lead, reviewers, headingLevel: 2 as const }
 
@@ -163,8 +233,59 @@ export function Outputs({
           )
         })()
 
+  // A merge that conflicts is the lead's to settle: one press asks it.
+  const conflicted = (
+    <>
+      {conflictsOf(conflict ?? '', task.here)
+        .map((one) => text.conflicts(one.name === null ? one.branch : `${one.name}’s ${one.branch}`, one.files))
+        .join(' ')}{' '}
+      <Button size="small" onClick={onResolve}>
+        {text.resolve}
+      </Button>
+    </>
+  )
+
+  // Merged here: what it merged, and whether its remote has it yet, which one press pushes.
+  // Merged here, beside a pull request or not: what is merged, and whether its remote has it, which one press pushes.
+  const settledHere = task.here.length === 0 && task.merged.length > 0
+  // Nothing left between it and its base, pushed or without a remote: a line says so, with no diff to show.
+  const done =
+    settledHere && !task.merged.some((one) => one.ahead > 0 && one.remote !== null) && task.files.length === 0 && task.commits === 0
+  const local =
+    settledHere && !done ? (
+      <ChangeSet
+        {...common}
+        state={ChangeState.Merged}
+        note={text.merged(task.merged)}
+        prs={task.merged.map((repo) => ({ repo: repo.name, files: filesIn(task.files, repo.repository, several) }))}
+        checks={reviews}
+        onReviewDiff={() => onOpenFile()}
+        diffKey={text.diffKey}
+        onOpenFile={onOpenFile}
+        {...(task.merged.some((one) => one.ahead > 0 && one.remote !== null) && onPushHere !== undefined
+          ? { onPush: onPushHere, pushing: pending }
+          : {})}
+        text={{ push: () => text.pushHere(task.merged), prs: text.repositories }}
+        {...(error === null ? {} : { error })}
+      />
+    ) : null
+
+  // Where its branch stands on its repositories' remotes, pushed with the person's own git: there, behind, or not yet.
+  const remotes = task.here.flatMap((repo) => (repo.remote == null ? [] : [repo.remote]))
+  const remote =
+    remotes.length === 0
+      ? undefined
+      : {
+          name: [...new Set(remotes.map((one) => one.name))].join(', '),
+          pushed: remotes.every((one) => one.pushed),
+          ahead: remotes.reduce((sum, one) => sum + one.ahead, 0),
+          onPush: onPushBranch,
+          pushing: pending,
+        }
+  const pushedSomewhere = remotes.some((one) => one.pushed)
+
   // Work on its branch: the repositories without a pull request, which merge here once it is ready; before that, its branch so far.
-  const branchOnly = first === undefined && (task.files.length > 0 || task.commits > 0)
+  const branchOnly = first === undefined && task.merged.length === 0 && (task.files.length > 0 || task.commits > 0)
   const here =
     task.here.length > 0 || branchOnly ? (
       <ChangeSet
@@ -173,7 +294,14 @@ export function Outputs({
         note={ready ? text.branchNote : text.sofar}
         prs={
           task.here.length > 0
-            ? task.here.map((repo) => ({ repo: repo.name, files: filesIn(task.files, repo.repository, several) }))
+            ? task.here.map((repo) => ({
+                repo: repo.name,
+                files: filesIn(task.files, repo.repository, several),
+                // Only where its remote has the branch: one push refused leaves the others' pages.
+                ...(repo.remote?.newPullRequest == null || !repo.remote.pushed
+                  ? {}
+                  : { newPullRequest: { url: repo.remote.newPullRequest, ...hostOfPage(repo.remote.newPullRequest, snapshot.host) } }),
+              }))
             : [{ repo: snapshot.project.name, files: filesIn(task.files, '', false) }]
         }
         checks={first === undefined ? reviews : []}
@@ -182,19 +310,40 @@ export function Outputs({
         diffKey={text.diffKey}
         onOpenFile={onOpenFile}
         accepting={pending}
-        {...(error === null || first !== undefined ? {} : { error })}
+        {...(first !== undefined
+          ? {}
+          : conflict !== null && onResolve !== undefined
+            ? { error: conflicted }
+            : error === null
+              ? {}
+              : { error })}
+        {...(remote === undefined ? {} : { remote })}
         text={{ mergeHere: () => mergeHereLabel(task.here, first !== undefined) }}
       />
+    ) : null
+  // Pushed with no connection: what connecting would add, said once something is there to have a pull request.
+  const offer =
+    pushedSomewhere && snapshot.host !== null && !snapshot.host.connected ? (
+      <p className={s.offer}>
+        {text.connectAfterPush(snapshot.host.name)}{' '}
+        <Button size="small" onClick={onConnect}>
+          {text.connect(snapshot.host.name)}
+        </Button>
+      </p>
     ) : null
 
   const pushes = open.filter((one) => one.state === 'open' && one.unpushed > 0 && one.localHead !== null)
   const drafts = open.filter((one) => one.state === 'open' && one.draft)
-  const unpublished = ready && first === undefined && task.commits > 0
+  // A pull request needs its host connected: without, there is nothing a press could open.
+  const unpublished = ready && first === undefined && task.commits > 0 && snapshot.host?.connected === true
   return (
     <div className={s.outputs}>
       <ThreadMeasure className={s.outputsBody}>
         {change}
+        {local}
+        {done && <p className={s.quiet}>{text.mergedAll(task.merged)}</p>}
         {here}
+        {offer}
         {closed.map((one) => (
           <p key={one.url} className={s.quiet}>
             {text.closed(one, productName(one.product))}
@@ -234,6 +383,29 @@ export function Outputs({
   )
 }
 
+/** The host a new pull request's page is on, by its name: the project's own host where it is that one, else as its address says. */
+const hostOfPage = (url: string, host: ThreadSnapshot['host']): { host?: string } => {
+  const name = (() => {
+    try {
+      return new URL(url).hostname
+    } catch {
+      return ''
+    }
+  })()
+  if (host !== null && name !== '' && host.webUrl.includes(name)) return { host: host.name }
+  const known = PAGE_HOSTS.find(([pattern]) => pattern.test(name))
+  return known === undefined ? {} : { host: known[1] }
+}
+
+const PAGE_HOSTS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^github\.com$/, 'GitHub'],
+  [/(^|\.)gitlab\./, 'GitLab'],
+  [/^bitbucket\.org$/, 'Bitbucket'],
+  [/^codeberg\.org$/, 'Codeberg'],
+  [/(^|\.)gitea\./, 'Gitea'],
+  [/(^|\.)forgejo\./, 'Forgejo'],
+]
+
 /** Whether a task has outputs to show: a pull request, or anything changed or committed on its branch. */
 export const hasOutputs = ({ task }: ThreadSnapshot) =>
-  task.changes.length > 0 || task.files.length > 0 || task.commits > 0 || task.here.length > 0
+  task.changes.length > 0 || task.files.length > 0 || task.commits > 0 || task.here.length > 0 || task.merged.length > 0

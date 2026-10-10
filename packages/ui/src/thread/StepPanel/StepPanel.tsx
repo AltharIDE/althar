@@ -1,7 +1,7 @@
 import { Tabs } from 'radix-ui'
 import type { ReactNode } from 'react'
 
-import { Model, type ModelInfo } from '../../foundations/Model/Model'
+import { Model, type ModelInfo } from '../../primitives/Model/Model'
 import { StepState } from '../../foundations/vocabulary'
 import { useControlled } from '../../lib/controlled'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'

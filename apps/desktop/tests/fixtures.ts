@@ -1,4 +1,5 @@
 import type {
+  AccountSignInState,
   AgentModels,
   AgentStatus,
   ChangeSummary,
@@ -18,6 +19,7 @@ import type {
 } from '@althar/contracts'
 import { vi } from 'vitest'
 
+import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
 import type { Host } from '../src/renderer/data/services'
 
@@ -53,10 +55,48 @@ export const projectRules: ProjectRulesView = {
 }
 
 export const agents: ReadonlyArray<AgentStatus> = [
-  { id: 'claude-code', name: 'Claude Code', signIn: 'signed_in', login: 'claude auth login', accounts: [usual('acc_claude', 'signed_in')] },
-  { id: 'codex', name: 'Codex', signIn: 'unknown', login: 'codex login', accounts: [usual('acc_codex', 'unknown')] },
-  { id: 'opencode', name: 'OpenCode', signIn: 'signed_out', login: 'opencode auth login', accounts: [usual('acc_opencode', 'signed_out')] },
+  {
+    id: 'claude-code',
+    name: 'Claude Code',
+    signIn: 'signed_in',
+    login: 'claude auth login',
+    version: '2.1.263',
+    ways: ['browser'],
+    accounts: [usual('acc_claude', 'signed_in')],
+    installed: true,
+    kept: false,
+    download: null,
+  },
+  {
+    id: 'codex',
+    name: 'Codex',
+    signIn: 'unknown',
+    login: 'codex login',
+    version: '0.159.3',
+    ways: ['browser', 'device'],
+    accounts: [usual('acc_codex', 'unknown')],
+    installed: true,
+    kept: false,
+    download: null,
+  },
+  {
+    id: 'opencode',
+    name: 'OpenCode',
+    signIn: 'signed_out',
+    login: 'opencode auth login',
+    version: null,
+    ways: [],
+    accounts: [usual('acc_opencode', 'signed_out')],
+    installed: true,
+    kept: false,
+    download: { size: '45 MB', installing: false },
+  },
 ]
+
+/** OpenCode not on this Mac, which Althar can download. */
+export const withoutOpenCode: ReadonlyArray<AgentStatus> = agents.map((agent) =>
+  agent.id === 'opencode' ? { ...agent, installed: false, signIn: 'unknown', accounts: [usual('acc_opencode', 'unknown')] } : agent,
+)
 
 export const status: Status = { apiVersion: 1, appVersion: '0.0.0', agents }
 
@@ -83,6 +123,7 @@ export const models: ReadonlyArray<AgentModels> = [
     model: 'default',
     effort: 'medium',
     defaults: [],
+    blocked: [],
     probing: false,
   },
   {
@@ -94,9 +135,10 @@ export const models: ReadonlyArray<AgentModels> = [
     model: 'gpt-5.2-codex',
     effort: 'medium',
     defaults: [],
+    blocked: [],
     probing: false,
   },
-  { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], probing: true },
+  { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], blocked: [], probing: true },
 ]
 
 /** A project's repositories as this Mac has them: one plain, one a fork. */
@@ -289,6 +331,7 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   step: null,
   summary: null,
   lead: 'claude-code',
+  leadModel: null,
   branch: 'althar/add-a-retry',
   startedAt: null,
   waits: null,
@@ -347,10 +390,12 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
   threadId: 'th1',
   cursor: 10,
   project: { id: 'p1', name: 'meridian' },
+  host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true },
   task: {
     id: 't1',
     title: 'Add a retry',
     description: '',
+    request: null,
     slug: 'add-a-retry',
     state: 'active',
     branch: 'althar/add-a-retry',
@@ -359,6 +404,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     phase: 'running',
     waits: null,
     steps: [],
+    lead: null,
     step: null,
     stepAt: null,
     startedAt: null,
@@ -368,6 +414,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     files: [],
     commits: 0,
     here: [],
+    merged: [],
   },
   session: {
     id: 's1',
@@ -375,6 +422,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     agentName: 'Claude Code',
     state: 'active',
     model: 'opus',
+    account: null,
     effort: 'high',
     models: ['opus', 'sonnet'],
     turnRunning: false,
@@ -449,6 +497,14 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
     mergeHere: vi.fn(async () => {}),
+    pushHere: vi.fn(async () => {}),
+    pushBranch: vi.fn(async () => {}),
+    listEditors: vi.fn(async () => [
+      { id: 'zed', name: 'Zed' },
+      { id: 'finder', name: 'Finder' },
+    ]),
+    openInEditor: vi.fn(async () => true),
+    installAgent: vi.fn(async () => {}),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
       file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
       lines: [
@@ -464,6 +520,11 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setEffort: vi.fn(async () => {}),
     getModels: vi.fn(async () => models),
     setDefaultEffort: vi.fn(async () => {}),
+    setModelBlocked: vi.fn(async () => {}),
+    getSettings: vi.fn(async () => ({
+      coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
+    })),
+    setCoAuthor: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     stopSession: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
@@ -505,6 +566,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     orderAccounts: vi.fn(async () => {}),
     findAccounts: vi.fn(async () => [{ grant: 'grant_work', name: 'work', path: '/Users/me/.codex-work', tool: 'codex-profiles' }]),
     signInAccount: vi.fn(async () => ({ line: 'codex login', opened: true })),
+    startAccountSignIn: vi.fn(async () => ({ flowId: 'flow_account', state: { state: 'starting' as const } })),
+    getAccountSignIn: vi.fn(async (): Promise<AccountSignInState> => ({ state: 'starting' })),
+    pasteAccountSignInCode: vi.fn(async () => {}),
+    cancelAccountSignIn: vi.fn(async () => {}),
     listIssues: vi.fn(async () => ({ issues: [] })),
     markReady: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
@@ -520,9 +585,28 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
   return { client, emit: (event: WatchEvent) => listeners.forEach((listener) => listener(event)), listeners, watching }
 }
 
+/** The app's preferences as a main process would keep them: where each starts, then each change. */
+const keptPreferences = (): Pick<Host, 'preferences' | 'setPreference'> => {
+  let kept: AppPreferences = DEFAULT_PREFERENCES
+  return {
+    preferences: vi.fn(async () => kept),
+    setPreference: vi.fn(async (key, value) => {
+      kept = { ...kept, [key]: value }
+      return kept
+    }),
+  }
+}
+
 export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
+  ...keptPreferences(),
+  platform: 'darwin',
+  sounds: vi.fn(async () => ['Basso', 'Glass', 'Ping', 'Purr']),
+  editorPicture: vi.fn(async (id: string) => `data:image/png;base64,${id}`),
+  playSound: vi.fn(async () => {}),
   pickFolder: vi.fn(async () => 'grant_picked'),
   grantDropped: vi.fn(async () => 'grant_dropped'),
+  findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
+  grantFound: vi.fn(async (id: string) => `grant_${id}`),
   onOpen: vi.fn(() => () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),

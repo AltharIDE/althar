@@ -6,8 +6,10 @@ import { OPUS } from '../../fixtures/models'
 import { TaskStatus } from '../../foundations/vocabulary'
 import { trackOf } from '../../primitives/StepTrack/StepTrack'
 import { States } from '../../storybook/States'
+import { BackCrumb } from '../BackCrumb/BackCrumb'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import { TaskMenu } from '../TaskMenu/TaskMenu'
+import { TitleBar } from '../TitleBar/TitleBar'
 import { TaskHeader, type TaskHeaderProps } from './TaskHeader'
 
 type Face = 'talk' | 'out'
@@ -15,109 +17,105 @@ const FACES = [
   { value: 'talk' as const, label: 'Conversation', kbd: 'c' },
   { value: 'out' as const, label: 'Outputs', kbd: 'o' },
 ]
-const STEPS = ['Requirements', 'Implement', 'Review', 'Repair', 'Security review', 'Verify', 'Evidence']
+const STEPS = ['Implement', 'Review', 'Settle', 'Review']
 
 const BASE: TaskHeaderProps<Face> = {
-  task: '418',
   title: 'Repair token refresh on privilege change',
   status: TaskStatus.Running,
-  state: 'Security review',
-  kind: 'Delivery',
+  state: 'Reviewing',
   lead: OPUS,
-  branch: 'ch/418-token-refresh',
-  since: 'security review · 6m',
+  branch: 'althar/token-refresh',
+  since: 'review · 6m',
   elapsed: '2h 14m',
   cost: '$4.10',
-  steps: trackOf(STEPS, 4),
+  steps: trackOf(STEPS, 1),
   faces: FACES,
   face: 'talk',
 }
 
-/* The header with its faces switching, and Graph and Code at the right. */
+/* The header in the window's bar, after the way back and the title, with its faces switching and Graph at the end. */
 function Header(props: Partial<TaskHeaderProps<Face>>) {
   const [face, setFace] = useState<Face>(props.face ?? 'talk')
   const [graph, setGraph] = useState(false)
+  const title = props.title ?? BASE.title
   return (
-    <TaskHeader
-      {...BASE}
-      {...props}
-      face={face}
-      onFace={setFace}
-      actions={
-        <>
-          <ChromeButton icon="branch" label="Graph" kbd="g" expanded={graph} onClick={() => setGraph(!graph)} />
-          <ChromeButton icon="work" label="Code" kbd="d" onClick={fn()} />
-          <TaskMenu status={props.status ?? BASE.status} onStop={fn()} onResume={fn()} onAbandon={fn()} onReopen={fn()} />
-        </>
+    <TitleBar
+      lights="none"
+      end={
+        <TaskHeader
+          {...BASE}
+          {...props}
+          face={face}
+          onFace={setFace}
+          actions={
+            <>
+              <ChromeButton icon="branch" label="Graph" kbd="g" expanded={graph} onClick={() => setGraph(!graph)} />
+              <TaskMenu status={props.status ?? BASE.status} onStop={fn()} onResume={fn()} onAbandon={fn()} onReopen={fn()} />
+            </>
+          }
+        />
       }
-    />
+    >
+      <BackCrumb to="meridian" kbd="esc" title={title} titleLevel={1} onBack={fn()} />
+    </TitleBar>
   )
 }
 
 const meta = {
   title: 'Chrome/TaskHeader',
   component: Header,
-  decorators: [(Story) => <div style={{ maxWidth: 680 }}>{Story()}</div>],
+  parameters: { layout: 'fullscreen' },
 } satisfies Meta<typeof Header>
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Running a review a rule added. */
+/** Its review running. */
 export const Running: Story = {}
-/** Every check passed; accepting it is yours. */
+/** Reviewed and settled; accepting it is yours. */
 export const ReadyForYou: Story = {
-  args: {
-    status: TaskStatus.Yours,
-    state: 'Ready for you',
-    since: 'verified · 4m ago',
-    elapsed: '3h 12m',
-    cost: '$5.90',
-    steps: trackOf(STEPS, 6),
-    face: 'out',
-  },
+  args: { status: TaskStatus.Yours, state: 'Ready for you', since: 'settled · 4m ago', steps: trackOf(STEPS, 3, 3, true), face: 'out' },
 }
-export const Paused: Story = { args: { status: TaskStatus.Paused, state: 'Paused until 14:00' } }
-/** A question: nothing built, so no branch and no second face. */
+export const Paused: Story = { args: { status: TaskStatus.Paused, state: 'Stopped' } }
+/** A question: nothing built, but the switch is still there, so its place never moves. */
 export const NothingBuilt: Story = {
   args: {
-    task: '425',
     title: 'Why do refunds fail fast when webhooks retry?',
     status: TaskStatus.Done,
     state: 'Answered',
-    kind: 'Question',
     branch: undefined,
     since: 'answered · 11m ago',
     elapsed: '6m',
-    cost: '$0.40',
     steps: trackOf(['Read', 'Answer'], 1, 1, true),
-    faces: [FACES[0]!],
-    facesNote: 'Nothing was built, so there is nothing else to look at.',
   },
 }
-
-/** A task with no number yet: the title leads the line. */
-export const Unnumbered: Story = { args: { task: undefined } }
+/** A title too long for the bar: one line, the whole of it on hover. */
+export const LongTitle: Story = {
+  args: { title: 'Repair token refresh on privilege change so that a downgraded admin loses access at once, everywhere' },
+}
 
 export const SwitchingFaces: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
+    await expect(c.getByRole('heading', { level: 1, name: BASE.title })).toBeVisible()
     await userEvent.click(c.getByRole('radio', { name: /Outputs/ }))
     await expect(c.getByRole('radio', { name: /Outputs/ })).toBeChecked()
     await userEvent.click(c.getByRole('button', { name: /Graph/ }))
     await expect(c.getByRole('button', { name: /Graph/ })).toHaveAttribute('aria-expanded', 'true')
+    // Who leads it, its branch and how long are said with where it stands.
+    await expect(c.getByText('Reviewing').parentElement).toHaveTextContent(/althar\/token-refresh/)
   },
 }
 
 export const AllStates: Story = {
   render: () => (
     <States
-      size="thread"
+      size="wide"
       cells={[
         { state: 'running', node: <Header /> },
         { state: 'ready for you', node: <Header {...ReadyForYou.args} /> },
-        { state: 'paused', node: <Header {...Paused.args} /> },
+        { state: 'stopped', node: <Header {...Paused.args} /> },
         { state: 'nothing built', node: <Header {...NothingBuilt.args} /> },
-        { state: 'unnumbered', node: <Header task={undefined} /> },
+        { state: 'long title', node: <Header {...LongTitle.args} /> },
       ]}
     />
   ),

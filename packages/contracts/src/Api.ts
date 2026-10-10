@@ -21,6 +21,10 @@ export class ApiError extends Schema.TaggedError<ApiError>()('ApiError', {
   reason: Schema.String,
   /** What went wrong, in words the window can show. */
   message: Schema.String,
+  /** Its own kind within the reason, where it has one: why a merge couldn't happen (`conflicts`). */
+  why: Schema.optional(Schema.String),
+  /** What it concerns, where the window can act on it: the files a merge conflicts in. */
+  detail: Schema.optional(Schema.String),
 }) {}
 
 /** A command's id, made by the client: `cmd_` and 32 hex digits. The same id twice is a retry. */
@@ -55,10 +59,38 @@ export const AgentStatus = Schema.Struct({
   signIn: SignIn,
   /** The agent's own command for signing in, when it isn't. */
   login: Schema.String,
+  /** Its own version, as its CLI says it; null where it doesn't. */
+  version: Schema.NullOr(Schema.String),
+  /** The ways Althar signs it in itself, without a terminal: in the browser, with a one-time code. */
+  ways: Schema.Array(Schema.Literals(['browser', 'device'])),
   /** Its accounts, in the person's order. */
   accounts: Schema.Array(AccountStatus),
+  /** Its command is on this device, the person's or the copy Althar downloaded; an agent that ships with Althar always is. */
+  installed: Schema.Boolean,
+  /** It runs from the copy Althar downloaded, as the person has none of their own. */
+  kept: Schema.Boolean,
+  /** Althar can download it for the person, about this big; null where it can't. `installing` while it does. */
+  download: Schema.NullOr(Schema.Struct({ size: Schema.String, installing: Schema.Boolean })),
 })
 export type AgentStatus = typeof AgentStatus.Type
+
+/** How signing an account in inside Althar stands (ADR-012): the agent's own login, run in the account's home. */
+export const AccountSignInState = Schema.Union([
+  Schema.Struct({ state: Schema.Literal('starting') }),
+  /** Waiting on the browser. `link` opens it elsewhere; `paste`: a code the page shows can be pasted; `refused`: the last one wasn't taken, in the agent's words. */
+  Schema.Struct({
+    state: Schema.Literal('browser'),
+    link: Schema.NullOr(Schema.String),
+    paste: Schema.Boolean,
+    refused: Schema.NullOr(Schema.String),
+  }),
+  /** A one-time code to type on `page`, good until `expiresAt`. */
+  Schema.Struct({ state: Schema.Literal('device'), code: Schema.String, page: Schema.String, expiresAt: Schema.String }),
+  /** Signed in, as `who` on `plan` where the agent says. */
+  Schema.Struct({ state: Schema.Literal('done'), who: Schema.NullOr(Schema.String), plan: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ state: Schema.Literal('failed'), message: Schema.String }),
+])
+export type AccountSignInState = typeof AccountSignInState.Type
 
 /** A folder an account switcher keeps one of the agent's accounts in, by a grant for it. */
 export const FoundAccount = Schema.Struct({
@@ -94,10 +126,19 @@ export const AgentModels = Schema.Struct({
   effort: Schema.NullOr(Schema.String),
   /** The person's default effort for each model they set one for: a session on it starts there. */
   defaults: Schema.Array(Schema.Struct({ model: Schema.String, effort: Schema.String })),
+  /** The models the person switched off, by id: no plan picks them, and no picker offers them. */
+  blocked: Schema.Array(Schema.String),
   /** Being asked now, for an agent not seen before: read again shortly. */
   probing: Schema.Boolean,
 })
 export type AgentModels = typeof AgentModels.Type
+
+/** The person's settings for the app as a whole. */
+export const AppSettings = Schema.Struct({
+  /** Althar as co-author of what it sends to a code host, on unless turned off; `line` is the trailer each commit gets. */
+  coAuthor: Schema.Struct({ on: Schema.Boolean, line: Schema.String }),
+})
+export type AppSettings = typeof AppSettings.Type
 
 export const Status = Schema.Struct({
   apiVersion: Schema.Number,
@@ -607,6 +648,8 @@ export const TaskCard = Schema.Struct({
   summary: Schema.NullOr(Schema.String),
   /** The agent that leads it, or last did: the plan's lead until one starts. */
   lead: Schema.NullOr(Schema.String),
+  /** The model it leads on, by the agent's id for it: its latest session's, or the plan's; null for the agent's own. */
+  leadModel: Schema.NullOr(Schema.String),
   branch: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.String),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
@@ -647,6 +690,8 @@ export const SessionSummary = Schema.Struct({
   agentName: Schema.String,
   state: Schema.String,
   model: Schema.NullOr(Schema.String),
+  /** The account it runs on, by its name; null where it isn't known. */
+  account: Schema.NullOr(Schema.String),
   /** How hard it thinks, where the agent offers a choice. */
   effort: Schema.NullOr(Schema.String),
   /** The models the agent offers for this session. */
@@ -756,18 +801,53 @@ export const TaskRepositoryHere = Schema.Struct({
   name: Schema.String,
   branch: Schema.String,
   head: Schema.NullOr(Schema.String),
+  /**
+   * Where the task's own branch stands on the repository's remote, for
+   * pushing it without a connection: the remote it goes to, whether the
+   * remote has it, how many commits of it the remote doesn't have, and the
+   * host's page for a new pull request from it, where that can be told.
+   * None for a repository without a remote.
+   */
+  remote: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        name: Schema.String,
+        /** The task's branch, as it is named there. */
+        branch: Schema.String,
+        pushed: Schema.Boolean,
+        ahead: Schema.Number,
+        newPullRequest: Schema.NullOr(Schema.String),
+      }),
+    ),
+  ),
 })
 export type TaskRepositoryHere = typeof TaskRepositoryHere.Type
+
+/** A repository a task merged into its default branch here, and how that branch stands with its remote. */
+export const TaskRepositoryMerged = Schema.Struct({
+  repository: Schema.String,
+  name: Schema.String,
+  branch: Schema.String,
+  /** The branch it follows there: origin/main. */
+  remote: Schema.NullOr(Schema.String),
+  /** Commits on the branch here the remote doesn't have. */
+  ahead: Schema.Number,
+})
+export type TaskRepositoryMerged = typeof TaskRepositoryMerged.Type
 
 /** A task's thread: its task and project, the agent working on it, the calls waiting on the person, and a page of its items. */
 export const ThreadSnapshot = Schema.Struct({
   threadId: Schema.String,
   cursor: Cursor,
   project: Schema.Struct({ id: Schema.String, name: Schema.String }),
+  /** Where the project's repository is hosted, and whether Althar is connected there: what a pull request needs. */
+  host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
   task: Schema.Struct({
     id: Schema.String,
     title: Schema.String,
     description: Schema.String,
+    /** What the person asked for, in their words, which its thread opens with; null for a task made before Althar kept it. */
+    request: Schema.NullOr(Schema.String),
     slug: Schema.String,
     state: Schema.String,
     branch: Schema.NullOr(Schema.String),
@@ -779,6 +859,10 @@ export const ThreadSnapshot = Schema.Struct({
     waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
+    /** Who leads it, running or not: the last agent on its thread, on its model and account, else the one its plan names. */
+    lead: Schema.NullOr(
+      Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String), account: Schema.NullOr(Schema.String) }),
+    ),
     /** The step it is on, by key, while it runs, and since when. */
     step: Schema.NullOr(Schema.String),
     stepAt: Schema.NullOr(Schema.String),
@@ -794,6 +878,8 @@ export const ThreadSnapshot = Schema.Struct({
     commits: Schema.Number,
     /** Its repositories with no pull request, not merged yet, which merge here. */
     here: Schema.Array(TaskRepositoryHere),
+    /** Those it merged here: into which branch, the remote that branch follows (none for a repository without one), and how many commits that remote doesn't have yet. */
+    merged: Schema.Array(TaskRepositoryMerged),
   }),
   session: Schema.NullOr(SessionSummary),
   attention: Schema.Array(AttentionRequest),
@@ -1089,9 +1175,16 @@ export const Api = RpcGroup.make(
     { threadId: Schema.String, agentId: Schema.String, model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) },
     Schema.String,
   ),
+  /** Hands the thread to another agent; with what the person said, that is the new lead's first turn, after its brief. */
   command(
     'SwitchAgent',
-    { threadId: Schema.String, agentId: Schema.String, model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) },
+    {
+      threadId: Schema.String,
+      agentId: Schema.String,
+      model: Schema.optional(Schema.String),
+      effort: Schema.optional(Schema.String),
+      body: Schema.optional(Schema.String),
+    },
     Schema.String,
   ),
   command('SetModel', { threadId: Schema.String, model: Schema.String }, Schema.Void),
@@ -1101,6 +1194,11 @@ export const Api = RpcGroup.make(
   call('GetModels', {}, Schema.Array(AgentModels)),
   /** The person's default effort for one of an agent's models, kept for the profile. */
   command('SetDefaultEffort', { agentId: Schema.String, model: Schema.String, effort: Schema.String }, Schema.Void),
+  /** Switches one of an agent's models off, or on again: one switched off is never planned, and no picker offers it. */
+  command('SetModelBlocked', { agentId: Schema.String, model: Schema.String, blocked: Schema.Boolean }, Schema.Void),
+  call('GetSettings', {}, AppSettings),
+  /** Turns Althar's co-authoring of commits and pull requests on or off; the agents' own credit lines go either way. */
+  command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
   command('Send', { threadId: Schema.String, body: Schema.String, disposition: Disposition }, Schema.Void),
@@ -1165,6 +1263,16 @@ export const Api = RpcGroup.make(
    * person signs in: the line it runs, and whether it could open it.
    */
   command('SignInAccount', { accountId: Schema.String }, Schema.Struct({ line: Schema.String, opened: Schema.Boolean })),
+  /** Signs an account in inside Althar, this way: its id, to ask how it stands. */
+  command(
+    'StartAccountSignIn',
+    { accountId: Schema.String, way: Schema.Literals(['browser', 'device']) },
+    Schema.Struct({ flowId: Schema.String, state: AccountSignInState }),
+  ),
+  call('GetAccountSignIn', { flowId: Schema.String }, AccountSignInState),
+  /** A code the browser's page showed, for the agent. */
+  command('PasteAccountSignInCode', { flowId: Schema.String, code: Schema.String }, Schema.Void),
+  command('CancelAccountSignIn', { flowId: Schema.String }, Schema.Void),
   /** A project's rules. */
   call('GetProjectRules', { projectId: Schema.String }, ProjectRulesView),
   /** Changes what is given of a project's rules, as a new revision recorded as the person's. */
@@ -1215,6 +1323,28 @@ export const Api = RpcGroup.make(
     'MergeHere',
     { taskId: Schema.String, heads: Schema.Array(Schema.Struct({ repository: Schema.String, head: Schema.String })) },
     Schema.Void,
+  ),
+  /** Pushes the default branches a task merged into here to the remotes they follow, with the person's own git sign-in. */
+  command('PushHere', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Pushes a task's branch, in each repository without a pull request, to
+   * that repository's remote, up to the commit the person saw in each, with
+   * their own git sign-in: no connection needed, and nothing opened there.
+   */
+  command(
+    'PushBranch',
+    { taskId: Schema.String, heads: Schema.Array(Schema.Struct({ repository: Schema.String, head: Schema.String })) },
+    Schema.Void,
+  ),
+  /** The editors on this device a task's files open in, by the name people know them. */
+  call('ListEditors', {}, Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
+  /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */
+  command('InstallAgent', { agentId: Schema.String }, Schema.Void),
+  /** Opens a task's folder in an editor, at one of its files and a line where given; whether it could. The path is the task's, as its changes list it. */
+  command(
+    'OpenInEditor',
+    { taskId: Schema.String, editor: Schema.String, path: Schema.optional(Schema.String), line: Schema.optional(Schema.Number) },
+    Schema.Boolean,
   ),
   /** Pushes the task's branch to its open pull request, up to the commit the person saw. */
   command('Push', { taskId: Schema.String, head: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),

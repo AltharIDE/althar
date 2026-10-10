@@ -143,3 +143,28 @@ export const parseLink = (link: string, hosts: KnownHosts = HOSTED): LinkRef | n
 export const linksIn = (text: string): ReadonlyArray<string> => [
   ...new Set([...text.matchAll(/https?:\/\/[^\s<>()"'`]+/g)].map((match) => match[0].replace(/[.,;:!?)\]]+$/, ''))),
 ]
+
+/**
+ * Where a host opens a new pull request from a branch into its base, for
+ * pushing without a connection: GitHub, GitLab and Bitbucket by the hosts
+ * they are known by (and a GitLab, Gitea or Forgejo of a team's own by its
+ * name), from the remote the branch went to. Null for a host whose page
+ * can't be told.
+ */
+export const newPullRequestLink = (remote: string, branch: string, base: string, known: KnownHosts): string | null => {
+  const ref = parseRemote(remote)
+  if (ref === null) return null
+  // A web remote's page is on its own scheme and port; one reached over SSH is on the host's https site.
+  const web = /^https?:\/\//i.test(remote.trim()) ? new URL(remote.trim()) : null
+  const at = `${web === null ? `https://${ref.host}` : `${web.protocol}//${web.host.toLowerCase()}`}/${ref.path.map(encodeURIComponent).join('/')}`
+  const product = known.get(ref.host)
+  const [from, into] = [encodeURIComponent(branch), encodeURIComponent(base)]
+  // In a path, a branch keeps its slashes, as the host's own links write it.
+  const [fromPath, intoPath] = [branch, base].map((name) => name.split('/').map(encodeURIComponent).join('/'))
+  if (product === 'github') return `${at}/compare/${intoPath}...${fromPath}?expand=1`
+  if (product === 'bitbucket_cloud') return `${at}/pull-requests/new?source=${from}&dest=${into}`
+  if (product === 'gitlab' || /(^|\.)gitlab\./.test(ref.host))
+    return `${at}/-/merge_requests/new?merge_request%5Bsource_branch%5D=${from}&merge_request%5Btarget_branch%5D=${into}`
+  if (/(^|\.)(gitea|forgejo)\.|^codeberg\.org$/.test(ref.host)) return `${at}/compare/${intoPath}...${fromPath}`
+  return null
+}

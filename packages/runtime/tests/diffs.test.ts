@@ -89,6 +89,35 @@ describe('what a task changed', () => {
     }),
   )
 
+  it.effect('gives the whole file, unchanged lines and all, for the window to fold and open in place', () =>
+    Effect.gen(function* () {
+      const { root } = changed()
+      // A long file whose one change is far from both ends.
+      const long = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`)
+      writeFileSync(join(root, 'long.txt'), `${long.join('\n')}\n`)
+      execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'add', 'long.txt'], { cwd: root })
+      execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '-m', 'Long'], { cwd: root })
+      const from = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root }).toString().trim()
+      writeFileSync(join(root, 'long.txt'), `${long.map((line, i) => (i === 19 ? 'line twenty' : line)).join('\n')}\n`)
+      const diff = yield* fileDiff(root, from, 'long.txt')
+      assert.deepStrictEqual(diff.lines[0], { kind: 'hunk', text: '@@ -1,40 +1,40 @@' })
+      assert.deepStrictEqual(diff.lines[1], { kind: 'context', old: 1, new: 1, text: 'line 1' })
+      assert.deepStrictEqual(diff.lines.at(-1), { kind: 'context', old: 40, new: 40, text: 'line 40' })
+      assert.lengthOf(diff.lines, 42)
+      // Too long to read whole, it comes in hunks, so a change far down is never lost behind its context.
+      const huge = Array.from({ length: 25_000 }, (_, i) => `row ${i + 1}`)
+      writeFileSync(join(root, 'huge.txt'), `${huge.join('\n')}\n`)
+      execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'add', 'huge.txt'], { cwd: root })
+      execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '-m', 'Huge'], { cwd: root })
+      const before = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root }).toString().trim()
+      writeFileSync(join(root, 'huge.txt'), `${huge.map((line, i) => (i === 24_000 ? 'row changed' : line)).join('\n')}\n`)
+      const cut = yield* fileDiff(root, before, 'huge.txt')
+      assert.isFalse(cut.truncated)
+      assert.deepStrictEqual(cut.lines[0], { kind: 'hunk', text: '@@ -23998,7 +23998,7 @@ row 23997' })
+      assert.isTrue(cut.lines.some((line) => line.kind === 'added' && line.text === 'row changed'))
+    }),
+  )
+
   it.effect('shows a new file nobody added yet as all new, a picture as binary, and nothing it didn’t change', () =>
     Effect.gen(function* () {
       const { root, base } = changed()

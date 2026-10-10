@@ -1,17 +1,29 @@
 import { useSyncExternalStore } from 'react'
 
-import { type AgentModels, type AgentStatus, agentDefaultName, modelName as namedAmongAgents } from '@althar/contracts'
+import {
+  type AgentModels,
+  type AgentStatus,
+  agentDefaultName,
+  isAgentDefault,
+  knownModelName,
+  modelName as namedAmongAgents,
+  standsFor,
+} from '@althar/contracts'
 import { Brand, Lab, labBrand, type ModelInfo, type RuntimeInfo } from '@althar/ui'
 
 import type { Client, Start } from '../data/client'
+import { device } from './device'
 
 /*
  * The models every agent offers, as the kit's pickers take them: one list,
- * whichever agent runs each. A model is known by its agent and its own id
- * together, since two agents may name theirs alike. It carries its maker's
- * mark, found from its name, or the agent's maker where the name says
- * nothing. An agent whose models aren't known yet is one entry: its own
- * default. Each model has effort levels of its own, and some none. A model's
+ * whichever agent runs each (ADR-015: the model is what counts, the agent a
+ * way to it, said on hover). A model is known by its agent and its own id
+ * together, since two agents may name theirs alike, and named as people know
+ * it. It carries its maker's mark, found from its name, or the agent's maker
+ * where the name says nothing. An agent's own default isn't a model of its
+ * own: it shows as the model it stands for. An agent whose models aren't
+ * known yet is one entry: its own default. Models the person switched off
+ * are left out, but where they are switched on again. Each model has effort levels of its own, and some none. A model's
  * default effort is the person's, kept by the runtime, which starts every
  * session on it there, or else the one it starts at by itself. Pins are only
  * how this window lists models, so they stay in its storage; until the
@@ -56,11 +68,18 @@ const AGENT_MAKERS: Readonly<Record<string, Lab>> = { 'claude-code': Lab.Anthrop
 /** An agent's own mark, for the list of agents. */
 const AGENT_BRANDS: Readonly<Record<string, Brand>> = { 'claude-code': Brand.ClaudeCode, codex: Brand.Codex }
 
-export const makerOf = (agentId: string, words: string): Brand | undefined => {
+const labOf = (agentId: string, words: string): Lab | undefined => {
   const said = words.toLowerCase()
-  const lab = MAKERS.find(([pattern]) => pattern.test(said))?.[1] ?? AGENT_MAKERS[agentId]
+  return MAKERS.find(([pattern]) => pattern.test(said))?.[1] ?? AGENT_MAKERS[agentId]
+}
+
+export const makerOf = (agentId: string, words: string): Brand | undefined => {
+  const lab = labOf(agentId, words)
   return lab === undefined ? undefined : labBrand(lab)
 }
+
+/** A model its own maker's agent runs: Claude through Claude Code, GPT through Codex. Through anyone else, it is another way to it. */
+const isNative = (agentId: string, words: string) => AGENT_MAKERS[agentId] !== undefined && labOf(agentId, words) === AGENT_MAKERS[agentId]
 
 export const text = {
   agentDefault: agentDefaultName,
@@ -68,7 +87,7 @@ export const text = {
   via: (model: string, by: string) => `${model} · ${by}`,
   /** Effort levels the agents write as one word. */
   efforts: { xhigh: 'Extra high' } as Readonly<Record<string, string>>,
-  how: { signed_in: 'signed in', unknown: 'this Mac', signed_out: 'signed out' } satisfies Record<AgentStatus['signIn'], string>,
+  how: { signed_in: 'signed in', unknown: device.this, signed_out: 'signed out' } satisfies Record<AgentStatus['signIn'], string>,
 }
 
 export interface Catalog {
@@ -85,42 +104,76 @@ export interface Catalog {
 export const nameOf = namedAmongAgents
 
 /** An effort level as the picker writes it: the agent's word, unless it runs two together. */
-const effortWord = (name: string): string => text.efforts[name.toLowerCase()] ?? name
+export const effortWord = (name: string): string => text.efforts[name.toLowerCase()] ?? name
 
-/** The agents' models as one list, for the agents a picker offers. */
-export const catalogOf = (known: ReadonlyArray<AgentModels>, agents: ReadonlyArray<AgentStatus>): Catalog => {
+/** How a model is reached, said on hover: the agent that runs it, and its account where known. */
+export const viaOf = (agentName: string, account?: string | null): string =>
+  account == null ? `via ${agentName}` : `via ${agentName} · ${account}`
+
+/**
+ * The agents' models as one list, for the agents a picker offers;
+ * `withBlocked` keeps the ones switched off, for where they are switched on
+ * again. `apart` is for a picker, where the way to a model is chosen: a model
+ * reached through an agent that isn't its maker's says which way
+ * (Claude Haiku 5.5 · OpenCode Go), and so does a name two agents share.
+ * Where a model is only named, the hover says the way.
+ */
+export const catalogOf = (
+  known: ReadonlyArray<AgentModels>,
+  agents: ReadonlyArray<AgentStatus>,
+  { withBlocked = false, apart = true }: { readonly withBlocked?: boolean; readonly apart?: boolean } = {},
+): Catalog => {
   const byId = new Map(known.map((offered) => [offered.agentId, offered]))
   const entries = agents.flatMap((agent) => {
     const offered = byId.get(agent.id)
-    const models = offered?.models ?? []
+    const all = offered?.models ?? []
+    // Its own default goes where it stands for another of its models, which is listed instead.
+    const models = all.filter(
+      (model) => !(isAgentDefault(model) && standsFor(all, model.id) !== null) && (withBlocked || !offered?.blocked.includes(model.id)),
+    )
+    // Every model switched off, it offers none: its own default would be one of them.
+    if (models.length === 0 && all.length > 0) return []
     if (models.length === 0) {
       const mark = makerOf(agent.id, '')
       const name = text.agentDefault(agent.name)
-      const info: ModelInfo = { id: keyOf(agent.id, null), name, short: name, runtime: agent.id, efforts: [], ...(mark ? { mark } : {}) }
-      return [{ info, by: agent.name }]
+      const info: ModelInfo = {
+        id: keyOf(agent.id, null),
+        name,
+        short: name,
+        runtime: agent.id,
+        efforts: [],
+        via: viaOf(agent.name),
+        ...(mark ? { mark } : {}),
+      }
+      return [{ info, by: agent.name, route: agent.name, native: true }]
     }
     return models.map((model) => {
       const mark = makerOf(agent.id, `${model.id} ${model.name}`)
-      const { name, provider } = nameOf(agent.name, model)
+      const { provider } = nameOf(agent.name, model)
+      const name = knownModelName(agent, model)
       const info: ModelInfo = {
         id: keyOf(agent.id, model.id),
         name,
         short: name,
         runtime: agent.id,
+        via: viaOf(agent.name),
         efforts: model.efforts.map((effort) => effortWord(effort.name)),
         ...(mark ? { mark } : {}),
         ...(model.description === null ? {} : { note: model.description }),
       }
-      return { info, by: provider ?? agent.name }
+      // The way it goes: the agent, or its provider where that names the agent (OpenCode Go).
+      const route = provider !== undefined && provider.toLowerCase().includes(agent.name.toLowerCase()) ? provider : agent.name
+      return { info, by: provider ?? agent.name, route, native: isNative(agent.id, `${model.id} ${model.name}`) }
     })
   })
-  // A name two models share says whose each is: its provider's, or its agent's.
-  const shared = (name: string) => entries.filter((entry) => entry.info.name === name).length > 1
+  const shown = (entry: (typeof entries)[number]) => (entry.native ? entry.info.name : text.via(entry.info.name, entry.route))
+  // Two that would still read the same say whose each is: its provider's, or its agent's.
+  const clash = (name: string) => entries.filter((entry) => shown(entry) === name).length > 1
   return {
-    models: entries.map(({ info, by }) => {
-      if (!shared(info.name)) return info
-      const told = text.via(info.name, by)
-      return { ...info, name: told, short: told }
+    models: entries.map((entry) => {
+      if (!apart) return entry.info
+      const told = clash(shown(entry)) ? text.via(entry.info.name, entry.by) : shown(entry)
+      return told === entry.info.name ? entry.info : { ...entry.info, name: told, short: told }
     }),
     runtimes: agents.map((agent) => {
       const brand = AGENT_BRANDS[agent.id]
@@ -133,17 +186,28 @@ export const catalogOf = (known: ReadonlyArray<AgentModels>, agents: ReadonlyArr
   }
 }
 
-/** What a choice shows as: its model, or what the agent is on where it names none, or the agent itself. */
+/** What a choice shows as: its model, or what the agent is on where it names none (its own default, as the model that stands for), or the agent itself. */
 export const infoOf = (catalog: Catalog, choice: { readonly agentId: string; readonly model: string | null }): ModelInfo => {
-  const model = choice.model ?? catalog.agents.get(choice.agentId)?.model ?? null
+  const offered = catalog.agents.get(choice.agentId)
+  const asked = choice.model ?? offered?.model ?? null
+  const model = offered === undefined ? asked : (standsFor(offered.models, asked) ?? asked)
   const found =
     catalog.models.find((info) => info.id === keyOf(choice.agentId, model)) ??
     catalog.models.find((info) => info.id === keyOf(choice.agentId, null))
   if (found !== undefined) return found
-  // A model the agent no longer lists, or an agent this picker doesn't offer: its id, as it was set.
-  const name = model ?? choice.agentId
+  // A model the agent no longer lists, or an agent this picker doesn't offer: its id, as it was set, or the agent's name.
+  const agentName = catalog.runtimes.find((runtime) => runtime.id === choice.agentId)?.name ?? choice.agentId
+  const name = model ?? agentName
   const mark = makerOf(choice.agentId, name)
-  return { id: keyOf(choice.agentId, model), name, short: name, runtime: choice.agentId, efforts: [], ...(mark ? { mark } : {}) }
+  return {
+    id: keyOf(choice.agentId, model),
+    name,
+    short: name,
+    runtime: choice.agentId,
+    efforts: [],
+    via: viaOf(agentName),
+    ...(mark ? { mark } : {}),
+  }
 }
 
 /** A model's name as its agent gives it, for a line that already names the agent; null for the agent's own default. */

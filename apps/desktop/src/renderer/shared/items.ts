@@ -4,10 +4,60 @@ import type { Streamed } from './thread'
 
 /* A thread's items as a window holds them: read a page at a time, and changed one by one. */
 
-/** Items by id, oldest first: what arrives replaces what was there. */
+/** The ids the window gives what the person sent until the store's copy arrives. */
+const SENDING = 'sending:'
+let sent = 0
+
+/** One of the window's own copies of what the person sent. */
+export const isSending = (id: string) => id.startsWith(SENDING)
+
+/** A message the window shows the moment it is sent, after what it holds, until the store's copy arrives. */
+export const sending = (
+  items: ReadonlyArray<ThreadItem>,
+  message: { readonly text: string; readonly queued: boolean; readonly interrupting: boolean },
+): { readonly id: string; readonly items: ReadonlyArray<ThreadItem> } => {
+  sent += 1
+  const id = `${SENDING}${sent}`
+  const item: ThreadItem = {
+    id,
+    kind: 'user_message',
+    sequence: (items.at(-1)?.sequence ?? 0) + 0.5,
+    agentId: null,
+    createdAt: new Date().toISOString(),
+    content: { text: message.text, links: [] },
+    input: { state: message.queued ? 'queued' : 'delivered', interrupting: message.interrupting },
+  }
+  return { id, items: [...items, item] }
+}
+
+/**
+ * A send that failed: its copy goes. Where the store's copy of another send
+ * with the same words took its place already, that other one's copy goes
+ * instead, so what shows is what was sent.
+ */
+export const unsent = (items: ReadonlyArray<ThreadItem>, id: string, text: string): ReadonlyArray<ThreadItem> => {
+  if (items.some((item) => item.id === id)) return items.filter((item) => item.id !== id)
+  const other = items.find((item) => isSending(item.id) && item.kind === 'user_message' && item.content.text === text)
+  return other === undefined ? items : items.filter((item) => item.id !== other.id)
+}
+
+/** Items by id, oldest first: what arrives replaces what was there, and the store's copy of a message, the window's. */
 export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: ReadonlyArray<ThreadItem>): ReadonlyArray<ThreadItem> => {
   const byId = new Map(current.map((item) => [item.id, item]))
-  for (const item of incoming) byId.set(item.id, item)
+  for (const item of incoming) {
+    // A message new to the window, said since the copy was made (not an older page read), takes the copy's place.
+    if (item.kind === 'user_message' && !byId.has(item.id)) {
+      const copy = [...byId.values()].find(
+        (held) =>
+          isSending(held.id) &&
+          held.kind === 'user_message' &&
+          held.content.text === item.content.text &&
+          item.sequence > held.sequence - 1,
+      )
+      if (copy !== undefined) byId.delete(copy.id)
+    }
+    byId.set(item.id, item)
+  }
   return [...byId.values()].toSorted((a, b) => a.sequence - b.sequence)
 }
 
@@ -54,7 +104,7 @@ export const caughtUp = (streaming: ReadonlyMap<string, Streamed>, items: Readon
 
 /** What the person said that still waits: a change to what they said moves it on, so these are read again. */
 export const waiting = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<string> =>
-  items.flatMap((item) => (item.kind === 'user_message' && item.input?.state === 'queued' ? [item.id] : []))
+  items.flatMap((item) => (item.kind === 'user_message' && item.input?.state === 'queued' && !isSending(item.id) ? [item.id] : []))
 
 /**
  * Whether what waits its turn shows in the composer's queue: behind a turn

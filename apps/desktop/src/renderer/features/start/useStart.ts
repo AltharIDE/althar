@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useState } from 'react'
 
-import { ApiError, type FoundAccount, type FoundRepository, type ProjectSummary, type Status } from '@althar/contracts'
+import { ApiError, type FoundRepository, type ProjectSummary, type Status } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
 import { keys, reads, recheckStatus } from '../../data/reads'
@@ -10,7 +10,8 @@ import { useServices } from '../../data/services'
 /*
  * The start screen's view model: the agents on this Mac, each with its
  * accounts and how each is signed in (ADR-012), the projects, and opening a
- * folder as a new one.
+ * folder as a new one. Signing an account in is the accounts' own model
+ * (features/accounts), which reads the agents from here.
  */
 
 /** A repository found where the person opened a folder, with the grant of the folder it was found in. */
@@ -24,9 +25,6 @@ export interface Forming {
   readonly name: string
   readonly repositories: ReadonlyArray<KeptRepository>
 }
-
-/** Where a new account signs in: a folder Althar makes, one a switcher made (by its grant), or one the person chooses. */
-export type AccountPlace = { readonly kind: 'own' } | { readonly kind: 'found'; readonly grant: string } | { readonly kind: 'choose' }
 
 export interface StartModel {
   readonly status: Status | null
@@ -47,13 +45,14 @@ export interface StartModel {
   readonly create: (project: { readonly name: string; readonly permissions: 'rules' | 'ask' | 'allow' }) => Promise<ProjectSummary | null>
   readonly creating: boolean
   readonly cancelForming: () => void
-  /** Folders account switchers keep each agent's accounts in, as last looked for. */
-  readonly found: Readonly<Record<string, ReadonlyArray<FoundAccount>>>
-  readonly lookForAccounts: (agentId: string) => void
-  /** Adds an account; one in a folder of its own is signed in at once. */
-  readonly addAccount: (agentId: string, name: string, place: AccountPlace) => Promise<void>
-  /** Opens the agent's own sign-in for the account, in Terminal. */
-  readonly signInAccount: (accountId: string) => Promise<void>
+  /** Asks each agent again how its accounts are signed in. */
+  readonly recheck: () => Promise<void>
+  /** Downloads an agent Althar can fetch, then asks the agents again; its row says it downloads meanwhile. */
+  readonly install: (agentId: string) => Promise<void>
+  /** Why each agent's last download didn't finish, by its id. */
+  readonly installFailed: Readonly<Record<string, string>>
+  /** When the agents were last read, as a time: a read that found nothing changed moves it on too. */
+  readonly checkedAt: number
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
   readonly moveAccount: (agentId: string, accountId: string, to: 'up' | 'down') => Promise<void>
   readonly removeAccount: (accountId: string) => Promise<void>
@@ -80,8 +79,8 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
   const [opening, setOpening] = useState(false)
   const [forming, setForming] = useState<Forming | null>(null)
   const [creating, setCreating] = useState(false)
-  const [found, setFound] = useState<Readonly<Record<string, ReadonlyArray<FoundAccount>>>>({})
   const [unremoved, setUnremoved] = useState<string | null>(null)
+  const [installFailed, setInstallFailed] = useState<Readonly<Record<string, string>>>({})
 
   /** The agents again: checked afresh after a sign-in, as the runtime last knew them after anything else. */
   const reloadStatus = useCallback(
@@ -92,6 +91,9 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
       ),
     [client, cache],
   )
+
+  // One function for the model's life, so an effect that asks again when it changes asks once.
+  const recheckNow = useCallback(() => reloadStatus(true), [reloadStatus])
 
   useEffect(() => {
     if (recheck) void reloadStatus(true)
@@ -125,36 +127,6 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
       await reloadStatus(again)
     },
     [reloadStatus],
-  )
-
-  const signInAccount = useCallback(
-    (accountId: string) =>
-      changing(async () => {
-        const { line, opened } = await client.signInAccount(accountId)
-        if (!opened) setError(`Run this in a terminal to sign in, then come back: ${line}`)
-      }),
-    [changing, client],
-  )
-
-  const addAccount = useCallback(
-    (agentId: string, name: string, place: AccountPlace) =>
-      changing(async () => {
-        const grant = place.kind === 'found' ? place.grant : place.kind === 'choose' ? await host.pickFolder('account') : undefined
-        if (grant === null) return
-        const account = await client.addAccount({ agentId, name, ...(grant === undefined ? {} : { grant }) })
-        // A folder of its own starts signed out: its sign-in opens at once.
-        if (account.signIn !== 'signed_in') await signInAccount(account.id)
-      }, true),
-    [changing, client, host, signInAccount],
-  )
-
-  const lookForAccounts = useCallback(
-    (agentId: string) =>
-      void client.findAccounts(agentId).then(
-        (places) => setFound((now) => ({ ...now, [agentId]: places })),
-        () => setFound((now) => ({ ...now, [agentId]: [] })),
-      ),
-    [client],
   )
 
   const moveAccount = useCallback(
@@ -267,10 +239,23 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
     create,
     creating,
     cancelForming: () => setForming(null),
-    found,
-    lookForAccounts,
-    addAccount,
-    signInAccount,
+    recheck: recheckNow,
+    install: async (agentId) => {
+      setInstallFailed((now) => Object.fromEntries(Object.entries(now).filter(([id]) => id !== agentId)))
+      // The runtime says it downloads as soon as it starts, so the row changes at once; that read is waited for before the
+      // last one, so it can never land after it and say the agent still downloads.
+      const done = client.installAgent(agentId)
+      const first = reloadStatus(false)
+      try {
+        await done
+      } catch (failure) {
+        setInstallFailed((now) => ({ ...now, [agentId]: messageOf(failure) }))
+      }
+      await first
+      await reloadStatus(true)
+    },
+    installFailed,
+    checkedAt: statusRead.dataUpdatedAt,
     renameAccount: (accountId, name) => changing(() => client.renameAccount(accountId, name)),
     moveAccount,
     removeAccount: (accountId) =>

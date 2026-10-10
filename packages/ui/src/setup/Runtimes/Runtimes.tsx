@@ -7,7 +7,6 @@ import { RuntimeState, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Button } from '../../primitives/Button/Button'
-import { Popover } from '../../primitives/Popover/Popover'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import s from './Runtimes.module.css'
 
@@ -51,7 +50,18 @@ export type RuntimeEntry = RuntimeBase &
         /** Where its work goes until then, by the project's usage-limit rule. Without it, the work waits. */
         movesTo?: string
       }
-    | { state: RuntimeState.Missing }
+    | {
+        state: RuntimeState.Missing
+        /** Althar can download it, about this big. Without it, only the agent's own instructions. */
+        download?: string
+        /** Why the last download didn't finish, in a sentence. */
+        failed?: string
+      }
+    | {
+        state: RuntimeState.Installing
+        /** About how big the download is. */
+        download: string
+      }
     | {
         state: RuntimeState.Outdated
         version: string
@@ -77,6 +87,10 @@ export interface RuntimesText {
   install: string
   update: string
   add: string
+  download: string
+  downloadNote: (name: string, size: string) => string
+  installing: (name: string, size: string) => string
+  tryAgain: string
 }
 
 export const runtimesText: RuntimesText = {
@@ -96,6 +110,11 @@ export const runtimesText: RuntimesText = {
   install: 'How to install',
   update: 'How to update',
   add: 'Connect another',
+  download: 'Download',
+  downloadNote: (name, size) =>
+    `Althar can fetch ${name}’s latest release from GitHub, about ${size}, check it, and keep it in its own folder.`,
+  installing: (name, size) => `Downloading ${name}, about ${size}, and checking it`,
+  tryAgain: 'Try again',
 }
 
 export interface RuntimesProps {
@@ -109,54 +128,40 @@ export interface RuntimesProps {
   onCheck?: (id: string) => void
   /** Opens the runtime's own instructions, to install or update it. */
   onHelp?: (id: string) => void
-  /** Adds an API key or a local model. Without it (or `connect`), no such row. */
+  /** Downloads a missing runtime Althar can fetch. Without it, no such button. */
+  onInstall?: (id: string) => void
+  /** Adds another agent: an API key, a local model. Without it, no such row. */
   onAdd?: () => void
-  /** What "Connect another" opens beside itself: ConnectAgent. Takes the place of `onAdd`. */
-  connect?: ReactNode
   className?: string
   text?: Partial<RuntimesText>
 }
 
 /** The agent runtimes on this machine, each with who it is signed in as or what it needs. */
-export function Runtimes({ label, runtimes, onSignIn, onCancel, onCheck, onHelp, onAdd, connect, className, text }: RuntimesProps) {
+export function Runtimes({ label, runtimes, onSignIn, onCancel, onCheck, onHelp, onInstall, onAdd, className, text }: RuntimesProps) {
   const t = { ...runtimesText, ...text }
   return (
     <div className={cx(s.runtimes, className)}>
       <ul aria-label={label} className={s.list}>
         {runtimes.map((r) => (
-          <Row key={r.id} r={r} t={t} onSignIn={onSignIn} onCancel={onCancel} onCheck={onCheck} onHelp={onHelp} />
+          <Row key={r.id} r={r} t={t} onSignIn={onSignIn} onCancel={onCancel} onCheck={onCheck} onHelp={onHelp} onInstall={onInstall} />
         ))}
       </ul>
-      {connect ? (
-        <Popover
-          label={t.add}
-          width={420}
-          trigger={
-            <ActionButton icon="plus" className={s.add}>
-              {t.add}
-            </ActionButton>
-          }
-        >
-          {connect}
-        </Popover>
-      ) : (
-        onAdd && (
-          <ActionButton icon="plus" onClick={onAdd} className={s.add}>
-            {t.add}
-          </ActionButton>
-        )
+      {onAdd && (
+        <ActionButton icon="plus" onClick={onAdd} className={s.add}>
+          {t.add}
+        </ActionButton>
       )}
     </div>
   )
 }
 
-interface RowProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel' | 'onCheck' | 'onHelp'> {
+interface RowProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel' | 'onCheck' | 'onHelp' | 'onInstall'> {
   r: RuntimeEntry
   t: RuntimesText
 }
 
-function Row({ r, t, onSignIn, onCancel, onCheck, onHelp }: RowProps) {
-  const { line, note, actions, calls } = parts(r, t, { onSignIn, onCancel, onCheck, onHelp })
+function Row({ r, t, onSignIn, onCancel, onCheck, onHelp, onInstall }: RowProps) {
+  const { line, note, actions, calls } = parts(r, t, { onSignIn, onCancel, onCheck, onHelp, onInstall })
   return (
     <li className={s.row}>
       <span className={s.mark}>{r.brand ? <BrandMark brand={r.brand} size={18} /> : <Icon name="plug" size={16} />}</span>
@@ -171,7 +176,7 @@ function Row({ r, t, onSignIn, onCancel, onCheck, onHelp }: RowProps) {
   )
 }
 
-type Handlers = Pick<RuntimesProps, 'onSignIn' | 'onCancel' | 'onCheck' | 'onHelp'>
+type Handlers = Pick<RuntimesProps, 'onSignIn' | 'onCancel' | 'onCheck' | 'onHelp' | 'onInstall'>
 
 /* What a row says and offers, by state. `calls` when something waits on you. */
 function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers) {
@@ -231,13 +236,28 @@ function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers) {
           </>
         ),
       }
-    case RuntimeState.Missing:
+    case RuntimeState.Missing: {
+      // Where Althar can fetch it, the button does; the agent's own instructions stay beside it.
+      const fetch = r.download !== undefined && h.onInstall && (
+        <Button onClick={() => h.onInstall?.(r.id)}>{r.failed === undefined ? t.download : t.tryAgain}</Button>
+      )
       return {
-        line: t.missing,
-        actions: (help(t.install) || check) && (
+        line: r.failed === undefined ? t.missing : <span role="alert">{r.failed}</span>,
+        ...(fetch && r.download !== undefined ? { note: t.downloadNote(r.name, r.download) } : {}),
+        actions: (fetch || help(t.install) || check) && (
           <>
             {help(t.install)}
-            {check}
+            {fetch || check}
+          </>
+        ),
+      }
+    }
+    case RuntimeState.Installing:
+      return {
+        line: (
+          <>
+            <Spinner size="small" />
+            {t.installing(r.name, r.download)}
           </>
         ),
       }

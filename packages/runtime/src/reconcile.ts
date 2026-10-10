@@ -5,7 +5,6 @@ import { SqlClient } from 'effect/sql'
 
 import { currentBranch, git } from './git'
 import { change, fact, timestamp } from './records'
-import { addItem } from './threads'
 
 /*
  * What an earlier launch of the runtime left unfinished, settled before
@@ -90,6 +89,7 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
     WHERE state IN ('starting', 'active', 'waiting_approval', 'cancelling')`
   for (const session of sessions) {
     // Every lifecycle edge out of a live state: a session still starting failed, one cancelling is uncertain, the rest are lost.
+    // The thread doesn't say so: a lead starts again when the person next writes to it.
     const state = session.state === 'cancelling' ? 'uncertain' : ['active', 'waiting_approval'].includes(session.state) ? 'lost' : 'failed'
     const revision = yield* change('provider_sessions', session.id, { state, endedAt: yield* timestamp })
     yield* fact({
@@ -101,18 +101,6 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
       payload: { reason: 'runtime_restarted' },
       actorId,
     })
-    // The thread says so, in the words the glossary gives it.
-    if (session.threadId !== null)
-      yield* addItem({ projectId: session.projectId, threadId: session.threadId, sessionId: session.id }, 'notice', {
-        source: 'runtime',
-        severity: 'warning',
-        title: 'Althar restarted.',
-        description: {
-          uncertain: 'The lead was stopping when it did. Start it again to carry on; nothing it was doing runs twice.',
-          lost: 'The lead stopped with it. Start it again to carry on; nothing it was doing runs twice.',
-          failed: "The lead hadn't started yet. Start it again to carry on.",
-        }[state],
-      })
   }
 
   const turns = yield* sql<{ id: string; projectId: ProjectId; state: string }>`

@@ -17,7 +17,7 @@ import { messageOf } from '../../data/client'
 import { CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
-import { caughtUp, mergeItems, newestReads, takenBack, waiting } from '../../shared/items'
+import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 
@@ -75,6 +75,8 @@ export interface ProjectModel {
   /** Moves the running coordinator to another agent. */
   /** Puts the coordinator on another model or effort, or another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
+  /** Hands the conversation to another agent with what the person says: its first turn, after its brief. */
+  readonly handOver: (choice: Choice, body: string) => Promise<void>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
@@ -264,6 +266,29 @@ export const useProject = (projectId: string): ProjectModel => {
   const send = (body: string, disposition: 'after_current' | 'interrupt_and_continue') =>
     threadId === null ? Promise.resolve() : client.send({ threadId, body, disposition })
 
+  /** What the person says shows at once, as the window's copy until the store's arrives; gone again if it fails. */
+  const shown = (
+    text: string,
+    disposition: 'after_current' | 'interrupt_and_continue',
+    action: () => Promise<unknown>,
+    queued = disposition === 'interrupt_and_continue' || coordinator?.session?.turnRunning === true,
+  ) => {
+    let id = ''
+    setCoordinator((current) => {
+      const next = sending(current.items, { text, queued, interrupting: disposition === 'interrupt_and_continue' })
+      id = next.id
+      return { ...current, items: next.items }
+    })
+    return act(async () => {
+      try {
+        await action()
+      } catch (failure) {
+        setCoordinator((current) => ({ ...current, items: unsent(current.items, id, text) }))
+        throw failure
+      }
+    })
+  }
+
   return {
     project,
     coordinator,
@@ -276,7 +301,7 @@ export const useProject = (projectId: string): ProjectModel => {
     loadingEarlier,
     loadEarlier,
     say: (body, choice) =>
-      act(async () => {
+      shown(body, 'after_current', async () => {
         // The runtime starts it as it ran last; anything else the person picked starts first.
         const suggested = coordinator?.suggested
         const same =
@@ -288,8 +313,10 @@ export const useProject = (projectId: string): ProjectModel => {
           await client.startSession(startOf(threadId, choice))
         await send(body, 'after_current')
       }),
-    sayNow: (body) => act(() => send(body, 'interrupt_and_continue')),
+    sayNow: (body) => shown(body, 'interrupt_and_continue', () => send(body, 'interrupt_and_continue')),
     takeBack: async (itemId) => {
+      // What is still on its way has nothing to take back yet.
+      if (isSending(itemId)) return false
       setError(null)
       try {
         await client.takeBack(itemId)
@@ -307,6 +334,15 @@ export const useProject = (projectId: string): ProjectModel => {
         const session = coordinator?.session
         if (threadId !== null && session != null) await moveTo(client, threadId, runningOn(session), choice)
       }),
+    handOver: (choice, body) =>
+      shown(
+        body,
+        'after_current',
+        async () => {
+          if (threadId !== null) await client.switchAgent({ ...startOf(threadId, choice), body })
+        },
+        false,
+      ),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     changePlan: (planId, steps, end) => act(() => client.changePlan(planId, steps, end)),

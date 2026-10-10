@@ -1,24 +1,37 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { HomeCall, HomeEvent, HomeTask, ProjectSummary } from '@althar/contracts'
 import { ProjectInk } from '@althar/ui'
 
+import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import { HomeView, lineOf, refOf } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
-import { SettingsView } from '../src/renderer/features/settings/SettingsView'
-import { useAppIcon } from '../src/renderer/features/settings/useAppIcon'
-import { useEdgePlace } from '../src/renderer/features/settings/useEdgePlace'
-import { useConnections } from '../src/renderer/features/connections/useConnections'
+import { agentGlanceOf, marksOf, SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
 import { useStart } from '../src/renderer/features/start/useStart'
-import { card, change, changed, fakeClient, fakeHost, home, project } from './fixtures'
+import {
+  agents,
+  card,
+  models,
+  change,
+  changed,
+  connectionList,
+  fakeClient,
+  fakeHost,
+  githubConnection,
+  home,
+  project,
+  usual,
+  withoutOpenCode,
+} from './fixtures'
 import { withServices } from './render'
 
 /*
  * The home: across projects, what waits on the person, answered where it is
  * or opened as its task; what is in progress; what the loop did since they
- * last left; the projects beside it; and the bar's way to settings.
+ * last left; the projects beside it; and settings, as a panel from the bar.
  */
 
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', ink: 'rose', lastWorkAt: null }
@@ -158,18 +171,8 @@ function Home({
   onProject = vi.fn(),
   onTalk = vi.fn(),
   onTask = vi.fn(),
-  onSettings = vi.fn(),
-}: Partial<Record<'onProject' | 'onTalk' | 'onTask' | 'onSettings', (id: string) => void>>) {
-  return (
-    <HomeView
-      model={useHome()}
-      start={useStart()}
-      onProject={onProject}
-      onTalk={onTalk}
-      onTask={onTask}
-      onSettings={() => onSettings('settings')}
-    />
-  )
+}: Partial<Record<'onProject' | 'onTalk' | 'onTask', (id: string) => void>>) {
+  return <HomeView model={useHome()} start={useStart()} onProject={onProject} onTalk={onTalk} onTask={onTask} />
 }
 
 describe('the home', () => {
@@ -272,20 +275,21 @@ describe('the home', () => {
     expect(onProject).toHaveBeenCalledWith('p2')
   })
 
-  it('leaves ⌘ and a number to the window’s tabs, opens settings by ⌘, and reads again when work changes from where it first read', async () => {
+  it('leaves ⌘ and a number to the window’s tabs, opens and closes settings by ⌘, and its gear, and reads again when work changes from where it first read', async () => {
     const onProject = vi.fn()
-    const onSettings = vi.fn()
     const getHome = vi.fn(async () => home({ looked: '2026-10-07T08:00:00.000Z', projects: [project, halyard] }))
     const { client, emit } = fakeClient({ getHome })
-    const view = withServices(<Home onProject={onProject} onSettings={onSettings} />, client)
+    const view = withServices(<Home onProject={onProject} />, client)
     await within(await screen.findByRole('complementary', { name: 'Projects' })).findByRole('button', { name: /halyard/ })
     fireEvent.keyDown(window, { key: '2', metaKey: true })
     fireEvent.keyDown(window, { key: 'x', metaKey: true })
     expect(onProject).not.toHaveBeenCalled()
     fireEvent.keyDown(window, { key: ',', metaKey: true })
-    expect(onSettings).toHaveBeenCalled()
+    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeTruthy()
+    fireEvent.keyDown(window, { key: ',', metaKey: true })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull())
     await userEvent.click(screen.getByRole('button', { name: 'Settings' }))
-    expect(onSettings).toHaveBeenCalledTimes(2)
+    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeTruthy()
 
     emit(changed('task', 't1', 'th1', 'p2'))
     emit(changed('thread_item', 'i1'))
@@ -383,30 +387,173 @@ describe('the home', () => {
   })
 })
 
-function Settings({ onBack = () => {} }: { onBack?: () => void }) {
-  return <SettingsView model={useStart()} connections={useConnections()} appIcon={useAppIcon()} edge={useEdgePlace()} onBack={onBack} />
+/* Settings, opened from the bar. */
+function Settings({ start = true }: { start?: boolean }) {
+  const [open, setOpen] = useState(start)
+  return <SettingsPanel start={useStart()} open={open} onOpenChange={setOpen} />
+}
+
+/** Opens a module of the open panel, by its title. */
+const openModule = async (title: string | RegExp) => {
+  const panel = await screen.findByRole('dialog', { name: 'Settings' })
+  await userEvent.click(within(panel).getByRole('button', { name: typeof title === 'string' ? new RegExp(`^${title}`) : title }))
+  return panel
 }
 
 describe('settings', () => {
-  it('goes back home by its crumb or Escape', async () => {
-    const onBack = vi.fn()
+  it('shows each part at a glance, opens one out, and steps back by Back or Escape before Escape closes it', async () => {
     const { client } = fakeClient()
-    withServices(<Settings onBack={onBack} />, client)
-    await screen.findByRole('heading', { name: 'Agents on this Mac' })
-    fireEvent.keyDown(window, { key: 'Escape' })
-    await userEvent.click(screen.getByRole('button', { name: /Home/ }))
-    expect(onBack).toHaveBeenCalledTimes(2)
+    withServices(<Settings />, client)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    // OpenCode's only account is signed out: only the person can sign it in.
+    expect(await within(panel).findByText('main signed out')).toBeTruthy()
+    expect(within(panel).getByText('3 agents · 3 accounts')).toBeTruthy()
+    expect(await within(panel).findByRole('button', { name: /^Code hosts and trackers/ })).toBeTruthy()
+    expect(within(panel).queryByText('0 connected')).toBeNull()
+    expect(within(panel).getByText('Althar 0.0.0')).toBeTruthy()
+    // Opened, it asks the agents how they stand once, not again and again.
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(vi.mocked(client.status).mock.calls.filter(([input]) => input?.recheck === true)).toHaveLength(1)
+
+    await openModule('Agents')
+    expect(within(panel).getByRole('heading', { name: 'Agents', level: 2 })).toBeTruthy()
+    // It opens on the agent that needs the person.
+    expect(within(panel).getByRole('tab', { name: 'OpenCode, needs you' }).getAttribute('aria-selected')).toBe('true')
+    expect(within(panel).getByRole('list', { name: 'OpenCode accounts' })).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('tab', { name: 'Codex' }))
+    expect(within(panel).getByRole('list', { name: 'Codex accounts' })).toBeTruthy()
+    // Under its name, who makes it and its version.
+    expect(within(panel).getByText('OpenAI · 0.159.3')).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Back to all settings' }))
+    expect(within(panel).getByRole('button', { name: /^Agents/ })).toBeTruthy()
+
+    // Code hosts beside trackers, each kind saying what it is for, so its services don't.
+    await openModule('Code hosts and trackers')
+    const hosts = await within(panel).findByRole('region', { name: 'Code hosts' })
+    expect(within(hosts).getByRole('list', { name: 'Code hosts' })).toBeTruthy()
+    expect(within(hosts).getByText('Pull requests, their checks and review comments')).toBeTruthy()
+    expect(within(within(panel).getByRole('region', { name: 'Trackers' })).getByRole('list', { name: 'Trackers' })).toBeTruthy()
+    expect(within(panel).queryByText(/Not connected · /)).toBeNull()
+    await userEvent.keyboard('{Escape}')
+    expect(within(panel).getByRole('button', { name: /^Code hosts and trackers/ })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull())
+  })
+
+  it('switches each agent’s models on and off beside its accounts, named as people know them', async () => {
+    // The runtime keeps what was switched off, and says so when read again.
+    const off = new Set<string>()
+    const said = () =>
+      models.map((offered) => ({ ...offered, blocked: offered.models.filter((model) => off.has(model.id)).map((model) => model.id) }))
+    const { client } = fakeClient({
+      getModels: vi.fn(async () => said()),
+      setModelBlocked: vi.fn(async ({ model, blocked }: { agentId: string; model: string; blocked: boolean }) => {
+        if (blocked) off.add(model)
+        else off.delete(model)
+      }),
+    })
+    withServices(<Settings />, client)
+    const panel = await openModule('Agents')
+    // Claude Code's models with their family, its own default not among them.
+    await userEvent.click(within(panel).getByRole('tab', { name: 'Claude Code' }))
+    const claude = await within(panel).findByRole('group', { name: 'Claude Code models' })
+    expect(within(claude).getAllByRole('checkbox')).toHaveLength(2)
+    expect(within(claude).getByRole('checkbox', { name: 'Claude Opus' })).toBeTruthy()
+    expect(within(panel).getByText('all 2 used')).toBeTruthy()
+    await userEvent.click(within(claude).getByRole('checkbox', { name: 'Claude Sonnet' }))
+    expect(client.setModelBlocked).toHaveBeenCalledWith({ agentId: 'claude-code', model: 'sonnet', blocked: true })
+    expect(within(claude).getByRole('checkbox', { name: 'Claude Sonnet' }).getAttribute('aria-checked')).toBe('false')
+    expect(within(panel).getByText('1 of 2 used')).toBeTruthy()
+    // Once the runtime has answered and been read again, it says the same: still off.
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    expect(within(claude).getByRole('checkbox', { name: 'Claude Sonnet' }).getAttribute('aria-checked')).toBe('false')
+    // Read again slowly: until the runtime's answer arrives, the switch stays as it was set, not as it was read last.
+    let answer: () => void = () => undefined
+    vi.mocked(client.getModels).mockImplementationOnce(() => new Promise((resolve) => (answer = () => resolve(said()))))
+    await userEvent.click(within(claude).getByRole('checkbox', { name: 'Claude Sonnet' }))
+    expect(client.setModelBlocked).toHaveBeenLastCalledWith({ agentId: 'claude-code', model: 'sonnet', blocked: false })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(within(claude).getByRole('checkbox', { name: 'Claude Sonnet' }).getAttribute('aria-checked')).toBe('true')
+    act(() => answer())
+    await waitFor(() => expect(within(panel).getByText('all 2 used')).toBeTruthy())
+    expect(within(claude).getByRole('checkbox', { name: 'Claude Sonnet' }).getAttribute('aria-checked')).toBe('true')
+    // One the runtime didn't switch goes back to how it was.
+    vi.mocked(client.setModelBlocked).mockRejectedValueOnce(new Error('No'))
+    await userEvent.click(within(claude).getByRole('checkbox', { name: 'Claude Opus' }))
+    await waitFor(() => expect(within(claude).getByRole('checkbox', { name: 'Claude Opus' }).getAttribute('aria-checked')).toBe('true'))
+  })
+
+  it('says where each agent stands in a word, and each code host by its mark', () => {
+    const now = new Date('2026-10-03T12:00:00')
+    const [claude, codex] = agents
+    expect(agentGlanceOf(claude!, now)).toMatchObject({ name: 'Claude Code', line: '1 account' })
+    const resting = { ...codex!, accounts: [{ ...usual('acc_codex', 'signed_in'), outUntil: '2026-10-03T14:00:00' }] }
+    expect(agentGlanceOf(resting, now)).toMatchObject({ tone: 'quiet' })
+    expect(agentGlanceOf(resting, now).line).toMatch(/^main out until /)
+    // One mark for a service's Cloud and its own servers; faint where none is connected, a dot where one asks to sign in again.
+    const [github, linear] = connectionList.products
+    const marks = marksOf({
+      ...connectionList,
+      products: [
+        github!,
+        { ...github!, product: 'bitbucket_cloud', name: 'Bitbucket' },
+        { ...github!, product: 'bitbucket_dc', name: 'Bitbucket' },
+        linear!,
+      ],
+      connections: [{ ...githubConnection, state: 'reauth_required' }],
+    })
+    expect(marks.map((mark) => mark.name)).toEqual(['GitHub', 'Bitbucket', 'Linear'])
+    expect(marks.find((mark) => mark.id === 'github')).toMatchObject({ yours: true })
+    expect(marks.find((mark) => mark.id === 'github')?.faint).toBeUndefined()
+    expect(marks.find((mark) => mark.id === 'bitbucket')).toMatchObject({ faint: true })
+  })
+
+  it('has Althar as co-author of what it sends until the person turns it off, and then says why it would stay', async () => {
+    const { client } = fakeClient()
+    withServices(<Settings />, client)
+    await openModule('Code hosts and trackers')
+    const credit = await screen.findByRole('switch', { name: 'Althar as co-author' })
+    expect(credit.getAttribute('aria-checked')).toBe('true')
+    expect(screen.queryByText(/no marketing budget/)).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'See the line' }))
+    expect(screen.getByText('Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>')).toBeTruthy()
+
+    await userEvent.click(credit)
+    expect(client.setCoAuthor).toHaveBeenCalledWith(false)
+    expect(credit.getAttribute('aria-checked')).toBe('false')
+    expect(screen.getByText(/Althar is free, and we have no marketing budget/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Turn it back on' }))
+    expect(client.setCoAuthor).toHaveBeenLastCalledWith(true)
+    expect(credit.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('turns co-authoring back when the change can’t be kept, and says so', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.setCoAuthor).mockRejectedValue(new Error('disk full'))
+    withServices(<Settings />, client)
+    await openModule('Code hosts and trackers')
+    const credit = await screen.findByRole('switch', { name: 'Althar as co-author' })
+    await userEvent.click(credit)
+    expect((await screen.findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(credit.getAttribute('aria-checked')).toBe('true'))
+    // Off and on again, both lost: it shows what the runtime kept, not the opposite of the last try.
+    const reads = vi.mocked(client.getSettings).mock.calls.length
+    await userEvent.click(credit)
+    await userEvent.click(credit)
+    await waitFor(() => expect(vi.mocked(client.getSettings).mock.calls.length).toBeGreaterThan(reads))
+    expect(credit.getAttribute('aria-checked')).toBe('true')
   })
 
   it('shows the icon the app has, and gives it another', async () => {
     const host = fakeHost({ appIcon: vi.fn(async () => 'paper') })
     withServices(<Settings />, fakeClient().client, host)
+    await openModule(/^App icon\s*Paper/)
     const icons = await screen.findByRole('radiogroup', { name: 'App icon' })
     expect(
       within(icons)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Cobalt', 'Cobalt, dark', 'Paper', 'Ink', 'Solid', 'Solid, dark'])
+    ).toEqual(['Cobalt', 'Lapis', 'Paper', 'Ink', 'Keystone', 'Monolith'])
     expect(within(icons).getByRole('radio', { name: 'Paper' }).getAttribute('aria-checked')).toBe('true')
     await userEvent.click(within(icons).getByRole('radio', { name: 'Ink' }))
     expect(host.setAppIcon).toHaveBeenCalledWith('ink')
@@ -421,9 +568,10 @@ describe('settings', () => {
       }),
     })
     withServices(<Settings />, fakeClient().client, host)
+    await openModule(/^App icon\s*Cobalt/)
     const icons = await screen.findByRole('radiogroup', { name: 'App icon' })
     expect(within(icons).getByRole('radio', { name: 'Cobalt' }).getAttribute('aria-checked')).toBe('true')
-    await userEvent.click(within(icons).getByRole('radio', { name: 'Solid' }))
+    await userEvent.click(within(icons).getByRole('radio', { name: 'Keystone' }))
     expect((await screen.findByRole('alert')).textContent).toBe('That icon couldn’t be kept. Try again.')
     expect(within(icons).getByRole('radio', { name: 'Cobalt' }).getAttribute('aria-checked')).toBe('true')
   })
@@ -431,12 +579,16 @@ describe('settings', () => {
   it('offers where Althar shows in another app, on a Mac with a notch, and keeps a choice', async () => {
     const host = fakeHost()
     withServices(<Settings />, fakeClient().client, host)
+    await openModule(/^While you’re in another app\s*Round the notch/)
     const places = await screen.findByRole('radiogroup', { name: 'While you’re in another app' })
     expect(
       within(places)
         .getAllByRole('radio')
         .map((radio) => radio.getAttribute('aria-checked')),
     ).toEqual(['true', 'false'])
+    // Each place as the screen would look; with nothing under way, a busy moment, said as such.
+    expect(screen.getByText('With nothing under way yet, here is how a busy moment would look.')).toBeTruthy()
+    expect(places.textContent).toContain('Publish the SDK to npm')
     await userEvent.click(within(places).getByRole('radio', { name: /In the menu bar/ }))
     expect(host.setEdge).toHaveBeenCalledWith('menu')
     expect(
@@ -448,8 +600,9 @@ describe('settings', () => {
 
   it('says nothing of it without a notch, where it is the menu bar', async () => {
     withServices(<Settings />, fakeClient().client, fakeHost({ edge: vi.fn(async () => ({ place: 'island', notch: false })) }))
-    await screen.findByRole('radiogroup', { name: 'App icon' })
-    expect(screen.queryByRole('radiogroup', { name: 'While you’re in another app' })).toBeNull()
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await within(panel).findByRole('button', { name: /^App icon/ })
+    expect(within(panel).queryByRole('button', { name: /^While you’re in another app/ })).toBeNull()
   })
 
   it('goes back to where it was when a choice can’t be kept', async () => {
@@ -460,6 +613,7 @@ describe('settings', () => {
       }),
     })
     withServices(<Settings />, fakeClient().client, host)
+    await openModule(/^While you’re in another app\s*In the menu bar/)
     const places = await screen.findByRole('radiogroup', { name: 'While you’re in another app' })
     await userEvent.click(within(places).getByRole('radio', { name: /Round the notch/ }))
     expect((await screen.findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
@@ -472,9 +626,9 @@ describe('settings', () => {
 
   it('offers no icon where there is no Dock to show one', async () => {
     withServices(<Settings />, fakeClient().client, fakeHost({ appIcon: vi.fn(async () => null) }))
-    await screen.findByRole('heading', { name: 'Agents on this Mac' })
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'App icon' })).toBeNull())
-    expect(screen.queryByRole('radiogroup', { name: 'App icon' })).toBeNull()
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await within(panel).findByText('Althar 0.0.0')
+    expect(within(panel).queryByRole('button', { name: /^App icon/ })).toBeNull()
   })
 
   it('lets only the latest choice go back, to the last icon kept', async () => {
@@ -483,6 +637,7 @@ describe('settings', () => {
       setAppIcon: vi.fn(() => new Promise<void>((resolve, reject) => void answers.push({ resolve, reject }))),
     })
     withServices(<Settings />, fakeClient().client, host)
+    await openModule(/^App icon\s*Cobalt/)
     const icons = await screen.findByRole('radiogroup', { name: 'App icon' })
     const checked = () =>
       within(icons)
@@ -497,8 +652,8 @@ describe('settings', () => {
     expect(checked()).toBe('Paper')
     expect(screen.queryByRole('alert')).toBeNull()
 
-    // Solid, which can't be kept: Paper, the last kept, comes back.
-    await userEvent.click(within(icons).getByRole('radio', { name: 'Solid' }))
+    // Keystone, which can't be kept: Paper, the last kept, comes back.
+    await userEvent.click(within(icons).getByRole('radio', { name: 'Keystone' }))
     await act(async () => answers[2]!.reject(new Error('no picture')))
     expect(checked()).toBe('Paper')
     expect((await screen.findByRole('alert')).textContent).toBe('That icon couldn’t be kept. Try again.')
@@ -507,10 +662,168 @@ describe('settings', () => {
   it('starts on cobalt when the main process can’t say', async () => {
     const host = fakeHost({ appIcon: vi.fn(async () => Promise.reject(new Error('gone'))) })
     withServices(<Settings />, fakeClient().client, host)
+    await openModule(/^App icon\s*Cobalt/)
     expect(
       within(await screen.findByRole('radiogroup', { name: 'App icon' }))
         .getByRole('radio', { name: 'Cobalt' })
         .getAttribute('aria-checked'),
     ).toBe('true')
+  })
+})
+
+describe('the app’s own preferences in settings', () => {
+  it('keeps the Mac awake by a round switch, and opens out to on battery too and the editor files open in', async () => {
+    const host = fakeHost()
+    const { client } = fakeClient({
+      listEditors: vi.fn(async () => [
+        { id: 'cursor', name: 'Cursor' },
+        { id: 'zed', name: 'Zed' },
+        { id: 'finder', name: 'Finder' },
+      ]),
+    })
+    withServices(<Settings />, client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    const awake = await within(panel).findByRole('switch', { name: 'Keep awake' })
+    expect(awake.getAttribute('aria-checked')).toBe('true')
+    expect(within(panel).getByRole('button', { name: /^Keep awake\s*While work runs/ })).toBeTruthy()
+    await userEvent.click(awake)
+    expect(host.setPreference).toHaveBeenCalledWith('keepAwake', false)
+    expect(within(panel).getByRole('button', { name: /^Keep awake\s*Off/ })).toBeTruthy()
+
+    await openModule(/^Keep awake/)
+    expect(within(panel).getByRole('heading', { name: 'This Mac', level: 2 })).toBeTruthy()
+    const battery = within(panel).getByRole('switch', { name: 'On battery too' })
+    // Nothing to add to while it is off.
+    expect((battery as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(within(panel).getByRole('switch', { name: 'Keep this Mac awake while work runs' }))
+    expect(host.setPreference).toHaveBeenLastCalledWith('keepAwake', true)
+    await userEvent.click(battery)
+    expect(host.setPreference).toHaveBeenLastCalledWith('awakeOnBattery', true)
+    // Each editor by its own icon; the first one found until one is chosen.
+    const editors = within(panel).getByRole('radiogroup', { name: 'Open files in' })
+    expect(within(editors).getByRole('radio', { name: 'Cursor' }).getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(editors.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,cursor'))
+    await userEvent.click(within(editors).getByRole('radio', { name: 'Zed' }))
+    expect(host.setPreference).toHaveBeenLastCalledWith('editor', 'zed')
+    await waitFor(() => expect(within(editors).getByRole('radio', { name: 'Zed' }).getAttribute('aria-checked')).toBe('true'))
+  })
+
+  it('turns every kind of notification off and on at once, and each on its own, with the count and a sound', async () => {
+    const host = fakeHost()
+    withServices(<Settings />, fakeClient().client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    expect(await within(panel).findByRole('button', { name: /^Notifications\s*Silent/ })).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('switch', { name: 'Notifications' }))
+    for (const key of ['notifyCalls', 'notifyReady', 'notifyStopped']) expect(host.setPreference).toHaveBeenCalledWith(key, false)
+    expect(within(panel).getByRole('button', { name: /^Notifications\s*Off/ })).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('switch', { name: 'Notifications' }))
+
+    await openModule(/^Notifications/)
+    expect(within(panel).getByText('Only while Althar isn’t in front. Never for progress.')).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('switch', { name: 'A task is ready for you' }))
+    expect(host.setPreference).toHaveBeenLastCalledWith('notifyReady', false)
+    await userEvent.click(within(panel).getByRole('switch', { name: 'Count them on the Dock icon' }))
+    expect(host.setPreference).toHaveBeenLastCalledWith('badge', false)
+    // The sound is one of the Mac's, heard as it is chosen, and again by its play button.
+    await userEvent.click(within(panel).getByRole('combobox', { name: 'Sound' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Glass' }))
+    expect(host.setPreference).toHaveBeenLastCalledWith('sound', 'Glass')
+    expect(host.playSound).toHaveBeenCalledWith('Glass')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Play Glass' }))
+    expect(host.playSound).toHaveBeenCalledTimes(2)
+    await userEvent.click(within(panel).getByRole('button', { name: 'Back to all settings' }))
+    // One kind still on is notifications on, saying its sound.
+    expect(within(panel).getByRole('button', { name: /^Notifications\s*Glass/ })).toBeTruthy()
+  })
+
+  it('shows what was kept, and goes back to it when a change can’t be kept', async () => {
+    const host = fakeHost({
+      preferences: vi.fn(async () => ({ ...DEFAULT_PREFERENCES, keepAwake: false, sound: 'Purr' })),
+      setPreference: vi.fn(async () => {
+        throw new Error('disk full')
+      }),
+    })
+    withServices(<Settings />, fakeClient().client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await waitFor(() => expect(within(panel).getByRole('switch', { name: 'Keep awake' }).getAttribute('aria-checked')).toBe('false'))
+    expect(within(panel).getByRole('button', { name: /^Notifications\s*Purr/ })).toBeTruthy()
+    // Said where the switch was pressed, at a glance as well as opened out.
+    await userEvent.click(within(panel).getByRole('switch', { name: 'Keep awake' }))
+    expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(within(panel).getByRole('switch', { name: 'Keep awake' }).getAttribute('aria-checked')).toBe('false'))
+    await openModule(/^Notifications/)
+    await userEvent.click(within(panel).getByRole('switch', { name: 'A task is ready for you' }))
+    expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() =>
+      expect(within(panel).getByRole('switch', { name: 'A task is ready for you' }).getAttribute('aria-checked')).toBe('true'),
+    )
+  })
+})
+
+describe('preference changes made together', () => {
+  it('keeps a change made before the first read came, and shows only the latest answer of several', async () => {
+    let answer: (preferences: typeof DEFAULT_PREFERENCES) => void = () => {}
+    const answers: Array<() => void> = []
+    let kept = DEFAULT_PREFERENCES
+    const host = fakeHost({
+      preferences: vi.fn(() => new Promise<typeof DEFAULT_PREFERENCES>((resolve) => void (answer = resolve))),
+      setPreference: vi.fn(
+        (key, value) =>
+          new Promise<typeof DEFAULT_PREFERENCES>((resolve) => {
+            kept = { ...kept, [key]: value }
+            const now = kept
+            answers.push(() => resolve(now))
+          }),
+      ),
+    })
+    withServices(<Settings />, fakeClient().client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    const awake = within(panel).getByRole('switch', { name: 'Keep awake' })
+    await userEvent.click(awake)
+    await waitFor(() => expect(awake.getAttribute('aria-checked')).toBe('false'))
+    // The read that was on its way answers late, with what was there before: the change stands.
+    act(() => answer(DEFAULT_PREFERENCES))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(awake.getAttribute('aria-checked')).toBe('false')
+    // Two changes; the first answers last: the switch shows the second.
+    await userEvent.click(awake)
+    await waitFor(() => expect(awake.getAttribute('aria-checked')).toBe('true'))
+    await act(async () => {
+      answers[2]?.()
+      answers[1]?.()
+      answers[0]?.()
+    })
+    expect(awake.getAttribute('aria-checked')).toBe('true')
+  })
+})
+
+describe('a change that can’t be kept among several', () => {
+  it('is said even when changes after it were kept, and what was kept is read again', async () => {
+    const host = fakeHost({
+      setPreference: vi.fn(async (key, value) => {
+        if (key === 'notifyCalls') throw new Error('disk full')
+        return { ...DEFAULT_PREFERENCES, notifyCalls: true, [key]: value }
+      }),
+    })
+    withServices(<Settings />, fakeClient().client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await userEvent.click(await within(panel).findByRole('switch', { name: 'Notifications' }))
+    expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(vi.mocked(host.preferences).mock.calls.length).toBeGreaterThan(1))
+  })
+})
+
+describe('an agent that isn’t on this Mac, in settings', () => {
+  it('says so at a glance, and in its tab offers to download it', async () => {
+    const { client } = fakeClient({ status: vi.fn(async () => ({ apiVersion: 1, appVersion: '0.0.0', agents: withoutOpenCode })) })
+    withServices(<Settings />, client, fakeHost())
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    expect(await within(panel).findByText('Not on this Mac')).toBeTruthy()
+    await openModule('Agents')
+    await userEvent.click(within(panel).getByRole('tab', { name: /OpenCode/ }))
+    const install = within(panel).getByRole('region', { name: 'OpenCode isn’t on this Mac' })
+    expect(within(install).getByText(/from GitHub, about 45 MB, check it against the release/)).toBeTruthy()
+    await userEvent.click(within(install).getByRole('button', { name: 'Download OpenCode' }))
+    expect(client.installAgent).toHaveBeenCalledWith('opencode')
   })
 })

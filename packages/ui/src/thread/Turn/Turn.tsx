@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { Model, type ModelInfo } from '../../foundations/Model/Model'
+import { Model, type ModelInfo } from '../../primitives/Model/Model'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'

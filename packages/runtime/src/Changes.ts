@@ -19,11 +19,24 @@ import { SqlClient } from 'effect/sql'
 import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
+import { coAuthorOn, creditBranch, type Memory, recallMade, rememberMade, withoutAgentCredit } from './credit'
 import { envelope } from './envelope'
-import { CantMerge, ChangedSinceSeen, NotFound } from './errors'
+import { CantMerge, ChangedSinceSeen, type GitFailed, NotFound, PushRefused } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
 import { forkOf } from './forks'
-import { commitOf, commitsAhead, gitOutcome, namedRemotes, onHead, pushTo, uncommittedFiles } from './git'
+import {
+  commitOf,
+  commitsAhead,
+  commitsOf,
+  gitOutcome,
+  gitWithin,
+  namedRemotes,
+  onHead,
+  pushTo,
+  remoteOf,
+  remoteTip,
+  uncommittedFiles,
+} from './git'
 import { Instance } from './Instance'
 import { applyMerges, planMerge } from './localMerge'
 import { outward, reconcileOutward } from './outward'
@@ -245,6 +258,17 @@ export class Changes extends Context.Service<
       taskId: string,
       heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>,
     ): Effect.Effect<ReadonlyArray<{ readonly repository: string; readonly branch: string; readonly already: boolean }>, unknown>
+    /**
+     * Pushes each default branch the task merged into here to the remote it
+     * follows, with the person's own git sign-in (their keychain or SSH
+     * agent), not a code host's: what they would run themselves.
+     */
+    pushHere(taskId: string): Effect.Effect<ReadonlyArray<{ readonly branch: string; readonly remote: string }>, unknown>
+    /** Pushes a task's branch to each of its repositories' remotes, with the person's own git, up to the commits they saw. */
+    pushBranch(
+      taskId: string,
+      heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>,
+    ): Effect.Effect<ReadonlyArray<{ readonly branch: string; readonly remote: string }>, unknown>
     /** Replies on the task's pull request, in a comment's thread or its conversation, signed as from Althar and the agent that wrote it. */
     reply(
       taskId: string,
@@ -293,6 +317,34 @@ export class Changes extends Context.Service<
         locks.set(taskId, made)
         return made.withPermits(1)
       }
+      /*
+       * Default branches move here, by a local merge, and go to their remotes,
+       * by a push, one at a time across every task: a push never sends what a
+       * merge of several repositories moved and is about to put back.
+       */
+      const branches = Semaphore.makeUnsafe(1)
+      /* What Althar made again of agents' commits, kept in the profile (credit.ts). */
+      const memory: Memory = {
+        recall: (commits) => recallMade(commits).pipe(Effect.provideContext(context)),
+        remember: (made) => rememberMade(made).pipe(Effect.provideContext(context)),
+      }
+      /* What the agents Althar runs call themselves, so their credit lines are known by name too. */
+      const agentNames = agents.list.map((entry) => entry.definition.name)
+
+      /**
+       * A worktree's branch with the commits not sent yet credited as the
+       * person set it (credit.ts): the agents' lines out, Althar's in. `known`
+       * were sent before and stay. What `head` became, and `settle`, which
+       * moves the branch onto it once it is sent. `head` may be one from
+       * before the branch was credited, which the person saw: it becomes the
+       * same commit the branch did.
+       */
+      const credited = (cwd: string, branch: string, head: string, known: ReadonlyArray<string | null>) =>
+        Effect.gen(function* () {
+          const coAuthor = yield* coAuthorOn
+          const credited = yield* creditBranch(cwd, branch, { head, known, coAuthor, agents: agentNames, memory })
+          return { head: credited.head, settle: credited.settle }
+        })
       /* When each task's pull request last had news, and when each was last asked: quiet ones are asked less often. */
       const newsAt = new Map<string, number>()
       const polledAt = new Map<string, number>()
@@ -371,8 +423,10 @@ export class Changes extends Context.Service<
                 AND json_extract(content, '$.step') = 'review' ORDER BY sequence DESC LIMIT 1) AS verdict,
               (SELECT count(*) FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
                 AND json_extract(content, '$.step') = 'review') AS rounds`
+          // An agent may sign its summary as it signs a commit; that stays here too.
+          const summary = lead?.summary ?? null
           return bodyOf({
-            lead: lead?.summary ?? null,
+            lead: summary === null ? null : withoutAgentCredit(summary, agentNames),
             review: reviewed === undefined ? null : reviewed,
             findings: findings.map((finding) => {
               const location = JSON.parse(finding.location) as { file?: string | null; line?: number | null }
@@ -380,7 +434,8 @@ export class Changes extends Context.Service<
             }),
             issue,
             template: repository.template,
-            written: written?.text ?? null,
+            written: written === undefined || written.text === null ? null : withoutAgentCredit(written.text, agentNames),
+            credit: yield* coAuthorOn,
           })
         })
 
@@ -526,8 +581,16 @@ export class Changes extends Context.Service<
           const left = yield* uncommittedFiles(task.path)
           const base = task.baseCommit ?? task.baseRef ?? own.defaultBranch
           if ((yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing', left } as const
-          const head = yield* commitOf(task.path, 'HEAD')
-          yield* pushTo(task.path, yield* host.pushTarget(own), task.branch)
+          const [sent] = yield* sql<{ head: string | null }>`
+            SELECT head_commit AS head FROM repository_changes WHERE workspace_id = ${task.workspaceId} ORDER BY updated_at DESC LIMIT 1`
+          const pushTarget = yield* host.pushTarget(own)
+          const { head, settle } = yield* credited(task.path, task.branch, yield* commitOf(task.path, 'HEAD'), [
+            task.baseCommit,
+            sent?.head ?? null,
+            yield* remoteTip(task.path, pushTarget, task.branch),
+          ])
+          yield* pushTo(task.path, pushTarget, task.branch, head)
+          yield* settle
           if (input.end === 'none') return { kind: 'pushed', branch: task.branch, left } as const
           const draft = input.end === 'draft' && host.capabilities.drafts
           const [issueLink] = yield* sql<{
@@ -716,7 +779,7 @@ export class Changes extends Context.Service<
           yield* touchCard(link.taskId)
         })
 
-      const push = (taskId: string, head: string, url?: string) =>
+      const push = (taskId: string, seen: string, url?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { link, snapshot, host, repository } = yield* current(taskId, url)
@@ -729,7 +792,6 @@ export class Changes extends Context.Service<
             LIMIT 1`
           if (workspace === undefined) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
           // What the person saw, and nothing the lead committed after: one rewritten away since isn't pushed.
-          if (!(yield* onHead(workspace.path, head))) return yield* new ChangedSinceSeen({ taskId })
           // A pull request from a fork into the repository it was forked from takes its commits on the fork.
           const fork = yield* namedRemotes(workspace.path).pipe(
             Effect.map(forkOf),
@@ -737,7 +799,19 @@ export class Changes extends Context.Service<
           )
           const into = fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase()
           const to = into ? yield* host.repository(fork.fork.path) : repository
-          yield* pushTo(workspace.path, yield* host.pushTarget(to), workspace.branch, head)
+          const [sent] = yield* sql<{ head: string | null }>`
+            SELECT head_commit AS head FROM repository_changes WHERE pull_request_url = ${snapshot.url} AND project_id = ${link.projectId} LIMIT 1`
+          const pushTarget = yield* host.pushTarget(to)
+          const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [
+            snapshot.headSha,
+            sent?.head ?? null,
+            yield* remoteTip(workspace.path, pushTarget, workspace.branch),
+          ])
+          // The commit seen, or what crediting made of it, is on the branch still.
+          if (!(yield* onHead(workspace.path, seen)) && !(yield* onHead(workspace.path, head)))
+            return yield* new ChangedSinceSeen({ taskId })
+          yield* pushTo(workspace.path, pushTarget, workspace.branch, head)
+          yield* settle
           yield* sql`UPDATE repository_changes SET head_commit = ${head}, updated_at = ${yield* timestamp}, revision = revision + 1
             WHERE pull_request_url = ${snapshot.url} AND project_id = ${link.projectId}`
           yield* news(taskId)
@@ -840,10 +914,13 @@ export class Changes extends Context.Service<
           // Worked out for every repository first: one that can't be merged stops them all.
           const plans = yield* Effect.forEach(repositories, (repository) =>
             Effect.gen(function* () {
-              const head = heads.find((seen) => seen.repository === repository.slug)?.head
-              if (head === undefined || !(yield* onHead(repository.worktree, head))) return yield* cant('changed')
+              const seen = heads.find((one) => one.repository === repository.slug)?.head
+              if (seen === undefined) return yield* cant('changed')
+              // What lands on the person's own branch is credited as what is pushed is.
+              const { head, settle } = yield* credited(repository.worktree, repository.branch, seen, [])
+              if (!(yield* onHead(repository.worktree, seen)) && !(yield* onHead(repository.worktree, head))) return yield* cant('changed')
               const plan = yield* planMerge(repository.root, repository.base, head, `Merge ${repository.branch}\n\n${task.title}`)
-              return { repository, plan }
+              return { repository, plan, settle }
             }),
           )
           const conflicts = plans.flatMap(({ repository, plan }) =>
@@ -866,6 +943,7 @@ export class Changes extends Context.Service<
             return yield* refused.plan.checkout === null
               ? cant('moved', several ? `${refused.repository.name}’s ${refused.branch}` : refused.branch)
               : cant('busy', refused.plan.checkout)
+          for (const { settle } of plans) yield* settle
           const merged = plans.map(({ repository, plan }) => ({
             repository: repository.name,
             branch: repository.base,
@@ -882,6 +960,125 @@ export class Changes extends Context.Service<
           // Merged, its task is done, as a merged pull request's is, once any others it has are merged too.
           yield* settleIfDone(taskId, { actorId: instance.personId, here: merged })
           return merged
+        })
+
+      /** Why a push the person's git made failed, in its words where the remote gave some: else git's own failure. */
+      const refusal = (taskId: string, remote: string, failed: GitFailed): Effect.Effect<never, GitFailed | PushRefused> => {
+        // The remote said no on its own terms, such as a protected branch: what it said, not a guess.
+        const refused = /\[remote rejected\][^(]*\(([^)]*)\)/i.exec(failed.stderr)
+        if (refused !== null) return Effect.fail(new PushRefused({ taskId, why: 'refused', remote, said: refused[1] ?? '' }))
+        if (/! \[rejected\].*\((fetch first|non-fast-forward)\)/i.test(failed.stderr))
+          return Effect.fail(new PushRefused({ taskId, why: 'behind', remote }))
+        if (/authentication|permission denied|could not read (username|password)|terminal prompts disabled/i.test(failed.stderr))
+          return Effect.fail(new PushRefused({ taskId, why: 'denied', remote }))
+        return Effect.fail(failed)
+      }
+
+      /**
+       * Pushes a task's branch, in each repository without a pull request, to
+       * the remote that repository's work goes to, as the person would from a
+       * terminal: up to the commit they saw, their remote, the branch's own
+       * name there, their sign-in, never forced. Nothing is opened there; the
+       * task says where a pull request can be, and stays as it was.
+       */
+      const pushBranch = (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: ProjectId; threadId: string }>`
+            SELECT k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+          const repositories = yield* sql<{
+            slug: string
+            base: string
+            root: string
+            worktree: string
+            branch: string
+            baseCommit: string | null
+          }>`
+            SELECT b.slug, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch, w.base_commit
+            FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+              AND NOT EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL)
+            ORDER BY b.created_at, b.rowid`
+          const pushed: Array<{ branch: string; remote: string }> = []
+          for (const repository of repositories) {
+            const head = heads.find((seen) => seen.repository === repository.slug)?.head
+            if (head === undefined) continue
+            if (!/^[0-9a-f]{7,64}$/.test(head)) return yield* new CantMerge({ taskId, why: 'changed', detail: '' })
+            const remote = yield* remoteOf(repository.root, repository.base)
+            if (remote === null) continue
+            // Credited as every push is (credit.ts): what the remote has already stays as it is.
+            const [there = null] = yield* commitsOf(repository.root, [`refs/remotes/${remote}/${repository.branch}`])
+            const { head: sent, settle } = yield* credited(repository.worktree, repository.branch, head, [repository.baseCommit, there])
+            // What the person saw, or what crediting made of it, still on the branch: a commit the lead made since isn't theirs to have seen.
+            if (!(yield* onHead(repository.worktree, head)) && !(yield* onHead(repository.worktree, sent)))
+              return yield* new CantMerge({ taskId, why: 'changed', detail: '' })
+            yield* gitWithin(60_000, repository.worktree, 'push', '--', remote, `${sent}:refs/heads/${repository.branch}`).pipe(
+              Effect.catchTag('GitFailed', (failed) => refusal(taskId, `${remote}/${repository.branch}`, failed)),
+            )
+            yield* settle
+            // What the remote has now, as a fetch would say: git notes it itself only where the remote's fetch takes every branch.
+            yield* gitWithin(10_000, repository.root, 'update-ref', `refs/remotes/${remote}/${repository.branch}`, sent).pipe(Effect.ignore)
+            pushed.push({ branch: repository.branch, remote })
+          }
+          if (pushed.length === 0) return yield* new NotFound({ kind: 'remote', id: taskId })
+          yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `Pushed ${[...new Set(pushed.map((one) => one.branch))].join(', ')} to ${[...new Set(pushed.map((one) => one.remote))].join(', ')}.`,
+          })
+          return pushed
+        })
+
+      const pushHere = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: ProjectId; threadId: string }>`
+            SELECT k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+          const repositories = yield* sql<{ base: string; root: string; worktree: string; baseCommit: string | null }>`
+            SELECT coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.base_commit
+            FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+              AND NOT EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL)`
+          const pushed: Array<{ branch: string; remote: string }> = []
+          for (const repository of repositories) {
+            // Only where the task's own work merged: a repository it left alone isn't its to push, whatever its branch holds.
+            const [head = null] = yield* commitsOf(repository.worktree, ['HEAD'])
+            if (head === null || head === repository.baseCommit) continue
+            const merged = yield* gitOutcome(repository.root, 'merge-base', '--is-ancestor', head, `refs/heads/${repository.base}`)
+            if (merged.code !== 0) continue
+            const followed = yield* gitOutcome(
+              repository.root,
+              'for-each-ref',
+              '--format=%(upstream:short)',
+              `refs/heads/${repository.base}`,
+            )
+            if (followed.code !== 0 || followed.stdout === '') continue
+            const remote = followed.stdout
+            const at = remote.indexOf('/')
+            // As the person would push it: their remote, their branch there, their sign-in. A prompt for a password fails rather than waits.
+            yield* gitWithin(
+              60_000,
+              repository.root,
+              'push',
+              '--',
+              remote.slice(0, at),
+              `refs/heads/${repository.base}:refs/heads/${remote.slice(at + 1)}`,
+            ).pipe(Effect.catchTag('GitFailed', (failed) => refusal(taskId, remote, failed)))
+            pushed.push({ branch: repository.base, remote })
+          }
+          if (pushed.length > 0)
+            yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: `Pushed ${pushed.map((one) => `${one.branch} to ${one.remote.slice(0, one.remote.indexOf('/'))}`).join(', ')}.`,
+            })
+          return pushed
         })
 
       const reply = (
@@ -1377,7 +1574,9 @@ export class Changes extends Context.Service<
         markReady: (taskId, url) => provide(locked(taskId)(markReady(taskId, url))),
         exclusive: (taskId, effect) => locked(taskId)(effect),
         merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),
-        mergeHere: (taskId, heads) => provide(locked(taskId)(mergeHere(taskId, heads))),
+        mergeHere: (taskId, heads) => provide(locked(taskId)(branches.withPermits(1)(mergeHere(taskId, heads)))),
+        pushHere: (taskId) => provide(locked(taskId)(branches.withPermits(1)(pushHere(taskId)))),
+        pushBranch: (taskId, heads) => provide(locked(taskId)(pushBranch(taskId, heads))),
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),

@@ -2,9 +2,11 @@ import { Commands, Database, Ledger } from '@althar/persistence-sqlite'
 import { Layer } from 'effect'
 
 import { Accounts } from './Accounts'
+import { AccountSignIns } from './AccountSignIns'
 import { Changes } from './Changes'
 import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
 import { Connections } from './Connections'
+import { Installs } from './Installs'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { Live } from './Live'
@@ -17,6 +19,7 @@ import { Runs } from './Runs'
 import { Secrets } from './Secrets'
 import { Sessions } from './Sessions'
 import { Limits } from './Limits'
+import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
 import { SignIns } from './SignIns'
 import { ToolServer } from './ToolServer'
@@ -43,10 +46,12 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(Database.layer({ filename: options.database })),
     Layer.provideMerge(WebCrypto),
   )
-  const base = Layer.mergeAll(Instance.layer, Live.layer, ToolServer.layer).pipe(
+  const base = Layer.mergeAll(Instance.layer, Live.layer, ToolServer.layer, ModelFacts.layer).pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry),
+    // Agents Althar downloads at the person's asking, where it keeps them; the registry's point at them where the person has none.
+    Layer.provideMerge(Installs.layer({ root: options.agentsRoot, fetch: options.fetch })),
     Layer.provideMerge(options.secrets ?? Secrets.none('Althar keeps sign-ins in the app; it can open them, and this can’t.')),
     Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds, options.fetch)),
   )
@@ -63,7 +68,9 @@ export const layer = (options: RuntimeLayerOptions) => {
   const work = Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))
   // The models each agent offers, read from its sessions, or asked of it once.
   const known = Models.layer.pipe(Layer.provideMerge(work))
-  return Coordinator.layer.pipe(Layer.provideMerge(known))
+  // Signing accounts in inside Althar, with each agent's own login (ADR-012).
+  const signing = AccountSignIns.layer.pipe(Layer.provideMerge(known))
+  return Coordinator.layer.pipe(Layer.provideMerge(signing))
 }
 
 export { envelope } from './envelope'

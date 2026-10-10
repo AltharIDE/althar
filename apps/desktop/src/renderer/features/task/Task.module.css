@@ -5,12 +5,6 @@
   background: var(--n-2);
 }
 
-.head {
-  flex: none;
-  padding: 26px 24px 12px;
-  border-bottom: 1px solid var(--line);
-}
-
 .face {
   flex: 1;
   min-height: 0;
@@ -41,6 +35,13 @@
   font-size: 13px;
 }
 
+/* Another agent picked, waiting for what the person says next. */
+.handover {
+  margin: 0;
+  color: var(--t-2);
+  font-size: 12.5px;
+}
+
 /* The issue a task came from, heading its thread. */
 .issue {
   display: flex;
@@ -49,6 +50,14 @@
   margin: 0;
   font-size: 13px;
   color: var(--t-3);
+}
+/* Pushed with no connection: what connecting would add, under the change. */
+.offer {
+  margin: 14px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t-2);
+  text-wrap: pretty;
 }
 .changeActions {
   display: flex;
@@ -65,6 +74,22 @@
 }
 
 /* What the task made: the change set and what can be done with it, on the page, as wide as the header over it. */
+/* Its outputs, alone or beside where its code host is connected, as a conversation has a panel beside it. */
+.outputsFace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.withPanel {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(420px, 38vw, 600px);
+}
+.withPanel > .outputs {
+  height: 100%;
+}
 .outputs {
   flex: 1;
   min-height: 0;
