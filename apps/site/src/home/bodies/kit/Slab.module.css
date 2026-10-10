@@ -33,7 +33,9 @@
 @media (max-width: 700px) {
   /* On a phone the slab lies flat, a card on the page: no turn, no edge, no light under it, and it holds still. */
   .slabLight { display: none; }
-  .float { animation: none; }
+  /* No 3D at all: a phone draws a layer in perspective soft, and this one is text. */
+  .slabStage { perspective: none; }
+  .float { animation: none; transform-style: flat; }
   .slab, .toLeft .slab {
     transform: none;
     box-shadow:

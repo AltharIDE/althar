@@ -1,10 +1,11 @@
 import { EdgeSheet, Logo } from '@althar/ui'
-import { useEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 
 // Prototype: the kit's demo world, read from its source.
 import { EDGE_NEEDS, EDGE_WORK, edgeRowOf } from '../../../../../../packages/ui/src/fixtures/edge'
 import { IslandOpen } from './app'
-import { BrowserWindow, Desktop, EditorWindow, TerminalWindow } from './Mac'
+import { BrowserWindow, Desktop, EditorWindow, TerminalWindow, type Wallpaper } from './Mac'
+import { useNarrow } from './Narrow'
 import { Reel, type ReelMoment } from './Reel'
 import { cx } from '../../../lib/cx'
 import { useInView, useSeen } from './seen'
@@ -57,54 +58,99 @@ const MENU_SHEET = (
   />
 )
 
-/** On a phone, the part of the screen each moment shows: the same for all, so the tour keeps one height as it turns. */
-const ISLAND = { x: 420, y: 0, w: 600, h: 600 }
+/**
+ * A moment's screen. On a wide page, the whole Mac; on a phone, a small
+ * screen of its own, the island hanging in its middle and the window under
+ * it laid out to fit, so nothing on it is cut at the edges, and every
+ * moment the same size, so the tour keeps one height as it turns.
+ */
+function EdgeScreen({
+  label,
+  wallpaper,
+  app,
+  island,
+  window: win,
+  at,
+}: {
+  label: string
+  wallpaper: Wallpaper
+  app: string
+  island: ReactNode
+  window?: (style: CSSProperties) => ReactNode
+  /** Where the window stands on the whole Mac. */
+  at?: CSSProperties
+}) {
+  const phone = useNarrow()
+  if (phone)
+    return (
+      <Shot w={600} h={640} label={label} frame={s.screen}>
+        <Desktop compact wallpaper={wallpaper} app={app} island={island}>
+          {win?.({ left: 22, top: 26, width: 556, height: 600 })}
+        </Desktop>
+      </Shot>
+    )
+  return (
+    <Shot w={1440} h={900} label={label} frame={s.screen}>
+      <Desktop wallpaper={wallpaper} app={app} island={island}>
+        {win && at && win(at)}
+      </Desktop>
+    </Shot>
+  )
+}
 
 export const EDGE_MOMENTS: ReelMoment[] = [
   {
     label: 'In your editor',
     stays: 6800,
     render: (active) => (
-      <Shot w={1440} h={900} phone={ISLAND} label="The island round the notch, dropping open over a code editor" frame={s.screen}>
-        <Desktop wallpaper="dark" app="Code" island={<OpeningIsland active={active} />}>
-          <EditorWindow style={{ left: 120, top: 50, width: 1200, height: 780 }} />
-        </Desktop>
-      </Shot>
+      <EdgeScreen
+        label="The island round the notch, dropping open over a code editor"
+        wallpaper="dark"
+        app="Code"
+        island={<OpeningIsland active={active} />}
+        window={(style) => <EditorWindow style={style} />}
+        at={{ left: 120, top: 50, width: 1200, height: 780 }}
+      />
     ),
   },
   {
     label: 'In the browser',
     stays: 4400,
     render: () => (
-      <Shot w={1440} h={900} phone={ISLAND} label="A pull request ready for you, said round the notch over a browser" frame={s.screen}>
-        <Desktop
-          wallpaper="light"
-          app="Chrome"
-          island={<IslandOpen open={false} saying={{ project: 'Meridian', kind: 'Ready to accept' }} />}
-        >
-          <BrowserWindow style={{ left: 90, top: 40, width: 1260, height: 800 }} />
-        </Desktop>
-      </Shot>
+      <EdgeScreen
+        label="A pull request ready for you, said round the notch over a browser"
+        wallpaper="light"
+        app="Chrome"
+        island={<IslandOpen open={false} saying={{ project: 'Meridian', kind: 'Ready to accept' }} />}
+        window={(style) => <BrowserWindow style={style} />}
+        at={{ left: 90, top: 40, width: 1260, height: 800 }}
+      />
     ),
   },
   {
     label: 'In a terminal',
     stays: 5600,
     render: (active) => (
-      <Shot w={1440} h={900} phone={ISLAND} label="The island dropping open over a terminal" frame={s.screen}>
-        <Desktop wallpaper="dark" app="Terminal" island={<OpeningIsland active={active} after={700} />}>
-          <TerminalWindow style={{ left: 120, top: 60, width: 1200, height: 760 }} />
-        </Desktop>
-      </Shot>
+      <EdgeScreen
+        label="The island dropping open over a terminal"
+        wallpaper="dark"
+        app="Terminal"
+        island={<OpeningIsland active={active} after={700} />}
+        window={(style) => <TerminalWindow style={style} />}
+        at={{ left: 120, top: 60, width: 1200, height: 760 }}
+      />
     ),
   },
   {
     label: 'Anywhere else',
     stays: 4400,
     render: () => (
-      <Shot w={1440} h={900} phone={ISLAND} label="A permission asked round the notch over an empty desktop" frame={s.screen}>
-        <Desktop wallpaper="light" app="Finder" island={<IslandOpen open={false} saying={{ project: 'Halyard', kind: 'Permission' }} />} />
-      </Shot>
+      <EdgeScreen
+        label="A permission asked round the notch over an empty desktop"
+        wallpaper="light"
+        app="Finder"
+        island={<IslandOpen open={false} saying={{ project: 'Halyard', kind: 'Permission' }} />}
+      />
     ),
   },
 ]

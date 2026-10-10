@@ -1,5 +1,5 @@
 import { Icon } from '@althar/ui'
-import { type CSSProperties, useRef } from 'react'
+import { type CSSProperties, Fragment, useRef } from 'react'
 
 import { Agent } from '../../../content/agents'
 import { cx } from '../../../lib/cx'
@@ -13,11 +13,14 @@ import s from './Plans.module.css'
  * in as, large, and the plans under it. The order is the order work goes
  * in: the first with room takes the next task, and one resting until its
  * reset says when it is back. Settings' own look (frost, the agents as
- * columns), touched up to make the one point.
+ * columns), touched up to make the one point. On a phone, only the point:
+ * each agent, how many, and the plans' names.
  */
 
 interface Plan {
   name: string
+  /** As a phone lists it. */
+  short: string
   who: string
   /** Resting until this time. */
   back?: string
@@ -30,8 +33,8 @@ const AGENTS: ReadonlyArray<{ id: Agent; name: string; maker: string; noun: stri
     maker: 'Anthropic',
     noun: 'Claude plans',
     plans: [
-      { name: 'Claude Max', who: 'Personal · you@hey.com' },
-      { name: 'Claude Team', who: 'Northwind · dana@northwind.io', back: '14:00' },
+      { name: 'Claude Max', short: 'Max', who: 'Personal · you@hey.com' },
+      { name: 'Claude Team', short: 'Team', who: 'Northwind · dana@northwind.io', back: '14:00' },
     ],
   },
   {
@@ -40,9 +43,9 @@ const AGENTS: ReadonlyArray<{ id: Agent; name: string; maker: string; noun: stri
     maker: 'OpenAI',
     noun: 'ChatGPT plans',
     plans: [
-      { name: 'ChatGPT Pro', who: 'Personal · you@hey.com' },
-      { name: 'ChatGPT Team', who: 'Northwind · dana@northwind.io' },
-      { name: 'ChatGPT Plus', who: 'Client · ~/.codex-client' },
+      { name: 'ChatGPT Pro', short: 'Pro', who: 'Personal · you@hey.com' },
+      { name: 'ChatGPT Team', short: 'Team', who: 'Northwind · dana@northwind.io' },
+      { name: 'ChatGPT Plus', short: 'Plus', who: 'Client · ~/.codex-client' },
     ],
   },
   {
@@ -51,8 +54,8 @@ const AGENTS: ReadonlyArray<{ id: Agent; name: string; maker: string; noun: stri
     maker: 'Any provider',
     noun: 'keys and plans',
     plans: [
-      { name: 'GLM Coding Plan', who: 'Z.ai' },
-      { name: 'OpenRouter', who: 'key ····9c1e · per use' },
+      { name: 'GLM Coding Plan', short: 'GLM Coding Plan', who: 'Z.ai' },
+      { name: 'OpenRouter', short: 'OpenRouter', who: 'key ····9c1e · per use' },
     ],
   },
 ]
@@ -109,6 +112,27 @@ export function Plans({ play }: { play?: boolean } = {}) {
           </section>
         ))}
       </div>
+      <ul className={s.compact}>
+        {AGENTS.map((agent, a) => (
+          <li key={agent.id} style={{ '--a': a } as CSSProperties}>
+            <span className={s.mark}>
+              <AgentMark agent={agent.id} size={20} />
+            </span>
+            <b className={s.many}>{agent.plans.length}</b>
+            <span className={s.what}>
+              <b>{agent.id === Agent.OpenCode ? 'OpenCode plans and keys' : agent.noun}</b>
+              <span>
+                {agent.plans.map((plan, i) => (
+                  <Fragment key={plan.name}>
+                    {i > 0 && ' · '}
+                    <span className={cx(plan.back && s.dim)}>{plan.short}</span>
+                  </Fragment>
+                ))}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

@@ -48,8 +48,26 @@
 .seen .plans li { opacity: 1; transform: none; }
 
 
+/* A phone's: an agent to a line, the count large, the plans by name. */
+.compact { display: none; margin: 0; padding: 4px 16px; list-style: none; }
+.compact li {
+  display: grid; grid-template-columns: 34px auto minmax(0, 1fr); align-items: center; gap: 14px;
+  padding: 14px 0;
+  opacity: 0; transform: translateY(8px);
+  transition: opacity 500ms ease, transform 600ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: calc(var(--a) * 140ms + 200ms);
+}
+.compact li + li { border-top: 1px solid var(--line-2); }
+.compact .mark { width: 34px; height: 34px; border-radius: 9px; }
+.many { font-family: 'Inter Display', var(--display); font-size: 46px; font-weight: 720; line-height: 0.8; letter-spacing: -0.06em; }
+.what { display: grid; gap: 3px; min-width: 0; }
+.what > b { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.what > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--t-2); }
+.dim { color: var(--t-4); }
+.seen .compact li { opacity: 1; transform: none; }
+
 @media (prefers-reduced-motion: reduce) {
-  .plans li { opacity: 1; transform: none; transition: none; }
+  .plans li, .compact li { opacity: 1; transform: none; transition: none; }
 }
 /* Narrow: a list, as Settings draws it on a narrow window: each agent with its count beside it, its plans one to a line under it. */
 @media (max-width: 900px) {
@@ -71,4 +89,8 @@
   .planWords b { flex: none; font-size: 14px; }
   .planWords span { font-size: 12px; }
   .add { display: none; }
+}
+@media (max-width: 700px) {
+  .columns { display: none; }
+  .compact { display: block; }
 }

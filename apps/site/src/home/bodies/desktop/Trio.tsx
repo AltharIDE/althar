@@ -25,6 +25,8 @@ interface Step {
   kicker: string
   title: ReactNode
   lead: string
+  /** The lead as a phone says it. */
+  short: string
   /** How wide the piece is laid out, in px, before it is scaled to fit the stage. */
   width: number
   piece: (on: boolean) => ReactNode
@@ -41,6 +43,7 @@ const STEPS: Step[] = [
       </>
     ),
     lead: 'Sign in to each agent as many times as you have plans: work and personal, Max and Pro, a key for OpenCode. Althar uses them all, in the order you set.',
+    short: 'Sign in to each agent once for every plan. Althar uses them all, in the order you set.',
     width: 1060,
     piece: (on) => <Plans play={on} />,
   },
@@ -54,6 +57,7 @@ const STEPS: Step[] = [
       </>
     ),
     lead: 'A plan runs out halfway through a task. The task doesn’t stop: the next agent you’re signed in to picks it up where it was.',
+    short: 'A plan runs out mid-task. The next one you’re signed in to carries it on.',
     width: 1060,
     piece: (on) => <Handoff play={on} />,
   },
@@ -67,6 +71,7 @@ const STEPS: Step[] = [
       </>
     ),
     lead: 'Sonnet and Gemini read what Opus wrote. The lead fixes what they find and sends it round again. Only what they can’t settle comes to you.',
+    short: 'Opus writes, Sonnet and Gemini review. Only what they can’t settle comes to you.',
     width: 760,
     piece: () => (
       <div className={s.reviewCard}>
@@ -193,7 +198,10 @@ export function Trio() {
                 {step.kicker}
               </p>
               <h2 className={cx(t.title, s.title)}>{step.title}</h2>
-              <p className={t.lead}>{step.lead}</p>
+              <p className={t.lead}>
+                <span className={s.long}>{step.lead}</span>
+                <span className={s.short}>{step.short}</span>
+              </p>
             </div>
             <div className={s.stackedPiece}>{step.piece(true)}</div>
           </div>

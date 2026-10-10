@@ -51,18 +51,22 @@ const BAR = 64
 type Tones = readonly [string, string, string]
 
 /**
- * The light's colours, bottom to top, by how far a column is from the middle:
- * a broad cobalt heart, strong most of the way up so white words read in it,
- * paler out to warm at the edges. `heart` is how wide it is, 0 to 1.
+ * The light's colours, bottom to top, by how far a column is from the middle,
+ * graded as the app's light is (foundations/Light): cobalt in the middle,
+ * brighter blues either side of it, then sky, pale, and warm at the edges.
+ * Across the heart, where the words stand, every blue stays deep enough
+ * most of the way up that white reads on it. `heart` is how wide that is,
+ * 0 to 1.
  */
-const tonesOf = (d: number, heart: number): Tones =>
-  d < heart
-    ? ['#2b3bff', '#3042ff', '#5868ff']
-    : d < heart + 0.18
-      ? ['#3550ff', '#5f86ff', '#bcd2ff']
-      : d < 0.86
-        ? ['#9fc6ff', '#d4e6ff', '#f3f7ff']
-        : ['#ffb995', '#ffd8c0', '#fff3ea']
+const tonesOf = (d: number, heart: number): Tones => {
+  const u = d / heart
+  if (u < 0.34) return ['#2b3bff', '#3042ff', '#6372ff']
+  if (u < 0.68) return ['#2f4cff', '#3d60ff', '#8ea6ff']
+  if (u < 1) return ['#3860ff', '#4c78ff', '#adc4ff']
+  if (d < heart + 0.16) return ['#4f8cff', '#86b6ff', '#d6e8ff']
+  if (d < 0.86) return ['#9fc6ff', '#d4e6ff', '#f3f7ff']
+  return ['#ffb995', '#ffd8c0', '#fff3ea']
+}
 
 /** How tall a column stands, as a share of the page: flat across the heart, then falling away, an arch. */
 const heightOf = (column: Column, heart: number) =>
@@ -166,8 +170,8 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
   /** When the name last turned, in the hero's time. */
   const turned = useRef(-1e9)
   const clock = useRef(0)
-  /** The light's heart: wider on a phone, to hold the words. */
-  const heart = typeof window !== 'undefined' && window.innerWidth < 700 ? 0.86 : 0.5
+  /** The light's heart: wider on a phone, to hold the words, with sky and warmth still at its sides. */
+  const heart = typeof window !== 'undefined' && window.innerWidth < 700 ? 0.76 : 0.5
 
   useLayoutEffect(() => {
     const live = (root.current && getComputedStyle(root.current).getPropertyValue('--live').trim()) || undefined

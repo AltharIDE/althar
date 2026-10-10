@@ -93,3 +93,8 @@
   -webkit-mask-image: linear-gradient(to top, transparent 2%, #000 20%, #000 72%, transparent);
   mask-image: linear-gradient(to top, transparent 2%, #000 20%, #000 72%, transparent);
 }
+.short { display: none; }
+@media (max-width: 700px) {
+  .long { display: none; }
+  .short { display: inline; }
+}
