@@ -23,7 +23,9 @@ import s from './ProjectTabs.module.css'
  * together, down to their marks, and past that they scroll, by wheel too,
  * fading at the side where more are, with a menu of them all. On
  * macOS the system draws the traffic lights over its start, so it keeps
- * their space, as the TitleBar does when it is the top.
+ * their space, as the TitleBar does when it is the top; where the system
+ * draws none, the same three dots are the window's own buttons (close,
+ * minimize, maximize), and the app behind them does what they ask.
  */
 
 /** A project as its tab shows it. */
@@ -51,6 +53,10 @@ export interface ProjectTabsText {
   openFolder: string
   /** The menu of every open project, when more are open than fit. */
   all: string
+  /** The window's own buttons, where the system draws none. */
+  closeWindow: string
+  minimizeWindow: string
+  maximizeWindow: string
 }
 
 export const projectTabsText: ProjectTabsText = {
@@ -63,6 +69,9 @@ export const projectTabsText: ProjectTabsText = {
   others: 'Other projects',
   openFolder: 'Open a folder…',
   all: 'All open projects',
+  closeWindow: 'Close the window',
+  minimizeWindow: 'Minimize the window',
+  maximizeWindow: 'Maximize the window',
 }
 
 export type ProjectTabsProps = RootProps<
@@ -82,8 +91,13 @@ export type ProjectTabsProps = RootProps<
     onOpen?: (id: string) => void
     /** Opens a folder as a new project. Without it or any others to open, there is no +. */
     onOpenFolder?: () => void
-    /** space: leave room for the system's lights. drawn: draw stand-ins. none: no room. */
+    /** space: leave room for the system's lights. drawn: draw the window's own buttons. none: no room. */
     lights?: 'space' | 'drawn' | 'none'
+    /** The window's own buttons, where the system draws none (lights='drawn'). */
+    onCloseWindow?: () => void
+    onMinimize?: () => void
+    /** Maximizes, or restores what it maximized. */
+    onToggleMaximize?: () => void
     text?: Partial<ProjectTabsText>
   }
 >
@@ -109,6 +123,9 @@ export function ProjectTabs({
   onOpen,
   onOpenFolder,
   lights = 'space',
+  onCloseWindow,
+  onMinimize,
+  onToggleMaximize,
   className,
   text,
   ...rest
@@ -152,10 +169,20 @@ export function ProjectTabs({
   return (
     <header className={cx(s.strip, className)} data-drag="" {...rest}>
       {lights !== 'none' && (
-        <span className={cx(s.lights, lights === 'drawn' && s.drawn)} aria-hidden="true">
-          <i />
-          <i />
-          <i />
+        <span className={s.lights} aria-hidden={lights === 'space' || undefined}>
+          {lights === 'drawn' ? (
+            <>
+              <button type="button" aria-label={t.closeWindow} onClick={onCloseWindow} />
+              <button type="button" aria-label={t.minimizeWindow} onClick={onMinimize} />
+              <button type="button" aria-label={t.maximizeWindow} onClick={onToggleMaximize} />
+            </>
+          ) : (
+            <>
+              <i />
+              <i />
+              <i />
+            </>
+          )}
         </span>
       )}
       <nav className={s.nav} aria-label={t.label}>

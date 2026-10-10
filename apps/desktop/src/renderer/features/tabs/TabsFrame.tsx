@@ -40,6 +40,7 @@ export const useLastRoom = (projectId: string): readonly [Room | null, (room: Ro
 
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
+  const { host } = useServices()
   const { select, current } = tabs
   const open = tabs.tabs.map((tab) => tab.id)
   const order = open.join(' ')
@@ -73,6 +74,11 @@ export function TabsFrame({ children }: { children: ReactNode }) {
           onClose={tabs.close}
           onOpen={tabs.open}
           onOpenFolder={tabs.openFolder}
+          // macOS draws its traffic lights over the strip; elsewhere the strip draws the window's own buttons.
+          lights={host.platform === 'darwin' ? 'space' : 'drawn'}
+          onCloseWindow={() => host.window('close')}
+          onMinimize={() => host.window('minimize')}
+          onToggleMaximize={() => host.window('toggle-maximize')}
         />
         <div className={s.screen}>{children}</div>
       </div>

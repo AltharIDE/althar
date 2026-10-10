@@ -521,6 +521,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
 }
 
 export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
+  platform: 'darwin',
+  window: vi.fn(),
   pickFolder: vi.fn(async () => 'grant_picked'),
   grantDropped: vi.fn(async () => 'grant_dropped'),
   onOpen: vi.fn(() => () => {}),

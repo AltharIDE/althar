@@ -16,7 +16,7 @@ import { Room } from '@althar/ui'
 
 import { TabsFrame, useLastRoom, useVisit } from '../src/renderer/features/tabs/TabsFrame'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
-import { changed, fakeClient, project } from './fixtures'
+import { changed, fakeClient, fakeHost, project } from './fixtures'
 import { withServices } from './render'
 
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', running: 0, working: 0, waiting: 0, ready: 0 }
@@ -58,15 +58,15 @@ const projectRoute = createRoute({ getParentRoute: () => rootRoute, path: '/proj
 const rulesRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects/$projectId/rules', component: Where })
 const threadRoute = createRoute({ getParentRoute: () => rootRoute, path: '/threads/$threadId', component: Thread })
 
-const windowAt = (path: string, projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera]) => {
+const windowAt = (path: string, projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera], host = fakeHost()) => {
   const router = createRouter({
     routeTree: rootRoute.addChildren([homeRoute, projectRoute, rulesRoute, threadRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   const { client, emit } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects })) })
-  withServices(<RouterProvider router={router} />, client)
+  withServices(<RouterProvider router={router} />, client, host)
   const go = (to: string) => act(() => router.history.push(to))
-  return { client, emit, go, router }
+  return { client, emit, go, router, host }
 }
 
 const nav = () => within(screen.getByRole('navigation', { name: 'Projects' }))
@@ -194,6 +194,26 @@ describe('the window’s tabs', () => {
     await userEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Open a folder…' }))
     expect(router.state.location.pathname).toBe('/')
     expect(router.state.location.search).toEqual({ open: 'folder' })
+  })
+})
+
+describe('the window’s own buttons in the strip', () => {
+  it('draws them off a Mac, and asks the main process for what they say', async () => {
+    const host = fakeHost({ platform: 'linux' })
+    windowAt('/', [project], host)
+    await waitFor(() => expect(tab('Home')).toBeTruthy())
+    await userEvent.click(screen.getByRole('button', { name: 'Minimize the window' }))
+    expect(host.window).toHaveBeenCalledWith('minimize')
+    await userEvent.click(screen.getByRole('button', { name: 'Maximize the window' }))
+    expect(host.window).toHaveBeenCalledWith('toggle-maximize')
+    await userEvent.click(screen.getByRole('button', { name: 'Close the window' }))
+    expect(host.window).toHaveBeenCalledWith('close')
+  })
+
+  it('leaves them to the system on macOS', async () => {
+    windowAt('/')
+    await waitFor(() => expect(tab('Home')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: 'Close the window' })).toBeNull()
   })
 })
 

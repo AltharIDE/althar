@@ -55,16 +55,21 @@ A csomagolt app SHALL a titkokat (pl. code host tokenek) az operációs rendszer
 - **WHEN** a keyring nem elérhető
 - **THEN** az app a meglévő hibaüzenettel jelzi a problémát a token műveleteknél, és nem tárol titkot védelem nélkül
 
-### Requirement: CI Linux artefaktumok
+### Requirement: CI: verify, build-teszt és publish
 
-A `desktop` CI workflow SHALL Linuxon is lefuttatni a csomagolást, hogy a csomagolás törése pull requesten kiderüljön; a csomagok artefaktumként SHALL feltöltődjenek, és a meglévő check, coverage és e2e lépések SHALL változatlanul zölden futni.
+A `desktop` CI workflow SHALL minden ágon lefuttatni a verify lépéseket (check, coverage, e2e) és a Linux csomagolás build-tesztjét (AppImage, deb, rpm, Flatpak), hogy a csomagolás törése már pull requesten kiderüljön. Csomagpublikálás SHALL csak mainre érkezéskor, új version tag esetén történjen — a verify zöld eredménye után —, a csomagok a GitHub Release-hez csatolva. Nem-main ágon, illetve új version tag nélkül semmilyen feltöltés vagy publikálás SHALL NOT történik.
 
-#### Scenario: Pull request csomagolással
+#### Scenario: Pull requesten verify és build-teszt
 
-- **WHEN** pull request nyílik a desktop érintő változtatással
-- **THEN** a CI lefut, a Linux csomagok elkészülnek, és hiba esetén a PR piros lesz
+- **WHEN** pull request nyílik a desktopot érintő változtatással
+- **THEN** a CI lefut, a csomagok build-tesztje elkészül, és hiba esetén a PR piros lesz; publikálás nem történik
 
-#### Scenario: Artefaktumok feltöltése
+#### Scenario: Main új version tag nélkül
 
-- **WHEN** a CI sikeresen lefut a main ágon
-- **THEN** az AppImage, deb, rpm (és Flatpak build) artefaktumként letölthető
+- **WHEN** változtatás érkezik a mainre version tag nélkül
+- **THEN** a verify és a csomagok build-tesztje lefut, de publikálás nem történik
+
+#### Scenario: Main új version taggel
+
+- **WHEN** a mainre új version tag kerül (amelyhez még nincs kiadás), és a verify zöld
+- **THEN** az AppImage, deb, rpm és Flatpak csomagok publikálódnak, a GitHub Release-hez csatolva

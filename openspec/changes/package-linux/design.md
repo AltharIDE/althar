@@ -15,12 +15,12 @@ Lásd `proposal.md` — Why. A jelenlegi állapot, ami az approach-ot alakítja:
 **Goals:**
 
 - Linuxon (GNOME, KDE; X11 és Wayland) natív küllem: menüsáv nélkül, rendszer-keret nélkül, saját ablakgombokkal, Althar ikonnal.
-- Telepíthető Linux csomagok: AppImage, deb, rpm, Flatpak — CI-ban építve.
+- Telepíthető Linux csomagok: AppImage, deb, rpm, Flatpak — minden ágon CI-s build-teszt; publikálás mainre érkező, új version taggel, verify után.
 - A macOS viselkedés bitre változatlan; a meglévő tesztek és a 90%-os coverage gate zölden marad.
 
 **Non-Goals:**
 
-- Auto-update, Flathub beküldés, Fedora COPR, Linux terminálos bejelentkezés (`openInTerminal`), macOS notarizáció.
+- Auto-update, Flathub beküldés, Fedora COPR, Linux terminálos bejelentkezés (`openInTerminal`), macOS notarizáció, verzióléptetési folyamat (a publish a meglévő version tagekre épül).
 - A runtime, CLI, contracts, provider-adapters érintése.
 
 ## Decisions
@@ -39,7 +39,7 @@ A sandboxolt preload `process.platform`-ját adjuk át (`althar.platform`), és 
 
 ### 4. Ablak-műveletek egy szűk IPC-csatornán
 
-Új csatorna: `althar:window` (`close` | `minimize` | `toggle-maximize`), `ipcMain.on`-nal, a sender ablakára alkalmazva (`BrowserWindow.fromWebContents`). Nem `invoke`, nincs visszatérés; a maximalizálás állapotát nem szinkronizáljuk (a gomb toggle-ként viselkedik). A dupla kattintás a sávon ugyanezt a `toggle-maximize`-ot hívja.
+Új csatorna: `althar:window` (`close` | `minimize` | `toggle-maximize`), `ipcMain.on`-nal, a sender ablakára alkalmazva (`BrowserWindow.fromWebContents`). Nem `invoke`, nincs visszatérés; a maximalizálás állapotát nem szinkronizáljuk (a gomb toggle-ként viselkedik). **Mérés:** a sávon (drag-régió) a dupla kattintást a platform kezeli — KDE Wayland és XWayland alatt natívan maximalizál/visszaállít, és a renderer nem kap `dblclick` eseményt, ezért nincs app-szintű kezelő (az felesleges, és dupla-toggle-ot okozna ott, ahol mégis eljutna a rendererig).
 
 ### 5. Menü: `Menu.setApplicationMenu(null)` nem-macOS-on
 
@@ -47,8 +47,8 @@ Az app indulásakor, nem-darwinon megszűnik az alapértelmezett menü. Elvetett
 
 ### 6. Ikon és identitás Linuxon
 
-- X11: `new BrowserWindow({ icon: join(here, '../../resources/icons/cobalt.png') })`.
-- `app.setName('Althar')` + a csomag `.desktop` fájlja `StartupWMClass=Althar`-ral (electron-builder állítja elő a `productName`-ből; ellenőrizni kell, hogy a futásidejű WM class egyezik).
+- X11: `new BrowserWindow({ icon })` 128×128-ra méretezett `nativeImage`-dzsel — mérés: a 256×256 és nagyobb kép némán nem kerül be (`_NET_WM_ICON` üres marad, X11 property-méret), a 128-as igen.
+- `app.setName('Althar')` + a csomag `.desktop` fájlja `StartupWMClass`-jal (electron-builder állítja elő a `productName`-ből; ellenőrizni kell, hogy a futásidejű WM class egyezik). Mérés fejlesztői futtatásból XWaylanden: `WM_CLASS = "althar", "althar"`, `_NET_WM_NAME = "Althar"` — a `.desktop` `StartupWMClass`-ja ehhez igazodjon (3.1).
 - Waylanden futásidőben nem lehet ikont adni — ezért a fejlesztői futtatás ikonja a legjobb eset; a telepített csomagé a `.desktop`-ból jön. Ez dokumentált korlát.
 
 ### 7. Csomagolás: platform-tudatos `scripts/package.ts`
@@ -61,15 +61,22 @@ Az electron-builder `dir` targetjéből (`linux-unpacked`) építünk `flatpak-b
 
 ### 9. Keyring: `basic_text` tiltása
 
-A main a `safeStorage.getSelectedStorageBackend()`-del ellenőrzi a backendet; ha `basic_text`, a pecsételés a meglévő hibaüzenettel elutasítva (nem csendes plaintext). Induláskor nem kényszerítünk `password-store` switch-et; ha a tesztek GNOME/KDE alatt mást kívánnak, ott vesszük fel.
+A main a `safeStorage.getSelectedStorageBackend()`-del ellenőrzi a backendet; ha `basic_text`, a pecsételés a keyring-hibával elutasítva (nem csendes plaintext). Az üzenet a main-ből a runtime `words.ts`-én át a window-ig jut, és Linuxon megmondja, mit kell telepíteni (gnome-keyring vagy KWallet); a deb `Recommends`-ként hozza a keyring-alternatívákat. Induláskor nem kényszerítünk `password-store` switch-et; ha a tesztek GNOME/KDE alatt mást kívánnak, ott vesszük fel.
 
 ### 10. Tesztelhetőség és coverage
 
 A main process ablak-opciói kiszűrhetők egy tiszta `windowOptions(platform)` függvénybe, ami unit-tesztelhető. A UI kit gombjaihoz komponens tesztek (render, callback, a11y, billentyűzet), a `TabsFrame` platform-váltásához teszt, az e2e (már Linuxon fut) ellenőrzi, hogy nincs menüsáv, és a saját gombok működnek. Coverage gate: 90% marad.
 
+### 11. Publish csak mainen, új version taggel
+
+A csomagépítés minden ágon build-teszt, publikálás nélkül; a dev/feature/fix ágak csomagjait lokálisan buildeljük. A publish job csak main pushra indul, a HEAD-on lévő version tag esetén, és csak új tagra (amelyhez még nincs kiadás) csatolja a csomagokat a GitHub Release-hez; feltétele a verify zöld eredménye (`needs`). Új tag nélkül a main push is publish nélkül fut. Verzióléptetés nem része a change-nek: a tag a kiadás forrása.
+
 ## Risks / Trade-offs
 
-- **[Wayland frameless resize/move akadályok]** → korai spike task: GNOME és KDE Wayland alatt végigmérni a resize/move/maximize viselkedést; ha kell, saját resize-élek vagy dokumentált `--ozone-platform=x11` fallback. Ez a change legnagyobb bizonytalansága, ezért az első implementációs lépések egyike.
+- **[Wayland frameless resize/move — mérési eredmény]** → Spike (Electron 44.5.0, frameless tesztablak):
+  - **KDE Plasma Wayland (Fedora 44):** zöld — szélhúzásos átméretezés, felső sávos mozgatás, dupla kattintásos maximalizálás/visszaállítás működik; fallback nem kell.
+  - **X11 / XWayland (Fedora 44):** zöld — ugyanaz a három művelet működik; fallback nem kell.
+  - **GNOME Wayland:** függőben — mérés GNOME session alatt (telepítés után); fallback (dokumentált `--ozone-platform=x11` vagy saját resize-él) csak akkor jön szóba, ha ott piros lesz.
 - **[GNOME vs KDE eltérések]** → kézi ellenőrzési mátrix (X11/Wayland × GNOME/KDE) a tasksban; a saját gombok mindkettőn azonosak, mert nem a rendszer rajzolja.
 - **[Flatpak sandbox vs agent-folyamatok és keyring]** → a bundled agent-binárisok sandboxban futnak; hálózat `--share=network`-kel; a keyring `org.freedesktop.secrets`-en át; ha a safeStorage a Flatpakban nem megy, dokumentált korlát + külön change.
 - **[Keyring hiánya fejlesztői gépen]** → a `basic_text` elutasítása hangos hiba; a keyring telepítése (gnome-keyring/kwallet) dokumentálva.

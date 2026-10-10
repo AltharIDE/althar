@@ -12,7 +12,8 @@ permissions:
 
 concurrency:
   group: desktop-${{ github.ref }}
-  cancel-in-progress: true
+  # A publish on main runs to the end; everywhere else a newer push takes over.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   verify:
@@ -35,11 +36,82 @@ jobs:
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: bun run check
       - run: bun run test:coverage
-      # The end-to-end tests run the built app, with the fake agent, on a virtual display.
-      - run: xvfb-run --auto-servernum bun run test:e2e
+      # The end-to-end tests run the built app, with the fake agent, on a virtual display, with a keyring:
+      # Althar refuses to seal sign-ins in plain text (basic_text), so a token would fail to save without one.
+      - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0
+      - run: dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e'
       - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: desktop-e2e
           path: apps/desktop/test-results
           retention-days: 7
+
+  # The packages as a build test on every branch: a broken package shows on the pull request. Nothing is published here.
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run package
+
+  # Whether this main commit carries a version tag nothing was published for yet.
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      publishing: ${{ steps.tag.outputs.publishing }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: The tag on this commit, if it has none published
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(git tag --points-at HEAD | grep -E '^v[0-9]' | head -n1)
+          publishing=false
+          if [ -n "$tag" ] && ! gh release view "$tag" >/dev/null 2>&1; then publishing=true; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publishing=$publishing" >> "$GITHUB_OUTPUT"
+
+  # Only main, only a new version tag, and only when the work is verified: the packages join the GitHub Release.
+  publish:
+    needs: [verify, package, release]
+    if: needs.release.outputs.publishing == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run package
+      - name: The packages on the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ needs.release.outputs.tag }}" out/dist/Althar-*.AppImage out/dist/althar_*.deb out/dist/althar-*.rpm --generate-notes --title "${{ needs.release.outputs.tag }}"
