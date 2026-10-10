@@ -16,7 +16,8 @@
     "probe:tools": "bun scripts/probe-tools.ts",
     "test:coverage": "vp test run --coverage",
     "verify": "bun run check && bun run test:coverage",
-    "test:agents": "vp test run --config vite.agents.config.ts"
+    "test:agents": "vp test run --config vite.agents.config.ts",
+    "test:memory-model": "vp test run --config vite.memory.config.ts"
   },
   "dependencies": {
     "@althar/connectors": "workspace:*",
@@ -24,6 +25,7 @@
     "@althar/domain": "workspace:*",
     "@althar/persistence-sqlite": "workspace:*",
     "@althar/provider-adapters": "workspace:*",
+    "@huggingface/transformers": "3.8.1",
     "@modelcontextprotocol/sdk": "^1.31.0",
     "effect": "4.0.0-rc.118"
   },

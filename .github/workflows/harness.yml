@@ -36,3 +36,5 @@ jobs:
       - run: bun install --frozen-lockfile
         working-directory: .
       - run: bun run verify
+      - run: bun run test:memory-model
+        if: matrix.package == 'packages/runtime'

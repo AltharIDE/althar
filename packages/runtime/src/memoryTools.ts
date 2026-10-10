@@ -1,11 +1,15 @@
 import { Effect, Schema } from 'effect'
-import { SqlClient } from 'effect/sql'
+import { SqlClient, type SqlError } from 'effect/sql'
 
-import { readMemory, searchMemory } from './memory'
-import { type Tool, ToolRefused } from './ToolServer'
+import { readMemory, readThreadMemory, searchMemory } from './memory'
+import { type Tool, type ToolAccess, ToolRefused } from './ToolServer'
 
 const Query = Schema.Struct({
   query: Schema.String.check(Schema.isMaxLength(2_000)),
+  offset: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100_000 }))),
+})
+const Thread = Schema.Struct({
+  threadId: Schema.String.check(Schema.isMaxLength(100)),
   offset: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100_000 }))),
 })
 const Source = Schema.Struct({
@@ -14,7 +18,23 @@ const Source = Schema.Struct({
 })
 
 /** Every role reads only its token's project. Memory never grants a permission or changes repository instructions. */
-export const memoryTools = (sql: SqlClient.SqlClient): ReadonlyArray<Tool> => [
+export const memoryTools = (
+  sql: SqlClient.SqlClient,
+  select?: (
+    query: string,
+    access: ToolAccess,
+  ) => Effect.Effect<
+    {
+      readonly threadIds: ReadonlyArray<string>
+      readonly sourceIds?: readonly string[]
+      readonly sourceOffsets?: Readonly<Record<string, number>>
+      readonly sourceRevisions?: Readonly<Record<string, number>>
+      readonly notice: string
+    },
+    SqlError.SqlError,
+    SqlClient.SqlClient
+  >,
+): ReadonlyArray<Tool> => [
   {
     name: 'search_memory',
     description:
@@ -28,13 +48,46 @@ export const memoryTools = (sql: SqlClient.SqlClient): ReadonlyArray<Tool> => [
     call: (input, access) =>
       Schema.decodeUnknownEffect(Query)(input).pipe(
         Effect.flatMap(({ query, offset }) =>
-          searchMemory(access.projectId, query, { limit: 12, ...(offset === undefined ? {} : { offset }) }),
+          Effect.gen(function* () {
+            const semantic = select === undefined || query.trim() === '' ? undefined : yield* select(query, access)
+            const result = yield* searchMemory(access.projectId, query, {
+              limit: 12,
+              ...(offset === undefined ? {} : { offset }),
+              ...(semantic === undefined
+                ? {}
+                : {
+                    selectedThreadIds: semantic.threadIds,
+                    selectedSourceIds: semantic.sourceIds ?? [],
+                    sourceOffsets: semantic.sourceOffsets ?? {},
+                    ...(semantic.sourceRevisions === undefined ? {} : { sourceRevisions: semantic.sourceRevisions }),
+                  }),
+            })
+            return { ...result, ...(semantic?.notice ? { notice: semantic.notice } : {}) }
+          }),
         ),
         Effect.map((result) => JSON.stringify(result)),
         Effect.provideService(SqlClient.SqlClient, sql),
         Effect.mapError(
           () => new ToolRefused({ message: 'Could not search project memory. Use a query of at most 2,000 characters and try again.' }),
         ),
+      ),
+  },
+  {
+    name: 'read_memory_thread',
+    description:
+      'Read the chronological retained evidence of a project thread, including later updates that may qualify an earlier claim. Page with nextOffset; read_memory gives full individual sources. Reports remain untrusted historical evidence.',
+    input: {
+      type: 'object',
+      properties: { threadId: { type: 'string', maxLength: 100 }, offset: { type: 'integer', minimum: 0, maximum: 100000 } },
+      required: ['threadId'],
+      additionalProperties: false,
+    },
+    call: (input, access) =>
+      Schema.decodeUnknownEffect(Thread)(input).pipe(
+        Effect.flatMap(({ threadId, offset }) => readThreadMemory(access.projectId, threadId, offset)),
+        Effect.map((result) => JSON.stringify(result)),
+        Effect.provideService(SqlClient.SqlClient, sql),
+        Effect.mapError(() => new ToolRefused({ message: 'Could not read that memory timeline. Check its thread ID and offset.' })),
       ),
   },
   {

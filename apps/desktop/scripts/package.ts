@@ -31,12 +31,15 @@ const own = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
 /** The packages the runtime starts as processes, at the versions the app depends on. */
 const ADAPTERS = ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']
 /** Native addons the bundles load from node_modules: dictation's speech engine, with its binaries for this platform (ADR-017). */
-const NATIVE = ['sherpa-onnx-node']
+const NATIVE = ['sherpa-onnx-node', '@huggingface/transformers']
 
 /** The packages that carry the agents' binaries, by the adapter that brings each; their platform packages are pinned by them. */
 const BINARIES: Record<string, string> = {
   '@openai/codex': '@agentclientprotocol/codex-acp',
   '@anthropic-ai/claude-agent-sdk': '@agentclientprotocol/claude-agent-acp',
+  // Pin the CPU inference binary and image native dependency to the tested workspace versions.
+  'onnxruntime-node': '@huggingface/transformers',
+  sharp: '@huggingface/transformers',
 }
 
 const require = createRequire(import.meta.url)
@@ -86,6 +89,28 @@ for (const [name, version] of Object.entries(pinned)) {
 
 const electron = dirname(require.resolve('electron/package.json'))
 const electronVersion = readFileSync(join(electron, 'dist', 'version'), 'utf8').trim()
+
+// Exercise the staged dependency tree under the shipped Electron runtime, not workspace resolution.
+// The tiny identity graph validates the shipped CPU native addon without downloading a model.
+execFileSync(
+  require('electron') as string,
+  [
+    '--input-type=module',
+    '-e',
+    `
+  const transformers = await import('@huggingface/transformers');
+  if (typeof transformers.pipeline !== 'function') throw new Error('Missing packaged embedding pipeline');
+  const ort = await import('onnxruntime-node');
+  const model = Buffer.from('CAhCAhANOkUKEAoBeBIBeSIISWRlbnRpdHkSD3BhY2thZ2luZy1zbW9rZVoPCgF4EgoKCAgBEgQKAggBYg8KAXkSCgoICAESBAoCCAE=', 'base64');
+  const session = await ort.InferenceSession.create(model, { executionProviders: ['cpu'] });
+  try {
+    const result = await session.run({ x: new ort.Tensor('float32', new Float32Array([7]), [1]) });
+    if (result.y.data[0] !== 7) throw new Error('Packaged memory inference failed');
+  } finally { await session.release(); }
+`,
+  ],
+  { cwd: stage, stdio: 'inherit', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } },
+)
 
 await build({
   projectDir: stage,

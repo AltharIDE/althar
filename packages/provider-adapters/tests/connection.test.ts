@@ -42,6 +42,17 @@ const find = <T extends SessionEvent['_tag']>(events: ReadonlyArray<SessionEvent
   events.filter((event): event is Extract<SessionEvent, { _tag: T }> => event._tag === tag)
 
 describe('AgentConnection', () => {
+  it.live('can interrupt immediately when prompt startup is announced', () =>
+    withConnection(fake, (connection) =>
+      Effect.gen(function* () {
+        const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+        const events = yield* Stream.runCollect(session.prompt(scenarios.slow, Effect.ignore(session.interrupt)))
+        assert.strictEqual(stopReason(events), 'cancelled')
+        assert.strictEqual(text(yield* Stream.runCollect(session.prompt(scenarios.hello))), 'Hello')
+      }),
+    ),
+  )
+
   it.live('reports the agent and what it advertises', () =>
     withConnection(fake, (connection) =>
       Effect.sync(() => {

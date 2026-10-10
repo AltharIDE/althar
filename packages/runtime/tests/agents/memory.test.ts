@@ -31,19 +31,45 @@ describe('project memory on a real provider', () => {
           projectId: project.projectId,
           title: 'Checkout cache experiment',
         })
-        const source = yield* addItem({ projectId: project.projectId as ProjectId, threadId: task.threadId }, 'agent_message', {
-          text: 'Tried a shared checkout retry cache. The isolation experiment failed. Missing account in cache keys is only a hypothesis; the cause is unverified. Next: compare keys for two accounts. No fix was completed.',
+        const place = { projectId: project.projectId as ProjectId, threadId: task.threadId }
+        const source = yield* addItem(place, 'agent_message', {
+          text: 'Serializing checkout writes still hangs. Lock inversion is unconfirmed. Next inspect acquire ordering.',
+        })
+        yield* addItem(
+          place,
+          'tool_call',
+          {
+            title: 'Run checkout isolation regression',
+            kind: 'execute',
+            status: 'failed',
+            rawInput: { command: 'bun test checkout-isolation' },
+            diagnostic: {
+              text: 'AssertionError: expected account B, received account A',
+              source: 'tool-output',
+              truncated: false,
+              redacted: false,
+            },
+          },
+          { toolCallId: 'isolation' },
+        )
+        for (let n = 0; n < 5; n++) yield* addItem(place, 'notice', { title: 'Inspecting reproduction fixture' })
+        yield* addItem(place, 'agent_message', {
+          text: 'Correction: the reproduction fixture reused an account. Earlier causal attribution to lock inversion was wrong. Production behavior remains unresolved; isolate the fixture identities before drawing conclusions.',
         })
         const threadId = yield* coordinator.thread(project.projectId)
         yield* sessions.start({ threadId, agentId: 'codex' })
-        const body = `What did earlier checkout cache work try, what happened, is the cause established, and what should be checked next? Use read_memory for source ${source}. Do not change files or create tasks. In your final answer include the exact phrase "cause unverified" if that is what the evidence says.`
+        const body =
+          'The purchase flow freezes under concurrent requests. Based on earlier project work, what was tried, what did the diagnostics show, and what remains uncertain or needs checking next? Do not change files or create tasks.'
         yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
         let completed = false
         for (let tries = 0; tries < 90; tries++) {
           const [turn] = yield* sql<{
             state: string
           }>`SELECT state FROM turn_deliveries WHERE thread_id=${threadId} ORDER BY requested_at DESC LIMIT 1`
-          if (turn?.state === 'completed') {
+          if (
+            turn?.state === 'completed' &&
+            (yield* sql`SELECT id FROM user_inputs WHERE thread_id=${threadId} AND state='queued'`).length === 0
+          ) {
             completed = true
             break
           }
@@ -56,18 +82,23 @@ describe('project memory on a real provider', () => {
         }>`SELECT json_extract(content,'$.text') AS text FROM thread_items WHERE thread_id=${threadId} AND kind='agent_message' ORDER BY sequence`
         const answer = messages.map((row) => row.text).join('\n')
         process.stdout.write(`Live Codex memory answer:\n${answer}\n`)
-        assert.include(answer.toLowerCase(), 'cause unverified')
+        assert.match(answer.toLowerCase(), /unconfirmed|unverified|unresolved|not (?:yet )?(?:proven|established)|hypothesis/)
+        assert.include(answer.toLowerCase(), 'fixture')
+        assert.match(answer.toLowerCase(), /account.?b/)
+        assert.match(answer.toLowerCase(), /account.?a/)
         assert.include(answer.toLowerCase(), 'account')
-        const tools = yield* sql<{ content: string }>`SELECT content FROM thread_items WHERE thread_id=${threadId} AND kind='tool_call'`
+        const deliveries = yield* sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id=${threadId}`
         assert.isTrue(
-          tools.some((row) => row.content.includes('read_memory')),
-          'live agent did not inspect source',
+          deliveries.some((row) => row.prompt.includes(source)),
+          'prior evidence was not automatically delivered',
         )
+        assert.notInclude(body, source)
       }).pipe(
         Effect.scoped,
         Effect.provide(
           Runtime.layer({
             database: join(home, 'state.db'),
+            memoryModelCache: process.env.ALTHAR_MEMORY_MODEL_CACHE ?? join(tmpdir(), 'althar-memory-model-cache'),
             worktreeRoot: join(home, 'worktrees'),
             appVersion: '0.0.0-test',
             deviceName: 'Live memory check',

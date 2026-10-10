@@ -1,70 +1,78 @@
 # Project memory validation
 
-Recorded on 10 October 2026. Implementation commit `192ac2a` includes the
-current main branch and the unified window-bar integration. All ten GitHub
-checks passed on that commit. Current head status is available on
-[PR #85](https://github.com/AltharIDE/althar/pull/85).
+Recorded on 10 October 2026 for the follow-up to
+[PR #85](https://github.com/AltharIDE/althar/pull/85). This supersedes the earlier
+lexical-only validation. GitHub checks must be read against the latest PR head.
 
 ## Verification evidence
 
 | Check | Result | What it establishes |
 |---|---|---|
-| Runtime | 500 passed; coverage gate passed | Interrupted cross-task/provider delivery after restart, later corrections, scoped tools, source lifecycle, recovery and normal task behavior. |
-| Desktop | 381 passed; coverage gate passed | RPC/client/cache, routing, project isolation, source inspection and revision-safe retirement. |
-| Electron E2E | 14 passed; 2 opt-in checks skipped | Built renderer, real RPC and SQLite; memory capture, inspection, retirement/restoration and source navigation. |
-| Shared UI | 1,032 passed; 4 skipped; coverage and Storybook build passed | Existing component behavior and the merged project-menu integration. |
-| Persistence / provider adapters | 41 / 133 passed; coverage gates passed | Migration/storage and provider adapter compatibility. |
-| Contracts / domain / connectors / CLI | 12 / 66 / 237 / 29 passed | Contract compatibility and unaffected runtime boundaries. |
-| Repository static checks | Passed | Formatting, lint and types; existing warnings remain. |
-| Site workflow | Passed | Shared UI changes build and test with the site. |
-| Pitch E2E | 36 passed; 2 skipped locally | Existing browser checks, after installing the required Chromium binary. |
-| Live Codex recipient | 1 passed, 45.61 seconds | A real ACP Codex session read retained synthetic prior evidence and distinguished an observed failure from a suspected cause. |
+| Focused continuity, retrieval and vectors | 35 passed | Durable failure capture, correction candidates, revision-safe retrieval, restart/provider handoff, cancellation and retry. |
+| Actual local embedding model | 8/8 relevant threads ranked first; 2/2 unrelated requests abstained | Different wording retrieves evidence that the lexical baseline misses. Pinned MiniLM weights, not a stub encoder. |
+| Live Codex recipient | 1 passed, 24.72 seconds | A differently worded request automatically receives prior evidence without a supplied source ID or required answer phrase. |
+| Desktop unit coverage | 382 passed; coverage gate passed | Source inspection, possible updates, lifecycle controls and existing renderer behavior. |
+| Electron E2E | 14 passed; 2 opt-in checks skipped | Built renderer, RPC and SQLite capture, inspection, retirement and source navigation. |
+| Persistence / provider adapters | 41 / 136 passed; coverage gates passed | Migration/schema consistency and actual ACP text diagnostic normalization. |
+| Contracts | 12 passed; coverage gate passed | Expanded source context contract compatibility. |
+| Packaged native inference smoke | Passed under Electron 44.5.0 | Isolated staged dependency tree loads ONNX and runs the actual cached encoder; packaging also has a native identity-graph smoke. |
 
-GitHub evidence: [harness](https://github.com/AltharIDE/althar/actions/runs/38073929081),
-[desktop](https://github.com/AltharIDE/althar/actions/runs/38073929092),
-[UI](https://github.com/AltharIDE/althar/actions/runs/38073929114),
-[site](https://github.com/AltharIDE/althar/actions/runs/38073929152).
-Runtime coverage was 98.15% lines and 90.06% branches in CI; desktop was
-97.19% lines and 90.10% branches. Thresholds were not weakened.
+The embedding model's public download is approximately 23 MB. A warm local
+fixture completed indexing and queries in approximately 0.4 seconds; this is a
+small evaluation, not a production performance guarantee. Desktop coverage was
+97.19% lines and 90.03% branches. Coverage thresholds were not weakened.
 
-Local broad tests were serialized with `--maxWorkers=2` after parallel
-runs caused wall-clock timeouts under machine load. The final fresh local
-runtime run also passed all 500 tests and its coverage gate. Tests caught
-and fixed current queued inputs being retrieved as history and stale
-projections being served during a correction backlog. The backlog fixture
-exceeds 2,048 sources; older same-thread evidence is also tested after a
-72,000-character item evicts it from the bounded transcript.
+## Failure and retrieval checks
+
+The scripted provider emits an attempted approach and a failed execution result,
+then hangs before any final narration. The test waits for the durable checkpoint,
+kills that owned process, restarts the runtime and checks that another task and
+provider receive the actual assertion diagnostic with its uncertain cause.
+
+Retrieval tests cover a correction separated from the original hypothesis by
+unrelated messages, buried execution failures, source passages beyond the first
+excerpt, queued/withdrawn input exclusion, retirement and concurrent revision
+changes. A failed encoder falls back to lexical context; the next turn retries
+and retrieves different-wording evidence. Interrupted inference cannot commit
+stale vectors after cancellation. A separate adapter regression verifies immediate
+cancellation after prompt startup and reuse of the same session; the original
+coordinator budget-retry test passed four consecutive targeted runs.
+
+The actual-model fixture lives in `packages/runtime/tests/model/memory.test.ts`
+and runs in the runtime CI matrix. It uses synthetic source records and real
+pinned weights. Its eight examples and two negative controls are a regression
+set, not a general retrieval-quality benchmark.
 
 ## Live check and its limits
 
-The opt-in fixture is
-[`packages/runtime/tests/agents/memory.test.ts`](../../packages/runtime/tests/agents/memory.test.ts).
-It inserted an attributed report into one task, then started a real Codex
-coordinator session in the same project. The question explicitly requested
-`read_memory` for that source and asked about the attempted approach, outcome,
-cause and next check. The test asserted that a `read_memory` tool call was
-recorded.
+`packages/runtime/tests/agents/memory.test.ts` inserts an attempted approach, an
+observed account-identity assertion failure and a later correction. It asks a real
+Codex coordinator about purchase freezes using different wording. The answer
+correctly distinguished the account mismatch from a proven deadlock, attributed
+the later fixture-reuse report, kept the root cause unresolved, and proposed
+isolating fixture identities before inspecting write ordering.
 
-The observed answer identified a shared checkout retry cache, a failed
-isolation experiment with no completed fix, an unverified cause, and a next
-check comparing cache keys for two accounts. It kept missing account identity
-as a hypothesis. The run log was `/tmp/althar-memory-live.log`; this is a local
-run artifact, not a repository fixture.
-
-This verifies a real recipient's source access and interpretation of this
-example. The prior report was synthetic, not work performed by a live Claude
-session. The prompt supplied the source ID and requested the phrase “cause
-unverified”; this is not a blind retrieval benchmark or a general measure of
-model reasoning quality. No specific Codex model is claimed. Scripted provider
-fixtures separately exercise automatic briefing across tasks/providers and
-runtime restart.
+The prior records are synthetic, not a live agent's coding experiment. The test
+establishes automatic recipient delivery and interpretation on this example;
+the separate abrupt-exit fixture establishes capture before narration. No
+specific Codex model is claimed.
 
 ## Scope and limitations
 
-Capture and delivery are automatic; the UI is for inspection and lifecycle
-control. Retrieval is lexical and consolidation is extractive. Paraphrases
-without shared terms may be missed; contradictory reports stay attributed.
-Indexed history samples observed revisions, and the initial catch-up budget
-can leave pending sources. Known outdated projections are withheld until
-refreshed. Raw tool output and file bodies remain outside the retention
-policy. The implementation does not claim semantic root-cause inference.
+Capture and delivery are automatic. Local semantic retrieval supplements lexical
+search; no evidence is uploaded to an embedding service and no paid or
+native-tool-capable helper agent runs. First use needs access to public model
+files. Download/inference failure or the 15-second retrieval deadline falls back
+to lexical context with a notice. In-flight native work can finish after timeout,
+but its interrupted Effect cannot write vectors afterward.
+
+Index catch-up is bounded to 128 sources per request, each sampled into at most
+16 chunks. Backlog and source truncation are disclosed. Correction detection
+reserves explicit revision-language candidates from across the source thread;
+it does not establish which claim is true or guarantee recognition of implicit
+or multilingual corrections. Source-linked chronological paging remains
+available for deeper reading. Observed execution text is bounded and best-effort
+redacted; file/resource bodies and ordinary read/edit tools are excluded.
+
+The packaged native dependency path was tested in an isolated staged tree under
+Electron; a complete distributable application was not assembled in this run.

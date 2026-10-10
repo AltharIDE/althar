@@ -1,3 +1,5 @@
+import { dirname, join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { Commands, Database, Ledger } from '@althar/persistence-sqlite'
 import { Layer } from 'effect'
 
@@ -48,7 +50,13 @@ export const layer = (options: RuntimeLayerOptions) => {
   )
   const base = Layer.mergeAll(Instance.layer, Live.layer, ToolServer.layer, ModelFacts.layer).pipe(
     Layer.provideMerge(store),
-    Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
+    Layer.provideMerge(
+      Layer.succeed(RuntimeConfig, {
+        ...options,
+        memoryModelCache:
+          options.memoryModelCache ?? join(options.database === ':memory:' ? tmpdir() : dirname(options.database), 'memory-models'),
+      }),
+    ),
     Layer.provideMerge(options.agents ?? Agents.registry),
     // Agents Althar downloads at the person's asking, where it keeps them; the registry's point at them where the person has none.
     Layer.provideMerge(Installs.layer({ root: options.agentsRoot, fetch: options.fetch })),

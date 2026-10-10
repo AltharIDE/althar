@@ -570,11 +570,13 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   in Althar's persistent project store. Automatic capture and bounded
   retrieval carry work across tasks and providers, including interrupted
   sessions, without approval of each observation.
-- [ ] **Semantic consolidation and retrieval.** The first design keeps
-  attributed extracts and uses lexical search. When do paraphrase misses or
-  repeated reports justify model-assisted consolidation or embeddings?
-  Decide from retrieval and continuity evaluations, retaining source evidence
-  and the separation between observed outcomes and inferred causes.
+- [ ] **Semantic consolidation quality.** Local sentence embeddings now recover
+  differently worded source evidence; they do not infer verified causes. Explicit
+  revision-language candidates remain attributed and source-linked. How should
+  implicit or multilingual corrections be linked and evaluated without inventing
+  supersession or hiding conflicting evidence? Broader retrieval evaluation is
+  needed beyond the committed eight-case model fixture.
+
 - [ ] **When a dismissal reaches `review.md`.** At dismissal, or once the
   knowledge candidate is accepted? Leaning: once accepted, with the line shown
   as pending until then.

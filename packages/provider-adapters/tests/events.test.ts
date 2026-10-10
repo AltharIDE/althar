@@ -4,6 +4,34 @@ import { assert, describe, it } from '@effect/vitest'
 import { normalize, normalizeOptions, normalizeUsage } from '../src/events'
 
 describe('normalize', () => {
+  it('preserves raw execution output when the initial tool call is already terminal', () => {
+    const rawOutput = { stderr: 'AssertionError: expected account B, received account A', exitCode: 1 }
+    const event = normalize({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'terminal',
+      title: 'Isolation',
+      kind: 'execute',
+      status: 'failed',
+      rawOutput,
+    })
+    assert.propertyVal(event, '_tag', 'ToolCall')
+    assert.deepStrictEqual(event._tag === 'ToolCall' ? event.rawOutput : undefined, rawOutput)
+  })
+
+  it('preserves plain ACP execution text without embedded resource bodies', () => {
+    const event = normalize({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 't',
+      status: 'failed',
+      content: [
+        { type: 'content', content: { type: 'text', text: 'AssertionError: expected B, received A' } },
+        { type: 'content', content: { type: 'resource', resource: { uri: 'file:///secret', text: 'private file body' } } },
+      ],
+    })
+    assert.propertyVal(event, '_tag', 'ToolCallUpdate')
+    assert.deepStrictEqual(event._tag === 'ToolCallUpdate' ? event.outputText : undefined, ['AssertionError: expected B, received A'])
+  })
+
   it('keeps text, and passes other content through as it came', () => {
     assert.deepStrictEqual(normalize({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hi' }, messageId: 'm1' }), {
       _tag: 'AgentMessage',

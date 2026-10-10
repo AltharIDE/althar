@@ -54,6 +54,9 @@ export type SessionEvent =
       readonly kind: ToolKind
       readonly status: ToolCallStatus
       readonly rawInput?: unknown
+      readonly rawOutput?: unknown
+      /** Plain ACP text output only; resource bodies, images, and diffs are excluded. */
+      readonly outputText?: ReadonlyArray<string>
       /** The files it touches, when it says. */
       readonly locations?: ReadonlyArray<ToolLocation>
     }
@@ -64,6 +67,8 @@ export type SessionEvent =
       readonly title?: string
       /** Some agents, Claude Code's among them, send a call's input only once they have all of it, in an update. */
       readonly rawInput?: unknown
+      /** Plain ACP text output only; resource bodies, images, and diffs are excluded. */
+      readonly outputText?: ReadonlyArray<string>
       readonly rawOutput?: unknown
       readonly locations?: ReadonlyArray<ToolLocation>
     }
@@ -173,6 +178,11 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         kind: asToolKind(update.kind),
         status: update.status ?? 'pending',
         ...defined('rawInput', update.rawInput),
+        ...defined('rawOutput', update.rawOutput),
+        ...defined(
+          'outputText',
+          update.content?.flatMap((block) => (block.type === 'content' && block.content.type === 'text' ? [block.content.text] : [])),
+        ),
         ...defined('locations', locationsOf(update.locations)),
       }
     case 'tool_call_update':
@@ -182,6 +192,10 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('status', update.status),
         ...defined('title', update.title),
         ...defined('rawInput', update.rawInput),
+        ...defined(
+          'outputText',
+          update.content?.flatMap((block) => (block.type === 'content' && block.content.type === 'text' ? [block.content.text] : [])),
+        ),
         ...defined('rawOutput', update.rawOutput),
         ...defined('locations', locationsOf(update.locations)),
       }

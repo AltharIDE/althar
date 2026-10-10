@@ -185,6 +185,19 @@ refcount alone is too fragile after crashes, restore, or partial migration.
 Provider transcripts, tool output, patches, screenshots, logs, and generated
 files may contain secrets. Default retention must differ by artifact class.
 
+Execution tool checkpoints retain a bounded diagnostic excerpt with their status,
+so a process exit before an agent's explanation does not erase assertion/stack
+evidence. The excerpt has an explicit tool-output source, truncation and redaction
+flags, and inherits the source item's task/session/provider/repository provenance.
+Only execution-kind plain output strings, known stdout/stderr/error/message fields,
+and ACP plain-text content blocks are eligible. Read/edit resources, diffs, arbitrary
+object fields and recognizable shell file/environment reads are excluded. Credential
+patterns are filtered before keeping up to 4,000 leading and 4,000 trailing characters.
+This is best-effort secret filtering, not a guarantee that arbitrary execution output
+contains no unknown secret; it is not a raw-log archive. A recorded diagnostic proves
+what the tool reported, not an agent's causal explanation. Full output remains marked
+as omitted, even where a diagnostic excerpt was retained.
+
 ## Backup, export, and restore
 
 A backup is not successful until restoration is tested.

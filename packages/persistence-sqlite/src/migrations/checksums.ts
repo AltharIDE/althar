@@ -21,4 +21,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0015_task_requests': '49472c4c5266e0af35bcffd5c12c0e69fe414916c72bbee9b281c54de71ae311',
   '0016_settings': '60eb94358968e28b6154a4cc352ec2ead79d8edec9e1a87119d9390d16405676',
   '0017_project_memory': '7ef15cc8688e51a456fe46ce163b719058f1f2945349c4ecb855aeca1abc9687',
+  '0018_memory_vectors': '1adf8d255b1084fb7431bcf817861dd760eda4c696e3ee6b57bb62d6ca0cc2e3',
 }

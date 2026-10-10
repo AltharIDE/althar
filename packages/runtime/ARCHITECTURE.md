@@ -119,20 +119,30 @@ items for retry. Session delivery catches and reports that failure without
 blocking ordinary work.
 
 Extraction preserves attributed person statements, agent reports, plans, step
-results, notices and observed tool status with retained command/path essentials.
-It does not generate semantic facts or inferred root causes. Conflicting reports
-remain separate evidence. Raw tool output and file bodies are never added by the
-projection. Source revision history records the revisions encountered during
-indexing, not every intervening recorder checkpoint.
+results, notices and observed tool outcomes. Execution diagnostics are filtered
+and bounded at recorder time, retaining status and diagnostic provenance even if
+the process dies before explanation. File/read/edit bodies remain excluded.
+Reports do not become causal facts; indexed history samples recorder revisions.
 
-Search tokenizes a bounded lexical query and ranks all indexed evidence with
-FTS5 BM25. Empty queries browse recent evidence; unmatched lexical queries return
-no evidence. Briefing diversifies up to four source anchors across other threads, adds up to
-two lexical anchors from the active thread, and includes nearby source items, so an attempted approach and qualified follow-up
-can accompany a matching failure. The active-thread allowance accepts bounded duplication because even one oversized
-recent transcript item can evict an older failure. Its 8,000-character budget is separate from
-thread history. Explicit source reads page through retained text; source IDs,
-provider/session/task attribution, revision and repository bases remain visible.
+`memoryVectors.ts` complements lexical FTS5 with persistent, model-versioned
+source-chunk embeddings. `memoryEmbeddings.ts` lazily loads pinned public MiniLM
+q8 weights into the profile cache and runs CPU inference locally. No agent tools,
+provider calls or accounts are used; model download is the only network dependency.
+No model loads for an empty project. Source revision/state checks prevent stale
+vectors from appearing after changes. Model computation occurs outside SQL
+transactions; each query catches up at most 128 sources and reports pending work.
+A source has at most sixteen overlapping 1,000-character chunks; oversized sources
+retain the ending and disclose partial semantic indexing. The original source is
+still paged in full. A 15-second bound degrades to lexical retrieval with a warning.
+
+Briefing groups up to four retrieved threads, reserves explicit revision-language
+update candidates, latest attributed reports and failed diagnostics, and removes
+identical repetition. Candidates are possible updates, not inferred verified
+supersession. Source and chronological thread tools expose omitted history; the
+brief labels sampling. Task context comes before user input in the search query,
+and long queries preserve beginning and ending terms. The prompt budget remains
+separate from bounded same-thread transcript history. Repository bases describe
+where work started, not the exact working-tree contents tested.
 
 The migration snapshots repository bases atomically at source insertion. Legacy
 items have unknown bases rather than today's checkout. Retirement is deliberate

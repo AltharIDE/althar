@@ -22,31 +22,43 @@
     structure recorded attempts and outcomes. A tool's failed status proves
     that it reported failure, not why. Agent explanations remain reports,
     including their uncertainty, questions and suggested next steps. This
-    does not claim semantic understanding or automatic root-cause analysis.
-  - Retain the existing exclusion of raw tool output and file bodies. A
-    source lookup returns retained evidence, not a promise to recover an
-    omitted diagnostic log. Agents must re-check code and diagnostics when
-    the recorded evidence is insufficient.
+    does not claim automatic root-cause analysis.
+  - Checkpoint bounded execution diagnostics with tool status, before any
+    agent explanation. Retain filtered stdout/stderr, exit codes and ACP text
+    blocks; exclude read/edit/resource bodies and recognizable shell file or
+    environment reads. Common credentials are redacted before persistence.
+    Redaction is best-effort, not a guarantee against arbitrary secrets.
+    Excerpts retain beginning and ending evidence and expose truncation.
   - Process source revisions incrementally and idempotently. Changed
     sources revise their projection; keep indexed revision history and
     retirement inspectable. History samples revisions seen during indexing,
     not every streaming checkpoint. Retirement/restoration uses optimistic revision checks.
     Conflicting reports remain attributable instead of becoming one
     silently chosen fact; historical bases expose possible staleness.
-  - Retrieve with SQLite full-text search across project evidence, combining
-    lexical matches with recent context. Derive projections lazily at
-    retrieval, processing at most 2,048 pending sources per query, newest
-    changes first. Report the remaining count in the brief and UI; repeated
-    queries continue catch-up. Initial results may omit older unindexed work.
-    Projections with pending source corrections are excluded until refreshed.
-    Reading or retiring one source refreshes only that source. Bound excerpts
-    and total prompt context; keep older indexed matches discoverable.
-    Bundle neighboring thread sequence items to preserve surrounding work,
-    without claiming their proximity establishes causality. Give every role relevant
-    context on each delivered turn, including existing sessions and provider
-    switches. Reserve a small allowance for older same-thread matches that
-    may have fallen out of the bounded transcript; omit pending current inputs. Provide
-    project-scoped search and source-reading tools for details.
+  - Combine SQLite lexical retrieval with local sentence embeddings. Pinned
+    quantized MiniLM weights run on CPU through Transformers.js/ONNX. A first
+    use downloads public model files into the profile cache; evidence never
+    goes to an embedding service and no provider account or paid model turn is
+    used. Model failure or a 15-second retrieval timeout leaves lexical search
+    available with a warning. Empty projects do not load a model.
+  - Text projection catches up at most 2,048 sources per read. Vector projection
+    catches up 128 sources per read, oldest pending first, with exact source
+    revision/model checks on both commit and retrieval. Model inference occurs
+    outside database transactions. Persistent vectors survive restart and are
+    invalidated by source revisions; retired/withdrawn/queued evidence cannot
+    be selected. Pending work is explicit and later queries continue catch-up.
+    Each source has up to sixteen overlapping 1,000-character chunks, preserving
+    its ending; oversized sources expose partial semantic indexing. Full text
+    remains accessible through paged source and chronological thread tools.
+  - Reserve coherent task context around retrieved sources: recent attributed
+    accounts, failed execution evidence and explicit revision-language update
+    candidates across the thread. Deduplicate repeated accounts. Candidates
+    link to their sources and are not accepted as verified supersession.
+    Preserve the matched semantic source, and disclose sampled context. This
+    handles explicit corrections separated by routine work or later chatter;
+    implicit corrections still require interpreting the retained timeline.
+    Give every role context on each delivered turn, including the same task,
+    provider switches and existing sessions. Memory cannot alter a running turn.
   - A processing failure keeps the original work, is logged, and produces an
     unavailable notice rather than aborting ordinary task execution. The
     next retrieval retries. The project UI exposes search, provenance,
@@ -59,15 +71,17 @@
   - A mandatory model call for extraction: adds account, latency and failure
     dependencies. It may improve semantic consolidation later, evaluated
     against the retained evidence rather than replacing it.
-  - Embeddings or a knowledge graph first: additional infrastructure before
-    retrieval examples establish the need. Lexical retrieval has predictable
-    local behavior but can miss paraphrases without shared terms.
+  - Lexical-only retrieval: the independent review reproduced a miss for
+    differently worded checkout/purchase failures, so a local embedding model
+    now supplies semantic candidates. A tool-capable provider helper would add
+    account usage and native-tool boundaries; local inference avoids both.
+    A knowledge graph or generated factual summary is not needed for this path.
   - Git-backed learned notes: portable and diffable, but Althar already owns
     durable project records and brief delivery. The coordinator's disposable
     checkout cannot own memory.
 - **Trade-off:** Extractive records preserve what was reported, including
   noise and mistaken explanations. They do not resolve semantic conflicts,
-  infer lessons, or recover diagnostics the recorder never retained. Search
+  infer verified causes, or recover output a provider never delivered durably. Search
   and source access make these limits inspectable; they do not eliminate
   them. Context on a delivered turn does not alter a turn already running.
 - **Evaluation:** The acceptance plan covers interrupted work reaching a

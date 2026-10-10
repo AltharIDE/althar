@@ -8,9 +8,14 @@ import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import { UnknownAgent } from './errors'
 import { Installs } from './Installs'
+import type { EmbedMemory } from './memoryEmbeddings'
 import type { ModelFactsOptions } from './ModelFacts'
 
 export interface RuntimeOptions {
+  /** Local semantic encoder. False disables it for offline/test environments; default uses pinned local weights. */
+  readonly memoryEmbeddings?: EmbedMemory | false
+  /** Model download cache; Runtime.layer defaults beside the database. */
+  readonly memoryModelCache?: string
   /** Where task worktrees go: `<root>/<project>/<task>/<repository>` (ADR-006). */
   readonly worktreeRoot: string
   /** Where the homes of accounts Althar makes go (ADR-012): `<root>/<account>`. Without it, it makes none. */

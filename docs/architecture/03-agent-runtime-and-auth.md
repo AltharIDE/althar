@@ -329,39 +329,31 @@ Rules:
 
 ### Project memory
 
-Durable thread items supply memory even when a session stops without a
-handover. Incremental, extractive projections preserve agent reports, plans,
-recorded tool outcomes and step results with source and workspace-base
-provenance. They do not turn speculation into an established cause: a failed
-tool status says the tool failed, while an agent's explanation stays an
-attributed report. Raw tool output and file bodies remain excluded.
+Durable thread items supply memory even when an agent stops without a handover.
+Execution status and bounded, filtered diagnostics checkpoint before explanation;
+agent accounts remain attributed reports, distinct from observed tool output.
+File bodies are excluded and common credentials redacted, with explicit limits.
 
-SQLite full-text retrieval selects bounded excerpts across the project,
-bundling nearby thread sequence items without inferring a causal link.
-Source access pages through retained detail on demand. Projections are built
-lazily at retrieval: each query processes at most 2,048 pending sources,
-newest changes first. The brief and UI report the remaining count; repeated
-queries continue catch-up. A partially indexed backlog can omit older work.
-Direct source reads and retirement refresh only the requested source.
+SQLite lexical search and a pinned local MiniLM embedding model retrieve across
+same-task and different-task work without provider siloing. Public weights download
+once into the profile cache; project text is encoded locally, without another
+provider turn. Persistent vectors use source revision and model identity. Retired,
+withdrawn and pending current inputs are excluded. A loading/model timeout leaves
+lexical context available with an explicit warning, never blocks ordinary work.
 
-Revision history contains indexed revisions, not every streaming checkpoint.
-Explicit retirement keeps corrections inspectable. Conflicting reports
-remain visible. Workspace bases are captured atomically when a source item
-is inserted; legacy sources have unknown bases. These snapshots help the
-reader check applicability against current code. Memory is evidence, not
-instructions or permission grants.
+Task bundles reserve recent reports, failed diagnostics and source-linked explicit
+revision-language candidates, even after intervening tool activity or later chatter.
+Candidates are not verified supersession. Paged `read_memory` and
+`read_memory_thread` expose full retained evidence and chronological context.
+Sampled context and incomplete indexing are explicit. Workspace bases describe the
+historical starting point; current code still needs verification. Memory does not
+grant permissions or override instructions. New work reaches active sessions on
+their next delivered turn. Capture needs neither UI use nor human acceptance.
 
-Processing failures preserve source work, log the failure and tell the agent
-that memory is unavailable without aborting its turn; a later retrieval
-retries. New context reaches active sessions on their next delivered turn.
-The project UI exposes search and source navigation, plus retirement and
-restoration with revision checks. Capture does not depend on anyone opening
-that UI or approving an observation.
+See [ADR-018](../decisions/018-project-memory-from-durable-work.md) for model,
+budget and retention boundaries and the [validation record](../plans/project-memory-validation.md)
+for actual transport, local model and live recipient evidence.
 
-The [implementation and verification plan](../plans/project-memory.md)
-describes the acceptance cases. Lexical search can miss paraphrases, and
-extractive consolidation does not infer lessons or resolve semantic
-contradictions. Those are explicit limits of this first design.
 
 ## Switching model or agent
 

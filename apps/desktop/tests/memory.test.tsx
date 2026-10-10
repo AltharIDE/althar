@@ -34,6 +34,8 @@ const evidence: MemoryDetail = {
   },
   history: [{ sourceRevision: 1, text: 'Attempt running', recordedAt: '2026-10-10T09:00:00Z' }],
   historyTruncated: false,
+  relatedUpdates: [],
+  contextNotice: 'Historical source; inspect the full timeline.',
 }
 function Memory({ onSource = vi.fn() }: { onSource?: (entry: MemoryDetail) => void }) {
   return <MemoryView model={useMemory('p1')} onBack={vi.fn()} onSource={onSource} />
@@ -119,5 +121,17 @@ describe('project memory', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'More evidence' }))
     expect(await screen.findByText('Failure at the end')).toBeTruthy()
     expect(readMemory).toHaveBeenLastCalledWith('p1', 'memory1', 16000)
+  })
+  it('shows attributed update candidates and opens their actual source', async () => {
+    const update = { ...evidence, id: 'correction', kind: 'agent_message', text: 'Correction: the fixture reused an account.' }
+    const readMemory = vi.fn(async (_project: string, id: string) =>
+      id === 'correction' ? update : { ...evidence, relatedUpdates: [update] },
+    )
+    const { client } = fakeClient({ searchMemory: vi.fn(async () => ({ entries: [evidence], pending: 0 })), readMemory })
+    withServices(<Memory />, client)
+    await userEvent.click(await screen.findByRole('button', { name: /Login experiment failed/ }))
+    expect(await screen.findByRole('heading', { name: 'Possible corrections and updates' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /Correction: the fixture reused/ }))
+    await waitFor(() => expect(readMemory).toHaveBeenLastCalledWith('p1', 'correction', 0))
   })
 })

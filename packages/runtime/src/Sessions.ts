@@ -42,6 +42,8 @@ import { addItem, recorder, transcript } from './threads'
 import { ToolServer } from './ToolServer'
 import { memoryBrief } from './memory'
 import { memoryTools } from './memoryTools'
+import { memoryEmbeddings } from './memoryEmbeddings'
+import { semanticMemory } from './memoryVectors'
 import { agentSaid, summarize } from './words'
 
 /*
@@ -352,13 +354,61 @@ export class Sessions extends Context.Service<
       const accounts = yield* Accounts
       const limits = yield* Limits
       const toolServer = yield* ToolServer
-      const memory = memoryTools(yield* SqlClient.SqlClient)
-      for (const role of ['lead', 'reviewer', 'coordinator'] as const) yield* toolServer.serve(role, memory)
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
+      const memoryConfig = yield* RuntimeConfig
+      const embed =
+        memoryConfig.memoryEmbeddings === false
+          ? undefined
+          : (memoryConfig.memoryEmbeddings ?? memoryEmbeddings(memoryConfig.memoryModelCache!))
+      const selectContext = (running: Running, query: string) =>
+        Effect.gen(function* () {
+          if (embed === undefined) return { threadIds: [], sourceIds: [], sourceOffsets: {}, sourceRevisions: {}, notice: '' }
+          const selected = yield* semanticMemory(running.thread.projectId, query, embed).pipe(
+            Effect.timeoutOption('15 seconds'),
+            Effect.catchCause((cause) =>
+              Effect.andThen(Effect.logWarning('Local semantic memory unavailable', cause), Effect.succeed(Option.none())),
+            ),
+          )
+          if (Option.isNone(selected))
+            return {
+              threadIds: [],
+              sourceIds: [],
+              sourceOffsets: {},
+              sourceRevisions: {},
+              notice:
+                'Local semantic memory is loading or unavailable; lexical retrieval may miss differently worded prior work. Use search_memory to retry.',
+            }
+          return {
+            ...selected.value,
+            notice: [
+              selected.value.pending > 0
+                ? `Semantic indexing is incomplete: ${selected.value.pending} sources pending; older work may be missing. Use search_memory to continue.`
+                : '',
+              selected.value.truncatedSources > 0
+                ? `${selected.value.truncatedSources} oversized sources have partial semantic indexing; read_memory/read_memory_thread retain the full source.`
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' '),
+          }
+        })
+      const memory = memoryTools(yield* SqlClient.SqlClient, (query, access) => {
+        const running = threads.get(access.threadId)
+        return running === undefined || running.thread.projectId !== access.projectId
+          ? Effect.succeed({
+              threadIds: [],
+              sourceIds: [],
+              sourceOffsets: {},
+              sourceRevisions: {},
+              notice: 'Semantic search requires an active session; lexical search remains available.',
+            })
+          : selectContext(running, query)
+      })
+      for (const role of ['lead', 'reviewer', 'coordinator'] as const) yield* toolServer.serve(role, memory)
 
       /** No agent starts, and nothing is said to one, in a project removed from Althar: a window that hadn't heard yet is told it's gone. */
       const inLiveProject = (threadId: string) =>
@@ -494,10 +544,14 @@ export class Sessions extends Context.Service<
           // something while this session was idle. Failed indexing never loses the
           // durable thread evidence or prevents this task from running.
           const query = [
-            ...inputs.map((input) => input.body),
             thread.role === 'coordinator' ? thread.projectName : `${thread.title} ${thread.description}`,
+            ...inputs.map((input) => input.body),
           ].join(' ')
-          const remembered = yield* memoryBrief(thread.projectId, query, thread.threadId).pipe(
+          const remembered = yield* Effect.gen(function* () {
+            const selected = yield* selectContext(running, query)
+            const evidence = yield* memoryBrief(thread.projectId, query, thread.threadId, selected)
+            return [selected.notice, evidence].filter(Boolean).join('\n\n')
+          }).pipe(
             Effect.catchCause((cause) =>
               Effect.andThen(
                 Effect.logWarning('Could not prepare project memory; source work remains durable', cause),
@@ -586,7 +640,9 @@ export class Sessions extends Context.Service<
           running.turnRunning = true
           // A task's card says when its lead or reviewer is at work.
           if (thread.role !== 'coordinator') yield* touchCard(thread.taskId)
-          yield* live.publish({
+          // Observers may interrupt immediately (for example, a spent turn budget).
+          // Publish only after the adapter has a current turn and has sent its prompt.
+          const started = live.publish({
             _tag: 'TurnStarted',
             threadId: thread.threadId,
             turnId,
@@ -643,7 +699,7 @@ export class Sessions extends Context.Service<
               ),
             )
           })
-          const streamed = yield* Stream.runForEach(running.agent.prompt(prompt), (event) =>
+          const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, started), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
               heardContext(running, event)

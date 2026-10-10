@@ -28,6 +28,61 @@ const place = Effect.gen(function* () {
 })
 
 describe('the thread recorder', () => {
+  it.live('retains diagnostics from a one-shot failed tool call before any update or narration', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      yield* recorder(where).record({
+        _tag: 'ToolCall',
+        toolCallId: 'terminal',
+        title: 'One-shot isolation',
+        kind: 'execute',
+        status: 'failed',
+        rawInput: { command: 'bun test isolation' },
+        rawOutput: { stderr: 'AssertionError: expected account B, received account A', exitCode: 1 },
+      })
+      const tool = (yield* items(where.threadId)).find((item) => item.content.title === 'One-shot isolation')
+      assert.strictEqual(tool?.content.status, 'failed')
+      assert.deepStrictEqual(tool?.content.diagnostic, {
+        text: 'AssertionError: expected account B, received account A\nexit code: 1',
+        source: 'tool-output',
+        truncated: false,
+        redacted: false,
+      })
+      assert.notProperty(tool?.content ?? {}, 'rawOutput')
+      assert.include((yield* transcript(where.threadId, 20000)).text, 'expected account B, received account A')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('checkpoints failed execution evidence without a final message or flush', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const writer = recorder(where)
+      yield* writer.record({
+        _tag: 'ToolCall',
+        toolCallId: 'failure',
+        title: 'Isolation test',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { command: 'bun test isolation' },
+      })
+      yield* writer.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'failure',
+        status: 'failed',
+        outputText: ['AssertionError: expected account B, received account A'],
+      })
+      // Abandon the recorder: no narration and no turn-end flush. Read only durable rows.
+      const tool = (yield* items(where.threadId)).find((item) => item.content.title === 'Isolation test')
+      assert.deepStrictEqual(tool?.content.diagnostic, {
+        text: 'AssertionError: expected account B, received account A',
+        source: 'tool-output',
+        truncated: false,
+        redacted: false,
+      })
+      assert.include((yield* transcript(where.threadId, 20_000)).text, 'expected account B, received account A')
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('keeps one item per tool call and per plan, and notes what the agent did on its own', () =>
     Effect.gen(function* () {
       const where = yield* place

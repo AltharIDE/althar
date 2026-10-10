@@ -150,6 +150,7 @@ export const runtime = (
   database = ':memory:',
   options: FakeAgentOptions = {},
   more: {
+    readonly memoryEmbeddings?: RuntimeOptions['memoryEmbeddings']
     readonly signedOut?: ReadonlyArray<string>
     readonly countdown?: Duration.Duration
     readonly connectors?: Layer.Layer<Connectors>
@@ -167,6 +168,7 @@ export const runtime = (
 ) =>
   Runtime.layer({
     database,
+    memoryEmbeddings: more.memoryEmbeddings ?? false,
     worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
     accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
     // Nothing opens on the Mac running the tests: what would have is kept.

@@ -57,3 +57,8 @@ transaction as the durable evidence. This preserves the repository binding,
 base ref/commit and branch even if indexing occurs after the workspace changes.
 Pre-migration evidence has no invented historical snapshot. The runtime can
 retry failed projection batches without changing the original thread items.
+
+Migration `0018_memory_vectors` stores rebuildable per-source chunk vectors with
+exact source revision, pinned model identity and truncation state. It does not
+store generated claims. The runtime commits only against still-current sources
+and filters stale/retired/withdrawn sources again when retrieving.

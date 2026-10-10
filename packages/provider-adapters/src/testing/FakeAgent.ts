@@ -20,6 +20,8 @@ export const scenarios = {
   hello: 'hello',
   /** A failed experiment checkpoint, then waits for interruption without a final report. */
   memoryFailure: 'memory-failure',
+  /** A failed command followed by process death, before any explanation. */
+  memoryAbruptFailure: 'memory-abrupt-failure',
   /** A thought, then a message. */
   think: 'think',
   /** A tool call that asks permission, then succeeds or fails on the answer. */
@@ -742,6 +744,29 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await update({ sessionUpdate: 'current_mode_update', currentModeId: session.mode })
           await update({ sessionUpdate: 'available_commands_update', availableCommands: [] })
           return ended()
+        case scenarios.memoryAbruptFailure:
+          await say('Trying checkout retry cache isolation. Account key collision is only a hypothesis; the cause is unverified.')
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'abrupt-memory-test',
+            title: 'Checkout isolation test',
+            kind: 'execute',
+            status: 'in_progress',
+            rawInput: { command: 'bun test checkout-isolation' },
+          })
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'abrupt-memory-test',
+            status: 'failed',
+            rawOutput: {
+              exitCode: 1,
+              stderr: 'AssertionError: expected account B, received account A\n at checkout-isolation.test.ts:42',
+            },
+          })
+          // The test kills this process only after the runtime has durably observed
+          // the failure; no graceful cancellation or narrative can fill the gap.
+          await new Promise(() => {})
+          return ended()
         case scenarios.memoryFailure:
           await say(
             'Tried sharing the checkout retry cache across requests. The isolation test failed. I suspect the cache key omits the account, but have not verified the cause. Next: compare keys for two accounts; the concurrency question is unresolved.',
@@ -758,7 +783,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             sessionUpdate: 'tool_call_update',
             toolCallId: 'memory-test',
             status: 'failed',
-            rawOutput: 'SECRET_OUTPUT_CANARY_NOT_RETAINED',
+            rawOutput: 'AssertionError: checkout isolation failed\nAPI_KEY=SECRET_OUTPUT_CANARY_NOT_RETAINED',
           })
           for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
           return { stopReason: session.cancelled ? 'cancelled' : 'end_turn' }

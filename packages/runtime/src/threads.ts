@@ -5,6 +5,7 @@ import { Clock, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { change, timestamp } from './records'
+import { diagnosticOf } from './diagnostics'
 import { essentials } from './rules'
 
 /*
@@ -129,18 +130,32 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       case 'ToolCallUpdate':
         return Effect.gen(function* () {
           yield* flush
-          // The call's command and paths are kept, not what it writes or what came back (docs/architecture/07).
+          // Persist bounded execution evidence in the same checkpoint as tool status, before narration.
           const kept = event.rawInput === undefined ? undefined : essentials(event.rawInput)
-          const output = event._tag === 'ToolCallUpdate' && event.rawOutput !== undefined
+          const output = event.rawOutput !== undefined
+          const existing = yield* toolItem(place.sessionId, event.toolCallId)
+          const diagnostic = diagnosticOf({
+            kind: event._tag === 'ToolCall' ? event.kind : existing?.content.kind,
+            rawInput: event.rawInput ?? existing?.content.rawInput,
+            rawOutput: event.rawOutput,
+            outputText: event.outputText,
+            previous: existing?.content.diagnostic,
+          })
           const content = defined({
+            diagnostic,
             title: event.title,
             kind: event._tag === 'ToolCall' ? event.kind : undefined,
             status: event.status,
             rawInput: kept?.input,
             locations: event.locations,
           })
-          const existing = yield* toolItem(place.sessionId, event.toolCallId)
-          const cut = [...new Set([...cutOf(existing?.content), ...(kept?.cut ?? []), ...(output ? ['output'] : [])])]
+          const cut = [
+            ...new Set([
+              ...cutOf(existing?.content),
+              ...(kept?.cut ?? []),
+              ...(output || (event.outputText?.length ?? 0) > 0 ? ['output'] : []),
+            ]),
+          ]
           const marked = cut.length === 0 ? content : { ...content, cut }
           if (existing === undefined)
             yield* addItem(place, 'tool_call', { title: '', kind: 'other', status: 'pending', ...marked }, { toolCallId: event.toolCallId })
@@ -192,7 +207,9 @@ export const transcript = (threadId: string, budget: number) =>
         case 'agent_message':
           return [`[${item.agentId ?? 'agent'}] ${text('text')}`]
         case 'tool_call':
-          return [`[tool] ${text('title')} (${text('status')})`]
+          return [
+            `[tool] ${text('title')} (${text('status')})${typeof content.diagnostic === 'object' && content.diagnostic !== null && 'text' in content.diagnostic ? `\n[tool-output observation] ${String(content.diagnostic.text)}` : ''}`,
+          ]
         case 'notice':
           return [`[note] ${text('title')}${text('description') === '' ? '' : `: ${text('description')}`}`]
         case 'step_result':

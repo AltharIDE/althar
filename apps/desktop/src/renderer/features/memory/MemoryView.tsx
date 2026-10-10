@@ -117,6 +117,23 @@ export function MemoryView({
                     ? 'Retired evidence is excluded from automatic context. Its source remains intact.'
                     : 'Historical evidence may no longer apply. Agent reports can contain hypotheses; tool failure alone does not establish a cause.'}
                 </p>
+                {entry.relatedUpdates.length > 0 && (
+                  <section aria-label="Related updates">
+                    <h3>Possible corrections and updates</h3>
+                    <p className={s.note}>
+                      These reports explicitly revise an earlier account. Inspect their sources before treating a correction as established.
+                    </p>
+                    {entry.relatedUpdates.map((update) => (
+                      <button key={update.id} className={s.item} onClick={() => model.select(update.id)}>
+                        <span className={s.meta}>
+                          {update.agentId ?? (update.kind === 'user_message' ? 'Person' : 'Althar')} ·{' '}
+                          {new Date(update.createdAt).toLocaleString()}
+                        </span>
+                        <span className={s.excerpt}>{update.text}</span>
+                      </button>
+                    ))}
+                  </section>
+                )}
                 <h3>Recorded evidence</h3>
                 <pre>{entry.source.text}</pre>
                 <div className={s.pages}>

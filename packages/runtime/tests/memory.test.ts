@@ -5,7 +5,7 @@ import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Exit } from 'effect'
 import { SqlClient } from 'effect/sql'
-import { memoryBrief, readMemory, refreshMemory, searchMemory, setMemoryState } from '../src/memory'
+import { memoryBrief, readMemory, readThreadMemory, refreshMemory, searchMemory, setMemoryState } from '../src/memory'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { addItem, transcript, updateItem } from '../src/threads'
@@ -288,6 +288,190 @@ describe('project evidence memory', () => {
       const brief = yield* memoryBrief(where.projectId, 'hello', where.threadId)
       assert.include(brief, 'previously delivered correction')
       assert.notInclude(brief, 'currently queued request')
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('carries later nonlexical corrections past intervening notices and repeated claims', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      for (let i = 0; i < 5; i++) yield* addItem(where, 'agent_message', { text: 'Heliostat deadlock: mutex is the proven cause.' })
+      for (let i = 0; i < 8; i++) yield* addItem(where, 'notice', { title: `Background activity ${i}` })
+      const correction = yield* addItem(where, 'agent_message', {
+        text: 'Correction to the previous diagnosis: the reproduction fixture reused an account. Earlier causal attribution was wrong. Do not change production locking.',
+      })
+      for (let i = 0; i < 15; i++)
+        yield* addItem(where, 'tool_call', { title: 'Read source', status: 'completed' }, { toolCallId: `read-${i}` })
+      const brief = yield* memoryBrief(where.projectId, 'heliostat mutex')
+      assert.include(brief, correction)
+      assert.include(brief, 'fixture reused an account')
+      assert.strictEqual(brief.split('mutex is the proven cause').length - 1, 1)
+      assert.include(brief, 'omitted events may contain further corrections')
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('retains trailing task terms after long pasted request context', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const id = yield* addItem(where, 'agent_message', { text: 'Heliostat acquisition failed; inspect the fixture.' })
+      const request = Array.from({ length: 80 }, (_, i) => `unrelatedword${i}`).join(' ') + ' heliostat acquisition'
+      assert.include(yield* memoryBrief(where.projectId, request), id)
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('merges semantic selections with project isolation', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const other = yield* place
+      const old = yield* addItem(where, 'agent_message', { text: 'Serializing writes still hangs. The cause is unconfirmed.' })
+      yield* addItem(where, 'agent_message', { text: 'The reproduction fixture is invalid; earlier causal claims are withdrawn.' })
+      yield* addItem(other, 'agent_message', { text: 'FOREIGN_PRIVATE_EVIDENCE' })
+      const brief = yield* memoryBrief(where.projectId, 'purchase freeze', undefined, { threadIds: [where.threadId, other.threadId] })
+      assert.include(brief, 'reproduction fixture is invalid')
+      assert.notInclude(brief, 'FOREIGN_PRIVATE_EVIDENCE')
+      const found = yield* searchMemory(where.projectId, 'purchase freeze', {
+        selectedThreadIds: [where.threadId, other.threadId],
+        limit: 1,
+      })
+      assert.strictEqual(found.entries.length, 1)
+      assert.include(found.entries[0]!.text, 'reproduction fixture is invalid')
+      const next = yield* searchMemory(where.projectId, 'purchase freeze', { selectedThreadIds: [where.threadId], limit: 1, offset: 1 })
+      assert.strictEqual(next.entries[0]!.id, old)
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('reserves a buried observed failure alongside the newest account in semantic task context', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      yield* addItem(where, 'agent_message', { text: 'Tried serializing acquisition.' })
+      const failure = yield* addItem(
+        where,
+        'tool_call',
+        {
+          title: 'Run reproduction',
+          status: 'failed',
+          diagnostic: { text: 'expected account B, received account A', source: 'tool-output', truncated: false, redacted: false },
+        },
+        { toolCallId: 'buried-failure' },
+      )
+      for (let i = 0; i < 15; i++) yield* addItem(where, 'agent_message', { text: `Investigating auxiliary progress ${i}` })
+      yield* addItem(where, 'agent_message', { text: 'The fixture reused an account; production locking is not established as the cause.' })
+      const brief = yield* memoryBrief(where.projectId, 'purchase freeze', undefined, { threadIds: [where.threadId] })
+      assert.include(brief, failure)
+      assert.include(brief, 'expected account B, received account A')
+      assert.include(brief, 'fixture reused an account')
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('preserves explicit retractions after many unrelated reports and links old source to updates', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const old = yield* addItem(where, 'agent_message', { text: 'Heliostat deadlock: mutex is the proven cause.' })
+      const correction = yield* addItem(where, 'agent_message', {
+        text: 'I retract the previous diagnosis. The reproduction fixture reused an account; production locking is not established as the cause.',
+      })
+      for (let i = 0; i < 15; i++) yield* addItem(where, 'agent_message', { text: `Unrelated documentation progress ${i}` })
+      const brief = yield* memoryBrief(where.projectId, 'heliostat mutex')
+      assert.include(brief, correction)
+      assert.include(brief, 'fixture reused an account')
+      assert.include(brief, 'Potential update candidate')
+      const detail = (yield* readMemory(where.projectId, old))!
+      assert.strictEqual(detail.relatedUpdates[0]!.id, correction)
+      assert.include(detail.contextNotice, 'read_memory_thread')
+      const page = yield* readThreadMemory(where.projectId, where.threadId)
+      assert.strictEqual(page.entries[0]!.id, old)
+      assert.strictEqual(page.entries[1]!.id, correction)
+      assert.strictEqual(page.nextOffset, 12)
+      const last = yield* readThreadMemory(where.projectId, where.threadId, page.nextOffset!)
+      assert.strictEqual(last.entries.length, 5)
+      assert.isNull(last.nextOffset)
+      const foreign = yield* place
+      assert.strictEqual((yield* readThreadMemory(foreign.projectId, where.threadId)).total, 0)
+      assert.isTrue(yield* setMemoryState(where.projectId, correction, detail.relatedUpdates[0]!.revision, 'retired'))
+      assert.deepStrictEqual((yield* readMemory(where.projectId, old))!.relatedUpdates, [])
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('includes semantic source anchors from the middle of a thread with its update candidates', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      yield* addItem(where, 'agent_message', { text: 'Initial unrelated work' })
+      const id = yield* addItem(where, 'agent_message', { text: 'Serializing checkout writes still hangs.' })
+      yield* addItem(where, 'agent_message', { text: 'Correction: earlier attribution was wrong; inspect the fixture.' })
+      for (let i = 0; i < 20; i++) yield* addItem(where, 'agent_message', { text: `Unrelated later progress ${i}` })
+      const foreign = yield* place
+      const secret = yield* addItem(foreign, 'agent_message', { text: 'PRIVATE_SOURCE' })
+      const brief = yield* memoryBrief(where.projectId, 'purchase freeze', undefined, {
+        threadIds: [where.threadId],
+        sourceIds: [id, secret],
+      })
+      assert.include(brief, id)
+      assert.include(brief, 'Serializing checkout writes still hangs')
+      assert.include(brief, 'earlier attribution was wrong')
+      assert.notInclude(brief, 'PRIVATE_SOURCE')
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('ranks exact semantic source hits before generic thread rows and preserves paging and isolation', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const middle = yield* addItem(where, 'agent_message', { text: 'Serializing checkout writes still hangs.' })
+      const latest = yield* addItem(where, 'agent_message', { text: 'Unrelated later progress' })
+      const foreign = yield* place
+      const secret = yield* addItem(foreign, 'agent_message', { text: 'PRIVATE_SOURCE' })
+      const options = { selectedThreadIds: [where.threadId], selectedSourceIds: [secret, middle], limit: 1 }
+      assert.strictEqual((yield* searchMemory(where.projectId, 'purchase freeze', options)).entries[0]!.id, middle)
+      assert.strictEqual((yield* searchMemory(where.projectId, 'purchase freeze', { ...options, offset: 1 })).entries[0]!.id, latest)
+      assert.isTrue(yield* setMemoryState(where.projectId, middle, 1, 'retired'))
+      assert.strictEqual((yield* searchMemory(where.projectId, 'purchase freeze', options)).entries[0]!.id, latest)
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('delivers the matching semantic passage of a long source while preserving observed failure status', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const id = yield* addItem(
+        where,
+        'tool_call',
+        {
+          title: 'Run reproduction',
+          status: 'failed',
+          rawInput: { command: 'bun test' },
+          diagnostic: {
+            text: 'setup '.repeat(800) + 'expected account B, received account A',
+            source: 'tool-output',
+            truncated: false,
+            redacted: false,
+          },
+        },
+        { toolCallId: 'offset-source' },
+      )
+      const detail = (yield* readMemory(where.projectId, id))!
+      const offset = detail.source.text.indexOf('expected account B')
+      const sourceOffsets = { [id]: offset }
+      const result = yield* searchMemory(where.projectId, 'purchase freeze', { selectedSourceIds: [id], sourceOffsets })
+      assert.include(result.entries[0]!.text, 'expected account B, received account A')
+      assert.include(result.entries[0]!.text, 'Observed tool status: failed')
+      const brief = yield* memoryBrief(where.projectId, 'purchase freeze', undefined, {
+        threadIds: [where.threadId],
+        sourceIds: [id],
+        sourceOffsets,
+      })
+      assert.include(brief, 'expected account B, received account A')
+      assert.include(brief, 'Observed tool status: failed')
+      const invalid = yield* searchMemory(where.projectId, 'purchase freeze', { selectedSourceIds: [id], sourceOffsets: { [id]: -100 } })
+      assert.include(invalid.entries[0]!.text, 'Observed tool status: failed')
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('does not apply a semantic offset computed for an obsolete source revision', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const id = yield* addItem(where, 'agent_message', { text: 'padding '.repeat(500) + 'old relevant passage' })
+      const original = (yield* readMemory(where.projectId, id))!
+      const sourceOffsets = { [id]: original.source.text.indexOf('old relevant passage') }
+      const sourceRevisions = { [id]: original.sourceRevision }
+      yield* updateItem(where.projectId, id, { text: 'Corrected current account. ' + 'unrelated '.repeat(600) })
+      const search = yield* searchMemory(where.projectId, 'unknownword', { selectedSourceIds: [id], sourceOffsets, sourceRevisions })
+      assert.include(search.entries[0]!.text, 'Corrected current account')
+      const brief = yield* memoryBrief(where.projectId, 'unknownword', undefined, {
+        threadIds: [where.threadId],
+        sourceIds: [id],
+        sourceOffsets,
+        sourceRevisions,
+      })
+      assert.include(brief, 'Corrected current account')
+      assert.notInclude(brief, 'old relevant passage')
     }).pipe(Effect.provide(runtime())),
   )
 })

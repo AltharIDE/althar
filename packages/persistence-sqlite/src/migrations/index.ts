@@ -19,6 +19,7 @@ import { statements as modelBlocks } from './0014_model_blocks'
 import { statements as taskRequests } from './0015_task_requests'
 import { statements as settings } from './0016_settings'
 import { statements as projectMemory } from './0017_project_memory'
+import { statements as memoryVectors } from './0018_memory_vectors'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -49,6 +50,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0015_task_requests', statements: taskRequests },
   { key: '0016_settings', statements: settings },
   { key: '0017_project_memory', statements: projectMemory },
+  { key: '0018_memory_vectors', statements: memoryVectors },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

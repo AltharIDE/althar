@@ -34,6 +34,8 @@ export const MemoryDetail = Schema.Struct({
   }),
   history: Schema.Array(Schema.Struct({ sourceRevision: Schema.Int, text: Schema.String, recordedAt: Schema.String })),
   historyTruncated: Schema.Boolean,
+  relatedUpdates: Schema.Array(MemoryEntry),
+  contextNotice: Schema.String,
 })
 export type MemoryDetail = typeof MemoryDetail.Type
 export const MemorySearch = Schema.Struct({ entries: Schema.Array(MemoryEntry), pending: Schema.Int })

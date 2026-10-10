@@ -160,7 +160,8 @@ export interface AgentSession {
    * `TurnInProgress`. A turn reads to its own end even if the stream is
    * stopped early, so nothing it says reaches a later turn.
    */
-  prompt(text: string): Stream.Stream<SessionEvent, Failure | TurnInProgress>
+  /** `onStarted` runs after the prompt is sent and the turn can be interrupted. */
+  prompt(text: string, onStarted?: Effect.Effect<void>): Stream.Stream<SessionEvent, Failure | TurnInProgress>
   /** Updates that arrive between turns, such as the agent changing its own mode. */
   readonly events: Stream.Stream<SessionEvent>
   /** Asks the agent to stop the current turn; the turn then ends with `cancelled`. */
@@ -659,7 +660,10 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           ),
         )
 
-        const prompt = (text: string): Stream.Stream<SessionEvent, Failure | TurnInProgress> =>
+        const prompt = (
+          text: string,
+          onStarted: Effect.Effect<void> = Effect.void,
+        ): Stream.Stream<SessionEvent, Failure | TurnInProgress> =>
           Stream.unwrap(
             Effect.gen(function* () {
               const turn: Turn = {
@@ -674,6 +678,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               )
               if (!idle) return yield* new TurnInProgress({ sessionId })
               yield* send(text)
+              yield* onStarted
               return Stream.fromQueue(turn.queue)
             }),
           )
