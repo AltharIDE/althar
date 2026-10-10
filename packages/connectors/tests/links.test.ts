@@ -156,6 +156,13 @@ describe('a new pull request’s page', () => {
     expect(newPullRequestLink('https://gitea.home.lan/me/tool.git', 'fix', 'main', HOSTED)).toBe(
       'https://gitea.home.lan/me/tool/compare/main...fix',
     )
+    // A web remote keeps its scheme and port; SSH's port is git's, not the site's.
+    expect(newPullRequestLink('http://gitlab.acme.dev:8080/group/api.git', 'fix', 'main', HOSTED)).toMatch(
+      /^http:\/\/gitlab\.acme\.dev:8080\/group\/api\/-\/merge_requests\/new\?/,
+    )
+    expect(newPullRequestLink('https://gitea.home.lan:3000/me/tool.git', 'fix', 'main', HOSTED)).toBe(
+      'https://gitea.home.lan:3000/me/tool/compare/main...fix',
+    )
     // One that can't be told, or no host at all.
     expect(newPullRequestLink('git@git.example.org:me/tool.git', 'fix', 'main', HOSTED)).toBeNull()
     expect(newPullRequestLink('/srv/git/tool.git', 'fix', 'main', HOSTED)).toBeNull()

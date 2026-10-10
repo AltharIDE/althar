@@ -493,7 +493,10 @@ describe('the agents', () => {
       const codex = agents.list.find((entry) => entry.definition.id === 'codex')
       const transport = codex?.transport(mkdtempSync(join(tmpdir(), 'althar-cwd-')), { CODEX_HOME: home })
       const env = transport?._tag === 'Process' ? (transport.spec.env ?? {}) : {}
-      assert.deepStrictEqual(JSON.parse(env.CODEX_CONFIG ?? '{}'), { 'mcp_servers.github.enabled': false })
+      assert.deepStrictEqual(JSON.parse(env.CODEX_CONFIG ?? '{}'), {
+        'mcp_servers.github.command': 'npx',
+        'mcp_servers.github.enabled': false,
+      })
       assert.strictEqual(env.CODEX_HOME, home)
     }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
   )

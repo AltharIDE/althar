@@ -154,6 +154,29 @@ export const BranchPushedSeveral: Story = {
   },
 }
 
+/** Several repositories, one pushed and one refused: the pushed one's page is there, and Push sends the rest. */
+export const BranchPushedPartly: Story = {
+  args: {
+    ...BranchPushedSeveral.args,
+    prs: [
+      {
+        repo: 'meridian-api',
+        files: PR_416[0]?.files ?? [],
+        newPullRequest: { url: 'https://github.com/meridian/api/compare/main...x', host: 'GitHub' },
+      },
+      { repo: 'meridian-web', files: PR_416[0]?.files ?? [] },
+    ],
+    remote: { name: 'origin', pushed: false, ahead: 2, onPush: fn() },
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Not on origin yet')).toBeInTheDocument()
+    await expect(c.getByRole('link', { name: 'Open a pull request on GitHub' })).toBeInTheDocument()
+    await expect(c.getAllByRole('link', { name: /Open a pull request/ })).toHaveLength(1)
+    await expect(c.getByRole('button', { name: 'Push the branch to origin' })).toBeInTheDocument()
+  },
+}
+
 /** Merged on this Mac, not on its remote yet: one press pushes it, with the person's own git. */
 export const MergedHere: Story = {
   args: {

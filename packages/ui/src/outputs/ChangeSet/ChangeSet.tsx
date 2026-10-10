@@ -31,7 +31,7 @@ export interface PullRequest {
   repo: string
   /** None for a repository whose work stays on its branch. */
   number?: number
-  /** For work on its branch, pushed: the host's page for a new pull request from it, and the host's name where known. */
+  /** For work on its branch, where this repository's remote has it: the host's page for a new pull request from it, and the host's name where known. */
   newPullRequest?: { readonly url: string; readonly host?: string }
   /** Where it lives on the code host; a link only when it is http or https. */
   url?: string
@@ -281,7 +281,7 @@ export function ChangeSet({
                 </Button>
               )}
               {/* One repository: its pull request is a press from here; several say so each beside its own. */}
-              {remote.pushed && prs.length === 1 && prs[0]?.newPullRequest && safeHref(prs[0].newPullRequest.url) && (
+              {prs.length === 1 && prs[0]?.newPullRequest && safeHref(prs[0].newPullRequest.url) && (
                 <a className={s.newPr} href={safeHref(prs[0].newPullRequest.url)} target="_blank" rel="noreferrer">
                   {t.newPullRequest(prs[0].newPullRequest.host)}
                   <Icon name="external" size={10} />
@@ -329,7 +329,7 @@ export function ChangeSet({
                     {owner && <span className={s.owner}>{owner} /</span>} {name}
                   </span>
                   {p.number !== undefined && <span className={s.number}>{t.number(p.number)}</span>}
-                  {here && prs.length > 1 && remote?.pushed && p.newPullRequest && safeHref(p.newPullRequest.url) && (
+                  {here && prs.length > 1 && p.newPullRequest && safeHref(p.newPullRequest.url) && (
                     <a className={s.github} href={safeHref(p.newPullRequest.url)} target="_blank" rel="noreferrer">
                       {t.newPullRequest(p.newPullRequest.host)}
                       <Icon name="external" size={10} />

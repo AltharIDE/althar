@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
@@ -12,7 +12,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Cause, Context, Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
-import { connection, services } from '../src/Api'
+import { connection, isInside, services } from '../src/Api'
 import {
   ChangedSinceSeen,
   CantMerge,
@@ -616,6 +616,14 @@ const asLeft = (folder: string) =>
     .join('\n')
 
 describe('editors, through the API', () => {
+  it('tells a file in a task’s folder from one out of it, as Windows writes paths too', () => {
+    assert.isTrue(isInside('/w/api', '/w/api/src/a.ts'))
+    assert.isTrue(isInside('C:\\w\\api', 'C:\\w\\api\\src\\a.ts', win32))
+    assert.isTrue(isInside('C:\\w\\api', 'C:\\w\\api\\..notes', win32))
+    for (const out of ['C:\\w\\api', 'C:\\w\\api-2\\a.ts', 'C:\\w\\a.ts', 'D:\\w\\api\\a.ts'])
+      assert.isFalse(isInside('C:\\w\\api', out, win32))
+  })
+
   it.live('lists the editors here, and opens one on a task’s folder at its file, never a path outside it', () =>
     Effect.scoped(
       Effect.gen(function* () {

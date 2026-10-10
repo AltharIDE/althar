@@ -154,7 +154,9 @@ export const linksIn = (text: string): ReadonlyArray<string> => [
 export const newPullRequestLink = (remote: string, branch: string, base: string, known: KnownHosts): string | null => {
   const ref = parseRemote(remote)
   if (ref === null) return null
-  const at = `https://${ref.host}/${ref.path.map(encodeURIComponent).join('/')}`
+  // A web remote's page is on its own scheme and port; one reached over SSH is on the host's https site.
+  const web = /^https?:\/\//i.test(remote.trim()) ? new URL(remote.trim()) : null
+  const at = `${web === null ? `https://${ref.host}` : `${web.protocol}//${web.host.toLowerCase()}`}/${ref.path.map(encodeURIComponent).join('/')}`
   const product = known.get(ref.host)
   const [from, into] = [encodeURIComponent(branch), encodeURIComponent(base)]
   // In a path, a branch keeps its slashes, as the host's own links write it.

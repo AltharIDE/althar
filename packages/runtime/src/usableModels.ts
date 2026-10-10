@@ -73,9 +73,13 @@ export const usableModels = (projectId?: string) =>
       if (Option.isSome(yield* limits.out(agent.id, projectId).pipe(Effect.orElseSucceed(() => Option.none())))) continue
       const offered = catalog.find((one) => one.agentId === agent.id)
       if (offered === undefined) continue
-      // A plan pays where the account work would start on is on one: the one picked, not just any signed in.
+      // The account work would start on, of those the project allows: none signed in, and the agent is no way to a model there.
       const starts = yield* limits.pick({ agentId: agent.id, ...(projectId === undefined ? {} : { projectId }) }).pipe(Effect.option)
-      const plan = Option.isSome(starts) && (yield* signIns.account(starts.value)).paidBy === 'plan'
+      if (Option.isNone(starts)) continue
+      const account = yield* signIns.account(starts.value)
+      if (account.status === 'signed_out') continue
+      // A plan pays where that account is on one, not just any signed in.
+      const plan = account.paidBy === 'plan'
       for (const model of offered.models) {
         if (isAgentDefault(model) || offered.blocked.includes(model.id)) continue
         const name = knownModelName(agent, model)

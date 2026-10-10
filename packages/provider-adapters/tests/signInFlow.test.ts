@@ -45,6 +45,16 @@ process.stdin.on('data', (data) => {
   }
 })`
 
+/* A Codex that answers, then stops reading: under Node, whose closed pipe breaks the next write, as a native app-server's does. */
+const CODEX_DEAF = `
+process.stdin.once('data', (data) => {
+  const message = JSON.parse(String(data).split('\\n')[0])
+  process.stdin.pause()
+  require('node:fs').closeSync(0)
+  process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n')
+  setTimeout(() => process.exit(0), 2000)
+})`
+
 const claude = (login = CLAUDE_LOGIN): AgentDefinition => ({
   ...agents['claude-code'],
   signIn: {
@@ -127,6 +137,18 @@ describe('signing in inside Althar', () => {
       { kind: 'device', code: 'LNBY-V0Q5J', page: 'https://auth.openai.com/codex/device', minutes: 15 },
       { kind: 'failed', message: 'Login was not completed' },
     ])
+  })
+
+  it('ends, rather than taking Althar down, when Codex stops reading mid-way', async () => {
+    const deaf: AgentDefinition = {
+      ...agents.codex,
+      signIn: {
+        ...agents.codex.signIn,
+        inApp: { kind: 'codex-app-server', ways: ['browser'], run: () => ({ command: 'node', args: ['-e', CODEX_DEAF] }) },
+      },
+    }
+    const said = await run(deaf, { way: 'browser' })
+    expect(said.at(-1)?.kind).toBe('failed')
   })
 
   it('stops when cancelled, saying nothing more', async () => {

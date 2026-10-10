@@ -326,6 +326,38 @@ describe('a task', () => {
     )
   })
 
+  it('keeps the pull request page of a repository its remote has, while another still waits for a push', async () => {
+    const base = thread({ session: null })
+    const repo = (name: string, page: string, pushed: boolean) => ({
+      repository: name,
+      name,
+      branch: 'main',
+      head: `${name}-head`,
+      remote: { name: 'origin', branch: 'althar/add-a-retry', newPullRequest: page, pushed, ahead: 1 },
+    })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({
+        ...base,
+        host: null,
+        task: {
+          ...base.task,
+          phase: 'ready' as const,
+          commits: 2,
+          here: [
+            repo('api', 'https://gitlab.acme.dev/web/api/-/merge_requests/new?x', true),
+            repo('web', 'https://codeberg.org/me/web/compare/main...x', false),
+          ],
+        },
+      })),
+    })
+    withServices(<Task />, client)
+    const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(outputs.getByText('Not on origin yet')).toBeTruthy()
+    expect(outputs.getByRole('link', { name: 'Open a pull request on GitLab' })).toBeTruthy()
+    expect(outputs.queryByRole('link', { name: 'Open a pull request on Codeberg' })).toBeNull()
+    expect(outputs.getByRole('button', { name: 'Push the branch to origin' })).toBeTruthy()
+  })
+
   it('opens on its outputs once ready, switches faces by c and o, and goes back on Escape', async () => {
     const onBack = vi.fn()
     const file: ChangedFile = { path: 'src/checkout.ts', from: null, status: 'modified', add: 4, del: 1, binary: false, uncommitted: false }
@@ -1230,11 +1262,14 @@ describe('a task’s outputs before it has made anything', () => {
             items.says('Looking.'),
             items.tool({ toolKind: 'execute', command: "nl -ba src/retry.ts | sed -n '1,40p'; cat ../elsewhere.md" }),
             items.tool({ locations: [{ path: '/w/meridian/README.md' }] }),
+            // Out of the folder by way of it: not the task's.
+            items.tool({ locations: [{ path: '/w/meridian/../private.txt' }] }),
+            items.tool({ toolKind: 'execute', command: 'cat src/../../outside.md ./src/./a.ts' }),
           ],
         },
       ),
     )
-    expect(looked).toEqual(['README.md', 'src/retry.ts', 'src/checkout.ts'])
+    expect(looked).toEqual(['src/a.ts', 'README.md', 'src/retry.ts', 'src/checkout.ts'])
     // Before its folder is made, a path can't be said to be the task's.
     const homeless = at({ worktree: null }, { items: [items.tool({ locations: [{ path: '/w/meridian/README.md' }] })] })
     expect(lookedOf(homeless)).toEqual([])
@@ -1263,6 +1298,9 @@ describe('a task’s outputs before it has made anything', () => {
       '../outside.ts',
     ])
     expect(readsOf("sed --in-place 's/a/b/' src/c.ts")).toEqual([])
+    // A redirect's file isn't read; after a cd, a relative path is from somewhere else.
+    expect(readsOf('cat a.ts > copied.ts; head -n 3 b.ts 2> err.log')).toEqual(['a.ts', 'b.ts'])
+    expect(readsOf('cat x.ts; cd /outside && cat private.txt /w/meridian/c.ts')).toEqual(['x.ts', '/w/meridian/c.ts'])
     // A name with a space, quoted; a line ended with a separator.
     expect(readsOf('cat "docs/read me.md";')).toEqual(['docs/read me.md'])
     // Edited in place, it is written, not read.

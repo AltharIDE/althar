@@ -225,6 +225,12 @@ export interface ControlToggleProps {
 
 /** A module with a round switch: the circle turns it on or off; the name opens it out. */
 export function ControlToggle({ title, line, on, onChange, glyph, onOpen, className }: ControlToggleProps) {
+  const opened = useContext(Opened)
+  const self = useRef<HTMLButtonElement | null>(null)
+  // Back from its detail: focus returns to its words, as to a module.
+  useEffect(() => {
+    if (opened?.take(title) && focusLost()) self.current?.focus()
+  }, [opened, title])
   const words = (
     <>
       <span className={s.toggleTitle}>{title}</span>
@@ -244,7 +250,15 @@ export function ControlToggle({ title, line, on, onChange, glyph, onOpen, classN
         {glyph}
       </button>
       {onOpen ? (
-        <button type="button" className={s.toggleWords} onClick={onOpen}>
+        <button
+          type="button"
+          ref={self}
+          className={s.toggleWords}
+          onClick={() => {
+            opened?.mark(title)
+            onOpen()
+          }}
+        >
           {words}
         </button>
       ) : (

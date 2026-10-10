@@ -674,7 +674,8 @@ export class Queries extends Context.Service<
           const [there = null] = yield* commitsOf(root, [`refs/remotes/${remote}/${branch}`])
           const from = there ?? baseCommit
           const ahead = from === null || from === head ? 0 : yield* commitsAhead(worktree, from, head).pipe(Effect.orElseSucceed(() => 0))
-          const url = (yield* namedRemotes(root).pipe(Effect.orElseSucceed(() => []))).find((one) => one.name === remote)?.url
+          // Where the branch goes: the remote's push URL, which can be a fork of the one it fetches from.
+          const url = (yield* namedRemotes(root, 'push').pipe(Effect.orElseSucceed(() => []))).find((one) => one.name === remote)?.url
           return {
             name: remote,
             branch,

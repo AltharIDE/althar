@@ -378,8 +378,11 @@ Agents reach code hosts and trackers only through Althar:
   Code loads only the servers it is given. Codex and OpenCode load every one
   their config names, so each of the person's is switched off by name as the
   agent starts: Codex's through `CODEX_CONFIG`, OpenCode's in the config it
-  takes from `OPENCODE_CONFIG_CONTENT`, the names read from the agent's home
-  and the repository's own config.
+  takes from `OPENCODE_CONFIG_CONTENT`. The names are read from each file
+  the agent itself reads: its global and home config, and the project's,
+  from the repository's root down to the session's folder. Codex refuses a
+  server it can't reach, so each is switched off with its own command or
+  URL beside it.
 - **The rules refuse** `gh` and `glab` commands that change a host, with a
   reason that names Althar's tool; and, for every role, the ways to
   credentials a shell still has: the keychain's `security`, and git's helpers

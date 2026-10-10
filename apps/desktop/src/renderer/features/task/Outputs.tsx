@@ -297,7 +297,8 @@ export function Outputs({
             ? task.here.map((repo) => ({
                 repo: repo.name,
                 files: filesIn(task.files, repo.repository, several),
-                ...(repo.remote?.newPullRequest == null
+                // Only where its remote has the branch: one push refused leaves the others' pages.
+                ...(repo.remote?.newPullRequest == null || !repo.remote.pushed
                   ? {}
                   : { newPullRequest: { url: repo.remote.newPullRequest, ...hostOfPage(repo.remote.newPullRequest, snapshot.host) } }),
               }))

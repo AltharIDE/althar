@@ -308,12 +308,12 @@ export const remoteUrls = (cwd: string) =>
     ),
   ])
 
-/** Each remote by name, with its fetch URL without credentials, in the order git lists them. */
-export const namedRemotes = (cwd: string) =>
+/** Each remote by name, with its fetch URL (or the URLs it pushes to) without credentials, in the order git lists them. */
+export const namedRemotes = (cwd: string, which: 'fetch' | 'push' = 'fetch') =>
   Effect.map(git(cwd, 'remote', '-v'), (output) =>
     output
       .split('\n')
-      .filter((line) => line.endsWith('(fetch)'))
+      .filter((line) => line.endsWith(`(${which})`))
       .map((line) => {
         const [name = '', url = ''] = line.split(/\s+/)
         return { name, url: redactUrl(url) }
@@ -363,13 +363,14 @@ export const pushTo = (
 /**
  * The remote a repository's work goes to, as the person's own git would
  * send it: the one its default branch follows, else `origin`, else its only
- * remote; null where it has none, or several and no way to tell.
+ * remote; null where it has none, or several and no way to tell. A default
+ * branch that follows a branch here (`.`), or a bare URL, follows no remote.
  */
 export const remoteOf = (cwd: string, base: string) =>
   Effect.gen(function* () {
-    const followed = yield* gitOutcome(cwd, 'for-each-ref', '--format=%(upstream:remotename)', `refs/heads/${base}`)
-    if (followed.code === 0 && followed.stdout !== '') return followed.stdout
     const remotes = yield* namedRemotes(cwd).pipe(Effect.orElseSucceed(() => []))
     const names = [...new Set(remotes.map((remote) => remote.name))]
+    const followed = yield* gitOutcome(cwd, 'for-each-ref', '--format=%(upstream:remotename)', `refs/heads/${base}`)
+    if (followed.code === 0 && names.includes(followed.stdout)) return followed.stdout
     return names.includes('origin') ? 'origin' : names.length === 1 ? (names[0] ?? null) : null
   })

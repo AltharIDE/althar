@@ -1,6 +1,5 @@
 /* The whole window: two halves over one field, the mark's on the left and the sheet on the right. */
 .start {
-  container-type: inline-size;
   position: relative;
   display: grid;
   grid-template-columns: minmax(340px, 1fr) minmax(400px, 0.95fr);
@@ -416,8 +415,9 @@
   }
 }
 
-/* A narrow window: the mark above, smaller, and the sheet under it; the page scrolls. */
-@container (max-width: 760px) {
+/* A narrow window: the mark above, smaller, and the sheet under it; the page scrolls. The screen is
+   the window, so the window's width says; a query on its own container couldn't change the screen itself. */
+@media (max-width: 760px) {
   .start {
     grid-template-columns: minmax(0, 1fr);
     overflow-y: auto;

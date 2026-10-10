@@ -67,6 +67,21 @@ export const Checking: Story = {
   },
 }
 
+/** A name too long for its line: one line, the whole of it on hover, and the way back in and the menu still at the end. */
+export const LongName: Story = {
+  args: {
+    accounts: [
+      { ...ACCOUNTS[0]!, name: 'The account the whole platform team shares for the weekend on-call rotation and its incident reviews' },
+      ...ACCOUNTS.slice(1),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByTitle(/^The account the whole platform team shares/)).toBeInTheDocument()
+    await expect(c.getAllByRole('button', { name: /^More for/ }).length).toBeGreaterThan(0)
+  },
+}
+
 /** Only shown, nothing to change: no menus, no way in, and no way to add one. */
 export const JustTheList: Story = {
   args: { onSignIn: undefined, onRename: undefined, onMove: undefined, onRemove: undefined, onAdd: undefined },

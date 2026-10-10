@@ -156,11 +156,9 @@ describe('merging a task here', () => {
   it.live('pushes the task’s branch with the person’s own git, up to what they saw, and says where a pull request can be', () =>
     Effect.gen(function* () {
       const root = repository()
-      // Its remote reads as GitHub, and takes pushes in a folder here.
-      const remote = mkdtempSync(join(tmpdir(), 'althar-remote-'))
-      git(remote, 'init', '-q', '--bare', '-b', 'main')
+      // It fetches from the team's repository on GitHub and pushes to the person's fork there.
       git(root, 'remote', 'add', 'origin', 'https://github.com/meridian/api.git')
-      git(root, 'remote', 'set-url', '--push', 'origin', remote)
+      git(root, 'remote', 'set-url', '--push', 'origin', 'git@github.com:alice/api.git')
       const { task, worktrees } = yield* taskIn([root], root)
       const worktree = worktrees[0]?.path ?? ''
       const slug = worktrees[0]?.slug ?? ''
@@ -168,33 +166,64 @@ describe('merging a task here', () => {
       const head = commit(worktree, 'retry.ts', 'retry\n')
       const queries = yield* Queries
       const remoteOf = Effect.map(queries.thread(task.threadId, {}), (snapshot) => snapshot.task.here[0]?.remote)
+      // The pull request opens where the branch goes.
       assert.deepStrictEqual(yield* remoteOf, {
         name: 'origin',
         branch,
         pushed: false,
         ahead: 1,
-        newPullRequest: `https://github.com/meridian/api/compare/main...${branch}?expand=1`,
+        newPullRequest: `https://github.com/alice/api/compare/main...${branch}?expand=1`,
       })
+      // Now it pushes to a folder here, and fetches only main, so git wouldn't note the branch there itself.
+      const remote = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+      git(remote, 'init', '-q', '--bare', '-b', 'main')
+      git(root, 'remote', 'set-url', '--push', 'origin', remote)
+      git(root, 'config', 'remote.origin.fetch', '+refs/heads/main:refs/remotes/origin/main')
+      // More from the lead after the person looked, crediting itself: what they saw goes, and nothing after it.
+      const later = commit(worktree, 'more.ts', 'more\n', 'Write more.ts\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>')
       const changes = yield* Changes
       assert.deepStrictEqual(yield* changes.pushBranch(task.taskId, [{ repository: slug, head }]), [{ branch, remote: 'origin' }])
-      assert.strictEqual(git(remote, 'rev-parse', branch), head)
+      // What they saw, credited as every push is (Althar's line in), and the later commit not.
+      assert.strictEqual(git(remote, 'rev-parse', branch), git(worktree, 'rev-parse', 'HEAD~1'))
+      assert.include(git(remote, 'log', '-1', '--format=%B', branch), 'Co-authored-by: Althar')
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
         `Pushed ${branch} to origin.`,
       )
-      assert.deepInclude(yield* remoteOf, { pushed: true, ahead: 0 })
-      // More from the lead: the remote is behind it, and a commit the person didn't see isn't pushed.
-      const later = commit(worktree, 'more.ts', 'more\n')
       assert.deepInclude(yield* remoteOf, { pushed: true, ahead: 1 })
-      assert.deepStrictEqual(cantOf(yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: slug, head: 'f'.repeat(40) }]))), [
-        'CantMerge',
-        'changed',
-        '',
-      ])
+      // A commit that isn't on the branch, or isn't a commit at all, isn't pushed.
+      for (const seen of ['f'.repeat(40), '--force'])
+        assert.deepStrictEqual(cantOf(yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: slug, head: seen }]))), [
+          'CantMerge',
+          'changed',
+          '',
+        ])
+      // The commit the person saw, which crediting rewrote: still what they saw, and the agent's line never leaves.
       yield* changes.pushBranch(task.taskId, [{ repository: slug, head: later }])
-      assert.strictEqual(git(remote, 'rev-parse', branch), later)
+      assert.strictEqual(git(remote, 'rev-parse', branch), git(worktree, 'rev-parse', 'HEAD'))
+      assert.notInclude(git(remote, 'log', '-1', '--format=%B', branch), 'noreply@anthropic.com')
+      assert.deepInclude(yield* remoteOf, { pushed: true, ahead: 0 })
       // The task stays as it was: pushing isn't merging.
       assert.strictEqual(yield* stateOf(task.taskId), 'open')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('pushes to origin where the default branch follows a branch here rather than a remote', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      const remote = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+      git(remote, 'init', '-q', '--bare', '-b', 'main')
+      git(root, 'remote', 'add', 'origin', remote)
+      git(root, 'branch', 'trunk')
+      git(root, 'config', 'branch.main.remote', '.')
+      git(root, 'config', 'branch.main.merge', 'refs/heads/trunk')
+      const { task, worktrees } = yield* taskIn([root], root)
+      const head = commit(worktrees[0]?.path ?? '', 'retry.ts', 'retry\n')
+      const branch = git(worktrees[0]?.path ?? '', 'rev-parse', '--abbrev-ref', 'HEAD')
+      const queries = yield* Queries
+      assert.strictEqual((yield* queries.thread(task.threadId, {})).task.here[0]?.remote?.name, 'origin')
+      yield* (yield* Changes).pushBranch(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }])
+      assert.strictEqual(git(remote, 'rev-parse', branch), git(worktrees[0]?.path ?? '', 'rev-parse', 'HEAD'))
     }).pipe(Effect.provide(withQueries())),
   )
 

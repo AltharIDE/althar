@@ -63,7 +63,7 @@ const ICONS: ChoiceOption<Ground>[] = [
   { value: 'ink', title: 'Ink', picture: ground('var(--t-1)', '#f4f1e8') },
 ]
 
-type Open = 'all' | 'agents' | 'hosts' | 'icon'
+type Open = 'all' | 'agents' | 'hosts' | 'icon' | 'awake'
 
 /* Settings as a consumer composes it: the modules, and each opened out in place. */
 function Settings({ start = 'all', ...args }: Partial<ControlCenterProps> & { start?: Open }) {
@@ -103,7 +103,7 @@ function Settings({ start = 'all', ...args }: Partial<ControlCenterProps> & { st
               on={awake}
               onChange={setAwake}
               glyph={<Icon name="cup" size={16} />}
-              onOpen={fn()}
+              onOpen={() => setOpen('awake')}
             />
             <ControlToggle title="Dictation" line="Off" on={false} onChange={fn()} glyph={<Icon name="mic" size={16} />} />
           </ControlGrid>
@@ -141,6 +141,11 @@ function Settings({ start = 'all', ...args }: Partial<ControlCenterProps> & { st
           <ControlSheet>
             <CoAuthor on={credit} onChange={setCredit} trailer={CO_AUTHOR_TRAILER} />
           </ControlSheet>
+        </ControlDetail>
+      )}
+      {open === 'awake' && (
+        <ControlDetail title="Keep awake" onBack={back}>
+          <ControlSheet>While work runs, this Mac stays awake.</ControlSheet>
         </ControlDetail>
       )}
       {open === 'icon' && (
@@ -202,6 +207,11 @@ export const OpeningAModule: Story = {
     // Back, focus is on the module it came from, as from Agents.
     await expect(p.getByRole('button', { name: /^App icon/ })).toHaveFocus()
     await expect(p.getByRole('button', { name: /^App icon/ })).toHaveTextContent('Ink')
+    // A switch's detail, left by Escape: focus is back on its words.
+    await userEvent.click(p.getByRole('button', { name: /^Keep awake/ }))
+    await expect(p.getByRole('heading', { name: 'Keep awake', level: 2 })).toHaveFocus()
+    await userEvent.keyboard('{Escape}')
+    await expect(p.getByRole('button', { name: /^Keep awake/ })).toHaveFocus()
     await userEvent.keyboard('{Escape}')
     await expect(args.onOpenChange).toHaveBeenCalledWith(false)
   },

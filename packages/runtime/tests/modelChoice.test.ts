@@ -175,6 +175,22 @@ describe('the models the coordinator can use', () => {
       assert.match(yield* callTool(access, 'list_models', {}), /^No model can be used now/)
     }).pipe(Effect.provide(runtime(':memory:', {}, { signedOut: ['claude-code', 'codex', 'opencode'] }))),
   )
+
+  it.live('asks an agent again once it is installed, and drops what an asking from before found', () =>
+    Effect.gen(function* () {
+      yield* opened
+      yield* known
+      const models = yield* Models
+      const agentId = (yield* models.catalog)[0]?.agentId ?? ''
+      // Asked again at once; what the first asking found doesn't stand in for it.
+      yield* models.forget(agentId)
+      assert.isTrue((yield* models.catalog).find((agent) => agent.agentId === agentId)?.probing)
+      // Forgotten again while being asked: that asking's answer counts for nothing, and the next is waited for.
+      yield* models.forget(agentId)
+      assert.isTrue((yield* models.catalog).find((agent) => agent.agentId === agentId)?.probing)
+      yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
+    }).pipe(Effect.provide(runtime(':memory:', {}))),
+  )
 })
 
 describe('a plan that names models', () => {

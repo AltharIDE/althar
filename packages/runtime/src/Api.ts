@@ -1,7 +1,7 @@
 import { agentVersion } from '@althar/provider-adapters'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { basename, dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep } from 'node:path'
 
 import {
   type AccountStatus,
@@ -743,13 +743,14 @@ export const handlers = Api.toLayer(
       PushHere: ({ commandId, taskId }) => once(commandId, api(Effect.asVoid(pullRequests.pushHere(taskId)))),
       PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
-      // Done once the copy is ready; its version is asked again, as it is a new one.
+      // Done once the copy is ready; its version and its models are asked again, as it is a new one.
       InstallAgent: ({ agentId }) =>
         api(
           Effect.gen(function* () {
             const entry = yield* agents.get(agentId)
             yield* installs.install(entry.definition)
             versions.delete(agentId)
+            yield* models.forget(agentId)
           }),
         ),
       OpenInEditor: ({ taskId, editor, path, line }) =>
@@ -765,7 +766,7 @@ export const handlers = Api.toLayer(
             const folder = yield* Effect.sync(() => realOf(worktrees.length > 1 ? dirname(first.path) : first.path))
             // A path from the task's changes, never one that leaves its folder, by `..` or by a link.
             const file = path === undefined ? null : yield* Effect.sync(() => realOf(resolve(folder, path)))
-            if (file !== null && !file.startsWith(`${folder}/`)) return false
+            if (file !== null && !isInside(folder, file)) return false
             return yield* open(editor, folder, file, line ?? null)
           }),
         ),
@@ -774,6 +775,16 @@ export const handlers = Api.toLayer(
     })
   }),
 )
+
+/** Whether a file is in a folder, as this system writes paths (`C:\\…` on Windows): not the folder itself, nor out of it by `..`. */
+export const isInside = (
+  folder: string,
+  file: string,
+  paths: Pick<typeof posix, 'relative' | 'isAbsolute' | 'sep'> = { relative, isAbsolute, sep },
+) => {
+  const within = paths.relative(folder, file)
+  return within !== '' && within !== '..' && !within.startsWith(`..${paths.sep}`) && !paths.isAbsolute(within)
+}
 
 /** The runtime's services: the store, this launch, and everything the API calls. Built once per launch. */
 export const services = (options: Runtime.RuntimeLayerOptions) =>

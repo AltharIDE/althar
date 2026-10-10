@@ -307,7 +307,9 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
         />
       ) : (
         <>
-          <span className={s.name}>{account.name}</span>
+          <span className={s.name} title={account.name}>
+            {account.name}
+          </span>
           <span className={s.who}>{who}</span>
         </>
       )}

@@ -39,9 +39,10 @@
   - **Agents still reach hosts only through Althar (ADR-011).** The MCP
     servers the person set up for Codex or OpenCode are switched off by name
     as each starts: Codex's through `CODEX_CONFIG`, OpenCode's through the
-    config it takes from its environment. Their names come from the agent's
-    home and the repository's own config. The files are only read. Claude
-    Code already loads only the servers it is given.
+    config it takes from its environment. Their names come from each file
+    the agent reads: its global and home config, and the project's, from
+    the repository's root down to the session's folder. The files are only
+    read. Claude Code already loads only the servers it is given.
 - **Alternatives considered:**
   - **Keep pushing behind a connection.** It is simpler, and every push
     would be recorded with a connection's receipt. But it leaves any host

@@ -987,8 +987,15 @@ export class Changes extends Context.Service<
           const [task] = yield* sql<{ projectId: ProjectId; threadId: string }>`
             SELECT k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${taskId}`
           if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
-          const repositories = yield* sql<{ slug: string; base: string; root: string; worktree: string; branch: string }>`
-            SELECT b.slug, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch
+          const repositories = yield* sql<{
+            slug: string
+            base: string
+            root: string
+            worktree: string
+            branch: string
+            baseCommit: string | null
+          }>`
+            SELECT b.slug, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch, w.base_commit
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -999,13 +1006,21 @@ export class Changes extends Context.Service<
           for (const repository of repositories) {
             const head = heads.find((seen) => seen.repository === repository.slug)?.head
             if (head === undefined) continue
-            // What the person saw, still on the branch: a commit the lead made since isn't theirs to have seen.
-            if (!(yield* onHead(repository.worktree, head))) return yield* new CantMerge({ taskId, why: 'changed', detail: '' })
+            if (!/^[0-9a-f]{7,64}$/.test(head)) return yield* new CantMerge({ taskId, why: 'changed', detail: '' })
             const remote = yield* remoteOf(repository.root, repository.base)
             if (remote === null) continue
-            yield* gitWithin(60_000, repository.worktree, 'push', remote, `${head}:refs/heads/${repository.branch}`).pipe(
+            // Credited as every push is (credit.ts): what the remote has already stays as it is.
+            const [there = null] = yield* commitsOf(repository.root, [`refs/remotes/${remote}/${repository.branch}`])
+            const { head: sent, settle } = yield* credited(repository.worktree, repository.branch, head, [repository.baseCommit, there])
+            // What the person saw, or what crediting made of it, still on the branch: a commit the lead made since isn't theirs to have seen.
+            if (!(yield* onHead(repository.worktree, head)) && !(yield* onHead(repository.worktree, sent)))
+              return yield* new CantMerge({ taskId, why: 'changed', detail: '' })
+            yield* gitWithin(60_000, repository.worktree, 'push', '--', remote, `${sent}:refs/heads/${repository.branch}`).pipe(
               Effect.catchTag('GitFailed', (failed) => refusal(taskId, `${remote}/${repository.branch}`, failed)),
             )
+            yield* settle
+            // What the remote has now, as a fetch would say: git notes it itself only where the remote's fetch takes every branch.
+            yield* gitWithin(10_000, repository.root, 'update-ref', `refs/remotes/${remote}/${repository.branch}`, sent).pipe(Effect.ignore)
             pushed.push({ branch: repository.branch, remote })
           }
           if (pushed.length === 0) return yield* new NotFound({ kind: 'remote', id: taskId })
@@ -1051,6 +1066,7 @@ export class Changes extends Context.Service<
               60_000,
               repository.root,
               'push',
+              '--',
               remote.slice(0, at),
               `refs/heads/${repository.base}:refs/heads/${remote.slice(at + 1)}`,
             ).pipe(Effect.catchTag('GitFailed', (failed) => refusal(taskId, remote, failed)))

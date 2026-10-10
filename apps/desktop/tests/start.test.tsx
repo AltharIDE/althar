@@ -125,6 +125,41 @@ describe('accounts in settings', () => {
     LONG_FLOW,
   )
 
+  it('signs in a new account the agent can’t tell is signed in, rather than taking it as signed in', async () => {
+    const codex = codexWith(usual('acc_usual', 'signed_in'))
+    const { client } = fakeClient({ status: codex.status })
+    vi.mocked(client.addAccount).mockImplementationOnce(async (input) => ({ ...usual('acc_added', 'unknown'), name: input.name }))
+    withServices(<Settings />, client)
+    const accounts = await codexAccounts()
+    await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in in Terminal' }))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_added'))
+    // Back from Terminal, and still it can't tell: not signed in yet.
+    codex.next(usual('acc_usual', 'signed_in'), { ...usual('acc_added', 'unknown'), name: 'Account 2' })
+    act(() => void window.dispatchEvent(new Event('focus')))
+    expect(await within(accounts).findByText(/Not signed in yet\./)).toBeTruthy()
+  })
+
+  it(
+    'keeps an account the person named, even when the screen closes before Althar has read the agents again',
+    async () => {
+      const codex = withWays(['browser', 'device'], usual('acc_usual', 'signed_in'))
+      const done: AccountSignInState = { state: 'done', who: 'dana@northwind.io', plan: 'ChatGPT Team' }
+      const { client } = fakeClient({ status: codex.status, getAccountSignIn: vi.fn(async () => done) })
+      const view = withServices(<Settings />, client)
+      const accounts = await codexAccounts()
+      await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
+      await userEvent.click(within(accounts).getByRole('button', { name: 'Continue with ChatGPT' }))
+      await within(accounts).findByRole('textbox', { name: 'Name this account' }, { timeout: 3000 })
+      // The agents' next read never comes back before the screen closes.
+      vi.mocked(client.status).mockImplementation(() => new Promise(() => undefined))
+      await userEvent.click(within(accounts).getByRole('button', { name: 'Add account' }))
+      view.unmount()
+      expect(client.removeAccount).not.toHaveBeenCalled()
+    },
+    LONG_FLOW,
+  )
+
   it('stops a sign-in in the browser that was left while it started', async () => {
     const codex = withWays(['browser', 'device'], usual('acc_usual', 'signed_in'))
     let started: (value: { flowId: string; state: AccountSignInState }) => void = () => undefined

@@ -73,8 +73,8 @@ interface Flow extends SigningIn {
   readonly name?: string
 }
 
-/** Signed in, as far as the agent says. */
-const signedIn = (account: AccountStatus) => account.signIn !== 'signed_out'
+/** Signed in, as the agent says: one that can't tell (OpenCode with no sign-in yet, or a check that failed) isn't. */
+const signedIn = (account: AccountStatus) => account.signIn === 'signed_in'
 
 /** A signed-in account, to name: what pays for it, when the agent says. */
 const naming = (account: AccountStatus): AccountSignInStep => ({
@@ -128,11 +128,15 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
       .catch(() => undefined)
       .then(() => start.recheck())
 
+  /** An account the person kept by naming it: never removed by leaving, however soon after. */
+  const kept = useRef<string | null>(null)
+
   /** Stops what the sign-in under way began: the agent's login, and the account made for it. */
   const leave = () => {
     token.current += 1
     if (flow?.flowId != null) void client.cancelAccountSignIn(flow.flowId).catch(() => undefined)
-    if (flow?.made != null) void forget(flow.made)
+    if (flow?.made != null && flow.made !== kept.current) void forget(flow.made)
+    kept.current = null
     setFlow(null)
     return token.current
   }
@@ -335,6 +339,7 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
       if (flow?.made == null || flow.step.kind !== 'named') return
       const { made, step: named } = flow
       const mine = token.current
+      kept.current = made
       setFlow({ ...flow, step: { ...named, saving: true } })
       void (name === named.name ? Promise.resolve() : client.renameAccount(made, name))
         .then(() => start.recheck())

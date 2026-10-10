@@ -123,6 +123,8 @@ export const startSignInFlow = (
     options.timeout ?? FIFTEEN_MINUTES,
   )
   child.on('error', (error) => end({ kind: 'failed', message: error.message }))
+  // Its input closed under a write (EPIPE) ends the sign-in, rather than the process Althar runs in.
+  child.stdin.on('error', () => end({ kind: 'failed', message: 'The agent stopped listening while signing in.' }))
   const driven = inApp.kind === 'claude-login' ? claude(agent, child, say, end, env) : codex(child, say, end, options)
   return {
     paste: (code) => {
@@ -184,9 +186,11 @@ const codex = (child: ChildProcessWithoutNullStreams, say: (event: SignInFlowEve
   const send = (method: string, params: unknown, then?: (result: Record<string, unknown> | null, error: string | null) => void) => {
     const id = ++next
     if (then !== undefined) waiting.set(id, then)
-    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    if (child.stdin.writable) child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
   }
-  const notify = (method: string, params: unknown) => child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`)
+  const notify = (method: string, params: unknown) => {
+    if (child.stdin.writable) child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`)
+  }
   let buffer = ''
   child.stdout.on('data', (chunk: Buffer) => {
     buffer += String(chunk)

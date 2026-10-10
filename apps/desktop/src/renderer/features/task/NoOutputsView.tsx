@@ -63,8 +63,11 @@ export const readsOf = (command: string): ReadonlyArray<string> => {
   const inner = /^\s*\/?(?:bin\/)?(?:ba|z)?sh\s+-l?c\s+(['"])([\s\S]*)\1\s*$/.exec(command)
   const line = inner?.[2] ?? command
   const files: string[] = []
+  // After a `cd`, a relative path is from somewhere this can't follow.
+  let moved = false
   for (const part of commandsOf(line)) {
     const [name, ...args] = wordsOf(part.trim())
+    if (name === 'cd' || name === 'pushd') moved = true
     const valued = name === undefined ? undefined : READERS[name]
     // sed told to edit in place writes, rather than reads.
     if (valued === undefined || (name === 'sed' && args.some((arg) => /^-[a-zA-Z]*i/.test(arg) || arg.startsWith('--in-place')))) continue
@@ -72,6 +75,11 @@ export const readsOf = (command: string): ReadonlyArray<string> => {
     let script = name === 'sed' && !args.includes('-e')
     for (let i = 0; i < args.length; i++) {
       const arg = args[i] ?? ''
+      // A redirect's file is written, or fed in, rather than read by name.
+      if (/^\d*(>>?|<|&>)$/.test(arg)) {
+        i += 1
+        continue
+      }
       if (arg.startsWith('-')) {
         if (valued.has(arg)) i += 1
         continue
@@ -80,11 +88,22 @@ export const readsOf = (command: string): ReadonlyArray<string> => {
         script = false
         continue
       }
-      if (/[*?{}$<>()`]/.test(arg) || !/[./]/.test(arg) || /^\d/.test(arg)) continue
+      if (/[*?{}$<>()`]/.test(arg) || !/[./]/.test(arg) || /^\d/.test(arg) || (moved && !arg.startsWith('/'))) continue
       files.push(arg)
     }
   }
   return files
+}
+
+/** A path with its `.` and `..` resolved as far as it says: `src/../a.ts` is `a.ts`, `../a.ts` stays outside. */
+const normal = (path: string): string => {
+  const out: string[] = []
+  for (const segment of path.split('/')) {
+    if (segment === '.' || (segment === '' && out.length > 0)) continue
+    if (segment === '..' && out.length > 0 && out.at(-1) !== '..' && out.at(-1) !== '') out.pop()
+    else out.push(segment)
+  }
+  return out.join('/')
 }
 
 /**
@@ -96,9 +115,9 @@ export const readsOf = (command: string): ReadonlyArray<string> => {
 export const lookedOf = (snapshot: ThreadSnapshot): ReadonlyArray<string> => {
   const root = (snapshot.task.worktree ?? '').replace(/\/$/, '')
   const inside = (path: string) => {
-    if (path.startsWith('/')) return root !== '' && path.startsWith(`${root}/`) ? path.slice(root.length + 1) : null
-    const relative = path.replace(/^\.\//, '')
-    return relative.startsWith('../') || relative.startsWith('~') ? null : relative
+    if (path.startsWith('/')) return root !== '' && normal(path).startsWith(`${root}/`) ? normal(path).slice(root.length + 1) : null
+    const relative = normal(path)
+    return relative.startsWith('../') || relative === '..' || relative.startsWith('~') ? null : relative
   }
   const seen = new Set<string>()
   for (const item of snapshot.items.toReversed()) {
