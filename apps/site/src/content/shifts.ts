@@ -45,25 +45,13 @@ export interface Shift {
   source: { name: string; url: string }
 }
 
+/** A change that is announced but hasn't happened yet. `date` is the day it takes effect. */
+export interface Upcoming extends Shift {
+  /** The day it was announced, YYYY-MM-DD. */
+  announced: string
+}
+
 export const SHIFTS: readonly Shift[] = [
-  {
-    id: 'opus-5-5-errors',
-    date: '2026-10-06',
-    kind: ShiftKind.Outage,
-    who: 'Anthropic',
-    title: 'Elevated errors on Claude Opus 5.5',
-    what: 'Requests to Opus 5.5 failed at an elevated rate for a window. The incident is marked resolved.',
-    source: { name: 'Claude Status', url: 'https://status.claude.com/incidents/ch27pb90bn85' },
-  },
-  {
-    id: 'credit-purchases-delayed',
-    date: '2026-10-01',
-    kind: ShiftKind.Outage,
-    who: 'Anthropic',
-    title: 'Credit purchases slow to show, so requests failed',
-    what: 'Bought credits took a while to reach account balances, and some requests failed for insufficient credit. Resolved the same day.',
-    source: { name: 'Claude Status', url: 'https://status.claude.com/incidents/k0h22tsvnydg' },
-  },
   {
     id: 'gpt-5-4-cyber-removed',
     date: '2026-10-01',
@@ -417,5 +405,119 @@ export const SHIFTS: readonly Shift[] = [
     title: 'Qwen3.8-Max',
     what: 'Alibaba’s new flagship: a 2.4-trillion-parameter model with a million-token window.',
     source: { name: 'DataNorth', url: 'https://datanorth.ai/news/alibaba-releases-qwen3-8-max' },
+  },
+]
+
+/*
+ * Upcoming: removals, retirements and new terms that are announced but not
+ * yet in effect, soonest first as written. The page hides one once its day has
+ * passed; move it into SHIFTS then, with what actually happened.
+ */
+export const UPCOMING: readonly Upcoming[] = [
+  {
+    id: 'gpt-5-5-leaves',
+    date: '2026-10-14',
+    announced: '2026-09-16',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'GPT-5.5 leaves ChatGPT and Codex',
+    what: 'Retired from ChatGPT, ChatGPT Work and Codex on every plan. The API is not affected, but Codex settings that pin it need to move first.',
+    source: {
+      name: 'BusinessToday',
+      url: 'https://www.businesstoday.in/technology/artificial-intelligence/story/openai-to-retire-gpt-5-5-from-chatgpt-work-and-codex-on-october-14-what-changes-to-expect-555782-2026-09-16',
+    },
+  },
+  {
+    id: 'openai-legacy-models-leave',
+    date: '2026-10-23',
+    announced: '2026-04-22',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'o1, o3-mini, GPT-4 and gpt-3.5-turbo leave the API',
+    what: 'Also o4-mini and the fine-tuned versions of these models. OpenAI’s replacements are GPT-5.6 models.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
+  },
+  {
+    id: 'chatgpt-pro-allowance-ends',
+    date: '2026-10-29',
+    announced: '2026-09-29',
+    kind: ShiftKind.Limits,
+    who: 'OpenAI',
+    title: 'ChatGPT Pro $200 subscribers lose the old allowance',
+    what: 'People already on the plan keep their old allowance until this day, then get the reopened plan’s, which is roughly half.',
+    source: { name: 'Kingy AI', url: 'https://kingy.ai/news/chatgpt-pro-200-usage-cut/' },
+  },
+  {
+    id: 'usage-policy-takes-effect',
+    date: '2026-11-12',
+    announced: '2026-10-09',
+    kind: ShiftKind.Access,
+    who: 'Anthropic',
+    title: 'Anthropic’s revised usage policy takes effect',
+    what: 'It bans sustained, needless abuse of Claude and tightens the rules on influence operations.',
+    source: {
+      name: 'The Register',
+      url: 'https://www.theregister.com/ai-and-ml/2026/10/09/anthropic-asks-users-to-stop-being-mean-to-claude/5302218',
+    },
+  },
+  {
+    id: 'cursor-openai-access-ends',
+    date: '2026-11-12',
+    announced: '2026-08-29',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'Cursor loses direct access to OpenAI’s models',
+    what: 'OpenAI’s upcoming models won’t go to Cursor either, now that SpaceX owns it.',
+    source: { name: 'CNBC', url: 'https://www.cnbc.com/2026/08/29/openai-cursor-spacex-model-access.html' },
+  },
+  {
+    id: 'sonnet-4-5-retires',
+    date: '2026-11-30',
+    announced: '2026-09-30',
+    kind: ShiftKind.Access,
+    who: 'Anthropic',
+    title: 'Claude Sonnet 4.5 retires from the Claude API',
+    what: 'Requests to it will fail after this day. Anthropic’s replacement is Sonnet 5.5.',
+    source: { name: 'Claude Platform docs', url: 'https://platform.claude.com/docs/en/about-claude/model-deprecations' },
+  },
+  {
+    id: 'openai-evals-prompts-agent-builder',
+    date: '2026-11-30',
+    announced: '2026-06-03',
+    kind: ShiftKind.Tools,
+    who: 'OpenAI',
+    title: 'Evals, reusable prompts and Agent Builder shut down',
+    what: 'Existing evals turn read-only on 31 October. OpenAI points to Promptfoo for evals and the Agents SDK for Agent Builder.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
+  },
+  {
+    id: 'gpt-5-o3-snapshots-leave',
+    date: '2026-12-11',
+    announced: '2026-06-11',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'GPT-5 and o3 snapshots leave the API',
+    what: 'Covers gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-pro, o3 and o3-pro. OpenAI’s replacements are GPT-5.6 models.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
+  },
+  {
+    id: 'openai-fine-tuning-ends',
+    date: '2027-01-06',
+    announced: '2026-05-07',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'OpenAI stops new fine-tuning jobs',
+    what: 'Existing customers can no longer create fine-tuning jobs. Fine-tuned models keep running until their base model is deprecated.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
+  },
+  {
+    id: 'gpt-5-3-codex-leaves',
+    date: '2027-04-01',
+    announced: '2026-10-01',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'gpt-5.3-codex, gpt-5.1 and gpt-5.4-nano leave the API',
+    what: 'Six months’ notice. OpenAI’s replacements are GPT-6 models.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
   },
 ]
