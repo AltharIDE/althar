@@ -5,9 +5,9 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 import { MARKED } from '../../fixtures/marks'
 import { Room } from '../../foundations/vocabulary'
 import { States, statesOn } from '../../storybook/States'
-import { BackCrumb } from '../BackCrumb/BackCrumb'
+import { IconButton } from '../../primitives/IconButton/IconButton'
+import { ChromeButton } from '../ChromeButton/ChromeButton'
 import { RoomSwitch } from '../RoomSwitch/RoomSwitch'
-import { TitleBar } from '../TitleBar/TitleBar'
 import { WorkStatus } from '../WorkStatus/WorkStatus'
 import { type ProjectTab, ProjectTabs, type ProjectTabsProps } from './ProjectTabs'
 
@@ -43,7 +43,7 @@ const TWENTY: ProjectTab[] = Array.from({ length: 20 }, (_, i) => {
   return { ...base, id, seed: id, name: i < ALL.length ? base.name : `${base.name} ${i}`, running: i % 5 === 1, yours: i % 7 === 3 ? 1 : 0 }
 })
 
-/* The strip at the top of a window, with the screen's own bar below it, as the app puts them. */
+/* The bar at the top of a window, with the screen's own controls at its end, as the app puts them. */
 function Window({ initial, current: start = 'meridian', ...props }: Partial<ProjectTabsProps> & { initial?: readonly ProjectTab[] }) {
   const [open, setOpen] = useState<readonly ProjectTab[]>(initial ?? ALL.slice(0, 3))
   const [current, setCurrent] = useState<string | null>(start)
@@ -69,18 +69,19 @@ function Window({ initial, current: start = 'meridian', ...props }: Partial<Proj
           setCurrent(id)
         }}
         onOpenFolder={fn()}
-        onCloseWindow={fn()}
-        onMinimize={fn()}
-        onToggleMaximize={fn()}
+        end={
+          shown ? (
+            <>
+              <RoomSwitch value={Room.Talk} onChange={fn()} />
+              {shown.yours > 0 && <WorkStatus yours={shown.yours} onYours={fn()} />}
+              <ChromeButton icon="plus" label="New task" onClick={fn()} />
+            </>
+          ) : (
+            <IconButton icon="gear" label="Settings" size="small" onClick={fn()} />
+          )
+        }
         {...props}
       />
-      <TitleBar lights="none" end={shown && <WorkStatus running={shown.running ? 2 : 0} yours={shown.yours} onYours={fn()} />}>
-        {shown ? (
-          <RoomSwitch value={Room.Talk} onChange={fn()} />
-        ) : (
-          <BackCrumb to="Home" onBack={fn()} task="" title="What waits on you, across every project" />
-        )}
-      </TitleBar>
     </div>
   )
 }
@@ -97,31 +98,16 @@ type Story = StoryObj<typeof meta>
 export const InAProject: Story = {}
 /** The home has the window; its tab counts what waits across every project. */
 export const AtHome: Story = { args: { current: null } }
-/** More open than fit: each tab gives way down to its mark and a few letters, and the strip scrolls. */
+/** More open than fit: each tab gives way down to its mark and a few letters, and the tabs scroll. */
 export const ManyOpen: Story = { args: { initial: MANY, current: 'billing-web' } }
-/** Twenty open: every tab gives way down to its mark, and the strip scrolls, by wheel too. */
+/** Twenty open: every tab gives way down to its mark, and the tabs scroll, by wheel too. */
 export const TwentyOpen: Story = { args: { initial: TWENTY, current: 'tessera-14' } }
 /** Nothing open yet but the home. */
 export const OnlyHome: Story = { args: { initial: [], current: null } }
 /** Every project open: the + only opens a folder. */
 export const EveryProjectOpen: Story = { args: { initial: ALL } }
-/** In the app the system draws the lights; the strip keeps their space. */
+/** In the app the system draws the lights; the bar keeps their space. */
 export const NativeLights: Story = { args: { lights: 'space' } }
-
-/** Off a Mac the same three dots are the window's own buttons; they answer to mouse and keyboard. */
-export const WindowButtons: Story = {
-  args: { onCloseWindow: fn(), onMinimize: fn(), onToggleMaximize: fn() },
-  play: async ({ canvasElement, args }) => {
-    const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Minimize the window' }))
-    await expect(args.onMinimize).toHaveBeenCalledTimes(1)
-    // Tab reaches them like any control, and Enter presses what it reaches.
-    const close = c.getByRole('button', { name: 'Close the window' })
-    close.focus()
-    await userEvent.keyboard('{Enter}')
-    await expect(args.onCloseWindow).toHaveBeenCalledTimes(1)
-  },
-}
 
 export const SwitchingOpeningAndClosing: Story = {
   play: async ({ canvasElement }) => {

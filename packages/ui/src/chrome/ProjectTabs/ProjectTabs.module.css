@@ -1,30 +1,29 @@
-/* The strip sits on the window's chrome; the tab that has the window is the
-   bar below it, so the two read as one sheet. */
+/* The window's one bar: the tabs from the start, the screen's own controls at the end. */
 .strip {
   position: relative;
   z-index: var(--z-float);
   display: flex;
-  align-items: flex-end;
+  align-items: center;
+  gap: 16px;
   min-width: 0;
-  height: 40px;
-  padding: 0 10px 0 12px;
+  height: 44px;
+  padding: 0 12px;
   background: var(--chrome);
   box-shadow: inset 0 -1px var(--line-2);
   -webkit-app-region: drag;
   user-select: none;
 }
 /* what can be pressed is not a drag handle */
-.strip :is(button, a) {
+.strip :is(button, a, input, [role='radio']) {
   -webkit-app-region: no-drag;
 }
 /* as wide as macOS draws its lights, from 16px in, with room after them */
 .lights {
   flex: none;
-  align-self: center;
   display: flex;
   gap: 9px;
   width: 66px;
-  margin-right: 10px;
+  margin-right: -6px;
   padding-left: 4px;
 }
 /* macOS keeps the system's lights' place: the dots are taken but empty */
@@ -38,14 +37,14 @@
   flex: 1;
   min-width: 0;
   display: flex;
-  align-items: flex-end;
-  gap: 4px;
+  align-items: center;
+  gap: 2px;
   height: 100%;
 }
 .pinned,
 .tabs {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 2px;
   height: 100%;
   margin: 0;
@@ -81,46 +80,32 @@
   display: flex;
   align-items: center;
   min-width: 0;
-  height: 32px;
-  border-radius: 8px 8px 0 0;
+  height: 28px;
+  border-radius: 7px;
   transition: background var(--fast) var(--ease);
 }
-/* each the same width, as a browser's are, giving way together down to its mark; the one with the window keeps its name */
+/* as wide as its name, giving way together down to its mark; the one with the window keeps its name */
 .project {
   flex: 0 1 auto;
-  width: 188px;
-  min-width: 46px;
-  container-type: inline-size;
+  max-width: 200px;
+  min-width: 44px;
 }
 .project.current {
-  min-width: 136px;
-}
-@container (max-width: 84px) {
-  .project .name,
-  .project .close {
-    display: none;
-  }
-  .project .select {
-    justify-content: center;
-    padding: 0 8px;
-  }
+  flex-shrink: 0;
+  min-width: 0;
 }
 .home {
   flex: none;
 }
 .tab:not(.current):hover {
-  background: var(--n-2);
+  background: var(--line);
 }
-/* the tab with the window is the bar below's own sheet, joined to it over the strip's line */
+/* the tab with the window: a sheet lifted off the bar */
 .current {
-  z-index: 1;
-  height: 33px;
-  margin-bottom: -1px;
   background: var(--n-1);
   box-shadow:
-    inset 1px 0 var(--line-2),
-    inset -1px 0 var(--line-2),
-    inset 0 1px var(--line-2);
+    0 0 0 1px var(--line-2),
+    var(--lift);
 }
 
 .select {
@@ -130,26 +115,39 @@
   align-items: center;
   gap: 7px;
   height: 100%;
-  padding: 0 12px 0 11px;
+  padding: 0 11px 0 10px;
+  overflow: hidden;
   border-radius: inherit;
   font-size: 12.5px;
   font-weight: 500;
-  color: var(--t-2);
+  color: var(--t-3);
   text-align: left;
 }
+.tab:hover .select,
 .current .select {
   color: var(--t-1);
 }
-/* room for the × that shows over the end of a project's tab */
+/* the end of a project's tab is one place: its dot at rest, its × when pointed at */
 .project .select {
-  padding-right: 30px;
+  padding-right: 25px;
+}
+.project .yours {
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  margin-top: -3px;
+  transition: opacity var(--fast) var(--ease);
+}
+.project:hover .yours,
+.project:has(.close:focus-visible) .yours {
+  opacity: 0;
 }
 .mark,
 .logo {
   flex: none;
 }
 .logo {
-  color: var(--t-2);
+  color: var(--t-3);
 }
 .current .logo {
   color: var(--t-1);
@@ -162,39 +160,47 @@
 }
 .yours {
   flex: none;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 99px;
   background: var(--signal);
 }
 /* the mark's drawing leaves 3px at its side, so the home's tab takes that much less there: the same space round both ends */
 .home .select {
-  padding: 0 12px 0 9px;
+  padding: 0 11px 0 8px;
 }
 
 .close {
   position: absolute;
   top: 50%;
-  right: 4px;
-  margin-top: -12px;
+  right: 3px;
+  margin-top: -11px;
+  width: 22px;
+  height: 22px;
   opacity: 0;
   transition: opacity var(--fast) var(--ease);
 }
 .tab:hover .close,
-.current .close,
 .close:focus-visible {
   opacity: 1;
 }
 
 .plus {
   flex: none;
-  align-self: center;
-  margin-top: 6px;
+}
+
+/* the screen's own controls */
+.end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .lights button,
   .tab,
+  .yours,
   .close {
     transition: none;
   }

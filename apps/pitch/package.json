@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Althar's investor brief and research note: a static site built with Vite+.",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vp dev",

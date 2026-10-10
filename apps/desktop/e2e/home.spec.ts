@@ -40,10 +40,11 @@ test('comes back to what runs and what waits across projects, with the projects 
     await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
     await tabs.getByRole('button', { name: /^Home/ }).click()
 
-    // The home has it running, and the project beside it.
+    // The home has it running in its project, at the side, and nothing in the middle asks for you; meridian's mark stands there instead.
     const projects = page.getByRole('complementary', { name: 'Projects' })
-    await expect(projects.getByRole('button', { name: /meridian/ })).toBeVisible()
-    await expect(page.getByRole('region', { name: /In progress/ }).getByRole('button', { name: LONG })).toBeVisible()
+    await expect(projects.getByRole('button', { name: /^meridian.*1 task in progress/ })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Nothing needs you' })).toBeVisible()
+    await expect(page.getByText('1 task moving in 1 project.')).toBeVisible()
 
     // Another project, opened from the home, with a task that is soon ready.
     await chooseFolder(electronApp, halyard)
@@ -53,8 +54,10 @@ test('comes back to what runs and what waits across projects, with the projects 
     await expect(page.getByText('Ready', { exact: true }).first()).toBeVisible()
     await tabs.getByRole('button', { name: /^Home/ }).click()
 
-    // Ready to accept is what needs you; what the lead did shows since you looked.
-    await expect(page.getByRole('heading', { name: 'Name the limits better', level: 3 })).toBeVisible()
+    // Ready to accept is what needs you, under its project's name; what the lead did is under the line of what happened since you looked.
+    await expect(page.getByRole('heading', { name: 'halyard', level: 3 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Name the limits better', level: 4 })).toBeVisible()
+    await page.getByRole('button', { name: /since you looked/ }).click()
     await expect(page.getByText('Implement finished')).toBeVisible()
     await expect(projects.getByRole('button', { name: /halyard/ })).toBeVisible()
     await page.screenshot({ path: 'test-results/home.png' })
@@ -67,7 +70,7 @@ test('comes back to what runs and what waits across projects, with the projects 
     await page.getByRole('button', { name: 'Merge into main' }).click()
     // Back at the home, what was accepted no longer waits on you.
     await tabs.getByRole('button', { name: /^Home/ }).click()
-    await expect(page.getByRole('heading', { name: 'Name the limits better', level: 3 })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Name the limits better', level: 4 })).toHaveCount(0)
 
     // Settings is a panel from the bar: the agents and their accounts, the code hosts, the app's icon and where Althar shows, kept in the profile.
     await page.keyboard.press('Meta+,')

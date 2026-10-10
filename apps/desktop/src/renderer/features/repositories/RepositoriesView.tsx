@@ -53,11 +53,14 @@ export function RepositoriesView({ model, onBack }: { model: RepositoriesModel; 
   // No tabs yet while a project is being formed: off a Mac the window's own buttons sit in the bar.
   const chrome = useWindowChrome()
   return (
-    <div className={s.window}>
-      <TitleBar {...chrome}>
-        <BackCrumb to={model.project ?? text.back} onBack={onBack} />
+    <div className={`${s.window} ${s.bare}`}>
+      <TitleBar {...chrome} className={s.over}>
+        {null}
       </TitleBar>
       <main className={s.scroll}>
+        <div className={s.back}>
+          <BackCrumb to={model.project ?? text.back} onBack={onBack} />
+        </div>
         {model.repositories === null ? (
           model.error === null ? (
             <PartPending label={pendingText.page} />

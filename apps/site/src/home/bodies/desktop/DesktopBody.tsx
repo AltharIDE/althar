@@ -69,7 +69,7 @@ function Screen({ children, label }: { children: ReactNode; label: string }) {
 /** The home on a Mac's screen; on a phone, the home's own narrow window, the stream alone. */
 function HomeScreen() {
   const phone = useNarrow()
-  const label = "Althar's home: three things that need you, five tasks running, and what happened since you looked"
+  const label = "Althar's home: three things that need you in the middle, and beside them every project with its work in progress"
   if (phone)
     return (
       <div className={s.narrowWrap}>
@@ -80,7 +80,7 @@ function HomeScreen() {
     )
   return (
     <Screen label={label}>
-      <Desktop island={<IslandOpen open={false} />}>
+      <Desktop island={<IslandOpen open={false} waiting={3} />}>
         <MacWindow style={{ left: 70, top: 26, width: 1300, height: 820 }}>
           <HomeWindow />
         </MacWindow>
@@ -100,7 +100,7 @@ export function DesktopBody() {
             Every project, every agent. <b>One window.</b>
           </>
         }
-        lead="What needs you, across every project, on top. Under it, everything running: which agent, which step, how long. Under that, what happened since you looked."
+        lead="What needs you, across every project, in the middle, answered where it is. Beside it, your projects, with a quiet tick for each task in progress. Under it, what happened since you looked."
       >
         <HomeScreen />
       </Scene>

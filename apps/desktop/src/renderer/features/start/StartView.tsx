@@ -116,7 +116,7 @@ export function StartView({
   /** The home, once there are projects. */
   home: () => ReactNode
 }) {
-  // No tabs yet on these screens: off a Mac the window's own buttons sit in their bars.
+  // No tabs yet on these screens: off a Mac the window's own buttons sit in their bar.
   const chrome = useWindowChrome()
   const opened = (project: ProjectSummary | null) => {
     if (project !== null) onProject(project.id)
@@ -129,8 +129,10 @@ export function StartView({
   if (model.forming !== null) {
     const { forming } = model
     return (
-      <div className={s.window}>
-        <TitleBar {...chrome}>{null}</TitleBar>
+      <div className={`${s.window} ${s.bare}`}>
+        <TitleBar {...chrome} className={s.over}>
+          {null}
+        </TitleBar>
         <div className={`${s.scroll} ${s.first}`}>
           <NewProject
             defaultName={forming.name}
