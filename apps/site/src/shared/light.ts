@@ -22,7 +22,8 @@ export const tonesOf = (d: number, heart: number): Tones => {
   if (u < 1) return ['#3550ff', '#4a6cff', '#9fb4ff']
   if (d < heart + 0.12) return ['#5aa2ff', '#a2cfff', '#e6f1ff']
   if (d < Math.max(0.8, heart + 0.2)) return ['#9fc6ff', '#d4e6ff', '#f3f7ff']
-  return ['#ffb995', '#ffd8c0', '#fff3ea']
+  // The app's warm, a touch softer.
+  return ['#ffc4a6', '#ffdeca', '#fff5ee']
 }
 
 /** How tall a column stands, as a share of the page: flat across the heart, then falling away, an arch. */
