@@ -14,6 +14,7 @@ import { refOf } from '../home/HomeView'
 /** Where in a project its tab was last: its conversation and board, its rules, its repositories, or one of its tasks. */
 export type Place =
   | { readonly kind: 'project' }
+  | { readonly kind: 'memory' }
   | { readonly kind: 'rules' }
   | { readonly kind: 'repositories' }
   | { readonly kind: 'thread'; readonly threadId: string }
@@ -33,12 +34,13 @@ export interface Kept {
 
 /** Where the window is, from its address. */
 export const whereOf = (pathname: string): Where => {
-  const project = /^\/projects\/([^/]+)(?:\/(rules|repositories))?\/?$/.exec(pathname)
+  const project = /^\/projects\/([^/]+)(?:\/(rules|repositories|memory))?\/?$/.exec(pathname)
   if (project?.[1] !== undefined)
     return {
       kind: 'project',
       projectId: decodeURIComponent(project[1]),
-      place: project[2] === 'rules' || project[2] === 'repositories' ? { kind: project[2] } : { kind: 'project' },
+      place:
+        project[2] === 'rules' || project[2] === 'repositories' || project[2] === 'memory' ? { kind: project[2] } : { kind: 'project' },
     }
   const thread = /^\/threads\/([^/]+)\/?$/.exec(pathname)
   if (thread?.[1] !== undefined) return { kind: 'thread', threadId: decodeURIComponent(thread[1]) }
@@ -92,7 +94,7 @@ const isRoom = (value: unknown): value is Room => Object.values(Room).some((room
 
 const isPlace = (value: unknown): value is Place => {
   if (typeof value !== 'object' || value === null || !('kind' in value)) return false
-  if (value.kind === 'project' || value.kind === 'rules' || value.kind === 'repositories') return true
+  if (value.kind === 'project' || value.kind === 'rules' || value.kind === 'repositories' || value.kind === 'memory') return true
   return value.kind === 'thread' && 'threadId' in value && typeof value.threadId === 'string'
 }
 

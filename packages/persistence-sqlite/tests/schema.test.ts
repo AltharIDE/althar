@@ -44,11 +44,11 @@ const withFile = <A, E, R>(use: (filename: string) => Effect.Effect<A, E, R>) =>
   )
 
 describe('schema', () => {
-  it.effect('creates every table as STRICT', () =>
+  it.effect('creates every application table as STRICT (FTS virtual and shadow tables are SQLite-managed)', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const tables = yield* sql<{ name: string; sql: string }>`
-        SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'schema_migrations'`
+        SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB 'project_memory_fts*' AND name <> 'schema_migrations'`
       assert.isAbove(tables.length, 80)
       for (const table of tables) assert.isTrue(table.sql.endsWith(') STRICT'), `${table.name} is not STRICT`)
     }).pipe(Effect.provide(InMemory)),

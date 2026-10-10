@@ -42,3 +42,18 @@ The profile's SQLite store, as described in [docs/architecture/07](../../docs/ar
 - **The artifact store** for bytes, content-addressed on disk, is not built; only artifact metadata is.
 - **WAL checkpoints, integrity checks, backup and restore,** which 07 requires, are not built.
 - **Raw protocol capture** is not in this database. The agent adapter hands it over frame by frame; writing it to a separate bounded file (docs/architecture/07) is not built yet.
+
+### Project memory storage
+
+Migration `0017_project_memory` adds a rebuildable text projection and FTS5 index
+of thread evidence, plus sampled source-revision history and deliberate
+active/retired state. A composite foreign key binds each projection to its source
+project. FTS virtual/shadow tables are SQLite-managed and cannot use STRICT;
+all application tables remain STRICT. Insert/update triggers keep FTS synchronized
+with projection transactions.
+
+`memory_source_bases` is captured by a thread-item insertion trigger in the same
+transaction as the durable evidence. This preserves the repository binding,
+base ref/commit and branch even if indexing occurs after the workspace changes.
+Pre-migration evidence has no invented historical snapshot. The runtime can
+retry failed projection batches without changing the original thread items.

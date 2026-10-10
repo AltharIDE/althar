@@ -11,6 +11,7 @@ The versioned client and runtime schemas of [docs/architecture/02](../../docs/ar
 | Module | What it does |
 | --- | --- |
 | `Api.ts` | The calls, their payloads, results and error, and the projections they return |
+| `memory.ts` | Attributed project evidence, bounded search results, source pages and indexed revision history; search/read RPCs are additive, and state changes carry an expected revision and a command receipt. |
 | `transport.ts` | Effect RPC over a message port: the port shapes each side has, and a protocol for each |
 
 ## Principles

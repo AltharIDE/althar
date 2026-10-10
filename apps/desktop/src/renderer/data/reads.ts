@@ -14,6 +14,7 @@ import type { Client } from './client'
  */
 
 export const keys = {
+  memory: (projectId: string) => ['memory', projectId] as const,
   projects: ['projects'] as const,
   /** The agents on this Mac, as the runtime last checked them. */
   status: ['status'] as const,
@@ -77,6 +78,13 @@ export const homeSince = (client: Client) => {
 }
 
 export const reads = (client: Client) => ({
+  memory: (projectId: string, query: string, includeRetired: boolean, offset: number) =>
+    queryOptions({
+      queryKey: [...keys.memory(projectId), 'search', query, includeRetired, offset],
+      queryFn: () => client.searchMemory({ projectId, query, includeRetired, offset, limit: 25 }),
+    }),
+  memoryDetail: (projectId: string, id: string, offset = 0) =>
+    queryOptions({ queryKey: [...keys.memory(projectId), 'detail', id, offset], queryFn: () => client.readMemory(projectId, id, offset) }),
   projects: () => queryOptions({ queryKey: keys.projects, queryFn: () => client.listProjects() }),
   status: () => queryOptions({ queryKey: keys.status, queryFn: () => client.status() }),
   home: () =>

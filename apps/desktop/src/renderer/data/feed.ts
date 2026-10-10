@@ -152,7 +152,14 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
   const heard = (event: WatchEvent) => {
     if (event._tag === 'Changed') {
       heardSoFar += 1
-      for (const read of wholeReads(event)) {
+      const memories =
+        event.projectId !== null && ['thread_item', 'project', 'task'].includes(event.aggregateType)
+          ? cache
+              .getQueryCache()
+              .findAll({ queryKey: keys.memory(event.projectId) })
+              .map((query) => ({ key: query.queryKey, offScreen: false }))
+          : []
+      for (const read of [...wholeReads(event), ...memories]) {
         const hash = hashKey(read.key)
         touched.set(hash, heardSoFar)
         // Off screen if any change gathered with it says so.

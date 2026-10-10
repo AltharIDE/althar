@@ -1,4 +1,7 @@
 import {
+  type MemoryDetail,
+  type MemorySearch,
+  type MemoryState,
   type AccountSignInState,
   type AccountStatus,
   type AgentModels,
@@ -54,6 +57,20 @@ import { RpcClient } from 'effect/rpc'
 export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<ProjectRulesView, 'projectId'>>
 
 export interface Client {
+  readonly searchMemory: (input: {
+    readonly projectId: string
+    readonly query: string
+    readonly includeRetired?: boolean
+    readonly limit?: number
+    readonly offset?: number
+  }) => Promise<MemorySearch>
+  readonly readMemory: (projectId: string, id: string, offset?: number) => Promise<MemoryDetail | null>
+  readonly setMemoryState: (input: {
+    readonly projectId: string
+    readonly id: string
+    readonly expectedRevision: number
+    readonly state: MemoryState
+  }) => Promise<boolean>
   /** The runtime's version and the agents on this Mac; `recheck` asks each agent again rather than trust the last minute's answer. */
   readonly status: (options?: { readonly recheck?: boolean }) => Promise<Status>
   readonly listProjects: () => Promise<ProjectList>
@@ -281,6 +298,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     }).pipe(Scope.provide(scope)),
   )
   return {
+    searchMemory: (input) => settle(api.SearchMemory(input)),
+    readMemory: (projectId, id, offset = 0) => settle(api.ReadMemory({ projectId, id, offset })),
+    setMemoryState: (input) => command((commandId) => api.SetMemoryState({ commandId, ...input })),
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),

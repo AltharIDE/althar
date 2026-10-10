@@ -75,7 +75,7 @@ export const useTabs = (): TabsModel => {
         projectId,
         threadId !== undefined
           ? { kind: 'thread', threadId }
-          : page === 'rules' || page === 'repositories'
+          : page === 'rules' || page === 'repositories' || page === 'memory'
             ? { kind: page }
             : { kind: 'project' },
       ),
@@ -89,6 +89,8 @@ export const useTabs = (): TabsModel => {
       switch (at.kind) {
         case 'project':
           return void navigate({ to: '/projects/$projectId', params: { projectId: id } })
+        case 'memory':
+          return void navigate({ to: '/projects/$projectId/memory', params: { projectId: id } })
         case 'rules':
           return void navigate({ to: '/projects/$projectId/rules', params: { projectId: id } })
         case 'repositories':

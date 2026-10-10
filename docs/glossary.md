@@ -9,6 +9,8 @@ say the right. When something new needs a name on screen, add it here first.
 | On screen | In the model | What it is |
 |---|---|---|
 | Project | `Project` | A body of work with its own rules, knowledge and history. It may have no repositories. |
+| Project memory | `project_memory`, derived from thread items | Attributed work, attempts and outcomes remembered across tasks and agents. It supplies context, not instructions or permission. |
+| Retire memory, Restore memory | `project_memory.state` | Exclude or include a remembered source in automatic project context; its original thread and recorded history stay intact. |
 | Repository | `RepositoryBinding` | A repository that the project's tasks may change, with its role. It is shared by everyone on the project. |
 | On this Mac, Map it later | `RepositoryLocation`, or none | Where this device keeps that repository. "Map it later" is a binding with no location here. On the Sources view that state is "needs mapping". |
 | Reading it | read-only inspection | What Althar does to a folder before a project exists. It changes nothing. |

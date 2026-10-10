@@ -50,6 +50,7 @@ MVVM in feature folders ([ADR-010](../../docs/decisions/010-desktop-app-mvvm.md)
 | `features/settings` | The agents on this Mac with their accounts, the code hosts and trackers, keeping the Mac awake and the editor files open in, notifications, the app's icon and where Althar shows in another app |
 | `features/project` | A project's menu (rename, its repositories, its rules, remove from Althar, each asked in a dialog first), on its bar and its tasks' bars. A project's window: the coordinator's thread with each task's card (its plan before it starts, then where it stands), the agent the coordinator runs on, and a task you plan yourself, beside it |
 | `features/board` | A project's board: its lanes, what waits on you in it, and the dock the home used to open, now unused |
+| `features/memory` | Searchable project evidence (ADR-018), source pages and provenance, indexed revisions, and optimistic retirement/restoration. The existing project tab owns the route; project and thread-item changes invalidate its cached reads. Capture happens in the runtime, independently of this screen. |
 | `features/rules` | A project's rules (ADR-013): who answers, what always asks and what is never allowed, how a task ends, usage limits and accounts; each change saved at once |
 | `features/repositories` | A project's repositories: adding a folder, leaving one out, each one's role, and where a fork's pull requests open; each change saved at once |
 | `features/task` | A task's thread, the calls waiting on you, the composer, and what it changed |

@@ -107,3 +107,35 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 - **Sessions are not loaded after a restart;** a lost session stays lost, and the person starts a new one.
 - **Raw protocol capture** is not written to its bounded file yet.
 - **Questions the agent asks** (ACP elicitation) are cancelled; they don't become attention requests yet.
+
+### Project evidence memory
+
+`memory.ts` builds a derived, project-scoped FTS5 index over durable thread items.
+Reads catch up changed source revisions in at most eight cooperative transactions
+of 256 items, newest first. The returned pending count and briefing warning expose
+an incomplete initial index; subsequent searches continue catch-up. Direct source
+reads and state changes refresh only that source, including during a backlog. Processing failure rolls back the batch, retaining source
+items for retry. Session delivery catches and reports that failure without
+blocking ordinary work.
+
+Extraction preserves attributed person statements, agent reports, plans, step
+results, notices and observed tool status with retained command/path essentials.
+It does not generate semantic facts or inferred root causes. Conflicting reports
+remain separate evidence. Raw tool output and file bodies are never added by the
+projection. Source revision history records the revisions encountered during
+indexing, not every intervening recorder checkpoint.
+
+Search tokenizes a bounded lexical query and ranks all indexed evidence with
+FTS5 BM25. Empty queries browse recent evidence; unmatched lexical queries return
+no evidence. Briefing diversifies up to four source anchors across other threads, adds up to
+two lexical anchors from the active thread, and includes nearby source items, so an attempted approach and qualified follow-up
+can accompany a matching failure. The active-thread allowance accepts bounded duplication because even one oversized
+recent transcript item can evict an older failure. Its 8,000-character budget is separate from
+thread history. Explicit source reads page through retained text; source IDs,
+provider/session/task attribution, revision and repository bases remain visible.
+
+The migration snapshots repository bases atomically at source insertion. Legacy
+items have unknown bases rather than today's checkout. Retirement is deliberate
+state preserved when a source changes; optimistic revision checks guard edits.
+Withdrawn person inputs are excluded at read time even if already indexed.
+Historical memory is data, never repository instructions or permission grants.

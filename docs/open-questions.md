@@ -564,11 +564,17 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 
 ## Memory and where things live
 
-- [ ] **Where memory lives, including review instructions.** Everything in
-  the repo (`.althar/review.md`, rules) is reviewable, diffable and travels
-  with the code, but it is crude, and not everything belongs in git. The
-  alternative is Althar's own project store. Maybe a mix: instructions in
-  the repo, learned context in the store. This needs its own conversation.
+- [x] **Where memory lives, including review instructions.** Settled on
+  10 October 2026 in [ADR-018](decisions/018-project-memory-from-durable-work.md):
+  deliberate instructions stay in the repository; learned context belongs
+  in Althar's persistent project store. Automatic capture and bounded
+  retrieval carry work across tasks and providers, including interrupted
+  sessions, without approval of each observation.
+- [ ] **Semantic consolidation and retrieval.** The first design keeps
+  attributed extracts and uses lexical search. When do paraphrase misses or
+  repeated reports justify model-assisted consolidation or embeddings?
+  Decide from retrieval and continuity evaluations, retaining source evidence
+  and the separation between observed outcomes and inferred causes.
 - [ ] **When a dismissal reaches `review.md`.** At dismissal, or once the
   knowledge candidate is accepted? Leaning: once accepted, with the line shown
   as pending until then.

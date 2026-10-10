@@ -13,6 +13,7 @@ export interface ProjectMenuText {
   label: string
   rename: string
   repositories: string
+  memory: string
   rules: string
   remove: string
 }
@@ -22,6 +23,7 @@ export const projectMenuText: ProjectMenuText = {
   label: 'This project',
   rename: 'Rename',
   repositories: 'Repositories',
+  memory: 'Project memory',
   rules: 'Project rules',
   remove: 'Remove from Althar',
 }
@@ -31,13 +33,14 @@ export interface ProjectMenuItemsProps {
   repositories?: number
   onRename?: () => void
   onRepositories?: () => void
+  onMemory?: () => void
   onRules?: () => void
   onRemove?: () => void
   text?: Partial<ProjectMenuText>
 }
 
 /** The project's items, for a menu of its own or another's, such as the head of its conversation. */
-export function ProjectMenuItems({ repositories, onRename, onRepositories, onRules, onRemove, text }: ProjectMenuItemsProps) {
+export function ProjectMenuItems({ repositories, onRename, onRepositories, onRules, onMemory, onRemove, text }: ProjectMenuItemsProps) {
   const t = { ...projectMenuText, ...text }
   return (
     <>
@@ -51,6 +54,11 @@ export function ProjectMenuItems({ repositories, onRename, onRepositories, onRul
           {t.repositories}
         </MenuItem>
       )}
+      {onMemory && (
+        <MenuItem icon="list" onSelect={onMemory}>
+          {t.memory}
+        </MenuItem>
+      )}
       {onRules && (
         <MenuItem icon="gear" onSelect={onRules}>
           {t.rules}
@@ -58,7 +66,7 @@ export function ProjectMenuItems({ repositories, onRename, onRepositories, onRul
       )}
       {onRemove && (
         <>
-          {(onRename || onRepositories || onRules) && <MenuSeparator />}
+          {(onRename || onRepositories || onRules || onMemory) && <MenuSeparator />}
           <MenuItem icon="close" tone="danger" onSelect={onRemove}>
             {t.remove}
           </MenuItem>
@@ -77,7 +85,7 @@ export interface ProjectMenuProps extends ProjectMenuItemsProps {
 /** The project's menu, behind the bar's more button. With nothing to offer, no button. */
 export function ProjectMenu({ open, defaultOpen, onOpenChange, ...items }: ProjectMenuProps) {
   const t = { ...projectMenuText, ...items.text }
-  if (!items.onRename && !items.onRepositories && !items.onRules && !items.onRemove) return null
+  if (!items.onRename && !items.onRepositories && !items.onRules && !items.onMemory && !items.onRemove) return null
   return (
     <Menu
       label={t.label}

@@ -40,6 +40,8 @@ import { reviewCopyOf } from './reviewCopy'
 import { defaultEffortOf } from './preferences'
 import { addItem, recorder, transcript } from './threads'
 import { ToolServer } from './ToolServer'
+import { memoryBrief } from './memory'
+import { memoryTools } from './memoryTools'
 import { agentSaid, summarize } from './words'
 
 /*
@@ -350,6 +352,8 @@ export class Sessions extends Context.Service<
       const accounts = yield* Accounts
       const limits = yield* Limits
       const toolServer = yield* ToolServer
+      const memory = memoryTools(yield* SqlClient.SqlClient)
+      for (const role of ['lead', 'reviewer', 'coordinator'] as const) yield* toolServer.serve(role, memory)
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
@@ -486,7 +490,27 @@ export class Sessions extends Context.Service<
               Effect.catchCause((cause) => Effect.logWarning('Could not refresh the coordinator folder', cause)),
             )
           const brief = running.brief
-          const prompt = promptFor(inputs, brief)
+          // Read at delivery, not session construction: another task may have learned
+          // something while this session was idle. Failed indexing never loses the
+          // durable thread evidence or prevents this task from running.
+          const query = [
+            ...inputs.map((input) => input.body),
+            thread.role === 'coordinator' ? thread.projectName : `${thread.title} ${thread.description}`,
+          ].join(' ')
+          const remembered = yield* memoryBrief(thread.projectId, query, thread.threadId).pipe(
+            Effect.catchCause((cause) =>
+              Effect.andThen(
+                Effect.logWarning('Could not prepare project memory; source work remains durable', cause),
+                Effect.succeed(
+                  'Project memory is temporarily unavailable. Do not infer that there is no prior work. Use search_memory to retry.',
+                ),
+              ),
+            ),
+          )
+          const prompt = [
+            promptFor(inputs, brief),
+            ...(remembered === '' ? [] : [`<althar-project-memory>\n${remembered}\n</althar-project-memory>`]),
+          ].join('\n\n')
           const turnId = yield* newId(Ids.turnDelivery)
           const [session] = yield* sql<{
             model: string | null

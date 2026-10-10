@@ -1502,3 +1502,43 @@ describe('thread items', () => {
     })
   })
 })
+
+describe('project memory API', () => {
+  it.live('searches and reads sources, persists retirement receipts, and rejects stale revisions', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Checkout memory' })
+        yield* client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'codex' })
+        yield* eventually(client.GetThread({ threadId: task.threadId }), idle)
+        const found = yield* client.SearchMemory({ projectId: project.id, query: 'Checkout' })
+        const source = found.entries[0]
+        assert.isDefined(source)
+        if (source === undefined) return
+        const detail = yield* client.ReadMemory({ projectId: project.id, id: source.id })
+        assert.strictEqual(detail?.threadId, task.threadId)
+        const request = {
+          commandId: commandId(),
+          projectId: project.id,
+          id: source.id,
+          expectedRevision: source.revision,
+          state: 'retired' as const,
+        }
+        assert.isTrue(yield* client.SetMemoryState(request))
+        // A retry returns its durable original receipt, not a revision conflict.
+        assert.isTrue(yield* client.SetMemoryState(request))
+        assert.isFalse((yield* client.SearchMemory({ projectId: project.id, query: '' })).entries.some((entry) => entry.id === source.id))
+        const retired = yield* client.ReadMemory({ projectId: project.id, id: source.id })
+        assert.strictEqual(retired?.state, 'retired')
+        assert.isFalse(yield* client.SetMemoryState({ ...request, commandId: commandId(), state: 'active' }))
+        assert.isTrue(
+          yield* client.SetMemoryState({ ...request, commandId: commandId(), expectedRevision: retired?.revision ?? 0, state: 'active' }),
+        )
+        const other = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        assert.isNull(yield* client.ReadMemory({ projectId: other.id, id: source.id }))
+        assert.isFalse(yield* client.SetMemoryState({ ...request, commandId: commandId(), projectId: other.id }))
+      }),
+    ),
+  )
+})

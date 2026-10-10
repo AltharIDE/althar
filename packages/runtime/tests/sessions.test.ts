@@ -153,7 +153,7 @@ describe('sessions', () => {
         .filter((item) => item.kind === 'agent_message')
         .map((item) => item.content.text)
       assert.strictEqual(
-        replies.at(-1),
+        String(replies.at(-1)).split('\n\n<althar-project-memory>')[0],
         `echo: ${promptFor([{ body: 'use the retry helper', disposition: 'interrupt_and_continue' }], undefined)}`,
       )
     }).pipe(Effect.provide(runtime())),
@@ -199,8 +199,10 @@ describe('sessions', () => {
         const itemId = (yield* message(sent.inputId)).itemId
         if (round % 2 === 1) yield* Effect.yieldNow
         const taken = yield* Effect.exit(takeBack(itemId))
+        // Historical evidence may follow the current input; only the delivery body
+        // determines whether this particular message reached the agent.
         const given = <A extends { readonly prompt: string | null }>(rows: ReadonlyArray<A>) =>
-          rows.filter((row) => row.prompt?.endsWith(body))
+          rows.filter((row) => row.prompt?.split('\n\n<althar-project-memory>')[0]?.endsWith(body))
         if (taken._tag === 'Success') {
           // Taken back: it stays out of every turn, now and after.
           assert.strictEqual((yield* message(sent.inputId)).state, 'withdrawn')
@@ -382,7 +384,7 @@ describe('sessions', () => {
         [second],
       )
       assert.include(given[0]?.prompt, 'You are taking over a task from Fake claude-code')
-      assert.isTrue(given[0]?.prompt.endsWith(body))
+      assert.isTrue(given[0]?.prompt.split('\n\n<althar-project-memory>')[0]?.endsWith(body))
       assert.notInclude(given[0]?.prompt, 'Carry on with the task from where it stands.')
       assert.notStrictEqual(first, second)
       // It is on the model asked for from the moment it starts.
@@ -476,7 +478,7 @@ describe('sessions', () => {
         const reply = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'agent_message').at(-1)?.content.text as string
         assert.include(reply, 'You are taking over a task, in the same worktree.')
         assert.include(reply, '[person] start with the worker')
-        assert.isTrue(reply.endsWith('start with the worker'))
+        assert.isTrue(reply.split('\n\n<althar-project-memory>')[0]?.endsWith('start with the worker'))
       }).pipe(Effect.provide(runtime())),
     )
 

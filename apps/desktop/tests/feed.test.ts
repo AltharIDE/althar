@@ -34,6 +34,23 @@ const later = <A>() => {
 }
 
 describe('the window’s watch', () => {
+  it('invalidates only the affected project memory on capture and state edits', async () => {
+    const { cache, emit, read } = opened()
+    const first = read.memory('p1', 'failure', false, 0)
+    const second = read.memory('p2', 'failure', false, 0)
+    const detail = read.memoryDetail('p1', 'm1')
+    await Promise.all([cache.fetchQuery(first), cache.fetchQuery(second), cache.fetchQuery(detail)])
+    emit(changed('thread_item', 'i1', 'th1', 'p1'))
+    await settle()
+    expect(cache.getQueryState(first.queryKey)?.isInvalidated).toBe(true)
+    expect(cache.getQueryState(detail.queryKey)?.isInvalidated).toBe(true)
+    expect(cache.getQueryState(second.queryKey)?.isInvalidated).toBe(false)
+    await cache.fetchQuery(first)
+    emit(changed('project', 'p1', null, 'p1'))
+    await settle()
+    expect(cache.getQueryState(first.queryKey)?.isInvalidated).toBe(true)
+  })
+
   it('watches from where the window started, and passes every change to whoever listens, from then on', () => {
     const { feed, emit, watching } = opened()
     expect(watching).toEqual([7])

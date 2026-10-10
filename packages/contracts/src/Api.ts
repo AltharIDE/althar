@@ -1,6 +1,8 @@
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
+import { MemoryDetail, MemorySearch, MemoryState } from './memory'
+
 /*
  * What a client can ask the runtime (docs/architecture/02): commands that
  * change state, queries that return what a screen shows, and one stream of
@@ -1273,6 +1275,33 @@ export const Api = RpcGroup.make(
   /** A code the browser's page showed, for the agent. */
   command('PasteAccountSignInCode', { flowId: Schema.String, code: Schema.String }, Schema.Void),
   command('CancelAccountSignIn', { flowId: Schema.String }, Schema.Void),
+  /** Historical project evidence and its lifecycle. */
+  call(
+    'SearchMemory',
+    {
+      projectId: Schema.String,
+      query: Schema.String.check(Schema.isMaxLength(2000)),
+      includeRetired: Schema.optional(Schema.Boolean),
+      limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))),
+      offset: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100000 }))),
+    },
+    MemorySearch,
+  ),
+  call(
+    'ReadMemory',
+    { projectId: Schema.String, id: Schema.String, offset: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))) },
+    Schema.NullOr(MemoryDetail),
+  ),
+  command(
+    'SetMemoryState',
+    {
+      projectId: Schema.String,
+      id: Schema.String,
+      expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      state: MemoryState,
+    },
+    Schema.Boolean,
+  ),
   /** A project's rules. */
   call('GetProjectRules', { projectId: Schema.String }, ProjectRulesView),
   /**

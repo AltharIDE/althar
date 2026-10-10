@@ -12,15 +12,17 @@ import type { ProjectMenuModel } from './useProjectMenu'
 export interface ProjectMenuActions {
   readonly model: ProjectMenuModel
   readonly onRepositories: () => void
+  readonly onMemory?: () => void
   readonly onRules: () => void
 }
 
 /** What the kit's menu takes, from the model and the places it opens. */
-const itemsOf = ({ model, onRepositories, onRules }: ProjectMenuActions) => ({
+const itemsOf = ({ model, onRepositories, onRules, onMemory }: ProjectMenuActions) => ({
   ...(model.project === null ? {} : { repositories: model.project.repositories.length }),
   onRename: () => model.ask('rename'),
   onRepositories,
   onRules,
+  ...(onMemory === undefined ? {} : { onMemory }),
   onRemove: () => model.ask('remove'),
 })
 

@@ -15,8 +15,8 @@ import {
   type ProjectRulesView,
 } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
-import { Ledger } from '@althar/persistence-sqlite'
-import { Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
+import { Commands, Ledger } from '@althar/persistence-sqlite'
+import { Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Schema, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
@@ -41,7 +41,8 @@ import { Permissions } from './Permissions'
 import { Projects } from './Projects'
 import { Nudges } from './Nudges'
 import { Queries } from './Queries'
-import { timestamp } from './records'
+import { fact, timestamp } from './records'
+import { readMemory, searchMemory, setMemoryState } from './memory'
 import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
 import { Plans } from './Plans'
@@ -128,6 +129,7 @@ export const handlers = Api.toLayer(
     const instance = yield* Instance
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
+    const commands = yield* Commands
     const agents = yield* Agents
     const config = yield* RuntimeConfig
     const connections = yield* Connections
@@ -327,6 +329,48 @@ export const handlers = Api.toLayer(
           }),
         ),
       ListProjects: () => api(queries.projects),
+      SearchMemory: ({ projectId, query, ...options }) =>
+        api(
+          searchMemory(projectId, query, {
+            ...(options.includeRetired === undefined ? {} : { includeRetired: options.includeRetired }),
+            ...(options.limit === undefined ? {} : { limit: options.limit }),
+            ...(options.offset === undefined ? {} : { offset: options.offset }),
+          }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+        ),
+      ReadMemory: ({ projectId, id, offset }) =>
+        api(readMemory(projectId, id, offset).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetMemoryState: ({ commandId, ...input }) =>
+        api(
+          Effect.gen(function* () {
+            const said = yield* envelope('project.memory_state_changed', input, commandId)
+            return yield* commands.execute({
+              envelope: said,
+              projectId: input.projectId as ProjectId,
+              result: Schema.Boolean,
+              handle: Effect.gen(function* () {
+                const changed = yield* setMemoryState(input.projectId, input.id, input.expectedRevision, input.state)
+                if (changed) {
+                  const [project] = yield* sql<{
+                    revision: number
+                  }>`UPDATE projects SET revision=revision+1 WHERE id=${input.projectId} RETURNING revision`
+                  if (project === undefined) return yield* new NotFound({ kind: 'project', id: input.projectId })
+                  const revision = project.revision
+                  yield* fact({
+                    projectId: input.projectId as ProjectId,
+                    aggregateType: 'project',
+                    aggregateId: input.projectId,
+                    revision,
+                    type: 'project.memory_state_changed',
+                    payload: { id: input.id, state: input.state },
+                    actorId: said.actorId,
+                    commandId: said.commandId,
+                  })
+                }
+                return changed
+              }).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.provideService(Ledger, ledger)),
+            })
+          }),
+        ),
       ReadFolder: ({ grant }) =>
         api(
           Effect.gen(function* () {

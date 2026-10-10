@@ -29,6 +29,8 @@
   - Editing `CLAUDE.md` or `AGENTS.md`: changes the user's repository.
 - **Trade-off:** a long record costs tokens. The new agent continues work it
   didn't do; research suggests that can hurt when moving to a stronger model.
+- **Related:** [ADR-018](018-project-memory-from-durable-work.md) extends
+  briefing with project memory across tasks and providers, refreshed on
+  delivered turns.
 - **Revisit when:** tuning switches (a fresh take, starting from base, a
-  generated handoff); when memory arrives, since knowledge enters sessions
-  through the brief.
+  generated handoff).

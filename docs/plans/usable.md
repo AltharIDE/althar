@@ -16,7 +16,10 @@ Althar solves two problems:
    ask when something really is yours.
 
 The shell prototype (`althar-designs/prototypes/shell`) is the target,
-without the knowledge graph, which is set aside for now. Most of what the
+without the knowledge graph, which is set aside for now. Project continuity
+is separate: [project memory](project-memory.md) derives searchable context
+from durable work across tasks and providers, without requiring graph
+storage ([ADR-018](../decisions/018-project-memory-from-durable-work.md)). Most of what the
 prototype shows is already in the kit (`@althar/ui`); what's missing is
 the runtime behind it and the app wiring it up.
 

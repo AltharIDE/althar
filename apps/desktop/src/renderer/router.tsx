@@ -1,5 +1,6 @@
 import { createHashHistory, createRouter, type RouterHistory } from '@tanstack/react-router'
 
+import { memoryRoute } from './features/memory/route'
 import { projectRoute } from './features/project/route'
 import { repositoriesRoute } from './features/repositories/route'
 import { rulesRoute } from './features/rules/route'
@@ -18,7 +19,7 @@ import { type RouterContext, rootRoute } from './root'
  * then long enough not to flash.
  */
 
-export const routeTree = rootRoute.addChildren([startRoute, projectRoute, rulesRoute, repositoriesRoute, taskRoute])
+export const routeTree = rootRoute.addChildren([startRoute, projectRoute, memoryRoute, rulesRoute, repositoriesRoute, taskRoute])
 
 /** How long a read may take before the place's outline shows, and how long the outline stays once it does. */
 export const PENDING = { after: 150, atLeast: 300 }

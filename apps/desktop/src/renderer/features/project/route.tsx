@@ -33,6 +33,7 @@ function Project() {
       menu={{
         model: menu,
         onRepositories: () => void navigate({ to: '/projects/$projectId/repositories', params: { projectId } }),
+        onMemory: () => void navigate({ to: '/projects/$projectId/memory', params: { projectId } }),
         onRules: () => void navigate({ to: '/projects/$projectId/rules', params: { projectId } }),
       }}
     />

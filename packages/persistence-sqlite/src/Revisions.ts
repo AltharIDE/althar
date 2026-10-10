@@ -10,6 +10,7 @@ import { RevisionConflict, RowNotFound } from './errors'
  */
 export const revisionedTables = [
   'projects',
+  'project_memory',
   'project_settings',
   'tasks',
   'task_repository_requirements',

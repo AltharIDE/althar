@@ -18,6 +18,8 @@ import type { InProcessAgent } from '../AgentConnection'
 export const scenarios = {
   /** Two message chunks, then the turn ends with usage. */
   hello: 'hello',
+  /** A failed experiment checkpoint, then waits for interruption without a final report. */
+  memoryFailure: 'memory-failure',
   /** A thought, then a message. */
   think: 'think',
   /** A tool call that asks permission, then succeeds or fails on the answer. */
@@ -551,7 +553,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       const session = sessionOf(params.sessionId)
       session.cancelled = false
-      const text = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
+      const received = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
+      // Scenario controls belong to the current request, never quoted project history.
+      const text = received.replace(/\n\n<althar-project-memory>[\s\S]*<\/althar-project-memory>$/, '')
       const out = options.outOfUsage
       if (out !== undefined && (out.until === undefined || Date.now() < out.until))
         throw new acp.RequestError(
@@ -738,6 +742,26 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await update({ sessionUpdate: 'current_mode_update', currentModeId: session.mode })
           await update({ sessionUpdate: 'available_commands_update', availableCommands: [] })
           return ended()
+        case scenarios.memoryFailure:
+          await say(
+            'Tried sharing the checkout retry cache across requests. The isolation test failed. I suspect the cache key omits the account, but have not verified the cause. Next: compare keys for two accounts; the concurrency question is unresolved.',
+          )
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'memory-test',
+            title: 'Checkout isolation test',
+            kind: 'execute',
+            status: 'in_progress',
+            rawInput: { command: 'bun test checkout-isolation' },
+          })
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'memory-test',
+            status: 'failed',
+            rawOutput: 'SECRET_OUTPUT_CANARY_NOT_RETAINED',
+          })
+          for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+          return { stopReason: session.cancelled ? 'cancelled' : 'end_turn' }
         case scenarios.slow:
           await say('Starting')
           for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
@@ -761,7 +785,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           options.exit?.()
           throw acp.RequestError.internalError(undefined, 'This agent can only exit as a process')
         default:
-          await say(`echo: ${text}`)
+          await say(`echo: ${received}`)
           return ended()
       }
     })

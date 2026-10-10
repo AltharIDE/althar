@@ -320,7 +320,48 @@ Rules:
   the agent reads it when it needs it.
 - The brief sent is recorded as an artifact on the attempt, so what an agent
   was told is always inspectable.
-- Project knowledge, when memory is built, enters sessions through the brief.
+- Project memory enters sessions through bounded context on each delivered
+  turn, not only the initial brief. Retrieval uses the task and incoming
+  input and spans other tasks and providers in the same project. A small
+  same-thread allowance recovers older evidence evicted from the transcript;
+  pending current inputs are excluded. Search and source-reading tools expose
+  retained details ([ADR-018](../decisions/018-project-memory-from-durable-work.md)).
+
+### Project memory
+
+Durable thread items supply memory even when a session stops without a
+handover. Incremental, extractive projections preserve agent reports, plans,
+recorded tool outcomes and step results with source and workspace-base
+provenance. They do not turn speculation into an established cause: a failed
+tool status says the tool failed, while an agent's explanation stays an
+attributed report. Raw tool output and file bodies remain excluded.
+
+SQLite full-text retrieval selects bounded excerpts across the project,
+bundling nearby thread sequence items without inferring a causal link.
+Source access pages through retained detail on demand. Projections are built
+lazily at retrieval: each query processes at most 2,048 pending sources,
+newest changes first. The brief and UI report the remaining count; repeated
+queries continue catch-up. A partially indexed backlog can omit older work.
+Direct source reads and retirement refresh only the requested source.
+
+Revision history contains indexed revisions, not every streaming checkpoint.
+Explicit retirement keeps corrections inspectable. Conflicting reports
+remain visible. Workspace bases are captured atomically when a source item
+is inserted; legacy sources have unknown bases. These snapshots help the
+reader check applicability against current code. Memory is evidence, not
+instructions or permission grants.
+
+Processing failures preserve source work, log the failure and tell the agent
+that memory is unavailable without aborting its turn; a later retrieval
+retries. New context reaches active sessions on their next delivered turn.
+The project UI exposes search and source navigation, plus retirement and
+restoration with revision checks. Capture does not depend on anyone opening
+that UI or approving an observation.
+
+The [implementation and verification plan](../plans/project-memory.md)
+describes the acceptance cases. Lexical search can miss paraphrases, and
+extractive consolidation does not infer lessons or resolve semantic
+contradictions. Those are explicit limits of this first design.
 
 ## Switching model or agent
 
