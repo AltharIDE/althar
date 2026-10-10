@@ -400,7 +400,11 @@ export const parseCommandLine = (text: string): Parsed => {
     if (program !== undefined && /^(ba|z|da|k)?sh$/.test(program.split('/').at(-1) ?? '') && flag !== -1 && args[flag + 1] !== undefined) {
       const script = parseCommandLine(args[flag + 1] ?? '')
       if (script.opaque) opaque = true
-      return [...script.commands]
+      // Where the shell's own output goes stays a command of its own, made of its redirects alone: `sh -c '…' > ~/.zshrc`.
+      const redirected = inner.flatMap((word, index) =>
+        REDIRECTS.includes(word) ? [word, ...(inner[index + 1] === undefined ? [] : [inner[index + 1] ?? ''])] : [],
+      )
+      return [...script.commands, ...(redirected.length === 0 ? [] : [redirected])]
     }
     if (program === 'eval' || program === 'xargs' || program === 'source' || program === '.') opaque = true
     return [inner]
@@ -440,7 +444,7 @@ const unwrap = (command: ReadonlyArray<string>): ReadonlyArray<string> => {
 export const programOf = (text: string): string | undefined => {
   for (const words of parseCommandLine(text).commands) {
     const [program, next] = unwrap(words)
-    if (program === undefined || program === 'cd') continue
+    if (program === undefined || program === 'cd' || REDIRECTS.includes(program)) continue
     const name = program.slice(program.lastIndexOf('/') + 1)
     return next !== undefined && /^[a-z][a-z-]{0,22}[a-z0-9]?$/.test(next) ? `${name} ${next}` : name
   }
@@ -701,12 +705,20 @@ const commandsIn = (words: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<s
 const WRITES_ALL = ['touch', 'mkdir', 'rm', 'rmdir', 'tee', 'truncate', 'chmod', 'chown', 'chgrp', 'unlink', 'shred']
 const WRITES_LAST = ['cp', 'mv', 'ln', 'install', 'rsync', 'scp']
 
+/** Where a command's output goes, as its redirects say: files, not other streams (`2>&1`). */
+const redirects = (words: ReadonlyArray<string>): ReadonlyArray<string> =>
+  words.flatMap((word, index) => {
+    const target = words[index + 1]
+    return REDIRECTS.slice(0, 4).includes(word) && target !== undefined && !target.startsWith('&') ? [target] : []
+  })
+
+/** A command made only of the redirects a shell wrapper carried, for where its script's output goes. */
+const onlyRedirects = (words: ReadonlyArray<string>) => REDIRECTS.includes(words[0] ?? '')
+
 /** The places a command writes, as far as its words say. */
 const writes = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
-  const targets: Array<string> = []
-  words.forEach((word, index) => {
-    const target = words[index + 1]
-    if (REDIRECTS.slice(0, 4).includes(word) && target !== undefined && !target.startsWith('&')) targets.push(target)
+  const targets: Array<string> = [...redirects(words)]
+  words.forEach((word) => {
     if (word.startsWith('of=')) targets.push(word.slice(3))
   })
   const program = (words[0] ?? '').split('/').at(-1) ?? ''
@@ -719,10 +731,12 @@ const writes = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
   return targets
 }
 
-/** One command of a line, and what of it the rules keep for the person. */
+/** One command of a line, and what of it the rules keep for the person: every kind, and those of where its output goes. */
 interface CommandKinds {
   readonly words: ReadonlyArray<string>
   readonly kinds: ReadonlyArray<Kept>
+  /** Writes outside the worktree its redirects make, which no rule for the command itself covers. */
+  readonly redirected: ReadonlyArray<Kept>
 }
 
 /** Each command of a line, as the shell would run them, with every kind each one is. */
@@ -732,13 +746,15 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
   let cwd = context.worktree
   const each: Array<CommandKinds> = []
   for (const words of commands) {
-    const kinds: Array<Kept> = []
-    each.push({ words, kinds })
+    // Where its output goes, whatever the command: `git status > ~/.zshrc`, `cd . > ~/.zshrc`, from where it runs.
+    const redirected = redirects(words)
+      .filter((path) => outside(where, locate(where, cwd, path)))
+      .slice(0, 1)
+      .map((path) => kept(`Writing outside the task's worktree always asks: ${path}`, 'outside'))
+    const kinds: Array<Kept> = [...redirected]
+    each.push({ words, kinds, redirected })
     if (commandsIn(words).some(deploys)) kinds.push(kept('Deploying or publishing always asks.', 'deploy'))
     if (words[0] === 'cd') {
-      // `cd` writes nothing itself, but a redirect on it does, from where it was: `cd . > ~/.zshrc`.
-      const target = writes(words).find((path) => outside(where, locate(where, cwd, path)))
-      if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
       cwd = locate(
         where,
         cwd,
@@ -761,7 +777,9 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
       }
       continue
     }
-    const target = writes(words).find((path) => outside(where, locate(where, cwd, path)))
+    const target = writes(words)
+      .filter((path) => !redirects(words).includes(path))
+      .find((path) => outside(where, locate(where, cwd, path)))
     if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
   }
   return { opaque, commands: each }
@@ -856,17 +874,21 @@ const allowedBy = (
   const whole = rules.find((rule) => exactly(rule) && rule.pattern === text.trim())
   if (whole !== undefined) return [{ pattern: whole.pattern, match: 'exact' }]
   const used: Array<AllowRule> = []
-  for (const { words, kinds } of commands) {
-    // Under "Ask me" every command asks but changing folder, unless a redirect on it writes; otherwise only what the rules can't tell.
-    const asks = project.mode === 'ask' ? words[0] !== 'cd' || writes(words).length > 0 : kinds.some((each) => each.rule === 'unclear')
+  for (const { words, kinds, redirected } of commands) {
+    // Changing folder, or where a shell's output goes, runs nothing: only what it writes outside counts.
+    const bare = words[0] === 'cd' || onlyRedirects(words)
+    // Under "Ask me" every command that runs something asks; otherwise only what the rules can't tell.
+    const asks = project.mode === 'ask' ? !bare || kinds.length > 0 : kinds.some((each) => each.rule === 'unclear')
     if (!asks) continue
-    const rule = rules.find((each) => !exactly(each) && startsAs(each.pattern, words))
-    if (rule !== undefined) {
-      used.push({ pattern: rule.pattern, match: 'prefix' })
+    const rule = bare ? undefined : rules.find((each) => !exactly(each) && startsAs(each.pattern, words))
+    // A rule covers how a command starts, never where its output goes: that is a write like any other.
+    const output = redirected.length === 0 ? [] : byKinds(redirected)
+    if (rule !== undefined && output !== undefined) {
+      used.push({ pattern: rule.pattern, match: 'prefix' }, ...output)
       continue
     }
     // One that only looks needs no rule of its own beside the rest.
-    if (project.mode === 'ask' && readerWordsReason(words) === undefined) continue
+    if (project.mode === 'ask' && !bare && readerWordsReason(words) === undefined) continue
     const covered = byKinds(kinds)
     if (covered === undefined) return undefined
     used.push(...covered)
@@ -1027,7 +1049,7 @@ export const alwaysOf = (request: PermissionRequest, context: RuleContext): Alwa
   const command = text !== '' && text.length <= COMMAND_KEPT ? text : null
   const found = keptOf(request, context)
   const kind = found.flatMap((each) => (each.rule === 'unclear' ? [] : [each.rule]))[0] ?? null
-  const commands = runs ? eachCommand(text, context).commands.filter((each) => each.words[0] !== 'cd') : []
+  const commands = runs ? eachCommand(text, context).commands.filter((each) => each.words[0] !== 'cd' && !onlyRedirects(each.words)) : []
   const named = (words: ReadonlyArray<string>) =>
     project.commands.some((rule) => rule.decision !== 'allow' && !exactly(rule) && startsAs(rule.pattern, words))
   const subject =
@@ -1456,6 +1478,8 @@ const readerWordsReason = (words: ReadonlyArray<string>): string | undefined => 
   const program = (words[0] ?? '').split('/').at(-1) ?? ''
   const written = writes(words).filter((target) => target !== '/dev/null')
   if (written.length > 0) return `It would write to ${written[0]}, and this role only reads.`
+  // Where a shell's output goes, thrown away.
+  if (onlyRedirects(words)) return undefined
   const reads = READS[program]
   if (reads === undefined) return `\`${program}\` isn't on the list of commands that only look, and this role only reads.`
   const args = words.slice(1)

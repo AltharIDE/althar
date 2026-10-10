@@ -558,7 +558,8 @@ describe('a project’s allow rules (ADR-017)', () => {
     const bunTest = [{ pattern: 'bun test', decision: 'allow' as const }]
     assert.strictEqual(verdictOf('bun test && cd . > ~/.zshrc', askMe(bunTest)).verdict, 'ask')
     assert.strictEqual(verdictOf('bun test && cd . > ~/.zshrc', askMe(bunTest, { never: ['outside'] })).verdict, 'deny')
-    assert.strictEqual(verdictOf('cd src > notes.txt && bun test', askMe(bunTest)).verdict, 'ask')
+    // Writing the task's own files that way is no more than any command may.
+    assert.strictEqual(verdictOf('cd src > notes.txt && bun test', askMe(bunTest)).verdict, 'allow')
     assert.strictEqual(verdictOf('cd src 2>&1 && bun test', askMe(bunTest)).verdict, 'allow')
     // With no allow rule at all, it is a write outside the worktree, which always asks.
     assert.deepStrictEqual(verdictOf('cd . > /Users/someone/.zshrc', {}), {
@@ -566,6 +567,36 @@ describe('a project’s allow rules (ADR-017)', () => {
       reason: "Writing outside the task's worktree always asks: /Users/someone/.zshrc",
       held: true,
     })
+  })
+
+  it('keep the redirect a shell wrapper carries: what the script runs is covered, not where its output goes', () => {
+    const bunTest = [{ pattern: 'bun test', decision: 'allow' as const }]
+    assert.strictEqual(verdictOf("sh -c 'bun test' > ~/.zshrc", askMe(bunTest)).verdict, 'ask')
+    assert.strictEqual(verdictOf("sh -c 'bun test' > ~/.zshrc", askMe(bunTest, { never: ['outside'] })).verdict, 'deny')
+    assert.deepStrictEqual(verdictOf("bash -lc 'bun test' > /Users/someone/.zshrc", {}), {
+      verdict: 'ask',
+      reason: "Writing outside the task's worktree always asks: /Users/someone/.zshrc",
+      held: true,
+    })
+    // Output kept in the task or thrown away is no write outside.
+    assert.strictEqual(verdictOf("sh -c 'bun test' > out.txt 2>&1", askMe(bunTest)).verdict, 'allow')
+    assert.strictEqual(verdictOf("bash -lc 'bun test' 2>/dev/null", askMe(bunTest)).verdict, 'allow')
+    // A role that only reads can't write through one either, and can still throw output away.
+    assert.strictEqual(decideReader(request({ kind: 'execute', title: "sh -c 'ls' > /tmp/x" })).verdict, 'deny')
+    assert.strictEqual(decideReader(request({ kind: 'execute', title: "sh -c 'ls' 2>/dev/null" })).verdict, 'allow')
+  })
+
+  it('count where a git command’s output goes: a write outside asks, and no rule for the command covers it', () => {
+    assert.deepStrictEqual(verdictOf('git status > ~/.zshrc', {}).verdict, 'ask')
+    assert.strictEqual(verdictOf('git status > /Users/someone/.zshrc', { never: ['outside'] }).verdict, 'deny')
+    assert.strictEqual(verdictOf('git status > ~/.zshrc', askMe(gitStatus)).verdict, 'ask')
+    assert.strictEqual(verdictOf('git status > ~/.zshrc', askMe(gitStatus, { ask: [] })).verdict, 'ask')
+    // Unless writing outside is itself always allowed.
+    assert.deepStrictEqual(verdictOf('git status > ~/.zshrc', askMe(gitStatus, { ask: [], allow: ['outside'] })), {
+      verdict: 'allow',
+      rules: [{ pattern: 'git status', match: 'prefix' }, { kind: 'outside' }],
+    })
+    assert.strictEqual(verdictOf('git status > status.txt', askMe(gitStatus)).verdict, 'allow')
   })
 
   it('never let through a line whose commands show only when it runs', () => {
