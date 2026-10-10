@@ -159,7 +159,8 @@ export function HomeWindow({
 export function useAssembling(assemble: boolean, plan: readonly LaunchStep[] = PLAN_432) {
   const [shown, setShown] = useState(assemble ? 0 : plan.length)
   useEffect(() => {
-    if (!assemble) return setShown(plan.length)
+    // With motion reduced, the plan is simply there.
+    if (!assemble || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return setShown(plan.length)
     setShown(0)
     let n = 0
     const timer = window.setInterval(() => {

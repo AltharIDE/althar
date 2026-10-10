@@ -22,14 +22,6 @@
 .composer { flex: none; padding: 12px 24px 20px; }
 .board { display: flex; flex: 1; flex-direction: column; min-width: 0; overflow: hidden; padding: 16px 0 0 16px; --lane-min: 186px; }
 
-/* Settings. */
-.scroll { flex: 1; min-height: 0; overflow: hidden; }
-.page { display: grid; align-content: start; gap: 40px; max-width: 640px; margin: 0 auto; padding: 32px 40px 64px; }
-.section { display: grid; align-content: start; gap: 12px; }
-.titled { display: grid; gap: 4px; }
-.titled > * { margin: 0; }
-.quiet { margin: 0; color: var(--t-3); }
-
 /* Narrow: only the conversation, the whole width. */
 .talkOnly .talk { flex: 1; width: auto; min-width: 0; border-right: 0; }
 .talkOnly .thread { padding: 4px 16px 0; }
@@ -50,25 +42,3 @@
 .reserve { display: grid; }
 .reserve > * { grid-area: 1 / 1; }
 .reserve > :first-child { visibility: hidden; }
-
-/* Settings: the Control Center's panel, frosted, as a picture. */
-.panel {
-  width: 440px;
-  overflow: hidden;
-  border-radius: 20px;
-  /* A picture can't blur what is behind it reliably: the frost a little thicker. */
-  background: rgba(250, 248, 243, 0.96);
-  box-shadow: var(--lift-frost);
-  backdrop-filter: var(--frost-blur);
-}
-.panelWide { width: 900px; max-width: 100%; }
-.iconPicture { display: block; width: 100%; height: 100%; }
-.iconPicture img { width: 100%; height: 100%; object-fit: contain; }
-/* The home, and the panel open over it from the gear at the bar's end. */
-.over { position: relative; width: 100%; height: 100%; }
-.overPanel { position: absolute; top: 76px; right: 14px; z-index: 5; }
-
-/* Centered: the conversation alone, in a column down the middle of a wide window. */
-.centered .talk { flex: 1; width: auto; border-right: 0; background: var(--n-1); }
-.centered .talk > * { width: 100%; max-width: 760px; margin-left: auto; margin-right: auto; }
-.centered .thread { padding: 8px 24px 0; }

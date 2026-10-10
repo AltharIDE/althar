@@ -3,7 +3,7 @@ import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef,
 
 import { cx } from '../../../lib/cx'
 import { OPUS } from '../../../../../../packages/ui/src/fixtures/models'
-import { useSeen } from '../kit/seen'
+import { useInView, useSeen } from '../kit/seen'
 import { Shot } from '../kit/Shot'
 import s from './Flow.module.css'
 
@@ -161,8 +161,13 @@ const still = () =>
 export function Flow() {
   const ref = useRef<HTMLDivElement>(null)
   const seen = useSeen(ref, 0.35)
+  const inView = useInView(ref, 0.2)
   const [at, setAt] = useState(0)
-  const [held, setHeld] = useState(false)
+  const [pointed, setPointed] = useState(false)
+  const [focused, setFocused] = useState(false)
+  /** Picked by hand: it stays on that route. */
+  const [picked, setPicked] = useState(false)
+  const held = pointed || focused || picked
   const route = ROUTES[at]!
   const pairs = useRef<Array<HTMLButtonElement | null>>([])
   const [thumb, setThumb] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
@@ -178,15 +183,24 @@ export function Flow() {
     return () => window.removeEventListener('resize', place)
   }, [at])
 
-  // Each route in turn, while it is in view.
+  // Each route in turn, only while it is on screen and the page is in front.
   useEffect(() => {
-    if (!seen || held || still()) return
+    if (!inView || held || still() || document.hidden) return
     const timer = window.setTimeout(() => setAt((n) => (n + 1) % ROUTES.length), 5200)
     return () => window.clearTimeout(timer)
-  }, [seen, held, at])
+  }, [inView, held, at])
 
   return (
-    <div ref={ref} className={cx(s.flow, seen && s.seen)} onPointerEnter={() => setHeld(true)} onPointerLeave={() => setHeld(false)}>
+    <div
+      ref={ref}
+      className={cx(s.flow, seen && s.seen)}
+      onPointerEnter={() => setPointed(true)}
+      onPointerLeave={() => setPointed(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setFocused(false)
+      }}
+    >
       <div className={s.switch}>
         <div className={s.pairs} role="group" aria-label="Trackers and code hosts">
           {thumb && (
@@ -211,7 +225,10 @@ export function Flow() {
               className={cx(s.pair, i === at && s.on)}
               aria-pressed={i === at}
               aria-label={`${r.tracker.name} to ${r.host.name}`}
-              onClick={() => setAt(i)}
+              onClick={() => {
+                setPicked(true)
+                setAt(i)
+              }}
             >
               <BrandMark brand={r.tracker.brand} size={18} />
               <span>{r.tracker.name}</span>

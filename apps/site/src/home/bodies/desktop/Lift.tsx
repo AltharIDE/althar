@@ -4,7 +4,7 @@ import { type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 import { cx } from '../../../lib/cx'
 import { DOCS_PLAN, Growing, Launch, ProjectWindow, useAssembling } from '../kit/app'
 import { Desktop, MacWindow } from '../kit/Mac'
-import { NarrowWindow, useNarrow } from '../kit/Narrow'
+import { NarrowWindow, useMedia, useNarrow } from '../kit/Narrow'
 import { useSeen } from '../kit/seen'
 import { Shot } from '../kit/Shot'
 import { Slab } from '../kit/Slab'
@@ -19,7 +19,8 @@ import s from './Lift.module.css'
  * screen, turns into the room, grows, and settles at the left, while the
  * window steps back to the right and the title above turns from the
  * coordinator to the team it put together. Scrolling back puts it back.
- * Narrower, the two moments stand one under the other; on a phone the
+ * Narrower, on a short screen, or with motion reduced, the two moments
+ * stand one under the other, nothing pinned or moving; on a phone the
  * window is the app's own narrow one, the conversation alone, and the plan
  * stands under it as a slab that keeps its room while it grows.
  */
@@ -117,7 +118,7 @@ function Screen({ children, label }: { children: ReactNode; label: string }) {
 }
 
 export function Lift() {
-  const narrow = useNarrow(900)
+  const narrow = useMedia('(max-width: 900px), (max-height: 699px), (prefers-reduced-motion: reduce)')
   const phone = useNarrow()
   const section = useRef<HTMLElement>(null)
   const stage = useRef<HTMLDivElement>(null)

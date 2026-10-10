@@ -7,8 +7,9 @@ import s from './Reel.module.css'
  * A few pictures on one screen, one after another while it is in view, the
  * way a short film plays: each stays its time, then the next comes in over
  * it. Under the screen, a line each with its name, filling while it plays;
- * any can be picked, and pointing at the screen holds it. With motion
- * reduced, or `?t=` in the address, it stands on the first.
+ * any can be picked, and then it stays on that one. Pointing at it or
+ * tabbing into it holds it. With motion reduced, or `?t=` in the address,
+ * it stands on the first.
  */
 
 export interface ReelMoment {
@@ -43,7 +44,11 @@ export function Reel({
   const [at, setAt] = useState(0)
   const [was, setWas] = useState<number | null>(null)
   const [playing, setPlaying] = useState(false)
-  const [held, setHeld] = useState(false)
+  const [pointed, setPointed] = useState(false)
+  const [focused, setFocused] = useState(false)
+  /** Picked by hand: it stays on that one. */
+  const [picked, setPicked] = useState(false)
+  const held = pointed || focused || picked
   const stage = useRef<HTMLDivElement>(null)
   const moving = !still()
 
@@ -75,8 +80,16 @@ export function Reel({
 
   const shown = [...new Set([was, at].filter((x): x is number => x !== null))]
   return (
-    <div className={cx(s.reel, tone === 'ink' && s.ink, className)}>
-      <div ref={stage} className={cx(s.stage, frame)} onPointerEnter={() => setHeld(true)} onPointerLeave={() => setHeld(false)}>
+    <div
+      className={cx(s.reel, tone === 'ink' && s.ink, className)}
+      onPointerEnter={() => setPointed(true)}
+      onPointerLeave={() => setPointed(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setFocused(false)
+      }}
+    >
+      <div ref={stage} className={cx(s.stage, frame)}>
         {shown.map((i) => (
           <div key={i} className={cx(s.layer, i === at ? s.in : s.out)}>
             {moments[i]!.render(i === at)}
@@ -90,7 +103,10 @@ export function Reel({
               type="button"
               className={cx(s.moment, i === at && s.current, i < at && s.past)}
               aria-current={i === at ? 'step' : undefined}
-              onClick={() => go(i)}
+              onClick={() => {
+                setPicked(true)
+                go(i)
+              }}
             >
               <span className={s.track}>
                 <i

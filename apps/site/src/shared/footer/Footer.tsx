@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { drawLandscape, drawLight, type Ground, lightOf } from './engrave'
 import s from './Footer.module.css'
@@ -23,6 +23,8 @@ export function Footer() {
   const glow = useRef<HTMLCanvasElement>(null)
   const words = useRef<HTMLDivElement>(null)
   const ground = useRef<Ground | null>(null)
+  /** Counts the landscape's redraws, so the light is drawn again for each size, held still or not. */
+  const [drawn, setDrawn] = useState(0)
   const on = useOnScreen(box)
 
   useEffect(() => {
@@ -41,6 +43,7 @@ export function Footer() {
           .map((r) => ({ left: r.left - box.left, right: r.right - box.left, bottom: r.bottom - box.top }))
       })
       ground.current = drawLandscape(ctx, w, h, clear, getComputedStyle(footer).backgroundColor)
+      setDrawn((n) => n + 1)
     })
   }, [])
 
@@ -67,7 +70,7 @@ export function Footer() {
     }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
-  }, [on])
+  }, [on, drawn])
 
   return (
     <footer ref={box} className={s.footer}>

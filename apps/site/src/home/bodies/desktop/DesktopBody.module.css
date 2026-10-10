@@ -27,37 +27,6 @@
 }
 .screen { border-radius: 20px; }
 
-/* ---- a piece up close, in the light ---- */
-.closeUp {
-  position: relative;
-  max-width: 1180px;
-  margin: 64px auto 0;
-  padding: 90px var(--gut) 100px;
-  isolation: isolate;
-}
-.lit {
-  position: absolute;
-  inset: 0 var(--gut);
-  z-index: -1;
-  border-radius: 28px;
-  background: #efede7;
-  overflow: hidden;
-}
-.card {
-  border-radius: 14px;
-  background: var(--n-1);
-  box-shadow: 0 0 0 1px rgba(20, 20, 40, 0.06), 0 30px 70px rgba(20, 24, 70, 0.18), 0 8px 20px rgba(20, 24, 70, 0.08);
-}
-.pad { padding: 10px; }
-
-/* The limit: the card, then the task before and after. */
-.handover { display: grid; gap: 22px; }
-.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 0 6px 6px; }
-.when { margin: 0 0 8px; font: 500 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--t-3); }
-
-/* Rules: long, so it fades away under its last lines. */
-.fade .card { max-height: 760px; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
-
 /* ---- the edge of the screen: a dark scene ---- */
 /* A dark panel, set in as the light one before it is. */
 .ink { margin: 120px 16px 0; padding-bottom: 150px; border-radius: 30px; background: #0b0c12; }
@@ -65,20 +34,6 @@
 .ink .head p { color: rgba(255, 255, 255, 0.7); }
 .ink .head p:first-child i { background: #9aa6ff; }
 .ink .bezel { background: #000; box-shadow: inset 0 0 0 1px #2a2a32, 0 40px 120px rgba(0, 0, 0, 0.6); }
-
-/* ---- the code hosts and trackers, as their marks ---- */
-.marks {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 18px 52px;
-  max-width: 900px;
-  margin: 56px auto 0;
-  padding: 0 var(--gut);
-  list-style: none;
-}
-.marks li { display: grid; justify-items: center; gap: 10px; font: 500 12px var(--mono); letter-spacing: 0.04em; color: var(--t-3); }
-.marks svg { color: var(--t-1); }
 
 /* ---- the end: one line and the download, between hairlines, as the systems' band opens the page; the footer's words are the last large ones ---- */
 .end { margin-top: 170px; border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }
@@ -94,24 +49,10 @@
   .screenWrap { max-width: none; margin-top: 40px; }
   .bezel { padding: 6px; border-radius: 18px; }
   .screen { border-radius: 12px; }
-  .cards { grid-template-columns: 1fr; }
-  .closeUp { margin-top: 36px; padding: 40px 12px 48px; }
-  .lit { inset: 0; border-radius: 0; }
   .ink { margin: 96px 12px 0; padding-bottom: 96px; border-radius: 24px; }
-  .marks { gap: 18px 30px; margin-top: 36px; }
-  .marks svg { width: 30px; height: 30px; }
   .end { margin-top: 110px; }
   .endRow { flex-direction: column; align-items: stretch; gap: 22px; padding: 34px var(--gut) 36px; }
   .endLine { font-size: 30px; line-height: 1.08; }
   .endRow > div { display: grid; gap: 10px; }
   .endRow > div > a { justify-content: center; height: 50px; }
-}
-
-/* ---- your plans: the panel lifted a little, in the light ---- */
-.lifted { position: relative; isolation: isolate; max-width: 1180px; margin: 0 auto; padding: 0 var(--gut) 40px; perspective: 2200px; }
-.lifted > div:last-child { transform: rotateX(5deg); transform-origin: 50% 100%; animation: float 9s ease-in-out infinite; }
-.liftedLight { position: absolute; left: 0; right: 0; bottom: -60px; height: 70%; z-index: -1; overflow: hidden; -webkit-mask-image: radial-gradient(60% 70% at 50% 100%, #000 40%, transparent 78%); mask-image: radial-gradient(60% 70% at 50% 100%, #000 40%, transparent 78%); }
-@media (max-width: 900px) {
-  .lifted { padding: 0 0 30px; }
-  .lifted > div:last-child { transform: none; animation: none; }
 }

@@ -42,8 +42,8 @@ const STEPS: Step[] = [
         Every plan you pay for. <b>All at once.</b>
       </>
     ),
-    lead: 'Sign in to each agent as many times as you have plans: work and personal, Max and Pro, a key for OpenCode. Althar uses them all, in the order you set.',
-    short: 'Sign in to each agent once for every plan. Althar uses them all, in the order you set.',
+    lead: 'Sign in to each agent as many times as you have plans: work and personal, Max and Pro, a key for OpenCode. Turn on rotation in a project’s rules, and when one runs out the next takes over, in the order you set.',
+    short: 'Sign in to each agent once for every plan. With rotation on, the next takes over when one runs out.',
     width: 1060,
     piece: (on) => <Plans play={on} />,
   },
@@ -57,7 +57,7 @@ const STEPS: Step[] = [
       </>
     ),
     lead: 'A plan runs out halfway through a task. The task doesn’t stop: the next agent you’re signed in to picks it up where it was.',
-    short: 'A plan runs out mid-task. The next one you’re signed in to carries it on.',
+    short: 'A plan runs out mid-task. The next agent you’re signed in to carries it on.',
     width: 1060,
     piece: (on) => <Handoff play={on} />,
   },
