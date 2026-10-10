@@ -269,24 +269,37 @@ const wroteWhole = (rawInput: unknown): string | null => {
 /** What a tool call's content and input hand back, kept: pictures, files it pointed at, and files it wrote whole or made. */
 export const handedByTool = (place: HandedPlace, content: ReadonlyArray<ToolContent>, rawInput: unknown, kind: string) =>
   Effect.gen(function* () {
+    const [cwd] = place.folders
+    // A file named from where the agent works, whole, so it is read from there and not from a repository's root.
+    const wrote = (path: string): HandedNow => ({
+      pictures: [],
+      files: [
+        {
+          path: isAbsolute(path) || cwd === undefined ? path : resolve(cwd, path),
+          how: 'wrote',
+          mediaType: null,
+          bytes: null,
+          title: null,
+        },
+      ],
+    })
     let now: HandedNow = { pictures: [], files: [] }
     for (const entry of content) {
       if (entry._tag === 'Diff') {
-        if (entry.created)
-          now = together(now, { pictures: [], files: [{ path: entry.path, how: 'wrote', mediaType: null, bytes: null, title: null }] })
+        if (entry.created) now = together(now, wrote(entry.path))
       } else if (entry._tag === 'Image' || entry._tag === 'Link' || entry._tag === 'Embedded')
         now = together(now, yield* handedNow(place, entry))
     }
     const whole = kind === 'edit' ? wroteWhole(rawInput) : null
-    return whole === null
-      ? now
-      : together(now, { pictures: [], files: [{ path: whole, how: 'wrote', mediaType: null, bytes: null, title: null }] })
+    return whole === null ? now : together(now, wrote(whole))
   })
 
 /**
  * A command's output as it comes, kept to its end: chunks add to it, or,
  * where an agent says it whole each time (OpenCode), it is replaced. Past
- * OUTPUT_KEPT, lines go from its start, counted.
+ * OUTPUT_KEPT bytes (as UTF-8, as it is kept), it goes from its start, at a
+ * line where there is one; whole lines that go are counted, and a line cut
+ * part way only once, as it ends.
  */
 export class Output {
   text = ''
@@ -295,28 +308,38 @@ export class Output {
   terminal = false
   exit: number | null = null
   changed = false
+  /** How many bytes the text is, as UTF-8. */
+  private bytes = 0
 
   constructor(readonly itemId: string) {}
 
   add(chunk: string) {
     this.terminal = true
     this.text += chunk
+    this.bytes += Buffer.byteLength(chunk)
     this.trim()
   }
 
   replace(whole: string) {
     this.text = unfenced(whole)
+    this.bytes = Buffer.byteLength(this.text)
     this.dropped = 0
     this.trim()
   }
 
   private trim() {
     this.changed = true
-    if (this.text.length <= OUTPUT_KEPT) return
-    const cut = this.text.indexOf('\n', this.text.length - OUTPUT_KEPT)
-    const from = cut === -1 ? this.text.length - OUTPUT_KEPT : cut + 1
-    this.dropped += countLines(this.text.slice(0, from))
-    this.text = this.text.slice(from)
+    if (this.bytes <= OUTPUT_KEPT) return
+    const encoded = Buffer.from(this.text)
+    let from = encoded.length - OUTPUT_KEPT
+    // At the next line where one starts; otherwise, within the last line, at the next whole character.
+    const line = encoded.indexOf(0x0a, from)
+    if (line !== -1 && line + 1 < encoded.length) from = line + 1
+    else while (from < encoded.length && ((encoded[from] ?? 0) & 0xc0) === 0x80) from += 1
+    const gone = encoded.subarray(0, from).toString()
+    this.dropped += gone.split('\n').length - 1
+    this.text = encoded.subarray(from).toString()
+    this.bytes = encoded.length - from
   }
 
   /** Its last lines, for a client watching it run, and how many came before them. */

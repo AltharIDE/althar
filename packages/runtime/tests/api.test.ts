@@ -100,6 +100,37 @@ const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.sess
 const texts = (thread: ThreadSnapshot) => thread.items.map((item) => ('text' in item.content ? item.content.text : item.kind))
 
 describe('the API', () => {
+  it.live('reads what a running command has printed so far, and what it printed once its turn was stopped', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Run the server' })
+        yield* client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'codex' })
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.streams, disposition: 'after_current' })
+        const running = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) =>
+          thread.items.some((item) => item.kind === 'tool_call' && item.content.command === 'npm run dev'),
+        )
+        const run = running.items.find((item) => item.kind === 'tool_call' && item.content.command === 'npm run dev')
+        // A window that opens now reads what it printed before it looked.
+        const soFar = yield* eventually(client.ReadOutput({ threadId: task.threadId, itemId: run?.id ?? '' }), (read) =>
+          read.text.includes('ready in 3 ms'),
+        )
+        assert.isTrue(soFar.text.startsWith('ready in 1 ms'))
+        yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
+        const stopped = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) =>
+          thread.items.some((item) => item.id === run?.id && item.kind === 'tool_call' && item.content.output !== null),
+        )
+        const ended = stopped.items.find((item) => item.id === run?.id)
+        const lines = ended?.kind === 'tool_call' ? (ended.content.output?.lines ?? 0) : 0
+        assert.isAtLeast(lines, 3)
+        const kept = yield* client.ReadOutput({ threadId: task.threadId, itemId: run?.id ?? '' })
+        assert.strictEqual(kept.text.split('\n').filter((line) => line !== '').length, lines)
+      }),
+    ),
+  )
+
   it.live('streams a command’s output, then reads what it printed and the document the agent wrote', () =>
     Effect.scoped(
       Effect.gen(function* () {

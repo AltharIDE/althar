@@ -364,6 +364,73 @@ describe('a command’s output', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('keeps what an ended command printed whatever comes after, in its turn or a later one', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const record = recorder(where)
+      yield* record.record({ _tag: 'ToolCall', toolCallId: 'done', title: 'npm test', kind: 'execute', status: 'in_progress' })
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'done', terminal: { output: 'passed\n' } })
+      yield* record.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'done',
+        status: 'completed',
+        terminal: { exit: { code: 0, signal: null } },
+      })
+      // What an agent says of a call after it ended: its name again, its status again.
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'done', title: 'npm test' })
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'done', status: 'completed', terminal: { output: 'late\n' } })
+      yield* record.end
+      const kept = yield* toolItem(where.threadId, 'done')
+      assert.deepInclude(kept?.output as object, { lines: 1, bytes: 7 })
+      assert.strictEqual(kept?.exit, 0)
+      // A later turn's recorder hears of it too, and changes nothing.
+      const next = recorder(where)
+      yield* next.record({ _tag: 'ToolCallUpdate', toolCallId: 'done', title: 'npm test' })
+      yield* next.end
+      assert.deepInclude((yield* toolItem(where.threadId, 'done'))?.output as object, { lines: 1, bytes: 7 })
+      assert.isUndefined(next.outputOf('anything'))
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('names a file written by a relative path from where the agent works', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const record = recorder(where)
+      yield* record.record({
+        _tag: 'ToolCall',
+        toolCallId: 'relative',
+        title: 'Write README.md',
+        kind: 'edit',
+        status: 'completed',
+        content: [{ _tag: 'Diff', path: 'README.md', created: true }],
+      })
+      assert.deepStrictEqual(
+        listOf((yield* toolItem(where.threadId, 'relative'))?.files).map((file) => file.path),
+        [join(where.folder, 'README.md')],
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it('keeps a long output to its limit in bytes, and counts each line that goes once', () => {
+    const wide = new Output('wide')
+    // Three bytes a character: the limit is bytes, as it is kept.
+    for (let i = 0; i < 3; i += 1) wide.add(`${'✓'.repeat(100_000)}\n`)
+    assert.isAtMost(Buffer.byteLength(wide.text), OUTPUT_KEPT)
+    assert.strictEqual(wide.dropped, 2)
+    // One line that never ends, cut again and again, is one line when it ends.
+    const long = new Output('long')
+    for (let i = 0; i < 10; i += 1) long.add('z'.repeat(OUTPUT_KEPT / 2))
+    assert.strictEqual(long.dropped, 0)
+    long.add('\nnext\n')
+    long.add('w'.repeat(OUTPUT_KEPT))
+    assert.strictEqual(long.dropped, 2)
+    // Cut part way through a character, it starts at the next whole one.
+    const cut = new Output('cut')
+    cut.add('é'.repeat(OUTPUT_KEPT))
+    assert.isFalse(cut.text.startsWith('\uFFFD'))
+    assert.isAtMost(Buffer.byteLength(cut.text), OUTPUT_KEPT)
+  })
+
   it('keeps a long output’s end, cut at a line, and sends watchers its last lines', () => {
     const output = new Output('item')
     const line = `${'x'.repeat(99)}\n`

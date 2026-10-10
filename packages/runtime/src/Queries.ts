@@ -1441,7 +1441,14 @@ export class Queries extends Context.Service<
         board: (projectId) => run(board(projectId)),
         home: (since) => run(home(since)),
         item: (threadId, itemId) => run(item(threadId, itemId)),
-        output: (threadId, itemId) => run(outputText(threadId, itemId)),
+        // A command still running is read from what it has printed so far; one that ended, from what was kept.
+        output: (threadId, itemId) =>
+          run(
+            Effect.gen(function* () {
+              const soFar = yield* (yield* Sessions).outputSoFar(threadId, itemId)
+              return Option.isSome(soFar) ? { text: soFar.value.text, dropped: soFar.value.dropped } : yield* outputText(threadId, itemId)
+            }),
+          ),
         document: (threadId, path) =>
           run(
             Effect.gen(function* () {

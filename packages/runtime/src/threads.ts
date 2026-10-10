@@ -126,6 +126,8 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   let plan: string | undefined
   /** Commands' output as it comes, by tool call, until each ends. */
   const outputs = new Map<string, Output>()
+  /** Commands that ended, whose output is kept. */
+  const finished = new Set<string>()
   const folders = place.folders ?? []
   const where = (itemId: string) => ({ projectId: place.projectId, itemId, folders })
 
@@ -184,6 +186,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const ended = (toolCallId: string, output: Output) =>
     Effect.gen(function* () {
       outputs.delete(toolCallId)
+      finished.add(toolCallId)
       return { output: yield* keepOutput(where(output.itemId), output), exit: output.exit }
     })
 
@@ -208,7 +211,8 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         if (now.pictures.length > had.pictures.length || now.files.length > had.files.length) extras = withHanded({}, now)
       }
       const command = kind === 'execute' || event.terminal !== undefined || content.some((entry) => entry._tag === 'Terminal')
-      if (!command) return extras
+      // A command that ended keeps what it printed: what comes after, in this turn or a later one, changes none of it.
+      if (!command || finished.has(toolCallId) || stored.output !== undefined) return extras
       const output = outputs.get(toolCallId) ?? new Output(itemId)
       outputs.set(toolCallId, output)
       if (event.terminal?.output !== undefined) output.add(event.terminal.output)
@@ -304,7 +308,13 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       return [{ itemId: output.itemId, ...output.tail() }]
     })
 
-  return { record, flush, end, current, outputsSoFar }
+  /** A command's output as far as it has come, while it runs, by its item. */
+  const outputOf = (itemId: string): OutputSoFar | undefined => {
+    const output = [...outputs.values()].find((candidate) => candidate.itemId === itemId)
+    return output === undefined ? undefined : { itemId, ...output.tail() }
+  }
+
+  return { record, flush, end, current, outputsSoFar, outputOf }
 }
 
 /** The thread as text, oldest first: what a new agent reads when it takes over (ADR-005). */
