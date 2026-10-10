@@ -444,6 +444,24 @@ describe('the coordinator loop', () => {
       // With no review, the lead's summary makes it ready.
       const [ready] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.strictEqual(ready?.summary, 'Did the task.')
+
+      // The coordinator hears what became of its plan before the person's next words, once, and speaks of it as it is.
+      const told = (body: string) =>
+        until(
+          sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${threadId} AND prompt LIKE ${`%${body}%`}`,
+          (rows) => rows.length === 1,
+        )
+      yield* say(threadId, 'How did it go?')
+      const [heard] = yield* told('How did it go?')
+      assert.match(heard?.prompt ?? '', /^Since you last spoke, in Althar:\n- something-small \(Something small\): /)
+      assert.match(
+        heard?.prompt ?? '',
+        /The person changed its plan: you proposed .+ leads, no review\. Now Large leads, no review\. It has started\./,
+      )
+      assert.match(heard?.prompt ?? '', /\n\nHow did it go\?$/)
+      yield* say(threadId, 'Thanks.')
+      const [after] = yield* told('Thanks.')
+      assert.notInclude(after?.prompt, 'Since you last spoke')
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.seconds(30) }))),
   )
 

@@ -64,6 +64,23 @@ export const say = async (page: Page, words: string) => {
   await box.press('Enter')
 }
 
+/**
+ * Asks the project's coordinator for a task, as the person does: it drafts
+ * the task and proposes its plan, a card that starts on its own after a
+ * countdown. The fake coordinator titles the task with what is said up to
+ * its first . ! or ? (at most 60 characters, as coordinators draft them),
+ * plans no review (`[coordinator:plan-no-review]`), and passes `lead`'s
+ * markers on to the lead in the task's description.
+ */
+export const planTask = (page: Page, title: string, lead = '[lead:finish]') => say(page, `${title} [coordinator:plan-no-review] ${lead}`)
+
+/** Starts a task: asks the coordinator for it, and starts its plan at once rather than waiting out the countdown. */
+export const startTask = async (page: Page, title: string, lead = '[lead:finish]') => {
+  await planTask(page, title, lead)
+  // The newest plan is the last in the conversation; any before it have started.
+  await page.getByRole('button', { name: 'Start now' }).last().click()
+}
+
 /** A ready task opens on what it made: its conversation is the header's other face, not the project's view of that name. */
 export const toConversation = async (page: Page) => {
   await page

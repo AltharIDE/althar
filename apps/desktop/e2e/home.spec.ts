@@ -2,10 +2,10 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, type Page, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch, openFirstProject } from './support'
+import { chooseFolder, launch, openFirstProject, startTask } from './support'
 
 /*
  * The home, once there are projects: what waits on you, what is in progress, and what
@@ -13,18 +13,8 @@ import { chooseFolder, launch, openFirstProject } from './support'
  * the agents and connections.
  */
 
-/** A title as long as people write them, which the home's rows end in an ellipsis. */
-const LONG = 'Help me add a new feature to the world where I can show other players walking around, with their names over them'
-
-/** Plans a task in the open project with no review, as the person would, and starts it. */
-const startTask = async (page: Page, title: string, lead: string) => {
-  await page.getByRole('button', { name: 'New task' }).click()
-  await page.getByLabel('What should change').fill(title)
-  await page.getByLabel('Anything the lead should know').fill(lead)
-  await page.getByRole('button', { name: /^Review:/ }).click()
-  await page.getByRole('button', { name: 'No review' }).click()
-  await page.getByRole('button', { name: 'Start the task' }).click()
-}
+/** A title as long as the coordinator drafts them (60 characters at most), which the home's rows end in an ellipsis. */
+const LONG = 'Show other players walking around with their names over them'
 
 test('comes back to what runs and what waits across projects, with the projects beside it', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
@@ -109,7 +99,17 @@ test('comes back to what runs and what waits across projects, with the projects 
       await expect(places.getByRole('radio', { name: /Round the notch/ })).toBeChecked()
       await places.getByRole('radio', { name: /In the menu bar/ }).click()
       await expect.poll(() => readFileSync(join(home, 'profile', 'desktop.json'), 'utf8')).toContain('"edge": "menu"')
+      // While Althar is in front, its mark leaves the menu bar: the person goes to another app to see it there, and comes back.
+      const inAnotherApp = (away: boolean) =>
+        electronApp.evaluate(({ app, BrowserWindow }, away) => {
+          const kept = globalThis as { focused?: () => Electron.BrowserWindow | null }
+          kept.focused ??= BrowserWindow.getFocusedWindow.bind(BrowserWindow)
+          BrowserWindow.getFocusedWindow = away ? () => null : kept.focused
+          app.emit(away ? 'browser-window-blur' : 'browser-window-focus')
+        }, away)
+      await inAnotherApp(true)
       await expect.poll(() => edgePage('island') === undefined && edgePage('menu') !== undefined).toBe(true)
+      await inAnotherApp(false)
       await page.keyboard.press('Escape')
     } else {
       await expect(settings.getByRole('button', { name: /^While you’re in another app/ })).toHaveCount(0)

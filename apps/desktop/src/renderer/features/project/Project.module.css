@@ -111,3 +111,9 @@
   outline: 2px solid var(--signal);
   outline-offset: 1px;
 }
+
+/* Connecting the project's host: the services' two columns, with room to sign one in. */
+.connecting {
+  top: 10vh;
+  max-height: 80vh;
+}

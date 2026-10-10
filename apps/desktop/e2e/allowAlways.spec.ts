@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, toConversation } from './support'
+import { launch, openFirstProject, say, startTask, toConversation } from './support'
 
 /*
  * Allow always (ADR-018), as the person meets it: under "Ask me", a lead's
@@ -23,14 +23,9 @@ const openRules = async (page: Page) => {
   await page.getByRole('menuitem', { name: 'Project rules' }).click()
 }
 
-/** Plans a task with no review, as the person would, starts it, and opens its conversation once it is ready. */
-const startTask = async (page: Page, title: string) => {
-  await page.getByRole('button', { name: 'New task' }).click()
-  await page.getByLabel('What should change').fill(title)
-  await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
-  await page.getByRole('button', { name: /^Review:/ }).click()
-  await page.getByRole('button', { name: 'No review' }).click()
-  await page.getByRole('button', { name: 'Start the task' }).click()
+/** Starts a task by telling the coordinator, and opens its conversation once it is ready. */
+const startAndOpen = async (page: Page, title: string) => {
+  await startTask(page, title)
   const card = page.getByRole('article', { name: title }).last()
   await expect(card.getByText('Ready', { exact: true })).toBeVisible()
   await card.getByRole('button', { name: /Open task/ }).click()
@@ -58,7 +53,7 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     await expect(page.getByText(/Nothing yet\. A permission answered/)).toBeVisible()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
 
-    await startTask(page, 'Look at the tree')
+    await startAndOpen(page, 'Look at the tree')
 
     // The lead's `git status` waits for the person, who allows commands starting so always.
     await say(page, 'run git status')
@@ -98,7 +93,7 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     await expect(page.getByText('Needs your permission')).toBeVisible()
     // Another task's lead asks for something else, and waits after it.
     await backToProject(page)
-    await startTask(page, 'Run the tests')
+    await startAndOpen(page, 'Run the tests')
     await say(page, 'run npm test')
     await expect(page.getByText('Needs your permission')).toBeVisible()
 

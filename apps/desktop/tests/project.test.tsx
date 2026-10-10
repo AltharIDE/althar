@@ -65,7 +65,7 @@ const talk = (overrides: Partial<CoordinatorSnapshot> = {}) =>
   })
 
 describe('the project’s bar', () => {
-  it('steps through the views by b, never while typing, and opens on the view or the new task a task’s bar asked for', async () => {
+  it('steps through the views by b, never while typing, and has no button to start a task', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     const view = withServices(<Project />, client)
     const checked = () => screen.getAllByRole('radio').find((radio) => radio.getAttribute('aria-checked') === 'true')?.textContent
@@ -79,12 +79,9 @@ describe('the project’s bar', () => {
     expect(checked()).toMatch(/^Conversation/)
     await userEvent.type(screen.getByRole('textbox', { name: /Tell the coordinator/ }), 'b')
     expect(checked()).toMatch(/^Conversation/)
+    // A task starts by telling the coordinator; nothing else starts one.
+    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
     view.unmount()
-
-    withServices(<Project room={Room.Board} newTask />, client)
-    // Planning a task opens beside the conversation, so the board is shown with it.
-    await waitFor(() => expect(checked()).toMatch(/^Both/))
-    expect(await screen.findByRole('complementary', { name: 'New task' })).toBeTruthy()
   })
 
   it('says which view it is on, to open on it again, and has only its views to choose from', async () => {
@@ -412,71 +409,6 @@ describe('the Talk room', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Show' }))
     expect(await screen.findByText('The oldest.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Show' })).toBeNull()
-  })
-})
-
-describe('a task the person plans', () => {
-  it('starts beside the conversation: what should change, its lead and its review', async () => {
-    const { client } = fakeClient()
-    withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    const panel = await screen.findByRole('complementary', { name: 'New task' })
-
-    // Nothing written: it says what is missing rather than refuse the button.
-    await userEvent.click(within(panel).getByRole('button', { name: 'Start the task' }))
-    expect(within(panel).getByText('Say what the task is.')).toBeTruthy()
-    expect(client.startTask).not.toHaveBeenCalled()
-
-    await userEvent.type(within(panel).getByLabelText('What should change'), '  Add a retry  ')
-    await userEvent.type(within(panel).getByLabelText('Anything the lead should know'), ' Only the checkout call. ')
-    // Another agent reviews by default.
-    expect(await within(panel).findByRole('button', { name: 'Review: gpt-5.2-codex Medium' })).toBeTruthy()
-    await userEvent.click(within(panel).getByRole('button', { name: 'Start the task' }))
-    await waitFor(() =>
-      expect(client.startTask).toHaveBeenCalledWith({
-        projectId: 'p1',
-        title: 'Add a retry',
-        description: 'Only the checkout call.',
-        steps: [
-          { key: 'implement', agentId: 'claude-code', model: null, effort: null, skipped: false },
-          { key: 'review', agentId: 'codex', model: null, effort: null, skipped: false },
-        ],
-        // The repository's host isn't connected here: the task ends on its branch.
-        end: null,
-      }),
-    )
-    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'New task' })).toBeNull())
-  })
-
-  it('can go without a review, with another lead; and says what went wrong', async () => {
-    const { client } = fakeClient({
-      startTask: vi.fn(async () => Promise.reject(new ApiError({ reason: 'GitFailed', message: "git worktree didn't work." }))),
-    })
-    withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    const panel = await screen.findByRole('complementary', { name: 'New task' })
-    await userEvent.type(within(panel).getByLabelText('What should change'), 'Bump the version')
-    await userEvent.click(await within(panel).findByRole('button', { name: 'Lead: Claude Code default Medium' }))
-    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
-    // The review goes to another agent than the lead's; without one, it can be added back.
-    await userEvent.click(await within(panel).findByRole('button', { name: 'Review: Claude Code default Medium' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'No review' }))
-    await userEvent.click(within(panel).getByRole('button', { name: 'Add a review' }))
-    await userEvent.click(await within(panel).findByRole('button', { name: 'Review: Claude Code default Medium' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'No review' }))
-    await userEvent.click(within(panel).getByRole('button', { name: 'Start the task' }))
-    expect(await screen.findByText("git worktree didn't work.")).toBeTruthy()
-    expect(client.startTask).toHaveBeenCalledWith({
-      projectId: 'p1',
-      title: 'Bump the version',
-      steps: [{ key: 'implement', agentId: 'codex', model: 'gpt-5.2-codex', effort: null, skipped: false }],
-      end: null,
-    })
-    // It stays open, to try again; Close puts it away, and Dismiss the message.
-    await userEvent.click(within(panel).getByRole('button', { name: 'Close the panel' }))
-    expect(screen.queryByRole('complementary', { name: 'New task' })).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
-    expect(screen.queryByText("git worktree didn't work.")).toBeNull()
   })
 })
 

@@ -14,7 +14,7 @@ import { useProjectMenu } from './useProjectMenu'
 
 function Project() {
   const { projectId } = projectRoute.useParams()
-  const { room, new: planning } = projectRoute.useSearch()
+  const { room } = projectRoute.useSearch()
   const navigate = useNavigate()
   // The view it was last on, unless a task's bar asked for one.
   const [last, keepRoom] = useLastRoom(projectId)
@@ -25,7 +25,6 @@ function Project() {
     <ProjectView
       {...(opening === null ? {} : { room: opening })}
       onRoomChange={keepRoom}
-      newTask={planning === 'task'}
       model={useProject(projectId)}
       board={useBoard(projectId)}
       connections={useConnections()}
@@ -39,10 +38,9 @@ function Project() {
   )
 }
 
-/** What a project opens on, when a task's bar asks: a view, and planning a new task. */
+/** What a project opens on, when a task's bar asks: a view. */
 interface ProjectSearch {
   readonly room?: Room
-  readonly new?: 'task'
 }
 
 /** The view an address names, if it names one. */
@@ -69,6 +67,6 @@ export const projectRoute = createRoute({
   },
   validateSearch: (search: Record<string, unknown>): ProjectSearch => {
     const room = roomOf(search.room)
-    return { ...(room === undefined ? {} : { room }), ...(search.new === 'task' ? { new: 'task' as const } : {}) }
+    return room === undefined ? {} : { room }
   },
 })

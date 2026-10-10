@@ -1,13 +1,12 @@
 import { type CSSProperties, useEffect, useState } from 'react'
 
 import {
+  Button,
   Composer,
+  Dialog,
   DictationTray,
   LinkButton,
   ResizeHandle,
-  SidePanel,
-  SidePanelBody,
-  SidePanelTitle,
   Room,
   TaskFace,
   Thread,
@@ -37,7 +36,6 @@ import type { BoardModel } from '../board/useBoard'
 import { ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
 import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
-import { NewTask } from './NewTask'
 import { ProjectDialogs, ProjectMenu, type ProjectMenuActions } from './ProjectMenu'
 import { nextRoom, ProjectBar } from './ProjectBar'
 import s from './Project.module.css'
@@ -47,8 +45,9 @@ import type { ProjectModel } from './useProject'
  * A project: the conversation with its coordinator, the board of its work,
  * or both side by side, the conversation as wide as the person drags it (b
  * steps through them). The coordinator answers questions itself and turns
- * changes into tasks; a task you plan yourself opens beside the conversation.
- * What you open from the board opens its task. The bar says how much is
+ * changes into tasks: there is no task to start without it. Connecting the
+ * code host, from the menu, opens over whichever view is shown. What you
+ * open from the board opens its task. The bar says how much is
  * running and how much needs you: pointed at, what it is; clicked, the
  * first of it.
  */
@@ -74,7 +73,7 @@ export const text = {
   dismiss: 'Dismiss',
   boardFailed: 'Althar couldn’t read the board.',
   boardReading: 'Reading the board',
-  newTask: 'New task',
+  done: 'Done',
   width: 'Width of the conversation',
   /** Where a project of several repositories is: how many, and their names. */
   repositories: (names: ReadonlyArray<string>) => `${names.length} repositories · ${names.join(', ')}`,
@@ -128,7 +127,6 @@ export function ProjectView({
   menu,
   room: opening = Room.Talk,
   onRoomChange,
-  newTask = false,
 }: {
   model: ProjectModel
   board: BoardModel
@@ -140,10 +138,8 @@ export function ProjectView({
   room?: Room
   /** The view it is on, each time it changes, to be opened on again. */
   onRoomChange?: (room: Room) => void
-  /** It opens planning a new task, as a task's bar asked. */
-  newTask?: boolean
 }) {
-  const [room, setRoom] = useState<Room>(newTask && opening === Room.Board ? Room.Both : opening)
+  const [room, setRoom] = useState<Room>(opening)
   useEffect(() => onRoomChange?.(room), [room, onRoomChange])
   // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
   const shown = useThreadHost(false)
@@ -171,8 +167,8 @@ export function ProjectView({
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
-  // What opens beside the conversation: a task you plan, or the connections.
-  const [panel, setPanel] = useState<'task' | 'connections' | null>(newTask ? 'task' : null)
+  // The code hosts and trackers, opened from the menu to connect the project's host.
+  const [connecting, setConnecting] = useState(false)
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts.
   const now = useNow((model.coordinator?.session?.turnRunning ?? false) || (lanes?.next.some((task) => task.phase === 'planned') ?? false))
   const coordinator = model.coordinator
@@ -298,15 +294,10 @@ export function ProjectView({
                 <ProjectMenu
                   {...menu}
                   // Pushing needs no connection, so connecting the host waits in the menu until it's wanted.
-                  {...(host === null || host.connected ? {} : { connect: { host: host.name, onConnect: () => setPanel('connections') } })}
+                  {...(host === null || host.connected ? {} : { connect: { host: host.name, onConnect: () => setConnecting(true) } })}
                 />
               ),
             })}
-        newTask={panel === 'task'}
-        onNewTask={() => {
-          if (room === Room.Board) setRoom(Room.Both)
-          setPanel('task')
-        }}
       />
       <div className={room === Room.Both ? `${s.rooms} ${s.both}` : s.rooms}>
         {talking && (
@@ -325,38 +316,7 @@ export function ProjectView({
                 </div>
               )
             ) : (
-              <TaskFace
-                className={s.face}
-                composer={composer}
-                panel={
-                  panel === 'task' ? (
-                    <NewTask
-                      agents={model.agents}
-                      starting={model.starting}
-                      connected={coordinator.host?.connected === true}
-                      defaultEnd={model.end}
-                      repositories={model.project?.repositories ?? []}
-                      listIssues={model.listIssues}
-                      onClose={() => setPanel(null)}
-                      onStart={(task) =>
-                        void model.startTask(task).then((started) => {
-                          if (started !== null) setPanel(null)
-                        })
-                      }
-                    />
-                  ) : panel === 'connections' ? (
-                    <SidePanel
-                      label={connectionsText.label}
-                      head={<SidePanelTitle>{connectionsText.label}</SidePanelTitle>}
-                      onClose={() => setPanel(null)}
-                    >
-                      <SidePanelBody>
-                        <ConnectionsView model={connections} />
-                      </SidePanelBody>
-                    </SidePanel>
-                  ) : undefined
-                }
-              >
+              <TaskFace className={s.face} composer={composer}>
                 <Thread label={text.conversation} busy={busy}>
                   {coordinator.earlier && (
                     <ThreadDivider
@@ -415,6 +375,17 @@ export function ProjectView({
         )}
       </div>
       {menu && <ProjectDialogs model={menu.model} />}
+      {connecting && (
+        <Dialog
+          title={connectionsText.label}
+          width={720}
+          className={s.connecting}
+          onClose={() => setConnecting(false)}
+          actions={<Button onClick={() => setConnecting(false)}>{text.done}</Button>}
+        >
+          <ConnectionsView model={connections} columns />
+        </Dialog>
+      )}
     </div>
   )
 }

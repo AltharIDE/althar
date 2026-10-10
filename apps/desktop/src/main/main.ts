@@ -60,6 +60,8 @@ import {
 const here = import.meta.dirname
 
 const SHUTDOWN_GRACE = 20_000
+/** How long focus settles, moving between Althar's windows, before the edge hears whether Althar is in front. */
+const FOCUS_SETTLE = 120
 /** Restarts allowed within a minute before a crashing runtime ends the app instead. */
 const RESTARTS_PER_MINUTE = 3
 
@@ -489,6 +491,19 @@ void app.whenReady().then(() => {
     page: join(here, '../renderer/edge.html'),
     pictures: join(here, '../../resources/tray'),
   })
+  // The edge is for while the person is in another app: it steps aside while one of Althar's windows has focus, on any screen.
+  // Moving between Althar's windows blurs one before the other has focus, so it settles first.
+  let focusing: ReturnType<typeof setTimeout> | undefined
+  const focusChanged = () => {
+    clearTimeout(focusing)
+    focusing = setTimeout(() => {
+      const focused = BrowserWindow.getFocusedWindow()
+      edge?.front(focused !== null && windows.has(focused))
+    }, FOCUS_SETTLE)
+  }
+  app.on('browser-window-focus', focusChanged)
+  app.on('browser-window-blur', focusChanged)
+  focusChanged()
   app.on('activate', () => {
     if (windows.size === 0) openWindow()
   })

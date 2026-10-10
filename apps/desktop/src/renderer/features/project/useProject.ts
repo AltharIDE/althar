@@ -5,11 +5,9 @@ import {
   type AgentStatus,
   type CoordinatorSnapshot,
   PAGE,
-  type IssueSummary,
   type PlanStep,
   type ProjectSummary,
   type TaskEnd,
-  type TaskSummary,
   type ThreadItem,
 } from '@althar/contracts'
 
@@ -26,8 +24,8 @@ import type { Streamed } from '../../shared/thread'
 /*
  * A project's Talk room: the coordinator's thread, with each task's card in
  * it, and what the person can do there: talk to the coordinator, pick the
- * agent it runs on, change, hold or start a plan before it starts on its own,
- * and start a task themselves. Like a task's thread, it reads the newest page
+ * agent it runs on, and change, hold or start a plan before it starts on its
+ * own. Like a task's thread, it reads the newest page
  * once, then what changes: an item alone, or the thread's head. A card shows
  * a task that moves in threads of its own, so a change to any task of the
  * project reads the cards again.
@@ -35,20 +33,6 @@ import type { Streamed } from '../../shared/thread'
 
 /** How long changes are gathered before they are read. */
 const GATHER = 25
-
-export interface NewTask {
-  readonly title: string
-  readonly description: string
-  readonly lead: Choice
-  /** Who reviews it, or null for no review. */
-  readonly reviewer: Choice | null
-  /** The issue it comes from, by its ref, if any. */
-  readonly issue: string | null
-  /** What happens when the work is done; null where the repository's host isn't connected. */
-  readonly end: TaskEnd | null
-  /** The project's repositories it changes, by name; null where the project has one. */
-  readonly repositories: ReadonlyArray<string> | null
-}
 
 export interface ProjectModel {
   readonly project: ProjectSummary | null
@@ -60,13 +44,9 @@ export interface ProjectModel {
   readonly outputs: ReadonlyMap<string, OutputSoFar>
   /** Agents that could work: signed in, or that don't say. */
   readonly agents: ReadonlyArray<AgentStatus>
-  /** How the project's tasks end where a plan doesn't say; null where its host decides. */
-  readonly end: TaskEnd | null
   readonly error: string | null
   /** An action is on its way to the runtime. */
   readonly pending: boolean
-  /** A task the person planned is starting. */
-  readonly starting: boolean
   readonly loadingEarlier: boolean
   readonly loadEarlier: () => Promise<void>
   /** Says something to the coordinator, which starts it on `agentId` if it isn't running. */
@@ -84,10 +64,6 @@ export interface ProjectModel {
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
-  /** Plans and starts a task; the task, or null when it couldn't. */
-  readonly startTask: (input: NewTask) => Promise<TaskSummary | null>
-  /** The person's open issues, for a task to come from. */
-  readonly listIssues: () => Promise<ReadonlyArray<IssueSummary>>
   readonly dismissError: () => void
 }
 
@@ -103,14 +79,11 @@ export const useProject = (projectId: string): ProjectModel => {
   const coordinator = thread.data ?? null
   const status = useQuery(read.status()).data
   const agents = useMemo(() => status?.agents.filter((agent) => agent.signIn !== 'signed_out') ?? [], [status])
-  // The project's ending, which a task the person plans starts from.
-  const end = useQuery(read.rules(projectId)).data?.end ?? null
   const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
   const [failed, setError] = useState<string | null>(null)
   const readFailure = thread.error ?? listed.error
   const error = failed ?? (readFailure === null ? null : messageOf(readFailure))
   const [pending, setPending] = useState(false)
-  const [starting, setStarting] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [newest] = useState(newestReads)
@@ -234,46 +207,6 @@ export const useProject = (projectId: string): ProjectModel => {
     [readHead, fail],
   )
 
-  const startTask = useCallback(
-    async (input: NewTask) => {
-      setError(null)
-      setStarting(true)
-      try {
-        return await client.startTask({
-          projectId,
-          title: input.title.trim(),
-          ...(input.description.trim() === '' ? {} : { description: input.description.trim() }),
-          steps: [
-            { key: 'implement', ...input.lead, skipped: false },
-            ...(input.reviewer === null ? [] : [{ key: 'review' as const, ...input.reviewer, skipped: false }]),
-          ],
-          ...(input.issue === null ? {} : { issue: input.issue }),
-          end: input.end,
-          ...(input.repositories === null ? {} : { repositories: input.repositories }),
-        })
-      } catch (failure) {
-        fail(failure)
-        return null
-      } finally {
-        setStarting(false)
-      }
-    },
-    [client, projectId, fail],
-  )
-
-  // Kept the same across renders: the new-task panel reads the issues once, when it opens.
-  const listIssues = useCallback(
-    () =>
-      client.listIssues(projectId).then(
-        (list) => list.issues,
-        (failure: unknown) => {
-          fail(failure)
-          return []
-        },
-      ),
-    [client, projectId, fail],
-  )
-
   const send = (body: string, disposition: 'after_current' | 'interrupt_and_continue') =>
     threadId === null ? Promise.resolve() : client.send({ threadId, body, disposition })
 
@@ -306,10 +239,8 @@ export const useProject = (projectId: string): ProjectModel => {
     streaming,
     outputs,
     agents,
-    end,
     error,
     pending,
-    starting,
     loadingEarlier,
     loadEarlier,
     say: (body, choice) =>
@@ -358,8 +289,6 @@ export const useProject = (projectId: string): ProjectModel => {
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     changePlan: (planId, steps, end) => act(() => client.changePlan(planId, steps, end)),
-    startTask,
-    listIssues,
     dismissError: () => setError(null),
   }
 }

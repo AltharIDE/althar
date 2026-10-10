@@ -3,19 +3,20 @@ import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
+import { type ElectronApplication, expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, toConversation } from './support'
+import { launch, openFirstProject, say, startTask, toConversation } from './support'
 
 /*
- * The app as someone uses it: open a folder as a project, start a task, and
- * talk to its lead; or ask the coordinator, which plans the task, and follow
- * it through Implement and Review until it is ready. Every agent here is the
- * scripted fake (ALTHAR_FAKE_AGENTS): what is said to it picks what it
- * does, and markers like `[coordinator:plan]` pick the role it plays. GitHub
- * is a fake too, at https://github.test, connected with a pasted token; what
- * is pushed to it lands in a bare repository on disk.
+ * The app as someone uses it: open a folder as a project, tell its
+ * coordinator what should change, which plans a task, and talk to the task's
+ * lead; or follow a planned task through Implement and Review until it is
+ * ready. Every agent here is the scripted fake (ALTHAR_FAKE_AGENTS): what is
+ * said to it picks what it does, and markers like `[coordinator:plan]` pick
+ * the role it plays. GitHub is a fake too, at https://github.test, connected
+ * with a pasted token; what is pushed to it lands in a bare repository on
+ * disk.
  */
 
 test('makes the first project of a repository it found, starts a task, and talks to its lead', async () => {
@@ -43,15 +44,8 @@ test('makes the first project of a repository it found, starts a task, and talks
 
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.screenshot({ path: 'test-results/project.png' })
-    await page.getByRole('button', { name: 'New task' }).click()
-    await page.getByLabel('What should change').fill('Add a retry to the checkout call')
-    // Its lead reports Implement done at once, with no review, so what follows is talking to it.
-    await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
-    await expect(page.getByRole('button', { name: /^Review: Small/ })).toBeVisible()
-    await page.screenshot({ path: 'test-results/new-task.png', animations: 'disabled' })
-    await page.getByRole('button', { name: /^Review:/ }).click()
-    await page.getByRole('button', { name: 'No review' }).click()
-    await page.getByRole('button', { name: 'Start the task' }).click()
+    // Told what should change, the coordinator plans it. Its lead reports Implement done at once, with no review, so what follows is talking to it.
+    await startTask(page, 'Add a retry to the checkout call')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
 
     // Its card shows in the Talk room, and opens the task.
@@ -212,8 +206,9 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await page.getByRole('button', { name: 'More for this project' }).click()
     await page.getByRole('menuitem', { name: 'Connect GitHub' }).click()
 
-    // GitHub has no sign-in of Althar's in this build, so it takes a token.
-    const services = page.getByRole('list', { name: 'Code hosts and trackers' })
+    // GitHub has no sign-in of Althar's in this build, so it takes a token. The code hosts and trackers open over the project.
+    const connecting = page.getByRole('dialog', { name: 'Code hosts and trackers' })
+    const services = connecting.getByRole('list', { name: 'Code hosts' })
     await services.getByRole('button', { name: 'Add a token' }).click()
     await services.getByLabel('GitHub token').fill('github_pat_e2e')
     await page.screenshot({ path: 'test-results/token.png', animations: 'disabled' })
@@ -222,6 +217,7 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await expect(page.getByText(/isn't connected to/)).toHaveCount(0)
     await page.screenshot({ path: 'test-results/connected.png', animations: 'disabled' })
     await page.keyboard.press('Escape')
+    await expect(connecting).toHaveCount(0)
 
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
     await box.fill('Add a retry to the checkout call. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
@@ -341,16 +337,6 @@ const catchWhatReachesThem = (electronApp: ElectronApplication) =>
 /** Where the system carries an app's count, as Settings names it: the Dock, Linux's launcher. */
 const COUNT = process.platform === 'darwin' ? 'Count them on the Dock icon' : 'Count them on the launcher icon'
 
-/** Plans a task with no review, as the person would, and starts it. */
-const startTask = async (page: Page, title: string, lead: string) => {
-  await page.getByRole('button', { name: 'New task' }).click()
-  await page.getByLabel('What should change').fill(title)
-  await page.getByLabel('Anything the lead should know').fill(lead)
-  await page.getByRole('button', { name: /^Review:/ }).click()
-  await page.getByRole('button', { name: 'No review' }).click()
-  await page.getByRole('button', { name: 'Start the task' }).click()
-}
-
 test('notifies the person of a ready task while they look elsewhere, counts it on the Dock, and opens it on a click', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
@@ -358,12 +344,7 @@ test('notifies the person of a ready task while they look elsewhere, counts it o
   try {
     await catchWhatReachesThem(electronApp)
     await openFirstProject(electronApp, page, repo)
-    await page.getByRole('button', { name: 'New task' }).click()
-    await page.getByLabel('What should change').fill('Add a retry to the checkout call')
-    await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
-    await page.getByRole('button', { name: /^Review:/ }).click()
-    await page.getByRole('button', { name: 'No review' }).click()
-    await page.getByRole('button', { name: 'Start the task' }).click()
+    await startTask(page, 'Add a retry to the checkout call')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 15_000 })
 
     await expect
@@ -447,7 +428,7 @@ test('tells only what the person keeps on, keeps the Mac awake while work runs, 
       .getByRole('button', { name: /meridian/ })
       .click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await startTask(page, 'Add a retry to the checkout call', '[lead:finish]')
+    await startTask(page, 'Add a retry to the checkout call')
     await expect(page.getByText('Ready', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
     await expect.poll(() => electronApp.evaluate(() => globalThis.badge)).toBe(0)
     await page.waitForTimeout(1_000)

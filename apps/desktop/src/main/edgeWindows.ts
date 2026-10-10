@@ -13,8 +13,11 @@ import { DEFAULT_EDGE, type EdgePlace, edgeIn, findNotch, type Notch, pointerOn,
  * window of an app in the background that the pointer came in, so this
  * process watches the pointer itself (`POINTER`) and tells the page. The
  * menu bar's is Althar's mark, which drops a sheet under it; the mark gets a
- * dot while something waits on you. Each page is renderer/edge.html, with a
- * port to the runtime like the window's, so it reads and answers for itself.
+ * dot while something waits on you. Both are for while you work in another
+ * app: while one of Althar's windows has focus, on any screen, the island
+ * hides and, on a Mac, the mark leaves the menu bar. Each page is
+ * renderer/edge.html, with a port to the runtime like the window's, so it
+ * reads and answers for itself.
  */
 
 /** What the edge needs from the rest of the main process. */
@@ -69,6 +72,8 @@ export interface Edge {
   readonly sized: (window: BrowserWindow, height: number) => void
   /** Closes the menu bar's sheet, as after it opened something. */
   readonly settle: () => void
+  /** Whether one of Althar's windows has focus: the edge steps aside while it has. */
+  readonly front: (front: boolean) => void
 }
 
 export const startEdge = (host: EdgeHost): Edge => {
@@ -84,6 +89,10 @@ export const startEdge = (host: EdgeHost): Edge => {
   let drawnFor: { readonly width: number; readonly height: number } | null = null
   /** Each look for the notch, counted, so one that answers late can't undo a later one. */
   let looking = 0
+  /** Whether one of Althar's windows has focus, when nothing shows at the edge. */
+  let inFront = false
+  /** The mark leaves the menu bar while Althar is in front only on a Mac: elsewhere a tray's icon stays, as the system's own do. */
+  const markSteps = process.platform === 'darwin'
 
   const load = (window: BrowserWindow, query: Record<string, string>) => {
     window.webContents.on('did-finish-load', () => host.connect(window))
@@ -124,7 +133,9 @@ export const startEdge = (host: EdgeHost): Edge => {
     made.setIgnoreMouseEvents(true, { forward: true })
     // Over the menu bar and its items, under a menu that opens later.
     made.setAlwaysOnTop(true, 'pop-up-menu')
-    made.once('ready-to-show', () => made.showInactive())
+    made.once('ready-to-show', () => {
+      if (!inFront) made.showInactive()
+    })
     made.on('closed', () => {
       if (island === made) island = undefined
     })
@@ -141,9 +152,24 @@ export const startEdge = (host: EdgeHost): Edge => {
     pointed = false
   }
 
+  /** Shows the island, or hides it while Althar is in front: closed first, so it comes back at rest. */
+  const placeIsland = () => {
+    if (island === undefined || island.isDestroyed()) return
+    if (!inFront) {
+      if (!island.isVisible() && !island.webContents.isLoading()) island.showInactive()
+      return
+    }
+    if (pointed) {
+      pointed = false
+      island.setIgnoreMouseEvents(true, { forward: true })
+      island.webContents.send('althar:edge-pointed', false)
+    }
+    island.hide()
+  }
+
   /* Clicks land on the island while the pointer is on what it draws, and go through elsewhere; the page hears which, to open and close. */
   const watch = setInterval(() => {
-    if (island === undefined || island.isDestroyed() || drawn === null) return
+    if (island === undefined || island.isDestroyed() || drawn === null || !island.isVisible()) return
     // Against where the window is now, which a change of screens may have moved.
     const on = pointerOn(drawn, island.getBounds(), screen.getCursorScreenPoint())
     if (on === pointed) return
@@ -209,12 +235,18 @@ export const startEdge = (host: EdgeHost): Edge => {
     tray.setToolTip('Althar')
     tray.on('click', toggleSheet)
     // Made now and kept hidden, so the first click opens it at once, already read.
-    makeSheet()
+    if (sheet === undefined || sheet.isDestroyed()) makeSheet()
+  }
+
+  /** Takes the mark out of the menu bar; its sheet is kept, hidden, for when it comes back. */
+  const hideMark = () => {
+    tray?.destroy()
+    tray = undefined
+    sheet?.hide()
   }
 
   const dropTray = () => {
-    tray?.destroy()
-    tray = undefined
+    hideMark()
     sheet?.destroy()
     sheet = undefined
   }
@@ -225,8 +257,10 @@ export const startEdge = (host: EdgeHost): Edge => {
     if (edgeIn(chosen, notch) === 'island' && notch !== null) {
       dropTray()
       showIsland(notch)
+      placeIsland()
     } else {
       dropIsland()
+      if (inFront && markSteps) return hideMark()
       try {
         showTray()
       } catch {
@@ -279,5 +313,10 @@ export const startEdge = (host: EdgeHost): Edge => {
       window.setBounds(window.isVisible() ? { ...window.getBounds(), height: place.height } : place)
     },
     settle: () => sheet?.hide(),
+    front: (front) => {
+      if (front === inFront) return
+      inFront = front
+      apply()
+    },
   }
 }

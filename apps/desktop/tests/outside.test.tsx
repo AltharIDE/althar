@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type IssueSummary, type Product, type ThreadSnapshot } from '@althar/contracts'
+import { ApiError, type Product, type ThreadSnapshot } from '@althar/contracts'
 import { Brand, IssuePriority, IssueStatus } from '@althar/ui'
 
 import { useConnections } from '../src/renderer/features/connections/useConnections'
@@ -16,19 +16,7 @@ import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { issuePriority, issueStatus, productBrand, productName } from '../src/renderer/shared/products'
 import { blocksOf } from '../src/renderer/shared/thread'
-import {
-  card,
-  change,
-  changed,
-  connectionList,
-  coordinatorSnapshot,
-  fakeClient,
-  githubConnection,
-  items,
-  project,
-  projectRules,
-  snapshot,
-} from './fixtures'
+import { card, change, changed, connectionList, coordinatorSnapshot, fakeClient, githubConnection, items, snapshot } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -473,19 +461,8 @@ function Project() {
   )
 }
 
-const issue: IssueSummary = {
-  product: 'linear',
-  ref: 'MER-231',
-  key: 'MER-231',
-  title: 'Rate-limit refunds like charges',
-  url: 'https://linear.app/m/issue/MER-231/x',
-  status: { name: 'Todo', category: 'todo' },
-  priority: null,
-  container: null,
-}
-
 describe('a project, reaching outside', () => {
-  it('says nothing of an unconnected host up front, and connects it from the project’s menu in the bar', async () => {
+  it('says nothing of an unconnected host up front, and connects it from the project’s menu in the bar, on any view', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
         coordinatorSnapshot({ host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: false } }),
@@ -497,46 +474,15 @@ describe('a project, reaching outside', () => {
     expect(screen.queryByText(/isn't connected to GitHub/)).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'More for this project' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Connect GitHub' }))
-    const panel = await screen.findByRole('complementary', { name: 'Code hosts and trackers' })
-    expect(within(panel).getByText('GitHub')).toBeTruthy()
-  })
-
-  it('starts a task from an issue, with how it ends, where the host is connected', async () => {
-    const { client } = fakeClient({
-      getCoordinator: vi.fn(async () =>
-        coordinatorSnapshot({ host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } }),
-      ),
-      listIssues: vi.fn(async () => ({ issues: [issue] })),
-    })
-    withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    const panel = await screen.findByRole('complementary', { name: 'New task' })
-    await userEvent.click(within(panel).getByRole('combobox', { name: 'From an issue' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'Linear MER-231 · Rate-limit refunds like charges' }))
-    expect((within(panel).getByLabelText('What should change') as HTMLInputElement).value).toBe('Rate-limit refunds like charges')
-    await userEvent.click(within(panel).getByRole('combobox', { name: 'When the work is done' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'Open a PR for review' }))
-    await userEvent.click(within(panel).getByRole('button', { name: 'Start the task' }))
-    await waitFor(() =>
-      expect(client.startTask).toHaveBeenCalledWith(
-        expect.objectContaining({ title: 'Rate-limit refunds like charges', issue: 'MER-231', end: 'ready' }),
-      ),
-    )
-  })
-
-  it('names the repositories a task changes, in a project of several', async () => {
-    const { client } = fakeClient({
-      listProjects: vi.fn(async () => ({ cursor: 3, projects: [{ ...project, repositories: ['api', 'web', 'docs'] }] })),
-    })
-    withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    const panel = await screen.findByRole('complementary', { name: 'New task' })
-    // The first, until the person ticks others; the last ticked can't be unticked.
-    expect(within(panel).getByRole('checkbox', { name: 'api' })).toHaveProperty('ariaChecked', 'true')
-    await userEvent.click(within(panel).getByRole('checkbox', { name: 'web' }))
-    await userEvent.type(within(panel).getByLabelText('What should change'), 'Share the retry')
-    await userEvent.click(within(panel).getByRole('button', { name: 'Start the task' }))
-    await waitFor(() => expect(client.startTask).toHaveBeenCalledWith(expect.objectContaining({ repositories: ['api', 'web'] })))
+    const dialog = await screen.findByRole('dialog', { name: 'Code hosts and trackers' })
+    expect(within(dialog).getByText('GitHub')).toBeTruthy()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // On the board too, where nothing of the conversation shows.
+    await userEvent.click(screen.getByRole('radio', { name: 'Board' }))
+    await userEvent.click(screen.getByRole('button', { name: 'More for this project' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Connect GitHub' }))
+    expect(await screen.findByRole('dialog', { name: 'Code hosts and trackers' })).toBeTruthy()
   })
 
   it('shows each of a task’s pull requests by its repository, and acts on the one open', async () => {
@@ -633,22 +579,6 @@ describe('a project, reaching outside', () => {
     expect(await screen.findByRole('button', { name: 'Push 2 commits to api' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Push 1 commit to web' }))
     await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456', 'https://github.com/meridian/web/pull/4'))
-  })
-
-  it('starts a new task from the project’s ending', async () => {
-    const { client } = fakeClient({
-      getCoordinator: vi.fn(async () =>
-        coordinatorSnapshot({ host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } }),
-      ),
-      getProjectRules: vi.fn(async () => ({ ...projectRules, end: 'none' as const })),
-    })
-    withServices(<Project />, client)
-    await waitFor(() => expect(client.getProjectRules).toHaveBeenCalledWith('p1'))
-    await userEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    const panel = await screen.findByRole('complementary', { name: 'New task' })
-    await userEvent.type(within(panel).getByLabelText('What should change'), 'Push it')
-    await userEvent.click(within(panel).getByRole('button', { name: 'Start the task' }))
-    await waitFor(() => expect(client.startTask).toHaveBeenCalledWith(expect.objectContaining({ title: 'Push it', end: 'none' })))
   })
 
   it('shows a task’s issue and pull request on its card, and its ending on its plan, which can change', async () => {

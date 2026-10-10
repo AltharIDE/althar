@@ -18,6 +18,7 @@ import { type Account, Accounts } from './Accounts'
 import type { Artifacts } from './Artifacts'
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
+import { coordinatorNews } from './coordinatorNews'
 import {
   AlreadyDelivered,
   EffortUnchanged,
@@ -33,6 +34,7 @@ import {
 import { Instance } from './Instance'
 import { Limits } from './Limits'
 import { Live } from './Live'
+import type { Models } from './Models'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { touchCard } from './cards'
 import { change, fact, timestamp } from './records'
@@ -208,6 +210,7 @@ type Store =
   | RuntimeConfig
   | Accounts
   | Limits
+  | Models
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
 
 /** A turn's input was taken back while the turn was being made: it is made again from what still waits. */
@@ -255,6 +258,8 @@ export const promptFor = (
     readonly cutShort?: string
   }>,
   brief: { readonly text: string; readonly closing: string } | undefined,
+  /** What Althar tells the agent first, before what was said: what changed while it wasn't speaking. */
+  news: string | null = null,
 ) => {
   const parts = inputs.map((input) => {
     const said =
@@ -266,8 +271,9 @@ export const promptFor = (
       ? said
       : `${input.cutShort} was working on this when it reached its usage limit, and may have done some of it already. Check what is done before you carry on.\n\n${said}`
   })
-  if (brief === undefined) return parts.join('\n\n')
-  return [brief.text, ...(parts.length === 0 ? [brief.closing] : parts)].join('\n\n')
+  const said = news === null ? parts : [news, ...parts]
+  if (brief === undefined) return said.join('\n\n')
+  return [brief.text, ...(parts.length === 0 ? [brief.closing] : said)].join('\n\n')
 }
 
 /** Why a turn ended in failure, as a class for the record. */
@@ -510,7 +516,16 @@ export class Sessions extends Context.Service<
               Effect.catchCause((cause) => Effect.logWarning('Could not refresh the coordinator folder', cause)),
             )
           const brief = running.brief
-          const prompt = promptFor(inputs, brief)
+          // What became of its plans since it last spoke, which only the cards show the person: read first, so it speaks of them as they are.
+          const news =
+            thread.role === 'coordinator'
+              ? yield* coordinatorNews(thread.threadId, thread.projectId).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.as(Effect.logWarning('Could not read what changed for the coordinator', cause), null),
+                  ),
+                )
+              : null
+          const prompt = promptFor(inputs, brief, news)
           const turnId = yield* newId(Ids.turnDelivery)
           const [session] = yield* sql<{
             model: string | null

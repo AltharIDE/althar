@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say } from './support'
+import { launch, openFirstProject, say, startTask } from './support'
 
 /*
  * A project's rules (ADR-013), as the person changes them: from the
@@ -64,14 +64,11 @@ test('the coordinator answers a task permission, leaves always-ask items to the 
     await openRules(page)
     await page.getByRole('radio', { name: /The coordinator decides/ }).click()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('button', { name: 'New task' }).click()
-    await page.getByLabel('What should change').fill('Verify the checkout')
-    await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
-    await page.getByRole('button', { name: /^Review:/ }).click()
-    await page.getByRole('button', { name: 'No review' }).click()
-    await page.getByRole('button', { name: 'Start the task' }).click()
+    await startTask(page, 'Verify the checkout')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
+    // In the task before saying anything: the project's composer, the coordinator's, is there until it opens.
+    await expect(page.getByRole('heading', { name: 'Verify the checkout', level: 1 })).toBeVisible()
     await page.keyboard.press('c')
 
     await say(page, 'tool')

@@ -552,7 +552,7 @@ describe('every state the board shows', () => {
 })
 
 describe('the bar and the dock, on the rest of the board', () => {
-  it('opens work ready to accept when no call waits, and starts a task from the board beside the conversation', async () => {
+  it('opens work ready to accept when no call waits', async () => {
     const onTask = vi.fn()
     const bare = change({ draft: false, additions: null, deletions: null, checks: null })
     const { client } = fakeClient({
@@ -565,10 +565,6 @@ describe('the bar and the dock, on the rest of the board', () => {
     expect(within(work).getByText('No checks ran')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: '1 needs you' }))
     expect(onTask).toHaveBeenCalledWith('th9')
-    // A task planned by hand opens beside the conversation, so the board makes room for it.
-    await userEvent.click(screen.getByRole('button', { name: 'New task' }))
-    expect(screen.getByRole('radio', { name: 'Both', checked: true })).toBeTruthy()
-    expect(await screen.findByLabelText('What should change')).toBeTruthy()
   })
 
   it('shows running and waiting work in the dock, each as it stands', async () => {
