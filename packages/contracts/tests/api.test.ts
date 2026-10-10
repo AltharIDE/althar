@@ -4,7 +4,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 
-import { Api, ApiError, CommandId, PAGE, Product, ThreadItem, WatchEvent } from '../src/Api'
+import { Api, ApiError, CommandId, NewProjectId, PAGE, Product, ThreadItem, WatchEvent } from '../src/Api'
 import { clientProtocol, emitterPort, serverProtocol } from '../src/transport'
 
 const at = '2026-09-29T12:00:00.000Z'
@@ -171,6 +171,9 @@ describe('the API', () => {
   it('takes a command id only in its own shape, and a change with its cursor', () => {
     assert.strictEqual(Schema.decodeUnknownSync(CommandId)(commandId), commandId)
     assert.throws(() => Schema.decodeUnknownSync(CommandId)('cmd_nope'))
+    // A new project's id, made by the window, is a project's id in its own shape, and nothing else's.
+    assert.strictEqual(Schema.decodeUnknownSync(NewProjectId)(`proj_${'0'.repeat(32)}`), `proj_${'0'.repeat(32)}`)
+    assert.throws(() => Schema.decodeUnknownSync(NewProjectId)(commandId))
     assert.throws(() =>
       Schema.decodeUnknownSync(WatchEvent)({ _tag: 'Changed', aggregateType: 'task', aggregateId: 't', projectId: null, threadId: null }),
     )

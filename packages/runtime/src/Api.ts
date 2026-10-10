@@ -339,7 +339,7 @@ export const handlers = Api.toLayer(
             return { ...reading, repositories: [...reading.repositories] }
           }),
         ),
-      OpenProject: ({ commandId, grant, name, repositories }) =>
+      OpenProject: ({ commandId, grant, name, repositories, projectId, ink }) =>
         api(
           Effect.gen(function* () {
             const path = yield* folders.path(grant)
@@ -357,10 +357,12 @@ export const handlers = Api.toLayer(
                     }),
                   )
             const opened = yield* projects.open({
-              envelope: yield* envelope('project.open', { path }, commandId),
+              envelope: yield* envelope('project.open', projectId === undefined ? { path } : { path, projectId }, commandId),
               path,
               ...(name === undefined ? {} : { name }),
               ...(roots === undefined ? {} : { repositories: roots }),
+              ...(projectId === undefined ? {} : { projectId }),
+              ...(ink === undefined ? {} : { ink }),
             })
             const { projects: all } = yield* queries.projects
             const found = all.find((project) => project.id === opened.projectId)

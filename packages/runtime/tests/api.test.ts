@@ -527,6 +527,19 @@ describe('the API', () => {
         })
         assert.deepStrictEqual([project.name, project.repository, project.repositories], ['Meridian', folder, ['web']])
         assert.deepStrictEqual((yield* client.ReadFolder({ grant: chosen })).project, { id: project.id, name: 'Meridian' })
+        // Made on purpose, under the window's id and in the ink it showed, from the same folder: a project of its own.
+        const projectId = `proj_${'2'.repeat(32)}`
+        const made = yield* client.OpenProject({
+          commandId: commandId(),
+          grant: chosen,
+          name: 'Northwind',
+          repositories: [{ grant: chosen, path: join(folder, 'api') }],
+          projectId,
+          ink: 'umber',
+        })
+        assert.deepStrictEqual([made.id, made.name, made.ink, made.repositories], [projectId, 'Northwind', 'umber', ['api']])
+        const taken = yield* Effect.flip(client.OpenProject({ commandId: commandId(), grant: chosen, projectId }))
+        assert.strictEqual(taken.reason, 'ProjectRefused')
       }),
     ),
   )

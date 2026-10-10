@@ -31,6 +31,10 @@ export class ApiError extends Schema.TaggedError<ApiError>()('ApiError', {
 export const CommandId = Schema.String.check(Schema.isPattern(/^cmd_[0-9a-f]{32}$/))
 export type CommandId = typeof CommandId.Type
 
+/** A new project's id, made by the window before the project is, so its mark is drawn from it while it is named: `proj_` and 32 hex digits. */
+export const NewProjectId = Schema.String.check(Schema.isPattern(/^proj_[0-9a-f]{32}$/))
+export type NewProjectId = typeof NewProjectId.Type
+
 /** A position in the store's change feed. Events after it are the ones a client hasn't seen. */
 export const Cursor = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -1204,6 +1208,10 @@ export const Api = RpcGroup.make(
    * window never names a path. A folder holding several repositories opens
    * with `repositories`, the ones the person kept, each by the grant of the
    * folder it was found in and its root as read; without it, every one found.
+   * A project made on purpose comes with the id the window made for it
+   * (`projectId`, refused where it is taken), and is made even where its
+   * folder is another project's already; with `ink`, in the ink the person
+   * chose, otherwise the runtime's pick (`inkFor`).
    */
   command(
     'OpenProject',
@@ -1211,6 +1219,8 @@ export const Api = RpcGroup.make(
       grant: Schema.String,
       name: Schema.optional(Schema.String),
       repositories: Schema.optional(Schema.Array(Schema.Struct({ grant: Schema.String, path: Schema.String }))),
+      projectId: Schema.optional(NewProjectId),
+      ink: Schema.optional(ProjectInk),
     },
     ProjectSummary,
   ),

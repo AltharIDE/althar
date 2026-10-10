@@ -293,6 +293,7 @@ const projectRefused = {
   last_repository: 'The project needs a repository for its tasks to work in. Add another before leaving this one out.',
   no_role: "That isn't a role a repository can have.",
   not_a_fork: "That repository isn't a fork, so its pull requests open on it.",
+  id_taken: "Althar couldn't make the project under the id its mark was drawn from. Close the tab and start again.",
 } as const satisfies Record<ProjectRefused['reason'], string>
 
 /** Why an account can't be added, renamed or removed, by reason. */
