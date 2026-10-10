@@ -1,0 +1,105 @@
+/* A Mac's desktop, at its design size: the wallpaper, the menu bar, and a screen under it for windows. */
+.desktop {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #f2f0ea center / cover no-repeat;
+  --bar: 32px;
+}
+.light { background-image: url(/wallpaper/aurora-light-mac.jpg); }
+.dark { background-image: url(/wallpaper/aurora-dark-mac.jpg); background-color: #0b0c12; }
+
+.menuBar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 3;
+  height: var(--bar);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  font: 500 13px/1 var(--font);
+  letter-spacing: -0.005em;
+  color: rgba(20, 20, 23, 0.86);
+  background: rgba(255, 255, 255, 0.32);
+  backdrop-filter: blur(18px) saturate(1.4);
+}
+.dark .menuBar { color: rgba(255, 255, 255, 0.9); background: rgba(10, 10, 16, 0.28); }
+.menus, .status { display: flex; align-items: center; gap: 20px; }
+.menus b { font-weight: 700; }
+.apple { --logo-point: currentColor; }
+.battery { width: 22px; height: 10px; border-radius: 3px; box-shadow: inset 0 0 0 1px currentColor; position: relative; opacity: 0.8; }
+.battery::after { content: ''; position: absolute; left: 2px; top: 2px; bottom: 2px; width: 13px; border-radius: 1.5px; background: currentColor; }
+
+.screen { position: absolute; inset: var(--bar) 0 0; }
+/* The island hangs from the top of the screen, over the menu bar. */
+.edge {
+  position: absolute; inset: 0; z-index: 4; pointer-events: none;
+  /* Touched up: the ink sheet doesn't yet set the code chip's paper (a task is open for the app). */
+  --n-4: rgba(255, 255, 255, 0.1);
+}
+.edge > * { pointer-events: auto; }
+
+/* A window, as macOS shadows it: a hairline edge, and a soft drop. */
+.window {
+  position: absolute;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--n-2);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.22),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.5),
+    0 22px 70px rgba(0, 0, 0, 0.22),
+    0 6px 18px rgba(0, 0, 0, 0.1);
+}
+.behind { box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.18), 0 12px 40px rgba(0, 0, 0, 0.14); }
+
+/* Another app: an editor, dark. */
+.editor { background: #17181d; color: rgba(255, 255, 255, 0.55); display: flex; flex-direction: column; }
+.editorBar { flex: none; height: 38px; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: #1d1e24; border-bottom: 1px solid rgba(255, 255, 255, 0.06); font: 500 12px var(--font); }
+.lights { display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; }
+.lights i:nth-child(3) { background: #28c840; }
+.editorTitle { flex: 1; text-align: center; margin-right: 60px; color: rgba(255, 255, 255, 0.6); }
+.editorBody { flex: 1; display: flex; min-height: 0; }
+.files { width: 200px; padding: 14px 16px; display: flex; flex-direction: column; gap: 9px; font: 12px var(--mono); border-right: 1px solid rgba(255, 255, 255, 0.06); }
+.fileOn { color: #fff; }
+.code { flex: 1; padding: 14px 0; display: flex; flex-direction: column; gap: 9px; }
+.line { display: flex; align-items: center; gap: 20px; height: 10px; }
+.line em { width: 34px; text-align: right; font: normal 11px var(--mono); color: rgba(255, 255, 255, 0.22); }
+.line i { display: block; height: 7px; border-radius: 4px; background: linear-gradient(90deg, rgba(154, 166, 255, 0.55), rgba(255, 255, 255, 0.18) 40%, rgba(255, 185, 149, 0.4)); }
+
+/* Althar in the menu bar: its mark among the status items, raised while what drops from it is open. */
+.statusItem { position: relative; display: grid; place-items: center; width: 26px; height: 22px; border-radius: 5px; --logo-point: var(--live); }
+.statusOn { background: rgba(20, 20, 23, 0.12); }
+.dark .statusOn { background: rgba(255, 255, 255, 0.18); }
+.statusDot { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.8); }
+.menuSheet {
+  position: absolute; top: calc(var(--bar) + 6px); right: 104px; z-index: 4; width: 400px;
+  border-radius: 12px; background: var(--n-1); overflow: hidden;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.2), 0 18px 50px rgba(0, 0, 0, 0.25);
+}
+
+/* A browser. */
+.browser { background: #fff; display: flex; flex-direction: column; }
+.browserTabs { flex: none; display: flex; align-items: flex-end; gap: 4px; height: 40px; padding: 0 12px; background: #e8e6e1; }
+.browserTabs .lights { align-self: center; margin-right: 14px; }
+.tab { padding: 8px 16px; border-radius: 9px 9px 0 0; font: 500 12px var(--font); color: rgba(20, 20, 23, 0.6); white-space: nowrap; }
+.tabOn { background: #fff; color: #141417; }
+.address { flex: none; display: flex; align-items: center; height: 40px; padding: 0 14px; border-bottom: 1px solid #ecebe7; }
+.address span { flex: 1; padding: 6px 14px; border-radius: 16px; background: #f2f1ee; font: 12.5px var(--font); color: rgba(20, 20, 23, 0.7); }
+.page { flex: 1; padding: 28px 56px; display: flex; flex-direction: column; gap: 24px; }
+.pageHead { display: grid; gap: 6px; padding-bottom: 18px; border-bottom: 1px solid #ecebe7; }
+.pageHead b { font: 600 24px/1.25 var(--font); letter-spacing: -0.01em; color: #1f2328; }
+.pageHead span { font: 13px var(--font); color: #59636e; }
+.pageBody { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+.pageBody i { display: block; height: 9px; border-radius: 5px; background: #eceae5; }
+
+/* A terminal. */
+.terminal { background: #101115; display: flex; flex-direction: column; }
+.termBody { flex: 1; padding: 18px 22px; display: flex; flex-direction: column; gap: 6px; font: 13px/1.5 var(--mono); color: rgba(255, 255, 255, 0.78); white-space: pre; }
+.termBody b { color: #9aa6ff; font-weight: 500; }
+.cursor { display: inline-block; width: 8px; height: 15px; vertical-align: -2px; background: rgba(255, 255, 255, 0.8); }
+

@@ -1,0 +1,25 @@
+/* One line between hairlines, under the first screen. */
+.band {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 14px 22px;
+  height: 76px;
+  padding: 0 var(--gut);
+  border-top: 1px solid var(--line-2);
+  border-bottom: 1px solid var(--line-2);
+  background: var(--n-2);
+  font-size: 16px;
+  color: var(--t-1);
+}
+.label { margin-right: 6px; font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3); }
+.system { display: inline-flex; align-items: center; gap: 9px; font-weight: 550; letter-spacing: -0.01em; }
+.dot { width: 3px; height: 3px; border-radius: 50%; background: var(--t-4); }
+
+@media (max-width: 700px) {
+  .band { height: auto; padding: 18px var(--gut); gap: 10px 16px; font-size: 15px; }
+  .label { flex-basis: 100%; margin: 0; text-align: center; }
+}

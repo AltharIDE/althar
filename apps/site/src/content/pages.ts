@@ -46,6 +46,13 @@ export const PAGE_META = {
     image: '/og/wallpaper.png',
     index: true,
   },
+  '/docs': {
+    path: '/docs',
+    title: 'Docs · Althar',
+    description: 'Althar’s documentation is being written. Until it’s published: the README, the thesis and the issues on GitHub.',
+    image: '/og/home.png',
+    index: false,
+  },
   /** The earlier page, kept for the company version: linked from nowhere, and kept out of search until then. */
   '/enterprise': {
     path: '/enterprise',

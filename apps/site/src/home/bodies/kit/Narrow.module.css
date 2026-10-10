@@ -1,0 +1,11 @@
+/* A window of the app, alone on the page: macOS's hairline edge and soft drop. */
+.wrap { padding: 0 var(--gut); }
+.window {
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--n-2);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.2),
+    0 24px 60px rgba(20, 24, 70, 0.16),
+    0 6px 16px rgba(20, 24, 70, 0.08);
+}

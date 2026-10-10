@@ -10,4 +10,7 @@
   "observability": {
     "enabled": true,
   },
+  // Branch builds run `wrangler preview`, which needs this block. Empty: previews
+  // use the same settings as production.
+  "previews": {},
 }

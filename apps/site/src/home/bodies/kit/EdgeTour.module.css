@@ -1,0 +1,101 @@
+/* As large as the window's height lets the screen and its places be seen together. */
+.tour { max-width: min(1320px, calc((100svh - 130px) * 1.6 + 2 * var(--gut) + 20px)); margin: 70px auto 0; padding: 0 var(--gut); }
+/* The screen's bezel wraps the pictures; the moments sit under it, outside. */
+.bezel > div > div:first-child {
+  padding: 10px;
+  border-radius: 30px;
+  background: #000;
+  box-shadow: inset 0 0 0 1px #2a2a32, 0 40px 120px rgba(0, 0, 0, 0.6);
+}
+.screen { border-radius: 20px; }
+
+/* Where the island's opening is watched from: the middle of the screen. */
+.spot { position: absolute; left: 50%; top: 30%; width: 1px; height: 1px; }
+
+/* ---- the menu bar: words, and the corner of a screen at its size ---- */
+.menuNote { display: grid; grid-template-columns: minmax(0, 1fr) 620px; align-items: center; gap: 72px; max-width: 1240px; margin: 140px auto 0; }
+.menuWords { display: grid; gap: 18px; align-content: center; color: rgba(255, 255, 255, 0.7); font-size: 17px; line-height: 1.55; }
+.menuWords p { margin: 0; max-width: 460px; }
+.menuWords .menuTitle { color: #fff; font-size: clamp(34px, 3.8vw, 56px); }
+.choose { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px !important; font: 500 12.5px var(--mono); color: rgba(255, 255, 255, 0.5); }
+.choose b { font-weight: 500; color: #fff; }
+.choose i { font-style: normal; color: rgba(255, 255, 255, 0.3); }
+
+.sceneFrame { border-radius: 20px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 40px 100px rgba(0, 0, 0, 0.55); }
+.corner {
+  position: relative; width: 620px; height: 600px; overflow: hidden;
+  background: #0b0c12 url(/wallpaper/aurora-dark-mac.jpg) right top / 1500px auto no-repeat;
+  font: 500 13px/1 var(--font); color: rgba(255, 255, 255, 0.9);
+}
+.cornerBar {
+  position: absolute; inset: 0 0 auto; z-index: 3; height: 32px;
+  background: rgba(10, 10, 16, 0.3); backdrop-filter: blur(18px) saturate(1.4);
+}
+.cornerMenus { position: absolute; left: 14px; top: 0; height: 32px; display: flex; align-items: center; gap: 20px; }
+.cornerStatus { position: absolute; right: 14px; top: 0; height: 32px; display: flex; align-items: center; gap: 16px; }
+.cornerMark { position: relative; display: grid; place-items: center; width: 30px; height: 22px; border-radius: 5px; --logo-point: #9aa6ff; }
+.cornerMark i { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: #a78bfa; box-shadow: 0 0 0 1.5px rgba(10, 10, 16, 0.8); }
+.glyphControl { width: 16px; height: 12px; border-radius: 3px; box-shadow: inset 0 0 0 1.5px currentColor; position: relative; }
+.glyphControl::after { content: ''; position: absolute; left: 3px; right: 3px; top: 4px; height: 1.5px; background: currentColor; }
+.glyphWifi { width: 16px; height: 12px; border-radius: 16px 16px 0 0; background: radial-gradient(circle at 50% 100%, currentColor 2px, transparent 2.5px, transparent 4px, currentColor 4.5px, currentColor 5.5px, transparent 6px, transparent 7.5px, currentColor 8px); -webkit-mask: linear-gradient(#000, #000); }
+.glyphBattery { position: relative; width: 24px; height: 11px; border-radius: 3px; box-shadow: inset 0 0 0 1px currentColor; opacity: 0.85; }
+.glyphBattery::after { content: ''; position: absolute; left: 2px; top: 2px; bottom: 2px; width: 14px; border-radius: 1.5px; background: currentColor; }
+.clock { width: 68px; text-align: right; }
+
+/* The list, dropping from the mark. */
+.drop {
+  position: absolute; top: 38px; right: 12px; z-index: 4; width: 400px;
+  overflow: hidden; border-radius: 12px; background: var(--n-1);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.3), 0 22px 60px rgba(0, 0, 0, 0.45);
+  transform-origin: 82% 0; opacity: 0; transform: translateY(-10px) scale(0.96);
+}
+.cursor { position: absolute; left: 0; top: 0; z-index: 5; transform-origin: 1px 1px; transform: translate(250px, 420px); opacity: 0; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35)); }
+
+/* One loop, 7.5 s, while it is on screen: the pointer comes up to the mark and clicks, the list drops,
+   the pointer reads down it, goes back up and clicks again, the list closes, and it rests a moment. */
+.corner { --loop: 7500ms; }
+.cursor, .cornerMark, .drop { animation-duration: var(--loop); animation-iteration-count: infinite; animation-play-state: paused; animation-fill-mode: both; }
+.cursor { animation-name: point; }
+.cornerMark { animation-name: press; }
+.drop { animation-name: drop; }
+.cornerOn .cursor, .cornerOn .cornerMark, .cornerOn .drop { animation-play-state: running; }
+@keyframes point {
+  0% { opacity: 0; transform: translate(250px, 430px); animation-timing-function: ease-out; }
+  6% { opacity: 1; transform: translate(260px, 400px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); }
+  22% { transform: translate(405px, 17px); animation-timing-function: ease; }
+  24% { transform: translate(405px, 17px) scale(0.85); animation-timing-function: ease; }
+  26% { transform: translate(405px, 17px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); }
+  40% { transform: translate(300px, 236px); animation-timing-function: ease-in-out; }
+  56% { transform: translate(318px, 330px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); }
+  70% { transform: translate(405px, 17px); animation-timing-function: ease; }
+  72% { transform: translate(405px, 17px) scale(0.85); animation-timing-function: ease; }
+  74% { opacity: 1; transform: translate(405px, 17px); animation-timing-function: ease-in; }
+  86%, 100% { opacity: 0; transform: translate(420px, 120px); }
+}
+@keyframes press {
+  0%, 23.5% { background: transparent; }
+  24.5%, 72% { background: rgba(255, 255, 255, 0.22); }
+  73%, 100% { background: transparent; }
+}
+@keyframes drop {
+  0%, 25% { opacity: 0; transform: translateY(-10px) scale(0.96); animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1.08); }
+  31%, 72.5% { opacity: 1; transform: none; animation-timing-function: ease-in; }
+  76%, 100% { opacity: 0; transform: translateY(-6px) scale(0.98); }
+}
+.cornerStill .cursor, .cornerStill .cornerMark, .cornerStill .drop { animation: none; }
+.cornerStill .drop { opacity: 1; transform: none; }
+.cornerStill .cornerMark { background: rgba(255, 255, 255, 0.22); }
+
+@media (max-width: 1100px) {
+  /* The words over the picture, centred as every other section's are. */
+  .menuNote { grid-template-columns: 1fr; gap: 40px; }
+  .menuWords { justify-items: center; text-align: center; }
+  .choose { justify-content: center; }
+}
+@media (max-width: 700px) {
+  .menuNote { grid-template-columns: 1fr; gap: 32px; margin-top: 80px; }
+  .menuWords { font-size: 16px; }
+  .tour { max-width: none; margin-top: 40px; }
+  .bezel > div > div:first-child { padding: 6px; border-radius: 18px; }
+  .screen { border-radius: 12px; }
+}

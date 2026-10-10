@@ -1,4 +1,4 @@
-import { type CSSProperties, Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type CSSProperties, Fragment, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 
 import type { Agent } from '../content/agents'
 import { AgentMark } from '../shared/AgentMark'
@@ -41,10 +41,11 @@ function Word({ name }: { name: Name }) {
   )
 }
 
-function Rolling({ names }: { names: readonly Name[] }) {
+function Rolling({ names, onTurn, after = 0 }: { names: readonly Name[]; onTurn?: (at: number) => void; after?: number }) {
   const [{ at, prev }, setTurn] = useState<{ at: number; prev: number | null }>({ at: 0, prev: null })
   const box = useRef<HTMLSpanElement>(null)
   const current = useRef<HTMLSpanElement>(null)
+  const turned = useEffectEvent((at: number) => onTurn?.(at))
 
   /* The slot takes the incoming name's width; CSS eases between widths. Watching it also follows the type size across breakpoints. */
   useLayoutEffect(() => {
@@ -63,13 +64,18 @@ function Rolling({ names }: { names: readonly Name[] }) {
   useEffect(() => {
     let timer = 0
     let seen = true
+    let turn = 0
+    let wait = HOLD + after
     const next = () => {
+      wait = HOLD
+      turn = (turn + 1) % names.length
+      turned(turn)
       setTurn(({ at: a }) => ({ at: (a + 1) % names.length, prev: a }))
       timer = window.setTimeout(next, HOLD)
     }
     const run = () => {
       window.clearTimeout(timer)
-      if (seen && !document.hidden) timer = window.setTimeout(next, HOLD)
+      if (seen && !document.hidden) timer = window.setTimeout(next, wait)
     }
     const io = new IntersectionObserver(([e]) => {
       seen = e?.isIntersecting ?? true
@@ -83,7 +89,7 @@ function Rolling({ names }: { names: readonly Name[] }) {
       io.disconnect()
       document.removeEventListener('visibilitychange', run)
     }
-  }, [names.length])
+  }, [names.length, after])
 
   const now = names[at]
   const was = prev === null ? null : names[prev]
@@ -103,7 +109,19 @@ function Rolling({ names }: { names: readonly Name[] }) {
 }
 
 /** "Claude." rolling through the names, or "Claude, Codex and Gemini." standing still. Reads as the whole list either way. */
-export function NameSwap({ names, nameClass }: { names: readonly Name[]; nameClass?: string }) {
+export function NameSwap({
+  names,
+  nameClass,
+  onTurn,
+  after,
+}: {
+  names: readonly Name[]
+  nameClass?: string
+  /** Called as each name turns, with the incoming name's place. */
+  onTurn?: (at: number) => void
+  /** How much longer the first name stays, in ms: while the hero opens. */
+  after?: number
+}) {
   const [moving] = useState(() => !still())
   const all = names.map((n) => n.word)
   const spoken = `${all.slice(0, -1).join(', ')} and ${all.at(-1)}.`
@@ -128,7 +146,7 @@ export function NameSwap({ names, nameClass }: { names: readonly Name[]; nameCla
   return (
     <span className={s.line}>
       <span className={s.spoken}>{spoken}</span>
-      <Rolling names={names} />
+      <Rolling names={names} onTurn={onTurn} after={after} />
       <span aria-hidden="true">.</span>
     </span>
   )

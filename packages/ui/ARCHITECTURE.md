@@ -202,6 +202,7 @@ The workbench (`workbench/`, `bun run workbench`) is where components are seen i
 
 - `@althar/ui` exports components, their prop and `text` types, their default `text`, and the enums, all from `src/index.ts`.
 - `@althar/ui/screens` exports the whole screens, from `src/screens/index.ts`. They are one product's compositions, kept off the main entry so the parts' surface stays general.
+- `@althar/ui/opening` exports the opening's drawing parts, from `src/opening.ts`: the light's columns, the mark's halftone and the launch's timeline. It serves a page that opens the way the window does, such as the site's first screen, and draws them itself.
 - `@althar/ui/styles.css` provides the tokens and the base. The consumer imports it once and wraps its UI in `.ch-root`.
 - Anything not exported from `src/index.ts` is internal. Until there is a second consumer, the API may change without a deprecation period; after that, breaking changes need an ADR.
 

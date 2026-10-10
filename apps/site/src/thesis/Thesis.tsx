@@ -1,18 +1,21 @@
-import { useEffect, useRef } from 'react'
-
 import source from '../../../../THESIS.md?raw'
 import { LINKS } from '../content/facts'
 import { DATE } from '../content/sheet'
 import { useCurrent } from '../lib/useCurrent'
-import { Bar } from '../shared/Bar'
-import { Close } from '../shared/Close'
+import { useNarrow } from '../home/bodies/kit/Narrow'
+import { Footer } from '../shared/footer/Footer'
+import { Lit } from '../shared/Lit'
+import { Nav } from '../shared/Nav'
 import { block, compile } from './prose'
 import s from './Thesis.module.css'
 
 /*
- * The thesis, compiled from THESIS.md at build time. The title, the
- * hypothesis and the numbered sections share one reading column, with the
- * contents beside it. Figures in the sections are rails.
+ * The thesis, compiled from THESIS.md at build time. Its title stands in
+ * the site's light; the hypothesis and the numbered sections share one
+ * reading column under it, with the contents beside it; narrower, the
+ * contents fold shut over the column. Each section opens with its number
+ * and its title, the claims stand large, and figures in the sections are
+ * rails.
  */
 
 export const THESIS_SOURCE = source
@@ -21,55 +24,36 @@ const IDS = THESIS.parts.map((p) => p.id)
 
 export function Thesis() {
   const current = useCurrent(IDS)
-  const pin = useRef<HTMLDivElement>(null)
+  const narrow = useNarrow(1000)
   const [lede, claim, ...rest] = THESIS.intro
-
-  useEffect(() => {
-    const el = pin.current
-    if (!el) return
-    const onScroll = () => {
-      if (window.scrollY > 8) el.dataset.scrolled = ''
-      else delete el.dataset.scrolled
-    }
-    onScroll()
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
 
   return (
     <div className={s.page}>
-      <div className={s.pin} ref={pin}>
-        <Bar tone="paper" base="/" />
-      </div>
+      <Nav />
 
       <main id="main" tabIndex={-1}>
+        <Lit kicker={<>Thesis · Rev C · {DATE}</>} title={THESIS.title} lead="A working thesis. A draft, and expected to change." />
         <div className={s.sheet}>
-          <p className={s.meta}>
-            <span className={s.kicker}>
-              <i aria-hidden="true" />
-              Research / Thesis
-            </span>
-            <span>Rev C · {DATE}</span>
-            <span className={s.draft}>Draft · Working thesis · Expected to change</span>
-          </p>
-
-          <nav className={s.contents} aria-label="Contents">
-            <p className={s.contentsHead}>Contents</p>
-            <ol>
-              {THESIS.parts.map((p) => (
-                <li key={p.id}>
-                  <a href={`#${p.id}`} aria-current={p.id === current ? 'location' : undefined}>
-                    <span>{p.no}</span>
-                    {p.title}
-                  </a>
-                </li>
-              ))}
-            </ol>
-          </nav>
+          <details className={s.contents} open={!narrow || undefined} key={narrow ? 'folded' : 'open'}>
+            <summary className={s.contentsHead}>
+              Contents <span>· {THESIS.parts.length} sections</span>
+            </summary>
+            <nav aria-label="Contents">
+              <ol>
+                {THESIS.parts.map((p) => (
+                  <li key={p.id}>
+                    <a href={`#${p.id}`} aria-current={p.id === current ? 'location' : undefined}>
+                      <span>{p.no}</span>
+                      {p.title}
+                    </a>
+                  </li>
+                ))}
+              </ol>
+            </nav>
+          </details>
 
           <article className={s.article}>
             <header className={s.head}>
-              <h1 className={s.h1}>{THESIS.title}</h1>
               {lede && <div className={s.lede}>{block(lede, 'lede')}</div>}
               {claim && <div className={s.openClaim}>{block(claim, 'claim')}</div>}
             </header>
@@ -78,11 +62,8 @@ export function Thesis() {
             </section>
             {THESIS.parts.map((p) => (
               <section key={p.id} id={p.id} className={s.part} aria-labelledby={`${p.id}-h`}>
-                <p className={s.partNo}>
-                  <b>{p.no}</b>
-                  Section
-                </p>
                 <h2 id={`${p.id}-h`} className={s.h2}>
+                  <span className={s.no}>{p.no}</span>
                   {p.title}
                 </h2>
                 {p.body.map((t, i) => block(t, `${p.id}-${i}`))}
@@ -95,7 +76,7 @@ export function Thesis() {
         </div>
       </main>
 
-      <Close />
+      <Footer />
     </div>
   )
 }

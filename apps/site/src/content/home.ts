@@ -29,8 +29,11 @@ export const HERO = {
     { agent: Agent.Kimi, word: 'Kimi' },
     { agent: Agent.Mistral, word: 'Mistral' },
   ],
-  use: 'Use them all at once.',
+  /** "Use them all at once.", on two lines. */
+  use: ['Use them all', 'at once.'],
   lead: 'Althar runs Claude Code, Codex and OpenCode side by side, on the plans you already have. One hits its limit, the next takes over. One gets it wrong, another catches it.',
+  /** The lead on a phone, where the first screen has less room. */
+  short: 'Claude Code, Codex and OpenCode side by side, on the plans you already have.',
   fine: 'Free and open source. No account, and no API key of its own.',
 } as const
 

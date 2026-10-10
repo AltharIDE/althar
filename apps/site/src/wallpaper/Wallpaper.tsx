@@ -1,7 +1,8 @@
 import { WALLPAPER, wallpaperFile, wallpaperPreview } from '../content/wallpaper'
 import { cx } from '../lib/cx'
-import { Bar } from '../shared/Bar'
-import { Close } from '../shared/Close'
+import { Footer } from '../shared/footer/Footer'
+import { Lit } from '../shared/Lit'
+import { Nav } from '../shared/Nav'
 import s from './Wallpaper.module.css'
 
 /*
@@ -13,17 +14,17 @@ import s from './Wallpaper.module.css'
 export function Wallpaper() {
   return (
     <div className={s.page}>
-      <Bar tone="paper" base="/" />
+      <Nav />
       <main id="main" tabIndex={-1}>
-        <header className={s.head}>
-          <div className={s.wrap}>
-            <h1 className={s.h1}>
-              <span className={s.dim}>{WALLPAPER.title[0]}</span>
-              <span>{WALLPAPER.title[1]}</span>
-            </h1>
-            <p className={s.lead}>{WALLPAPER.lead}</p>
-          </div>
-        </header>
+        <Lit
+          kicker="Wallpaper"
+          title={
+            <>
+              {WALLPAPER.title[0]}. <b>{WALLPAPER.title[1]}.</b>
+            </>
+          }
+          lead={WALLPAPER.lead}
+        />
 
         {WALLPAPER.themes.map((t) => (
           <section key={t.key} id={t.key} className={cx(s.theme, t.key === 'dark' && s.ink)} aria-labelledby={`${t.key}-h`}>
@@ -80,7 +81,7 @@ export function Wallpaper() {
           </section>
         ))}
       </main>
-      <Close />
+      <Footer />
     </div>
   )
 }

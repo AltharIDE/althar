@@ -1,0 +1,27 @@
+/* A page's head: paper, the light standing up off its foot, white words in it. */
+
+.lit { position: relative; isolation: isolate; overflow: hidden; background: var(--n-2); color: #fff; }
+/* Taller than the head and standing on its floor: its strong part reaches above the words, its tops fade into the paper under the island. */
+.light { position: absolute; inset: 0; z-index: -1; }
+.glow { height: 150%; }
+
+.words { display: grid; justify-items: center; gap: 22px; max-width: 980px; margin: 0 auto; padding: 150px var(--gut) 110px; text-align: center; }
+.kicker { display: inline-flex; align-items: center; gap: 9px; margin: 0; font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255, 255, 255, 0.82); }
+.kicker i { width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+.title {
+  margin: 0;
+  font-family: 'Inter Display', var(--display);
+  font-weight: 200;
+  font-size: clamp(44px, 6.4vw, 100px);
+  line-height: 0.98;
+  letter-spacing: -0.05em;
+  text-wrap: balance;
+}
+.title b { font-weight: 720; letter-spacing: -0.056em; }
+.lead { margin: 0; max-width: 620px; font-size: 18px; line-height: 1.5; letter-spacing: -0.01em; color: rgba(255, 255, 255, 0.9); text-wrap: pretty; }
+
+@media (max-width: 700px) {
+  .words { gap: 18px; padding: 120px 30px 84px; }
+  .lead { font-size: 16.5px; }
+  .glow { left: -2%; right: -2%; }
+}
