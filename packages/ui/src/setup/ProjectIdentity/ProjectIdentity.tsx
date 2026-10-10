@@ -109,6 +109,8 @@ export function ProjectIdentity({ name, seed, ink, taken = {}, onRename, onInk, 
             setProblem(null)
           }}
           onKeyDown={(event) => {
+            // Enter and Escape that finish or cancel what an input method is composing are its own.
+            if (event.nativeEvent.isComposing) return
             if (event.key === 'Enter') {
               event.preventDefault()
               keep(false)

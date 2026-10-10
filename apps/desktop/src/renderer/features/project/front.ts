@@ -22,6 +22,8 @@ export const text = {
   issues: (key: string) => `${key} issues`,
   alwaysAsks: (what: string) => `Always asks you: ${what}.`,
   nothingAsks: 'Nothing always asks you.',
+  /** Everything allowed: what always asks is kept, but doesn't ask. */
+  nothingWaits: 'Nothing waits for you.',
 }
 
 /** The code host or tracker a project is on, as its coordinator's thread says. */
@@ -52,7 +54,8 @@ export const remoteHostOf = (remote: string | null): string | null => {
   }
 }
 
-const hostNameOf = (url: string | null): string | null => {
+/** An address's host name, lower case; null for one that isn't an address. */
+export const hostNameOf = (url: string | null): string | null => {
   if (url === null) return null
   try {
     return new URL(url).hostname.toLowerCase()
@@ -72,21 +75,36 @@ export const productOfRemote = (remote: string | null, host: Host | null, list: 
   return list?.products.find((product) => product.host && hostNameOf(product.hostedUrl) === name)?.product ?? null
 }
 
-/** The tracker a project's tasks name, by the key most of their issues share (MER of MER-231); none where they name none. */
-export const trackerOf = (tasks: ReadonlyArray<BoardTask>, list: ConnectionList | null): { product: Product; key: string } | null => {
+/** The tracker a project's tasks name, where it is, and the key most of their issues share (MER of MER-231). */
+export interface Tracker {
+  readonly product: Product
+  /** The host its issues are on: linear.app, a company's own Jira. */
+  readonly at: string | null
+  readonly key: string
+}
+
+/** The tracker a project's tasks name, by the key most of their issues share; none where they name none. */
+export const trackerOf = (tasks: ReadonlyArray<BoardTask>, list: ConnectionList | null): Tracker | null => {
   const trackers = new Set(list?.products.filter((product) => product.tracker && !product.host).map((product) => product.product) ?? [])
-  const counted = new Map<string, { product: Product; key: string; n: number }>()
+  const counted = new Map<string, Tracker & { n: number }>()
   for (const task of tasks) {
     const issue = task.issue
     const key = issue === null ? undefined : /^([A-Z][A-Z0-9_]*)-\d+$/.exec(issue.key)?.[1]
     if (issue === null || key === undefined || !trackers.has(issue.product)) continue
-    const id = `${issue.product}:${key}`
+    const at = hostNameOf(issue.url)
+    const id = `${issue.product}:${at ?? ''}:${key}`
     const was = counted.get(id)
-    counted.set(id, { product: issue.product, key, n: (was?.n ?? 0) + 1 })
+    counted.set(id, { product: issue.product, at, key, n: (was?.n ?? 0) + 1 })
   }
   const [most] = [...counted.values()].toSorted((a, b) => b.n - a.n)
-  return most === undefined ? null : { product: most.product, key: most.key }
+  return most === undefined ? null : { product: most.product, at: most.at, key: most.key }
 }
+
+/** The account Althar is connected as on a product there, if it is: a connection to another server of the same product doesn't count. */
+export const connectedAs = (list: ConnectionList | null, product: Product, at: string | null): string | null =>
+  list?.connections.find(
+    (connection) => connection.product === product && connection.state === 'ready' && (at === null || hostNameOf(connection.webUrl) === at),
+  )?.account.login ?? null
 
 /** Every task on the board, in its lanes' order. */
 export const tasksOf = (lanes: Lanes): ReadonlyArray<BoardTask> => [...lanes.next, ...lanes.running, ...lanes.ready, ...lanes.settled]
@@ -96,7 +114,7 @@ export const partsOf = (input: {
   readonly repositories: ReadonlyArray<Pick<ProjectRepository, 'id' | 'name' | 'remote'>>
   readonly host: Host | null
   readonly list: ConnectionList | null
-  readonly tracker: { readonly product: Product; readonly key: string } | null
+  readonly tracker: Tracker | null
 }): ProjectPart[] => [
   ...input.repositories.map((repository) => {
     const product = productOfRemote(repository.remote, input.host, input.list)
@@ -118,9 +136,11 @@ export const hostMarksOf = (
     const product = productOfRemote(repository.remote, host, list)
     if (product === null) continue
     const brand = productBrand(product)
+    const at = remoteHostOf(repository.remote)
     const connected =
-      list?.connections.some((connection) => connection.product === product && connection.state === 'ready') ??
-      (host?.product === product && host.connected)
+      list === null
+        ? host?.product === product && hostNameOf(host.webUrl) === at && host.connected
+        : connectedAs(list, product, at) !== null
     // One mark a brand, as Cloud and a company's own server share one: faint only while neither is connected.
     const was = marks.get(brand)
     const faint = !connected && (was === undefined || was.faint === true)
@@ -144,9 +164,12 @@ export const rulesLineOf = (rules: ProjectRulesView): { readonly policy: string;
   ]
   return {
     policy: permissionPolicyText[POLICY[rules.permissions]].title,
+    // With everything allowed, what always asks is kept for later, but asks nothing now.
     asks:
-      asking.length === 0
-        ? text.nothingAsks
-        : text.alwaysAsks(asking.map((what, i) => (i === 0 ? what : what.charAt(0).toLowerCase() + what.slice(1))).join(', ')),
+      rules.permissions === 'allow'
+        ? text.nothingWaits
+        : asking.length === 0
+          ? text.nothingAsks
+          : text.alwaysAsks(asking.map((what, i) => (i === 0 ? what : what.charAt(0).toLowerCase() + what.slice(1))).join(', ')),
   }
 }

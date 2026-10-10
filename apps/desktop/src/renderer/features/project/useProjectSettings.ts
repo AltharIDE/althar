@@ -40,9 +40,10 @@ export interface ProjectSettingsModel {
   readonly remove: () => Promise<void>
 }
 
+/** A name or ink the person chose, and which change it was, in the order they were made. */
 interface Chosen {
-  readonly name?: string
-  readonly ink?: ProjectInk
+  readonly name?: { readonly value: string; readonly change: number }
+  readonly ink?: { readonly value: ProjectInk; readonly change: number }
 }
 
 export const useProjectSettings = (projectId: string, onRemoved: () => void): ProjectSettingsModel => {
@@ -54,18 +55,20 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
 
   // What the person chose, shown until the runtime says the same or says no.
   const [chosen, setChosen] = useState<Chosen>({})
-  const [failed, setFailed] = useState<string | null>(null)
+  const [failed, setFailed] = useState<{ readonly message: string; readonly change: number } | null>(null)
   // One change after another, in the order they were made, so the last one chosen is the one kept.
   const queue = useRef<Promise<unknown>>(Promise.resolve())
+  const made = useRef(0)
 
   const change = useCallback(
-    <K extends keyof Chosen>(field: K, value: NonNullable<Chosen[K]>, send: () => Promise<void>) => {
-      setFailed(null)
-      setChosen((was) => ({ ...was, [field]: value }))
+    <K extends keyof Chosen>(field: K, value: NonNullable<Chosen[K]>['value'], send: () => Promise<void>) => {
+      const mine = ++made.current
+      setChosen((was) => ({ ...was, [field]: { value, change: mine } }))
       const done = (failure: string | null) => {
-        // A later choice of the same thing stays shown; this one is the runtime's to show now, or put back.
-        setChosen((was) => (was[field] === value ? { ...was, [field]: undefined } : was))
-        if (failure !== null) setFailed(failure)
+        // Only this change's own choice goes, to the runtime's word or back: a later one of the same thing stays shown.
+        setChosen((was) => (was[field]?.change === mine ? { ...was, [field]: undefined } : was))
+        // A failure is said until a later change holds.
+        setFailed((was) => (failure !== null ? { message: failure, change: mine } : was !== null && was.change < mine ? null : was))
       }
       queue.current = queue.current.then(async () => {
         try {
@@ -122,12 +125,12 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
 
   return {
     project,
-    name: chosen.name ?? project?.name ?? null,
-    ink: chosen.ink ?? project?.ink ?? null,
+    name: chosen.name?.value ?? project?.name ?? null,
+    ink: chosen.ink?.value ?? project?.ink ?? null,
     taken,
     rename,
     setInk,
-    failed,
+    failed: failed?.message ?? null,
     rules,
     removing,
     askRemove,

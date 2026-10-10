@@ -15,6 +15,7 @@ import {
   ThreadShellProvider,
   ThreadSkeleton,
   ProjectFront,
+  type ProjectFrontProps,
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
@@ -29,7 +30,7 @@ import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
 import { BoardView } from '../board/BoardView'
-import { lanesOf, yoursOf } from '../board/lanes'
+import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
 import type { BoardModel } from '../board/useBoard'
 import { ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
@@ -110,6 +111,13 @@ const useBothWidth = () => {
     }
   }
   return { width: Math.min(width, max), min: WIDTH.min, max, set: setWidth, keep, reset: () => keep(WIDTH.start) }
+}
+
+/** The front page, with a clock of its own: what settled last says how long ago, a minute at a time, whatever else runs or doesn't. */
+function Front({ lanes, ...front }: Omit<ProjectFrontProps, 'last'> & { lanes: Lanes | null }) {
+  const now = useNow(true, 60_000)
+  const last = lanes === null ? undefined : lastSettledOf(lanes, new Date(now))
+  return <ProjectFront {...front} {...(last === undefined ? {} : { last })} />
 }
 
 /** The project's settings, and where they open. */
@@ -285,16 +293,15 @@ export function ProjectView({
   const repositories =
     model.repositories ?? model.project?.repositories.map((repository) => ({ id: repository, name: repository, remote: null })) ?? []
   const tracker = lanes === null ? null : trackerOf(tasksOf(lanes), connections.list)
-  const last = lanes === null ? undefined : lastSettledOf(lanes, new Date(now))
   const front = (
-    <ProjectFront
+    <Front
+      lanes={lanes}
       name={kept?.name ?? name}
       seed={projectId}
       ink={inkOf(kept?.ink ?? model.project?.ink ?? 'clay')}
       yours={yours}
       {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask), inProgress: lanes.running.length })}
       onYours={openYours}
-      {...(last === undefined ? {} : { last })}
       parts={partsOf({ repositories, host, list: connections.list, tracker })}
       {...(settings === undefined
         ? {}

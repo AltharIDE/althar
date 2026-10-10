@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
-import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fireEvent, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Brand } from '../../foundations/brands/brands'
 import { ProjectInk } from '../../foundations/ProjectMark/drawing'
@@ -82,6 +82,20 @@ export const Renaming: Story = {
     await userEvent.type(field, ' API')
     await userEvent.tab()
     await expect(args.onRename).toHaveBeenLastCalledWith('Refunds v2 API')
+  },
+}
+
+/** Enter that finishes what an input method is composing is the input method's; the next one keeps the name. */
+export const Composing: Story = {
+  play: async ({ args, canvasElement }) => {
+    const field = within(canvasElement).getByRole('textbox', { name: 'Name' })
+    await userEvent.type(field, ' 2')
+    await fireEvent.keyDown(field, { key: 'Enter', isComposing: true })
+    await fireEvent.keyDown(field, { key: 'Escape', isComposing: true })
+    await expect(args.onRename).not.toHaveBeenCalled()
+    await expect(field).toHaveValue('Meridian 2')
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onRename).toHaveBeenCalledWith('Meridian 2')
   },
 }
 

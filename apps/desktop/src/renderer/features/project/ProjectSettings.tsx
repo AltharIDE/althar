@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import type { ConnectionList, Product, ProjectRepository, ProjectSummary } from '@althar/contracts'
+import type { ConnectionList, ProjectRepository, ProjectSummary } from '@althar/contracts'
 import {
   Button,
   ControlCenter,
@@ -20,7 +20,7 @@ import {
 
 import { shortFolder } from '../../shared/folders'
 import { productBrand, productName } from '../../shared/products'
-import { type Host, hostMarksOf, rulesLineOf, text as frontText } from './front'
+import { connectedAs, type Host, hostMarksOf, hostNameOf, rulesLineOf, text as frontText, type Tracker } from './front'
 import type { ProjectSettingsModel } from './useProjectSettings'
 
 /*
@@ -72,7 +72,7 @@ export interface ProjectSettingsProps {
   /** The code host its repositories are on, as its coordinator's thread says. */
   host: Host | null
   /** The tracker its tasks name, where they name one. */
-  tracker: { readonly product: Product; readonly key: string } | null
+  tracker: Tracker | null
   onRepositories: () => void
   onRules: () => void
   /** Opens the code hosts and trackers, to connect one. */
@@ -101,11 +101,9 @@ export function ProjectSettings({
     if (whose !== undefined) taken[one] = whose
   }
   const rules = model.rules === null ? null : rulesLineOf(model.rules)
-  /** Who Althar is connected as on a product, if it is. */
-  const loginOf = (product: Product) =>
-    list?.connections.find((connection) => connection.product === product && connection.state === 'ready')?.account.login ?? null
-  const hostLogin = host === null ? null : loginOf(host.product)
-  const trackerLogin = tracker === null ? null : loginOf(tracker.product)
+  // Who Althar is connected as there: on that very server, not another of the same product.
+  const hostLogin = host === null ? null : connectedAs(list, host.product, hostNameOf(host.webUrl))
+  const trackerLogin = tracker === null ? null : connectedAs(list, tracker.product, tracker.at)
   // Each opened from the panel goes over the screen on its own.
   const leave = (then: () => void) => () => {
     setOpen(false)

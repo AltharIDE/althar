@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import type { BoardTask, ConnectionList } from '@althar/contracts'
+import type { BoardTask, ConnectionList, ProductOption } from '@althar/contracts'
 import { Brand } from '@althar/ui'
 
 import { lanesOf } from '../src/renderer/features/board/lanes'
 import {
+  connectedAs,
   hostMarksOf,
   lastSettledOf,
   partsOf,
@@ -37,6 +38,20 @@ const task = (overrides: Partial<BoardTask> = {}): BoardTask => ({
 const settled = (...tasks: BoardTask[]) => lanesOf({ cursor: 1, tasks, calls: [] })
 
 const github = { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } as const
+
+const GITLAB: ProductOption = {
+  product: 'gitlab',
+  name: 'GitLab',
+  host: true,
+  tracker: true,
+  hostedUrl: 'https://gitlab.com',
+  selfHosted: true,
+  browserSignIn: true,
+  tokenNeeds: null,
+  tokenHelp: 'https://gitlab.com/-/user_settings/personal_access_tokens',
+  tokenHelpForKey: null,
+  keyChecks: [],
+}
 
 describe('a project’s front page', () => {
   it('says what settled last: its pull request merged or closed, or the task done or abandoned, and when', () => {
@@ -90,7 +105,7 @@ describe('a project’s front page', () => {
         ],
         host: github,
         list: connectionList,
-        tracker: { product: 'linear', key: 'MER' },
+        tracker: { product: 'linear', at: 'linear.app', key: 'MER' },
       }),
     ).toEqual([
       { id: 'api', name: 'meridian-api', brand: Brand.GitHub },
@@ -108,7 +123,7 @@ describe('a project’s front page', () => {
         [task({ issue: issue('OPS-1') }), task({ issue: issue('MER-231') }), task({ issue: issue('MER-240') }), task()],
         connectionList,
       ),
-    ).toEqual({ product: 'linear', key: 'MER' })
+    ).toEqual({ product: 'linear', at: 'x', key: 'MER' })
     expect(trackerOf([task({ issue: issue('MER-1') })], null)).toBeNull()
   })
 
@@ -122,6 +137,41 @@ describe('a project’s front page', () => {
     ])
     // Without the list, the project's own host says whether it is connected.
     expect(hostMarksOf(repositories, github, null)).toEqual([{ id: Brand.GitHub, name: 'GitHub', brand: Brand.GitHub }])
+  })
+
+  it('says who Althar is connected as on that very server, and marks a host faint while it isn’t', () => {
+    const company = { product: 'gitlab', name: 'GitLab', webUrl: 'https://git.acme.dev', connected: false } as const
+    const list: ConnectionList = {
+      ...connectionList,
+      products: [...connectionList.products, GITLAB],
+      connections: [
+        {
+          ...githubConnection,
+          id: 'c3',
+          product: 'gitlab',
+          name: 'GitLab',
+          webUrl: 'https://gitlab.com',
+          account: { login: 'me', name: null },
+        },
+      ],
+    }
+    expect(connectedAs(list, 'gitlab', 'gitlab.com')).toBe('me')
+    // GitLab.com is connected; the company's own GitLab isn't.
+    expect(connectedAs(list, 'gitlab', 'git.acme.dev')).toBeNull()
+    expect(hostMarksOf([{ remote: 'git@git.acme.dev:a/b.git' }], company, list)).toEqual([
+      { id: Brand.GitLab, name: 'GitLab', brand: Brand.GitLab, faint: true },
+    ])
+    expect(hostMarksOf([{ remote: 'git@git.acme.dev:a/b.git' }, { remote: 'git@gitlab.com:a/c.git' }], company, list)).toEqual([
+      { id: Brand.GitLab, name: 'GitLab', brand: Brand.GitLab },
+    ])
+    // A signed-out connection doesn't count.
+    expect(
+      connectedAs(
+        { ...list, connections: list.connections.map((each) => ({ ...each, state: 'reauth_required' as const })) },
+        'gitlab',
+        null,
+      ),
+    ).toBeNull()
   })
 
   it('says its rules in a line: who answers, and what always asks you', () => {
@@ -140,5 +190,14 @@ describe('a project’s front page', () => {
       }),
     ).toEqual({ policy: 'Allow, except what you keep', asks: 'Always asks you: “npm publish”.' })
     expect(rulesLineOf({ ...projectRules, permissions: 'ask', alwaysAsk: [] }).asks).toBe('Nothing always asks you.')
+    // With everything allowed, what always asks is kept but asks nothing.
+    expect(
+      rulesLineOf({
+        ...projectRules,
+        permissions: 'allow',
+        alwaysAsk: ['deploy'],
+        commands: [{ pattern: 'npm publish', decision: 'ask' }],
+      }),
+    ).toEqual({ policy: 'Allow everything', asks: 'Nothing waits for you.' })
   })
 })
