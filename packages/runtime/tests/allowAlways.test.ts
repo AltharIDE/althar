@@ -4,9 +4,9 @@ import { scenarios } from '@althar/provider-adapters/testing'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { AlwaysNotOffered } from '../src/errors'
+import { AlwaysNotOffered, AttentionClosed } from '../src/errors'
 import { Instance } from '../src/Instance'
-import { Permissions } from '../src/Permissions'
+import { Permissions, rememberedOf } from '../src/Permissions'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -251,6 +251,66 @@ describe('Allow always and Deny always (ADR-017)', () => {
       yield* ended(created.threadId, 2)
       assert.deepStrictEqual(yield* calls(created.threadId), [])
       assert.deepStrictEqual((yield* tools(created.threadId)).at(-1), { command: 'cargo build', allowedBy: null })
+    }).pipe(Effect.provide(withQueries())),
+  )
+})
+
+describe('the rule an always answer keeps (ADR-017)', () => {
+  const always = {
+    command: 'make deploy',
+    prefix: 'make deploy',
+    kind: 'deploy' as const,
+    allow: ['exact', 'prefix'] as const,
+    deny: ['exact', 'prefix', 'kind'] as const,
+  }
+
+  it('is the one offered by that scope, let through or never allowed, and none that wasn’t offered', () => {
+    assert.deepStrictEqual(rememberedOf(always, 'allow', 'exact'), { decision: 'allow', pattern: 'make deploy', match: 'exact' })
+    assert.deepStrictEqual(rememberedOf(always, 'allow', 'prefix'), { decision: 'allow', pattern: 'make deploy', match: 'prefix' })
+    assert.deepStrictEqual(rememberedOf(always, 'reject', 'kind'), { decision: 'never', kind: 'deploy' })
+    assert.isUndefined(rememberedOf(always, 'allow', 'kind'))
+    // Nor one whose words it hasn't, whatever it says it offers.
+    const bare = { command: null, prefix: null, kind: null, allow: ['exact', 'prefix', 'kind'] as const, deny: [] }
+    assert.isUndefined(rememberedOf(bare, 'allow', 'exact'))
+    assert.isUndefined(rememberedOf(bare, 'allow', 'prefix'))
+    assert.isUndefined(rememberedOf(bare, 'allow', 'kind'))
+  })
+})
+
+describe('answers that meet each other', () => {
+  it.live('refuses an answer to a call the rules answered meanwhile, and leaves a call nobody else answered alone', () =>
+    Effect.gen(function* () {
+      const permissions = yield* Permissions
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const { project, task: created } = yield* asking
+      yield* say(created.threadId, `${scenarios.run}git status`)
+      const call = yield* waitingCall(created.threadId)
+      // Another fiber's transaction answered it a moment before: the person's answer is too late, and the rules leave it be.
+      yield* sql`UPDATE attention_requests SET state = 'answered' WHERE id = ${call.id}`
+      assert.instanceOf(yield* Effect.flip(answer(call.id, 'allow')), AttentionClosed)
+      yield* policies.set(project.projectId, { permissions: 'allow' }, instance.personId)
+      yield* permissions.reconsider(project.projectId)
+      assert.deepStrictEqual(yield* sql`SELECT id FROM decisions`, [])
+      // Opened again, the rules answer it.
+      yield* sql`UPDATE attention_requests SET state = 'open' WHERE id = ${call.id}`
+      yield* permissions.reconsider(project.projectId)
+      yield* ended(created.threadId, 1)
+      assert.deepStrictEqual(yield* said(created.threadId), ['ran=allow_once'])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('answers a call whose session is already back at work without moving it again', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { task: created } = yield* asking
+      yield* say(created.threadId, `${scenarios.run}git status`)
+      const call = yield* waitingCall(created.threadId)
+      yield* sql`UPDATE provider_sessions SET state = 'active' WHERE thread_id = ${created.threadId} AND state = 'waiting_approval'`
+      yield* answer(call.id, 'allow')
+      yield* ended(created.threadId, 1)
+      assert.deepStrictEqual(yield* said(created.threadId), ['ran=allow_once'])
     }).pipe(Effect.provide(withQueries())),
   )
 })

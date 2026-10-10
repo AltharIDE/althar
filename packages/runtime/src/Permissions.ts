@@ -68,6 +68,8 @@ interface Waiting {
   readonly digest: string
   /** What an "always" answer would keep, as the person was offered it. */
   readonly always: Always
+  /** What the rules read it in: a task's lead's, as only a lead waits on the person. */
+  readonly rules: RuleContext
 }
 
 /** The rule an "always" answer by this scope keeps, where it was offered: let through, or never allowed. */
@@ -259,13 +261,12 @@ export class Permissions extends Context.Service<
         })
 
       /** A task's request as the project's rules decide it now, with the context they read it in and the revision they are. */
-      const judge = (requestContext: RequestContext, request: PermissionRequest) =>
+      const judge = (projectId: ProjectId, rules: RuleContext, request: PermissionRequest) =>
         Effect.gen(function* () {
-          const rules = requestContext.rules.role === 'task' ? requestContext.rules.context : { worktree: '', defaultBranch: '' }
           // Where a push without a destination goes depends on the branch checked out now.
           const current = request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(rules.worktree) : undefined
           // The project's rules as they are now: a change the person makes applies to the next request.
-          const policy = yield* policies.current(requestContext.projectId)
+          const policy = yield* policies.current(projectId)
           const context: RuleContext = {
             ...rules,
             project: ruleSetOf(policy.rules),
@@ -339,10 +340,10 @@ export class Permissions extends Context.Service<
 
       const reconsider = (projectId: string) =>
         Effect.forEach(
-          [...waiting].filter(([, waiter]) => waiter.context.projectId === projectId && waiter.context.rules.role === 'task'),
+          [...waiting].filter(([, waiter]) => waiter.context.projectId === projectId),
           ([attentionId, waiter]) =>
             Effect.gen(function* () {
-              const { verdict, policyId } = yield* judge(waiter.context, waiter.request)
+              const { verdict, policyId } = yield* judge(waiter.context.projectId, waiter.rules, waiter.request)
               if (verdict.verdict !== 'ask') yield* settle(attentionId, waiter, decisionOf(verdict, policyId))
             }).pipe(Effect.ignore),
           { discard: true },
@@ -393,7 +394,7 @@ export class Permissions extends Context.Service<
             )
             return decision
           }
-          const { context: ruleContext, verdict, policyId } = yield* judge(requestContext, request)
+          const { context: ruleContext, verdict, policyId } = yield* judge(requestContext.projectId, requestContext.rules.context, request)
           // What the rules refuse outright, such as an agent changing things on the code host, is answered at once with what to do instead.
           if (verdict.verdict !== 'ask') {
             const { decision, cited } = decisionOf(verdict, policyId)
@@ -456,6 +457,7 @@ export class Permissions extends Context.Service<
             requestId,
             digest,
             always,
+            rules: requestContext.rules.context,
           }
           waiting.set(attentionId, waiter)
           yield* live.publish({
