@@ -148,8 +148,6 @@ export interface Client {
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
-  /** Lets a held plan count down again. */
-  readonly unholdPlan: (planId: string) => Promise<void>
   readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
   /** The connections on this Mac, and the code hosts and trackers a person can connect. */
   readonly listConnections: () => Promise<ConnectionList>
@@ -336,7 +334,6 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
-    unholdPlan: (planId) => command((commandId) => api.UnholdPlan({ commandId, planId })),
     changePlan: (planId, steps, end) =>
       command((commandId) => api.ChangePlan({ commandId, planId, steps, ...(end === undefined ? {} : { end }) })),
     listConnections: () => settle(api.ListConnections()),

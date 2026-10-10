@@ -618,7 +618,6 @@ export const handlers = Api.toLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(plans.start(planId, instance.personId))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
-      UnholdPlan: ({ commandId, planId }) => once(commandId, api(plans.unhold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
       AnswerStuck: ({ commandId, attentionId, answer }) =>
         once(

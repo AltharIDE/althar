@@ -539,7 +539,6 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     startTask: vi.fn(async () => task),
     startPlan: vi.fn(async () => {}),
     holdPlan: vi.fn(async () => {}),
-    unholdPlan: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
     answerStuck: vi.fn(async () => {}),
     listConnections: vi.fn(async () => connectionList),

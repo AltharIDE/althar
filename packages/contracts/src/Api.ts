@@ -1177,8 +1177,6 @@ export const Api = RpcGroup.make(
   command('StartPlan', { planId: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. */
   command('HoldPlan', { planId: Schema.String }, Schema.Void),
-  /** Lets a held plan count down again: it starts when the countdown ends, unless held again. */
-  command('UnholdPlan', { planId: Schema.String }, Schema.Void),
   /** Changes who does a planned task's steps, or skips one, before it starts. */
   command(
     'ChangePlan',

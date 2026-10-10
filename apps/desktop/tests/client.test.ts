@@ -146,11 +146,6 @@ describe('the client', () => {
     const card = planned.items.find((item) => item.kind === 'task')
     const planId = card?.kind === 'task' ? (card.content.plan?.id ?? '') : ''
     await client.holdPlan(planId)
-    // Let go, it counts down again; held again, it waits.
-    await client.unholdPlan(planId)
-    const counting = await client.getThreadItem(coordinator.threadId, card?.id ?? '')
-    expect(counting.kind === 'task' && counting.content.phase).toBe('planned')
-    await client.holdPlan(planId)
     await client.changePlan(planId, [{ key: 'implement', agentId: 'codex', model: null, skipped: false }])
     const held = await client.getThreadItem(coordinator.threadId, card?.id ?? '')
     expect(held.kind === 'task' && [held.content.phase, held.content.plan?.steps.map((step) => step.agentId)]).toEqual(['held', ['codex']])
@@ -242,7 +237,6 @@ describe('the client', () => {
           StartTask: () => Effect.die('unused'),
           StartPlan: () => Effect.die('unused'),
           HoldPlan: () => Effect.die('unused'),
-          UnholdPlan: () => Effect.die('unused'),
           ChangePlan: () => Effect.die('unused'),
           AnswerStuck: () => Effect.die('unused'),
           ListConnections: () => Effect.die('unused'),

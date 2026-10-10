@@ -106,24 +106,6 @@ export const Held: Story = {
   },
 }
 
-const counted = fn()
-const restarted = fn()
-
-/** Held, its countdown restarts: the whole wait again, and it starts when that ends. */
-export const RestartingTheCountdown: Story = {
-  render: () => <Launch wait={2} defaultHeld onHeldChange={counted} onStart={restarted} />,
-  play: async ({ canvasElement }) => {
-    const c = within(canvasElement)
-    await expect(c.getByText('Held. Starts when you say')).toBeInTheDocument()
-    await expect(c.queryByRole('button', { name: 'Hold' })).not.toBeInTheDocument()
-    await userEvent.click(c.getByRole('button', { name: 'Restart the countdown' }))
-    await expect(counted).toHaveBeenCalledWith(false)
-    await expect(c.getByRole('button', { name: 'Hold' })).toBeInTheDocument()
-    await expect(c.queryByText('Held. Starts when you say')).not.toBeInTheDocument()
-    await waitFor(() => expect(restarted).toHaveBeenCalled(), { timeout: 4000 })
-  },
-}
-
 const started = fn()
 
 /** Left alone, it starts on its own. */
@@ -177,11 +159,6 @@ export const HeldByTheRuntime: Story = {
     await userEvent.click(c.getByRole('button', { name: 'Hold' }))
     await expect(heldChanged).toHaveBeenCalledWith(true)
     await expect(c.getByText('Held. Starts when you say')).toBeInTheDocument()
-    // Let go, the runtime keeps the time again.
-    await userEvent.click(c.getByRole('button', { name: 'Restart the countdown' }))
-    await expect(heldChanged).toHaveBeenCalledWith(false)
-    await expect(c.getByText(/^Starts in \d+s$/)).toBeInTheDocument()
-    await userEvent.click(c.getByRole('button', { name: 'Hold' }))
     await userEvent.click(c.getByRole('button', { name: 'Start' }))
     await expect(startedHeld).toHaveBeenCalled()
   },

@@ -26,9 +26,8 @@ import { fakeConnectors, HOST, hosted, repository, runtime, turns, until } from 
  * A task's course as the person steers it (docs/architecture/05, "Task and
  * run lifecycle"): stopping it suspends its run and every agent on it;
  * resuming carries on the step it was on; abandoning settles it with its
- * worktree and branch kept; reopening opens it on them again; a held plan
- * counts down again when let go. A merged task can be neither abandoned nor
- * reopened. The fake agent plays the lead and the reviewer from markers in
+ * worktree and branch kept; reopening opens it on them again. A merged task
+ * can be neither abandoned nor reopened. The fake agent plays the lead and the reviewer from markers in
  * the task's title.
  */
 
@@ -842,41 +841,5 @@ describe('a task’s course', () => {
         2,
       )
     }).pipe(Effect.provide(withQueries({ stopGrace: Duration.seconds(2) }))),
-  )
-
-  it.live('lets a held plan count down again, and starts it when the countdown ends', () =>
-    Effect.gen(function* () {
-      const plans = yield* Plans
-      const sql = yield* SqlClient.SqlClient
-      const { task, planId, actor } = yield* planned('Count again [lead:finish]')
-      const startsAt = Effect.map(
-        sql<{ startsAt: string | null; state: string }>`SELECT starts_at, state FROM task_plans WHERE id = ${planId}`,
-        ([row]) => row,
-      )
-      // Counting down, there is nothing to let go.
-      const counting = yield* startsAt
-      yield* plans.unhold(planId, actor)
-      assert.strictEqual((yield* startsAt)?.startsAt, counting?.startsAt)
-      yield* plans.hold(planId, actor)
-      assert.isNull((yield* startsAt)?.startsAt)
-      assert.strictEqual((yield* shown(task.threadId)).phase, 'held')
-      yield* plans.unhold(planId, actor)
-      // The whole countdown again, from now: shorter than the minute it had.
-      const again = yield* startsAt
-      assert.isNotNull(again?.startsAt)
-      assert.isBelow(Date.parse(again?.startsAt ?? '') - Date.now(), 1_000)
-      assert.strictEqual((yield* shown(task.threadId)).phase, 'planned')
-      // When it ends, the plan starts.
-      yield* until(
-        Effect.map(startsAt, (row) => (row?.state === 'accepted' ? [row] : [])),
-        (rows) => rows.length === 1,
-      )
-      yield* standsAt(task.threadId, (now) => now.phase === 'ready')
-      const unheld = yield* sql<{ type: string }>`SELECT type FROM record_events WHERE aggregate_id = ${planId} ORDER BY sequence`
-      assert.deepStrictEqual(
-        unheld.map((row) => row.type),
-        ['task_plan.proposed', 'task_plan.held', 'task_plan.unheld', 'task_plan.accepted'],
-      )
-    }).pipe(Effect.provide(withQueries())),
   )
 })

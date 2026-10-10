@@ -201,7 +201,6 @@ export function ProjectView({
     agentName,
     onStart: (planId) => void model.startPlan(planId),
     onHold: (planId) => void model.holdPlan(planId),
-    onUnhold: (planId) => void model.unholdPlan(planId),
     onChange: (planId, steps, end) => void model.changePlan(planId, steps, end),
     onOpen: onTask,
   }

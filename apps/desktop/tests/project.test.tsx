@@ -158,10 +158,6 @@ describe('the Talk room', () => {
     expect(screen.getByText(`Waits for Claude Code, back at ${clock('2026-10-03T15:40:00.000Z')}`)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Start' }))
     expect(client.startPlan).toHaveBeenCalledWith('pln5')
-    // Held, its countdown restarts in the runtime, which starts it when that ends.
-    await userEvent.click(screen.getByRole('button', { name: 'Restart the countdown' }))
-    expect(client.unholdPlan).toHaveBeenCalledWith('pln5')
-    expect(client.holdPlan).not.toHaveBeenCalled()
   })
 
   it('holds, changes and starts a plan before it starts on its own', async () => {

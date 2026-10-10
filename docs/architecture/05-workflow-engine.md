@@ -220,8 +220,7 @@ stateDiagram-v2
 ```
 
 - **Start now** applies while the task's plan waits to start, counting down
-  or held. A held plan can also restart its countdown: it counts the whole
-  wait again, and starts when that ends.
+  or held.
 - **Stop** applies while the task's run runs or an agent is on any of its
   threads. It suspends the run in one transaction: each node attempt it was
   on ends `cancelled`, marked as stopped; its run attempt ends `interrupted`;

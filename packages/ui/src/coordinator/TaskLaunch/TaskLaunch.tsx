@@ -22,7 +22,7 @@ import { Rhythm } from '../../lib/rhythm'
  * makes the task and its graph and shows you the plan once, as steps. You get
  * a short while to change who does each step or drop one, then it starts on
  * its own. Nothing here asks you to approve anything: leaving it alone is a
- * yes. Held, it waits until you start it, or restart its countdown. The clock runs only while the plan is on screen, since a preview
+ * yes. The clock runs only while the plan is on screen, since a preview
  * nobody saw is not a preview; unless something else keeps it, like a
  * runtime that starts the plan at a set time whether or not a window is
  * open, and then the card shows that time as it comes.
@@ -78,8 +78,6 @@ export interface TaskLaunchText {
   /** Said once to a screen reader when the plan is first seen: that it starts on its own. */
   announce: (seconds: number) => string
   hold: string
-  /** Lets a held plan count down again, the whole wait. */
-  unhold: string
   start: string
   startNow: string
 }
@@ -108,7 +106,6 @@ export const taskLaunchText: TaskLaunchText = {
   startsAfterSeen: (n) => `Starts ${n}s after you’ve seen it`,
   announce: (n) => `The plan starts on its own in ${n} seconds. Hold it to take your time.`,
   hold: 'Hold',
-  unhold: 'Restart the countdown',
   start: 'Start',
   startNow: 'Start now',
 }
@@ -163,7 +160,7 @@ export interface TaskLaunchProps {
   wait?: number
   /** When it starts, in milliseconds since the epoch, when something else keeps the clock and starts it: it counts down to then, seen or not, and then says it is starting. */
   startsAt?: number
-  /** Held: the clock stops until you start it, or let it count down again. */
+  /** Held: the clock stops until you start it. */
   held?: boolean
   defaultHeld?: boolean
   onHeldChange?: (held: boolean) => void
@@ -213,12 +210,6 @@ export function TaskLaunch({
     onStart(steps, end)
   }
   const startWhenDue = useEffectEvent(start)
-  /* let go, it counts the whole wait again: on its own clock, or to the time whatever keeps it gives back */
-  const unhold = () => {
-    setShownFor(wait)
-    setNow(Date.now())
-    setHeld(false)
-  }
 
   const seen = useOnScreen(ref, { threshold: 0.9, enabled: !started })
   useEffect(() => {
@@ -324,11 +315,7 @@ export function TaskLaunch({
         {/* the countdown is not read out each second; that it starts on its own is said once, when it is first seen */}
         <span className={s.when}>{when}</span>
         <span aria-live="polite">{announced && !held && !started && <VisuallyHidden>{t.announce(wait)}</VisuallyHidden>}</span>
-        {held ? (
-          <Button variant="quiet" onClick={unhold}>
-            {t.unhold}
-          </Button>
-        ) : (
+        {!held && (
           <Button variant="quiet" onClick={() => setHeld(true)}>
             {t.hold}
           </Button>

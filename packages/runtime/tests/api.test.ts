@@ -1012,7 +1012,7 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
-  it.live('stops, resumes, abandons and reopens a task, and lets a held plan count down again', () =>
+  it.live('stops, resumes, abandons and reopens a task', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, grant } = yield* connected({ countdown: Duration.minutes(5) })
@@ -1057,27 +1057,6 @@ describe('the coordinator, through the API', () => {
           (yield* Effect.flip(client.AbandonTask({ commandId: commandId(), taskId: 'task_missing' }))).message,
           "That task isn't there any more.",
         )
-
-        // A plan the coordinator proposes, held, counts down again when let go.
-        const coordinator = yield* client.GetCoordinator({ projectId: project.id })
-        yield* client.Send({
-          commandId: commandId(),
-          threadId: coordinator.threadId,
-          body: 'Add a retry. [coordinator:plan]',
-          disposition: 'after_current',
-        })
-        const planned = yield* eventually(client.GetCoordinator({ projectId: project.id, limit: 50 }), (snapshot) =>
-          snapshot.items.some((item) => item.kind === 'task' && item.content.phase === 'planned'),
-        )
-        const card = planned.items.find((item) => item.kind === 'task' && item.content.phase === 'planned')
-        const planId = card?.kind === 'task' ? (card.content.plan?.id ?? '') : ''
-        yield* client.HoldPlan({ commandId: commandId(), planId })
-        const held = yield* client.GetThreadItem({ threadId: planned.threadId, itemId: card?.id ?? '' })
-        assert.deepStrictEqual(held.kind === 'task' ? [held.content.phase, held.content.plan?.startsAt] : [], ['held', null])
-        yield* client.UnholdPlan({ commandId: commandId(), planId })
-        const counting = yield* client.GetThreadItem({ threadId: planned.threadId, itemId: card?.id ?? '' })
-        assert.strictEqual(counting.kind === 'task' ? counting.content.phase : undefined, 'planned')
-        assert.isString(counting.kind === 'task' ? counting.content.plan?.startsAt : undefined)
       }),
     ),
   )

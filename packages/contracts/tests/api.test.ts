@@ -184,7 +184,6 @@ describe('the API', () => {
               StartTask: () => Effect.die('unused'),
               StartPlan: () => Effect.void,
               HoldPlan: () => Effect.void,
-              UnholdPlan: () => Effect.void,
               ChangePlan: () => Effect.void,
               AnswerStuck: () => Effect.void,
               StartSession: ({ commandId: id }) => Effect.succeed(id),

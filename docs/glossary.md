@@ -47,7 +47,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Queue, "Enter queues it; the lead reads it next" | `after_current` | What you write while the lead works. It waits for the lead's current turn to end. |
 | Send now | `interrupt_and_continue` | Stops the lead's turn to read your message, then it carries on with both. |
 | Interrupt the lead | turn interrupt | The composer's square. Ends the lead's turn; the task stays open. The line in the thread reads "Interrupted by you". |
-| Hold, Restart the countdown | plan held, plan unheld | On a plan waiting to start: Hold stops its countdown, and it starts when you say; Restart the countdown counts its whole wait again, and it starts when that ends. |
+| Hold | plan held | On a plan waiting to start: its countdown stops, and it starts when you say. |
 | Start now | plan accepted | Starts a plan waiting to start, from its card or the task menu. |
 | Stop the task | run suspended | From the task menu. Every agent on it stops, and the step it was on is cut short. Nothing runs, and nothing waits on you, until you resume it. Status: Stopped. |
 | Resume | run resumed | From the task menu, or by writing to a stopped task: the lead carries on the step it was on, with what you wrote first. |

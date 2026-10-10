@@ -14,7 +14,7 @@ import { type PlanStep, Runs, type TaskEnd } from './Runs'
  * A task's plan before it runs (docs/architecture/04): its steps and who does
  * them, and when it starts. The coordinator proposes it; its card shows in
  * the coordinator's thread with the time left; leaving it alone starts it.
- * Held, it waits until the person starts it or lets it count down again.
+ * Held, it waits until the person starts it.
  * The runtime keeps the countdown, so a plan starts with the window closed.
  * A plan whose time came while Althar wasn't running is held, not started
  * unannounced at the next launch.
@@ -45,8 +45,6 @@ export class Plans extends Context.Service<
     start(planId: string, actorId: ActorId): Effect.Effect<void, unknown>
     /** Holds a proposed plan until someone starts it. */
     hold(planId: string, actorId: ActorId): Effect.Effect<void, unknown>
-    /** Lets a held plan count down again, from the start: it starts when its countdown ends. */
-    unhold(planId: string, actorId: ActorId): Effect.Effect<void, unknown>
     /** Changes a proposed plan's steps (who does them, or which are skipped), and what happens when the work is done. */
     change(planId: string, steps: ReadonlyArray<PlanStep>, actorId: ActorId, end?: TaskEnd | null): Effect.Effect<void, unknown>
   }
@@ -208,21 +206,6 @@ export class Plans extends Context.Service<
         start: (planId, actorId) => provide(start(planId, actorId)),
         hold: (planId, actorId) =>
           provide(Effect.asVoid(transition(planId, counting, () => ({ startsAt: null }), 'task_plan.held', actorId))),
-        // Held, it counts down the whole wait again, from now; the countdown wakes for it.
-        unhold: (planId, actorId) =>
-          provide(
-            Effect.gen(function* () {
-              const at = yield* timestamp
-              const startsAt = new Date(Date.parse(at) + Duration.toMillis(countdownOf)).toISOString()
-              yield* transition(
-                planId,
-                (plan) => plan.state === 'proposed' && plan.startsAt === null,
-                () => ({ startsAt }),
-                'task_plan.unheld',
-                actorId,
-              )
-            }),
-          ),
         change: (planId, steps, actorId, end) =>
           provide(
             Effect.asVoid(
