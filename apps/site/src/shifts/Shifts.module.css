@@ -25,6 +25,8 @@
 /* ---- the list ---- */
 .list { padding: 56px 0 120px; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.views { margin-bottom: 14px; }
+.lead { margin-top: 28px; font-size: 16px; line-height: 1.5; color: var(--t-2); }
 .legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .filters button { display: inline-flex; gap: 8px; align-items: center; padding: 8px 13px; border: 0; border-radius: 999px; background: var(--n-1); box-shadow: inset 0 0 0 1px var(--line-2); font: 600 13.5px var(--font); color: var(--t-1); cursor: pointer; }
 .filters button span { font: 500 12px var(--mono); color: var(--t-3); }
@@ -46,6 +48,7 @@
 .who { display: flex; align-items: center; gap: 9px; padding-top: 1px; font-weight: 600; font-size: 15px; }
 .kind { font: 600 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--live); }
 .kind[data-kind='limits'], .kind[data-kind='pricing'], .kind[data-kind='access'], .kind[data-kind='outage'] { color: var(--t-1); }
+.ahead { color: var(--t-3); }
 .title { margin-top: 6px; font-size: 21px; line-height: 1.2; letter-spacing: -0.02em; font-weight: 650; }
 .what { margin-top: 6px; font-size: 16px; line-height: 1.5; color: var(--t-2); }
 .source { padding-top: 3px; justify-self: end; font-size: 13.5px; color: var(--t-2); text-underline-offset: 4px; text-align: right; }

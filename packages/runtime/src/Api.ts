@@ -28,6 +28,7 @@ import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
 import { Folders } from './Folders'
+import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
@@ -740,6 +741,18 @@ export const handlers = Api.toLayer(
             const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
             if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
             return yield* rulesView(projectId, (yield* policies.current(project.id)).rules)
+          }),
+        ),
+      GetVocabulary: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${projectId}`
+            if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+            const repositories = yield* sql<{ name: string; path: string; within: string | null }>`
+              SELECT b.display_name AS name, l.path, b.folder AS within FROM repository_bindings b
+              JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+              WHERE b.project_id = ${projectId} AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid`
+            return [...(yield* vocabulary(project.name, repositories))]
           }),
         ),
       SetProjectRules: ({ commandId, projectId, rotateAccounts, onlyAccounts, ...change }) =>

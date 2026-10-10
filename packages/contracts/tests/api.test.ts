@@ -219,6 +219,7 @@ describe('the API', () => {
               MarkReady: () => Effect.void,
               SetUsageLimit: () => Effect.void,
               GetProjectRules: () => Effect.die('unused'),
+              GetVocabulary: () => Effect.die('unused'),
               RenameProject: () => Effect.die('unused'),
               RemoveProject: () => Effect.die('unused'),
               GetRepositories: () => Effect.die('unused'),

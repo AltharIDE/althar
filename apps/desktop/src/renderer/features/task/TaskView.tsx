@@ -10,6 +10,7 @@ import {
   DiffLineKind,
   type FileView,
   Composer,
+  DictationTray,
   Issue,
   TaskActivity,
   LinkButton,
@@ -27,6 +28,7 @@ import {
 
 import { waitsWords } from '../../shared/agents'
 import { contextMeter } from '../../shared/ContextMeter'
+import { useDictation } from '../../shared/dictation/useDictation'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
@@ -215,6 +217,7 @@ export function TaskView({
   onBack: () => void
 }) {
   const [draft, setDraft] = useState('')
+  const voice = useDictation(setDraft, { projectId: model.snapshot?.project.id ?? null })
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while a lead is on the task: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
@@ -407,6 +410,9 @@ export function TaskView({
       <Composer
         value={draft}
         onChange={setDraft}
+        inputRef={voice.inputRef}
+        dictation={voice.dictation}
+        tray={voice.tray && <DictationTray {...voice.tray} />}
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}

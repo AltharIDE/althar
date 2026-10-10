@@ -1,21 +1,23 @@
 import { Brand, BrandMark } from '@althar/ui'
 import type { CSSProperties } from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { LINKS } from '../content/facts'
-import { KIND_WORD, SHIFTS, ShiftKind, type Shift } from '../content/shifts'
+import { KIND_WORD, SHIFTS, ShiftKind, UPCOMING, type Shift, type Upcoming } from '../content/shifts'
 import { cx } from '../lib/cx'
 import { Footer } from '../shared/footer/Footer'
 import { Lit } from '../shared/Lit'
 import { Nav } from '../shared/Nav'
-import { byMonth, countByKind, daysCovered, newestFirst, onlyKind, shortDate } from './group'
+import { byMonth, countByKind, daysCovered, newestFirst, onlyKind, shortDate, soonestFirst, stillAhead, untilWord } from './group'
 import s from './Shifts.module.css'
 
 /*
  * Shifts: what changed under developers who code with agents, since August.
  * A cobalt head with the count and every shift on one strip of days, then the
  * list by month, filterable by kind, each entry linking its source. The
- * argument is made once, at the top; the entries are only facts.
+ * argument is made once, at the top; the entries are only facts. A second
+ * view lists what is announced but not yet in effect, soonest first; it opens
+ * from #upcoming.
  */
 
 const MARK_OF: Record<string, Brand> = {
@@ -78,7 +80,17 @@ function Strip({ shifts }: { shifts: readonly Shift[] }) {
   )
 }
 
-function Entry({ shift }: { shift: Shift }) {
+type View = 'happened' | 'upcoming'
+
+const isUpcoming = (x: Shift | Upcoming): x is Upcoming => 'announced' in x
+
+/** The view a link's #fragment points at: #upcoming, or the id of one entry, else the list so far. */
+function viewOf(hash: string): View {
+  const id = hash.replace(/^#/, '')
+  return id === 'upcoming' || UPCOMING.some((x) => x.id === id) ? 'upcoming' : 'happened'
+}
+
+function Entry({ shift, ahead }: { shift: Shift | Upcoming; ahead?: { announced: string; until: string } }) {
   const mark = MARK_OF[shift.who]
   return (
     <li id={shift.id} className={s.entry}>
@@ -92,6 +104,12 @@ function Entry({ shift }: { shift: Shift }) {
       <div className={s.body}>
         <p className={s.kind} data-kind={shift.kind}>
           {KIND_WORD[shift.kind]}
+          {ahead && (
+            <span className={s.ahead}>
+              {' '}
+              · {ahead.until} · announced {shortDate(ahead.announced)}
+            </span>
+          )}
         </p>
         <h3 className={s.title}>{shift.title}</h3>
         <p className={s.what}>{shift.what}</p>
@@ -105,11 +123,36 @@ function Entry({ shift }: { shift: Shift }) {
 }
 
 export function Shifts() {
+  const [view, setView] = useState<View>(() => viewOf(window.location.hash))
   const [kind, setKind] = useState<ShiftKind | null>(null)
-  const counts = countByKind(SHIFTS)
+  const [now] = useState(() => Date.now())
+  const upcoming = soonestFirst(stillAhead(UPCOMING, now))
+  const upcomingView = view === 'upcoming'
+  const shown = upcomingView ? upcoming : SHIFTS
+  const counts = countByKind(shown)
   const kinds = Object.values(ShiftKind).filter((k) => counts[k] > 0)
-  const months = byMonth(onlyKind(SHIFTS, kind))
+  const months = upcomingView ? byMonth(onlyKind(upcoming, kind), soonestFirst) : byMonth(onlyKind(SHIFTS, kind))
   const newest = newestFirst(SHIFTS)[0]
+
+  const show = (next: View) => {
+    setView(next)
+    setKind(null)
+    window.history.replaceState(null, '', next === 'upcoming' ? '#upcoming' : window.location.pathname)
+  }
+
+  // A link to an entry in the other view (the strip's marks, a shared link) opens that view first.
+  useEffect(() => {
+    const follow = () => {
+      setView(viewOf(window.location.hash))
+      setKind(null)
+    }
+    window.addEventListener('hashchange', follow)
+    return () => window.removeEventListener('hashchange', follow)
+  }, [])
+  useEffect(() => {
+    const id = window.location.hash.replace(/^#/, '')
+    if (id && id !== 'upcoming') document.getElementById(id)?.scrollIntoView()
+  }, [view])
 
   return (
     <div className={s.page}>
@@ -133,10 +176,19 @@ export function Shifts() {
 
         <section className={s.list} aria-label="Every shift">
           <div className={s.wrap}>
+            <fieldset className={cx(s.filters, s.views)}>
+              <legend className={s.legend}>View</legend>
+              <button type="button" aria-pressed={!upcomingView} onClick={() => show('happened')}>
+                Happened <span>{SHIFTS.length}</span>
+              </button>
+              <button type="button" aria-pressed={upcomingView} onClick={() => show('upcoming')}>
+                Upcoming <span>{upcoming.length}</span>
+              </button>
+            </fieldset>
             <fieldset className={s.filters}>
               <legend className={s.legend}>Show</legend>
               <button type="button" aria-pressed={kind === null} onClick={() => setKind(null)}>
-                All <span>{SHIFTS.length}</span>
+                All <span>{shown.length}</span>
               </button>
               {kinds.map((k) => (
                 <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(kind === k ? null : k)} data-kind={k}>
@@ -145,6 +197,8 @@ export function Shifts() {
                 </button>
               ))}
             </fieldset>
+            {upcomingView && <p className={s.lead}>Announced, and not in effect yet. Each one goes into the list when its day comes.</p>}
+            {upcomingView && upcoming.length === 0 && <p className={s.lead}>Nothing scheduled that we know of.</p>}
             {months.map((m) => (
               <section key={m.key} className={s.month} aria-labelledby={`m-${m.key}`}>
                 <h2 id={`m-${m.key}`} className={s.monthName}>
@@ -153,7 +207,11 @@ export function Shifts() {
                 </h2>
                 <ol className={s.entries}>
                   {m.items.map((x) => (
-                    <Entry key={x.id} shift={x} />
+                    <Entry
+                      key={x.id}
+                      shift={x}
+                      ahead={isUpcoming(x) ? { announced: x.announced, until: untilWord(x.date, now) } : undefined}
+                    />
                   ))}
                 </ol>
               </section>
