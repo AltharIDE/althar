@@ -6,6 +6,7 @@ import { type ArtifactKind, Ids, newId, type ProjectId, type Sensitivity } from 
 import { Context, type Crypto, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { artifactPath, isDigest } from './artifactFiles'
 import { RuntimeConfig } from './Config'
 import { timestamp } from './records'
 
@@ -44,11 +45,7 @@ export interface Kept {
   readonly size: number
 }
 
-/** The file a digest is kept in: two levels, so no folder holds too many. */
-export const artifactPath = (root: string, sha256: string) => join(root, sha256.slice(0, 2), sha256)
-
-/** A digest as the store names files: 64 hex digits, and nothing else. */
-export const isDigest = (value: string) => /^[0-9a-f]{64}$/.test(value)
+export { artifactPath, isDigest } from './artifactFiles'
 
 export class Artifacts extends Context.Service<
   Artifacts,

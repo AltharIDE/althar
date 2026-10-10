@@ -64,6 +64,13 @@ export const Long: Story = {
     exit: 0,
   },
 }
+/** Longer than Althar keeps: its start wasn't kept, and says how much. */
+export const StartNotKept: Story = {
+  args: { lines: TEST_OUTPUT, earlier: TEST_EARLIER, omitted: 1204, exit: 0 },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('1,204 earlier lines weren’t kept')).toBeInTheDocument()
+  },
+}
 /** In a Tool's sheet, whose row already shows the command. */
 export const WithoutTheCommand: Story = { args: { command: undefined } }
 export const Dark: Story = {
@@ -89,6 +96,7 @@ export const AllStates: Story = {
         { state: 'empty', node: <Terminal command="git add -A" lines={[]} exit={0} /> },
         { state: 'loading', node: <Terminal lines={[]} loading /> },
         { state: 'read failed', node: <Terminal lines={[]} exit={0} error="Althar didn’t keep what this printed." /> },
+        { state: 'start not kept', node: <Terminal lines={TEST_OUTPUT} earlier={TEST_EARLIER} omitted={1204} exit={0} /> },
         { state: 'without the command', node: <Terminal lines={TEST_OUTPUT} exit={0} /> },
         {
           state: 'earlier, hover',

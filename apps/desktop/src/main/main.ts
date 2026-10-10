@@ -12,6 +12,8 @@ import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
 import { dockCount, soundOf, tells } from './notify'
 import { readAppPreferences, writeAppPreference } from './preferences'
+import { PICTURE_SCHEME } from './pictureAddress'
+import { type Resize, servePicture } from './pictures'
 import { findRepositories, forWindow, placesFor } from './repositories'
 import { alertSounds, playSound } from './sounds'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
@@ -27,6 +29,7 @@ import {
   Notification,
   powerMonitor,
   powerSaveBlocker,
+  protocol,
   safeStorage,
   session,
   shell,
@@ -78,6 +81,24 @@ app.setPath(
   'userData',
   ownProfile !== undefined && ownProfile !== '' ? join(ownProfile, 'window') : join(app.getPath('appData'), '@althar', 'desktop'),
 )
+
+/*
+ * Pictures agents hand back reach the window at an address of Althar's own,
+ * answered from the artifact store (pictures.ts): a standard, secure scheme,
+ * registered before the app is ready, as Electron asks.
+ */
+protocol.registerSchemesAsPrivileged([{ scheme: PICTURE_SCHEME, privileges: { standard: true, secure: true } }])
+
+/** A smaller copy of a picture, drawn by Chromium's own decoder: a JPEG stays one, anything else becomes a PNG, keeping its transparency. */
+const resize: Resize = (bytes, type, width) => {
+  const picture = nativeImage.createFromBuffer(bytes)
+  if (picture.isEmpty() || picture.getSize().width <= width) return null
+  const smaller = picture.resize({ width, quality: 'good' })
+  return type === 'image/jpeg' ? { bytes: smaller.toJPEG(85), type } : { bytes: smaller.toPNG(), type: 'image/png' }
+}
+
+/** What the window may do of what a page can ask: write what the person copies to the clipboard (Copy), never read it. */
+const WINDOW_MAY: ReadonlySet<string> = new Set(['clipboard-sanitized-write'])
 
 /** Grants the runtime has yet to confirm, by request. */
 const granting = new Map<string, (grant: string | null) => void>()
@@ -430,10 +451,12 @@ ipcMain.on('althar:edge-open', (_event, threadId: unknown) => {
 })
 
 void app.whenReady().then(() => {
-  // The window asks for nothing: no notifications, camera, microphone or anything else a page can ask for.
-  // Althar's own notifications come from here, as the runtime says something needs the person.
-  session.defaultSession.setPermissionRequestHandler((_contents, _permission, done) => done(false))
-  session.defaultSession.setPermissionCheckHandler(() => false)
+  // The window asks for nothing but to put what the person copies on the clipboard: no notifications, camera,
+  // microphone or anything else a page can ask for. Althar's own notifications come from here, as the runtime says something needs the person.
+  session.defaultSession.setPermissionRequestHandler((_contents, permission, done) => done(WINDOW_MAY.has(permission)))
+  session.defaultSession.setPermissionCheckHandler((_contents, permission) => WINDOW_MAY.has(permission))
+  // The pictures agents handed back, from the artifact store the runtime keeps in the profile, by digest.
+  protocol.handle(PICTURE_SCHEME, servePicture(join(locations().profile, 'artifacts'), resize))
   void showChosenIcon()
   // Plugged in or on battery changes whether the Mac is held awake.
   powerMonitor.on('on-battery', awake.powerChanged)

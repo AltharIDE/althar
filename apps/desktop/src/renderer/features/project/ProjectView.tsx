@@ -12,6 +12,7 @@ import {
   Thread,
   ThreadDivider,
   ThreadMeasure,
+  ThreadShellProvider,
   ThreadSkeleton,
   MenuItem,
   MenuSeparator,
@@ -28,6 +29,7 @@ import { type Choice, runningOn } from '../../shared/models'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
+import { useThreadHost } from '../../shared/ThreadHost'
 import { BoardView } from '../board/BoardView'
 import { lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
@@ -144,6 +146,8 @@ export function ProjectView({
 }) {
   const [room, setRoom] = useState<Room>(newTask && opening === Room.Board ? Room.Both : opening)
   useEffect(() => onRoomChange?.(room), [room, onRoomChange])
+  // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
+  const shown = useThreadHost(false)
   const both = useBothWidth()
   const lanes = board.board === null ? null : lanesOf(board.board)
   const yours = lanes === null ? 0 : yoursOf(lanes)
@@ -375,20 +379,25 @@ export function ProjectView({
                     </ThreadDivider>
                   )}
                   {coordinator.items.length === 0 && model.streaming.size === 0 && <p className={s.quiet}>{text.empty}</p>}
-                  <ThreadBlocks
-                    blocks={blocksOf(
-                      { items: coordinator.items, turnRunning: busy, worktree: null, queue },
-                      model.streaming,
-                      (iso) => ago(iso),
-                      now,
-                    )}
-                    session={session}
-                    card={(card) => <Card card={card} actions={actions} />}
-                    queued={text.queued}
-                  />
+                  {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
+                  <ThreadShellProvider value={shown.shell}>
+                    <ThreadBlocks
+                      blocks={blocksOf(
+                        { items: coordinator.items, turnRunning: busy, worktree: null, queue, outputs: model.outputs },
+                        model.streaming,
+                        (iso) => ago(iso),
+                        now,
+                      )}
+                      threadId={coordinator.threadId}
+                      session={session}
+                      card={(card) => <Card card={card} actions={actions} />}
+                      queued={text.queued}
+                    />
+                  </ThreadShellProvider>
                 </Thread>
               </TaskFace>
             )}
+            {shown.lightbox}
             {room === Room.Both && (
               <ResizeHandle
                 value={both.width}

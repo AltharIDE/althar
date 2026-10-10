@@ -17,6 +17,7 @@ import { messageOf } from '../../data/client'
 import { CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
+import { type OutputSoFar, outputsCaughtUp, withOutput } from '../../shared/handed'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
@@ -54,6 +55,8 @@ export interface ProjectModel {
   readonly coordinator: CoordinatorSnapshot | null
   /** Text still streaming, by thread item. */
   readonly streaming: ReadonlyMap<string, Streamed>
+  /** Commands' output as far as it has come, by their tool call's item, while they run. */
+  readonly outputs: ReadonlyMap<string, OutputSoFar>
   /** Agents that could work: signed in, or that don't say. */
   readonly agents: ReadonlyArray<AgentStatus>
   /** How the project's tasks end where a plan doesn't say; null where its host decides. */
@@ -99,6 +102,7 @@ export const useProject = (projectId: string): ProjectModel => {
   // The project's ending, which a task the person plans starts from.
   const end = useQuery(read.rules(projectId)).data?.end ?? null
   const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
+  const [outputs, setOutputs] = useState<ReadonlyMap<string, OutputSoFar>>(new Map())
   const [failed, setError] = useState<string | null>(null)
   const readFailure = thread.error ?? listed.error
   const error = failed ?? (readFailure === null ? null : messageOf(readFailure))
@@ -127,6 +131,7 @@ export const useProject = (projectId: string): ProjectModel => {
     (items: ReadonlyArray<ThreadItem>) => {
       setCoordinator((current) => ({ ...current, items: mergeItems(current.items, items) }))
       setStreaming((current) => caughtUp(current, items))
+      setOutputs((current) => outputsCaughtUp(current, items))
     },
     [setCoordinator],
   )
@@ -159,6 +164,11 @@ export const useProject = (projectId: string): ProjectModel => {
   }, [client, threadId, coordinator, readHead, newest, arrived, fail])
 
   useWatch((event) => {
+    // A command's output as far as it has come, until the store has it whole.
+    if (event._tag === 'Output') {
+      if (event.threadId === threadId) setOutputs((current) => withOutput(current, event))
+      return
+    }
     if (event._tag === 'Streaming') {
       if (event.threadId !== threadId) return
       setStreaming((current) =>
@@ -293,6 +303,7 @@ export const useProject = (projectId: string): ProjectModel => {
     project,
     coordinator,
     streaming,
+    outputs,
     agents,
     end,
     error,

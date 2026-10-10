@@ -14,6 +14,8 @@ export interface TerminalText {
   exit: (code: number) => string
   /** A command that ended having printed nothing. */
   empty: string
+  /** Lines from its start that weren't kept, past what it shows. */
+  omitted: (n: number) => string
 }
 
 export const terminalText: TerminalText = {
@@ -22,6 +24,7 @@ export const terminalText: TerminalText = {
   hideEarlier: 'Hide earlier lines',
   exit: (code) => `exit ${code}`,
   empty: 'No output',
+  omitted: (n) => `${n.toLocaleString('en')} earlier lines weren’t kept`,
 }
 
 /**
@@ -44,6 +47,8 @@ export interface TerminalProps {
   lines: string[]
   /** What it printed before those, held back until asked for. */
   earlier?: string[]
+  /** How many lines came before even those, and weren't kept. */
+  omitted?: number
   exit?: number
   /** A line still being written, while the command runs: the cursor shows after it, even when it is empty. */
   live?: string
@@ -65,6 +70,7 @@ export function Terminal({
   command,
   lines,
   earlier = [],
+  omitted = 0,
   exit,
   live,
   loading = false,
@@ -96,6 +102,7 @@ export function Terminal({
             {command}
           </Line>
         )}
+        {omitted > 0 && <Line className={s.said}>{t.omitted(omitted)}</Line>}
         {earlier.length > 0 && (
           <Line className={s.earlier}>
             <LinkButton aria-expanded={open} onClick={() => setOpen(!open)}>

@@ -1,6 +1,7 @@
-import type { ThreadItem, Unfurl } from '@althar/contracts'
+import type { FileMention, Picture, ThreadItem, Unfurl } from '@althar/contracts'
 import { Delivery, PlanState, ToolKind, ToolState } from '@althar/ui'
 
+import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
 import { took } from './time'
 
 /*
@@ -17,10 +18,16 @@ import { took } from './time'
  * the fold says how long it has worked so far and what it is doing now.
  */
 
+/** What a message or a tool call handed back beside its words (handed.ts). */
+interface HandedParts {
+  readonly pictures: ReadonlyArray<Picture>
+  readonly files: ReadonlyArray<FileMention>
+}
+
 export type Part =
-  | { readonly kind: 'message'; readonly id: string; readonly text: string }
+  | ({ readonly kind: 'message'; readonly id: string; readonly text: string } & HandedParts)
   | { readonly kind: 'thought'; readonly id: string; readonly text: string }
-  | {
+  | ({
       readonly kind: 'tool'
       readonly id: string
       readonly toolKind: ToolKind
@@ -29,7 +36,13 @@ export type Part =
       readonly state: ToolState
       /** The whole command, when it runs one: what the row opens to, and what Copy takes. */
       readonly command: string | null
-    }
+      /** For a command: its output so far, or how much it printed once it ended (handed.ts). */
+      readonly ran: Ran | null
+      /** How a command ended, where it says. */
+      readonly exit: number | null
+      /** Every file it names, as it names them: what it touched, wrote or pointed at. */
+      readonly touches: ReadonlyArray<string>
+    } & HandedParts)
   | {
       readonly kind: 'plan'
       readonly id: string
@@ -68,6 +81,8 @@ export type Block =
       readonly took: string
       /** While it runs, what it is doing now, in a few words. */
       readonly doing: string | null
+      /** What it handed back beside its words: pictures, documents, files. */
+      readonly handed: Handed
     }
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
   | { readonly kind: 'step'; readonly id: string; readonly at: string; readonly result: StepResult }
@@ -206,6 +221,7 @@ const partOf = (
   streaming: ReadonlyMap<string, Streamed>,
   turnRunning: boolean,
   worktree: string | null,
+  outputs: ReadonlyMap<string, OutputSoFar>,
 ): Part => {
   switch (item.kind) {
     case 'agent_message':
@@ -213,7 +229,9 @@ const partOf = (
       const live = streaming.get(item.id)?.text
       // Streaming text is whole each time; the store catches up behind it.
       const text = live !== undefined && live.length >= item.content.text.length ? live : item.content.text
-      return { kind: item.kind === 'agent_thought' ? 'thought' : 'message', id: item.id, text }
+      return item.kind === 'agent_thought'
+        ? { kind: 'thought', id: item.id, text }
+        : { kind: 'message', id: item.id, text, pictures: item.content.pictures, files: item.content.files }
     }
     case 'tool_call': {
       const toolKind = toolKindOf(item.content.toolKind)
@@ -226,6 +244,11 @@ const partOf = (
         target: targetOf(item.content, worktree),
         state,
         command: item.content.command,
+        ran: ranOf(item.content, state, outputs.get(item.id)),
+        exit: item.content.exit,
+        touches: [...item.content.locations.map((location) => location.path), ...item.content.files.map((file) => file.path)],
+        pictures: item.content.pictures,
+        files: item.content.files,
       }
     }
     case 'plan':
@@ -250,6 +273,20 @@ export interface ThreadSource {
   readonly worktree: string | null
   /** What waits its turn is in the composer's queue, not here: see `queueShown`. The turn running, when not said. */
   readonly queue?: boolean
+  /** Commands' output as far as it has come, by their tool call's item, while they run. */
+  readonly outputs?: ReadonlyMap<string, OutputSoFar>
+}
+
+/** What a part handed back, for the turn to gather. */
+const partHanded = (part: Part): PartHanded => {
+  switch (part.kind) {
+    case 'message':
+      return { id: part.id, pictures: part.pictures, files: part.files }
+    case 'tool':
+      return { id: part.id, pictures: part.pictures, files: part.files, undone: part.state !== ToolState.Done, target: part.target }
+    default:
+      return { id: part.id, pictures: [], files: [] }
+  }
 }
 
 /** A turn's work and what it said: all but its last message folds, and all of it before a step's result. */
@@ -290,6 +327,7 @@ export const blocksOf = (
 ): ReadonlyArray<Block> => {
   const { turnRunning, worktree } = source
   const queue = source.queue ?? turnRunning
+  const outputs = source.outputs ?? new Map<string, OutputSoFar>()
   const blocks: Array<Block> = []
   /** When each turn began and last grew, by its id. */
   const spans = new Map<string, { from: string; to: string }>()
@@ -301,7 +339,19 @@ export const blocksOf = (
       if (span !== undefined) spans.set(last.id, { ...span, to: at })
       return
     }
-    blocks.push({ kind: 'turn', id: part.id, agentId, at: ago(at), parts: [part], work: [], said: [], live: false, took: '', doing: null })
+    blocks.push({
+      kind: 'turn',
+      id: part.id,
+      agentId,
+      at: ago(at),
+      parts: [part],
+      work: [],
+      said: [],
+      live: false,
+      took: '',
+      doing: null,
+      handed: handedBy([], null),
+    })
     spans.set(part.id, { from: at, to: at })
   }
   for (const item of source.items) {
@@ -337,13 +387,19 @@ export const blocksOf = (
           continue
         }
     }
-    add(item.agentId, item.createdAt, partOf(item, streaming, turnRunning, worktree))
+    add(item.agentId, item.createdAt, partOf(item, streaming, turnRunning, worktree, outputs))
   }
   // A message the store has placed but the window hasn't read yet shows from its first words.
   const read = new Set(source.items.map((item) => item.id))
   for (const [id, streamed] of streaming) {
     if (read.has(id)) continue
-    add(streamed.agentId, streamed.at, { kind: streamed.kind === 'agent_thought' ? 'thought' : 'message', id, text: streamed.text })
+    add(
+      streamed.agentId,
+      streamed.at,
+      streamed.kind === 'agent_thought'
+        ? { kind: 'thought', id, text: streamed.text }
+        : { kind: 'message', id, text: streamed.text, pictures: [], files: [] },
+    )
   }
   // What an agent says after its step's result, closing its turn, folds with the work that led to it.
   const lastTurn = blocks.findLastIndex((block) => block.kind === 'turn')
@@ -372,6 +428,7 @@ export const blocksOf = (
       live: running,
       took: span === undefined ? '' : took(span.from, running ? now : span.to),
       doing: running ? doingOf(work) : null,
+      handed: handedBy(block.parts.map(partHanded), worktree),
     }
   })
 }

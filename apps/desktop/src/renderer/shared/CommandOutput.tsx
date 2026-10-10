@@ -1,0 +1,66 @@
+import { useQuery } from '@tanstack/react-query'
+
+import type { CommandOutput as Kept } from '@althar/contracts'
+import { Terminal } from '@althar/ui'
+
+import { messageOf } from '../data/client'
+import { reads } from '../data/reads'
+import { useServices } from '../data/services'
+import { linesOf, type Ran } from './handed'
+
+/*
+ * A command's output in its tool call, as the kit's Terminal: while it runs,
+ * what it has printed so far, the line being written ending in the cursor;
+ * once it ends, what was kept, read when the person opens the call, never
+ * before. Its last lines show, those before them a click away, and lines
+ * Althar didn't keep are counted.
+ */
+
+export const text = {
+  notKept: 'Althar didn’t keep what this printed.',
+}
+
+export interface CommandOutputProps {
+  readonly threadId: string
+  readonly itemId: string
+  readonly ran: Ran
+  /** How it ended, where it says. */
+  readonly exit: number | null
+  /** The command, where the tool call's row can't show all of it. */
+  readonly command?: string
+}
+
+export function CommandOutput({ threadId, itemId, ran, exit, command }: CommandOutputProps) {
+  const shown = command === undefined ? {} : { command }
+  const ended = exit === null ? {} : { exit }
+  if (ran.kind === 'running') {
+    const lines = ran.text.split('\n')
+    // What follows the last newline is the line still being written.
+    const live = lines.pop() ?? ''
+    const { lines: last, earlier } = linesOf(lines.join('\n'))
+    return <Terminal {...shown} lines={[...last]} earlier={[...earlier]} omitted={ran.dropped} live={live} />
+  }
+  if (!ran.output.kept) return <Terminal {...shown} {...ended} lines={[]} {...(ran.output.lines > 0 ? { error: text.notKept } : {})} />
+  return <KeptOutput threadId={threadId} itemId={itemId} output={ran.output} shown={shown} ended={ended} />
+}
+
+function KeptOutput({
+  threadId,
+  itemId,
+  output,
+  shown,
+  ended,
+}: {
+  threadId: string
+  itemId: string
+  output: Kept
+  shown: { readonly command?: string }
+  ended: { readonly exit?: number }
+}) {
+  const { client } = useServices()
+  const read = useQuery(reads(client).output(threadId, itemId))
+  if (read.isPending) return <Terminal {...shown} lines={[]} loading />
+  if (read.isError) return <Terminal {...shown} {...ended} lines={[]} error={messageOf(read.error)} />
+  const { lines, earlier } = linesOf(read.data.text)
+  return <Terminal {...shown} {...ended} lines={[...lines]} earlier={[...earlier]} omitted={read.data.dropped || output.dropped} />
+}

@@ -197,6 +197,8 @@ describe('the client', () => {
           CreateTask: () => Effect.die('unused'),
           GetThread: () => Effect.die('unused'),
           GetThreadItem: () => Effect.die('unused'),
+          ReadOutput: () => Effect.die('unused'),
+          ReadDocument: () => Effect.die('unused'),
           // The first try gets no answer the client can read; the second works.
           StartSession: ({ commandId }) => {
             commands.push(commandId)
