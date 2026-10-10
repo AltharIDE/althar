@@ -14,12 +14,14 @@ flowchart LR
     Main -->|"utilityProcess.fork"| Runtime["Runtime<br/>utility process"]
     Window <-->|"MessagePort: @althar/contracts"| Runtime
     Runtime -->|"agents over ACP"| Agents["Claude Code, Codex, OpenCode"]
+    Main -->|"utilityProcess.fork, on first dictation"| Speech["Speech<br/>utility process"]
 ```
 
 | Where | What it holds | What it never holds |
 | --- | --- | --- |
-| `src/main` | Windows, the app's lifecycle, the runtime's process and its restarts, the folder picker and folder grants, the repositories found where people keep code for the first screen (`repositories.ts`), external links, notifications and the Dock's count, the app's own preferences (`appPreferences.ts`, kept in the profile's `desktop.json`), and keeping the Mac awake while work runs | Projects, tasks, rules, sessions |
-| `src/preload` | The bridge: hands the page its port, and asks main for grants for picked and dropped folders and for repositories it found | Node, the file system, a shell, paths |
+| `src/main` | Windows, the app's lifecycle, the runtime's process and its restarts, the folder picker and folder grants, the repositories found where people keep code for the first screen (`repositories.ts`), external links, notifications and the Dock's count, the app's own preferences (`appPreferences.ts`, kept in the profile's `desktop.json`), keeping the Mac awake while work runs, and dictation's microphone permission, the system's settings and the speech process | Projects, tasks, rules, sessions |
+| `src/preload` | The bridge: hands the page its port, and asks main for grants for picked and dropped folders and for repositories it found, and carries dictation's calls | Node, the file system, a shell, paths |
+| `src/speech` | Dictation's speech process (ADR-017): the pinned model, its checked and resumable download, and sherpa-onnx turning speech into text | Anything but speech |
 | `src/runtime` | The runtime (`@althar/runtime`), serving the API over each window's port, and telling the main process what needs the person | Anything about windows |
 | `src/renderer` | The window: views, view models and the data layer (ADR-010) | Effect outside `data/`; Node |
 
@@ -51,7 +53,7 @@ MVVM in feature folders ([ADR-010](../../docs/decisions/010-desktop-app-mvvm.md)
 | `features/rules` | A project's rules (ADR-013): who answers, what always asks, what is never allowed and what is always allowed (ADR-017), how a task ends, usage limits and accounts; each change saved at once, one after another, a list's naming the revision it read, so a rule a card kept meanwhile isn't dropped |
 | `features/repositories` | A project's repositories: adding a folder, leaving one out, each one's role, and where a fork's pull requests open; each change saved at once |
 | `features/task` | A task's thread, the calls waiting on you (permissions as one stack, with Allow all), the composer, and what it changed |
-| `shared/` | A thread's items as blocks, drawn with the kit (finished work folded, steps' results under it); the model picker every conversation and plan step uses; how agents and times are drawn; what a place shows while a slow read comes |
+| `shared/` | A thread's items as blocks, drawn with the kit (finished work folded, steps' results under it); the model picker every conversation and plan step uses; how agents and times are drawn; what a place shows while a slow read comes; dictation in a composer (`dictation/`: the view model, the recorder, the writing down as it is said, the project's names spelt as its code spells them, each system's words) |
 
 Each feature holds its route (`route.tsx`, with what it reads before it shows), its view model (`use*.ts`), its view (`*View.tsx`) and its styles. `router.tsx` puts the routes together, with the place in the hash, since the page loads from a file.
 
@@ -61,8 +63,9 @@ Each feature holds its route (`route.tsx`, with what it reads before it shows), 
 - **The runtime owns the state; the window keeps what it last said** ([ADR-014](../../docs/decisions/014-window-keeps-what-it-read.md)). View models read from the window's cache and hold what is streaming. A change reads again the whole reads it touches (the projects, the home, a board, the connections), on screen or not; a thread on screen reads what changed item by item, and one off screen is marked and read when next opened. Nothing goes out of date by age, and nothing is patched but a thread's items as they are read.
 - **A screen opens whole.** Its route reads what it shows first, from the cache when nothing changed, and the screen being left stays until then. A read slower than 150 ms shows the place's outline, never a spinner, for at least 300 ms; what hasn't been read is never drawn as empty.
 - **Each agent is asked again** once a launch, whenever the window comes back to the front, and as Settings opens. Everywhere else shows what the runtime last knew.
-- **The page is locked down** (07's renderer list). Sandboxed, context-isolated, no Node, a strict Content Security Policy, no new windows and no navigation away, no web permissions granted, and no paths. Links open in the person's browser, for `https:` and local `http:` only.
-- **Test hooks stay out of packaged builds.** `ALTHAR_FAKE_AGENTS` works only in a build made with `bun run build`; `bun run build:package` leaves the code out. It swaps in the fake agent, the connectors' fake GitHub, and secrets kept in memory, so the end-to-end tests never reach a network or the Keychain.
+- **The page is locked down** (07's renderer list). Sandboxed, context-isolated, no Node, a strict Content Security Policy, no new windows and no navigation away, no web permissions granted but the microphone (audio alone, in Althar's own windows, for dictation), and no paths. Links open in the person's browser, for `https:` and local `http:` only.
+- **Test hooks stay out of packaged builds.** `ALTHAR_FAKE_AGENTS` works only in a build made with `bun run build`; `bun run build:package` leaves the code out. It swaps in the fake agent, the connectors' fake GitHub, and secrets kept in memory, so the end-to-end tests never reach a network or the Keychain. `ALTHAR_FAKE_SPEECH` swaps in a speech model that comes down at once and hears the same words, with Chromium's fake microphone, which the system is never asked about (`ALTHAR_FAKE_MICROPHONE` for the microphone alone).
+- **Dictation is local** ([ADR-017](../../docs/decisions/017-dictation-on-this-machine.md)). The first press offers the speech model in the composer's tray, and nothing comes down until the person says Download; the microphone is asked for first. What is said shows faint at the cursor as it is said, and is written there when it stops, with the project's names (`GetVocabulary`, read once a window) spelt as its code spells them; never sent. Escape while listening throws it away. ⌘⇧D starts and stops it; held, letting go stops it.
 - **Words on screen follow [the glossary](../../docs/glossary.md).**
 - **Every composer says how full its agent's context is,** with the kit's ring, from what the agent last said while it runs; nothing where it hasn't said.
 - **One model picker for every agent.** Every agent's models are one list, each known by its agent and its own id; picking another agent's model hands the conversation to that agent, which the picker says on those models, and asks before while a turn is under way. Default efforts are the runtime's, so every way a session starts uses them; pins are only how this window lists models, so they stay in its storage, as conveniences that may be lost. Until the person pins one, each agent's current model is pinned.
@@ -80,7 +83,7 @@ Each feature holds its route (`route.tsx`, with what it reads before it shows), 
 
 - `bun run check`: format, type-aware lint and type checks.
 - `bun run test:coverage`: view models and views with Testing Library against a fake client; the client against the real runtime over a `MessageChannel`, with the fake agent. Gated at 90% of lines and branches; the entry and the routes are left to the end-to-end tests.
-- `bun run test:e2e`: the built app under Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; the home across two projects, opening a ready task from it, and settings; the coordinator planning a task that is implemented, reviewed, settled and ready; and connecting GitHub with a token, a planned task ending in a draft pull request that is pushed and opened, marking it ready, and reading what it changed. `e2e/real.spec.ts` runs a real agent when asked.
+- `bun run test:e2e`: the built app under Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; the home across two projects, opening a ready task from it, and settings; the coordinator planning a task that is implemented, reviewed, settled and ready; and connecting GitHub with a token, a planned task ending in a draft pull request that is pushed and opened, marking it ready, and reading what it changed; and dictating the first time, with the stand-in speech model. `e2e/real.spec.ts` runs a real agent when asked, and `e2e/real-dictation.spec.ts` the real speech model on a recording.
 
 ## Gaps
 

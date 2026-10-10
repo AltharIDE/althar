@@ -6,7 +6,9 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
  * a drop or among the repositories main found, each as a grant, the thread a notification they clicked opens,
  * the icon they gave the app, the app's own preferences, and where Althar
  * shows at the edge of the screen. The edge's own pages say through it where they draw, and what to
- * open in the window, and hear whether the pointer is on the island. The page never sees or sends a
+ * open in the window, and hear whether the pointer is on the island. And
+ * dictation: where the speech model and the microphone stand, the model's
+ * download, and what was said, sent to be written down. The page never sees or sends a
  * path. It gets no Node, no file system, no shell.
  */
 
@@ -27,6 +29,15 @@ ipcRenderer.on('althar:open', (_event, threadId: unknown) => {
   if (typeof threadId !== 'string') return
   if (opening.size === 0) pending = threadId
   for (const listener of opening) listener(threadId)
+})
+
+/* Where dictation's speech engine (sherpa-onnx) has a binary; elsewhere the page gets no dictation, and shows no microphone. */
+const SPEECH = new Set(['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'win32-x64', 'win32-ia32'])
+
+/* How the speech model's download goes, as the main process says. */
+const dictating = new Set<(event: unknown) => void>()
+ipcRenderer.on('althar:dictation', (_event, message: unknown) => {
+  for (const listener of dictating) listener(message)
 })
 
 contextBridge.exposeInMainWorld('althar', {
@@ -56,6 +67,24 @@ contextBridge.exposeInMainWorld('althar', {
   },
   edgeSize: (height: number): void => ipcRenderer.send('althar:edge-size', height),
   openInWindow: (threadId?: string): void => ipcRenderer.send('althar:edge-open', threadId ?? null),
+  ...(SPEECH.has(`${process.platform}-${process.arch}`)
+    ? {
+        dictation: {
+          state: (): Promise<unknown> => ipcRenderer.invoke('althar:dictation-state'),
+          allow: (): Promise<boolean> => ipcRenderer.invoke('althar:dictation-allow'),
+          download: (): Promise<void> => ipcRenderer.invoke('althar:dictation-download'),
+          cancel: (): Promise<void> => ipcRenderer.invoke('althar:dictation-cancel'),
+          prepare: (): Promise<void> => ipcRenderer.invoke('althar:dictation-prepare'),
+          transcribe: (samples: Float32Array, sampleRate: number): Promise<string> =>
+            ipcRenderer.invoke('althar:dictation-transcribe', samples, sampleRate),
+          openSettings: (pane: 'privacy' | 'sound'): Promise<boolean> => ipcRenderer.invoke('althar:dictation-settings', pane),
+          onEvent: (listener: (event: unknown) => void): (() => void) => {
+            dictating.add(listener)
+            return () => void dictating.delete(listener)
+          },
+        },
+      }
+    : {}),
   onOpen: (listener: (threadId: string) => void): (() => void) => {
     opening.add(listener)
     if (pending !== undefined) {

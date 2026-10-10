@@ -557,6 +557,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     leaveOutRepository: vi.fn(async () => {}),
     setRepository: vi.fn(async () => {}),
     getProjectRules: vi.fn(async (projectId: string) => ({ ...projectRules, projectId })),
+    getVocabulary: vi.fn(async () => ['RefundLedger', 'useEffect']),
     setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({ ...projectRules, ...change, projectId })),
     addAccount: vi.fn(async (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => ({
       ...usual('acc_added', 'signed_out'),

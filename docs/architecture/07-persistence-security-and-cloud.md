@@ -208,7 +208,9 @@ A backup is not successful until restoration is tested.
 - narrow preload API;
 - schema validation on both IPC sides;
 - no arbitrary command, SQL, path, URL, or secret APIs;
-- navigation, new-window, permission, and external-protocol allowlists;
+- navigation, new-window, permission, and external-protocol allowlists: the
+  only web permission granted is the microphone, for audio alone, in Althar's
+  own windows, for dictation (ADR-017);
 - strict CSP and no remote privileged content.
 
 ### Runtime
