@@ -5,26 +5,12 @@
   background: var(--n-2);
 }
 
-/* No tabs yet: the bar only drags the window, over the page, under the system's lights. */
-.bare {
-  position: relative;
-}
-
-.bare .over {
-  position: absolute;
-  inset: 0 0 auto;
-  z-index: 2;
-  background: transparent;
-  border-bottom: 0;
-}
-
 /* Under the window's bar it scrolls, with the scrollbar at the window's edge. */
 .scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  /* Below the bar that drags the window. */
-  padding: 56px max(40px, calc((100% - 760px) / 2)) 64px;
+  padding: 18px max(40px, calc((100% - 760px) / 2)) 64px;
 }
 
 /* the way back, at the top of the page */

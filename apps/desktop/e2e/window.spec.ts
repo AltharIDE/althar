@@ -34,12 +34,15 @@ test('draws the window’s own chrome off a Mac, and its buttons reach the windo
     expect(bar).toBe(false)
 
     // Before there is any project there are no tabs: the first screen's own bar carries the window's own buttons, so the window can still be closed.
-    await expect(page.getByRole('button', { name: 'Close the window' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Minimize the window' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Maximize the window' })).toBeVisible()
+    // One bar, one set of buttons.
+    await expect(page.getByRole('button', { name: 'Close the window' })).toHaveCount(1)
+    await expect(page.getByRole('button', { name: 'Minimize the window' })).toHaveCount(1)
+    await expect(page.getByRole('button', { name: 'Maximize the window' })).toHaveCount(1)
 
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    // The tabs' bar draws them now; the first screen's overlay is gone, not a second bar.
+    await expect(page.getByRole('button', { name: 'Close the window' })).toHaveCount(1)
 
     // Catch what each button asks for, keep the maximized state, and tell the window, so the toggle and the third button's name are judged.
     await electronApp.evaluate(({ BrowserWindow }) => {

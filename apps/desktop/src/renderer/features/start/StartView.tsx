@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect } from 'react'
 
 import type { AgentStatus, ProjectSummary } from '@althar/contracts'
-import { Button, PermissionPolicy, type RuntimeEntry, RuntimeState, SourceOrigin, TitleBar } from '@althar/ui'
+import { Button, PermissionPolicy, type RuntimeEntry, RuntimeState, SourceOrigin } from '@althar/ui'
 import { NewProject, Start } from '@althar/ui/screens'
 
 import { brandOf } from '../../shared/agents'
@@ -14,7 +14,7 @@ import s from './Start.module.css'
 import { useFirstProject } from './useFirstProject'
 import type { StartModel } from './useStart'
 import { device, platform } from '../../shared/device'
-import { useWindowChrome } from '../../shared/useWindowChrome'
+import { BareBar } from '../tabs/TabsFrame'
 
 /*
  * Where the window starts. With no project yet, the kit's Start screen: the
@@ -116,8 +116,6 @@ export function StartView({
   /** The home, once there are projects. */
   home: () => ReactNode
 }) {
-  // No tabs yet on these screens: off a Mac the window's own buttons sit in their bar.
-  const chrome = useWindowChrome()
   const opened = (project: ProjectSummary | null) => {
     if (project !== null) onProject(project.id)
   }
@@ -130,9 +128,7 @@ export function StartView({
     const { forming } = model
     return (
       <div className={`${s.window} ${s.bare}`}>
-        <TitleBar {...chrome} className={s.over}>
-          {null}
-        </TitleBar>
+        <BareBar className={s.over} />
         <div className={`${s.scroll} ${s.first}`}>
           <NewProject
             defaultName={forming.name}
@@ -180,8 +176,6 @@ function First({
   accounts: AccountSignInModel
   onProject: (projectId: string) => void
 }) {
-  // No tabs on the first screen: off a Mac the window's own buttons sit in its bar.
-  const chrome = useWindowChrome()
   const project = useFirstProject()
   const make = () =>
     void project.make().then((made) => {
@@ -209,9 +203,7 @@ function First({
   const error = project.error ?? model.error
   return (
     <div className={`${s.window} ${s.bare}`}>
-      <TitleBar {...chrome} className={s.over}>
-        {null}
-      </TitleBar>
+      <BareBar className={s.over} />
       <Start
         // Still asking until the runtime answers, or says it can't.
         runtimes={model.status === null && model.error === null ? null : runtimesOf(model, accounts)}

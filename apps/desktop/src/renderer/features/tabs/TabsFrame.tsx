@@ -1,7 +1,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 
-import { ProjectTabs, type Room } from '@althar/ui'
+import { ProjectTabs, TitleBar, type Room } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { useWindowChrome } from '../../shared/useWindowChrome'
@@ -24,6 +24,9 @@ const VisitContext = createContext<(threadId: string, projectId: string) => void
 
 /** The end of the window's bar: undefined outside the tabs, null until the bar is drawn. */
 const EndContext = createContext<HTMLElement | null | undefined>(undefined)
+
+/** Whether the window's bar is drawn here, so a screen knows not to draw one of its own. */
+const TabBarContext = createContext(false)
 
 /** What the screen on show puts at the end of the window's bar; a screen shown without the tabs keeps it in place. */
 export function BarEnd({ children }: { children: ReactNode }) {
@@ -52,11 +55,58 @@ export const useLastRoom = (projectId: string): readonly [Room | null, (room: Ro
   return [kept?.rooms?.[projectId] ?? pending[projectId] ?? null, keep]
 }
 
+/**
+ * The window's one bar, while there are tabs: the projects, the screen's own
+ * end, and the window's own buttons where the system draws none. Its own
+ * component, so the maximized-state subscription lives only while it is here.
+ */
+function TabsBar({ tabs, endRef }: { tabs: ReturnType<typeof useTabs>; endRef: (element: HTMLElement | null) => void }) {
+  const { host } = useServices()
+  const chrome = useWindowChrome()
+  const { select, current } = tabs
+  return (
+    <ProjectTabs
+      tabs={tabs.tabs}
+      current={current}
+      yours={tabs.yours}
+      others={tabs.others}
+      onSelect={select}
+      onClose={tabs.close}
+      onOpen={tabs.open}
+      onOpenFolder={tabs.openFolder}
+      end={<div ref={endRef} className={s.end} />}
+      // macOS draws its traffic lights over the bar; elsewhere the bar draws the window's own buttons.
+      lights={host.platform === 'darwin' ? 'space' : 'drawn'}
+      maximized={chrome.window?.maximized === true}
+      onCloseWindow={() => host.window('close')}
+      onMinimize={() => host.window('minimize')}
+      onToggleMaximize={() => host.window('toggle-maximize')}
+    />
+  )
+}
+
+/**
+ * The bar for a screen shown without the tabs: nothing where the window's bar
+ * is already there, so a screen on a tabbed route never draws a second one.
+ */
+export function BareBar({ className }: { className?: string }) {
+  const barIsHere = useContext(TabBarContext)
+  if (barIsHere) return null
+  return <BareTitleBar className={className} />
+}
+
+/** The overlay bar itself, subscribing only while it is drawn. */
+function BareTitleBar({ className }: { className?: string }) {
+  const chrome = useWindowChrome()
+  return (
+    <TitleBar {...chrome} className={className}>
+      {null}
+    </TitleBar>
+  )
+}
+
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
-  const { host } = useServices()
-  // The window's own buttons in the bar, and whether the third says maximize or restore.
-  const chrome = useWindowChrome()
   const [end, setEnd] = useState<HTMLElement | null>(null)
   const { select, current } = tabs
   const open = tabs.tabs.map((tab) => tab.id)
@@ -82,28 +132,12 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   return (
     <VisitContext.Provider value={tabs.visit}>
       <EndContext.Provider value={end}>
-        <div className={s.frame}>
-          {!tabs.none && (
-            <ProjectTabs
-              tabs={tabs.tabs}
-              current={current}
-              yours={tabs.yours}
-              others={tabs.others}
-              onSelect={select}
-              onClose={tabs.close}
-              onOpen={tabs.open}
-              onOpenFolder={tabs.openFolder}
-              end={<div ref={setEnd} className={s.end} />}
-              // macOS draws its traffic lights over the bar; elsewhere the bar draws the window's own buttons.
-              lights={host.platform === 'darwin' ? 'space' : 'drawn'}
-              maximized={chrome.window?.maximized === true}
-              onCloseWindow={() => host.window('close')}
-              onMinimize={() => host.window('minimize')}
-              onToggleMaximize={() => host.window('toggle-maximize')}
-            />
-          )}
-          <div className={s.screen}>{children}</div>
-        </div>
+        <TabBarContext.Provider value={!tabs.none}>
+          <div className={s.frame}>
+            {!tabs.none && <TabsBar tabs={tabs} endRef={setEnd} />}
+            <div className={s.screen}>{children}</div>
+          </div>
+        </TabBarContext.Provider>
       </EndContext.Provider>
     </VisitContext.Provider>
   )
