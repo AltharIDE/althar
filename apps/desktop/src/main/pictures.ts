@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { artifactPath, type PictureType, pictureType } from '@althar/runtime/artifacts'
@@ -31,12 +32,20 @@ const missing = () => new Response(null, { status: 404 })
 
 const read = (path: string) => readFile(path).catch(() => null)
 
-/** Keeps a smaller copy beside the store, written aside first, so a half-written one is never served. */
+/**
+ * Keeps a smaller copy beside the store, written aside under a name of its
+ * own first, so neither a half-written copy nor one two requests made at
+ * once is ever served.
+ */
 const keepCopy = async (folder: string, name: string, bytes: Buffer) => {
   await mkdir(folder, { recursive: true })
-  const aside = join(folder, `.${name}.${process.pid}`)
-  await writeFile(aside, bytes)
-  await rename(aside, join(folder, name))
+  const aside = join(folder, `.${name}.${randomUUID()}`)
+  try {
+    await writeFile(aside, bytes)
+    await rename(aside, join(folder, name))
+  } finally {
+    await rm(aside, { force: true })
+  }
 }
 
 /** The picture an address asks for, from the store at `root`, or 404 for anything else. */

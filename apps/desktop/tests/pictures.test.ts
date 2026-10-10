@@ -96,6 +96,17 @@ describe('serving a picture from the store', () => {
     expect(Buffer.from(await kept.arrayBuffer()).toString()).toBe('small jpeg')
   })
 
+  it('makes copies asked for at once each whole, and leaves nothing half-written', async () => {
+    const root = store(PNG)
+    const smaller = Buffer.alloc(64 * 1024, 7)
+    const serve = servePicture(root, () => ({ bytes: smaller, type: 'image/png' }))
+    const answers = await Promise.all(Array.from({ length: 6 }, () => serve(ask(pictureUrl(digestOf(PNG), true)))))
+    for (const answer of answers) expect(Buffer.from(await answer.arrayBuffer()).equals(smaller)).toBe(true)
+    expect(readdirSync(join(root, 'smaller'))).toEqual([`${digestOf(PNG)}-${THUMB_WIDTH}.png`])
+    const kept = await servePicture(root, vi.fn())(ask(pictureUrl(digestOf(PNG), true)))
+    expect(Buffer.from(await kept.arrayBuffer()).equals(smaller)).toBe(true)
+  })
+
   it('serves a smaller copy even where it can’t keep it', async () => {
     const root = store(PNG)
     // A file where the copies' folder should be.

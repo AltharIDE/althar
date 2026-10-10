@@ -19,7 +19,7 @@ export interface HandedBackProps {
   readonly threadId: string
   /** Where each file was last touched, so a document is read again after an edit. */
   readonly touched: ReadonlyMap<string, string>
-  /** Opens a file of the task's in the person's editor; without it, there is no such button. */
+  /** Opens a file of the task's in the person's editor, by its whole path; without it, there is no such button. */
   readonly openFile?: (path: string) => void
 }
 
@@ -36,7 +36,7 @@ export function HandedBack({ handed, threadId, touched, openFile }: HandedBackPr
           path={file.shown}
           kind={file.kind}
           {...(file.size === null ? {} : { size: file.size })}
-          {...(openFile === undefined || file.shown.startsWith('/') ? {} : { onOpen: () => openFile(file.shown) })}
+          {...(openFile === undefined || file.local === null ? {} : { onOpen: () => openFile(file.local ?? '') })}
         />
       ))}
     </>
@@ -64,7 +64,7 @@ function DocumentCard({
       loading={read.isPending}
       {...(read.data === undefined ? {} : { body: read.data.body, size: bytesText(read.data.bytes), lines: read.data.lines })}
       {...(read.isError ? { error: messageOf(read.error) } : {})}
-      {...(openFile === undefined || file.shown.startsWith('/') ? {} : { onOpen: () => openFile(file.shown) })}
+      {...(openFile === undefined || file.local === null ? {} : { onOpen: () => openFile(file.local ?? '') })}
     />
   )
 }

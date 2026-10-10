@@ -36,7 +36,7 @@ import { type Choice, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { stepNames, stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
-import { lastTouches } from '../../shared/handed'
+import { editorPath, lastTouches } from '../../shared/handed'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
@@ -334,6 +334,8 @@ export function TaskView({
   )
   // A file the lead wrote or pointed at opens in the person's editor, as its changes do.
   const openFile = editor === undefined ? undefined : (path: string) => editors.open(editor.id, { path })
+  // The document open beside the thread, as the editor opens it: by its whole path inside the task's folder.
+  const docInEditor = host.doc?.path === undefined ? null : editorPath(host.doc.path, snapshot.task.worktree)
   // A stopped task picks up with its last lead, on its model, while that agent can lead (or before the agents are read); else the agent that last spoke; else the first; with every one signed out, none.
   const lastLead = snapshot.task.lead
   const last = snapshot.items.findLast((item) => item.agentId !== null)?.agentId
@@ -505,9 +507,7 @@ export function TaskView({
                 doc={host.doc}
                 version={touched.get(host.doc.path ?? '') ?? ''}
                 onClose={host.closeDoc}
-                {...(openFile === undefined || host.doc.path === undefined || host.doc.path.startsWith('/')
-                  ? {}
-                  : { onOpen: () => openFile(host.doc?.path ?? '') })}
+                {...(openFile === undefined || docInEditor === null ? {} : { onOpen: () => openFile(docInEditor) })}
               />
             )
           }

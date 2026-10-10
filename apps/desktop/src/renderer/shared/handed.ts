@@ -20,7 +20,8 @@ export interface OutputSoFar {
 
 /** What a command shows in its tool call: its output so far while it runs, or how much it printed once it ended. */
 export type Ran =
-  | { readonly kind: 'running'; readonly text: string; readonly dropped: number }
+  /** `heard` once the window has heard its output stream; before then, what it printed so far is read. */
+  | { readonly kind: 'running'; readonly text: string; readonly dropped: number; readonly heard: boolean }
   | { readonly kind: 'ended'; readonly output: CommandOutput }
 
 /** A command's state for its tool call: null for a call that isn't a command, or one from before Althar kept output. */
@@ -31,7 +32,7 @@ export const ranOf = (
 ): Ran | null => {
   if (content.output !== null) return { kind: 'ended', output: content.output }
   if (state !== ToolState.Running || (content.toolKind !== 'execute' && soFar === undefined)) return null
-  return { kind: 'running', text: soFar?.text ?? '', dropped: soFar?.dropped ?? 0 }
+  return { kind: 'running', text: soFar?.text ?? '', dropped: soFar?.dropped ?? 0, heard: soFar !== undefined }
 }
 
 /** A screenshot, as Shots and the lightbox draw it. */
@@ -42,6 +43,8 @@ export interface HandedFile {
   readonly id: string
   readonly path: string
   readonly shown: string
+  /** Its whole path, where it is in the task's folder, for the editor to open; null elsewhere. */
+  readonly local: string | null
   /** What kind of file, from its name: Markdown, CSV. */
   readonly kind: string
   /** Its size, in words, where the agent said. */
@@ -95,6 +98,19 @@ export const kindOf = (path: string) => {
 export const shownPath = (path: string, worktree: string | null) => {
   const local = path.startsWith('file://') ? decodeURIComponent(path.slice('file://'.length)) : path
   return worktree !== null && local.startsWith(`${worktree}/`) ? local.slice(worktree.length + 1) : local
+}
+
+/**
+ * A file's whole path, as the editor opens it: one named from the task's
+ * worktree is put back under it. Only one inside the task's folder, where
+ * all its worktrees are (ADR-006), opens; null for anywhere else.
+ */
+export const editorPath = (path: string, worktree: string | null): string | null => {
+  if (worktree === null) return null
+  const local = path.startsWith('file://') ? decodeURIComponent(path.slice('file://'.length)) : path
+  const whole = local.startsWith('/') ? local : `${worktree}/${local}`
+  const folder = worktree.slice(0, worktree.lastIndexOf('/'))
+  return folder !== '' && whole.startsWith(`${folder}/`) ? whole : null
 }
 
 /** What one part of a turn handed back: its pictures and files, and, for a tool call, whether it finished. */
@@ -153,6 +169,7 @@ export const handedBy = (parts: ReadonlyArray<PartHanded>, worktree: string | nu
         id: `${part.id}:${shown}`,
         path: file.path,
         shown,
+        local: editorPath(file.path, worktree),
         kind: kindOf(shown),
         size: file.bytes === null ? null : bytesText(file.bytes),
       }

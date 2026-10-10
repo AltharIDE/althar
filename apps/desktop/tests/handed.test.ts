@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   bytesText,
+  editorPath,
   handedBy,
   kindOf,
   lastTouches,
@@ -112,9 +113,13 @@ describe('a command in its tool call', () => {
     const running = items.tool({ title: 'npm test', toolKind: 'execute', status: 'in_progress', command: 'npm test' })
     const streamed = new Map([[running.id, { text: ' ✓ a\n ✓ b', dropped: 3 }]])
     const part = turnOf([running], true, streamed).parts[0]
-    expect(part).toMatchObject({ kind: 'tool', state: ToolState.Running, ran: { kind: 'running', text: ' ✓ a\n ✓ b', dropped: 3 } })
-    // Before its first line, the cursor waits.
-    expect(turnOf([running], true).parts[0]).toMatchObject({ ran: { kind: 'running', text: '', dropped: 0 } })
+    expect(part).toMatchObject({
+      kind: 'tool',
+      state: ToolState.Running,
+      ran: { kind: 'running', text: ' ✓ a\n ✓ b', dropped: 3, heard: true },
+    })
+    // Before the window has heard any of it, what it printed so far is read.
+    expect(turnOf([running], true).parts[0]).toMatchObject({ ran: { kind: 'running', text: '', dropped: 0, heard: false } })
     const ended = items.tool({
       title: 'npm test',
       toolKind: 'execute',
@@ -131,6 +136,7 @@ describe('a command in its tool call', () => {
       kind: 'running',
       text: 'x',
       dropped: 0,
+      heard: true,
     })
   })
 
@@ -161,6 +167,16 @@ describe('files, as people read them', () => {
     expect(shownPath('docs/a.md', null)).toBe('docs/a.md')
     expect([kindOf('a.md'), kindOf('a.MDX'), kindOf('a.parquet'), kindOf('Makefile')]).toEqual(['Markdown', 'MDX', 'PARQUET', 'File'])
     expect([bytesText(512), bytesText(2048), bytesText(3.5 * 1024 * 1024)]).toEqual(['512 B', '2 KB', '3.5 MB'])
+  })
+
+  it('opens a file in the editor by its whole path, only inside the task’s folder, where its worktrees are', () => {
+    expect(editorPath('docs/a.md', '/t/meridian/task/api')).toBe('/t/meridian/task/api/docs/a.md')
+    // Another of the task's repositories is beside the first, in the same folder.
+    expect(editorPath('/t/meridian/task/web/b.md', '/t/meridian/task/api')).toBe('/t/meridian/task/web/b.md')
+    expect(editorPath('file:///t/meridian/task/web/c%20d.md', '/t/meridian/task/api')).toBe('/t/meridian/task/web/c d.md')
+    expect(editorPath('/elsewhere/e.md', '/t/meridian/task/api')).toBeNull()
+    expect(editorPath('docs/a.md', null)).toBeNull()
+    expect(editorPath('a.md', 'api')).toBeNull()
   })
 
   it('knows where each file was last touched, so a document is read again after an edit', () => {

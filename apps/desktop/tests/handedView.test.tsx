@@ -132,6 +132,22 @@ describe('what an agent hands back, on a task', () => {
     expect(screen.queryByText('elsewhere')).toBeNull()
   })
 
+  it('reads what a running command printed before the window looked, until more streams in', async () => {
+    const run = items.tool({ title: 'npm run dev', toolKind: 'execute', command: 'npm run dev', status: 'in_progress' })
+    const base = snapshot({ items: [items.you('Start it'), run] })
+    const live = { ...base, session: base.session === null ? null : { ...base.session, turnRunning: true } }
+    const { client, emit } = fakeClient({
+      getThread: vi.fn(async () => live),
+      readOutput: vi.fn(async () => ({ text: 'ready in 12 ms\n', dropped: 0 })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: /Working for/ }))
+    expect(await screen.findByText(/ready in 12 ms/)).toBeTruthy()
+    expect(client.readOutput).toHaveBeenCalledWith('th1', run.id)
+    act(() => emit({ _tag: 'Output', threadId: 'th1', itemId: run.id, text: 'ready in 12 ms\nlistening on 4000\n', dropped: 0 }))
+    expect(await screen.findByText(/listening on 4000/)).toBeTruthy()
+  })
+
   it('opens the turn’s screenshots in the lightbox, the arrows moving between them, and focus coming back', async () => {
     const user = userEvent.setup()
     const { client } = fakeClient({ getThread: vi.fn(async () => handing()) })
@@ -158,13 +174,13 @@ describe('what an agent hands back, on a task', () => {
     expect(await within(card).findByText(/Refunds share the partner budget/)).toBeTruthy()
     expect(client.readDocument).toHaveBeenCalledWith('th1', 'docs/notes.md')
     await user.click(within(card).getByRole('button', { name: 'Open in editor' }))
-    expect(client.openInEditor).toHaveBeenLastCalledWith(expect.objectContaining({ path: 'docs/notes.md' }))
+    expect(client.openInEditor).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/w/meridian/docs/notes.md' }))
     await user.click(within(card).getByRole('button', { name: 'Read in the panel' }))
     const panel = await screen.findByRole('complementary', { name: 'notes.md' })
     expect(within(panel).getByText('docs/notes.md')).toBeTruthy()
     // It opens in the editor files open in, at the file.
     await user.click(within(panel).getByRole('button', { name: 'Open in editor' }))
-    expect(client.openInEditor).toHaveBeenCalledWith(expect.objectContaining({ path: 'docs/notes.md' }))
+    expect(client.openInEditor).toHaveBeenCalledWith(expect.objectContaining({ path: '/w/meridian/docs/notes.md' }))
     await user.click(within(panel).getByRole('button', { name: /Close the panel/ }))
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'notes.md' })).toBeNull())
   })
@@ -191,7 +207,7 @@ describe('what an agent hands back, on a task', () => {
     const card = await screen.findByRole('article', { name: 'report.csv' })
     expect(within(card).getByText(/CSV · 2 KB/)).toBeTruthy()
     await user.click(within(card).getByRole('button', { name: 'Open in editor' }))
-    expect(client.openInEditor).toHaveBeenCalledWith(expect.objectContaining({ path: 'report.csv' }))
+    expect(client.openInEditor).toHaveBeenCalledWith(expect.objectContaining({ path: '/w/meridian/report.csv' }))
     expect(screen.getByRole('columnheader', { name: 'Budget' })).toBeTruthy()
     // The document's card copies its markdown; the turn's own Copy, after it, what the turn said.
     const turn = screen.getAllByRole('article').find((article) => article.textContent?.includes('Here it is.'))
