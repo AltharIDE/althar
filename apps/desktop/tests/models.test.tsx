@@ -62,6 +62,9 @@ describe('the models every agent offers', () => {
       version: null,
       ways: [],
       accounts: [],
+      installed: true,
+      kept: false,
+      download: null,
     }
     const plain = (id: string, name: string) => ({ id, name, description: null, efforts: [], effort: null })
     const offered: AgentModels = {

@@ -3,6 +3,8 @@ import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } 
 
 import type { WatchEvent } from '@althar/contracts'
 
+import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
+
 import type { Client } from './client'
 import type { Feed } from './feed'
 
@@ -19,6 +21,8 @@ import type { Feed } from './feed'
  * back a grant the runtime knows the folder by.
  */
 export interface Host {
+  /** The system Althar runs on: darwin, win32, linux. */
+  readonly platform: string
   /** Asks the person for a folder, for a project or an agent's account; its grant, or null when they cancel. */
   readonly pickFolder: (purpose?: 'project' | 'account') => Promise<string | null>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */
@@ -27,6 +31,16 @@ export interface Host {
   readonly appIcon: () => Promise<string | null>
   /** Gives the app another icon, kept and shown on the Dock at once. */
   readonly setAppIcon: (icon: string) => Promise<void>
+  /** The app's own preferences (`main/appPreferences`), as the main process keeps them. */
+  readonly preferences: () => Promise<AppPreferences>
+  /** Changes one, kept and acted on at once; all of them as they now stand. */
+  readonly setPreference: <K extends PreferenceKey>(key: K, value: AppPreferences[K]) => Promise<AppPreferences>
+  /** An editor's icon as a picture's address, by its id (`ListEditors`); null where it can't be drawn. */
+  readonly editorPicture: (id: string) => Promise<string | null>
+  /** The Mac's alert sounds a notification can play, by name; none off a Mac. */
+  readonly sounds: () => Promise<ReadonlyArray<string>>
+  /** Plays one of them once, so the person hears it. */
+  readonly playSound: (name: string) => Promise<void>
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
   readonly onOpen: (listener: (threadId: string) => void) => () => void
   /** Where Althar shows while the person is in another app (`shared/edge`), and whether this Mac has a notch to choose the island by; null before the main process knows. */

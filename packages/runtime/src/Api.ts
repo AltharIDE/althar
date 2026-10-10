@@ -35,6 +35,7 @@ import { Limits } from './Limits'
 import { Live } from './Live'
 import { accountsOf, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from './Policies'
 import { Models } from './Models'
+import { Installs } from './Installs'
 import { Permissions } from './Permissions'
 import { Projects } from './Projects'
 import { Nudges } from './Nudges'
@@ -116,6 +117,7 @@ export const handlers = Api.toLayer(
     const signIns = yield* SignIns
     const accounts = yield* Accounts
     const limits = yield* Limits
+    const installs = yield* Installs
     const models = yield* Models
     const accountSignIns = yield* AccountSignIns
     const policies = yield* Policies
@@ -249,9 +251,13 @@ export const handlers = Api.toLayer(
         const statuses = yield* Effect.forEach(yield* accounts.of(entry.definition.id), (account) => accountStatus(account, recheck), {
           concurrency: 'unbounded',
         })
+        const install = yield* installs.state(entry.definition)
         return {
           id: entry.definition.id,
           name: entry.definition.name,
+          installed: entry.definition.cli === undefined || install.located !== null,
+          kept: install.located?.whose === 'althar',
+          download: install.downloadable && install.size !== null ? { size: install.size, installing: install.installing } : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
           version: yield* versionOf(entry),
@@ -736,6 +742,15 @@ export const handlers = Api.toLayer(
       Push: ({ commandId, taskId, head, url }) => once(commandId, api(Effect.asVoid(pullRequests.push(taskId, head, url)))),
       PushHere: ({ commandId, taskId }) => once(commandId, api(Effect.asVoid(pullRequests.pushHere(taskId)))),
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
+      // Done once the copy is ready; its version is asked again, as it is a new one.
+      InstallAgent: ({ agentId }) =>
+        api(
+          Effect.gen(function* () {
+            const entry = yield* agents.get(agentId)
+            yield* installs.install(entry.definition)
+            versions.delete(agentId)
+          }),
+        ),
       OpenInEditor: ({ taskId, editor, path, line }) =>
         api(
           Effect.gen(function* () {

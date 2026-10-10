@@ -202,6 +202,8 @@ export interface Client {
   readonly pushHere: (taskId: string) => Promise<void>
   /** The editors on this Mac a task's files open in. */
   readonly listEditors: () => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>
+  /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
+  readonly installAgent: (agentId: string) => Promise<void>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
   readonly openInEditor: (input: {
     readonly taskId: string
@@ -349,6 +351,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     pushHere: (taskId) => command((commandId) => api.PushHere({ commandId, taskId })),
     listEditors: () => settle(api.ListEditors({})),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
+    installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),

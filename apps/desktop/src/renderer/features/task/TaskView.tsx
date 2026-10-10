@@ -28,7 +28,7 @@ import { waitsWords } from '../../shared/agents'
 import { contextMeter } from '../../shared/ContextMeter'
 import { headerTrial } from '../../shared/trial'
 import { isGenerated } from '../../shared/generated'
-import { OpenIn } from '../../shared/OpenIn'
+import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
@@ -223,6 +223,8 @@ export function TaskView({
         : 'talk',
     )
   const named = useModelNames()
+  const editors = useEditors(model.snapshot?.task.id ?? '')
+  const editor = editors.main
   const files = model.snapshot?.task.files ?? []
   // What it changed opens on the first file someone wrote, not a lockfile.
   const changes = useChanges(model.snapshot?.task.id ?? null, (files.find((file) => !isGenerated(file.path)) ?? files[0])?.path ?? null)
@@ -352,7 +354,14 @@ export function TaskView({
           onClick={() => changes.show()}
         />
       )}
-      {session !== null && <TaskMenu status={status} onStop={() => void model.stop()} />}
+      <TaskMenu
+        status={status}
+        {...(session === null ? {} : { onStop: () => void model.stop() })}
+        // Its folder opens in the editor files open in, once it has a worktree.
+        {...(snapshot.task.branch === null || editor === undefined
+          ? {}
+          : { onOpen: () => editors.open(editor.id), editor: editor.name, text: { open: openInText.in } })}
+      />
     </>
   )
 

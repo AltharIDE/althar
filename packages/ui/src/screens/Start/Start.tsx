@@ -5,7 +5,7 @@ import { Logo } from '../../foundations/Logo/Logo'
 import { RuntimeState } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { Kbd } from '../../primitives/Kbd/Kbd'
-import { Runtimes, type RuntimesProps } from '../../setup/Runtimes/Runtimes'
+import { Runtimes, type RuntimesProps, type RuntimesText } from '../../setup/Runtimes/Runtimes'
 import s from './Start.module.css'
 
 /*
@@ -43,10 +43,12 @@ export interface StartProps extends Omit<RuntimesProps, 'label' | 'className' | 
   onCreate: () => void
   className?: string
   text?: Partial<StartText>
+  /** The agents' rows' own words, such as what this computer is called. */
+  runtimesText?: Partial<RuntimesText>
 }
 
 /** Before any project: the agents found on this machine, and making the first project. */
-export function Start({ onCreate, className, text, ...runtimes }: StartProps) {
+export function Start({ onCreate, className, text, runtimesText, ...runtimes }: StartProps) {
   const t = { ...startText, ...text }
   const agentsId = useId()
   const beginId = useId()
@@ -64,7 +66,7 @@ export function Start({ onCreate, className, text, ...runtimes }: StartProps) {
           {t.agents}
         </h2>
         <p className={s.note}>{t.agentsNote}</p>
-        <Runtimes label={t.agents} {...runtimes} />
+        <Runtimes label={t.agents} {...runtimes} {...(runtimesText === undefined ? {} : { text: runtimesText })} />
         {!ready && <p className={s.none}>{t.noneReady}</p>}
       </section>
 

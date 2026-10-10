@@ -4,10 +4,12 @@ import {
   ArrowRight,
   ArrowUp,
   Attachment,
+  Bell,
   Book,
   ChatBubble,
   Check,
   Clock,
+  CoffeeCup,
   Community,
   Compress,
   Copy,
@@ -28,6 +30,7 @@ import {
   NavArrowRight,
   OpenNewWindow,
   Page,
+  Play,
   PageMinus,
   PagePlus,
   PageRight,
@@ -37,6 +40,7 @@ import {
   Prohibition,
   Quote,
   Search,
+  SoundHigh,
   ServerConnection,
   Settings,
   Square,
@@ -113,6 +117,14 @@ export const ICONS = {
   compress: Compress,
   up: ArrowUp,
   clock: Clock,
+  /** Keeps the Mac awake while work runs. */
+  cup: CoffeeCup,
+  /** Notifications. */
+  bell: Bell,
+  /** A sound, as a notification plays it. */
+  sound: SoundHigh,
+  /** Plays something once, to hear it. */
+  play: Play,
   /** Waits for something else to merge first. */
   after: GitMerge,
   external: OpenNewWindow,

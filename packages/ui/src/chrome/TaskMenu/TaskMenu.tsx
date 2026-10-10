@@ -3,9 +3,9 @@ import { Menu, MenuItem } from '../../primitives/Menu/Menu'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 
 /*
- * What you can do with a task as a whole, from its header: stop it, resume
- * it, abandon it, reopen it. Which of these it offers follows where the task
- * stands. Stopping a task is not interrupting its lead: the composer's
+ * What you can do with a task as a whole, from its header: open its folder
+ * in an editor, stop it, resume it, abandon it, reopen it. Which of these it
+ * offers follows where the task stands; its folder opens whenever it has one. Stopping a task is not interrupting its lead: the composer's
  * square stops one turn and the task keeps going; this stops every agent on
  * it until you resume it. Each item says what happens, since none of them
  * is undone by pressing it again.
@@ -14,6 +14,9 @@ import { ChromeButton } from '../ChromeButton/ChromeButton'
 export interface TaskMenuText {
   trigger: string
   label: string
+  /** Opening the folder, in the editor named. */
+  open: (editor: string) => string
+  openAbout: string
   stop: string
   stopAbout: string
   resume: string
@@ -27,6 +30,8 @@ export interface TaskMenuText {
 export const taskMenuText: TaskMenuText = {
   trigger: 'More for this task',
   label: 'This task',
+  open: (editor) => `Open in ${editor}`,
+  openAbout: 'The task’s folder, on its branch.',
   stop: 'Stop the task',
   stopAbout: 'Every agent on it stops. The branch and what it found stay, and you can resume it.',
   resume: 'Resume',
@@ -39,6 +44,10 @@ export const taskMenuText: TaskMenuText = {
 
 export interface TaskMenuProps {
   status: TaskStatus
+  /** Opens the task's folder in `editor`, the one its files open in. */
+  onOpen?: () => void
+  /** The editor it opens in, by name. */
+  editor?: string
   onStop?: () => void
   onResume?: () => void
   onAbandon?: () => void
@@ -49,12 +58,29 @@ export interface TaskMenuProps {
   text?: Partial<TaskMenuText>
 }
 
-export function TaskMenu({ status, onStop, onResume, onAbandon, onReopen, open, defaultOpen, onOpenChange, text }: TaskMenuProps) {
+export function TaskMenu({
+  status,
+  onOpen,
+  editor,
+  onStop,
+  onResume,
+  onAbandon,
+  onReopen,
+  open,
+  defaultOpen,
+  onOpenChange,
+  text,
+}: TaskMenuProps) {
   const t = { ...taskMenuText, ...text }
   const working = status === TaskStatus.Running || status === TaskStatus.Yours || status === TaskStatus.Paused
   const stopped = status === TaskStatus.Stopped
   const done = status === TaskStatus.Done
   const items = [
+    onOpen && editor !== undefined && (
+      <MenuItem key="open" icon="external" description={t.openAbout} onSelect={onOpen}>
+        {t.open(editor)}
+      </MenuItem>
+    ),
     working && onStop && (
       <MenuItem key="stop" icon="hold" description={t.stopAbout} onSelect={onStop}>
         {t.stop}

@@ -793,7 +793,11 @@ describe('a task', () => {
     expect(await screen.findByText('Stopped')).toBeTruthy()
     // No button to start one that has nothing to do: saying something starts it.
     expect(screen.queryByRole('button', { name: 'Start the lead' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'More for this task' })).toBeNull()
+    // Nothing to stop; its folder still opens, in the editor files open in.
+    await userEvent.click(screen.getByRole('button', { name: 'More for this task' }))
+    expect(screen.queryByRole('menuitem', { name: /Stop the task/ })).toBeNull()
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Open in Zed/ }))
+    expect(client.openInEditor).toHaveBeenCalledWith({ taskId: 't1', editor: 'zed' })
     await userEvent.click(await screen.findByRole('button', { name: 'Lead: gpt-5.2-codex Medium' }))
     await userEvent.click(await screen.findByRole('radio', { name: /Claude Code default/ }))
     await userEvent.type(screen.getByRole('textbox', { name: 'Tell Claude Code something' }), 'Carry on with the retry.{Enter}')

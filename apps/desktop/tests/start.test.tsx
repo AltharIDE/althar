@@ -15,7 +15,7 @@ import { SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
 import { runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
-import { agents, changed, fakeClient, fakeHost, home, project, streamed, usual } from './fixtures'
+import { agents, changed, fakeClient, fakeHost, home, project, streamed, usual, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
@@ -584,6 +584,35 @@ describe('the start', () => {
     expect(client.openProject).toHaveBeenCalledWith('grant_picked')
   })
 
+  it('offers to download an agent that isn’t on this Mac, says it downloads, and why it didn’t finish', async () => {
+    let installing = false
+    let finish: () => void = () => {}
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      status: vi.fn(async () => ({
+        apiVersion: 1,
+        appVersion: '0.0.0',
+        agents: withoutOpenCode.map((agent) => (agent.id === 'opencode' ? { ...agent, download: { size: '45 MB', installing } } : agent)),
+      })),
+      // The download runs until the test lets it end, so its row is seen downloading however slow the machine.
+      installAgent: vi.fn(async () => {
+        installing = true
+        await new Promise<void>((resolve) => (finish = resolve))
+        installing = false
+        throw new ApiError({ reason: 'InstallFailed', message: 'GitHub couldn’t be reached to find OpenCode.' })
+      }),
+    })
+    withServices(<Start onProject={vi.fn()} />, client, fakeHost())
+    expect(await screen.findByText('Not installed on this Mac')).toBeTruthy()
+    expect(screen.getByText(/latest release from GitHub, about 45 MB/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Download' }))
+    expect(client.installAgent).toHaveBeenCalledWith('opencode')
+    expect(await screen.findByText('Downloading OpenCode, about 45 MB, and checking it')).toBeTruthy()
+    finish()
+    expect((await screen.findByRole('alert')).textContent).toBe('GitHub couldn’t be reached to find OpenCode.')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+  })
+
   it('shows the first screen when there is no project, and what went wrong', async () => {
     const failure = new ApiError({ reason: 'NotARepository', message: 'That folder is not in a git repository.' })
     const { client } = fakeClient({
@@ -620,7 +649,7 @@ describe('the start', () => {
   })
 
   it('says how each agent is signed in', () => {
-    expect(agents.map(runtimeEntry).map((entry) => [entry.state, 'account' in entry])).toEqual([
+    expect(agents.map((agent) => runtimeEntry(agent)).map((entry) => [entry.state, 'account' in entry])).toEqual([
       [RuntimeState.Ready, false],
       [RuntimeState.Ready, true],
       [RuntimeState.SignedOut, false],

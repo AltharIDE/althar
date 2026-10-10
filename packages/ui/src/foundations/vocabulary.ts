@@ -395,6 +395,8 @@ export enum RuntimeState {
   OutOfUsage = 'out-of-usage',
   /** Not installed here. */
   Missing = 'missing',
+  /** Althar is downloading it, at the person's asking, and checking it before it runs. */
+  Installing = 'installing',
   /** Older than the versions Althar works with. */
   Outdated = 'outdated',
 }

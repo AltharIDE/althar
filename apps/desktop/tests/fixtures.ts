@@ -19,6 +19,7 @@ import type {
 } from '@althar/contracts'
 import { vi } from 'vitest'
 
+import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
 import type { Host } from '../src/renderer/data/services'
 
@@ -62,6 +63,9 @@ export const agents: ReadonlyArray<AgentStatus> = [
     version: '2.1.263',
     ways: ['browser'],
     accounts: [usual('acc_claude', 'signed_in')],
+    installed: true,
+    kept: false,
+    download: null,
   },
   {
     id: 'codex',
@@ -71,6 +75,9 @@ export const agents: ReadonlyArray<AgentStatus> = [
     version: '0.159.3',
     ways: ['browser', 'device'],
     accounts: [usual('acc_codex', 'unknown')],
+    installed: true,
+    kept: false,
+    download: null,
   },
   {
     id: 'opencode',
@@ -80,8 +87,16 @@ export const agents: ReadonlyArray<AgentStatus> = [
     version: null,
     ways: [],
     accounts: [usual('acc_opencode', 'signed_out')],
+    installed: true,
+    kept: false,
+    download: { size: '45 MB', installing: false },
   },
 ]
+
+/** OpenCode not on this Mac, which Althar can download. */
+export const withoutOpenCode: ReadonlyArray<AgentStatus> = agents.map((agent) =>
+  agent.id === 'opencode' ? { ...agent, installed: false, signIn: 'unknown', accounts: [usual('acc_opencode', 'unknown')] } : agent,
+)
 
 export const status: Status = { apiVersion: 1, appVersion: '0.0.0', agents }
 
@@ -488,6 +503,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'finder', name: 'Finder' },
     ]),
     openInEditor: vi.fn(async () => true),
+    installAgent: vi.fn(async () => {}),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
       file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
       lines: [
@@ -568,7 +584,24 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
   return { client, emit: (event: WatchEvent) => listeners.forEach((listener) => listener(event)), listeners, watching }
 }
 
+/** The app's preferences as a main process would keep them: where each starts, then each change. */
+const keptPreferences = (): Pick<Host, 'preferences' | 'setPreference'> => {
+  let kept: AppPreferences = DEFAULT_PREFERENCES
+  return {
+    preferences: vi.fn(async () => kept),
+    setPreference: vi.fn(async (key, value) => {
+      kept = { ...kept, [key]: value }
+      return kept
+    }),
+  }
+}
+
 export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
+  ...keptPreferences(),
+  platform: 'darwin',
+  sounds: vi.fn(async () => ['Basso', 'Glass', 'Ping', 'Purr']),
+  editorPicture: vi.fn(async (id: string) => `data:image/png;base64,${id}`),
+  playSound: vi.fn(async () => {}),
   pickFolder: vi.fn(async () => 'grant_picked'),
   grantDropped: vi.fn(async () => 'grant_dropped'),
   onOpen: vi.fn(() => () => {}),
