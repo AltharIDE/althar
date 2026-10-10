@@ -88,7 +88,7 @@ export const STATUS: readonly Milestone[] = [
 export const EARLY = {
   title: 'Very early. Come and shape it.',
   body: 'There is no runnable Althar yet. The repository holds the thesis, the architecture, the interface primitives and the brief. The model, and the words for it, will change as we prototype, which makes now the time to have a say.',
-  licence: 'Meant to be open source. The licence is still to be chosen.',
+  licence: 'Open source, under the Apache License 2.0.',
 } as const
 
 /** Ways in, for someone who wants to help. */

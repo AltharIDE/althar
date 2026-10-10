@@ -1,6 +1,6 @@
 # Developing Althar
 
-How to work in this repository. For what Althar is, see the [README](README.md).
+How to work in this repository. For what Althar is, see the [README](README.md); for how to propose a change, [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Set up
 
