@@ -2,6 +2,7 @@ import { Commands, Database, Ledger } from '@althar/persistence-sqlite'
 import { Layer } from 'effect'
 
 import { Accounts } from './Accounts'
+import { Artifacts } from './Artifacts'
 import { AccountSignIns } from './AccountSignIns'
 import { Changes } from './Changes'
 import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
@@ -48,7 +49,7 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(Database.layer({ filename: options.database })),
     Layer.provideMerge(WebCrypto),
   )
-  const base = Layer.mergeAll(Instance.layer, Live.layer, ToolServer.layer, ModelFacts.layer).pipe(
+  const base = Layer.mergeAll(Instance.layer, Live.layer, ToolServer.layer, ModelFacts.layer, Artifacts.layer).pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry),

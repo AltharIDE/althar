@@ -14,11 +14,13 @@ import {
   type ConnectionList,
   type ConnectionSummary,
   type CoordinatorSnapshot,
+  type DocumentText,
   type DomMessagePort,
   domPort,
   type FileDiff,
   type FolderReading,
   type IssueList,
+  type OutputText,
   type Product,
   type ChangeTarget,
   type ProjectList,
@@ -86,6 +88,10 @@ export interface Client {
     page?: { readonly before?: number; readonly limit?: number; readonly fresh?: boolean },
   ) => Promise<ThreadSnapshot>
   readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem>
+  /** What a command in a thread printed, as kept once it ended. */
+  readonly readOutput: (threadId: string, itemId: string) => Promise<OutputText>
+  /** A markdown document an agent in a thread wrote, as it is now in the task's worktree. */
+  readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
   /** One file a task changed, as a diff from its base to its worktree. */
   readonly getFileDiff: (taskId: string, path: string) => Promise<FileDiff>
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
@@ -239,8 +245,13 @@ export interface Client {
   readonly refreshTask: (taskId: string) => Promise<void>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
-  /** Calls `listener` with each change after `since` (or from now) until the returned function is called. */
-  readonly watch: (listener: (event: WatchEvent) => void, since?: number) => () => void
+  /**
+   * Calls `listener` with each change after `since` (or from now) until the
+   * returned function is called; and `onWatching` each time it starts
+   * listening, at first and again after it broke, when what streams only to
+   * those listening (an agent's words, a command's output) may have been missed.
+   */
+  readonly watch: (listener: (event: WatchEvent) => void, since?: number, onWatching?: () => void) => () => void
   readonly close: () => Promise<void>
 }
 
@@ -315,6 +326,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
+    readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
+    readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
     getFileDiff: (taskId, path) => settle(api.GetFileDiff({ taskId, path })),
     getBoard: (projectId) => settle(api.GetBoard({ projectId })),
     getHome: (since) => settle(api.GetHome(since === undefined ? {} : { since })),
@@ -382,11 +395,13 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
-    watch: (listener, since) => {
+    watch: (listener, since, onWatching) => {
       let cursor = since
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.
+      // Said once the watch's request has gone, a moment after it starts, so a read made then comes after it on the port.
+      const started = Effect.sync(() => void setTimeout(() => onWatching?.(), 0))
       const heard = Effect.suspend(() =>
-        Stream.runForEach(api.Watch(cursor === undefined ? {} : { since: cursor }), (event) =>
+        Stream.runForEach(Stream.onStart(api.Watch(cursor === undefined ? {} : { since: cursor }), started), (event) =>
           Effect.sync(() => {
             if (event._tag === 'Changed') cursor = event.cursor
             listener(event)

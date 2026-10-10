@@ -17,6 +17,8 @@ import { messageOf } from '../../data/client'
 import { CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
+import type { OutputSoFar } from '../../shared/handed'
+import { useOutputs } from '../../shared/useOutputs'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
@@ -54,6 +56,8 @@ export interface ProjectModel {
   readonly coordinator: CoordinatorSnapshot | null
   /** Text still streaming, by thread item. */
   readonly streaming: ReadonlyMap<string, Streamed>
+  /** Commands' output as far as it has come, by their tool call's item, while they run. */
+  readonly outputs: ReadonlyMap<string, OutputSoFar>
   /** Agents that could work: signed in, or that don't say. */
   readonly agents: ReadonlyArray<AgentStatus>
   /** How the project's tasks end where a plan doesn't say; null where its host decides. */
@@ -87,6 +91,9 @@ export interface ProjectModel {
   readonly dismissError: () => void
 }
 
+/** A thread not yet read has no items. */
+const NO_ITEMS: ReadonlyArray<ThreadItem> = []
+
 export const useProject = (projectId: string): ProjectModel => {
   const { client, cache } = useServices()
   const read = reads(client)
@@ -109,6 +116,8 @@ export const useProject = (projectId: string): ProjectModel => {
   const [newest] = useState(newestReads)
   const changed = useRef({ head: false, cards: false, items: new Set<string>() })
   const threadId = coordinator?.threadId ?? null
+  // What the coordinator's commands have printed so far, while they run.
+  const outputs = useOutputs(threadId, coordinator?.items ?? NO_ITEMS, coordinator?.session?.turnRunning ?? false)
 
   /** Changes the coordinator's thread as the window keeps it; nothing before it is first read. */
   const setCoordinator = useCallback(
@@ -159,6 +168,8 @@ export const useProject = (projectId: string): ProjectModel => {
   }, [client, threadId, coordinator, readHead, newest, arrived, fail])
 
   useWatch((event) => {
+    // A command's output as far as it has come is useOutputs'.
+    if (event._tag === 'Output') return
     if (event._tag === 'Streaming') {
       if (event.threadId !== threadId) return
       setStreaming((current) =>
@@ -293,6 +304,7 @@ export const useProject = (projectId: string): ProjectModel => {
     project,
     coordinator,
     streaming,
+    outputs,
     agents,
     end,
     error,

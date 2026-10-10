@@ -18,6 +18,7 @@ import { statements as projectChanges } from './0013_project_changes'
 import { statements as modelBlocks } from './0014_model_blocks'
 import { statements as taskRequests } from './0015_task_requests'
 import { statements as settings } from './0016_settings'
+import { statements as artifactImages } from './0017_artifact_images'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -47,6 +48,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0014_model_blocks', statements: modelBlocks },
   { key: '0015_task_requests', statements: taskRequests },
   { key: '0016_settings', statements: settings },
+  { key: '0017_artifact_images', statements: artifactImages },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

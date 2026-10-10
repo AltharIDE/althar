@@ -15,6 +15,7 @@ import { Cause, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Option
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
+import type { Artifacts } from './Artifacts'
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import {
@@ -39,7 +40,7 @@ import { withRole } from './roles'
 import { git } from './git'
 import { reviewCopyOf } from './reviewCopy'
 import { defaultEffortOf } from './preferences'
-import { addItem, recorder, transcript } from './threads'
+import { addItem, type OutputSoFar, recorder, transcript } from './threads'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
 
@@ -135,6 +136,12 @@ type ThreadContext = TaskThread | CoordinatorThread | ReviewThread
 /** Where a thread's agent works. */
 const cwdOf = (thread: ThreadContext) => (thread.role === 'coordinator' ? thread.folder.folder : thread.cwd)
 
+/** Every folder a thread's agent works in: a picture an agent points at is read only from inside them. */
+const foldersOf = (thread: ThreadContext): ReadonlyArray<string> =>
+  thread.role === 'coordinator'
+    ? [thread.folder.folder]
+    : [...new Set([thread.cwd, ...thread.repositories.map((repository) => repository.worktree)])]
+
 /** Where an agent starts among a task's repositories: in the one, or the folder in it the project is about; among several, the folder that holds them. */
 const startIn = (repositories: ReadonlyArray<{ readonly worktree: string; readonly within: string | null }>) => {
   const [first] = repositories
@@ -173,6 +180,8 @@ interface Running {
   stopping: boolean
   /** How full the agent's context is, in tokens, as it last said; null until it says (ACP's usage updates). */
   context: { readonly used: number; readonly size: number } | null
+  /** What records its events now: its turn's, or the one between turns. */
+  recording: { readonly outputOf: (itemId: string) => OutputSoFar | undefined } | undefined
 }
 
 /** Keeps what the agent last said of its context, from an event it streamed. */
@@ -186,6 +195,7 @@ const accountOf = (input: { readonly accountId?: string }) => (input.accountId =
 type StopRequest = { readonly state: 'completed' } | { readonly state: 'superseded'; readonly by: string }
 
 type Store =
+  | Artifacts
   | SqlClient.SqlClient
   | Ledger
   | Commands
@@ -341,6 +351,8 @@ export class Sessions extends Context.Service<
         readonly stopping: boolean
       }>
     >
+    /** What a command on a thread has printed so far, while it runs: its last lines, and how many came before them. */
+    outputSoFar(threadId: string, itemId: string): Effect.Effect<Option.Option<OutputSoFar>>
   }
 >()('@althar/runtime/Sessions') {
   static readonly layer: Layer.Layer<Sessions, never, Store> = Layer.effect(
@@ -587,7 +599,9 @@ export class Sessions extends Context.Service<
             threadId: thread.threadId,
             sessionId: running.sessionId,
             deliveryId: turnId,
+            folders: foldersOf(thread),
           })
+          running.recording = items
           let ended: Extract<SessionEvent, { _tag: 'TurnEnded' }> | undefined
           // A failure to record one event doesn't stop the runtime reading the rest of the turn.
           const record = (event: SessionEvent) =>
@@ -595,22 +609,30 @@ export class Sessions extends Context.Service<
           /*
            * The text being written goes to watching clients whole, at most every
            * STREAM_EVERY, and once more after the last piece, so a long message
-           * doesn't cost the square of its length on the way.
+           * doesn't cost the square of its length on the way. So does each
+           * command's output that grew, as its last lines.
            */
           const streaming = { sentAt: 0, trailing: false }
           const sendOpen = Effect.suspend(() => {
             streaming.sentAt = Date.now()
             const open = items.current()
-            return open === undefined
-              ? Effect.void
-              : live.publish({
-                  _tag: 'Streaming',
-                  threadId: thread.threadId,
-                  itemId: open.id,
-                  kind: open.kind,
-                  agentId: running.entry.definition.id,
-                  text: open.text,
-                })
+            const message =
+              open === undefined
+                ? Effect.void
+                : live.publish({
+                    _tag: 'Streaming',
+                    threadId: thread.threadId,
+                    itemId: open.id,
+                    kind: open.kind,
+                    agentId: running.entry.definition.id,
+                    text: open.text,
+                  })
+            return Effect.andThen(
+              message,
+              Effect.forEach(items.outputsSoFar(), (output) => live.publish({ _tag: 'Output', threadId: thread.threadId, ...output }), {
+                discard: true,
+              }),
+            )
           })
           const stream = Effect.suspend(() => {
             const wait = STREAM_EVERY - (Date.now() - streaming.sentAt)
@@ -637,10 +659,11 @@ export class Sessions extends Context.Service<
               heardContext(running, event)
               yield* record(event)
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
-              if (event._tag === 'AgentMessage' || event._tag === 'AgentThought') yield* stream
+              if (event._tag === 'AgentMessage' || event._tag === 'AgentThought' || event._tag === 'ToolCallUpdate') yield* stream
             }),
           ).pipe(Effect.exit)
-          yield* items.flush.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the end of a message', cause)))
+          // What the turn left open is kept as far as it came: the message being written, and any command's output.
+          yield* items.end.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the end of a message', cause)))
           running.turnRunning = false
 
           const failure = Exit.isFailure(streamed) ? Cause.findErrorOption(streamed.cause) : Option.none()
@@ -1019,11 +1042,14 @@ export class Sessions extends Context.Service<
             turnRunning: false,
             stopping: false,
             context: null,
+            recording: undefined,
           }
           threads.set(thread.threadId, running)
           yield* Effect.forkIn(run(deliveries(running)), scope)
           // What the agent says between turns, such as leaving plan mode, goes to the thread too.
-          const between = recorder({ projectId: thread.projectId, threadId: thread.threadId, sessionId })
+          const between = recorder({ projectId: thread.projectId, threadId: thread.threadId, sessionId, folders: foldersOf(thread) })
+          // A turn that already started records itself; between turns, this one does.
+          running.recording ??= between
           yield* Effect.forkIn(
             run(
               Stream.runForEach(agent.events, (event) =>
@@ -1530,6 +1556,7 @@ export class Sessions extends Context.Service<
                   stopping: running.stopping,
                 })
           }),
+        outputSoFar: (threadId, itemId) => Effect.sync(() => Option.fromNullishOr(threads.get(threadId)?.recording?.outputOf(itemId))),
       })
     }),
   )

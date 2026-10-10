@@ -66,6 +66,12 @@ export const CARDS = new Set(['provider_session', 'attention_request', 'task_pla
 export interface Feed {
   /** Calls `listener` with every change from now on, until the returned function is called. */
   readonly listen: (listener: (event: WatchEvent) => void) => () => void
+  /**
+   * Calls `listener` each time the watch starts listening, as it does again
+   * after it broke, until the returned function is called: what streams only
+   * to those listening, such as a command's output, may have been missed.
+   */
+  readonly rewatched: (listener: () => void) => () => void
   readonly stop: () => void
 }
 
@@ -121,6 +127,7 @@ const isThread = (key: QueryKey) => key[0] === 'thread' || key[0] === 'coordinat
 /** Starts watching the runtime's changes after `since` (or from now), keeping `cache` up to date, until `stop`. */
 export const follow = (client: Client, cache: QueryClient, since?: number): Feed => {
   const listeners = new Set<(event: WatchEvent) => void>()
+  const rewatching = new Set<() => void>()
   // Changes heard so far; for each read, by its key's hash, how many had been heard when a change last touched it, and when it last began.
   let heardSoFar = 0
   const touched = new Map<string, number>()
@@ -172,17 +179,24 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
     for (const listener of listeners) listener(event)
   }
 
-  const unwatch = client.watch(heard, since)
+  const unwatch = client.watch(heard, since, () => {
+    for (const listener of rewatching) listener()
+  })
   return {
     listen: (listener) => {
       listeners.add(listener)
       return () => void listeners.delete(listener)
+    },
+    rewatched: (listener) => {
+      rewatching.add(listener)
+      return () => void rewatching.delete(listener)
     },
     stop: () => {
       unwatch()
       unsubscribe()
       clearTimeout(timer)
       listeners.clear()
+      rewatching.clear()
     },
   }
 }

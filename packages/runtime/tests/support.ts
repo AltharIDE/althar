@@ -166,12 +166,15 @@ export const runtime = (
     readonly modelFacts?: ModelFactsOptions
     /** The editors a task's files open in, and what opening one does. */
     readonly editors?: RuntimeOptions['editors']
+    /** Where the artifact store keeps bytes; a folder of its own unless a test says (null: nowhere). */
+    readonly artifactsRoot?: string | null
   } = {},
 ) =>
   Runtime.layer({
     database,
     worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
     accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
+    ...(more.artifactsRoot === null ? {} : { artifactsRoot: more.artifactsRoot ?? mkdtempSync(join(tmpdir(), 'althar-artifacts-')) }),
     // Nothing opens on the Mac running the tests: what would have is kept.
     openTerminal: (line) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(false)),
     appVersion: '0.0.0-test',

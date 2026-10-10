@@ -97,6 +97,8 @@ describe('the thread recorder', () => {
         status: 'completed',
         rawInput: { file_path: '/w/.env' },
         cut: ['content', 'output'],
+        // The file it wrote whole, by its path alone.
+        files: [{ path: '/w/.env', how: 'wrote', mediaType: null, bytes: null, title: null }],
       })
       const sql = yield* SqlClient.SqlClient
       const stored = yield* sql<{ content: string }>`SELECT content FROM thread_items WHERE thread_id = ${where.threadId}`

@@ -16,6 +16,20 @@
 .table :is(th, td) {
   white-space: nowrap;
 }
+/* sentences in cells wrap, each column kept wide enough to read */
+.wraps :is(th, td) {
+  white-space: normal;
+  min-width: 96px;
+  max-width: 360px;
+  vertical-align: top;
+}
+.wraps td,
+.wraps .first {
+  height: auto;
+  padding-top: 9px;
+  padding-bottom: 9px;
+  line-height: 1.45;
+}
 .caption {
   position: absolute;
   width: 1px;

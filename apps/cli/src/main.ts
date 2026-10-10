@@ -156,6 +156,8 @@ const layer = Runtime.layer({
   database: databaseIn(options.profile),
   worktreeRoot: options.worktrees,
   accountsRoot: join(options.profile, 'accounts'),
+  // What commands print and the pictures agents hand back, as the app keeps them, in the same profile.
+  artifactsRoot: join(options.profile, 'artifacts'),
   appVersion: '0.0.0',
   deviceName: hostname(),
 })

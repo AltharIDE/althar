@@ -29,6 +29,10 @@ export const keys = {
   repositories: (projectId: string) => ['repositories', projectId] as const,
   connections: ['connections'] as const,
   settings: ['settings'] as const,
+  /** What a command printed: kept once it ended, so it never changes. */
+  output: (threadId: string, itemId: string) => ['output', threadId, itemId] as const,
+  /** A document an agent wrote, as it was after the thread's last call that touched it (`version`). */
+  document: (threadId: string, path: string, version: string) => ['document', threadId, path, version] as const,
 }
 
 /**
@@ -108,6 +112,14 @@ export const reads = (client: Client) => ({
     queryOptions({ queryKey: keys.repositories(projectId), queryFn: () => client.getRepositories(projectId) }),
   connections: () => queryOptions({ queryKey: keys.connections, queryFn: () => client.listConnections() }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
+  output: (threadId: string, itemId: string) =>
+    queryOptions({ queryKey: keys.output(threadId, itemId), queryFn: () => client.readOutput(threadId, itemId), gcTime: 5 * 60_000 }),
+  document: (threadId: string, path: string, version: string) =>
+    queryOptions({
+      queryKey: keys.document(threadId, path, version),
+      queryFn: () => client.readDocument(threadId, path),
+      gcTime: 5 * 60_000,
+    }),
 })
 
 export type Reads = ReturnType<typeof reads>

@@ -8,6 +8,8 @@ import { keys, reads } from '../../data/reads'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
+import type { OutputSoFar } from '../../shared/handed'
+import { useOutputs } from '../../shared/useOutputs'
 import type { Streamed } from '../../shared/thread'
 import { useServices, useWatch } from '../../data/services'
 
@@ -22,6 +24,9 @@ import { useServices, useWatch } from '../../data/services'
  * items. Earlier items are read a page at a time, when asked for.
  */
 
+/** A thread not yet read has no items. */
+const NO_ITEMS: ReadonlyArray<ThreadItem> = []
+
 /** How long changes are gathered before they are read. */
 const GATHER = 25
 
@@ -30,6 +35,8 @@ export interface TaskModel {
   readonly snapshot: ThreadSnapshot | null
   /** Text still streaming, by thread item. */
   readonly streaming: ReadonlyMap<string, Streamed>
+  /** Commands' output as far as it has come, by their tool call's item, while they run. */
+  readonly outputs: ReadonlyMap<string, OutputSoFar>
   /** Agents that could lead: signed in, or that don't say. */
   readonly agents: ReadonlyArray<AgentStatus>
   /** The agents have been read: none above then means none can lead, not that none are known yet. */
@@ -105,6 +112,8 @@ export const useTask = (threadId: string): TaskModel => {
   const status = useQuery(read.status()).data
   const agents = useMemo(() => status?.agents.filter((agent) => agent.signIn !== 'signed_out') ?? [], [status])
   const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
+  // What its commands have printed so far, while they run.
+  const outputs = useOutputs(threadId, snapshot?.items ?? NO_ITEMS, snapshot?.session?.turnRunning ?? false)
   const [failed, setError] = useState<string | null>(null)
   const error = failed ?? (thread.error === null ? null : messageOf(thread.error))
   const [pending, setPending] = useState(false)
@@ -179,6 +188,8 @@ export const useTask = (threadId: string): TaskModel => {
   }, [client, threadId, readHead, newest, arrived, fail])
 
   useWatch((event) => {
+    // A command's output as far as it has come is useOutputs'.
+    if (event._tag === 'Output') return
     if (event._tag === 'Streaming') {
       if (event.threadId !== threadId) return
       setStreaming((current) =>
@@ -268,6 +279,7 @@ export const useTask = (threadId: string): TaskModel => {
   return {
     snapshot,
     streaming,
+    outputs,
     agents,
     agentsKnown: status !== undefined,
     error,

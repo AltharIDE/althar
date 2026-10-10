@@ -225,9 +225,25 @@ export const items = {
     ...(id === undefined ? {} : { id }),
     agentId,
     kind: 'agent_message',
-    content: { text },
+    content: { text, pictures: [], files: [] },
   }),
-  thinks: (text: string, agentId = 'claude-code'): ThreadItem => ({ ...next(), agentId, kind: 'agent_thought', content: { text } }),
+  thinks: (text: string, agentId = 'claude-code'): ThreadItem => ({
+    ...next(),
+    agentId,
+    kind: 'agent_thought',
+    content: { text, pictures: [], files: [] },
+  }),
+  /** A message that hands back pictures or files beside its words. */
+  hands: (
+    text: string,
+    handed: Partial<Pick<Extract<ThreadItem, { kind: 'agent_message' | 'agent_thought' }>['content'], 'pictures' | 'files'>>,
+    agentId = 'claude-code',
+  ): ThreadItem => ({
+    ...next(),
+    agentId,
+    kind: 'agent_message',
+    content: { text, pictures: [], files: [], ...handed },
+  }),
   tool: (content: Partial<Extract<ThreadItem, { kind: 'tool_call' }>['content']> = {}, agentId = 'claude-code'): ThreadItem => ({
     ...next(),
     agentId,
@@ -239,6 +255,10 @@ export const items = {
       command: null,
       locations: [],
       declined: false,
+      pictures: [],
+      files: [],
+      output: null,
+      exit: null,
       ...content,
     },
   }),
@@ -486,6 +506,7 @@ export const connectionList: ConnectionList = {
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
   const watching: Array<number | undefined> = []
+  const starts = new Set<() => void>()
   const client: Client = {
     status: vi.fn(async () => status),
     listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
@@ -495,6 +516,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
+    readOutput: vi.fn(async () => ({ text: ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n', dropped: 0 })),
+    readDocument: vi.fn(async (_threadId: string, path: string) => ({
+      path,
+      body: '# Notes\n\nRefunds share the partner budget.\n',
+      bytes: 42,
+      lines: 3,
+    })),
     getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [] })),
     getHome: vi.fn(async () => home()),
     leftHome: vi.fn(async () => {}),
@@ -582,15 +610,30 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     markReady: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
-    watch: (listener, since) => {
+    watch: (listener, since, onWatching) => {
       watching.push(since)
       listeners.add(listener)
-      return () => void listeners.delete(listener)
+      // A watch is listening from the moment it starts, as the runtime's stream does once it is open.
+      if (onWatching !== undefined) {
+        starts.add(onWatching)
+        onWatching()
+      }
+      return () => {
+        listeners.delete(listener)
+        if (onWatching !== undefined) starts.delete(onWatching)
+      }
     },
     close: vi.fn(async () => {}),
     ...overrides,
   }
-  return { client, emit: (event: WatchEvent) => listeners.forEach((listener) => listener(event)), listeners, watching }
+  return {
+    client,
+    emit: (event: WatchEvent) => listeners.forEach((listener) => listener(event)),
+    /** The watch broke and started again, as after the runtime restarted: it listens again from now. */
+    rewatch: () => starts.forEach((start) => start()),
+    listeners,
+    watching,
+  }
 }
 
 /** The app's preferences as a main process would keep them: where each starts, then each change. */

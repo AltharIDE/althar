@@ -42,6 +42,49 @@ const find = <T extends SessionEvent['_tag']>(events: ReadonlyArray<SessionEvent
   events.filter((event): event is Extract<SessionEvent, { _tag: T }> => event._tag === tag)
 
 describe('AgentConnection', () => {
+  it.live('asks for command output, and keeps asking for structured failures', () => {
+    let asked: unknown
+    const listening: ContractSubject = {
+      ...fake,
+      transport: () => ({
+        _tag: 'InProcess',
+        agent: fakeAgent({
+          initialized: (capabilities) => {
+            asked = capabilities?._meta
+          },
+        }),
+      }),
+    }
+    return withConnection(listening, () =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(asked, {
+          jetbrains: { air: { version: 1, capabilities: ['sessionFailure'] } },
+          terminal_output_delta: true,
+        })
+      }),
+    )
+  })
+
+  it.live('hears what an agent hands back: output in chunks and whole, pictures, links and the files it writes', () =>
+    Effect.gen(function* () {
+      const { events } = yield* turn(scenarios.handsBack)
+      const updates = find(events, 'ToolCallUpdate')
+      const chunks = updates.filter((event) => event.toolCallId === 'run-chunks').flatMap((event) => event.terminal?.output ?? [])
+      assert.deepStrictEqual(chunks, [' ✓ charges/limit (14)\n', ' ✓ refunds/router (38)\n', ' 52 passed\n'])
+      assert.deepStrictEqual(updates.find((event) => event.toolCallId === 'run-whole' && event.status === 'failed')?.terminal, {
+        exit: { code: 1, signal: null },
+      })
+      const words = updates.filter((event) => event.toolCallId === 'run-words').map((event) => event.content)
+      assert.deepStrictEqual(words.at(-1), [{ _tag: 'Text', text: ' M src/a.ts\n?? docs/notes.md\n' }])
+      const shot = updates.find((event) => event.toolCallId === 'shot')
+      assert.strictEqual(shot?.content?.[1]?._tag, 'Image')
+      const wrote = find(events, 'ToolCall').find((event) => event.toolCallId === 'write-doc')
+      assert.deepStrictEqual(wrote?.content, [{ _tag: 'Diff', path: '/tmp/docs/notes.md', created: true }])
+      const handed = find(events, 'AgentContent').map((event) => event.content._tag)
+      assert.deepStrictEqual(handed, ['Link', 'Image'])
+    }),
+  )
+
   it.live('reports the agent and what it advertises', () =>
     withConnection(fake, (connection) =>
       Effect.sync(() => {

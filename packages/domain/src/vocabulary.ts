@@ -206,7 +206,19 @@ export type ConnectionState = typeof ConnectionState.Type
 export const ExternalKind = Schema.Literals(['issue', 'change'])
 export type ExternalKind = typeof ExternalKind.Type
 
-export const ArtifactKind = Schema.Literals(['brief', 'message', 'transcript', 'patch', 'log', 'report', 'findings', 'summary', 'other'])
+/** What an artifact is, which decides how long it is kept: a command's output is a log, a picture an agent hands back an image. */
+export const ArtifactKind = Schema.Literals([
+  'brief',
+  'message',
+  'transcript',
+  'patch',
+  'log',
+  'report',
+  'findings',
+  'summary',
+  'other',
+  'image',
+])
 export type ArtifactKind = typeof ArtifactKind.Type
 
 export const Sensitivity = Schema.Literals(['normal', 'may_contain_secrets'])

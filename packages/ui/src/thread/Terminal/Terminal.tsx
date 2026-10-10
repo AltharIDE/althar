@@ -2,6 +2,7 @@ import { useContext, useState, type ReactNode } from 'react'
 
 import { cx } from '../../lib/cx'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { ExitShown } from './exitShown'
 import s from './Terminal.module.css'
 
@@ -11,6 +12,10 @@ export interface TerminalText {
   showEarlier: (n: number) => string
   hideEarlier: string
   exit: (code: number) => string
+  /** A command that ended having printed nothing. */
+  empty: string
+  /** Lines from its start that weren't kept, past what it shows. */
+  omitted: (n: number) => string
 }
 
 export const terminalText: TerminalText = {
@@ -18,6 +23,8 @@ export const terminalText: TerminalText = {
   showEarlier: (n) => `${n} earlier lines`,
   hideEarlier: 'Hide earlier lines',
   exit: (code) => `exit ${code}`,
+  empty: 'No output',
+  omitted: (n) => `${n.toLocaleString('en')} earlier lines weren’t kept`,
 }
 
 /**
@@ -40,16 +47,40 @@ export interface TerminalProps {
   lines: string[]
   /** What it printed before those, held back until asked for. */
   earlier?: string[]
+  /** How many lines came before even those, and weren't kept. */
+  omitted?: number
   exit?: number
-  /** A line still being written. */
+  /** A line still being written, while the command runs: the cursor shows after it, even when it is empty. */
   live?: string
+  /** What it printed is still being read: its lines' places show, without words. */
+  loading?: boolean
+  /** What it printed couldn't be read, in words: shown in its place. */
+  error?: string
+  /** What the tool said of how it ended, where it failed or was stopped: after what it printed, as a failure. */
+  failure?: string
   /** Which lines read as errors. By default, isTerminalError. */
   isError?: (line: string) => boolean
   text?: Partial<TerminalText>
 }
 
-/** What a command printed: its end first, with what came before one click away. */
-export function Terminal({ command, lines, earlier = [], exit, live, isError = isTerminalError, text }: TerminalProps) {
+/**
+ * What a command printed: its end first, with what came before one click
+ * away. While it runs, the line being written ends in a cursor; one that
+ * ended having printed nothing says so.
+ */
+export function Terminal({
+  command,
+  lines,
+  earlier = [],
+  omitted = 0,
+  exit,
+  live,
+  loading = false,
+  error,
+  failure,
+  isError = isTerminalError,
+  text,
+}: TerminalProps) {
   const t = { ...terminalText, ...text }
   const [open, setOpen] = useState(false)
   const said = useContext(ExitShown)
@@ -62,8 +93,9 @@ export function Terminal({ command, lines, earlier = [], exit, live, isError = i
       </Line>
     )
   }
+  const quiet = lines.length === 0 && earlier.length === 0 && live === undefined && !loading && error === undefined && failure === undefined
   return (
-    <div className={s.term}>
+    <div className={s.term} aria-busy={loading || live !== undefined || undefined}>
       <pre className={s.out}>
         {command && (
           <Line className={s.command}>
@@ -73,6 +105,7 @@ export function Terminal({ command, lines, earlier = [], exit, live, isError = i
             {command}
           </Line>
         )}
+        {omitted > 0 && <Line className={s.said}>{t.omitted(omitted)}</Line>}
         {earlier.length > 0 && (
           <Line className={s.earlier}>
             <LinkButton aria-expanded={open} onClick={() => setOpen(!open)}>
@@ -82,12 +115,22 @@ export function Terminal({ command, lines, earlier = [], exit, live, isError = i
         )}
         {open && earlier.map((l, i) => line(l, `e${i}`))}
         {lines.map((l, i) => line(l, `l${i}`))}
-        {live && (
+        {live !== undefined && (
           <span className={s.live}>
             {plainTerminalLine(live)}
             <i className={s.cursor} aria-hidden="true" />
           </span>
         )}
+        {loading && (
+          <span className={s.reading}>
+            <Skeleton width="62%" />
+            <Skeleton width="44%" />
+            <Skeleton width="51%" />
+          </span>
+        )}
+        {error !== undefined && <Line className={s.said}>{error}</Line>}
+        {failure !== undefined && <Line className={s.err}>{failure}</Line>}
+        {quiet && <Line className={s.said}>{t.empty}</Line>}
       </pre>
       {code !== undefined && (
         <div className={s.foot}>

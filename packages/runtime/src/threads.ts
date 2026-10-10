@@ -1,9 +1,22 @@
 import { Ids, newId, type ProjectId, type ThreadItemKind } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
-import type { SessionEvent } from '@althar/provider-adapters'
+import type { Handed, SessionEvent } from '@althar/provider-adapters'
 import { Clock, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import {
+  errorIn,
+  exitIn,
+  type FileMention,
+  handedByTool,
+  handedNow,
+  type HandedNow,
+  type KeptPicture,
+  keepOutput,
+  Output,
+  printedIn,
+  together,
+} from './handed'
 import { change, timestamp } from './records'
 import { essentials } from './rules'
 
@@ -21,6 +34,8 @@ export interface ItemPlace {
   readonly threadId: string
   readonly sessionId?: string
   readonly deliveryId?: string
+  /** The folders the agent works in: a picture a link points at is read only from inside them. */
+  readonly folders?: ReadonlyArray<string>
 }
 
 /** Adds an item at the end of the thread. */
@@ -81,6 +96,28 @@ const cutOf = (content: Record<string, unknown> | undefined): ReadonlyArray<stri
 
 const defined = (entries: Record<string, unknown>) => Object.fromEntries(Object.entries(entries).filter(([, value]) => value !== undefined))
 
+const NOTHING: HandedNow = { pictures: [], files: [] }
+
+/** What an item already holds of what was handed back, as it was stored. */
+const handedIn = (content: Record<string, unknown> | undefined): HandedNow => ({
+  pictures: Array.isArray(content?.pictures) ? (content.pictures as ReadonlyArray<KeptPicture>) : [],
+  files: Array.isArray(content?.files) ? (content.files as ReadonlyArray<FileMention>) : [],
+})
+
+/** An item's content with what was handed back, where there is any. */
+const withHanded = (content: Record<string, unknown>, handed: HandedNow) => ({
+  ...content,
+  ...(handed.pictures.length === 0 ? {} : { pictures: handed.pictures }),
+  ...(handed.files.length === 0 ? {} : { files: handed.files }),
+})
+
+/** A command's output as far as it has come, for a client watching it: by the item it is, its last lines, and how many came before. */
+export interface OutputSoFar {
+  readonly itemId: string
+  readonly text: string
+  readonly dropped: number
+}
+
 /**
  * Turns one session's events into items. `record` takes each event as it
  * streams; `flush` writes the message being gathered, and is called when the
@@ -88,34 +125,136 @@ const defined = (entries: Record<string, unknown>) => Object.fromEntries(Object.
  */
 export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   let gathering:
-    | { readonly kind: 'agent_message' | 'agent_thought'; readonly id: string; text: string; written: number; writtenAt: number }
+    | {
+        readonly kind: 'agent_message' | 'agent_thought'
+        readonly id: string
+        text: string
+        written: number
+        writtenAt: number
+        /** Pictures and files it handed back between its words. */
+        handed: HandedNow
+      }
     | undefined
   let plan: string | undefined
+  /** Commands' output as it comes, by tool call, until each ends. */
+  const outputs = new Map<string, Output>()
+  /** Commands that ended, whose output is kept. */
+  const finished = new Set<string>()
+  const folders = place.folders ?? []
+  const where = (itemId: string) => ({ projectId: place.projectId, itemId, folders })
 
   /** Writes the message being gathered; its item was placed when its first chunk arrived. */
   const flush = Effect.gen(function* () {
     const open = gathering
     gathering = undefined
-    if (open !== undefined) yield* updateItem(place.projectId, open.id, { text: open.text })
+    if (open !== undefined) yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed))
   })
+
+  /** The message being gathered, or a new one: what it hands back goes with its words. */
+  const gathered = (kind: 'agent_message' | 'agent_thought', text: string) =>
+    Effect.gen(function* () {
+      if (gathering !== undefined && gathering.kind !== kind) yield* flush
+      if (gathering !== undefined) return { open: gathering, fresh: false }
+      // The item is placed when its first chunk arrives, so the thread keeps the order things happened in.
+      const open = {
+        kind,
+        id: yield* addItem(place, kind, { text }),
+        text,
+        written: text.length,
+        writtenAt: yield* Clock.currentTimeMillis,
+        handed: NOTHING,
+      }
+      gathering = open
+      return { open, fresh: true }
+    })
 
   const gather = (kind: 'agent_message' | 'agent_thought', text: string) =>
     Effect.gen(function* () {
-      if (gathering !== undefined && gathering.kind !== kind) yield* flush
+      const { open, fresh } = yield* gathered(kind, text)
+      if (fresh) return
       const now = yield* Clock.currentTimeMillis
-      if (gathering === undefined) {
-        // The item is placed when its first chunk arrives, so the thread keeps the order things happened in.
-        gathering = { kind, id: yield* addItem(place, kind, { text }), text, written: text.length, writtenAt: now }
-        return
-      }
-      gathering.text += text
+      open.text += text
       // A long message is written as it grows, so a crash loses only its last few seconds.
-      if (gathering.text.length - gathering.written >= WRITE_EVERY_CHARACTERS || now - gathering.writtenAt >= WRITE_EVERY_MILLIS) {
-        yield* updateItem(place.projectId, gathering.id, { text: gathering.text })
-        gathering.written = gathering.text.length
-        gathering.writtenAt = now
+      if (open.text.length - open.written >= WRITE_EVERY_CHARACTERS || now - open.writtenAt >= WRITE_EVERY_MILLIS) {
+        yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed))
+        open.written = open.text.length
+        open.writtenAt = now
       }
     })
+
+  /** A picture or a file in what the agent says: kept with the message it is in, and written at once. */
+  const handedInMessage = (content: Handed) =>
+    Effect.gen(function* () {
+      const { open } = yield* gathered('agent_message', '')
+      const now = yield* handedNow(where(open.id), content)
+      if (now.pictures.length === 0 && now.files.length === 0) return
+      open.handed = together(open.handed, now)
+      yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed))
+      open.written = open.text.length
+      open.writtenAt = yield* Clock.currentTimeMillis
+    })
+
+  /** Keeps a command's output once it ends, and its exit, on its item. */
+  const ended = (toolCallId: string, output: Output) =>
+    Effect.gen(function* () {
+      outputs.delete(toolCallId)
+      finished.add(toolCallId)
+      return { output: yield* keepOutput(where(output.itemId), output), exit: output.exit }
+    })
+
+  /**
+   * What a tool call's event adds to its item beyond what it is: pictures and
+   * files it hands back, and, for a command, its output once it ends. Its
+   * output so far is held here, for watching clients, until then.
+   */
+  const extrasOf = (
+    toolCallId: string,
+    itemId: string,
+    stored: Record<string, unknown>,
+    event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>,
+  ) =>
+    Effect.gen(function* () {
+      const kind = typeof stored.kind === 'string' ? stored.kind : 'other'
+      const content = event.content ?? []
+      let extras: Record<string, unknown> | undefined
+      if (content.length > 0 || kind === 'edit') {
+        const had = handedIn(stored)
+        const now = together(had, yield* handedByTool(where(itemId), content, event.rawInput, kind))
+        if (now.pictures.length > had.pictures.length || now.files.length > had.files.length) extras = withHanded({}, now)
+      }
+      const command = kind === 'execute' || event.terminal !== undefined || content.some((entry) => entry._tag === 'Terminal')
+      // A command that ended keeps what it printed: what comes after, in this turn or a later one, changes none of it.
+      if (!command || finished.has(toolCallId) || stored.output !== undefined) return extras
+      const output = outputs.get(toolCallId) ?? new Output(itemId)
+      outputs.set(toolCallId, output)
+      if (event.terminal?.output !== undefined) output.add(event.terminal.output)
+      else if (!output.terminal && kind === 'execute') {
+        // OpenCode says a command's output as the tool's own words, whole each time, and whole in its raw output's metadata where it has it.
+        // Its error report is the error, not its output: what it printed stays, and the error is kept beside it.
+        const words = content.flatMap((entry) => (entry._tag === 'Text' ? [entry.text] : []))
+        const raw = event._tag === 'ToolCallUpdate' ? event.rawOutput : undefined
+        const whole = printedIn(raw)
+        const failed = event.status === 'failed'
+        if (whole !== null) output.replace(whole)
+        else if (!failed && words.length > 0) output.replace(words.join('\n'))
+        if (failed) output.error = errorIn(raw) ?? (words.length > 0 ? words.join('\n') : null)
+      }
+      const exit = event.terminal?.exit?.code ?? (event._tag === 'ToolCallUpdate' ? exitIn(event.rawOutput) : null)
+      if (exit !== null) output.exit = exit
+      if (event.status !== 'completed' && event.status !== 'failed') return extras
+      return { ...extras, ...(yield* ended(toolCallId, output)) }
+    })
+
+  /** Ends what the turn left open: a command's output, kept as far as it came, as when the turn was stopped. */
+  const end = Effect.gen(function* () {
+    yield* flush
+    // A Map lets the entry being visited go as it is kept.
+    for (const [toolCallId, output] of outputs) {
+      const item = yield* toolItem(place.sessionId, toolCallId)
+      const kept = yield* ended(toolCallId, output)
+      if (item !== undefined) yield* updateItem(place.projectId, item.id, { ...item.content, ...kept })
+    }
+  })
 
   const notice = (content: Record<string, unknown>) => Effect.andThen(flush, addItem(place, 'notice', defined(content)))
 
@@ -125,6 +264,8 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         return gather('agent_message', event.text)
       case 'AgentThought':
         return gather('agent_thought', event.text)
+      case 'AgentContent':
+        return handedInMessage(event.content)
       case 'ToolCall':
       case 'ToolCallUpdate':
         return Effect.gen(function* () {
@@ -142,9 +283,16 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
           const existing = yield* toolItem(place.sessionId, event.toolCallId)
           const cut = [...new Set([...cutOf(existing?.content), ...(kept?.cut ?? []), ...(output ? ['output'] : [])])]
           const marked = cut.length === 0 ? content : { ...content, cut }
-          if (existing === undefined)
-            yield* addItem(place, 'tool_call', { title: '', kind: 'other', status: 'pending', ...marked }, { toolCallId: event.toolCallId })
-          else yield* updateItem(place.projectId, existing.id, { ...existing.content, ...marked })
+          if (existing === undefined) {
+            const stored = { title: '', kind: 'other', status: 'pending', ...marked }
+            const id = yield* addItem(place, 'tool_call', stored, { toolCallId: event.toolCallId })
+            const extras = yield* extrasOf(event.toolCallId, id, stored, event)
+            if (extras !== undefined) yield* updateItem(place.projectId, id, { ...stored, ...extras })
+          } else {
+            const stored = { ...existing.content, ...marked }
+            const extras = yield* extrasOf(event.toolCallId, existing.id, stored, event)
+            yield* updateItem(place.projectId, existing.id, { ...stored, ...extras })
+          }
         })
       case 'Plan':
         return Effect.gen(function* () {
@@ -170,7 +318,21 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   /** The message being gathered, as far as it has come: what a watching client shows while it streams. */
   const current = () => (gathering === undefined ? undefined : { id: gathering.id, kind: gathering.kind, text: gathering.text })
 
-  return { record, flush, current }
+  /** Commands' output that grew since this was last asked, each as far as it has come. */
+  const outputsSoFar = (): ReadonlyArray<OutputSoFar> =>
+    [...outputs.values()].flatMap((output) => {
+      if (!output.changed) return []
+      output.changed = false
+      return [{ itemId: output.itemId, ...output.tail() }]
+    })
+
+  /** A command's output as far as it has come, while it runs, by its item. */
+  const outputOf = (itemId: string): OutputSoFar | undefined => {
+    const output = [...outputs.values()].find((candidate) => candidate.itemId === itemId)
+    return output === undefined ? undefined : { itemId, ...output.tail() }
+  }
+
+  return { record, flush, end, current, outputsSoFar, outputOf }
 }
 
 /** The thread as text, oldest first: what a new agent reads when it takes over (ADR-005). */

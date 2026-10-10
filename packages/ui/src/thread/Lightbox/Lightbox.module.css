@@ -39,14 +39,58 @@
   overflow: hidden;
   border-radius: 10px;
   background: var(--term);
-  box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
+/* what stands in for a picture: its words, and why it isn't there */
 .none {
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   height: 100%;
+  padding: 0 16px;
   font-size: 13px;
+  text-align: center;
   color: var(--term-t5);
+}
+.why {
+  font-size: 11.5px;
+  opacity: 0.85;
+}
+.position {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--term-t3);
+}
+/* a picture on its way: its box, breathing, so nothing moves when it comes */
+.waiting {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: currentColor;
+  opacity: 0.06;
+  animation: breathe 1.6s var(--ease) infinite alternate;
+}
+.img[data-state='loading'] {
+  opacity: 0;
+}
+.img[data-state='loaded'] {
+  opacity: 1;
+  transition: opacity var(--fast) var(--ease);
+}
+@keyframes breathe {
+  to {
+    opacity: 0.12;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .waiting {
+    animation: none;
+  }
+  .img[data-state='loaded'] {
+    transition: none;
+  }
 }
 .caption {
   display: flex;

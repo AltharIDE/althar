@@ -100,6 +100,8 @@ const options = {
   database: databaseIn(profile),
   worktreeRoot: required('ALTHAR_WORKTREES'),
   accountsRoot: join(profile, 'accounts'),
+  // Pictures agents hand back and what commands print, by digest; the main process serves the pictures from here.
+  artifactsRoot: join(profile, 'artifacts'),
   // Agents the person asked Althar to download, kept in the profile, never on their PATH.
   agentsRoot: join(profile, 'agents'),
   openTerminal: openInTerminal,

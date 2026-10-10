@@ -592,10 +592,25 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 
 ## Chat primitives
 
-- [ ] **What agents can hand back.** Images are covered (screenshots side by
-  side, full size on click). Still open: screen recordings of a UI flow,
-  generated PDFs, and larger outputs (logs, data files). Do those get the file
-  card, or their own viewers?
+- [ ] **What agents can hand back.** Images, markdown documents, other files
+  (the file card), tables and command output are built (ADR-020). Still
+  open: screen recordings of a UI flow, and generated PDFs. Do those get the
+  file card, or their own viewers?
+- [ ] **How long what agents hand back is kept.** Pictures and command output
+  are kept in the artifact store, by digest, with nothing swept yet (ADR-020).
+  How long does each kind stay: for the task's life, a set time, or until the
+  profile is cleaned? Leaning: mark-and-sweep from the thread items, with
+  logs going first, once a task is settled.
+- [ ] **Which written files are handed back.** A markdown document a lead
+  writes whole stands under its turn as a card; a file it points at gets the
+  file card; other files it writes are the task's change, with no card.
+  Should an edited document (a README) stand too? Leaning: no, it is part of
+  the change.
+- [ ] **Pictures outside the worktree.** A picture a link points at is read
+  only from inside the folders the agent works in; a browser tool that saves
+  its screenshots in a temporary folder hands back a link that isn't
+  followed. Leaning: allow the system's temporary folder for pictures only,
+  if it comes up.
 - [ ] **"Every finding" mode.** Each open finding waits for you, with Have it
   fixed / Say what to do / Dismiss, plus "Leave them to the lead". Does the
   lead start on the findings you've answered, or wait for the whole list?

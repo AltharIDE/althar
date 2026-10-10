@@ -5,7 +5,7 @@
 -- repository_access: read, write, observe
 -- location_kind: existing, managed
 -- location_state: ready, needs_access, changed, unavailable
--- artifact_kind: brief, message, transcript, patch, log, report, findings, summary, other
+-- artifact_kind: brief, message, transcript, patch, log, report, findings, summary, other, image
 -- sensitivity: normal, may_contain_secrets
 -- task_state: draft, open, done, abandoned
 -- plan_state: proposed, accepted, replaced, declined

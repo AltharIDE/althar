@@ -48,7 +48,7 @@ A component renders what it is given and reports what happened. It does not fetc
 - **Say what is wrong rather than disable.** A submit button stays pressable. Pressed with something missing, it says what, beside the field, and focus goes to the field.
 - **Build on what exists.** Where a primitive or another component already does the job, use it and compose from it. Don't draw it again in the component's own markup and CSS. A component styles what it uses only to place it in its context. If the existing piece doesn't quite fit, extend it rather than copying it.
 - **Composition over configuration.** Prefer `children` and slots (`above`, `trigger`, `card`) to growing lists of flags. For example, the Composer does not know about models: its `picker` and `meter` slots take a ModelPick and a ContextRing, which the consumer wires to its own state. A component that needs a new variant for one caller usually needs a slot instead.
-- **Context only for host services.** Examples are opening a document, an image or a step's thread beside the thread (`ThreadShellProvider`). Every service is optional, and a control that needs one is left out when the host has not given it, so every component renders alone in a story.
+- **Context only for host services.** Examples are opening a document, an image (with the set it belongs to, which the Lightbox moves through) or a step's thread beside the thread (`ThreadShellProvider`). Every service is optional, and a control that needs one is left out when the host has not given it, so every component renders alone in a story.
 
 ### No raw strings inside components
 
@@ -160,7 +160,8 @@ A pattern that appears in two components becomes one part, so the two cannot dri
 | StepRow | A step's row, its track and its thread link | Step, Review |
 | StepTrack | A task's steps as a row of bars | TaskCard, WorkCard, TaskHeader |
 | Heading | A heading at the level the consumer gives | everything with a title |
-| Markdown | Markdown drawn as our own elements, never as HTML | Document, DocPanel, FileArtifact |
+| Markdown | Markdown drawn as our own elements, never as HTML; its tables are the kit's Table | Document, DocPanel, FileArtifact |
+| ImageView | A picture at its src or its smaller copy, decoded lazily in a box that keeps its shape, saying when it couldn't be shown | Shots, Lightbox |
 
 The helpers, in `src/lib`:
 

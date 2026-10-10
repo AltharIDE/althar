@@ -67,6 +67,9 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Ask for changes | request changes | Writes the lead a note about what should change; sent, the lead takes the work up again with it. |
 | Findings | review findings | What a review step found. By default the lead settles them. |
 | Artifacts | artifacts | What a task wrote that is worth keeping and isn't in a repository. |
+| Screenshots, Image | artifact of kind `image` | Pictures an agent hands back, under what it said, full size on a click. One without a name is "Image 1". |
+| Document | a markdown file an agent wrote or pointed at | Its card stands under what it said; "Read in the panel" opens it beside the thread, as it is now in the worktree. |
+| Output | artifact of kind `log` | What a command printed, in its tool call: its last lines, "N earlier lines" a click away. |
 | Knowledge | knowledge claims | Everything the project holds. It has two parts: |
 | Notes | canonical claims | What every task starts with: decisions, conventions, architecture. |
 | Seen in tasks | episodic claims | What one task observed. It can be proposed as a note. |

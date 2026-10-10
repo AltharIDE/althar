@@ -19,6 +19,8 @@ import {
   type StuckStep,
   type TaskList,
   type TaskSummary,
+  type DocumentText,
+  type OutputText,
   type ThreadItem,
   type ThreadSnapshot,
 } from '@althar/contracts'
@@ -29,7 +31,10 @@ import { Agents, RuntimeConfig } from './Config'
 import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
-import { GitFailed, NotFound } from './errors'
+import { filesOf, outputOf, picturesOf } from './handed'
+import { documentText, outputText } from './reading'
+import type { Artifacts } from './Artifacts'
+import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { Instance } from './Instance'
 import { commitsAhead, commitsOf, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
 import { commandIn } from './rules'
@@ -256,9 +261,14 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       }
     case 'agent_message':
     case 'agent_thought':
-      return { ...base, kind: row.kind, content: { text: text(content, 'text') } }
+      return {
+        ...base,
+        kind: row.kind,
+        content: { text: text(content, 'text'), pictures: picturesOf(field(content, 'pictures')), files: filesOf(field(content, 'files')) },
+      }
     case 'tool_call': {
       const locations = field(content, 'locations')
+      const exit = field(content, 'exit')
       const allowedBy = row.decision === 'allow' ? allowedByOf(row.rule) : undefined
       return {
         ...base,
@@ -275,6 +285,10 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           }),
           declined: row.decision === 'reject',
           ...(allowedBy === undefined ? {} : { allowedBy }),
+          pictures: picturesOf(field(content, 'pictures')),
+          files: filesOf(field(content, 'files')),
+          output: outputOf(field(content, 'output')),
+          exit: typeof exit === 'number' ? exit : null,
         },
       }
     }
@@ -377,7 +391,7 @@ export interface ThreadChange {
   readonly threadId: string | null
 }
 
-type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig
+type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig | Artifacts
 
 export class Queries extends Context.Service<
   Queries,
@@ -391,6 +405,10 @@ export class Queries extends Context.Service<
       page?: { readonly before?: number; readonly limit?: number; readonly fresh?: boolean },
     ): Effect.Effect<ThreadSnapshot, SqlError.SqlError | NotFound>
     item(threadId: string, itemId: string): Effect.Effect<ThreadItem, SqlError.SqlError | NotFound>
+    /** What a command in a thread printed, as kept when it ended. */
+    output(threadId: string, itemId: string): Effect.Effect<OutputText, SqlError.SqlError | NotFound>
+    /** A markdown document an agent in a thread wrote, as it is now in the task's worktrees. */
+    document(threadId: string, path: string): Effect.Effect<DocumentText, SqlError.SqlError | NotFound | DocumentRefused>
     /** One file a task changed, as a diff from its base to its worktree; only a file it changed. */
     fileDiff(taskId: string, path: string): Effect.Effect<FileDiff, unknown>
     /** A project's board: its tasks, by card, and the calls that wait on the person. */
@@ -1454,6 +1472,28 @@ export class Queries extends Context.Service<
         board: (projectId) => run(board(projectId)),
         home: (since) => run(home(since)),
         item: (threadId, itemId) => run(item(threadId, itemId)),
+        // A command still running is read from what it has printed so far; one that ended, from what was kept.
+        output: (threadId, itemId) =>
+          run(
+            Effect.gen(function* () {
+              const soFar = yield* (yield* Sessions).outputSoFar(threadId, itemId)
+              return Option.isSome(soFar) ? { text: soFar.value.text, dropped: soFar.value.dropped } : yield* outputText(threadId, itemId)
+            }),
+          ),
+        document: (threadId, path) =>
+          run(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              // A task's documents are in its worktrees here; the coordinator writes none.
+              const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
+              if (thread?.taskId == null) return yield* new NotFound({ kind: 'document', id: path })
+              const worktrees = yield* worktreesOf(thread.taskId)
+              return yield* documentText(
+                path,
+                worktrees.map((worktree) => worktree.path),
+              )
+            }),
+          ),
         coordinator: (projectId, page) => run(coordinator(projectId, page)),
         changesSince: (after, limit) => run(changesSince(after, limit)),
         cursor: run(cursor),

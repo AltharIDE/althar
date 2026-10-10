@@ -27,3 +27,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [017](017-dictation-on-this-machine.md) | Dictation runs on this machine, with a model downloaded on the first press |
 | [018](018-allow-always-keeps-a-rule.md) | Allow always keeps a rule in the project |
 | [019](019-coordinator-judges-permissions.md) | The coordinator judges permission requests in fresh read-only sessions |
+| [020](020-what-agents-hand-back.md) | What agents hand back is kept in the artifact store, by digest |
