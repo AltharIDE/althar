@@ -146,9 +146,9 @@ export function Outputs({
   /** Pushes what it merged here to the remotes its branches follow. */
   onPushHere?: () => void
   /** Pushes its branch to its repositories' remotes, with the person's own git, no connection needed. */
-  onPushBranch?: () => void
+  onPushBranch: () => void
   /** Opens where the project's code host is connected. */
-  onConnect?: () => void
+  onConnect: () => void
   /** Accepts its pull requests: each merged on its host in turn, at the head shown, stopping at the first refused. */
   onAccept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => void
   onMergeHere: () => void
@@ -279,7 +279,8 @@ export function Outputs({
           name: [...new Set(remotes.map((one) => one.name))].join(', '),
           pushed: remotes.every((one) => one.pushed),
           ahead: remotes.reduce((sum, one) => sum + one.ahead, 0),
-          ...(onPushBranch === undefined ? {} : { onPush: onPushBranch, pushing: pending }),
+          onPush: onPushBranch,
+          pushing: pending,
         }
   const pushedSomewhere = remotes.some((one) => one.pushed)
 
@@ -321,7 +322,7 @@ export function Outputs({
     ) : null
   // Pushed with no connection: what connecting would add, said once something is there to have a pull request.
   const offer =
-    pushedSomewhere && snapshot.host !== null && !snapshot.host.connected && onConnect !== undefined ? (
+    pushedSomewhere && snapshot.host !== null && !snapshot.host.connected ? (
       <p className={s.offer}>
         {text.connectAfterPush(snapshot.host.name)}{' '}
         <Button size="small" onClick={onConnect}>

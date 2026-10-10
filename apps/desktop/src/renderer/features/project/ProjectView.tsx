@@ -280,7 +280,8 @@ export function ProjectView({
   return (
     <div className={s.window}>
       <ProjectBar
-        place={{ room, onRoom: setRoom }}
+        room={room}
+        onRoom={setRoom}
         working={lanes === null ? null : working}
         yours={lanes === null ? null : yours}
         {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask) })}

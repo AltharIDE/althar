@@ -1,29 +1,23 @@
 import type { ReactNode } from 'react'
 
-import { BackCrumb, ChromeButton, Room, RoomSwitch, TitleBar, type WorkNeed, WorkStatus } from '@althar/ui'
+import { ChromeButton, Room, RoomSwitch, TitleBar, type WorkNeed, WorkStatus } from '@althar/ui'
 
 /*
  * A project's bar, under the window's tabs: its views, how much runs and
  * what waits on the person (pointed at, what it is; clicked, the first of
- * it), its menu (rename, repositories, rules, remove), and a new task. The project's own screen and each of its
- * tasks have it. On a task, the views give way to the way back, as in the
- * prototype: the project, with Escape, then which task this is; back goes
- * to the view the person was on. The views have no shortcut of their own:
- * ⌘ and a number belongs to the tabs, and b steps through the views.
+ * it), its menu (rename, repositories, rules, remove), and a new task. The
+ * project's own screen has it; a task has its own header in the bar. The
+ * views have no shortcut of their own: ⌘ and a number belongs to the tabs,
+ * and b steps through the views.
  */
 
 export const text = {
   newTask: 'New task',
-  backKey: 'esc',
 }
 
-/** What the bar starts with: the project's views, or, on a task, the way back to them. */
-export type BarPlace =
-  | { readonly room: Room; readonly onRoom: (room: Room) => void }
-  | { readonly back: { readonly project: string; readonly task: string; readonly onBack: () => void } }
-
 export function ProjectBar({
-  place,
+  room,
+  onRoom,
   working,
   yours,
   needs,
@@ -32,7 +26,9 @@ export function ProjectBar({
   onNewTask,
   newTask = false,
 }: {
-  place: BarPlace
+  /** The project's view, which the bar starts with. */
+  room: Room
+  onRoom: (room: Room) => void
   /** How many run and wait; null until the board is read, when nothing is said. */
   working: number | null
   yours: number | null
@@ -64,11 +60,7 @@ export function ProjectBar({
         </>
       }
     >
-      {'back' in place ? (
-        <BackCrumb to={place.back.project} kbd={text.backKey} title={place.back.task} onBack={place.back.onBack} />
-      ) : (
-        <RoomSwitch value={place.room} onChange={place.onRoom} text={{ key: () => '' }} />
-      )}
+      <RoomSwitch value={room} onChange={onRoom} text={{ key: () => '' }} />
     </TitleBar>
   )
 }

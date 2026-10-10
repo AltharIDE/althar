@@ -190,14 +190,14 @@ describe('a task', () => {
   it('pushes its branch with the person’s own git, then offers its host’s pull request page, and what connecting would add', async () => {
     const file: ChangedFile = { path: 'src/checkout.ts', from: null, status: 'modified', add: 4, del: 1, binary: false, uncommitted: false }
     const page = 'https://github.com/meridian/api/compare/main...althar/add-a-retry?expand=1'
-    const at = (remote: { pushed: boolean; ahead: number }) => {
+    const at = (remote: { pushed: boolean; ahead: number }, phase: ThreadSnapshot['task']['phase'] = 'ready') => {
       const base = thread({ session: null })
       return {
         ...base,
         host: { product: 'github' as const, name: 'GitHub', webUrl: 'https://github.com', connected: false },
         task: {
           ...base.task,
-          phase: 'ready' as const,
+          phase,
           files: [file],
           commits: 2,
           here: [
@@ -213,9 +213,18 @@ describe('a task', () => {
       }
     }
     let stands = { pushed: false, ahead: 2 }
+    // Under way, its branch so far can go up already.
+    const early = withServices(<Task />, fakeClient({ getThread: vi.fn(async () => at(stands, 'running')) }).client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    const sofar = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(sofar.getByText('Its branch so far')).toBeTruthy()
+    expect(sofar.getByRole('button', { name: 'Push the branch to origin' })).toBeTruthy()
+    early.unmount()
+
     const { client } = fakeClient({ getThread: vi.fn(async () => at(stands)) })
     const view = withServices(<Task />, client)
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(outputs.getByText('Not merged yet')).toBeTruthy()
     expect(outputs.getByText('Not on origin yet')).toBeTruthy()
     // Nothing to connect for, before anything is pushed.
     expect(screen.queryByText(/Connected to GitHub, Althar would/)).toBeNull()
@@ -591,6 +600,18 @@ describe('a task', () => {
     await waitFor(() => expect((busy as HTMLTextAreaElement).value).toBe('Use the helper'))
     expect(screen.queryByRole('region', { name: /queued/ })).toBeNull()
     expect(screen.queryByText('Skip the docs')).toBeNull()
+  })
+
+  it('leaves a queued message where it is, and the composer as it was, when the lead has it already', async () => {
+    const queued = items.you('Use the helper', { state: 'queued', interrupting: false })
+    const { client } = fakeClient({ getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })) })
+    vi.mocked(client.takeBack).mockRejectedValueOnce(new Error('The lead has read it already.'))
+    withServices(<Task />, client)
+    const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the lead' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    expect((busy as HTMLTextAreaElement).value).toBe('')
+    expect(screen.getByRole('region', { name: 'Queued; the lead reads it next' })).toBeTruthy()
   })
 
   it('changes how hard its lead thinks and its model, hands it to another agent, and stops it', async () => {
@@ -1214,6 +1235,9 @@ describe('a task’s outputs before it has made anything', () => {
       ),
     )
     expect(looked).toEqual(['README.md', 'src/retry.ts', 'src/checkout.ts'])
+    // Before its folder is made, a path can't be said to be the task's.
+    const homeless = at({ worktree: null }, { items: [items.tool({ locations: [{ path: '/w/meridian/README.md' }] })] })
+    expect(lookedOf(homeless)).toEqual([])
   })
 
   it('reads the files a shell command looks at, as agents run them, and nothing from anything else', () => {
@@ -1239,6 +1263,8 @@ describe('a task’s outputs before it has made anything', () => {
       '../outside.ts',
     ])
     expect(readsOf("sed --in-place 's/a/b/' src/c.ts")).toEqual([])
+    // A name with a space, quoted; a line ended with a separator.
+    expect(readsOf('cat "docs/read me.md";')).toEqual(['docs/read me.md'])
     // Edited in place, it is written, not read.
     expect(readsOf("sed -i '' 's#http://localhost#http://127.0.0.1#' check.mjs")).toEqual([])
     expect(readsOf('git status --short; npm run build; grep -rn "x" src | head -40; cat src/*.ts; cat $f')).toEqual([])
