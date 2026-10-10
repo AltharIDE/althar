@@ -1,9 +1,11 @@
 import { Effect, Schema } from 'effect'
 
+import type { RunState, TaskState } from './vocabulary'
+
 /*
  * The lifecycles drawn in docs/architecture/03 (provider session) and 05 (node
- * attempt), as data. A state may move only along an edge listed here; a state
- * with no edges is terminal.
+ * attempt, run and task), as data. A state may move only along an edge listed
+ * here; a state with no edges is terminal.
  */
 
 export const NodeAttemptState = Schema.Literals([
@@ -88,6 +90,39 @@ export const providerSessionLifecycle: Lifecycle<ProviderSessionState> = {
     uncertain: [],
     failed: [],
     superseded: [],
+  },
+}
+
+/**
+ * A task is drafted with its plan and opens when its run starts. It is done
+ * once its change is merged, for good. Abandoned, it settles without its
+ * change, and the person can reopen it: open again, or a draft again with
+ * its plan held, where it was abandoned before its plan started.
+ */
+export const taskLifecycle: Lifecycle<TaskState> = {
+  name: 'task',
+  edges: {
+    draft: ['open', 'abandoned'],
+    open: ['done', 'abandoned'],
+    abandoned: ['open', 'draft'],
+    done: [],
+  },
+}
+
+/**
+ * A run is suspended when the person stops its task, or abandons it, and
+ * runs again when they resume it. Nothing ends a suspended run but being
+ * resumed or cancelled.
+ */
+export const runLifecycle: Lifecycle<RunState> = {
+  name: 'run',
+  edges: {
+    admitted: ['running', 'cancelled'],
+    running: ['suspended', 'succeeded', 'failed', 'cancelled'],
+    suspended: ['running', 'cancelled'],
+    succeeded: [],
+    failed: [],
+    cancelled: [],
   },
 }
 

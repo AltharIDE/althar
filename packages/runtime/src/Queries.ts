@@ -32,6 +32,7 @@ import { Instance } from './Instance'
 import { commitsAhead, commitsOf, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
 import { commandIn } from './rules'
 import { Sessions } from './Sessions'
+import { actionsOf, standingOf } from './Tasks'
 
 /*
  * What screens show, read from the store (docs/architecture/02: queries
@@ -1292,6 +1293,8 @@ export class Queries extends Context.Service<
             SELECT s.agent_id, s.model, a.name AS account FROM provider_sessions s LEFT JOIN agent_accounts a ON a.id = s.account_id
             WHERE s.thread_id = ${threadId} ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
           const planned = card?.plan?.steps.find((step) => step.key === 'implement')
+          // What the person can do to it as a whole, from where it stands.
+          const standing = yield* standingOf(head.taskId)
           // Its links, whose open pull requests say what isn't pushed, what git says of its worktrees, and its host, read at the same time.
           const [links, said, host] = yield* Effect.all(
             [linksOf(head.taskId), gitOf(head.taskId, { changed: true, here: true, fresh: page.fresh === true }), hostOf(head.projectId)],
@@ -1327,6 +1330,8 @@ export class Queries extends Context.Service<
               commits: said.commits,
               here: said.here,
               merged: said.merged,
+              actions: [...actionsOf(standing)],
+              planId: standing.planId,
             },
             session,
             attention: attention.map(callOf),

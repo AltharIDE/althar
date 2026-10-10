@@ -2,7 +2,7 @@ import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
 import type { AccountRefused } from './Accounts'
-import type { CantMerge, NoChangeToOpen, ProjectRefused } from './errors'
+import type { CantMerge, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
 
 /*
  * What went wrong, in words a person reads in the window. The runtime's
@@ -165,6 +165,8 @@ export const words = (
       }
       case 'NoChangeToOpen':
         return noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working
+      case 'TaskRefused':
+        return taskRefused[text(error, 'why') as TaskRefused['why']] ?? taskRefused.merged
       case 'SignOutFailed':
         return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on this Mac any more, remove it anyway; its sign-in may stay behind.`
       case 'AccountRefused':
@@ -234,11 +236,18 @@ const noChangeToOpen = {
   opened: 'The task already has its pull request.',
 } as const satisfies Record<NoChangeToOpen['why'], string>
 
+/** Why a task can't be abandoned or reopened, by reason. */
+const taskRefused = {
+  merged: 'The task is merged, so it stays done.',
+  branch_gone: 'The task’s worktree and its branch are both gone, so it can’t be reopened on them.',
+} as const satisfies Record<TaskRefused['why'], string>
+
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
   'ChangedSinceSeen',
   'CantMerge',
   'NoChangeToOpen',
+  'TaskRefused',
   'NotConnected',
   'NotAnIssue',
   'NotARepository',

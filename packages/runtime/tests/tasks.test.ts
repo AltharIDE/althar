@@ -1,0 +1,476 @@
+import { execFileSync } from 'node:child_process'
+import { existsSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import type { ActorId, ProjectId } from '@althar/domain'
+import { assert, describe, it } from '@effect/vitest'
+import { Duration, Effect, Layer, Option } from 'effect'
+import { SqlClient } from 'effect/sql'
+
+import { Changes } from '../src/Changes'
+import { Plans } from '../src/Plans'
+import { Projects } from '../src/Projects'
+import { Queries } from '../src/Queries'
+import { type PlanStep, Runs } from '../src/Runs'
+import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
+import { actionsOf, Tasks } from '../src/Tasks'
+import { repository, runtime, turns, until } from './support'
+
+/*
+ * A task's course as the person steers it (docs/architecture/05, "Task and
+ * run lifecycle"): stopping it suspends its run and every agent on it;
+ * resuming carries on the step it was on; abandoning settles it with its
+ * worktree and branch kept; reopening opens it on them again; a held plan
+ * counts down again when let go. A merged task can be neither abandoned nor
+ * reopened. The fake agent plays the lead and the reviewer from markers in
+ * the task's title.
+ */
+
+const withQueries = (more: Parameters<typeof runtime>[2] = {}) =>
+  Queries.layer.pipe(Layer.provideMerge(runtime(undefined, undefined, more)))
+
+const git = (cwd: string, ...args: Array<string>) =>
+  execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd })
+    .toString()
+    .trim()
+
+const implement = (agentId = 'claude-code'): PlanStep => ({ key: 'implement', agentId, model: null, skipped: false })
+const reviewBy = (agentId = 'codex'): PlanStep => ({ key: 'review', agentId, model: null, skipped: false })
+
+/** A project with a task in it, planned: its plan proposed to start in a minute unless started. */
+const planned = (title: string, steps: ReadonlyArray<PlanStep> = [implement()]) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const projects = yield* Projects
+    const plans = yield* Plans
+    const root = repository()
+    const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
+    const task = yield* projects.createTask({
+      envelope: yield* Runtime.envelope('task.create', {}),
+      projectId: project.projectId,
+      title,
+      draft: true,
+    })
+    const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
+    const actor = (person?.id ?? '') as ActorId
+    const planId = yield* plans.propose({
+      projectId: project.projectId as ProjectId,
+      taskId: task.taskId,
+      steps,
+      reason: null,
+      actorId: actor,
+      startsIn: Duration.minutes(1),
+    })
+    return { root, project, task, planId, actor }
+  })
+
+/** The task as its screen reads it: where it stands, and what the person can do to it. */
+const shown = (threadId: string) =>
+  Effect.gen(function* () {
+    const queries = yield* Queries
+    const { task } = yield* queries.thread(threadId, { limit: 0 })
+    return {
+      phase: task.phase,
+      state: task.state,
+      actions: task.actions,
+      planId: task.planId,
+      worktree: task.worktree,
+      branch: task.branch,
+    }
+  })
+
+const command = (type: string) => Runtime.envelope(type, {})
+
+/** Each node attempt of the task's run, in the order they were admitted: its step, round and state, and whether stopping cut it short. */
+const attempts = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ nodeKey: string; iteration: number; state: string; stopped: number | null }>`
+      SELECT n.node_key, n.iteration, a.state, json_extract(a.output, '$.stopped') AS stopped
+      FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+      JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId} ORDER BY a.admitted_at, a.rowid`
+    return rows.map((row) => [row.nodeKey, row.iteration, row.state, row.stopped === 1] as const)
+  })
+
+const runOf = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [run] = yield* sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${taskId}`
+    const tries = yield* sql<{ state: string }>`
+      SELECT a.state FROM run_attempts a JOIN runs r ON r.id = a.run_id WHERE r.task_id = ${taskId} ORDER BY a.attempt_number`
+    return { state: run?.state, attempts: tries.map((attempt) => attempt.state) }
+  })
+
+const callsOf = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    return yield* sql<{ kind: string; state: string; why: string | null }>`
+      SELECT kind, state, json_extract(payload, '$.why') AS why FROM attention_requests WHERE task_id = ${taskId} ORDER BY created_at`
+  })
+
+/** Whether an agent is on the thread. */
+const onThread = (threadId: string) =>
+  Effect.map(
+    Effect.flatMap(Sessions, (sessions) => sessions.running(threadId)),
+    Option.isSome,
+  )
+
+/** Waits until the task stands where `check` says. */
+const standsAt = (threadId: string, check: (task: Effect.Success<ReturnType<typeof shown>>) => boolean, limit = Duration.seconds(20)) =>
+  until(
+    Effect.map(shown(threadId), (task) => [task]),
+    ([task]) => task !== undefined && check(task),
+    limit,
+  )
+
+describe('a task’s course', () => {
+  it('offers what applies where a task stands, and nothing for a merged one', () => {
+    const open = { state: 'open', planId: null, runState: null, working: false } as const
+    assert.deepStrictEqual(actionsOf({ ...open, state: 'done' }), [])
+    assert.deepStrictEqual(actionsOf({ ...open, state: 'abandoned', runState: 'suspended' }), ['reopen'])
+    assert.deepStrictEqual(actionsOf({ ...open, state: 'draft', planId: 'plan_1' }), ['start', 'abandon'])
+    assert.deepStrictEqual(actionsOf({ ...open, runState: 'running' }), ['stop', 'abandon'])
+    assert.deepStrictEqual(actionsOf({ ...open, runState: 'suspended' }), ['resume', 'abandon'])
+    // Ready, with the lead talking: stopping stops the agent, and nothing is resumed.
+    assert.deepStrictEqual(actionsOf({ ...open, runState: 'succeeded', working: true }), ['stop', 'abandon'])
+    assert.deepStrictEqual(actionsOf({ ...open, runState: 'succeeded' }), ['abandon'])
+  })
+
+  it.live('stops a task in the middle of its step, with nothing to answer, and resumes it from there', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const sessions = yield* Sessions
+      const { task, planId, actor } = yield* planned('Retry checkout [lead:wait]')
+      assert.deepStrictEqual((yield* shown(task.threadId)).actions, ['start', 'abandon'])
+      assert.strictEqual((yield* shown(task.threadId)).planId, planId)
+      yield* plans.start(planId, actor)
+      yield* until(
+        Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) && live.value.turnRunning ? [live] : [])),
+        (rows) => rows.length === 1,
+      )
+      const working = yield* shown(task.threadId)
+      assert.deepStrictEqual([working.phase, working.actions, working.planId], ['running', ['stop', 'abandon'], null])
+
+      yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      // Its run waits, its step cut short, and no agent is on it.
+      assert.deepStrictEqual(yield* runOf(task.taskId), { state: 'suspended', attempts: ['interrupted'] })
+      assert.deepStrictEqual(yield* attempts(task.taskId), [['implement', 0, 'cancelled', true]])
+      assert.isFalse(yield* onThread(task.threadId))
+      const stopped = yield* shown(task.threadId)
+      assert.deepStrictEqual([stopped.phase, stopped.actions], ['stopped', ['resume', 'abandon']])
+      // The lead going isn't a step needing the person: nothing waits on them.
+      yield* Effect.sleep('200 millis')
+      assert.deepStrictEqual(yield* callsOf(task.taskId), [])
+      // Pressed again, there is nothing to stop.
+      yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      assert.deepStrictEqual((yield* runOf(task.taskId)).attempts, ['interrupted'])
+
+      // Resumed, the lead carries the step on, told to, in a session of its own.
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      assert.deepStrictEqual(yield* runOf(task.taskId), { state: 'running', attempts: ['interrupted', 'active'] })
+      yield* until(
+        Effect.map(turns(task.threadId), (all) =>
+          all.filter((turn) => turn.prompt?.includes('Carry on with the task from where it stands') === true),
+        ),
+        (rows) => rows.length === 1,
+      )
+      assert.deepStrictEqual(yield* attempts(task.taskId), [
+        ['implement', 0, 'cancelled', true],
+        ['implement', 0, 'running', false],
+      ])
+      const sql = yield* SqlClient.SqlClient
+      assert.strictEqual(
+        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM provider_sessions WHERE thread_id = ${task.threadId}`)[0]?.n,
+        2,
+      )
+      assert.deepStrictEqual((yield* shown(task.threadId)).actions, ['stop', 'abandon'])
+      // Resuming what runs does nothing, asked of the task or of its run.
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      yield* (yield* Runs).resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      assert.strictEqual((yield* runOf(task.taskId)).attempts.length, 2)
+
+      // Stopped again, what the person says starts it with their words first: the lead reads them, and finishes its step.
+      yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      yield* sessions.send({
+        envelope: yield* command('thread.send'),
+        threadId: task.threadId,
+        body: 'Go ahead [lead:finish]',
+        disposition: 'after_current',
+      })
+      yield* tasks.resume({
+        envelope: yield* command('task.resume'),
+        taskId: task.taskId,
+        lead: { agentId: 'codex', model: 'large', effort: 'high' },
+      })
+      const ready = yield* standsAt(task.threadId, (now) => now.phase === 'ready')
+      // Ready, with its lead still on it: stopping stops that agent, and there is nothing to resume.
+      assert.deepStrictEqual(ready[0]?.actions, ['stop', 'abandon'])
+      assert.deepStrictEqual((yield* runOf(task.taskId)).state, 'succeeded')
+      // On the agent, model and effort the person picked.
+      const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
+        SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+      assert.deepStrictEqual({ ...last }, { agentId: 'codex', model: 'large', effort: 'high' })
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('stops a review in the middle, and resumes its round on its reviewer', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const sql = yield* SqlClient.SqlClient
+      const { task, planId, actor } = yield* planned('Retry checkout [lead:finish] [review:wait]', [implement(), reviewBy()])
+      yield* plans.start(planId, actor)
+      const reviewing = sql<{ threadId: string }>`
+        SELECT s.thread_id FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN provider_sessions s ON s.id = a.provider_session_id
+        WHERE n.node_key = 'review' AND a.state = 'running'`
+      const [review] = yield* until(reviewing, (rows) => rows.length === 1)
+      yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      // Every agent on it stops: the reviewer's too.
+      assert.isFalse(yield* onThread(review?.threadId ?? ''))
+      assert.deepStrictEqual(yield* attempts(task.taskId), [
+        ['implement', 0, 'succeeded', false],
+        ['review', 0, 'cancelled', true],
+      ])
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      yield* until(reviewing, (rows) => rows.length === 1)
+      assert.deepStrictEqual((yield* attempts(task.taskId)).slice(2), [['review', 0, 'running', false]])
+      assert.isTrue(yield* onThread(review?.threadId ?? ''))
+      // The lead had nothing waiting for it, so it stays stopped beside the review.
+      assert.isFalse(yield* onThread(task.threadId))
+      // What the person says then is read beside the review, by the lead.
+      yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      const sessions = yield* Sessions
+      yield* sessions.send({
+        envelope: yield* command('thread.send'),
+        threadId: task.threadId,
+        body: 'How is it going?',
+        disposition: 'after_current',
+      })
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      yield* until(
+        Effect.map(onThread(task.threadId), (on) => (on ? [on] : [])),
+        (rows) => rows.length === 1,
+      )
+      assert.isTrue(yield* onThread(review?.threadId ?? ''))
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('stops a task waiting on the person, withdrawing its call, and resumes it on another agent', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const sessions = yield* Sessions
+      // Its lead can't start, so Implement needs the person.
+      const { task, planId, actor } = yield* planned('Nobody to do it', [implement('missing')])
+      yield* plans.start(planId, actor)
+      yield* standsAt(task.threadId, (now) => now.phase === 'waiting')
+      assert.deepStrictEqual((yield* shown(task.threadId)).actions, ['stop', 'abandon'])
+      yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      assert.deepStrictEqual(yield* callsOf(task.taskId), [{ kind: 'stuck', state: 'withdrawn', why: 'failed_to_start' }])
+      assert.strictEqual((yield* shown(task.threadId)).phase, 'stopped')
+      // Resumed on an agent that can't start either, it needs the person again, as a plan starting would.
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      yield* standsAt(task.threadId, (now) => now.phase === 'waiting')
+      assert.strictEqual((yield* callsOf(task.taskId)).filter((call) => call.state === 'open').length, 1)
+      // Abandoned while it waits, its call goes with it; reopened, it is stopped where it was.
+      yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
+      assert.deepStrictEqual(
+        (yield* callsOf(task.taskId)).map((call) => call.state),
+        ['withdrawn', 'withdrawn'],
+      )
+      yield* tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId })
+      assert.deepStrictEqual((yield* shown(task.threadId)).actions, ['resume', 'abandon'])
+      // On one that can, it carries the step on there.
+      yield* tasks.resume({
+        envelope: yield* command('task.resume'),
+        taskId: task.taskId,
+        lead: { agentId: 'codex', model: null, effort: null },
+      })
+      yield* until(
+        Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) && live.value.agentId === 'codex' ? [live] : [])),
+        (rows) => rows.length === 1,
+      )
+      assert.deepStrictEqual((yield* attempts(task.taskId)).at(-1), ['implement', 0, 'running', false])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('carries the lead’s own step on when it stopped between two steps', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      // Out of rounds with settled changes no review has seen: the run waits on the person with no step under way.
+      const { task, planId, actor } = yield* planned('Tighten the types [lead:finish] [review:always]', [implement(), reviewBy()])
+      yield* plans.start(planId, actor)
+      yield* standsAt(task.threadId, (now) => now.phase === 'waiting', Duration.seconds(60))
+      assert.deepStrictEqual(
+        (yield* callsOf(task.taskId)).map((call) => call.why),
+        ['round_limit'],
+      )
+      yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      assert.deepStrictEqual((yield* attempts(task.taskId)).at(-1), ['settle', 2, 'succeeded', false])
+      // Resumed, the lead settles what is open again; with still more to see and no rounds left, the person decides again.
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      yield* until(callsOf(task.taskId), (calls) => calls.filter((call) => call.state === 'open').length === 1, Duration.seconds(30))
+      assert.deepStrictEqual((yield* attempts(task.taskId)).slice(-2), [
+        ['settle', 2, 'succeeded', false],
+        ['settle', 2, 'succeeded', false],
+      ])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('abandons a task, keeping its worktree and branch, and reopens it on them, putting back a folder that went', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const sql = yield* SqlClient.SqlClient
+      const { root, project, task, planId, actor } = yield* planned('Retry checkout [lead:wait]')
+      yield* plans.start(planId, actor)
+      yield* standsAt(task.threadId, (now) => now.phase === 'running')
+      const before = yield* shown(task.threadId)
+
+      yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
+      const settled = yield* shown(task.threadId)
+      assert.deepStrictEqual([settled.state, settled.phase, settled.actions], ['abandoned', 'settled', ['reopen']])
+      assert.isFalse(yield* onThread(task.threadId))
+      // Its run waits, cut short, for reopening; its worktree and branch are where they were.
+      assert.strictEqual((yield* runOf(task.taskId)).state, 'suspended')
+      assert.isTrue(existsSync(before.worktree ?? ''))
+      assert.strictEqual(git(root, 'rev-parse', '--verify', '--quiet', `refs/heads/${before.branch}`).length, 40)
+      const [kept] = yield* sql<{ settledAt: string | null }>`SELECT settled_at FROM tasks WHERE id = ${task.taskId}`
+      assert.isNotNull(kept?.settledAt)
+      // Abandoned again, nothing changes; and an abandoned task is neither stopped nor resumed.
+      yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      assert.strictEqual((yield* runOf(task.taskId)).state, 'suspended')
+
+      // The person deleted its folder meanwhile: reopening puts it back, on its branch, with what it had committed.
+      writeFileSync(join(before.worktree ?? '', 'note.txt'), 'kept\n')
+      git(before.worktree ?? '', 'add', '.')
+      git(before.worktree ?? '', 'commit', '-q', '-m', 'Keep a note')
+      rmSync(before.worktree ?? '', { recursive: true, force: true })
+      yield* tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId })
+      assert.strictEqual(git(before.worktree ?? '', 'rev-parse', '--abbrev-ref', 'HEAD'), before.branch)
+      assert.isTrue(existsSync(join(before.worktree ?? '', 'note.txt')))
+      const reopened = yield* shown(task.threadId)
+      assert.deepStrictEqual([reopened.state, reopened.phase, reopened.actions], ['open', 'stopped', ['resume', 'abandon']])
+      const [open] = yield* sql<{ settledAt: string | null }>`SELECT settled_at FROM tasks WHERE id = ${task.taskId}`
+      assert.isNull(open?.settledAt)
+      // Reopening an open task does nothing.
+      yield* tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId })
+      assert.strictEqual((yield* shown(task.threadId)).state, 'open')
+
+      // Abandoned with its branch gone too, it can't be reopened on it, and stays as it was.
+      yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
+      rmSync(before.worktree ?? '', { recursive: true, force: true })
+      git(root, 'worktree', 'prune')
+      git(root, 'branch', '-D', before.branch ?? '')
+      const refused = yield* Effect.flip(tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId }))
+      assert.deepStrictEqual([(refused as { _tag?: string })._tag, (refused as { why?: string }).why], ['TaskRefused', 'branch_gone'])
+      assert.strictEqual((yield* shown(task.threadId)).state, 'abandoned')
+      // Its project removed from Althar, it isn't reopened there.
+      yield* (yield* Projects).remove(project.projectId)
+      const gone = yield* Effect.flip(tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId }))
+      assert.deepStrictEqual([(gone as { _tag?: string })._tag, (gone as { kind?: string }).kind], ['NotFound', 'project'])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('abandons a task before its plan starts, and reopened, its plan waits held', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const sql = yield* SqlClient.SqlClient
+      const { task, planId, actor } = yield* planned('Later [lead:finish]')
+      yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
+      const [plan] = yield* sql<{ state: string; startsAt: string | null }>`SELECT state, starts_at FROM task_plans WHERE id = ${planId}`
+      assert.deepStrictEqual({ ...plan }, { state: 'declined', startsAt: null })
+      // Declined, it never starts.
+      yield* plans.start(planId, actor)
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM runs`)[0]?.n, 0)
+
+      yield* tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId })
+      const reopened = yield* shown(task.threadId)
+      // A draft again, with its plan held: it starts when the person says.
+      assert.deepStrictEqual([reopened.state, reopened.phase, reopened.actions], ['draft', 'held', ['start', 'abandon']])
+      assert.notStrictEqual(reopened.planId, planId)
+      yield* plans.start(reopened.planId ?? '', actor)
+      yield* standsAt(task.threadId, (now) => now.phase === 'ready')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('neither abandons nor reopens a merged task', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const changes = yield* Changes
+      const tasks = yield* Tasks
+      const sql = yield* SqlClient.SqlClient
+      const root = repository()
+      git(root, 'config', 'user.name', 'T')
+      git(root, 'config', 'user.email', 't@t.test')
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
+      const task = yield* projects.createTask({
+        envelope: yield* command('task.create'),
+        projectId: project.projectId,
+        title: 'Add a retry',
+      })
+      const [worktree] = yield* sql<{ slug: string; path: string }>`
+        SELECT b.slug, w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${task.taskId}`
+      writeFileSync(join(worktree?.path ?? '', 'retry.ts'), 'retry\n')
+      git(worktree?.path ?? '', 'add', '.')
+      git(worktree?.path ?? '', 'commit', '-q', '-m', 'Retry')
+      yield* changes.mergeHere(task.taskId, [{ repository: worktree?.slug ?? '', head: git(worktree?.path ?? '', 'rev-parse', 'HEAD') }])
+      const merged = yield* shown(task.threadId)
+      assert.deepStrictEqual([merged.state, merged.actions], ['done', []])
+      for (const refused of [
+        yield* Effect.flip(tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })),
+        yield* Effect.flip(tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId })),
+      ])
+        assert.deepStrictEqual([(refused as { _tag?: string })._tag, (refused as { why?: string }).why], ['TaskRefused', 'merged'])
+      // Stopping or resuming it is nothing; nor has it a run to resume.
+      yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      yield* (yield* Runs).resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      assert.strictEqual((yield* shown(task.threadId)).state, 'done')
+      // A task that isn't there isn't found.
+      const missing = yield* Effect.flip(tasks.stop({ envelope: yield* command('task.stop'), taskId: 'task_missing' }))
+      assert.strictEqual((missing as { _tag?: string })._tag, 'NotFound')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('lets a held plan count down again, and starts it when the countdown ends', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const sql = yield* SqlClient.SqlClient
+      const { task, planId, actor } = yield* planned('Count again [lead:finish]')
+      const startsAt = Effect.map(
+        sql<{ startsAt: string | null; state: string }>`SELECT starts_at, state FROM task_plans WHERE id = ${planId}`,
+        ([row]) => row,
+      )
+      // Counting down, there is nothing to let go.
+      const counting = yield* startsAt
+      yield* plans.unhold(planId, actor)
+      assert.strictEqual((yield* startsAt)?.startsAt, counting?.startsAt)
+      yield* plans.hold(planId, actor)
+      assert.isNull((yield* startsAt)?.startsAt)
+      assert.strictEqual((yield* shown(task.threadId)).phase, 'held')
+      yield* plans.unhold(planId, actor)
+      // The whole countdown again, from now: shorter than the minute it had.
+      const again = yield* startsAt
+      assert.isNotNull(again?.startsAt)
+      assert.isBelow(Date.parse(again?.startsAt ?? '') - Date.now(), 1_000)
+      assert.strictEqual((yield* shown(task.threadId)).phase, 'planned')
+      // When it ends, the plan starts.
+      yield* until(
+        Effect.map(startsAt, (row) => (row?.state === 'accepted' ? [row] : [])),
+        (rows) => rows.length === 1,
+      )
+      yield* standsAt(task.threadId, (now) => now.phase === 'ready')
+      const unheld = yield* sql<{ type: string }>`SELECT type FROM record_events WHERE aggregate_id = ${planId} ORDER BY sequence`
+      assert.deepStrictEqual(
+        unheld.map((row) => row.type),
+        ['task_plan.proposed', 'task_plan.held', 'task_plan.unheld', 'task_plan.accepted'],
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+})

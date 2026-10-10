@@ -45,6 +45,7 @@ import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
+import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
 import { anyOf, SignIns } from './SignIns'
 import { expected, words } from './words'
@@ -123,6 +124,7 @@ export const handlers = Api.toLayer(
     const policies = yield* Policies
     const plans = yield* Plans
     const runs = yield* Runs
+    const tasks = yield* Tasks
     const coordinator = yield* Coordinator
     const instance = yield* Instance
     const sql = yield* SqlClient.SqlClient
@@ -527,6 +529,35 @@ export const handlers = Api.toLayer(
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       Interrupt: ({ commandId, threadId }) => once(commandId, api(sessions.interrupt(threadId))),
       StopSession: ({ commandId, threadId }) => once(commandId, api(sessions.stop(threadId))),
+      StopTask: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.stop', { taskId }, commandId), (said) => tasks.stop({ envelope: said, taskId }))),
+        ),
+      ResumeTask: ({ commandId, taskId, agentId, model, effort }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.resume', { taskId, agentId }, commandId), (said) =>
+              tasks.resume({
+                envelope: said,
+                taskId,
+                // The agent the person picked, else its last lead.
+                ...(agentId === undefined ? {} : { lead: { agentId, model: model ?? null, effort: effort ?? null } }),
+              }),
+            ),
+          ),
+        ),
+      AbandonTask: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.abandon', { taskId }, commandId), (said) => tasks.abandon({ envelope: said, taskId }))),
+        ),
+      ReopenTask: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
+        ),
       Send: ({ commandId, threadId, body, disposition }) =>
         api(
           Effect.gen(function* () {
@@ -586,6 +617,7 @@ export const handlers = Api.toLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(plans.start(planId, instance.personId))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
+      UnholdPlan: ({ commandId, planId }) => once(commandId, api(plans.unhold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
       AnswerStuck: ({ commandId, attentionId, answer }) =>
         once(

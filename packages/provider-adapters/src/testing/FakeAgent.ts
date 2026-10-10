@@ -252,7 +252,7 @@ const playStall = async (
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
- * until it is stopped, and `[lead:settle-quietly]` settles without reporting.
+ * until it is stopped, and so does `[review:wait]` reviewing; `[lead:settle-quietly]` settles without reporting.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
  * Althar says it isn't committed. Asked for its pull request's description
@@ -288,6 +288,11 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
       return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
     }
     if (available.has('report_review')) {
+      // Reviews until it is stopped: for a review cut short in the middle.
+      if (session.markers.has('[review:wait]')) {
+        for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        return 'Stopped reviewing.'
+      }
       if (session.markers.has('[review:always]'))
         return await call('report_review', {
           verdict: 'changes_requested',

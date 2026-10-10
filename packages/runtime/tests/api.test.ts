@@ -27,6 +27,7 @@ import {
   NotFound,
   OutwardUncertain,
   SessionFailed,
+  TaskRefused,
 } from '../src/errors'
 import { NotConnected } from '../src/Connections'
 import { Folders } from '../src/Folders'
@@ -960,6 +961,71 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
+  it.live('stops, resumes, abandons and reopens a task, and lets a held plan count down again', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected({ countdown: Duration.minutes(5) })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Retry',
+          description: '[lead:wait]',
+          steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        })
+        const working = yield* eventually(
+          client.GetThread({ threadId: task.threadId, limit: 0 }),
+          (thread) => thread.session?.turnRunning === true,
+        )
+        assert.deepStrictEqual([working.task.actions, working.task.planId], [['stop', 'abandon'], null])
+        const stopping = { commandId: commandId(), taskId: task.id }
+        yield* client.StopTask(stopping)
+        // Sent again by a retry, it is one stop.
+        yield* client.StopTask(stopping)
+        const stopped = yield* client.GetThread({ threadId: task.threadId, limit: 0 })
+        assert.deepStrictEqual([stopped.task.phase, stopped.task.actions, stopped.session], ['stopped', ['resume', 'abandon'], null])
+        yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'codex', model: 'large', effort: 'high' })
+        const resumed = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
+        assert.strictEqual(resumed.session?.agentId, 'codex')
+        yield* client.AbandonTask({ commandId: commandId(), taskId: task.id })
+        const abandoned = yield* client.GetThread({ threadId: task.threadId, limit: 0 })
+        assert.deepStrictEqual([abandoned.task.state, abandoned.task.phase, abandoned.task.actions], ['abandoned', 'settled', ['reopen']])
+        yield* client.ReopenTask({ commandId: commandId(), taskId: task.id })
+        const reopened = yield* client.GetThread({ threadId: task.threadId, limit: 0 })
+        assert.deepStrictEqual([reopened.task.state, reopened.task.actions], ['open', ['resume', 'abandon']])
+        // Resumed with its last lead.
+        yield* client.ResumeTask({ commandId: commandId(), taskId: task.id })
+        const again = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
+        assert.strictEqual(again.session?.agentId, 'codex')
+        assert.strictEqual(
+          (yield* Effect.flip(client.AbandonTask({ commandId: commandId(), taskId: 'task_missing' }))).message,
+          "That task isn't there any more.",
+        )
+
+        // A plan the coordinator proposes, held, counts down again when let go.
+        const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: coordinator.threadId,
+          body: 'Add a retry. [coordinator:plan]',
+          disposition: 'after_current',
+        })
+        const planned = yield* eventually(client.GetCoordinator({ projectId: project.id, limit: 50 }), (snapshot) =>
+          snapshot.items.some((item) => item.kind === 'task' && item.content.phase === 'planned'),
+        )
+        const card = planned.items.find((item) => item.kind === 'task' && item.content.phase === 'planned')
+        const planId = card?.kind === 'task' ? (card.content.plan?.id ?? '') : ''
+        yield* client.HoldPlan({ commandId: commandId(), planId })
+        const held = yield* client.GetThreadItem({ threadId: planned.threadId, itemId: card?.id ?? '' })
+        assert.deepStrictEqual(held.kind === 'task' ? [held.content.phase, held.content.plan?.startsAt] : [], ['held', null])
+        yield* client.UnholdPlan({ commandId: commandId(), planId })
+        const counting = yield* client.GetThreadItem({ threadId: planned.threadId, itemId: card?.id ?? '' })
+        assert.strictEqual(counting.kind === 'task' ? counting.content.phase : undefined, 'planned')
+        assert.isString(counting.kind === 'task' ? counting.content.plan?.startsAt : undefined)
+      }),
+    ),
+  )
+
   it.live('shows a step that needs the person as a call, and takes their answer', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1290,6 +1356,12 @@ describe('words', () => {
     )
     // Refused without a word why: just that it was.
     assert.strictEqual(said(new PushRefused({ taskId: 't', why: 'refused', remote: 'origin/main' })), 'origin/main refused the push.')
+    // A task's course: a merged task stays done, and one whose worktree and branch went can't be reopened.
+    assert.strictEqual(said(new TaskRefused({ taskId: 't', why: 'merged' })), 'The task is merged, so it stays done.')
+    assert.strictEqual(
+      said(new TaskRefused({ taskId: 't', why: 'branch_gone' })),
+      'The task’s worktree and its branch are both gone, so it can’t be reopened on them.',
+    )
     // A merge that conflicts carries its files, for the window to have the lead settle them.
     assert.deepStrictEqual(words(new CantMerge({ taskId: 't', why: 'conflicts', detail: 'README.md' }), name), {
       reason: 'CantMerge',
