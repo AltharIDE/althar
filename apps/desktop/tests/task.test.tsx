@@ -41,6 +41,20 @@ const running = (overrides: Partial<ThreadSnapshot> = {}) => {
   return { ...base, session: base.session === null ? null : { ...base.session, turnRunning: true } }
 }
 
+/** A task standing as given, with its menu open: the client, the view, and each item the menu offers, by its name. */
+const taskMenu = async (task: Partial<ThreadSnapshot['task']>, session?: ThreadSnapshot['session']) => {
+  const { client } = fakeClient({
+    getThread: vi.fn(async () => thread({ task: { ...thread().task, ...task }, ...(session === undefined ? {} : { session }) })),
+  })
+  const view = withServices(<Task />, client)
+  await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+  // An item's name is its label, without what it says it does.
+  const offered = (await screen.findAllByRole('menuitem')).map(
+    (item) => document.getElementById(item.getAttribute('aria-labelledby') ?? '')?.textContent,
+  )
+  return { client, view, offered }
+}
+
 describe('a task', () => {
   it('catches up on what changed between its route reading it and its first listening', async () => {
     const meanwhile = items.says('Said meanwhile', 'claude-code', 'i-meanwhile')
@@ -676,7 +690,191 @@ describe('a task', () => {
     expect(screen.queryByText(/takes over from/)).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'More for this task' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: /Stop the task/ }))
-    expect(client.stopSession).toHaveBeenCalledWith('th1')
+    expect(client.stopTask).toHaveBeenCalledWith('t1')
+  })
+
+  it('offers stopping and abandoning in its menu while it works, as the runtime says', async () => {
+    const { client, offered } = await taskMenu({})
+    expect(offered).toEqual(['Open in Zed', 'Stop the task', 'Abandon'])
+    await userEvent.click(screen.getByRole('menuitem', { name: /Stop the task/ }))
+    await waitFor(() => expect(client.stopTask).toHaveBeenCalledWith('t1'))
+  })
+
+  it('offers resuming a task stopped in the middle of its step', async () => {
+    const { client, offered } = await taskMenu({ phase: 'stopped', actions: ['resume', 'abandon'] }, null)
+    expect(offered).toEqual(['Open in Zed', 'Resume', 'Abandon'])
+    expect(screen.getByText('Stopped')).toBeTruthy()
+    await userEvent.click(screen.getByRole('menuitem', { name: /Resume/ }))
+    await waitFor(() => expect(client.resumeTask).toHaveBeenCalledWith({ taskId: 't1' }))
+  })
+
+  it('offers starting its plan now while it waits to start', async () => {
+    const { client, offered } = await taskMenu({ phase: 'held', actions: ['start', 'abandon'], planId: 'pln1' }, null)
+    expect(offered).toEqual(['Open in Zed', 'Start now', 'Abandon'])
+    await userEvent.click(screen.getByRole('menuitem', { name: /Start now/ }))
+    await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith('pln1'))
+  })
+
+  it('marks each of its draft pull requests ready from its menu, in turn', async () => {
+    const drafts = [change({ draft: true }), change({ draft: true, number: 1207, url: 'https://github.com/meridian/web/pull/1207' })]
+    const { client, offered } = await taskMenu(
+      { phase: 'ready', actions: ['abandon'], changes: [...drafts, change({ state: 'merged' })] },
+      null,
+    )
+    expect(offered).toEqual(['Open in Zed', 'Mark ready for review', 'Abandon'])
+    await userEvent.click(screen.getByRole('menuitem', { name: /Mark ready for review/ }))
+    await waitFor(() => expect(client.markReady).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(client.markReady).mock.calls).toEqual(drafts.map((one) => ['t1', one.url]))
+  })
+
+  it('says an abandoned task was abandoned, and offers reopening it, and only its folder once merged', async () => {
+    const drafts = [change({ draft: true })]
+    const abandoned = await taskMenu({ phase: 'settled', state: 'abandoned', actions: ['reopen'], changes: drafts }, null)
+    expect(abandoned.offered).toEqual(['Open in Zed', 'Reopen'])
+    expect(screen.getByText('Abandoned')).toBeTruthy()
+    await userEvent.click(screen.getByRole('menuitem', { name: /Reopen/ }))
+    await waitFor(() => expect(abandoned.client.reopenTask).toHaveBeenCalledWith('t1'))
+    abandoned.view.unmount()
+    // Merged, it is done for good.
+    expect((await taskMenu({ phase: 'settled', state: 'done', actions: [] }, null)).offered).toEqual(['Open in Zed'])
+  })
+
+  it('asks before abandoning, saying what stays, and abandons on the person’s say-so', async () => {
+    const pr = change({ state: 'open' })
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, changes: [pr] } })) })
+    vi.mocked(client.abandonTask).mockRejectedValueOnce(
+      new ApiError({ reason: 'TaskRefused', message: 'The task is merged, so it stays done.' }),
+    )
+    withServices(<Task />, client)
+    const abandon = async () => {
+      await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+      await userEvent.click(await screen.findByRole('menuitem', { name: /Abandon/ }))
+      return screen.findByRole('dialog', { name: 'Abandon this task?' })
+    }
+    const asked = await abandon()
+    expect(asked.textContent).toContain('The agents on it stop.')
+    expect(asked.textContent).toContain('Its worktree stays in /w/meridian, as it is.')
+    expect(asked.textContent).toContain('Its branch althar/add-a-retry stays. Nothing is pushed or deleted.')
+    expect(asked.textContent).toContain(`PR ${pr.prefix}${pr.number} stays open on GitHub.`)
+    // Cancelled, nothing happens.
+    await userEvent.click(within(asked).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(client.abandonTask).not.toHaveBeenCalled()
+    // Refused, it says why and stays open; then it goes.
+    await userEvent.click(within(await abandon()).getByRole('button', { name: 'Abandon task' }))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toBeTruthy()
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Abandon task' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(client.abandonTask).toHaveBeenCalledTimes(2)
+    expect(client.abandonTask).toHaveBeenLastCalledWith('t1')
+  })
+
+  it('says when abandoning that a planned task’s plan doesn’t start, and nothing stops for one at rest', async () => {
+    const ask = async (task: Partial<ThreadSnapshot['task']>) => {
+      const { view } = await taskMenu(task, null)
+      await userEvent.click(screen.getByRole('menuitem', { name: /Abandon/ }))
+      const asked = await screen.findByRole('dialog', { name: 'Abandon this task?' })
+      return { view, said: asked.textContent ?? '' }
+    }
+    const planned = await ask({ phase: 'held', actions: ['start', 'abandon'], planId: 'pln1' })
+    expect(planned.said).toContain('Its plan doesn’t start.')
+    expect(planned.said).not.toContain('stays open on')
+    planned.view.unmount()
+    const still = await ask({ phase: 'stopped', actions: ['abandon'], worktree: null, branch: null })
+    expect(still.said).not.toContain('stop')
+    expect(still.said).toContain('It has no worktree to leave behind.')
+  })
+
+  it('reopens an abandoned task when the person writes to it, then gives the lead their words first', async () => {
+    const base = snapshot()
+    const lead = { agentId: 'claude-code', model: 'opus', account: null }
+    const abandoned = thread({ task: { ...base.task, phase: 'settled', state: 'abandoned', actions: ['reopen'], lead }, session: null })
+    // Reopened, it stands where it was: stopped in the middle of its step, or with nothing to carry on.
+    const reopened = (actions: ThreadSnapshot['task']['actions']) =>
+      thread({ task: { ...base.task, phase: 'stopped', state: 'open', actions, lead }, session: null })
+    const writes = async (after: ThreadSnapshot) => {
+      let open = false
+      const { client } = fakeClient({
+        getThread: vi.fn(async () => (open ? after : abandoned)),
+        reopenTask: vi.fn(async () => {
+          open = true
+        }),
+      })
+      const view = withServices(<Task />, client)
+      await waitFor(() => expect(client.status).toHaveBeenCalled())
+      await userEvent.type(await screen.findByRole('textbox', { name: /^Tell .* something$/ }), 'Carry on{Enter}')
+      await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Carry on', disposition: 'after_current' }))
+      // Reopened first, as its menu would: the message goes to an open task.
+      expect(client.reopenTask).toHaveBeenCalledWith('t1')
+      expect(vi.mocked(client.reopenTask).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.send).mock.invocationCallOrder[0] ?? 0)
+      return { client, view }
+    }
+    const resumed = await writes(reopened(['resume', 'abandon']))
+    await waitFor(() =>
+      expect(resumed.client.resumeTask).toHaveBeenCalledWith({ taskId: 't1', agentId: 'claude-code', model: 'opus', effort: null }),
+    )
+    expect(resumed.client.startSession).not.toHaveBeenCalled()
+    resumed.view.unmount()
+    const started = await writes(reopened(['abandon']))
+    await waitFor(() =>
+      expect(started.client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'opus' }),
+    )
+    expect(started.client.resumeTask).not.toHaveBeenCalled()
+  })
+
+  it('says why an abandoned task can’t be reopened when the person writes to it, and sends nothing', async () => {
+    const base = snapshot()
+    const abandoned = thread({
+      task: {
+        ...base.task,
+        phase: 'settled',
+        state: 'abandoned',
+        actions: ['reopen'],
+        lead: { agentId: 'claude-code', model: 'opus', account: null },
+      },
+      session: null,
+    })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => abandoned),
+      reopenTask: vi.fn(async () =>
+        Promise.reject(
+          new ApiError({
+            reason: 'TaskRefused',
+            message: 'The task’s worktree and its branch are both gone, so it can’t be reopened on them.',
+          }),
+        ),
+      ),
+    })
+    withServices(<Task />, client)
+    await waitFor(() => expect(client.status).toHaveBeenCalled())
+    await userEvent.type(await screen.findByRole('textbox', { name: /^Tell .* something$/ }), 'Carry on{Enter}')
+    expect(await screen.findByText(/can’t be reopened on them/)).toBeTruthy()
+    expect(client.send).not.toHaveBeenCalled()
+    expect(client.startSession).not.toHaveBeenCalled()
+  })
+
+  it('resumes a task stopped in the middle of its step with what the person says, on the lead picked', async () => {
+    const base = snapshot()
+    const stopped = thread({
+      task: {
+        ...base.task,
+        phase: 'stopped',
+        actions: ['resume', 'abandon'],
+        lead: { agentId: 'claude-code', model: 'opus', account: null },
+      },
+      session: null,
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => stopped) })
+    withServices(<Task />, client)
+    await waitFor(() => expect(client.status).toHaveBeenCalled())
+    await userEvent.type(await screen.findByRole('textbox', { name: /^Tell .* something$/ }), 'Use the new client{Enter}')
+    await waitFor(() =>
+      expect(client.resumeTask).toHaveBeenCalledWith({ taskId: 't1', agentId: 'claude-code', model: 'opus', effort: null }),
+    )
+    // Queued first, so it is the lead's first word; and no lead is started beside the run.
+    expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Use the new client', disposition: 'after_current' })
+    expect(vi.mocked(client.send).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.resumeTask).mock.invocationCallOrder[0] ?? 0)
+    expect(client.startSession).not.toHaveBeenCalled()
   })
 
   it('opens the pull request of work that ended on its branch', async () => {
@@ -1078,7 +1276,9 @@ describe('a task', () => {
   })
 
   it('starts the lead picked when the person says something to a task none is working on, with that as its first turn', async () => {
-    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ session: null })) })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ session: null, task: { ...thread().task, phase: 'stopped', actions: ['abandon'] } })),
+    })
     withServices(<Task />, client)
     expect(await screen.findByText('Stopped')).toBeTruthy()
     // No button to start one that has nothing to do: saying something starts it.
@@ -1276,6 +1476,11 @@ describe('a task', () => {
     // Ready, accepting it is the person's; settled, it is done.
     expect(statusOf({ ...base, task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Yours, state: 'Ready for you' })
     expect(statusOf({ ...base, task: { ...base.task, phase: 'settled' } })).toEqual({ status: TaskStatus.Done, state: 'Done' })
+    // Abandoned, it says so.
+    expect(statusOf({ ...base, task: { ...base.task, phase: 'settled', state: 'abandoned' } })).toEqual({
+      status: TaskStatus.Done,
+      state: 'Abandoned',
+    })
     expect(statusOf({ ...running(), task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Running, state: 'Working' })
     expect(
       statusOf({
@@ -1307,6 +1512,9 @@ describe('a task', () => {
     expect(sinceOf({ ...base, task: { ...base.task, phase: 'ready' }, items: [reported] }, now)).toBe('ready · 4m ago')
     expect(sinceOf({ ...base, task: { ...base.task, phase: 'stopped' }, items: [reported] }, now)).toBe('stopped · 4m ago')
     expect(sinceOf({ ...base, task: { ...base.task, phase: 'settled', settledAt: reported.createdAt } }, now)).toBe('done · 4m ago')
+    expect(sinceOf({ ...base, task: { ...base.task, phase: 'settled', state: 'abandoned', settledAt: reported.createdAt } }, now)).toBe(
+      'abandoned · 4m ago',
+    )
   })
 
   it('says how long it has run, until it stopped', () => {

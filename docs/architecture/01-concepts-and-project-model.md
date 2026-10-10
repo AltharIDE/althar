@@ -404,8 +404,8 @@ same source location, while each run still receives its own managed workspace.
 | `CoordinatorThread` | The project is created (later, one per member) | Archived with the project; never truncated |
 | `RepositoryBinding` | Source identity joins a project | Detached/tombstoned |
 | `RepositoryLocation` | A host maps or clones a binding | Remapped, unavailable, or removed |
-| `Task` | Desired work is recorded | Completed, cancelled, or archived |
-| `Run` | A task is submitted under a workflow and policy | Logical outcome chosen |
+| `Task` | Desired work is recorded | Done once merged, for good; abandoned, which can be reopened; or archived with its project ([05](05-workflow-engine.md#task-and-run-lifecycle)) |
+| `Run` | A task is submitted under a workflow and policy | Logical outcome chosen; suspended meanwhile while its task is stopped or abandoned |
 | `RunAttempt` | Execution or retry is admitted | Succeeded, failed, cancelled, interrupted |
 | `Workspace` | A task's first run is admitted on a device | Retained, published, or cleaned with the task |
 | `WorkspaceSnapshot` | A node attempt starts or ends, a switch, an interrupt | Immutable |

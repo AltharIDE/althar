@@ -15,7 +15,8 @@ import { useServices, useWatch } from '../../data/services'
  * A task's view model: its thread as the store has it, the text an agent is
  * streaming, and what the person can do: talk to the lead, interrupt it,
  * answer its calls, change its model and effort or hand the task to another
- * agent with one, stop it. It reads the thread's newest page once, then only what changes: an item
+ * agent with one, and steer its course: start its plan now, stop it, resume
+ * it, abandon it, reopen it. It reads the thread's newest page once, then only what changes: an item
  * that changed is read alone, and anything else about the thread (the agent
  * working, the calls waiting) reads the thread's head again, without its
  * items. Earlier items are read a page at a time, when asked for.
@@ -46,7 +47,9 @@ export interface TaskModel {
   readonly readFiles: () => void
   /**
    * Says something to the lead. With no lead working, `start` names the one
-   * to start: the message is its first turn, with its brief.
+   * to start: the message is its first turn, with its brief. A task stopped
+   * in the middle of its step resumes with it, on that one; an abandoned one
+   * is reopened first.
    */
   readonly send: (body: string, start?: Choice) => Promise<void>
   readonly sendNow: (body: string) => Promise<void>
@@ -57,13 +60,24 @@ export interface TaskModel {
   readonly choose: (choice: Choice) => Promise<void>
   /** Hands the task to another agent with what the person says: the new lead's first turn, after its brief. */
   readonly handOver: (choice: Choice, body: string) => Promise<void>
+  /** Stops the task: every agent on it, until it is resumed. */
   readonly stop: () => Promise<void>
+  /** Carries the task on from the step it stopped on, with its last lead. */
+  readonly resume: () => Promise<void>
+  /** Settles it without its change; its worktree and branch stay. Whether it was abandoned. */
+  readonly abandon: () => Promise<boolean>
+  /** Opens it again, once abandoned, on its worktree and branch. */
+  readonly reopen: () => Promise<void>
+  /** Starts its plan now, while it waits to start. */
+  readonly startPlan: (planId: string) => Promise<void>
   /** Answers a call; with `always`, the answer is kept in the project's rules by that scope. */
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string, always?: AlwaysScope) => Promise<boolean>
   /** Answers a step that needs the person. */
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
   /** Marks the task's draft pull request ready for review: the one at `url`, in a task of several. */
   readonly markReady: (url?: string) => Promise<void>
+  /** Marks each of these draft pull requests ready for review, in turn: as its menu does, for all of them. */
+  readonly markAllReady: (urls: ReadonlyArray<string>) => Promise<void>
   /** Opens the pull request of a task whose work ended on its branch. */
   readonly openChange: () => Promise<void>
   /** Merges the task into its repositories' default branches here, up to the heads it showed; it has no pull request. */
@@ -223,6 +237,10 @@ export const useTask = (threadId: string): TaskModel => {
     [readHead, fail],
   )
 
+  /** Runs an action on the task, once it has been read. */
+  const onTask = (action: (taskId: string) => Promise<unknown>) =>
+    act(async () => (snapshot === null ? undefined : action(snapshot.task.id)))
+
   /** What the person sends shows at once, as the window's copy until the store's arrives; gone again if the send fails. */
   const shown = (
     text: string,
@@ -261,9 +279,18 @@ export const useTask = (threadId: string): TaskModel => {
     readFiles,
     send: (body, start) =>
       shown(body, 'after_current', async () => {
+        // Abandoned, what the person says reopens it first, as its menu would; refused, nothing is sent.
+        const reopening = snapshot?.task.actions.includes('reopen') === true
+        if (reopening && snapshot !== null) await client.reopenTask(snapshot.task.id)
         // Queued first, so the lead that starts reads it in its first turn rather than after one of its own.
         await client.send({ threadId, body, disposition: 'after_current' })
-        if (start !== undefined) await client.startSession(startOf(threadId, start))
+        if (start === undefined || snapshot === null) return
+        // Reopened, it stands where it was, which only the runtime knows: read again.
+        const actions = reopening ? (await client.getThread(threadId, { limit: 0 })).task.actions : snapshot.task.actions
+        // Stopped in the middle of its step, the task carries that step on, with what the person said first.
+        if (actions.includes('resume'))
+          await client.resumeTask({ taskId: snapshot.task.id, agentId: start.agentId, model: start.model, effort: start.effort })
+        else await client.startSession(startOf(threadId, start))
       }),
     sendNow: (body) => shown(body, 'interrupt_and_continue', () => client.send({ threadId, body, disposition: 'interrupt_and_continue' })),
     takeBack: async (itemId) => {
@@ -287,7 +314,18 @@ export const useTask = (threadId: string): TaskModel => {
         await (session == null ? client.startSession(startOf(threadId, choice)) : moveTo(client, threadId, runningOn(session), choice))
       }),
     handOver: (choice, body) => shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body }), false),
-    stop: () => act(() => client.stopSession(threadId)),
+    stop: () => onTask((taskId) => client.stopTask(taskId)),
+    resume: () => onTask((taskId) => client.resumeTask({ taskId })),
+    abandon: async () => {
+      let abandoned = false
+      await onTask(async (taskId) => {
+        await client.abandonTask(taskId)
+        abandoned = true
+      })
+      return abandoned
+    },
+    reopen: () => onTask((taskId) => client.reopenTask(taskId)),
+    startPlan: (planId) => act(() => client.startPlan(planId)),
     answer: async (attentionId, decision, reason, always) => {
       // Whether it went through: a call whose answer didn't is answerable again.
       let through = true
@@ -308,6 +346,10 @@ export const useTask = (threadId: string): TaskModel => {
     },
     answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
     markReady: (url) => act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id, url))),
+    markAllReady: (urls) =>
+      onTask(async (taskId) => {
+        for (const url of urls) await client.markReady(taskId, url)
+      }),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id))),
     mergeHere: () =>
       act(async () => {

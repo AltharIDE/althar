@@ -325,6 +325,10 @@ export const namedRemotes = (cwd: string, which: 'fetch' | 'push' = 'fetch') =>
 export const addWorktree = (repository: string, path: string, branch: string, base: string) =>
   git(repository, 'worktree', 'add', '-b', branch, path, base)
 
+/** Puts back a worktree whose folder is gone, on the branch it had: git forgets the missing one first. */
+export const restoreWorktree = (repository: string, path: string, branch: string) =>
+  Effect.andThen(git(repository, 'worktree', 'prune'), git(repository, 'worktree', 'add', path, branch))
+
 /** The files the worktree hasn't committed, changed, new or deleted, ignored files aside; by path, sorted. */
 export const uncommittedFiles = (cwd: string) =>
   Effect.gen(function* () {

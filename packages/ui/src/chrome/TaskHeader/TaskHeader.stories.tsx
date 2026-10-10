@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { OPUS } from '../../fixtures/models'
-import { TaskStatus } from '../../foundations/vocabulary'
+import { TaskStatus, unreachable } from '../../foundations/vocabulary'
 import { trackOf } from '../../primitives/StepTrack/StepTrack'
 import { States } from '../../storybook/States'
 import { BackCrumb } from '../BackCrumb/BackCrumb'
@@ -33,6 +33,22 @@ const BASE: TaskHeaderProps<Face> = {
   face: 'talk',
 }
 
+/** What its menu offers where it stands, as the consumer would give it. */
+const menuFor = (status: TaskStatus) => {
+  switch (status) {
+    case TaskStatus.Running:
+    case TaskStatus.Yours:
+    case TaskStatus.Paused:
+      return { onStop: fn(), onAbandon: fn() }
+    case TaskStatus.Stopped:
+      return { onResume: fn(), onAbandon: fn() }
+    case TaskStatus.Done:
+      return { onReopen: fn() }
+    default:
+      return unreachable(status)
+  }
+}
+
 /* The header in the window's bar, after the way back and the title, with its faces switching and Graph at the end. */
 function Header(props: Partial<TaskHeaderProps<Face>>) {
   const [face, setFace] = useState<Face>(props.face ?? 'talk')
@@ -50,7 +66,7 @@ function Header(props: Partial<TaskHeaderProps<Face>>) {
           actions={
             <>
               <ChromeButton icon="branch" label="Graph" kbd="g" expanded={graph} onClick={() => setGraph(!graph)} />
-              <TaskMenu status={props.status ?? BASE.status} onStop={fn()} onResume={fn()} onAbandon={fn()} onReopen={fn()} />
+              <TaskMenu {...menuFor(props.status ?? BASE.status)} />
             </>
           }
         />

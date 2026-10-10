@@ -351,10 +351,14 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 - [x] **Stop, interrupt and cancel are one square today.** Settled as the
   leaning: the composer's square interrupts the lead's turn and keeps the task
   ("Interrupted by you"); ⌘Enter or Send now interrupts and continues; the
-  task menu stops, resumes, abandons or reopens the task, and only Stop sets
-  "Stopped", drawn as a pause and never as a square. Decided in the kit
-  (Composer, You, Furniture, TaskMenu, TaskGlyph) and the prototype's task
-  view. Supersede-pending has no control yet.
+  task menu offers, each only where it applies, Start now, Mark ready for
+  review, Stop, Resume, Abandon (asked first) and Reopen (an abandoned task
+  only, never a merged one), and only Stop sets "Stopped", drawn as a pause
+  and never as a square. Decided in the kit (Composer, You, Furniture,
+  TaskMenu, AbandonTask, TaskGlyph) and the prototype's task view; built on
+  10 October (DEV-31), with what each does in
+  [Architecture 05](architecture/05-workflow-engine.md#task-and-run-lifecycle).
+  Supersede-pending has no control yet.
 - [x] **What a stuck task looks like.** Settled: a violet call in the thread
   (kit `thread/Stuck`): what it tried, why as the lead reads it, the failing
   output, then Tell the lead, Try another agent or Abandon. On the board it is

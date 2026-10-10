@@ -152,3 +152,14 @@ export class NotAnIssue extends Schema.TaggedError<NotAnIssue>()('NotAnIssue', {
 export class ChangedSinceSeen extends Schema.TaggedError<ChangedSinceSeen>()('ChangedSinceSeen', {
   taskId: Schema.String,
 }) {}
+
+/**
+ * A task that can't take that turn in its course: a merged task is done for
+ * good, so it is never abandoned or reopened; one whose worktree went with
+ * its branch can't be reopened on it; and an abandoned one has no agent on
+ * it until it is reopened.
+ */
+export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
+  taskId: Schema.String,
+  why: Schema.Literals(['merged', 'branch_gone', 'abandoned']),
+}) {}
