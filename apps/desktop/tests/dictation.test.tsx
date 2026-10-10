@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Composer, DictationTray } from '@althar/ui'
 
 import type { DictationHost, DictationState } from '../src/renderer/data/services'
-import type { Record } from '../src/renderer/shared/dictation/recorder'
+import type { Frame, Record } from '../src/renderer/shared/dictation/recorder'
 import { bytes, lengthOf, timeLeft, trayText } from '../src/renderer/shared/dictation/text'
 import { useDictation } from '../src/renderer/shared/dictation/useDictation'
 import { fakeClient, fakeHost } from './fixtures'
@@ -51,20 +51,27 @@ const fakeDictation = (initial: DictationState, overrides: Partial<DictationHost
   return { dictation, send, set }
 }
 
-/** A microphone that hears two seconds of something, as loud as `level`. */
+/** A microphone that hears `seconds` of something; `hear` plays it moments by hand. */
 const fakeRecord = (seconds = 2, fail?: DOMException) => {
   const cancel = vi.fn()
-  const record: Record = vi.fn(async (onLevel: (level: number) => void) => {
+  let onFrame: (frame: Frame) => void = () => {}
+  const heard = () => ({ samples: new Float32Array(16_000 * seconds), sampleRate: 16_000 })
+  const record: Record = vi.fn(async (listener: (frame: Frame) => void) => {
     if (fail !== undefined) throw fail
-    onLevel(0.5)
-    return { stop: () => ({ samples: new Float32Array(16_000 * seconds), sampleRate: 16_000 }), cancel }
+    onFrame = listener
+    // Before the recording is handed over: heard by the bars, not by the writer.
+    listener({ level: 0.5, rms: 0.1, end: 1024, rate: 16_000 })
+    return { peek: heard, stop: heard, cancel }
   })
-  return { record, cancel }
+  /** A moment `at` seconds in: speech, or quiet. */
+  const hear = (at: number, loud = true) =>
+    act(() => onFrame({ level: loud ? 0.5 : 0, rms: loud ? 0.1 : 0.001, end: Math.round(at * 16_000), rate: 16_000 }))
+  return { record, cancel, hear }
 }
 
 function Harness({ record, onSubmit, initial = '' }: { record: Record; onSubmit?: (text: string) => void; initial?: string }) {
   const [draft, setDraft] = useState(initial)
-  const voice = useDictation(setDraft, record)
+  const voice = useDictation(setDraft, { record, projectId: 'p1' })
   return (
     <Composer
       value={draft}
@@ -78,8 +85,18 @@ function Harness({ record, onSubmit, initial = '' }: { record: Record; onSubmit?
   )
 }
 
-const show = (dictation: DictationHost, record: Record, props: { onSubmit?: (text: string) => void; initial?: string } = {}) =>
-  withServices(<Harness record={record} {...props} />, fakeClient().client, fakeHost({ dictation }))
+const show = (
+  dictation: DictationHost,
+  record: Record,
+  props: { onSubmit?: (text: string) => void; initial?: string } = {},
+  client = fakeClient().client,
+) => withServices(<Harness record={record} {...props} />, client, fakeHost({ dictation }))
+
+/** The faint words the composer draws where what is said will land. */
+const faint = () => document.querySelector('[aria-hidden="true"][class*="interim"]')?.textContent ?? ''
+
+const shortcut = (overrides: Partial<KeyboardEventInit> = {}) =>
+  fireEvent.keyDown(window, { key: 'D', metaKey: true, shiftKey: true, ...overrides })
 
 const field = () => screen.getByRole('textbox', { name: 'Tell the lead' })
 
@@ -391,6 +408,112 @@ describe('dictation’s edges', () => {
     await screen.findByRole('button', { name: /^Stop dictating/ })
     unmount()
     expect(cancel).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('writing down as it is said', () => {
+  it('shows what is heard faint where it will land, keeps the field still meanwhile, then writes it there', async () => {
+    const host = fakeDictation(state({}, { ready: true }))
+    const mic = fakeRecord()
+    show(host.dictation, mic.record, { initial: 'Before the PR,run it again.' })
+    const box = field() as HTMLTextAreaElement
+    box.setSelectionRange(14, 14)
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    mic.hear(0.5)
+    mic.hear(1.1)
+    await waitFor(() => expect(faint()).toBe('Before the PR, check the retry path run it again.'))
+    expect(box.readOnly).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: /^Stop dictating/ }))
+    await waitFor(() => expect(box.value).toBe('Before the PR, check the retry path run it again.'))
+    expect(faint()).toBe('')
+    expect(box.readOnly).toBe(false)
+  })
+
+  it('spells the project’s own names as its code does, reading them once a window', async () => {
+    const host = fakeDictation(state({}, { ready: true }), { transcribe: vi.fn(async () => 'open use effect in the refund ledger') })
+    const { client } = fakeClient()
+    show(host.dictation, fakeRecord().record, {}, client)
+    for (let i = 0; i < 2; i += 1) {
+      await userEvent.click(await screen.findByRole('button', { name: 'Dictate' }))
+      await userEvent.click(await screen.findByRole('button', { name: /^Stop dictating/ }))
+      await waitFor(() => expect(host.dictation.transcribe).toHaveBeenCalledTimes(i + 1))
+    }
+    await waitFor(() => expect(field()).toHaveProperty('value', 'open useEffect in the RefundLedger open useEffect in the RefundLedger'))
+    expect(client.getVocabulary).toHaveBeenCalledTimes(1)
+    expect(client.getVocabulary).toHaveBeenCalledWith('p1')
+  })
+
+  it('goes on without the project’s names when they can’t be read', async () => {
+    const host = fakeDictation(state({}, { ready: true }), { transcribe: vi.fn(async () => 'the refund ledger') })
+    const { client } = fakeClient({ getVocabulary: vi.fn(async () => Promise.reject(new Error('gone'))) })
+    show(host.dictation, fakeRecord().record, {}, client)
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Stop dictating/ }))
+    await waitFor(() => expect(field()).toHaveProperty('value', 'the refund ledger'))
+  })
+})
+
+describe('the shortcut', () => {
+  it('starts with ⌘⇧D, and stops with it again', async () => {
+    const host = fakeDictation(state({}, { ready: true }))
+    show(host.dictation, fakeRecord().record)
+    expect(screen.getByRole('button', { name: 'Dictate' })).toBeTruthy()
+    shortcut()
+    fireEvent.keyUp(window, { key: 'Meta' })
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    // Held down, the key repeats: nothing more happens.
+    shortcut({ repeat: true })
+    expect(screen.getByRole('button', { name: /^Stop dictating/ })).toBeTruthy()
+    shortcut({ metaKey: false, ctrlKey: true })
+    await waitFor(() => expect(host.dictation.transcribe).toHaveBeenCalledTimes(1))
+  })
+
+  it('stops when let go after being held down', async () => {
+    const host = fakeDictation(state({}, { ready: true }))
+    show(host.dictation, fakeRecord().record)
+    const now = vi.spyOn(Date, 'now').mockReturnValue(10_000)
+    shortcut()
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    now.mockReturnValue(11_000)
+    fireEvent.keyUp(window, { key: 'Shift' })
+    await waitFor(() => expect(host.dictation.transcribe).toHaveBeenCalledTimes(1))
+    now.mockRestore()
+  })
+
+  it('opens the offer where there is no model yet, and leaves other keys alone', async () => {
+    const host = fakeDictation(state())
+    show(host.dictation, fakeRecord().record)
+    shortcut({ shiftKey: false })
+    shortcut({ altKey: true })
+    expect(host.dictation.state).not.toHaveBeenCalled()
+    shortcut()
+    expect(await screen.findByText('Dictation needs a speech model on this Mac')).toBeTruthy()
+  })
+
+  it('goes to the composer shown last', async () => {
+    const host = fakeDictation(state({}, { ready: true }))
+    const first = fakeRecord()
+    const second = fakeRecord()
+    const { client } = fakeClient()
+    withServices(
+      <>
+        <Harness record={first.record} />
+        <Harness record={second.record} />
+      </>,
+      client,
+      fakeHost({ dictation: host.dictation }),
+    )
+    shortcut()
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    expect(second.record).toHaveBeenCalledTimes(1)
+    expect(first.record).not.toHaveBeenCalled()
+  })
+
+  it('shows itself in the microphone’s tooltip', async () => {
+    show(fakeDictation(state()).dictation, fakeRecord().record)
+    await userEvent.hover(screen.getByRole('button', { name: 'Dictate' }))
+    await waitFor(() => expect(document.body.textContent).toMatch(/⌘⇧D|Ctrl\+Shift\+D/))
   })
 })
 

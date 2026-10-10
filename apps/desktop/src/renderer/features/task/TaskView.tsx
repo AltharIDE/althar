@@ -184,7 +184,7 @@ export function TaskView({
   nav?: ReactNode
 }) {
   const [draft, setDraft] = useState('')
-  const voice = useDictation(setDraft)
+  const voice = useDictation(setDraft, { projectId: model.snapshot?.project.id ?? null })
   const [pick, setPick] = useState<Choice | null>(null)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
   const [face, setFace] = useState<Face | null>(null)

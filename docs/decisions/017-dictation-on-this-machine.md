@@ -52,6 +52,26 @@
   - **What was said lands at the cursor, never sent.** Escape while
     listening throws it away. The model loads while the person talks, so the
     first words don't wait for it.
+  - **Words show as they are said.** Parakeet doesn't stream, so the window
+    writes down what has been said since the last pause about once a second,
+    shown faint where it will land; at a pause of 0.6 s that stretch settles,
+    so each pass stays short. When the person stops, all of it is written
+    down once more (up to 90 seconds; past that the settled stretches stand),
+    which reads better than the stretches joined. One pass at a time: a slow
+    machine shows words less often, not later and later.
+  - **The project's own names are spelt as its code spells them.** The
+    runtime reads the names a project's code uses that have parts
+    (`RefundLedger`, `useEffect`, `idempotency_key`, `charges-api.ts`) from
+    git: tracked files' names, and the names in the 300 most recently
+    changed source files (`GetVocabulary`). Where the model writes a name's
+    parts in order ("refund ledger"), the window writes the name; "refund
+    ledger dot ts" becomes `RefundLedger.ts` where that file exists. Names
+    with a small word in them ("is open", "get user") are left out, so an
+    ordinary sentence stays one, and where two names are said alike the one
+    used most wins.
+  - **A shortcut: ⌘⇧D** (Ctrl+Shift+D off the Mac) starts and stops it from
+    anywhere in the window; held down, letting go stops it. The composer
+    shown last has it.
 - **Alternatives considered:**
   - Hosted transcription with the person's own key (OpenAI's GPT-Transcribe,
     or OpenRouter's audio endpoint): the best quality on accents and noise,
@@ -75,15 +95,30 @@
   - Transcribing in the runtime's process: one process fewer, but a native
     crash would end agents' sessions, and the model's memory would stay for
     as long as Althar runs.
+  - Biasing the model itself towards the project's names (sherpa-onnx's
+    hotwords, with modified beam search and a vocabulary built from the
+    model's tokens): tried on recordings of code-heavy sentences. At every
+    boost it either did nothing for names ("Althar" stayed "Alpha") or broke
+    the words around the boosted ones ("idem potency", "Rate Liter"), while
+    respelling after the model got every name in the recordings right.
+  - A streaming model for words as they are said (NVIDIA's Nemotron
+    streaming): true streaming, but a second download, and English first.
+  - A shortcut held alone, as Claude Code holds Space: a GUI composer types
+    spaces; a modifier held alone can't be told from a chord starting.
 - **Trade-off:**
   - A 670 MB download before the first dictation, and about a gigabyte of
     memory while dictating.
   - Hosted models still do better with heavy accents, noise and mumbling.
   - 25 European languages, not every language.
-  - No words as you speak: the text arrives when you stop, a fraction of a
-    second later for a sentence.
+  - Words as you speak come about once a second, not word by word, and use
+    the processor while you talk.
+  - Respelling turns the project's names into code even where the person
+    meant the words ("the refund ledger" as an idea); they see it before
+    they send. Names the model mishears as other words ("Alpha" for
+    "Althar") aren't caught.
   - Windows on Arm has no prebuilt binary yet.
 - **Revisit when:** an open model clearly beats Parakeet on code-heavy
-  speech, a streaming model is good enough to show words as they are said
-  (NVIDIA's Nemotron streaming models are close), sherpa-onnx ships Windows
-  on Arm, or people ask for languages Parakeet lacks.
+  speech, a streaming model is good enough to replace the passes (NVIDIA's
+  Nemotron streaming models are close), sherpa-onnx's biasing works for
+  NeMo models, sherpa-onnx ships Windows on Arm, or people ask for
+  languages Parakeet lacks.

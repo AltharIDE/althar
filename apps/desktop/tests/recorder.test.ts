@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { record } from '../src/renderer/shared/dictation/recorder'
+import { type Frame, record } from '../src/renderer/shared/dictation/recorder'
 
 /*
  * The microphone while someone dictates: mono at 16 kHz where the system
@@ -46,15 +46,20 @@ const install = (options: { rate?: number; refuse16k?: boolean; fail?: DOMExcept
 afterEach(() => vi.unstubAllGlobals())
 
 describe('recording what is said', () => {
-  it('asks for mono audio, says how loud it is, and hands over every frame at 16 kHz', async () => {
+  it('asks for mono audio, says how loud each moment is, and hands over every frame at 16 kHz', async () => {
     const fake = install()
-    const levels: Array<number> = []
-    const recording = await record((level) => levels.push(level))
+    const frames: Array<Frame> = []
+    const recording = await record((frame) => frames.push(frame))
     expect(fake.getUserMedia).toHaveBeenCalledWith({ audio: expect.objectContaining({ channelCount: 1 }) })
     fake.node.hear(new Float32Array([0.5, -0.5, 0.5, -0.5]))
     fake.node.hear(new Float32Array([0, 0]))
-    expect(levels[0]).toBeGreaterThan(0.5)
-    expect(levels[1]).toBe(0)
+    expect(frames[0]).toMatchObject({ rms: 0.5, end: 4, rate: 16_000 })
+    expect(frames[0]?.level).toBeGreaterThan(0.5)
+    expect(frames[1]).toMatchObject({ level: 0, rms: 0, end: 6 })
+    // What was heard so far, from any point, while it goes on.
+    expect([...recording.peek(3).samples]).toEqual([-0.5, 0, 0])
+    expect([...recording.peek(4).samples]).toEqual([0, 0])
+    expect(recording.peek(9).samples).toHaveLength(0)
     const { samples, sampleRate } = recording.stop()
     expect(sampleRate).toBe(16_000)
     expect([...samples]).toEqual([0.5, -0.5, 0.5, -0.5, 0, 0])

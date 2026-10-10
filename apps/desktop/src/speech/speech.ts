@@ -45,6 +45,8 @@ const say = (message: Record<string, unknown>) => port.postMessage(message)
 /* The download under way: how to stop it, and when it has stopped. */
 let downloading: { readonly controller: AbortController; readonly run: Promise<void> } | undefined
 let recognizer: Promise<Recognizer> | undefined
+/* The transcription under way, the next waits for. */
+let turn: Promise<unknown> = Promise.resolve()
 
 const load = (): Promise<Recognizer> => {
   recognizer ??= (async () => {
@@ -125,11 +127,16 @@ const answer = async (request: Request): Promise<unknown> => {
       const { samples, sampleRate } = request
       if (!(samples instanceof Float32Array) || typeof sampleRate !== 'number') throw new Error('Nothing to write down.')
       if (fake) return 'Also check the webhook retry path.'
-      const model = await load()
-      const stream = model.createStream()
-      stream.acceptWaveform({ samples, sampleRate })
-      await model.decodeAsync(stream)
-      return model.getResult(stream).text.trim()
+      // One at a time: the window writes down as someone speaks, and again as they stop.
+      const run = turn.then(async () => {
+        const model = await load()
+        const stream = model.createStream()
+        stream.acceptWaveform({ samples, sampleRate })
+        await model.decodeAsync(stream)
+        return model.getResult(stream).text.trim()
+      })
+      turn = run.catch(() => undefined)
+      return run
     }
     default:
       throw new Error(`The speech process doesn't know ${String(request.type)}.`)

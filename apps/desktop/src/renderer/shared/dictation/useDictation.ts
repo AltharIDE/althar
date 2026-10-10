@@ -2,17 +2,26 @@ import { type Dispatch, type RefObject, type SetStateAction, useEffect, useEffec
 
 import { type Dictation, type DictationState as TrayState, DictationSetup, type DictationTrayProps } from '@althar/ui'
 
+import { reads } from '../../data/reads'
 import { type DictationEvent, type DictationHost, type DictationState, type DownloadStop, useServices } from '../../data/services'
-import { type Record, record as recordMicrophone, type Recording } from './recorder'
+import { joined, live } from './live'
+import { type Record, type Recorded, record as recordMicrophone, type Recording } from './recorder'
 import { bytes, lengthOf, timeLeft, trayText } from './text'
+import { NO_VOCABULARY, respell, type Vocabulary, vocabularyOf } from './vocabulary'
 
 /*
  * Dictation in a composer (ADR-017), the first time and every time after.
  * Pressing the microphone with no speech model on this machine opens the
  * composer's tray, which offers it; nothing comes down until the person says
  * Download. The microphone is asked for first, so a no costs nothing. Once the
- * model is here, and if the tray is still open, it listens. What is said is
- * written at the cursor, never sent. Escape while listening throws it away.
+ * model is here, and if the tray is still open, it listens. What is said
+ * shows faint at the cursor as it is said (`live.ts`), and is written there
+ * once it stops, with the project's own names spelt as its code spells them
+ * (`vocabulary.ts`); never sent. Escape while listening throws it away.
+ *
+ * ⌘⇧D (Ctrl+Shift+D elsewhere) starts and stops it from anywhere in the
+ * window; held down, letting go stops it. Where two composers dictate, the
+ * one shown last has it.
  *
  * Asking where things stand happens on the first press, not as the composer
  * shows, so a window that never dictates never starts the speech process.
@@ -35,11 +44,18 @@ type Problem =
   /** What was said is kept, to try again. */
   | { readonly kind: 'failed'; readonly said: Said }
 
-interface Said {
+interface Said extends Recorded {
   readonly seconds: number
-  readonly samples: Float32Array
-  readonly sampleRate: number
 }
+
+/* The shortcut, as the window's own system writes it. */
+const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent)
+export const SHORTCUT = MAC ? '⌘⇧D' : 'Ctrl+Shift+D'
+/* Held this long, the shortcut is held to talk: letting go stops. */
+const HELD = 500
+
+/* The composers that dictate, the one shown last at the end: the shortcut is its. */
+const claims: Array<symbol> = []
 
 /* A host with no dictation: never called, since its window shows no microphone. */
 const NONE: DictationHost = {
@@ -78,12 +94,10 @@ const isEvent = (event: unknown): event is DictationEvent =>
 const problemOf = (stop: DownloadStop, got: number, size: number): Problem =>
   stop.reason === 'space' ? { kind: 'noRoom', need: stop.need, free: stop.free } : { kind: 'stopped', got, size }
 
-/** Puts `words` in at the field's cursor, with a space either side where it needs one, and the cursor after them. */
-const inserting = (field: HTMLTextAreaElement | null, words: string) => (now: string) => {
-  const at = field === null ? now.length : Math.min(field.selectionStart, now.length)
-  const end = field === null ? now.length : Math.min(Math.max(field.selectionEnd, at), now.length)
-  const before = now.slice(0, at)
-  const after = now.slice(end)
+/** Puts `words` in at `at`, with a space either side where it needs one, and the field's cursor after them. */
+const inserting = (field: HTMLTextAreaElement | null, at: number, words: string) => (now: string) => {
+  const before = now.slice(0, Math.min(at, now.length))
+  const after = now.slice(Math.min(at, now.length))
   const lead = before !== '' && !/\s$/.test(before) ? ' ' : ''
   const trail = after !== '' && !/^\s/.test(after) ? ' ' : ''
   const caret = (before + lead + words).length
@@ -94,8 +108,16 @@ const inserting = (field: HTMLTextAreaElement | null, words: string) => (now: st
   return before + lead + words + trail + after
 }
 
-export function useDictation(setDraft: Dispatch<SetStateAction<string>>, record: Record = recordMicrophone): Voice {
-  const { host } = useServices()
+export interface DictationOptions {
+  /** The project dictated about, whose names are spelt as its code spells them. */
+  readonly projectId?: string | null
+  /** The microphone; tests give a fake. */
+  readonly record?: Record
+}
+
+export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options: DictationOptions = {}): Voice {
+  const { record = recordMicrophone, projectId = null } = options
+  const { host, client, cache } = useServices()
   const voice = host.dictation ?? NONE
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [known, setKnown] = useState<DictationState | null>(null)
@@ -106,6 +128,11 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, record:
   const [seconds, setSeconds] = useState(0)
   const [levels, setLevels] = useState<ReadonlyArray<number>>(() => Array.from({ length: BARS }, () => 0))
   const recording = useRef<Recording | null>(null)
+  const writer = useRef<ReturnType<typeof live> | null>(null)
+  const [interim, setInterim] = useState('')
+  /* Where what is said lands: the field's cursor as it started listening. */
+  const [at, setAt] = useState(0)
+  const vocabulary = useRef<{ readonly projectId: string | null; readonly words: Vocabulary }>({ projectId: null, words: NO_VOCABULARY })
   const prepared = useRef(false)
   /* Download was pressed: once the model is here, it listens, if the tray is still open. */
   const listenWhenHere = useRef(false)
@@ -137,14 +164,34 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, record:
     return true
   }
 
-  const write = async (said: Said) => {
+  /** What was said, as text, with the project's names spelt as its code spells them. */
+  const transcribe = async (recorded: Recorded) =>
+    respell(await voice.transcribe(recorded.samples, recorded.sampleRate), vocabulary.current.words)
+
+  /** The project's names, read once a window as someone first dictates in it; dictation goes on without them meanwhile. */
+  const learn = () => {
+    if (projectId === null || vocabulary.current.projectId === projectId) return
+    vocabulary.current = { projectId, words: NO_VOCABULARY }
+    cache
+      .fetchQuery(reads(client).vocabulary(projectId))
+      .then((words) => {
+        if (vocabulary.current.projectId === projectId) vocabulary.current = { projectId, words: vocabularyOf(words) }
+      })
+      .catch(() => (vocabulary.current = { projectId: null, words: NO_VOCABULARY }))
+  }
+
+  /** Writes down all of what was said, at where it started: by the live writer as it stops, or again as it is retried. */
+  const write = async (said: Said, now = writer.current) => {
+    writer.current = null
     setPhase('writing')
     try {
-      const text = await voice.transcribe(said.samples, said.sampleRate)
+      const text = now === null ? await transcribe(said) : await now.finish(said)
       setPhase('idle')
-      if (text !== '') setDraft(inserting(inputRef.current, text))
+      setInterim('')
+      if (text !== '') setDraft(inserting(inputRef.current, at, text))
     } catch {
       setPhase('idle')
+      setInterim('')
       setProblem({ kind: 'failed', said })
       setOpen(true)
     }
@@ -157,8 +204,13 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, record:
       prepared.current = true
       voice.prepare().catch(() => (prepared.current = false))
     }
+    learn()
+    const now = live(transcribe, (text) => setInterim(joined(text.settled, text.unsettled)))
     try {
-      recording.current = await record((level) => setLevels((bars) => [...bars.slice(1 - BARS), level]))
+      recording.current = await record((frame) => {
+        setLevels((bars) => [...bars.slice(1 - BARS), frame.level])
+        if (recording.current !== null) now.frame(frame, recording.current)
+      })
     } catch (error) {
       setPhase('idle')
       const name = error instanceof DOMException ? error.name : ''
@@ -166,6 +218,9 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, record:
       setOpen(true)
       return
     }
+    writer.current = now
+    setAt(inputRef.current?.selectionStart ?? inputRef.current?.value.length ?? 0)
+    setInterim('')
     setSeconds(0)
     setProblem(null)
     setOpen(false)
@@ -178,13 +233,21 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, record:
     if (now === null) return
     const { samples, sampleRate } = now.stop()
     setLevels((bars) => bars.map(() => 0))
-    if (samples.length < sampleRate * SHORTEST) return setPhase('idle')
+    if (samples.length < sampleRate * SHORTEST) {
+      writer.current?.close()
+      writer.current = null
+      setInterim('')
+      return setPhase('idle')
+    }
     void write({ seconds, samples, sampleRate })
   }
 
   const cancelListening = () => {
     recording.current?.cancel()
     recording.current = null
+    writer.current?.close()
+    writer.current = null
+    setInterim('')
     setLevels((bars) => bars.map(() => 0))
     setPhase('idle')
   }
@@ -276,7 +339,51 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, record:
   }, [listening])
 
   // Leaving while listening keeps nothing.
-  useEffect(() => () => recording.current?.cancel(), [])
+  useEffect(
+    () => () => {
+      recording.current?.cancel()
+      writer.current?.close()
+    },
+    [],
+  )
+
+  // The shortcut: pressed, it starts or stops; held down, letting go stops. Only the composer shown last hears it.
+  const pressedAt = useRef<number | null>(null)
+  const shortcutDown = useEffectEvent(() => {
+    if (phase === 'listening') {
+      pressedAt.current = null
+      return stop()
+    }
+    pressedAt.current = Date.now()
+    void press()
+  })
+  const shortcutUp = useEffectEvent(() => {
+    const held = pressedAt.current !== null && Date.now() - pressedAt.current >= HELD
+    pressedAt.current = null
+    if (held && phase === 'listening') stop()
+  })
+  useEffect(() => {
+    if (host.dictation === undefined) return
+    const me = Symbol('dictation')
+    claims.push(me)
+    const mine = () => claims.at(-1) === me
+    const onDown = (event: KeyboardEvent) => {
+      if (!mine() || event.key.toLowerCase() !== 'd' || !(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return
+      event.preventDefault()
+      if (!event.repeat) shortcutDown()
+    }
+    // On a Mac, letting go of D while ⌘ is down says nothing: letting go of any of the three ends the hold.
+    const onUp = (event: KeyboardEvent) => {
+      if (mine() && ['d', 'D', 'Meta', 'Control', 'Shift'].includes(event.key)) shortcutUp()
+    }
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup', onUp)
+    return () => {
+      claims.splice(claims.indexOf(me), 1)
+      window.removeEventListener('keydown', onDown)
+      window.removeEventListener('keyup', onUp)
+    }
+  }, [host.dictation])
 
   if (host.dictation === undefined) return { dictation: undefined, tray: null, inputRef }
 
@@ -333,7 +440,7 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, record:
           onRetry: () => {
             if (problem?.kind === 'failed') {
               setProblem(null)
-              return void write(problem.said)
+              return void write(problem.said, null)
             }
             if (known !== null) void startDownload(known)
           },
@@ -352,6 +459,9 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, record:
     dictation: {
       elapsed: listening ? lengthOf(seconds) : null,
       levels,
+      interim,
+      at,
+      kbd: SHORTCUT,
       busy: phase === 'writing',
       expanded: shown !== null,
       ...(download !== null && shown === null ? { progress: download.got / download.size } : {}),

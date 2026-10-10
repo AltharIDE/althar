@@ -19,8 +19,12 @@ export interface Dictation {
   elapsed: string | null
   /** How loud you are, recent first-to-last, each from 0 to 1: drawn as bars while dictating. */
   levels?: readonly number[]
-  /** Words heard and not yet settled, shown faint after what is written. For a transcriber that streams. */
+  /** Words heard and not yet settled, shown faint where they will land (`at`), while listening and until they are written. For a transcriber that streams. */
   interim?: string
+  /** Where in what is written the words will land; the end when not given. */
+  at?: number
+  /** The shortcut that starts and stops dictating, shown in the microphone's tooltip; the consumer binds it. */
+  kbd?: string
   /** Writing down what was said, or getting the speech model ready: the microphone turns. */
   busy?: boolean
   /** The speech model coming down, from 0 to 1: a ring fills round the microphone. */
@@ -155,7 +159,13 @@ export function Composer({
   const ref = inputRef ?? own
   const hintId = useId()
   const elapsed = dictation?.elapsed ?? null
-  const interim = elapsed !== null ? (dictation?.interim ?? '') : ''
+  const interim = dictation?.interim ?? ''
+  /* While words arrive or are written down, the field is the dictation's: typing would land where they are about to. */
+  const dictating = elapsed !== null || dictation?.busy === true
+  const overlay = useRef<HTMLDivElement>(null)
+  const at = Math.max(0, Math.min(value.length, dictation?.at ?? value.length))
+  const before = value.slice(0, at)
+  const after = value.slice(at)
   const drafted = value.trim() !== ''
   /* the microphone takes focus back when its tray closes with focus inside it */
   const mic = useRefocus<HTMLButtonElement>(tray != null)
@@ -227,18 +237,25 @@ export function Composer({
           </section>
         )}
         <div className={s.field}>
-          {/* the words still arriving, faint after what is written; the field's own text shows through clear */}
+          {/* the words still arriving, faint where they will land; while they show, this draws what is written too, and the field's own text goes clear */}
           {interim && (
-            <div className={s.interim} aria-hidden="true">
-              <span className={s.written}>{value}</span>
-              {value && !/\s$/.test(value) ? ' ' : ''}
+            <div ref={overlay} className={s.interim} aria-hidden="true">
+              <span className={s.written}>{before}</span>
+              {before && !/\s$/.test(before) ? ' ' : ''}
               {interim}
+              {after && !/^\s/.test(after) ? ' ' : ''}
+              <span className={s.written}>{after}</span>
             </div>
           )}
           <textarea
             ref={ref}
             rows={1}
             value={value}
+            className={cx(interim && s.under)}
+            readOnly={dictating}
+            onScroll={(e) => {
+              if (overlay.current) overlay.current.scrollTop = e.currentTarget.scrollTop
+            }}
             placeholder={shownPlaceholder}
             aria-label={placeholder}
             aria-describedby={note ? hintId : undefined}
@@ -286,6 +303,7 @@ export function Composer({
                 ref={mic}
                 icon="mic"
                 label={micLabel(dictation, t)}
+                {...(dictation.kbd === undefined ? {} : { kbd: dictation.kbd })}
                 busy={dictation.busy}
                 progress={dictation.busy ? undefined : dictation.progress}
                 aria-expanded={dictation.expanded}

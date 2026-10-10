@@ -44,8 +44,10 @@ function Picker() {
 const voice = (t: number) => Array.from({ length: 12 }, (_, i) => Math.abs(Math.sin((t + i) * 0.7) * Math.cos((t - i) * 0.31)))
 const SAID = 'Also check the webhook retry path while you are in there.'.split(' ')
 
-function Example(props: Partial<ComposerProps> & { initial?: string; recording?: boolean; streaming?: boolean; waiting?: string[] }) {
-  const { initial = '', recording = false, streaming = false, waiting = [], onSendNow = () => {}, ...rest } = props
+function Example(
+  props: Partial<ComposerProps> & { initial?: string; recording?: boolean; streaming?: boolean; waiting?: string[]; at?: number },
+) {
+  const { initial = '', recording = false, streaming = false, waiting = [], at, onSendNow = () => {}, ...rest } = props
   const [value, setValue] = useState(initial)
   const [queue, setQueue] = useState(waiting.map((text, i) => ({ id: `q${i}`, text })))
   const [seconds, setSeconds] = useState<number | null>(recording ? 4 : null)
@@ -79,6 +81,8 @@ function Example(props: Partial<ComposerProps> & { initial?: string; recording?:
           elapsed: seconds === null ? null : clock(seconds),
           levels: voice(tick),
           interim: heard,
+          ...(at === undefined ? {} : { at }),
+          kbd: '⌘⇧D',
           onStart: () => setSeconds(0),
           onStop: () => {
             setSeconds(null)
@@ -272,6 +276,15 @@ export const DictationFirstTime: Story = {
     await userEvent.click(await c.findByRole('button', { name: /^Stop dictating/ }, { timeout: 4000 }))
     await waitFor(() => expect(c.getByRole('textbox', { name: 'Tell the lead' })).toHaveValue(SAID.join(' ')), { timeout: 3000 })
     await expect(args.onSubmit).not.toHaveBeenCalled()
+  },
+}
+/** Words arriving in the middle of what is written: faint where they will land, the text after them moved along. */
+export const DictatingMidSentence: Story = {
+  render: () => <Example recording streaming initial="Before the PR, run it again." at={14} />,
+  play: async ({ canvasElement }) => {
+    const field = within(canvasElement).getByRole('textbox', { name: 'Tell the lead' })
+    // While words arrive, the field is the dictation's.
+    await expect(field).toHaveAttribute('readonly')
   },
 }
 /** Sent while the lead worked: it waits until the lead is done with what it is doing, and can be taken back or out. */

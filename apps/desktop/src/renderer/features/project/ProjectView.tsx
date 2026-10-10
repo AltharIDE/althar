@@ -167,7 +167,7 @@ export function ProjectView({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
   const [draft, setDraft] = useState('')
-  const voice = useDictation(setDraft)
+  const voice = useDictation(setDraft, { projectId: model.project?.id ?? model.coordinator?.project.id ?? null })
   const [pick, setPick] = useState<Choice | null>(null)
   // What opens beside the conversation: a task you plan, or the connections.
   const [panel, setPanel] = useState<'task' | 'connections' | null>(newTask ? 'task' : null)
