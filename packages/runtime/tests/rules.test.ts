@@ -37,6 +37,75 @@ const request = (fields: Partial<PermissionRequest>): PermissionRequest => ({
 
 const run = (command: string, overrides: Partial<RuleContext> = {}) => decide(request({ title: command }), { ...context, ...overrides })
 
+describe('the coordinator decides', () => {
+  const project: ProjectRuleSet = { mode: 'coordinator', ask: ['deploy'], never: ['force-push'], allow: [], commands: [] }
+
+  it('judges requests outside the explicit lists', () => {
+    assert.strictEqual(run('npm test', { project }).verdict, 'judge')
+    assert.strictEqual(run('git push origin althar/retry', { project }).verdict, 'judge')
+  })
+
+  it('allows routine reads, searches and own-file edits without a judgment', () => {
+    for (const kind of ['read', 'search', 'edit', 'delete', 'move'] as const) {
+      const action = request({ kind, paths: [`${worktree}/src/app.ts`], rawInput: { path: `${worktree}/src/app.ts` } })
+      assert.strictEqual(decide(action, { ...context, project }).verdict, 'allow', kind)
+    }
+    const outside = request({ kind: 'edit', paths: ['/elsewhere/app.ts'] })
+    assert.strictEqual(decide(outside, { ...context, project }).verdict, 'judge')
+    assert.strictEqual(decide(outside, { ...context, project: { ...project, ask: ['outside'] } }).verdict, 'ask')
+  })
+
+  it('cannot override always-ask, never, command rules, or the code-host boundary', () => {
+    assert.strictEqual(run('npm publish', { project }).verdict, 'ask')
+    assert.strictEqual(run('git push --force origin main', { project }).verdict, 'deny')
+    assert.strictEqual(run('gh pr merge 12', { project }).verdict, 'deny')
+    assert.strictEqual(run('npm test', { project: { ...project, commands: [{ pattern: 'npm test', decision: 'ask' }] } }).verdict, 'ask')
+    assert.strictEqual(run('npm test', { project: { ...project, commands: [{ pattern: 'npm test', decision: 'never' }] } }).verdict, 'deny')
+    assert.strictEqual(run('git push origin $(git branch --show-current)', { project }).verdict, 'ask')
+  })
+
+  it('lets an allow rule answer before the coordinator is asked, and only what it covers (ADR-018)', () => {
+    const allowing: ProjectRuleSet = { ...project, commands: [{ pattern: 'npm test', decision: 'allow' }] }
+    assert.deepStrictEqual(run('npm test -- --watch=false', { project: allowing }), {
+      verdict: 'allow',
+      rules: [{ pattern: 'npm test', match: 'prefix' }],
+    })
+    // What only looks rides along, as under "Ask me"; anything else the rule doesn't cover is judged.
+    assert.strictEqual(run('cd src && npm test | tail -20', { project: allowing }).verdict, 'allow')
+    assert.strictEqual(run('npm test && npm run lint', { project: allowing }).verdict, 'judge')
+    assert.strictEqual(run('npm run build', { project: allowing }).verdict, 'judge')
+    // A kind always allowed answers for the kind: a write outside the worktree.
+    const outside = request({ kind: 'edit', paths: ['/elsewhere/app.ts'] })
+    assert.deepStrictEqual(decide(outside, { ...context, project: { ...project, allow: ['outside'] } }), {
+      verdict: 'allow',
+      rules: [{ kind: 'outside' }],
+    })
+  })
+
+  it('keeps what always asks, and what the rules cannot read, for the person, whatever the allow rules say', () => {
+    const allowing: ProjectRuleSet = {
+      ...project,
+      allow: ['deploy'],
+      commands: [
+        { pattern: 'npm publish', decision: 'allow' },
+        { pattern: 'git push', decision: 'allow' },
+      ],
+    }
+    const publish = run('npm publish', { project: allowing })
+    assert.strictEqual(publish.verdict, 'ask')
+    assert.strictEqual(publish.verdict === 'ask' && publish.held, true)
+    const opaque = run('git push origin $(git branch --show-current)', { project: allowing })
+    assert.strictEqual(opaque.verdict, 'ask')
+    assert.strictEqual(opaque.verdict === 'ask' && opaque.held, false)
+  })
+
+  it('offers an always for what the coordinator would judge, as it holds next time without a judgment', () => {
+    const always = alwaysOf(request({ title: 'npm test' }), { ...context, project })
+    assert.deepStrictEqual(always.allow, ['exact', 'prefix'])
+    assert.deepStrictEqual(always.deny, ['exact', 'prefix'])
+  })
+})
+
 describe('a code host, reached only through Althar', () => {
   it.each([
     ['gh pr view 12', undefined],

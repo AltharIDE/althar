@@ -25,12 +25,26 @@
   - **Precedence, in order:** what no project can change; what is never
     allowed; allowing everything; what always asks (a kind on the list, or a
     command the project asks about), which is *held* for the person; then
-    what would otherwise ask (what the rules can't tell, or, under "Ask me",
-    anything beyond the task's own files) is let through where the allow
-    rules cover it; the rest asks. A never and an always ask beat an allow
-    rule, always. The lead deciding (DEV-22) comes after the allow rules and
-    before the person, and answers only what isn't held: a verdict that asks
-    says whether it is held.
+    what would otherwise ask or be judged (what the rules can't tell, or,
+    under "Ask me" or "The coordinator decides", anything beyond reads and
+    the task's own files) is let through where the allow rules cover it;
+    then, where the project has the coordinator decide, the coordinator
+    judges the rest, but for what the rules can't tell
+    ([ADR-019](019-coordinator-judges-permissions.md)); the person answers
+    what is left. A never and an always ask beat an allow rule, always.
+  - **Allow rules and the coordinator's judgment.** An allow rule answers
+    before the coordinator is asked, so no judgment, and none of its time or
+    cost, is spent on what a rule covers. The coordinator never answers what
+    is held for the person, nor what the rules can't tell. Its answer is
+    applied only if the rules, read again with it, still leave the request to
+    the coordinator: an allow rule kept while it judged answers instead, by
+    the rule. A call it leaves to the person isn't held, so the card offers
+    Allow always, and the rule kept answers the next such request with no
+    judgment. The two answers keep their own receipts: "Allowed … · by
+    meridian's rules" for an allow rule, the coordinator's "By the
+    coordinator: …" for its own. A call already with the person stays with
+    them when the rules change, unless the rules now settle it; it isn't
+    sent to the coordinator.
   - **What a rule covers:** an exact rule, the line. Otherwise each command
     of the line that would ask must start as an allow rule says (as itself,
     or as what a package runner or a shell runs for it), or be only of kinds
@@ -88,10 +102,10 @@
     bypassed (ADR-013).
 - **Trade-off:** allow rules only see what reaches Althar. A command that
   stays in an agent's sandbox never asks, so a rule for it never fires (the
-  sandbox gap, ADR-013). Allow rules mostly matter under "Ask me" and for what
-  the rules can't tell; under the default mode nearly everything is allowed
-  already. Exact rules keep a whole command, which can hold a secret, as the
+  sandbox gap, ADR-013). Allow rules mostly matter under "Ask me", where the
+  coordinator decides, and for what the rules can't tell; under the default
+  mode nearly everything is allowed already. Exact rules keep a whole command, which can hold a secret, as the
   record of the request already does.
-- **Revisit when:** the lead answers requests (DEV-22); the project's command
-  rules reach the agents in their own forms; rules on paths or the network
-  arrive.
+- **Revisit when:** the project's command rules reach the agents in their
+  own forms; rules on paths or the network arrive; the coordinator's
+  judgments show rules it could suggest keeping (ADR-019).

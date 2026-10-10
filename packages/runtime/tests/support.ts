@@ -78,6 +78,7 @@ export const definition = (id: string, signedOut: ReadonlyArray<string> = [], pe
   // Shares everything in its usual folder but its sign-in, as OpenCode's data folder does.
   home: { variable: 'FAKE_HOME', usual: () => join(fakeHomes, id), shared: (names) => names.filter((name) => name !== 'auth.json') },
   permissions: codexLikeMeanings,
+  permissionJudge: { sessionMeta: { fake: { tools: [] } } },
   // One fake agent passes session options, as Claude Code's entry does.
   ...(id === 'claude-code' ? { sessionMeta: () => ({ fake: { asks: true } }) } : {}),
   knownGaps: [],
@@ -151,6 +152,7 @@ export const runtime = (
   options: FakeAgentOptions = {},
   more: {
     readonly signedOut?: ReadonlyArray<string>
+    readonly agents?: Layer.Layer<Agents>
     readonly countdown?: Duration.Duration
     readonly connectors?: Layer.Layer<Connectors>
     readonly listenEvery?: Duration.Duration
@@ -159,6 +161,7 @@ export const runtime = (
     readonly perUse?: ReadonlyArray<string>
     readonly stalls?: StallOptions
     readonly stopGrace?: Duration.Duration
+    readonly permissionJudgeTimeout?: Duration.Duration
     /** Where what is known of models comes from; nothing is fetched without it. */
     readonly modelFacts?: ModelFactsOptions
     /** The editors a task's files open in, and what opening one does. */
@@ -173,13 +176,14 @@ export const runtime = (
     openTerminal: (line) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(false)),
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
-    agents: fakeAgents(options, more.signedOut, more.each, more.perUse),
+    agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse),
     countdown: more.countdown ?? Duration.millis(300),
     secrets: Secrets.memory(),
     connectors: more.connectors ?? fakeConnectors({}),
     ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),
     ...(more.stalls === undefined ? {} : { stalls: more.stalls }),
     ...(more.stopGrace === undefined ? {} : { stopGrace: more.stopGrace }),
+    ...(more.permissionJudgeTimeout === undefined ? {} : { permissionJudgeTimeout: more.permissionJudgeTimeout }),
     ...(more.modelFacts === undefined ? {} : { modelFacts: more.modelFacts }),
     ...(more.editors === undefined ? {} : { editors: more.editors }),
   })

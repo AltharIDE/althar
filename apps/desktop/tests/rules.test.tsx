@@ -14,6 +14,16 @@ function Rules({ onBack = vi.fn() }: { onBack?: () => void }) {
 }
 
 describe('a project’s rules', () => {
+  it('offers coordinator decisions and saves that mode without disabling the always-ask list', async () => {
+    const { client } = fakeClient()
+    withServices(<Rules />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: /The coordinator decides/ }))
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', permissions: 'coordinator' }))
+    expect(
+      (within(screen.getByRole('group', { name: 'Always ask me' })).getByRole('checkbox', { name: 'Force pushes' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false)
+  })
   it('shows them as kept, and saves each change at once', async () => {
     const onBack = vi.fn()
     const { client } = fakeClient({

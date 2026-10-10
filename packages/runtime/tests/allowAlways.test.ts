@@ -208,7 +208,7 @@ describe('Allow always and Deny always (ADR-018)', () => {
       yield* say(threadId, `${scenarios.run}git status --short`)
       yield* ended(threadId, 2)
       assert.deepStrictEqual(yield* calls(threadId), [])
-      assert.deepStrictEqual(yield* said(threadId), ['ran=allow_once', 'ran=allow_once'])
+      assert.deepStrictEqual(yield* said(threadId), ['chosen=allow_once', 'chosen=allow_once'])
       assert.deepStrictEqual(yield* tools(threadId), [
         { command: 'git status', allowedBy: null },
         { command: 'git status --short', allowedBy: { pattern: 'git status', match: 'prefix' } },
@@ -283,7 +283,7 @@ describe('Allow always and Deny always (ADR-018)', () => {
       yield* say(created.threadId, `${scenarios.run}rm -rf build`)
       yield* ended(created.threadId, 2)
       assert.deepStrictEqual(yield* calls(created.threadId), [])
-      assert.deepStrictEqual(yield* said(created.threadId), ['ran=decline', 'ran=decline'])
+      assert.deepStrictEqual(yield* said(created.threadId), ['chosen=decline', 'chosen=decline'])
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -313,7 +313,7 @@ describe('Allow always and Deny always (ADR-018)', () => {
       yield* ended(created.threadId, 1)
       // The other's call is answered by the rule, and its lead carries on.
       yield* ended(other.threadId, 1)
-      assert.deepStrictEqual(yield* said(other.threadId), ['ran=allow_once'])
+      assert.deepStrictEqual(yield* said(other.threadId), ['chosen=allow_once'])
       const [settled] = yield* sql<{ state: string }>`
         SELECT a.state FROM attention_requests a JOIN tasks k ON k.id = a.task_id WHERE k.id = ${other.taskId}`
       assert.strictEqual(settled?.state, 'answered')
@@ -448,7 +448,7 @@ describe('answers that meet each other', () => {
       yield* sql`UPDATE attention_requests SET state = 'open' WHERE id = ${call.id}`
       yield* permissions.reconsider(project.projectId)
       yield* ended(created.threadId, 1)
-      assert.deepStrictEqual(yield* said(created.threadId), ['ran=allow_once'])
+      assert.deepStrictEqual(yield* said(created.threadId), ['chosen=allow_once'])
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -461,7 +461,7 @@ describe('answers that meet each other', () => {
       yield* sql`UPDATE provider_sessions SET state = 'active' WHERE thread_id = ${created.threadId} AND state = 'waiting_approval'`
       yield* answer(call.id, 'allow')
       yield* ended(created.threadId, 1)
-      assert.deepStrictEqual(yield* said(created.threadId), ['ran=allow_once'])
+      assert.deepStrictEqual(yield* said(created.threadId), ['chosen=allow_once'])
     }).pipe(Effect.provide(withQueries())),
   )
 })

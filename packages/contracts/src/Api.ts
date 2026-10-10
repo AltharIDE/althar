@@ -286,8 +286,11 @@ export const ProjectRulesView = Schema.Struct({
   projectId: Schema.String,
   /** Which revision of the rules these are: a change that replaces a list names it, so one made meanwhile isn't lost. */
   revision: Schema.Number,
-  /** What happens to what no rule keeps: allowed (`rules`), asked about (`ask`); or everything allowed (`allow`), short of `never`. */
-  permissions: Schema.Literals(['rules', 'ask', 'allow']),
+  /**
+   * What no rule keeps: allowed (`rules`), judged by the coordinator (`coordinator`), or asked about (`ask`);
+   * or everything allowed (`allow`), what always asks with it, short of `never`.
+   */
+  permissions: Schema.Literals(['rules', 'coordinator', 'ask', 'allow']),
   alwaysAsk: Schema.Array(RuleKind),
   never: Schema.Array(RuleKind),
   /** The kinds let through without asking, short of what always asks or is never allowed (ADR-018). */
@@ -995,6 +998,8 @@ export const HomeEvent = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal('answered'),
     id: Schema.String,
+    /** Omitted by older runtimes, whose answers all came from the rules. */
+    by: Schema.optional(Schema.Literals(['rules', 'coordinator'])),
     /** The first of them. */
     at: Schema.String,
     count: Schema.Number,
@@ -1334,7 +1339,7 @@ export const Api = RpcGroup.make(
     'SetProjectRules',
     {
       projectId: Schema.String,
-      permissions: Schema.optional(Schema.Literals(['rules', 'ask', 'allow'])),
+      permissions: Schema.optional(Schema.Literals(['rules', 'coordinator', 'ask', 'allow'])),
       alwaysAsk: Schema.optional(Schema.Array(RuleKind)),
       never: Schema.optional(Schema.Array(RuleKind)),
       alwaysAllow: Schema.optional(Schema.Array(RuleKind)),

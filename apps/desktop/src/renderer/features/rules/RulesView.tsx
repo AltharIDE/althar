@@ -73,9 +73,20 @@ const KINDS = Object.keys(text.kinds) as ReadonlyArray<RuleKind>
 
 const toEnd = { draft: TaskEnd.DraftPr, ready: TaskEnd.ReadyPr, none: TaskEnd.PushOnly } as const
 
-const toPolicy = { rules: PermissionPolicy.Rules, ask: PermissionPolicy.Ask, allow: PermissionPolicy.AllowAll } as const
+const toPolicy = {
+  rules: PermissionPolicy.Rules,
+  coordinator: PermissionPolicy.Coordinator,
+  ask: PermissionPolicy.Ask,
+  allow: PermissionPolicy.AllowAll,
+} as const
 const fromPolicy = (policy: PermissionPolicy): ProjectRulesView['permissions'] =>
-  policy === PermissionPolicy.Ask ? 'ask' : policy === PermissionPolicy.AllowAll ? 'allow' : 'rules'
+  policy === PermissionPolicy.Coordinator
+    ? 'coordinator'
+    : policy === PermissionPolicy.Ask
+      ? 'ask'
+      : policy === PermissionPolicy.AllowAll
+        ? 'allow'
+        : 'rules'
 
 /** A command rule's id in the lists: by how it starts, or exactly, and its words. */
 const commandId = (rule: CommandRule) => `command:${rule.match ?? 'prefix'}:${rule.pattern}`
@@ -172,7 +183,7 @@ export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => 
         ) : (
           <ProjectRules
             project={model.project ?? ''}
-            permissionOptions={[PermissionPolicy.Rules, PermissionPolicy.Ask, PermissionPolicy.AllowAll]}
+            permissionOptions={[PermissionPolicy.Rules, PermissionPolicy.Coordinator, PermissionPolicy.Ask, PermissionPolicy.AllowAll]}
             permissions={toPolicy[rules.permissions]}
             onPermissionsChange={(policy) => model.change({ permissions: fromPolicy(policy) })}
             always={itemsOf(rules.commands, 'ask')}

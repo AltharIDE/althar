@@ -50,7 +50,7 @@ export const newProjectText: NewProjectText = {
   cancel: 'Cancel',
 }
 
-const PERMISSIONS = [PermissionPolicy.Lead, PermissionPolicy.AllowAll, PermissionPolicy.Ask] as const
+const PERMISSIONS = [PermissionPolicy.Coordinator, PermissionPolicy.AllowAll, PermissionPolicy.Ask] as const
 
 export interface NewProjectProps extends Omit<SourceMapProps, 'className' | 'text'> {
   /** Why the form is showing, when a repository was opened and reading it found something to decide. */
@@ -80,7 +80,7 @@ export function NewProject({
   defaultName = '',
   onNameChange,
   permissions: permissionsProp,
-  defaultPermissions = PermissionPolicy.Lead,
+  defaultPermissions = PermissionPolicy.Coordinator,
   onPermissionsChange,
   permissionOptions = PERMISSIONS,
   onCreate,

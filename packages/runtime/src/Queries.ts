@@ -1246,12 +1246,17 @@ export class Queries extends Context.Service<
             const about = text(JSON.parse(row.content), 'about') === 'stall' ? 'stall' : 'limit'
             return [{ ...base, kind: 'dealt', about, title: item.content.title, description: item.content.description }]
           })
-          // Answered by the rules, not by the person: counted, from the first.
-          const [answered] = yield* sql<{ count: number; first: string | null }>`
-            SELECT count(*) AS count, min(d.decided_at) AS first FROM decisions d JOIN projects p ON p.id = d.project_id
-            WHERE p.archived_at IS NULL AND d.decided_by_actor_id = ${instance.systemId} AND d.decided_at > ${from}`
-          if (answered !== undefined && answered.count > 0 && answered.first !== null)
-            events.push({ kind: 'answered', id: `answered:${from}`, at: answered.first, count: answered.count })
+          // Each automatic answer counted under whoever made it, never the person's own answers.
+          const answered = yield* sql<{ actorId: string; count: number; first: string }>`
+            SELECT d.decided_by_actor_id AS actor_id, count(*) AS count, min(d.decided_at) AS first
+            FROM decisions d JOIN projects p ON p.id = d.project_id
+            WHERE p.archived_at IS NULL AND d.permission_request_id IS NOT NULL
+              AND d.decided_by_actor_id IN (${instance.systemId}, ${instance.coordinatorId}) AND d.decided_at > ${from}
+            GROUP BY d.decided_by_actor_id`
+          for (const group of answered) {
+            const by = group.actorId === instance.coordinatorId ? 'coordinator' : 'rules'
+            events.push({ kind: 'answered', id: `answered:${by}:${from}`, by, at: group.first, count: group.count })
+          }
           return events
         })
 

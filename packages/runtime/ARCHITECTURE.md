@@ -30,8 +30,10 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `conventions.ts` | A team's conventions, as each repository writes them down (DEV-42): naming patterns read from its docs, its pull request template, branch and title names by pattern, and a description kept in its template |
 | `Nudges.ts` | What reaches the person outside the window: each thing that comes to need them, a call or a task ready, and how many wait |
 | `Models.ts` | The models each agent offers and how hard each can think, from its latest session or asked once a launch |
-| `Permissions.ts` | Records permission requests and decisions, and the allow rules that answered; asks the person what the rules keep for them, offering the always answers that would hold; keeps the rule an always answer saves, and decides again what still waits when the rules change |
-| `rules.ts` | The rules: what no project can change (credentials, the code host), each kind of request they keep for the person, and the project's rules on top, never before always ask before allow rules (ADR-018); for a role that only reads, only what reads. Commands are read as a shell would split them. What an "always" answer would keep, and the scopes it would hold by |
+| `Permissions.ts` | Records permission requests and decisions, and the allow rules that answered; asks the coordinator to judge what no rule answers (ADR-019), and the person what the rules keep for them or the judge leaves, offering the always answers that would hold; keeps the rule an always answer saves, and decides again what still waits when the rules change |
+| `PermissionJudge.ts` | At most two fresh coordinator judgments, requiring verified tool removal, with task context, validated answers and usage metrics (ADR-019) |
+| `coordinatorChoice.ts` | The shared agent and model selection for coordinator conversations and judgments |
+| `rules.ts` | The rules: what no project can change (credentials, the code host), each kind of request they keep for the person, and the project's rules on top: never, then always ask, then allow rules (ADR-018), then the coordinator's judgment where the project asks for it; for a role that only reads, only what reads. Commands are read as a shell would split them. What an "always" answer would keep, and the scopes it would hold by |
 | `threads.ts` | Turns agent events into thread items; writes the thread as text for a brief |
 | `Live.ts` | What is happening now, for clients that watch, with each message's text as far as it has come |
 | `Queries.ts` | What a client's screens show, read from the store: projects, tasks, a task's thread with its live session and the calls waiting, and the coordinator's thread with its task cards; and what git says of a task's worktrees, kept while each looks the same |
@@ -101,7 +103,7 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 - **Stopping never waits on an agent for ever.** One that doesn't end its turn within the grace is stopped with its process, and its turn recorded as cut short.
 - **A review copy leaves out ignored files,** such as `node_modules`, since it is the worktree's tree; a reviewer can't run tests that need what the lead installed.
 - **Findings are settled by the lead alone.** The person sees them but doesn't answer them yet.
-- **The lead's own permission requests are answered by the rules,** not by the lead, and the coordinator doesn't answer a lead's questions yet.
+- **Permission judgments are opt-in.** The coordinator answers permission requests in its mode; conversational questions from leads still need the person.
 - **No timeout per step yet.** A step whose agent keeps working without end isn't stopped; the MVP plan's budget per node will bound it.
 - **Session commands have no receipts in the store.** A retry within a launch gets the first one's result; across a restart, the session is gone anyway.
 - **Rules read commands, not what they do.** A script that writes outside the worktree isn't caught by the rules; the agents' sandboxes are the boundary (Codex's and Claude's). OpenCode has no sandbox yet.

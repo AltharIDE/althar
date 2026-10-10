@@ -31,12 +31,14 @@ export type Verdict =
   /** Allowed: by the project's allow rules where `rules` names them (ADR-018), else because nothing keeps it. */
   | { readonly verdict: 'allow'; readonly rules?: ReadonlyArray<AllowRule> }
   /**
-   * It waits: for the person where it is `held` (a kind on the always-ask
-   * list, or a command the project asks about), which only the person
-   * answers; otherwise because the rules can't tell what it does, or the
-   * project asks about everything, which a judge could answer one day.
+   * It waits for the person: `held` where a kind on the always-ask list, or
+   * a command the project asks about, keeps it for them, which no rule or
+   * judge answers; otherwise because the rules can't tell what it does, or
+   * the project asks about everything.
    */
   | { readonly verdict: 'ask'; readonly reason: string; readonly held: boolean }
+  /** The coordinator judges it (ADR-019): what no rule answers, in a project that has the coordinator decide. */
+  | { readonly verdict: 'judge'; readonly reason: string }
   | { readonly verdict: 'deny'; readonly reason: string }
 
 /**
@@ -84,10 +86,11 @@ export type AllowRule = { readonly kind: RuleId } | { readonly pattern: string; 
 export interface ProjectRuleSet {
   /**
    * What happens to what no rule keeps: it is allowed (`rules`), it waits
-   * for the person (`ask`); or everything is allowed (`allow`), the
+   * for the person (`ask`), or the coordinator judges (`coordinator`);
+   * or everything is allowed (`allow`), the
    * always-ask list with it, and only what is never allowed is refused.
    */
-  readonly mode: 'rules' | 'ask' | 'allow'
+  readonly mode: 'rules' | 'coordinator' | 'ask' | 'allow'
   /** The kinds that ask the person. */
   readonly ask: ReadonlyArray<RuleId>
   /** The kinds refused outright, whoever would answer. */
@@ -115,11 +118,13 @@ export const sayRules = (rules: ProjectRuleSet): string => {
   const never = [...rules.never.map((id) => RULE_WORDS[id]), ...named('never')]
   const allowed = [...rules.allow.map((id) => RULE_WORDS[id]), ...named('allow')]
   return [
-    rules.mode === 'ask'
-      ? "Agents may read anything and change a task's own files; everything else waits for the person."
-      : rules.mode === 'allow' || asks.length === 0
-        ? 'Agents may do anything.'
-        : `Agents may do anything but these, which wait for the person: ${asks.join('; ')}.`,
+    rules.mode === 'coordinator'
+      ? `The coordinator judges permission requests within these rules. Always ask the person: ${asks.length === 0 ? 'none' : asks.join('; ')}.`
+      : rules.mode === 'ask'
+        ? "Agents may read anything and change a task's own files; everything else waits for the person."
+        : rules.mode === 'allow' || asks.length === 0
+          ? 'Agents may do anything.'
+          : `Agents may do anything but these, which wait for the person: ${asks.join('; ')}.`,
     ...(rules.mode === 'allow' || allowed.length === 0 ? [] : [`Allowed without asking: ${allowed.join('; ')}.`]),
     ...(never.length === 0 ? [] : [`Never allowed: ${never.join('; ')}.`]),
   ].join(' ')
@@ -846,6 +851,13 @@ const commandRule = (text: string, rules: ProjectRuleSet['commands']) => {
 }
 
 /**
+ * Whether the project has someone answer whatever goes beyond reads and the
+ * task's own files: the person (`ask`), or the coordinator (`coordinator`),
+ * so an allow rule there lets through what would otherwise ask or be judged.
+ */
+const everyRunAnswered = (project: ProjectRuleSet) => project.mode === 'ask' || project.mode === 'coordinator'
+
+/**
  * The allow rules that cover what would make a request ask (ADR-018), or
  * none where they don't cover all of it. A command line is covered by an
  * exact rule as a whole, or command by command: each that would ask starts
@@ -877,8 +889,8 @@ const allowedBy = (
   for (const { words, kinds, redirected } of commands) {
     // Changing folder, or where a shell's output goes, runs nothing: only what it writes outside counts.
     const bare = words[0] === 'cd' || onlyRedirects(words)
-    // Under "Ask me" every command that runs something asks; otherwise only what the rules can't tell.
-    const asks = project.mode === 'ask' ? !bare || kinds.length > 0 : kinds.some((each) => each.rule === 'unclear')
+    // Under "Ask me", or where the coordinator decides, every command that runs something needs an answer; otherwise only what the rules can't tell.
+    const asks = everyRunAnswered(project) ? !bare || kinds.length > 0 : kinds.some((each) => each.rule === 'unclear')
     if (!asks) continue
     const rule = bare ? undefined : rules.find((each) => !exactly(each) && startsAs(each.pattern, words))
     // A rule covers how a command starts, never where its output goes: that is a write like any other.
@@ -888,7 +900,7 @@ const allowedBy = (
       continue
     }
     // One that only looks needs no rule of its own beside the rest.
-    if (project.mode === 'ask' && !bare && readerWordsReason(words) === undefined) continue
+    if (everyRunAnswered(project) && !bare && readerWordsReason(words) === undefined) continue
     const covered = byKinds(kinds)
     if (covered === undefined) return undefined
     used.push(...covered)
@@ -931,9 +943,12 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
  * - a kind on the always-ask list, or a command the project asks about, is
  *   held for the person, whatever else would answer;
  * - what would ask otherwise (what the rules can't tell, or, where the
- *   project asks about everything, anything but reads and changes to the
- *   task's own files, which every agent's sandbox keeps) is let through
- *   where the project's allow rules cover it (ADR-018), saying which;
+ *   project asks about everything or has the coordinator decide, anything
+ *   but reads and changes to the task's own files, which every agent's
+ *   sandbox keeps) is let through where the project's allow rules cover it
+ *   (ADR-018), saying which;
+ * - where the coordinator decides, it judges the rest of that, but for
+ *   what the rules can't tell (ADR-019);
  * - the rest of that waits for the person;
  * - anything else is allowed.
  */
@@ -970,14 +985,20 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   if (named !== undefined) return ask(asked?.reason ?? `The project's rules ask before \`${named.pattern.trim()}\`.`, true)
   // Reads, and changes to the task's own files, go through, as they would in any agent's sandbox.
   const ownFiles = CHANGES.includes(request.kind) && found.length === 0
+  const routine = LOOKS.includes(request.kind) || ownFiles
   const reason =
     asked?.reason ??
-    (project.mode === 'ask' && !LOOKS.includes(request.kind) && !ownFiles
-      ? "This project asks you before anything an agent does beyond the task's own files."
+    (everyRunAnswered(project) && !routine
+      ? project.mode === 'coordinator'
+        ? 'The coordinator decides within the project rules.'
+        : "This project asks you before anything an agent does beyond the task's own files."
       : undefined)
   if (reason === undefined) return ALLOW
+  // An allow rule answers before anyone is asked, the coordinator too: no judgment is spent on what a rule covers.
   const rules = allowedBy(request, context, project, found)
   if (rules !== undefined) return { verdict: 'allow', rules }
+  // What the rules can't tell waits for the person; the rest the coordinator judges, where the project has it decide.
+  if (asked === undefined && project.mode === 'coordinator') return { verdict: 'judge', reason }
   return ask(reason, false)
 }
 
