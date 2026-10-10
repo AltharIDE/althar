@@ -8,7 +8,7 @@ import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 /*
  * What the rules keep for the person: an agent's action that waits for them
  * to allow it once or always, or not, with a note or never again
- * (ADR-017). In a task's thread several wait as a stack, with Allow all;
+ * (ADR-018). In a task's thread several wait as a stack, with Allow all;
  * in the dock beside the board, one.
  */
 

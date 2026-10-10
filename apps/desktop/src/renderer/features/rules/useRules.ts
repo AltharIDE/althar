@@ -14,7 +14,7 @@ import { useServices } from '../../data/services'
  * Althar can follow it; until then the screen says why it can't.
  *
  * A change that replaces a list names the revision it was made against, so
- * a rule a permission card kept meanwhile isn't dropped (ADR-017): the
+ * a rule a permission card kept meanwhile isn't dropped (ADR-018): the
  * runtime refuses it, and the screen reads the rules again. The screen's own
  * changes go one after another, each against the revision the last left.
  */

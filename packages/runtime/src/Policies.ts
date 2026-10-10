@@ -28,9 +28,9 @@ export const ProjectRules = Schema.Struct({
   alwaysAsk: Schema.Array(Schema.String),
   /** The kinds refused outright, by id. */
   never: Schema.optional(Schema.Array(Schema.String)),
-  /** The kinds let through without asking, by id (ADR-017): what Allow always kept by kind. */
+  /** The kinds let through without asking, by id (ADR-018): what Allow always kept by kind. */
   alwaysAllow: Schema.optional(Schema.Array(Schema.String)),
-  /** Commands the person named, by how they start or exactly: asked about, refused, or let through (ADR-017). */
+  /** Commands the person named, by how they start or exactly: asked about, refused, or let through (ADR-018). */
   commands: Schema.optional(
     Schema.Array(
       Schema.Struct({
@@ -80,7 +80,7 @@ export const ruleSetOf = (rules: ProjectRules): ProjectRuleSet => ({
   commands: rules.commands ?? [],
 })
 
-/** A rule an "always" answer keeps (ADR-017): a kind, or a command by how it starts or exactly, let through or never allowed. */
+/** A rule an "always" answer keeps (ADR-018): a kind, or a command by how it starts or exactly, let through or never allowed. */
 export type Remembered = AlwaysRule
 
 /**

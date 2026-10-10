@@ -15,7 +15,7 @@ import { Sessions } from '../src/Sessions'
 import { runtime, task, turns, until } from './support'
 
 /*
- * Allow always and Deny always (ADR-017), with the fake agent running real
+ * Allow always and Deny always (ADR-018), with the fake agent running real
  * commands under "Ask me": an answer keeps a rule in the project's rules,
  * the next request it covers is answered by it and says so in the thread,
  * and taking the rule away makes it ask again. What always asks still asks.
@@ -179,7 +179,7 @@ const separateLead = Effect.gen(function* () {
   }
 })
 
-describe('Allow always and Deny always (ADR-017)', () => {
+describe('Allow always and Deny always (ADR-018)', () => {
   it.live('Allow always for `git status` by how it starts: the next is let through by the rule, says so, and the rule is kept', () =>
     Effect.gen(function* () {
       const policies = yield* Policies
@@ -331,7 +331,7 @@ describe('Allow always and Deny always (ADR-017)', () => {
   )
 })
 
-describe('the rule an always answer keeps (ADR-017)', () => {
+describe('the rule an always answer keeps (ADR-018)', () => {
   const always = {
     command: 'make deploy',
     prefix: 'make deploy',

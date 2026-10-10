@@ -515,7 +515,7 @@ describe('a project’s rules (ADR-013)', () => {
   })
 })
 
-describe('a project’s allow rules (ADR-017)', () => {
+describe('a project’s allow rules (ADR-018)', () => {
   const rules = (project: Partial<ProjectRuleSet>) => ({ project: { ...MVP_RULES, ...project } })
   const verdictOf = (command: string, project: Partial<ProjectRuleSet>) => run(command, rules(project))
   const askMe = (commands: ProjectRuleSet['commands'], more: Partial<ProjectRuleSet> = {}) => ({ mode: 'ask' as const, commands, ...more })
@@ -711,7 +711,7 @@ describe('a project’s allow rules (ADR-017)', () => {
   })
 })
 
-describe('what an always would keep (ADR-017)', () => {
+describe('what an always would keep (ADR-018)', () => {
   const rules = (project: Partial<ProjectRuleSet>) => ({ ...context, project: { ...MVP_RULES, ...project } })
   const always = (command: string, project: Partial<ProjectRuleSet>) => alwaysOf(request({ title: command }), rules(project))
 

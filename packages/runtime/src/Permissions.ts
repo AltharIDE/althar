@@ -44,7 +44,7 @@ import {
  * agent, and, where the project's allow rules answered, the rules and the
  * revision they belong to. What the rules keep for the person becomes an
  * attention request, and the agent waits until the person answers or the
- * turn is cancelled. An answer can keep a rule (ADR-017): Allow always and
+ * turn is cancelled. An answer can keep a rule (ADR-018): Allow always and
  * Deny always save one to the project, and every request still waiting is
  * decided again by the rules as they now are.
  */

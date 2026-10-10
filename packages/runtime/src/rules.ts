@@ -28,7 +28,7 @@ import type { PermissionRequest } from '@althar/provider-adapters'
  */
 
 export type Verdict =
-  /** Allowed: by the project's allow rules where `rules` names them (ADR-017), else because nothing keeps it. */
+  /** Allowed: by the project's allow rules where `rules` names them (ADR-018), else because nothing keeps it. */
   | { readonly verdict: 'allow'; readonly rules?: ReadonlyArray<AllowRule> }
   /**
    * It waits: for the person where it is `held` (a kind on the always-ask
@@ -67,7 +67,7 @@ interface Kept {
 const kept = (reason: string, rule: RuleId | 'unclear'): Kept => ({ reason, rule })
 
 /**
- * A command the person named (ADR-013, ADR-017): asked about, refused, or
+ * A command the person named (ADR-013, ADR-018): asked about, refused, or
  * let through. By how it starts (`npm publish`, `terraform *`), or, where
  * `match` says so, as this exact line.
  */
@@ -77,10 +77,10 @@ export interface CommandRule {
   readonly match?: 'prefix' | 'exact' | undefined
 }
 
-/** What let a request through without asking (ADR-017): a kind the project always allows, or a command rule. */
+/** What let a request through without asking (ADR-018): a kind the project always allows, or a command rule. */
 export type AllowRule = { readonly kind: RuleId } | { readonly pattern: string; readonly match: 'prefix' | 'exact' }
 
-/** A project's rules, as the rules read them (ADR-013, ADR-017, Policies). */
+/** A project's rules, as the rules read them (ADR-013, ADR-018, Policies). */
 export interface ProjectRuleSet {
   /**
    * What happens to what no rule keeps: it is allowed (`rules`), it waits
@@ -846,7 +846,7 @@ const commandRule = (text: string, rules: ProjectRuleSet['commands']) => {
 }
 
 /**
- * The allow rules that cover what would make a request ask (ADR-017), or
+ * The allow rules that cover what would make a request ask (ADR-018), or
  * none where they don't cover all of it. A command line is covered by an
  * exact rule as a whole, or command by command: each that would ask starts
  * as an allow rule says, or is only of kinds the project always allows. A
@@ -933,7 +933,7 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
  * - what would ask otherwise (what the rules can't tell, or, where the
  *   project asks about everything, anything but reads and changes to the
  *   task's own files, which every agent's sandbox keeps) is let through
- *   where the project's allow rules cover it (ADR-017), saying which;
+ *   where the project's allow rules cover it (ADR-018), saying which;
  * - the rest of that waits for the person;
  * - anything else is allowed.
  */
@@ -981,7 +981,7 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   return ask(reason, false)
 }
 
-/** How far an "always" answer reaches (ADR-017): this exact command, commands that start the same way, or the kind it is. */
+/** How far an "always" answer reaches (ADR-018): this exact command, commands that start the same way, or the kind it is. */
 export type AlwaysScope = 'exact' | 'prefix' | 'kind'
 
 /** A rule an "always" answer keeps: a kind, or a command by how it starts or exactly, let through or never allowed. */
@@ -1067,7 +1067,7 @@ const prefixOf = (words: ReadonlyArray<string>): string | null => {
 
 /**
  * What Allow always and Deny always would keep for a request that waits
- * (ADR-017), and the scopes each would hold for: an allow rule only where
+ * (ADR-018), and the scopes each would hold for: an allow rule only where
  * it would let this request through next time, and a never rule where it
  * would refuse it. The command an always is about is the first that keeps
  * the line for the person, else the first that runs something.

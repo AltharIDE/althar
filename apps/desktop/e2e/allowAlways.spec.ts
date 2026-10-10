@@ -8,7 +8,7 @@ import { repository } from '../tests/repository'
 import { launch, openFirstProject, say, toConversation } from './support'
 
 /*
- * Allow always (ADR-017), as the person meets it: under "Ask me", a lead's
+ * Allow always (ADR-018), as the person meets it: under "Ask me", a lead's
  * `git status` waits as a call; answered with Allow always for commands
  * starting `git status`, the next one runs without asking and the thread
  * says which rule let it through; the rule is on the rules screen, and

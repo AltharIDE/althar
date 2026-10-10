@@ -29,7 +29,7 @@ export type Part =
       readonly state: ToolState
       /** The whole command, when it runs one: what the row opens to, and what Copy takes. */
       readonly command: string | null
-      /** The project's rule that let it through without asking (ADR-017), where one did. */
+      /** The project's rule that let it through without asking (ADR-018), where one did. */
       readonly allowedBy?: AllowedBy
     }
   | {

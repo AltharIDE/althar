@@ -94,7 +94,7 @@ Decided in [ADR-013](decisions/013-project-rules.md).
 - [x] **An allowlist for "Ask me".** Asking about everything, a person will
   want some commands let through, as Cursor's and Roo's allowlists do.
   Settled on 10 October 2026 in
-  [ADR-017](decisions/017-allow-always-keeps-a-rule.md) (DEV-21): allow
+  [ADR-018](decisions/018-allow-always-keeps-a-rule.md) (DEV-21): allow
   rules by kind, by how a command starts, or exactly, kept by Allow always
   on a call and listed as "Always allowed" on the rules screen, where each
   can be taken off. What always asks or is never allowed still wins.
@@ -472,7 +472,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   refusals that hold even with everything allowed. Still open:
   - ~~**Allow rules.** Under "Ask me", nothing is pre-approved, so `bun test`
     would ask every time.~~ Settled in
-    [ADR-017](decisions/017-allow-always-keeps-a-rule.md): command rules
+    [ADR-018](decisions/018-allow-always-keeps-a-rule.md): command rules
     carry allow beside ask and never, and kinds can be always allowed;
     Allow always on a card writes one (Althar's own, never the agent's
     `allow_always`).
@@ -530,7 +530,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   be left out of Allow all?
   *Prototype:* Permissions → "Many at once".
   Settled for now on 10 October 2026 (DEV-21,
-  [ADR-017](decisions/017-allow-always-keeps-a-rule.md)): Allow all allows
+  [ADR-018](decisions/018-allow-always-keeps-a-rule.md)): Allow all allows
   every card in the stack once, the always-ask ones too, since each was kept
   for the person and they see the count. It never keeps a rule.
 - [x] **Pasted links.** Settled on 1 October 2026: issues and pull requests

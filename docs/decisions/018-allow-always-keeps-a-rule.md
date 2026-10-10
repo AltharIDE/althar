@@ -1,4 +1,4 @@
-# ADR-017: Allow always keeps a rule in the project
+# ADR-018: Allow always keeps a rule in the project
 
 - **Status:** Accepted
 - **Date:** 2026-10-10

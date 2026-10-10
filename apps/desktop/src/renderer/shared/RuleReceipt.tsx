@@ -5,7 +5,7 @@ import type { Part } from './thread'
 
 /*
  * What the project's allow rules let through in a turn, without asking
- * anyone (ADR-017): one quiet line under its work, which opens to each
+ * anyone (ADR-018): one quiet line under its work, which opens to each
  * command and the rule that let it through.
  */
 

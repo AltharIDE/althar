@@ -742,7 +742,7 @@ including the always-ask list
   Althar, which is what agents ask to do beyond their sandbox. Every answer is recorded on the task. What the
   project's allow rules let through shows under its turn as one quiet line,
   saying which rule; the person's Allow always and Deny always keep such a
-  rule in the project ([ADR-017](../decisions/017-allow-always-keeps-a-rule.md)),
+  rule in the project ([ADR-018](../decisions/018-allow-always-keeps-a-rule.md)),
   and the agent is still sent its narrowest option.
 - A session with a read-only role, such as the coordinator or a review step,
   starts in the agent's read-only mode where it has one (for example Claude

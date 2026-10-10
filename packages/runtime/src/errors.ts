@@ -76,7 +76,7 @@ export class AttentionClosed extends Schema.TaggedError<AttentionClosed>()('Atte
   attentionId: Schema.String,
 }) {}
 
-/** An allow rule for words the project's rules ask about or never allow, which come first (ADR-017): it would replace them, or do nothing. */
+/** An allow rule for words the project's rules ask about or never allow, which come first (ADR-018): it would replace them, or do nothing. */
 export class RuleOnAnotherList extends Schema.TaggedError<RuleOnAnotherList>()('RuleOnAnotherList', {
   pattern: Schema.String,
   exact: Schema.Boolean,
@@ -90,7 +90,7 @@ export class RulesChanged extends Schema.TaggedError<RulesChanged>()('RulesChang
   expected: Schema.Number,
 }) {}
 
-/** An "always" answer by a scope the request wasn't offered: no rule of it would hold (ADR-017). */
+/** An "always" answer by a scope the request wasn't offered: no rule of it would hold (ADR-018). */
 export class AlwaysNotOffered extends Schema.TaggedError<AlwaysNotOffered>()('AlwaysNotOffered', {
   attentionId: Schema.String,
   scope: Schema.String,

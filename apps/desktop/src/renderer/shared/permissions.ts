@@ -3,7 +3,7 @@ import { Decision, type PermissionAnswer, type PermissionRequest, PermissionScop
 
 /*
  * A permission call as the kit asks it, and its answer as the runtime takes
- * it (ADR-017). The runtime says what an "always" would keep and the scopes
+ * it (ADR-018). The runtime says what an "always" would keep and the scopes
  * each always holds for; the card offers those and nothing else, so an
  * Allow always that the always-ask list would override is never offered.
  * The answer names only the scope: the runtime keeps the rule it offered.

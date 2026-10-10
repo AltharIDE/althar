@@ -69,7 +69,7 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Project rules | execution policy, `ProjectRules` | When agents need a yes, what always asks, what is never allowed, how a task ends, how its branches and pull requests are named, what a usage limit does, and which accounts work runs on (ADR-013). |
 | Always ask me | `alwaysAsk` kinds, `ask` command rules | What waits for the person whoever would answer: kinds of request, and commands they named by how they start. |
 | Never | `never` kinds and command rules | What is refused without asking anyone, even with everything allowed. |
-| Always allowed | `alwaysAllow` kinds, `allow` command rules | What is let through without asking, short of what always asks or is never allowed: kinds, and commands by how they start or exactly. Answering a permission with "always allow" adds one (ADR-017). |
+| Always allowed | `alwaysAllow` kinds, `allow` command rules | What is let through without asking, short of what always asks or is never allowed: kinds, and commands by how they start or exactly. Answering a permission with "always allow" adds one (ADR-018). |
 | Allow always, Never allow | an answer that keeps a rule, by its scope | An answer that is also kept in the project's rules: for this exact command, commands starting the same way, or the kind of request. Offered only where the rule would hold. |
 | Allowed by the project's rules | a decision a rule made | The quiet line under a turn for what an allow rule let through, opening to each command and its rule. |
 | Settled | terminal states | Calls answered, changes accepted, tasks abandoned. |

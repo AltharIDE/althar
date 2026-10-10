@@ -245,7 +245,7 @@ export type RuleKind = typeof RuleKind.Type
 
 /**
  * A command the person named: asked about, refused, or let through without
- * asking (ADR-017). By how it starts (`npm publish`, `terraform *`), or, with
+ * asking (ADR-018). By how it starts (`npm publish`, `terraform *`), or, with
  * `match: 'exact'`, as this whole line.
  */
 export const CommandRule = Schema.Struct({
@@ -255,7 +255,7 @@ export const CommandRule = Schema.Struct({
 })
 export type CommandRule = typeof CommandRule.Type
 
-/** How far an "always" answer to a permission reaches (ADR-017): this exact command, commands that start the same way, or the kind it is. */
+/** How far an "always" answer to a permission reaches (ADR-018): this exact command, commands that start the same way, or the kind it is. */
 export const AlwaysScope = Schema.Literals(['exact', 'prefix', 'kind'])
 export type AlwaysScope = typeof AlwaysScope.Type
 
@@ -290,7 +290,7 @@ export const ProjectRulesView = Schema.Struct({
   permissions: Schema.Literals(['rules', 'ask', 'allow']),
   alwaysAsk: Schema.Array(RuleKind),
   never: Schema.Array(RuleKind),
-  /** The kinds let through without asking, short of what always asks or is never allowed (ADR-017). */
+  /** The kinds let through without asking, short of what always asks or is never allowed (ADR-018). */
   alwaysAllow: Schema.Array(RuleKind),
   commands: Schema.Array(CommandRule),
   /** How a task ends when its plan doesn't say; null: a draft pull request where Althar is connected to the host, else its branch. */
@@ -541,7 +541,7 @@ export const ToolCallItem = Schema.Struct({
     locations: Schema.Array(ToolLocation),
     /** Refused when it asked: by the rules, the lead or the person. */
     declined: Schema.Boolean,
-    /** Let through without asking by the project's allow rules, the first that did (ADR-017); absent otherwise. */
+    /** Let through without asking by the project's allow rules, the first that did (ADR-018); absent otherwise. */
     allowedBy: Schema.optional(AllowedBy),
   }),
 })
@@ -773,7 +773,7 @@ export const AttentionRequest = Schema.Struct({
   stuck: Schema.NullOr(StuckStep),
   /**
    * For a permission: what an "always" answer would keep in the project's
-   * rules (ADR-017), and the scopes Allow always and Deny always each hold
+   * rules (ADR-018), and the scopes Allow always and Deny always each hold
    * for; none offered for an answer whose rule wouldn't hold, as Allow
    * always for what always asks. Absent where it can't be kept as a rule.
    */

@@ -1,6 +1,6 @@
 # ADR-013: Project rules: a mode, always ask, never, and command rules
 
-- **Status:** Accepted; amended by [ADR-017](017-allow-always-keeps-a-rule.md)
+- **Status:** Accepted; amended by [ADR-018](018-allow-always-keeps-a-rule.md)
   (2026-10-10), which adds allow rules after what always asks
 - **Date:** 2026-10-04
 - **Owner:** Repository maintainers

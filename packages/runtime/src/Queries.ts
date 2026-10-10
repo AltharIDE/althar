@@ -111,7 +111,7 @@ interface ItemRow {
   readonly disposition: string | null
   /** For a tool call that asked: what was decided, last. */
   readonly decision: string | null
-  /** For a tool call the project's allow rules let through: the rules, as the decision keeps them (ADR-017). */
+  /** For a tool call the project's allow rules let through: the rules, as the decision keeps them (ADR-018). */
   readonly rule?: string | null
   readonly createdAt: string
 }
@@ -177,7 +177,7 @@ const callOf = (request: { readonly id: string; readonly kind: string; readonly 
     reason: text(payload, 'reason'),
     command: text(payload, 'command') || null,
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
-    // What an "always" would keep, for a permission that says (ADR-017); earlier ones don't.
+    // What an "always" would keep, for a permission that says (ADR-018); earlier ones don't.
     ...Option.match(decodeAlways(field(payload, 'always')), {
       onNone: () => ({}),
       onSome: (always) => (always === undefined ? {} : { always }),

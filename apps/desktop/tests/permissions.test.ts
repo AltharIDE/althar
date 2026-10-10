@@ -5,7 +5,7 @@ import { permissionOf, replyOf, ruleWordsOf } from '../src/renderer/shared/permi
 
 /*
  * A permission call as the kit's card asks it, and its answer as the
- * runtime takes it (ADR-017): only the always answers the runtime offers,
+ * runtime takes it (ADR-018): only the always answers the runtime offers,
  * and only the scope of one goes back.
  */
 
