@@ -112,7 +112,84 @@ describe('Permission', () => {
   })
 })
 
+describe('Permission, kept as a rule', () => {
+  const offers = [Decision.AllowOnce, Decision.AllowAlways, Decision.Deny, Decision.DenyAlways]
+
+  it('offers an always only by the scopes that would hold, and each answer keeps one it offers', () => {
+    const onAnswer = vi.fn()
+    render(
+      <Permission
+        {...STAGING}
+        offers={offers}
+        scopes={{ [Decision.AllowAlways]: [PermissionScope.Exact, PermissionScope.Prefix], [Decision.DenyAlways]: [PermissionScope.Kind] }}
+        defaultScope={PermissionScope.Prefix}
+        project={project}
+        onAnswer={onAnswer}
+      />,
+    )
+    // The kind is offered for never alone, and the prefix picked for always isn't one never can keep.
+    fireEvent.click(screen.getByRole('radio', { name: /No, and never allow/ }))
+    expect(screen.getByText('anything that reaches staging')).toBeInTheDocument()
+    fireEvent.submit(form())
+    settle()
+    expect(onAnswer).toHaveBeenCalledWith({ decision: Decision.DenyAlways, cmd: STAGING.cmd, scope: PermissionScope.Kind })
+  })
+
+  it('keeps the prefix picked where that answer offers it', () => {
+    const onAnswer = vi.fn()
+    render(<Permission {...STAGING} offers={offers} defaultScope={PermissionScope.Prefix} project={project} onAnswer={onAnswer} />)
+    fireEvent.click(screen.getByRole('radio', { name: /Yes, and always allow/ }))
+    fireEvent.submit(form())
+    settle()
+    expect(onAnswer).toHaveBeenCalledWith({ decision: Decision.AllowAlways, cmd: STAGING.cmd, scope: PermissionScope.Prefix })
+  })
+
+  it('leaves out an always with no scope to keep, and starts on the first answer offered instead', () => {
+    render(
+      <Permission
+        {...STAGING}
+        offers={offers}
+        scopes={{ [Decision.AllowAlways]: [] }}
+        defaultDecision={Decision.AllowAlways}
+        project={project}
+      />,
+    )
+    expect(screen.queryByRole('radio', { name: /Yes, and always allow/ })).toBeNull()
+    expect(screen.getByRole('radio', { name: /Yes, this once/ })).toBeChecked()
+  })
+
+  it('says the one scope it would keep, and nothing where that is this command alone', () => {
+    const { unmount } = render(<Permission {...STAGING} scopes={{ [Decision.AllowAlways]: [PermissionScope.Kind] }} project={project} />)
+    expect(screen.getByText('anything that reaches staging')).toBeInTheDocument()
+    expect(screen.queryByRole('combobox')).toBeNull()
+    unmount()
+    render(<Permission {...STAGING} scopes={{ [Decision.AllowAlways]: [PermissionScope.Exact] }} project={project} />)
+    expect(screen.queryByText('in Meridian')).toBeNull()
+  })
+})
+
 describe('Permissions', () => {
+  it('folds a stack of one as one card, with Undo', () => {
+    const onUndo = vi.fn()
+    render(<Permissions items={[STAGING]} project={project} onAnswer={() => {}} onUndo={onUndo} />)
+    expect(screen.queryByText(/1 of 1/)).toBeNull()
+    fireEvent.submit(form())
+    settle()
+    expect(screen.getByText('Allowed once')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(onUndo).toHaveBeenCalledWith(STAGING, { decision: Decision.AllowOnce, cmd: STAGING.cmd })
+    expect(form()).toBeInTheDocument()
+  })
+
+  it('beats the card in front once for Allow all, then folds', () => {
+    render(<Permissions items={REQUESTS} project={project} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Allow all 3' }))
+    // The front card stays for its beat.
+    expect(form()).toBeInTheDocument()
+    settle()
+    expect(screen.getByText('Allowed 3')).toBeInTheDocument()
+  })
+
   it('goes through the stack, and Allow all answers the rest', () => {
     const onAnswer = vi.fn()
     render(<Permissions items={REQUESTS} project={project} onAnswer={onAnswer} onUndo={() => {}} />)

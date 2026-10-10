@@ -8,6 +8,7 @@ import { CheckList, type CheckItem } from '../../primitives/CheckList/CheckList'
 import { Choices, type ChoiceOption } from '../../primitives/Choices/Choices'
 import { Field, FieldError } from '../../primitives/Field/Field'
 import { FormRow } from '../../primitives/FormRow/FormRow'
+import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Panel } from '../../primitives/Panel/Panel'
 import { NamingRule, type NamingRuleProps, type RepositoryTemplate, TemplateSources } from '../../setup/Conventions/Conventions'
 import s from './ProjectRules.module.css'
@@ -32,6 +33,8 @@ export interface ProjectRulesText {
   permission: Record<PermissionPolicy, Option>
   always: { label: string; note: string; overridden: string }
   never: { label: string; note: string }
+  /** What is let through without asking: each rule, and how it goes. */
+  alwaysAllowed: { label: string; note: string; empty: string; remove: (rule: string) => string }
   addRule: string
   /** The form a rule is added with: a command, by how it starts. */
   rule: { field: string; placeholder: string; note: string; empty: string; add: string; cancel: string }
@@ -68,6 +71,12 @@ export const projectRulesText: ProjectRulesText = {
   },
   always: { label: 'Always ask me', note: 'Whoever would answer, these wait for you', overridden: 'Off while everything is allowed' },
   never: { label: 'Never', note: 'Refused without asking anyone, even with everything allowed. Only this list changes it' },
+  alwaysAllowed: {
+    label: 'Always allowed',
+    note: 'Let through without asking. What “Always ask me” or “Never” lists comes first',
+    empty: 'Nothing yet. A permission answered with “always allow” adds its rule here.',
+    remove: (rule) => `Remove ${rule}`,
+  },
   addRule: 'Add a rule',
   rule: {
     field: 'A command, as it starts',
@@ -168,6 +177,16 @@ export interface ProjectRulesProps {
   onNeverOnChange?: (value: readonly string[]) => void
   /** Adds a rule to `never`: a command, by how it starts. The button is shown only with it. */
   onAddNever?: (pattern: string) => void
+  /**
+   * What is let through without asking, short of what always asks or is
+   * never allowed: the rules a permission answered with "always allow" kept,
+   * and those added here, in words. Without it, no such row.
+   */
+  alwaysAllowed?: readonly CheckItem[]
+  /** Takes a rule off `alwaysAllowed`. Without it, the list can't be changed here. */
+  onRemoveAlwaysAllowed?: (id: string) => void
+  /** Adds a rule to `alwaysAllowed`: a command, by how it starts. The button is shown only with it. */
+  onAddAlwaysAllowed?: (pattern: string) => void
   reach?: FindingsReach
   defaultReach?: FindingsReach
   /** Without it, no review findings row. */
@@ -218,6 +237,9 @@ export function ProjectRules({
   defaultNeverOn = [],
   onNeverOnChange,
   onAddNever,
+  alwaysAllowed,
+  onRemoveAlwaysAllowed,
+  onAddAlwaysAllowed,
   reach: reachProp,
   defaultReach = FindingsReach.Stuck,
   onReachChange,
@@ -275,6 +297,15 @@ export function ProjectRules({
           <div className={s.checks}>
             <CheckList label={t.never.label} items={never} value={neverOn} onChange={setNeverOn} />
             {onAddNever && <AddRule t={t} onAdd={onAddNever} />}
+          </div>
+        </FormRow>
+      )}
+
+      {alwaysAllowed && (
+        <FormRow label={t.alwaysAllowed.label} note={allowAll ? `${t.alwaysAllowed.note}. ${t.always.overridden}` : t.alwaysAllowed.note}>
+          <div className={s.checks}>
+            <AllowedRules rules={alwaysAllowed} t={t} {...(onRemoveAlwaysAllowed ? { onRemove: onRemoveAlwaysAllowed } : {})} />
+            {onAddAlwaysAllowed && <AddRule t={t} onAdd={onAddAlwaysAllowed} />}
           </div>
         </FormRow>
       )}
@@ -340,6 +371,54 @@ export function ProjectRules({
         </FormRow>
       )}
     </Panel>
+  )
+}
+
+/**
+ * The rules that let requests through, each with a way to take it off.
+ * Taking one off moves focus to the next one's button, or the last one's,
+ * so it isn't lost with the button pressed.
+ */
+function AllowedRules({ rules, onRemove, t }: { rules: readonly CheckItem[]; onRemove?: (id: string) => void; t: ProjectRulesText }) {
+  const box = useRef<HTMLDivElement>(null)
+  const removed = useRef<number | null>(null)
+  useEffect(() => {
+    const at = removed.current
+    if (at === null) return
+    removed.current = null
+    const buttons = box.current?.querySelectorAll<HTMLElement>('li button')
+    const next = buttons?.[Math.min(at, buttons.length - 1)]
+    // With none left, focus goes to the line that says so.
+    const landing = next ?? box.current?.querySelector<HTMLElement>('p')
+    landing?.focus()
+  }, [rules])
+  return (
+    <div ref={box}>
+      {rules.length === 0 ? (
+        <p className={s.empty} tabIndex={-1}>
+          {t.alwaysAllowed.empty}
+        </p>
+      ) : (
+        <ul className={s.allowed} aria-label={t.alwaysAllowed.label}>
+          {rules.map((rule, index) => (
+            <li key={rule.id} className={s.allowedRule}>
+              <span>{rule.label}</span>
+              {onRemove && (
+                <IconButton
+                  icon="close"
+                  size="small"
+                  label={t.alwaysAllowed.remove(rule.label)}
+                  onClick={() => {
+                    removed.current = index
+                    onRemove(rule.id)
+                  }}
+                />
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 

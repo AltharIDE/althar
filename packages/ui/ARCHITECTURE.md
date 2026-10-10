@@ -12,7 +12,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | --- | --- |
 | `foundations` | Tokens, icons, brand marks, project marks, Althar's light and its halftone mark, and the domain vocabularies. |
 | `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), `Model` (a model's mark and name, and how it is reached on hover), and Ask, which every part that asks a person shares. |
-| `thread` | What appears in a conversation: turns, tool calls, steps, permissions, questions, Stuck, documents. |
+| `thread` | What appears in a conversation: turns, tool calls, steps, permissions (a card, a stack with Allow all, their answers in small for a call on the home, and what a rule allowed), questions, Stuck, documents. |
 | `composer` | What writes into a conversation: Composer, ModelPick, ContextRing, Listening, Running. |
 | `coordinator` | What the coordinator shows about tasks: Issue, TaskLaunch, TaskCard, TaskMark, TaskHeld. |
 | `board` | The project's work in lanes: Board, BoardColumn, and a card or row for each lane. |

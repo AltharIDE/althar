@@ -8,7 +8,7 @@ import type { AllowedItem, PermissionRequest } from '../thread/Permission/Permis
 import type { RateLimitOption } from '../thread/RateLimit/RateLimit'
 import type { ReviewFinding } from '../thread/Review/Review'
 import type { StepRef } from '../thread/Shell/Shell'
-import { AllowedBy, DiffLineKind, FindingState, Severity, StepState } from '../foundations/vocabulary'
+import { AllowedBy, Decision, DiffLineKind, FindingState, Severity, StepState } from '../foundations/vocabulary'
 import s from './fixtures.module.css'
 import { CODEX, GEMINI_PRO, GPT_MINI, OPUS, QWEN, SONNET } from './models'
 
@@ -205,6 +205,51 @@ export const REQUESTS: readonly PermissionRequest[] = [
     cmd: 'pnpm docs:publish --preview',
     why: `Publishing is on ${PROJECT}’s always-ask list.`,
   },
+]
+
+/** Seven from three steps, for a stack that shows no more than two behind. */
+export const MANY: readonly PermissionRequest[] = [
+  ...REQUESTS,
+  {
+    id: 'logs-staging',
+    step: 'Verify on staging',
+    agent: CODEX,
+    what: 'Read staging logs',
+    cmd: 'kubectl logs -n staging deploy/refunds --since=1h',
+    prefix: 'kubectl logs',
+    why: `Staging is on ${PROJECT}’s always-ask list.`,
+  },
+  {
+    id: 'comment-issue',
+    step: 'Docs',
+    agent: GPT_MINI,
+    what: 'Post the preview link on MER-212',
+    cmd: 'linear comment MER-212',
+    why: `Messages to people are on ${PROJECT}’s always-ask list.`,
+  },
+  {
+    id: 'push-main',
+    step: 'Implement',
+    agent: OPUS,
+    what: 'Push to main',
+    cmd: 'git push origin main',
+    why: 'Pushing to main always asks.',
+    offers: [Decision.AllowOnce, Decision.Deny, Decision.DenyAlways],
+  },
+  {
+    id: 'budget',
+    step: 'Implement',
+    agent: OPUS,
+    what: 'Spend past $5 on this task',
+    cmd: 'budget +$4 (now $5.20)',
+    why: `Spending is on ${PROJECT}’s always-ask list.`,
+  },
+]
+
+/** What a project's rule let through, in a thread with no steps to tell apart. */
+export const BY_RULE: readonly AllowedItem[] = [
+  { id: 'r1', cmd: 'git status --short', by: AllowedBy.Rule, rule: 'commands starting “git status”' },
+  { id: 'r2', cmd: 'bun test src/refunds/limit.test.ts', by: AllowedBy.Rule, rule: 'commands starting “bun test”' },
 ]
 
 export const ALLOWED: readonly AllowedItem[] = [
