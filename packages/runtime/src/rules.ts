@@ -736,7 +736,14 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
     each.push({ words, kinds })
     if (commandsIn(words).some(deploys)) kinds.push(kept('Deploying or publishing always asks.', 'deploy'))
     if (words[0] === 'cd') {
-      cwd = locate(where, cwd, words[1] ?? '~')
+      // `cd` writes nothing itself, but a redirect on it does, from where it was: `cd . > ~/.zshrc`.
+      const target = writes(words).find((path) => outside(where, locate(where, cwd, path)))
+      if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
+      cwd = locate(
+        where,
+        cwd,
+        words.find((word, index) => index > 0 && !REDIRECTS.includes(word) && !REDIRECTS.includes(words[index - 1] ?? '')) ?? '~',
+      )
       continue
     }
     const git = gitCall(words, cwd)
@@ -850,8 +857,8 @@ const allowedBy = (
   if (whole !== undefined) return [{ pattern: whole.pattern, match: 'exact' }]
   const used: Array<AllowRule> = []
   for (const { words, kinds } of commands) {
-    // Under "Ask me" every command asks; otherwise only what the rules can't tell.
-    const asks = project.mode === 'ask' ? words[0] !== 'cd' : kinds.some((each) => each.rule === 'unclear')
+    // Under "Ask me" every command asks but changing folder, unless a redirect on it writes; otherwise only what the rules can't tell.
+    const asks = project.mode === 'ask' ? words[0] !== 'cd' || writes(words).length > 0 : kinds.some((each) => each.rule === 'unclear')
     if (!asks) continue
     const rule = rules.find((each) => !exactly(each) && startsAs(each.pattern, words))
     if (rule !== undefined) {

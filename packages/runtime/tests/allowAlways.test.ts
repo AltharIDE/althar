@@ -278,6 +278,87 @@ describe('the rule an always answer keeps (ADR-017)', () => {
 })
 
 describe('answers that meet each other', () => {
+  it.live('keeps no always the rules would now override, as when the person has since kept the command for themselves', () =>
+    Effect.gen(function* () {
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const { project, task: created } = yield* asking
+      yield* say(created.threadId, `${scenarios.run}bun test`)
+      const call = yield* waitingCall(created.threadId)
+      assert.deepStrictEqual(call.always?.allow, ['exact', 'prefix'])
+      yield* policies.set(project.projectId, { commands: [{ pattern: 'bun test', decision: 'ask' }] }, instance.personId)
+      assert.instanceOf(yield* Effect.flip(answer(call.id, 'allow', 'prefix')), AlwaysNotOffered)
+      assert.deepStrictEqual((yield* policies.current(project.projectId as ProjectId)).rules.commands, [
+        { pattern: 'bun test', decision: 'ask' },
+      ])
+      yield* answer(call.id, 'allow')
+      yield* ended(created.threadId, 1)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('decides again a call made while the rules changed, which the change itself never saw', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const instance = yield* Instance
+      const policies = yield* Policies
+      const sql = yield* SqlClient.SqlClient
+      const { project, task: created } = yield* task()
+      yield* policies.set(project.projectId, { permissions: 'ask' }, instance.personId)
+      const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
+      yield* until(turns(created.threadId), (rows) => rows.length >= 1 && rows.every(finished))
+      const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${created.taskId}`
+      // Permissions whose first read of the rules is followed, at once, by the person letting everything through.
+      let armed = true
+      // Fresh: the runtime has its own, built already.
+      const racing = Layer.fresh(Permissions.layer).pipe(
+        Layer.provide(
+          Layer.succeed(
+            Policies,
+            Policies.of({
+              ...policies,
+              current: (projectId) =>
+                Effect.tap(policies.current(projectId), () =>
+                  armed
+                    ? Effect.andThen(
+                        Effect.sync(() => (armed = false)),
+                        Effect.orDie(policies.set(projectId, { permissions: 'allow' }, instance.personId)),
+                      )
+                    : Effect.void,
+                ),
+            }),
+          ),
+        ),
+      )
+      const decided = yield* Effect.flatMap(Permissions, (permissions) =>
+        permissions.decide(
+          {
+            projectId: project.projectId as ProjectId,
+            threadId: created.threadId,
+            taskId: created.taskId,
+            sessionId,
+            meanings: { rejectAndContinue: ['decline'], rejectAndStop: ['cancel'], allowScopes: { allow_once: 'once' } },
+            rules: { role: 'task', context: { worktree: workspace?.path ?? '', defaultBranch: 'main' } },
+          },
+          {
+            sessionId: 'fake',
+            toolCallId: 'race-1',
+            title: 'Run cargo build',
+            kind: 'execute',
+            rawInput: { command: 'cargo build' },
+            paths: [],
+            options: [
+              { optionId: 'allow_once', name: 'Yes', kind: 'allow_once' },
+              { optionId: 'decline', name: 'No', kind: 'reject_once' },
+            ],
+          },
+        ),
+      ).pipe(Effect.provide(racing), Effect.timeout('5 seconds'))
+      assert.deepStrictEqual(decided, { decision: 'allow', reason: 'Allowed by the project rules.' })
+      const [call] = yield* sql<{ state: string }>`SELECT state FROM attention_requests`
+      assert.strictEqual(call?.state, 'answered')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('refuses an answer to a call the rules answered meanwhile, and leaves a call nobody else answered alone', () =>
     Effect.gen(function* () {
       const permissions = yield* Permissions

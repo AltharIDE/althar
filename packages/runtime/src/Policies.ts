@@ -85,7 +85,11 @@ export type Remembered =
   | { readonly decision: 'allow' | 'never'; readonly kind: RuleId }
   | { readonly decision: 'allow' | 'never'; readonly pattern: string; readonly match: 'prefix' | 'exact' }
 
-/** The rules with one kept: a command in place of any rule for the same words, a kind on its list and off the other. */
+/**
+ * The rules with one kept: a never in place of an allow for the same words,
+ * an allow only where nothing is kept for them, and a kind on its list (a
+ * never takes it off the allowed).
+ */
 export const withRemembered = (rules: ProjectRules, rule: Remembered): ProjectRules => {
   if ('kind' in rule) {
     const allow = rules.alwaysAllow ?? []
@@ -100,7 +104,8 @@ export const withRemembered = (rules: ProjectRules, rule: Remembered): ProjectRu
   }
   const same = (each: NonNullable<ProjectRules['commands']>[number]) =>
     each.pattern === rule.pattern && (each.match ?? 'prefix') === rule.match
-  if ((rules.commands ?? []).some((each) => same(each) && each.decision === rule.decision)) return rules
+  // Kept already; or an allow over the same words that always ask or are never allowed, which a card can't loosen.
+  if ((rules.commands ?? []).some((each) => same(each) && (each.decision === rule.decision || rule.decision === 'allow'))) return rules
   return {
     ...rules,
     commands: [

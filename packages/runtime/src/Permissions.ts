@@ -66,8 +66,6 @@ interface Waiting {
   readonly request: PermissionRequest
   readonly requestId: string
   readonly digest: string
-  /** What an "always" answer would keep, as the person was offered it. */
-  readonly always: Always
   /** What the rules read it in: a task's lead's, as only a lead waits on the person. */
   readonly rules: RuleContext
 }
@@ -456,17 +454,22 @@ export class Permissions extends Context.Service<
             request,
             requestId,
             digest,
-            always,
             rules: requestContext.rules.context,
           }
           waiting.set(attentionId, waiter)
-          yield* live.publish({
-            _tag: 'AttentionNeeded',
-            threadId: requestContext.threadId,
-            attentionId,
-            title: request.title,
-            reason: verdict.reason,
-          })
+          // The rules may have changed while the call was being made, and been decided again without it: then it is decided again now.
+          if ((yield* policies.current(requestContext.projectId)).id !== policyId) {
+            const again = yield* judge(requestContext.projectId, requestContext.rules.context, request)
+            if (again.verdict.verdict !== 'ask') yield* settle(attentionId, waiter, decisionOf(again.verdict, again.policyId))
+          }
+          if (waiting.has(attentionId))
+            yield* live.publish({
+              _tag: 'AttentionNeeded',
+              threadId: requestContext.threadId,
+              attentionId,
+              title: request.title,
+              reason: verdict.reason,
+            })
           return yield* Deferred.await(waiter.deferred).pipe(
             Effect.onExit((exit) => (exit._tag === 'Success' ? Effect.void : Effect.ignore(run(withdraw(attentionId, waiter))))),
           )
@@ -498,8 +501,16 @@ export class Permissions extends Context.Service<
                   }),
                 })
               }
-              // An "always" keeps the rule the person was offered by that scope, and nothing they weren't.
-              const saved = always === undefined ? undefined : rememberedOf(waiter.always, decision, always)
+              // An "always" keeps the rule offered by that scope as the rules now are: none they would override, as when what
+              // always asks has changed since the call was made.
+              const saved =
+                always === undefined
+                  ? undefined
+                  : rememberedOf(
+                      alwaysOf(waiter.request, (yield* judge(waiter.context.projectId, waiter.rules, waiter.request)).context),
+                      decision,
+                      always,
+                    )
               if (always !== undefined && saved === undefined) return yield* new AlwaysNotOffered({ attentionId, scope: always })
               const answered: PermissionDecision = { decision, ...(reason === undefined ? {} : { reason }) }
               yield* commands.execute({

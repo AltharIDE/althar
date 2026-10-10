@@ -126,12 +126,17 @@ describe('a project’s rules, as kept', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it('keep a rule an always answer saves: a command in place of one for the same words, a kind on its list and off the other', () => {
-    const first: ProjectRules = { source: 'person', alwaysAsk: [], commands: [{ pattern: 'git status', decision: 'never' }] }
-    const allowed = withRemembered(first, { decision: 'allow', pattern: 'git status', match: 'prefix' })
+  it('keep a rule an always answer saves: a never in place of an allow, an allow only where nothing is kept, a kind on its list', () => {
+    const first: ProjectRules = { source: 'person', alwaysAsk: [], commands: [{ pattern: 'git status', decision: 'ask' }] }
+    // An allow doesn't loosen what the person keeps for themselves.
+    assert.strictEqual(withRemembered(first, { decision: 'allow', pattern: 'git status', match: 'prefix' }), first)
+    const allowed = withRemembered({ ...first, commands: [] }, { decision: 'allow', pattern: 'git status', match: 'prefix' })
     assert.deepStrictEqual(allowed.commands, [{ pattern: 'git status', decision: 'allow' }])
-    // The same rule again changes nothing; the same words exactly are another rule.
+    // The same rule again changes nothing; a never takes an allow's place; the same words exactly are another rule.
     assert.strictEqual(withRemembered(allowed, { decision: 'allow', pattern: 'git status', match: 'prefix' }), allowed)
+    assert.deepStrictEqual(withRemembered(allowed, { decision: 'never', pattern: 'git status', match: 'prefix' }).commands, [
+      { pattern: 'git status', decision: 'never' },
+    ])
     assert.deepStrictEqual(withRemembered(allowed, { decision: 'never', pattern: 'git status', match: 'exact' }).commands, [
       { pattern: 'git status', decision: 'allow' },
       { pattern: 'git status', decision: 'never', match: 'exact' },

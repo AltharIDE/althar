@@ -554,6 +554,20 @@ describe('a project’s allow rules (ADR-017)', () => {
     assert.strictEqual(verdictOf('npx vitest run', askMe([{ pattern: 'vitest', decision: 'allow' }])).verdict, 'allow')
   })
 
+  it('never let a write ride along on a change of folder, and count it as the write it is', () => {
+    const bunTest = [{ pattern: 'bun test', decision: 'allow' as const }]
+    assert.strictEqual(verdictOf('bun test && cd . > ~/.zshrc', askMe(bunTest)).verdict, 'ask')
+    assert.strictEqual(verdictOf('bun test && cd . > ~/.zshrc', askMe(bunTest, { never: ['outside'] })).verdict, 'deny')
+    assert.strictEqual(verdictOf('cd src > notes.txt && bun test', askMe(bunTest)).verdict, 'ask')
+    assert.strictEqual(verdictOf('cd src 2>&1 && bun test', askMe(bunTest)).verdict, 'allow')
+    // With no allow rule at all, it is a write outside the worktree, which always asks.
+    assert.deepStrictEqual(verdictOf('cd . > /Users/someone/.zshrc', {}), {
+      verdict: 'ask',
+      reason: "Writing outside the task's worktree always asks: /Users/someone/.zshrc",
+      held: true,
+    })
+  })
+
   it('never let through a line whose commands show only when it runs', () => {
     assert.strictEqual(verdictOf('git status $(echo --short)', askMe(gitStatus)).verdict, 'ask')
     assert.strictEqual(verdictOf('eval "git status"', askMe(gitStatus)).verdict, 'ask')
