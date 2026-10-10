@@ -1361,7 +1361,8 @@ export class Changes extends Context.Service<
           const [task] = yield* sql<{ state: string; projectId: ProjectId; threadId: string }>`
             SELECT k.state, k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             WHERE k.id = ${taskId}`
-          if (task?.state !== 'open') return
+          // An abandoned task whose change merged on its host after all is done too: what it made is in, so it isn't reopened.
+          if (task?.state !== 'open' && task?.state !== 'abandoned') return
           const repositories = yield* sql<{ name: string; path: string; base: string; root: string; opened: number }>`
             SELECT b.display_name AS name, w.path, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root,
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
@@ -1386,6 +1387,8 @@ export class Changes extends Context.Service<
             if (head === '' || merged.code !== 0) unmerged.push(repository.name)
           }
           if (open.length > 0 || unmerged.length > 0) {
+            // Abandoned, it is nobody's to finish: nothing is said.
+            if (task.state === 'abandoned') return
             yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
               source: 'runtime',
               severity: 'info',

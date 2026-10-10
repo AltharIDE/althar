@@ -97,14 +97,15 @@ export const providerSessionLifecycle: Lifecycle<ProviderSessionState> = {
  * A task is drafted with its plan and opens when its run starts. It is done
  * once its change is merged, for good. Abandoned, it settles without its
  * change, and the person can reopen it: open again, or a draft again with
- * its plan held, where it was abandoned before its plan started.
+ * its plan held, where it was abandoned before its plan started. One whose
+ * pull request merges on its host after all is done.
  */
 export const taskLifecycle: Lifecycle<TaskState> = {
   name: 'task',
   edges: {
     draft: ['open', 'abandoned'],
     open: ['done', 'abandoned'],
-    abandoned: ['open', 'draft'],
+    abandoned: ['open', 'draft', 'done'],
     done: [],
   },
 }

@@ -196,6 +196,7 @@ stateDiagram-v2
     open --> abandoned
     abandoned --> open: reopened
     abandoned --> draft: reopened, its plan never started
+    abandoned --> done: its pull requests merged on the host after all
     done --> [*]
 ```
 
@@ -223,12 +224,17 @@ stateDiagram-v2
   on ends `cancelled`, marked as stopped; its run attempt ends `interrupted`;
   the call a step waited on is withdrawn. Then every agent on the task stops,
   its lead's and its steps', so no step takes an agent going as one that
-  went. Nothing runs, and nothing waits on the person, until it is resumed.
+  went. Nothing new is admitted on a suspended run, an agent a step was
+  starting as it stopped is stopped once it is up, and publishing Althar had
+  begun on the host says what it did there when it ends, without ending the
+  run or asking the person anything. Nothing runs, and nothing waits on the
+  person, until it is resumed; publishing again then adopts what is there.
 - **Resume** applies while the run is suspended. The run runs again on a new
   run attempt, from the step stopping cut short: the lead's step (Implement,
   or settling a review) on a new attempt, on its last lead or the agent the
   person picked, told to carry on; a review's round again, on its reviewer;
-  publishing, tried again. Stopped between two steps, the lead carries its
+  publishing, tried again. A step handed to another agent resumes on that
+  agent. Stopped between two steps, the lead carries its
   own step on. Writing to a stopped task resumes it the same way, with what
   the person wrote as the lead's first word; beside a review, the lead
   starts too, so it is read now. Resume never starts an agent with nothing
@@ -239,9 +245,10 @@ stateDiagram-v2
   `abandoned` and settles. Then every agent on it stops. Its worktree and its
   branch stay where they are: Althar never removes the person's worktrees
   for them ([01](01-concepts-and-project-model.md)), and nothing is pushed,
-  deleted or closed on the host. A pull request it opened stays open there.
+  deleted or closed on the host. A pull request it opened stays open there,
+  and should every one merge there after all, the task is done.
 - **Reopen** applies only to an abandoned task, never to a merged one: a task
-  is `done` once every repository is merged, for good. It opens the task
+  is `done` once every repository is merged, for good, abandoned or not. It opens the task
   again, on the same worktree and branch, without replaying the plan: a
   worktree whose folder went is put back from its branch first (and with the
   branch gone too, it can't be reopened). Where its run was cut short, the

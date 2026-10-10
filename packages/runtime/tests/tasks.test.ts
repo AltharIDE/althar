@@ -4,10 +4,14 @@ import { join } from 'node:path'
 
 import type { ActorId, ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Deferred, Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+
 import { Changes } from '../src/Changes'
+import { Connections } from '../src/Connections'
+import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -15,7 +19,7 @@ import { type PlanStep, Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { actionsOf, Tasks } from '../src/Tasks'
-import { repository, runtime, turns, until } from './support'
+import { fakeConnectors, HOST, hosted, repository, runtime, turns, until } from './support'
 
 /*
  * A task's course as the person steers it (docs/architecture/05, "Task and
@@ -38,13 +42,17 @@ const git = (cwd: string, ...args: Array<string>) =>
 const implement = (agentId = 'claude-code'): PlanStep => ({ key: 'implement', agentId, model: null, skipped: false })
 const reviewBy = (agentId = 'codex'): PlanStep => ({ key: 'review', agentId, model: null, skipped: false })
 
-/** A project with a task in it, planned: its plan proposed to start in a minute unless started. */
-const planned = (title: string, steps: ReadonlyArray<PlanStep> = [implement()]) =>
+/** A project with a task in it, planned: its plan proposed to start in a minute unless started; in the repository at `root`, ending as `end` says. */
+const planned = (
+  title: string,
+  steps: ReadonlyArray<PlanStep> = [implement()],
+  more: { readonly root?: string; readonly end?: 'draft' | 'ready' | 'none' | null } = {},
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const projects = yield* Projects
     const plans = yield* Plans
-    const root = repository()
+    const root = more.root ?? repository()
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
     const task = yield* projects.createTask({
       envelope: yield* Runtime.envelope('task.create', {}),
@@ -61,6 +69,7 @@ const planned = (title: string, steps: ReadonlyArray<PlanStep> = [implement()]) 
       reason: null,
       actorId: actor,
       startsIn: Duration.minutes(1),
+      ...(more.end === undefined ? {} : { end: more.end }),
     })
     return { root, project, task, planId, actor }
   })
@@ -81,6 +90,16 @@ const shown = (threadId: string) =>
   })
 
 const command = (type: string) => Runtime.envelope(type, {})
+
+/** The runtime with a fake GitHub, asked for news often. */
+const withGitHub = (github: FakeService) => withQueries({ connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })
+
+/** Connects GitHub with a pasted token, as the person would. */
+const connectGitHub = Effect.gen(function* () {
+  const connections = yield* Connections
+  const instance = yield* Instance
+  yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+})
 
 /** Each node attempt of the task's run, in the order they were admitted: its step, round and state, and whether stopping cut it short. */
 const attempts = (taskId: string) =>
@@ -437,6 +456,154 @@ describe('a task’s course', () => {
       assert.strictEqual((missing as { _tag?: string })._tag, 'NotFound')
     }).pipe(Effect.provide(withQueries())),
   )
+
+  it.live('stops a reviewer that was still starting as the task stopped, once it is up', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const sql = yield* SqlClient.SqlClient
+      const { task, planId, actor } = yield* planned('Retry checkout [lead:finish] [review:wait]', [implement(), reviewBy()])
+      yield* plans.start(planId, actor)
+      // The review is admitted and its reviewer takes its time to start: the task stops meanwhile.
+      yield* until(
+        sql<{
+          id: string
+        }>`SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'review' AND a.state = 'admitted'`,
+        (rows) => rows.length === 1,
+      )
+      yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      const reviewThread = sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step'`
+      const [thread] = yield* until(reviewThread, (rows) => rows.length === 1)
+      // Once up, it is stopped, and its attempt stays as stopping left it.
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM provider_sessions WHERE thread_id = ${thread?.id ?? ''}`,
+        (rows) => rows.length === 1 && rows[0]?.state !== 'starting' && rows[0]?.state !== 'active',
+      )
+      assert.isFalse(yield* onThread(thread?.id ?? ''))
+      assert.deepStrictEqual((yield* attempts(task.taskId)).at(-1), ['review', 0, 'cancelled', true])
+      assert.strictEqual((yield* runOf(task.taskId)).state, 'suspended')
+    }).pipe(Effect.provide(withQueries({ each: { codex: { slowStart: 1_500 } } }))),
+  )
+
+  it.live('resumes a review on the agent it was handed to, not the one planned', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const runs = yield* Runs
+      const sql = yield* SqlClient.SqlClient
+      // The planned reviewer can't start: the person hands the review to Codex, which reviews until stopped.
+      const { task, planId, actor } = yield* planned('Retry checkout [lead:finish] [review:wait]', [implement(), reviewBy('missing')])
+      yield* plans.start(planId, actor)
+      const [call] = yield* until(
+        sql<{ id: string }>`SELECT id FROM attention_requests WHERE task_id = ${task.taskId} AND state = 'open'`,
+        (rows) => rows.length === 1,
+      )
+      yield* runs.answerStuck({
+        envelope: yield* command('attention.answer'),
+        attentionId: call?.id ?? '',
+        answer: { kind: 'retry', agentId: 'codex' },
+      })
+      const reviewing = sql<{ agentId: string }>`
+        SELECT s.agent_id FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN provider_sessions s ON s.id = a.provider_session_id
+        WHERE n.node_key = 'review' AND a.state = 'running'`
+      yield* until(reviewing, (rows) => rows[0]?.agentId === 'codex')
+      yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      const [again] = yield* until(reviewing, (rows) => rows.length === 1)
+      assert.strictEqual(again?.agentId, 'codex')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('starts no run for a plan accepted as its task was abandoned', () =>
+    Effect.gen(function* () {
+      const tasks = yield* Tasks
+      const runs = yield* Runs
+      const sql = yield* SqlClient.SqlClient
+      const { task, planId } = yield* planned('Later [lead:finish]')
+      yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
+      // The plan's start had got past accepting it: its run is what would follow.
+      yield* runs.run(planId)
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM runs`)[0]?.n, 0)
+      assert.isFalse(yield* onThread(task.threadId))
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('says what publishing did when the task stopped as it published, ends nothing, and adopts it when resumed', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
+    const gate = Deferred.makeUnsafe<void>()
+    // Opening the pull request waits until the test lets it go.
+    const slow: FakeService = {
+      ...github,
+      openChange: (repository, change) => Effect.andThen(Deferred.await(gate), github.openChange(repository, change)),
+    }
+    return Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const sql = yield* SqlClient.SqlClient
+      yield* connectGitHub
+      const { task, planId, actor } = yield* planned('Retry checkout [lead:finish] [lead:edit]', [implement()], {
+        root: working,
+        end: 'draft',
+      })
+      yield* plans.start(planId, actor)
+      yield* until(
+        sql<{
+          id: string
+        }>`SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'publish' AND a.state = 'running'`,
+        (rows) => rows.length === 1,
+      )
+      yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      yield* Deferred.succeed(gate, undefined)
+      // What it did on the host is said; the run waits, and nothing asks the person.
+      yield* until(
+        sql<{ summary: string }>`
+          SELECT json_extract(content, '$.summary') AS summary FROM thread_items
+          WHERE thread_id = ${task.threadId} AND kind = 'step_result' AND json_extract(content, '$.step') = 'publish'`,
+        (rows) => rows.length === 1,
+      )
+      assert.deepStrictEqual(yield* runOf(task.taskId), { state: 'suspended', attempts: ['interrupted'] })
+      assert.deepStrictEqual((yield* attempts(task.taskId)).at(-1), ['publish', 0, 'cancelled', true])
+      assert.deepStrictEqual(yield* callsOf(task.taskId), [])
+      assert.strictEqual(github.changes.length, 1)
+      // Resumed, it publishes again and adopts the pull request it opened: ready, with one.
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      yield* standsAt(task.threadId, (now) => now.phase === 'ready')
+      assert.strictEqual(github.changes.length, 1)
+      assert.strictEqual((yield* runOf(task.taskId)).state, 'succeeded')
+    }).pipe(Effect.provide(withGitHub(slow)))
+  })
+
+  it.live('makes an abandoned task done when its pull request merges on the host after all, and then never reopens it', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
+    return Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const changes = yield* Changes
+      yield* connectGitHub
+      const { task, planId, actor } = yield* planned('Retry checkout [lead:finish] [lead:edit]', [implement()], {
+        root: working,
+        end: 'draft',
+      })
+      yield* plans.start(planId, actor)
+      yield* standsAt(task.threadId, (now) => now.phase === 'ready')
+      yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
+      assert.deepStrictEqual((yield* shown(task.threadId)).actions, ['reopen'])
+      github.mergeByHand(1)
+      yield* changes.refresh(task.taskId)
+      const [done] = yield* standsAt(task.threadId, (now) => now.state === 'done')
+      assert.deepStrictEqual(done?.actions, [])
+      const refused = yield* Effect.flip(tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId }))
+      assert.deepStrictEqual([(refused as { _tag?: string })._tag, (refused as { why?: string }).why], ['TaskRefused', 'merged'])
+    }).pipe(Effect.provide(withGitHub(github)))
+  })
 
   it.live('lets a held plan count down again, and starts it when the countdown ends', () =>
     Effect.gen(function* () {

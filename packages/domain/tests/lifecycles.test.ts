@@ -76,6 +76,8 @@ describe('lifecycles', () => {
   it('reopens an abandoned task, and never a merged one', () => {
     assert.isTrue(canTransition(taskLifecycle, 'open', 'abandoned'))
     assert.isTrue(canTransition(taskLifecycle, 'abandoned', 'open'))
+    // Its pull request merged on the host after all, it is done.
+    assert.isTrue(canTransition(taskLifecycle, 'abandoned', 'done'))
     assert.isTrue(isTerminal(taskLifecycle, 'done'))
     assert.isFalse(canTransition(taskLifecycle, 'done', 'open'))
   })

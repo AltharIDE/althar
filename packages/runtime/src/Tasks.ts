@@ -133,15 +133,25 @@ export class Tasks extends Context.Service<
       const plans = yield* Plans
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
-      /** Every agent on the task stops: its lead's, and its steps'. Stopping one that isn't there is nothing. */
-      const stopAgents = (threads: ReadonlyArray<string>) =>
-        Effect.forEach(threads, (threadId) => Effect.ignore(sessions.stop(threadId)), { concurrency: 'unbounded', discard: true })
+      /**
+       * Every agent on the task stops: its lead's, and its steps', on the
+       * threads it has now, a step's made since it was read too. Stopping one
+       * that isn't there is nothing.
+       */
+      const stopAgents = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const threads = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId}`
+          yield* Effect.forEach(threads, (thread) => Effect.ignore(sessions.stop(thread.id)), { concurrency: 'unbounded', discard: true })
+        })
 
       /**
        * Suspends the task's run, if it runs: each attempt it was on is cut
        * short, marked stopped, its run attempt interrupted, and the call a
        * step waited on withdrawn. A run already suspended has whatever
-       * started since cut short too. Inside the caller's transaction.
+       * started since cut short too. Publishing Althar had begun on the host
+       * says what it did there when it ends, and the run waits all the same.
+       * Inside the caller's transaction.
        */
       const suspend = (taskId: string, envelope: CommandEnvelope, why: 'stopped' | 'abandoned') =>
         Effect.gen(function* () {
@@ -213,7 +223,7 @@ export class Tasks extends Context.Service<
           if (!actionsOf(standing).includes('stop')) return
           // Suspended first, so no step takes its agents stopping as one going.
           yield* sql.withTransaction(suspend(input.taskId, input.envelope, 'stopped'))
-          yield* stopAgents(standing.threads)
+          yield* stopAgents(input.taskId)
           yield* touchCard(input.taskId)
         })
 
@@ -280,7 +290,7 @@ export class Tasks extends Context.Service<
           )
           if (!abandoned) return
           // Its run is suspended, so no step answers an agent going: each one on it stops.
-          yield* stopAgents(standing.threads)
+          yield* stopAgents(input.taskId)
           yield* touchCard(input.taskId)
         })
 

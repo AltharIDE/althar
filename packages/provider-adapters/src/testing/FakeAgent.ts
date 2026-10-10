@@ -127,6 +127,8 @@ export interface FakeAgentOptions {
   readonly failsOnce?: ReadonlyArray<string>
   /** Models it says yes to but doesn't put a session on: the session stays on the model it was on. */
   readonly staysOn?: ReadonlyArray<string>
+  /** How long it takes to make a session, in milliseconds: for what happens while an agent starts. */
+  readonly slowStart?: number
 }
 
 interface SessionState {
@@ -491,7 +493,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             _meta: { steering: { supported: true } },
           },
     )
-    .onRequest(acp.methods.agent.session.new, ({ params }) => {
+    .onRequest(acp.methods.agent.session.new, async ({ params }) => {
+      if (options.slowStart !== undefined) await pause(options.slowStart)
       created += 1
       const sessionId = `fake-${created}`
       const session: SessionState = {

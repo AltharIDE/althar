@@ -357,14 +357,26 @@ export class Runs extends Context.Service<
           return { nodeId, attemptId }
         })
 
-      /** An attempt now runs in a session. */
-      const started = (run: RunRow, attemptId: string, sessionId: string) =>
+      /**
+       * An attempt now runs in a session, unless it can't any more: its run
+       * was stopped or abandoned while its agent started (`stopped`: the
+       * caller stops that agent), or it ended meanwhile, as one whose agent
+       * reported in its first turn (`past`: it stays as it ended). `fresh`
+       * clears what it had said, for one reminded afresh.
+       */
+      const started = (run: RunRow, attemptId: string, sessionId: string, fresh = false) =>
         Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [now] = yield* sql<{ attempt: string; run: string }>`
+            SELECT a.state AS attempt, r.state AS run FROM node_attempts a JOIN runs r ON r.id = ${run.runId} WHERE a.id = ${attemptId}`
+          if (now === undefined || now.run !== 'running' || now.attempt === 'cancelled') return 'stopped' as const
+          if (!['admitted', 'running', 'waiting_attention', 'held'].includes(now.attempt)) return 'past' as const
           const revision = yield* change('node_attempts', attemptId, {
             state: 'running',
             holdReason: null,
             providerSessionId: sessionId,
             startedAt: yield* timestamp,
+            ...(fresh ? { output: null } : {}),
           })
           yield* fact({
             projectId: run.projectId,
@@ -374,9 +386,18 @@ export class Runs extends Context.Service<
             type: 'node_attempt.running',
             actorId: instance.systemId,
           })
-          const sql = yield* SqlClient.SqlClient
           const [session] = yield* sql<{ threadId: string }>`SELECT thread_id FROM provider_sessions WHERE id = ${sessionId}`
           if (session !== undefined) yield* freshen(session.threadId)
+          return 'running' as const
+        })
+
+      /** Marks an attempt running in a session, and stops that agent where the run was stopped meanwhile. Whether it runs. */
+      const begin = (run: RunRow, attemptId: string, sessionId: string, threadId: string, fresh = false) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const now = yield* sql.withTransaction(started(run, attemptId, sessionId, fresh))
+          if (now === 'stopped') yield* Effect.ignore(sessions.stop(threadId))
+          return now !== 'stopped'
         })
 
       /** Ends an attempt and its node, with what it reported. */
@@ -421,23 +442,28 @@ export class Runs extends Context.Service<
       const finish = (run: RunRow, state: 'succeeded' | 'failed' | 'cancelled') =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          yield* sql.withTransaction(
-            Effect.gen(function* () {
-              const at = yield* timestamp
-              yield* change('run_attempts', run.runAttemptId, { state, endedAt: at })
-              yield* change('workflow_executions', run.executionId, { state, endedAt: at })
-              const revision = yield* change('runs', run.runId, { state, endedAt: at })
-              yield* fact({
-                projectId: run.projectId,
-                aggregateType: 'run',
-                aggregateId: run.runId,
-                revision,
-                type: `run.${state}`,
-                actorId: instance.systemId,
-              })
-            }),
-          )
+          yield* sql.withTransaction(ends(run, state))
           yield* touchCard(run.taskId)
+        })
+
+      /** The run ends, inside the caller's transaction: unless its task's stop suspended it meanwhile, when it waits to be resumed. */
+      const ends = (run: RunRow, state: 'succeeded' | 'failed' | 'cancelled') =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [now] = yield* sql<{ state: string }>`SELECT state FROM runs WHERE id = ${run.runId}`
+          if (now?.state !== 'running') return
+          const at = yield* timestamp
+          yield* change('run_attempts', run.runAttemptId, { state, endedAt: at })
+          yield* change('workflow_executions', run.executionId, { state, endedAt: at })
+          const revision = yield* change('runs', run.runId, { state, endedAt: at })
+          yield* fact({
+            projectId: run.projectId,
+            aggregateType: 'run',
+            aggregateId: run.runId,
+            revision,
+            type: `run.${state}`,
+            actorId: instance.systemId,
+          })
         })
 
       /** What a step that Althar does itself reported, in a line. */
@@ -573,17 +599,18 @@ export class Runs extends Context.Service<
           }
           yield* sql.withTransaction(
             Effect.gen(function* () {
+              const said = { step: 'publish', round: 0, summary: publishedSummary(published.value, end), ...openedOf(published.value) }
+              // Stopped or abandoned while it published, what it did on the host is said, and the run waits: publishing again, as resuming
+              // does, adopts what is there.
+              const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attemptId}`
+              if (still?.state !== 'running') return yield* result(run, said)
               yield* ended(run, { id: attemptId, nodeId }, 'succeeded', published.value)
               yield* unstuck(run)
-              yield* result(run, {
-                step: 'publish',
-                round: 0,
-                summary: publishedSummary(published.value, end),
-                ...openedOf(published.value),
-              })
+              yield* result(run, said)
+              yield* ends(run, 'succeeded')
             }),
           )
-          yield* finish(run, 'succeeded')
+          yield* touchCard(run.taskId)
         })
 
       /**
@@ -599,6 +626,11 @@ export class Runs extends Context.Service<
               const [open] = yield* sql<{ id: string }>`
                 SELECT id FROM attention_requests WHERE task_id = ${run.taskId} AND kind = 'stuck' AND state = 'open'`
               if (open !== undefined) return false
+              // A run its task's stop suspended, or a step it cut short, asks nothing of the person: they stopped it.
+              const [now] = yield* sql<{ run: string; attempt: string | null }>`
+                SELECT r.state AS run, (SELECT state FROM node_attempts WHERE id = ${attempt?.id ?? ''}) AS attempt
+                FROM runs r WHERE r.id = ${run.runId}`
+              if (now?.run !== 'running' || now.attempt === 'cancelled') return false
               if (attempt !== null) {
                 const revision = yield* change('node_attempts', attempt.id, { state: 'waiting_attention' })
                 yield* fact({
@@ -891,7 +923,7 @@ export class Runs extends Context.Service<
               body: `Round ${round + 1}. The lead settled your findings:\n\n${settled ?? ''}\n\nYour copy now holds the settled work. Review the change again. Check that the fixes hold, and don't raise again what the lead set aside unless you have new evidence; then say which finding you repeat, and why.`,
               quiet: true,
             })
-          yield* sql.withTransaction(started(run, attemptId, sessionId))
+          yield* begin(run, attemptId, sessionId, threadId)
           yield* touchCard(run.taskId)
         })
 
@@ -913,7 +945,7 @@ export class Runs extends Context.Service<
                 body: settling(findings),
                 quiet: true,
               })
-              yield* sql.withTransaction(started(run, attemptId, sessionId))
+              yield* begin(run, attemptId, sessionId, run.threadId)
             }),
           )
           if (begun._tag === 'Failure')
@@ -1166,6 +1198,8 @@ export class Runs extends Context.Service<
               if (live === undefined) return yield* new NotFound({ kind: 'project', id: plan.projectId })
               const at = yield* timestamp
               const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${plan.taskId}`
+              // Abandoned as its plan was accepted, it gets no run.
+              if (task?.state === 'abandoned' || task?.state === 'done') return
               if (task?.state === 'draft') {
                 const revision = yield* change('tasks', plan.taskId, { state: 'open' })
                 yield* fact({
@@ -1247,7 +1281,7 @@ export class Runs extends Context.Service<
                 open: 0,
               },
             )
-          yield* sql.withTransaction(started(current, attemptId, begun.value))
+          yield* begin(current, attemptId, begun.value, current.threadId)
           yield* touchCard(plan.taskId)
         })
 
@@ -1659,13 +1693,9 @@ export class Runs extends Context.Service<
                   nodeId: string
                   state: string
                 }>`SELECT id, node_id, state FROM node_attempts WHERE id = ${attemptId}`
-          /** The waiting attempt runs again, reminded afresh. */
+          /** The waiting attempt runs again, reminded afresh; whether it does, its run not stopped meanwhile. */
           const resume = (sessionId: string) =>
-            attempt === undefined
-              ? Effect.void
-              : sql.withTransaction(
-                  Effect.andThen(change('node_attempts', attempt.id, { output: null }), started(current, attempt.id, sessionId)),
-                )
+            attempt === undefined ? Effect.succeed(true) : begin(current, attempt.id, sessionId, current.threadId, true)
           const endAttempt = (state: 'failed' | 'cancelled', output: unknown) =>
             attempt === undefined
               ? Effect.void
@@ -1729,7 +1759,7 @@ export class Runs extends Context.Service<
           }
           // The lead's step: its agent (or the one picked) on the task's thread, told again what the step is.
           const sessionId = yield* leadOn(current, answer.kind === 'retry' ? answer.agentId : undefined, model, said, effort)
-          yield* resume(sessionId)
+          if (!(yield* resume(sessionId))) return
           if (answer.kind === 'tell') yield* sessions.send({ envelope: envelope, threadId: current.threadId, body: answer.note })
           else
             yield* sessions.send({
@@ -1816,7 +1846,8 @@ export class Runs extends Context.Service<
           const current = yield* currentRun(input.taskId)
           if (current === undefined) return
           const lead = input.lead ?? (yield* lastLead(current))
-          // The run's latest attempt: the one stopping cut short, unless it stopped between two steps.
+          // The run's latest attempt: the one stopping cut short, unless it stopped between two steps; with the agent it ran on,
+          // where it started one, since a step handed to another agent keeps its node's first.
           const [latest] = yield* sql<{
             nodeKey: string
             iteration: number
@@ -1824,9 +1855,12 @@ export class Runs extends Context.Service<
             input: string
             state: string
             stopped: number | null
+            ranOn: string | null
+            ranModel: string | null
           }>`
-            SELECT n.node_key, n.iteration, n.config, a.input, a.state, json_extract(a.output, '$.stopped') AS stopped
-            FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+            SELECT n.node_key, n.iteration, n.config, a.input, a.state, json_extract(a.output, '$.stopped') AS stopped,
+              s.agent_id AS ran_on, s.model AS ran_model
+            FROM node_attempts a JOIN nodes n ON n.id = a.node_id LEFT JOIN provider_sessions s ON s.id = a.provider_session_id
             WHERE n.execution_id = ${current.executionId} ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1`
           const cut = latest !== undefined && latest.state === 'cancelled' && latest.stopped === 1 ? latest : undefined
           const step = cut === undefined ? undefined : stepOf(cut.nodeKey)
@@ -1837,7 +1871,9 @@ export class Runs extends Context.Service<
               SELECT json_extract(content, '$.summary') AS summary FROM thread_items
               WHERE thread_id = ${current.threadId} AND kind = 'step_result' AND json_extract(content, '$.step') = 'settle'
               ORDER BY sequence DESC LIMIT 1`
-            yield* review(current, cut.iteration, cut.iteration > 0 ? settled?.summary : undefined, config.agentId, config.model ?? null)
+            const reviewer =
+              cut.ranOn === null ? { agentId: config.agentId, model: config.model ?? null } : { agentId: cut.ranOn, model: cut.ranModel }
+            yield* review(current, cut.iteration, cut.iteration > 0 ? settled?.summary : undefined, reviewer.agentId, reviewer.model)
           } else if (cut !== undefined && step === 'publish') yield* conclude(current)
           else {
             // The lead's step: the one cut short, else the lead's latest, else Implement.
