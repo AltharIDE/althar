@@ -361,6 +361,12 @@ export const transcript = (threadId: string, budget: number) =>
           return [`[${text('step')}${text('verdict') === '' ? '' : `, ${text('verdict')}`}] ${text('summary')}`]
         case 'task':
           return item.task === null ? [] : [`[task] ${item.task}`]
+        case 'question': {
+          // What was asked of the person; its answer reaches the agent on its own, as a message from Althar.
+          const fields = Array.isArray(content['fields']) ? (content['fields'] as ReadonlyArray<Record<string, unknown>>) : []
+          const asked = fields.map((field) => (typeof field['question'] === 'string' ? field['question'] : '')).filter((q) => q !== '')
+          return [`[${item.agentId ?? 'agent'} asked the person] ${asked.length > 0 ? asked.join(' / ') : text('message')}`]
+        }
         default:
           return []
       }

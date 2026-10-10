@@ -85,6 +85,8 @@ export const ThreadItemKind = Schema.Literals([
   'task',
   /** Something heard from outside, written by someone else: a comment on the task's pull request, its checks. */
   'arrival',
+  /** A question an agent asks the person, answered where it is. */
+  'question',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 

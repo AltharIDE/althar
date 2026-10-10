@@ -50,6 +50,12 @@ export const scenarios = {
   stubborn: 'stubborn',
   /** Asks the person a question and repeats the answer. */
   question: 'question',
+  /**
+   * Asks as Claude Code's AskUserQuestion does: a tool call, then a form of
+   * two questions, the second with several picks, each with a field for the
+   * person's own words; repeats the answer.
+   */
+  questions: 'questions',
   /** Claude's structured report of an exhausted quota, then a normal end. */
   quota: 'quota',
   /** Claude's structured report of a full context. */
@@ -634,6 +640,74 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
 
+      /** Asks the person: one question, or, as Claude Code asks, two in a form; cancelling the turn withdraws it. */
+      const askPerson = async (claude: boolean): Promise<string> => {
+        if (claude)
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'ask-1',
+            title: 'Asking for your input',
+            kind: 'other',
+            status: 'pending',
+            rawInput: {},
+          })
+        const answer = await client
+          .request<acp.CreateElicitationResponse, acp.CreateElicitationRequest>(
+            acp.methods.client.elicitation.create,
+            claude
+              ? {
+                  sessionId: params.sessionId,
+                  toolCallId: 'ask-1',
+                  mode: 'form',
+                  message: 'Please answer the following questions.',
+                  requestedSchema: {
+                    type: 'object',
+                    properties: {
+                      question_0: {
+                        type: 'string',
+                        title: 'Database',
+                        description: 'Which database should the cache use?',
+                        oneOf: [
+                          { const: 'Postgres', title: 'Postgres', description: 'what production runs' },
+                          { const: 'SQLite', title: 'SQLite', description: 'one file, no server' },
+                        ],
+                      },
+                      question_0_custom: { type: 'string', title: 'Other' },
+                      question_1: {
+                        type: 'array',
+                        title: 'Checks',
+                        description: 'Which checks should run before it lands?',
+                        items: {
+                          anyOf: [
+                            { const: 'Unit tests', title: 'Unit tests' },
+                            { const: 'Lint', title: 'Lint' },
+                            { const: 'End-to-end', title: 'End-to-end' },
+                          ],
+                        },
+                      },
+                      question_1_custom: { type: 'string', title: 'Other' },
+                    },
+                  },
+                }
+              : {
+                  sessionId: params.sessionId,
+                  mode: 'form',
+                  message: 'Which database?',
+                  requestedSchema: {
+                    type: 'object',
+                    properties: { database: { type: 'string', enum: ['postgres', 'sqlite'] } },
+                    required: ['database'],
+                  },
+                },
+            { cancellationSignal: (session.abort = new AbortController()).signal },
+          )
+          .catch((): acp.CreateElicitationResponse => ({ action: 'cancel' }))
+        session.abort = undefined
+        return answer.action === 'accept'
+          ? `answer=${JSON.stringify((answer as { readonly content?: unknown }).content)}`
+          : `answer=${answer.action}`
+      }
+
       if (text.startsWith('You are the project coordinator, judging one permission request')) {
         const reply =
           options.judgment === undefined
@@ -654,6 +728,21 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         await update({ sessionUpdate: 'usage_update', used: 100, size: 10000, cost: { amount: 0.002, currency: 'USD' } })
         await say(reply)
         return ended({ inputTokens: 100, outputTokens: 20, totalTokens: 120 })
+      }
+
+      // An answer to a question asked before, told in a later turn, as after a restart: said, then the role played on.
+      const told = /The person answered[^\n]*\n([\s\S]*)$/.exec(text)
+      if (told?.[1] !== undefined) {
+        await say(`told=${told[1].trim().split('\n').join(' | ')}`)
+        const after = await playRole(session, text)
+        if (after !== undefined) await say(after)
+        return ended()
+      }
+      // A lead that asks the person first, `[lead:ask]`, once: then it plays its part with the answer.
+      if (text.includes('[lead:ask]') && !session.played.has('[lead:ask]')) {
+        session.played.add('[lead:ask]')
+        await say(await askPerson(false))
+        if (session.cancelled) return { stopReason: 'cancelled' }
       }
 
       // A lead that stalls or loops, where a marker says so.
@@ -704,26 +793,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           if (scenario === scenarios.deniedThenWait) while (!session.cancelled) await pause(10)
           return session.cancelled || chosen === 'cancel' || chosen === 'cancelled' ? { stopReason: 'cancelled' } : ended()
         }
-        case scenarios.question: {
-          const answer = await client.request<acp.CreateElicitationResponse, acp.CreateElicitationRequest>(
-            acp.methods.client.elicitation.create,
-            {
-              sessionId: params.sessionId,
-              mode: 'form',
-              message: 'Which database?',
-              requestedSchema: {
-                type: 'object',
-                properties: { database: { type: 'string', enum: ['postgres', 'sqlite'] } },
-                required: ['database'],
-              },
-            },
-          )
-          await say(
-            answer.action === 'accept'
-              ? `answer=${JSON.stringify((answer as { readonly content?: unknown }).content)}`
-              : `answer=${answer.action}`,
-          )
-          return ended()
+        case scenarios.question:
+        case scenarios.questions: {
+          await say(await askPerson(scenario === scenarios.questions))
+          return session.cancelled ? { stopReason: 'cancelled' } : ended()
         }
         case scenarios.quota:
           await update({

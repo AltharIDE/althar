@@ -1,7 +1,8 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Fiber, Ref, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Ref, Stream } from 'effect'
 
-import { answerFor, connect, type PermissionOption, type QuestionAnswer } from '../src/AgentConnection'
+import { answerFor, connect, type PermissionOption } from '../src/AgentConnection'
+import { type Question, type QuestionAnswer, questionContent } from '../src/questions'
 import { AgentRequestFailed, OptionUnavailable, TurnInProgress } from '../src/errors'
 import type { SessionEvent } from '../src/events'
 import type { Classified } from '../src/failures'
@@ -469,7 +470,7 @@ describe('AgentConnection', () => {
   })
 
   describe('questions', () => {
-    const ask = (onQuestion?: () => Effect.Effect<QuestionAnswer>) =>
+    const ask = (onQuestion?: (question: Question) => Effect.Effect<QuestionAnswer>, scenario: string = scenarios.question) =>
       Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* connect({
@@ -478,34 +479,84 @@ describe('AgentConnection', () => {
             ...(onQuestion === undefined ? {} : { onQuestion }),
           })
           const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
-          return text(yield* Stream.runCollect(session.prompt(scenarios.question)))
+          return text(yield* Stream.runCollect(session.prompt(scenario)))
         }),
       )
 
     it.live('passes a question to the person, and their answer back', () =>
       Effect.gen(function* () {
-        const seen: Array<unknown> = []
+        const seen: Array<Question> = []
         const answered = yield* ask(() => Effect.succeed({ action: 'accept', content: { database: 'sqlite' } }))
         assert.strictEqual(answered, 'answer={"database":"sqlite"}')
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const connection = yield* connect({
-              transport: { _tag: 'InProcess', agent: fakeAgent() },
-              onPermission: reject,
-              onQuestion: (question) => Effect.sync(() => seen.push(question)).pipe(Effect.as({ action: 'decline' as const })),
-            })
-            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
-            assert.strictEqual(text(yield* Stream.runCollect(session.prompt(scenarios.question))), 'answer=decline')
-          }),
-        )
+        const declined = yield* ask((question) => Effect.sync(() => seen.push(question)).pipe(Effect.as({ action: 'decline' as const })))
+        assert.strictEqual(declined, 'answer=decline')
         assert.deepStrictEqual(seen, [
           {
             sessionId: 'fake-1',
             message: 'Which database?',
-            fields: { database: { type: 'string', enum: ['postgres', 'sqlite'] } },
-            required: ['database'],
+            fields: [
+              {
+                id: 'database',
+                question: 'Which database?',
+                type: 'choice',
+                options: [
+                  { value: 'postgres', label: 'postgres' },
+                  { value: 'sqlite', label: 'sqlite' },
+                ],
+                multiple: false,
+                required: true,
+              },
+            ],
           },
         ])
+      }),
+    )
+
+    it.live("reads Claude Code's questions, with the tool call they stand for, and answers them in its fields", () =>
+      Effect.gen(function* () {
+        const seen: Array<Question> = []
+        const answered = yield* ask(
+          (question) =>
+            Effect.sync(() => seen.push(question)).pipe(
+              Effect.as({
+                action: 'accept' as const,
+                content: questionContent(question, {
+                  question_0: { values: [], words: 'DuckDB' },
+                  question_1: { values: ['Unit tests', 'Lint'] },
+                }),
+              }),
+            ),
+          scenarios.questions,
+        )
+        assert.strictEqual(answered, 'answer={"question_0_custom":"DuckDB","question_1":["Unit tests","Lint"]}')
+        assert.strictEqual(seen[0]?.toolCallId, 'ask-1')
+        assert.deepStrictEqual(
+          seen[0]?.fields.map((field) => [field.id, field.question, field.header, field.multiple, field.wordsField]),
+          [
+            ['question_0', 'Which database should the cache use?', 'Database', false, 'question_0_custom'],
+            ['question_1', 'Which checks should run before it lands?', 'Checks', true, 'question_1_custom'],
+          ],
+        )
+      }),
+    )
+
+    it.live('offers a way to ask only where someone answers', () =>
+      Effect.gen(function* () {
+        const offered: Array<unknown> = []
+        const listen = (onQuestion?: () => Effect.Effect<QuestionAnswer>) =>
+          Effect.scoped(
+            connect({
+              transport: {
+                _tag: 'InProcess',
+                agent: fakeAgent({ initialized: (capabilities) => offered.push(capabilities?.elicitation ?? null) }),
+              },
+              onPermission: reject,
+              ...(onQuestion === undefined ? {} : { onQuestion }),
+            }),
+          )
+        yield* listen(() => Effect.succeed({ action: 'decline' }))
+        yield* listen()
+        assert.deepStrictEqual(offered, [{ form: {} }, null])
       }),
     )
 
@@ -515,6 +566,35 @@ describe('AgentConnection', () => {
         assert.strictEqual(yield* ask(() => Effect.die('no one is there')), 'answer=cancel')
       }),
     )
+
+    for (const [how, keepsRequests] of [
+      ['the agent withdraws it', false],
+      ['the agent keeps it, so Althar drops it', true],
+    ] as const)
+      it.live(`drops a question still waiting when the turn is cancelled: ${how}`, () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const asked = yield* Deferred.make<void>()
+            const ended = yield* Deferred.make<boolean>()
+            const connection = yield* connect({
+              transport: { _tag: 'InProcess', agent: fakeAgent({ keepsRequests }) },
+              onPermission: reject,
+              onQuestion: () =>
+                Deferred.succeed(asked, undefined).pipe(
+                  Effect.andThen(Effect.never),
+                  Effect.onInterrupt(() => Deferred.succeed(ended, true)),
+                ),
+            })
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+            const turn = yield* Effect.forkChild(Stream.runCollect(session.prompt(scenarios.question)))
+            yield* Deferred.await(asked)
+            yield* session.cancel
+            const events = yield* Fiber.join(turn)
+            assert.strictEqual(text(events), 'answer=cancel')
+            assert.isTrue(yield* Deferred.await(ended))
+          }),
+        ),
+      )
   })
 
   describe('failures the agent reports', () => {

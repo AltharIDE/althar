@@ -124,6 +124,23 @@ export const moveSession = (sessionId: string, to: ProviderSessionState, set: Re
     return yield* change('provider_sessions', sessionId, { ...set, state: to })
   })
 
+/**
+ * A session waiting on the person goes back to work once nothing it asked
+ * still waits, permission or question; one already at work stays as it is.
+ */
+export const releaseSession = (sessionId: string, options: { readonly questions: boolean } = { questions: true }) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [session] = yield* sql<{ state: string }>`SELECT state FROM provider_sessions WHERE id = ${sessionId}`
+    if (session?.state !== 'waiting_approval') return
+    // Without its questions, where they no longer wait on this session: they wait on the thread.
+    const [open] = yield* sql<{ count: number }>`
+      SELECT count(*) AS count FROM attention_requests a LEFT JOIN permission_requests r ON r.id = a.permission_request_id
+      WHERE a.state = 'open' AND (r.provider_session_id = ${sessionId}
+        OR (${options.questions ? 1 : 0} = 1 AND a.kind = 'question' AND json_extract(a.payload, '$.sessionId') = ${sessionId}))`
+    if ((open?.count ?? 0) === 0) yield* moveSession(sessionId, 'active')
+  })
+
 type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | Live | Policies | PermissionJudge
 
 export class Permissions extends Context.Service<
@@ -216,20 +233,7 @@ export class Permissions extends Context.Service<
           })
         })
 
-      /**
-       * A session waiting on the person goes back to work once nothing it
-       * asked still waits; one already at work stays as it is.
-       */
-      const release = (sessionId: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const [session] = yield* sql<{ state: string }>`SELECT state FROM provider_sessions WHERE id = ${sessionId}`
-          if (session?.state !== 'waiting_approval') return
-          const [open] = yield* sql<{ count: number }>`
-            SELECT count(*) AS count FROM attention_requests a JOIN permission_requests r ON r.id = a.permission_request_id
-            WHERE r.provider_session_id = ${sessionId} AND a.state = 'open'`
-          if ((open?.count ?? 0) === 0) yield* moveSession(sessionId, 'active')
-        })
+      const release = releaseSession
 
       /** Ends a wait without a decision: the turn was cancelled or the session ended. Only the first call does anything. */
       const withdraw = (attentionId: string, waiter: Waiting) =>

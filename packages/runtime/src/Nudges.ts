@@ -4,7 +4,7 @@ import { Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'e
 import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
-import { parse, stuckOf, text } from './Queries'
+import { field, parse, stuckOf, text } from './Queries'
 import { programOf } from './rules'
 import { Sessions } from './Sessions'
 
@@ -66,6 +66,12 @@ export const callWords = (
     }
     return `Needs you: ${STEPS[stuck.step]} is stuck`
   }
+  if (call.kind === 'question') {
+    const fields = field(call.payload, 'fields')
+    const [only] = Array.isArray(fields) && fields.length === 1 ? fields : []
+    const asked = (text(only, 'question') || text(call.payload, 'message')).replace(/\s+/g, ' ').trim()
+    return asked === '' ? 'Question' : `Question: ${asked.length > 140 ? `${asked.slice(0, 139)}…` : asked}`
+  }
   const program = text(call.payload, 'kind') === 'execute' ? programOf(text(call.payload, 'command')) : undefined
   if (program !== undefined) return `Needs you: ${program}`
   const reason = text(call.payload, 'reason')
@@ -99,10 +105,18 @@ export class Nudges extends Context.Service<
       /** Everything that needs the person now, by a key that stays the same while it does. */
       const needs = Effect.gen(function* () {
         const found = new Map<string, Extract<NudgeEvent, { _tag: 'Nudge' }>>()
+        // A task's calls, and the questions a project's coordinator asks, under the project's name.
         const calls = yield* sql<{ id: string; kind: string; payload: string; threadId: string; title: string }>`
-          SELECT a.id, a.kind, a.payload, t.id AS thread_id, k.title
-          FROM attention_requests a JOIN tasks k ON k.id = a.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-          WHERE a.state = 'open' ORDER BY a.created_at, a.id`
+          SELECT id, kind, payload, thread_id, title FROM (
+            SELECT a.id, a.kind, a.payload, t.id AS thread_id, k.title, a.created_at
+            FROM attention_requests a JOIN tasks k ON k.id = a.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE a.state = 'open'
+            UNION ALL
+            SELECT a.id, a.kind, a.payload, t.id AS thread_id, p.name AS title, a.created_at
+            FROM attention_requests a JOIN projects p ON p.id = a.project_id AND p.archived_at IS NULL
+            JOIN threads t ON t.id = json_extract(a.payload, '$.threadId') AND t.kind = 'coordinator'
+            WHERE a.state = 'open' AND a.task_id IS NULL AND a.kind = 'question')
+          ORDER BY created_at, id`
         for (const call of calls)
           found.set(`call:${call.id}`, {
             _tag: 'Nudge',

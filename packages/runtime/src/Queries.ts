@@ -20,7 +20,9 @@ import {
   type TaskList,
   type TaskSummary,
   type DocumentText,
+  FieldAnswer,
   type OutputText,
+  QuestionField,
   type ThreadItem,
   type ThreadSnapshot,
 } from '@althar/contracts'
@@ -28,6 +30,7 @@ import { Context, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Agents, RuntimeConfig } from './Config'
+import { questionTitle } from './Questions'
 import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
@@ -99,7 +102,7 @@ export const parse = (json: string | null): unknown => {
   }
 }
 
-const field = (value: unknown, key: string): unknown =>
+export const field = (value: unknown, key: string): unknown =>
   typeof value === 'object' && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined
 
 export const text = (value: unknown, key: string): string => {
@@ -119,8 +122,20 @@ interface ItemRow {
   readonly decision: string | null
   /** For a tool call the project's allow rules let through: the rules, as the decision keeps them (ADR-018). */
   readonly rule?: string | null
+  /** For a question: its call's state and payload, where its answer is. */
+  readonly questionState?: string | null
+  readonly questionPayload?: string | null
   readonly createdAt: string
 }
+
+const decodeFields = Schema.decodeUnknownOption(Schema.Array(QuestionField))
+const decodeAnswers = Schema.decodeUnknownOption(Schema.Record(Schema.String, FieldAnswer))
+
+/** An agent's question as its call keeps it: what it asks, and once answered, what was said. */
+const questionOf = (payload: unknown) => ({
+  message: text(payload, 'message'),
+  fields: Option.getOrElse(decodeFields(field(payload, 'fields')), () => []),
+})
 
 const decodeAllowedBy = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(AllowedBy)))
 const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
@@ -178,11 +193,12 @@ const callOf = (request: { readonly id: string; readonly kind: string; readonly 
   const payload = parse(request.payload)
   return {
     id: request.id,
-    kind: request.kind === 'stuck' ? ('stuck' as const) : ('permission' as const),
-    title: text(payload, 'title'),
+    kind: request.kind === 'stuck' ? ('stuck' as const) : request.kind === 'question' ? ('question' as const) : ('permission' as const),
+    title: request.kind === 'question' ? questionTitle(questionOf(payload)) : text(payload, 'title'),
     reason: text(payload, 'reason'),
     command: text(payload, 'command') || null,
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
+    ...(request.kind === 'question' ? { question: questionOf(payload) } : {}),
     // What an "always" would keep, for a permission that says (ADR-018); earlier ones don't.
     ...Option.match(decodeAlways(field(payload, 'always')), {
       onNone: () => ({}),
@@ -345,6 +361,23 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
             }
           }),
           agentId: agentId === '' ? null : agentId,
+        },
+      }
+    }
+    case 'question': {
+      const payload = parse(row.questionPayload ?? '{}')
+      const state = row.questionState === 'answered' ? 'answered' : row.questionState === 'open' ? 'open' : 'withdrawn'
+      const toolCallId = text(content, 'toolCallId')
+      return {
+        ...base,
+        kind: 'question',
+        content: {
+          attentionId: text(content, 'attentionId'),
+          ...questionOf(content),
+          toolCallId: toolCallId === '' ? null : toolCallId,
+          state,
+          answers: state === 'answered' ? Option.getOrNull(decodeAnswers(field(payload, 'answers'))) : null,
+          withdrawn: state === 'withdrawn' ? (text(payload, 'withdrawn') === 'turn' ? 'turn' : 'task') : null,
         },
       }
     }
@@ -520,8 +553,10 @@ export class Queries extends Context.Service<
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,
               (SELECT d.rule FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
-                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS rule
+                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS rule,
+              q.state AS question_state, q.payload AS question_payload
             FROM thread_items i
+            LEFT JOIN attention_requests q ON i.kind = 'question' AND q.id = json_extract(i.content, '$.attentionId')
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id
             WHERE i.thread_id = ${threadId}

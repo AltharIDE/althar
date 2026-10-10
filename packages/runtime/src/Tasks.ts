@@ -196,9 +196,9 @@ export class Tasks extends Context.Service<
               commandId: envelope.commandId,
             })
           }
-          // Nothing runs, so no step waits on the person.
+          // Nothing runs, so no step waits on the person, and no agent's question does.
           const calls = yield* sql<{ id: string }>`
-            SELECT id FROM attention_requests WHERE task_id = ${taskId} AND kind = 'stuck' AND state = 'open'`
+            SELECT id FROM attention_requests WHERE task_id = ${taskId} AND kind IN ('stuck', 'question') AND state = 'open'`
           for (const call of calls) {
             const revision = yield* change('attention_requests', call.id, { state: 'withdrawn' })
             yield* fact({

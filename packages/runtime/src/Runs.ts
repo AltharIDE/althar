@@ -223,6 +223,8 @@ export class Runs extends Context.Service<
      * isn't suspended.
      */
     resume(input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly lead?: Lead }): Effect.Effect<void, unknown>
+    /** Tells the person's answer to a question whose agent has gone since it asked: to the agent on its thread next, started for it. */
+    answered(input: { readonly envelope: CommandEnvelope; readonly threadId: string; readonly body: string }): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Runs') {
   static readonly layer: Layer.Layer<Runs, never, Store> = Layer.effect(
@@ -734,6 +736,16 @@ export class Runs extends Context.Service<
           }
         })
 
+      /** Whether an agent on the thread asked the person a question they haven't answered. */
+      const asking = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [open] = yield* sql<{ id: string }>`
+            SELECT id FROM attention_requests
+            WHERE kind = 'question' AND state = 'open' AND json_extract(payload, '$.threadId') = ${threadId} LIMIT 1`
+          return open !== undefined
+        })
+
       /** Review findings of the run the lead hasn't settled. */
       const openFindings = (run: RunRow) =>
         Effect.gen(function* () {
@@ -809,6 +821,8 @@ export class Runs extends Context.Service<
           if (event._tag === 'SessionEnded') {
             // Another agent took the thread over: the step carries on there.
             if (event.state === 'superseded' || Option.isSome(yield* sessions.running(event.threadId))) return
+            // It went while it asked the person something: their answer starts it again, so the question is the call.
+            if (yield* asking(event.threadId)) return
             return yield* stuck(on.run, { id: on.attemptId }, info('session_ended', null))
           }
           // A turn of a session another agent has taken over from is that session's last, not the step's.
@@ -1861,6 +1875,44 @@ export class Runs extends Context.Service<
        * What the person said meanwhile waits in the lead's thread: beside a
        * review or publishing the lead starts too, so it is read now.
        */
+      /**
+       * Tells an answer to a question whose agent has gone since it asked
+       * (DEV-13): queued for the thread, quietly, and read by the agent on it,
+       * or by one started for it. A run's lead step that waited on the answer
+       * carries on, its lead started as a stuck step's is when told what to do;
+       * otherwise the agent last on the thread starts again.
+       */
+      const answered = (input: { readonly envelope: CommandEnvelope; readonly threadId: string; readonly body: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          // Queued first, so the agent that starts reads it in its first turn.
+          yield* sessions.send({ envelope: input.envelope, threadId: input.threadId, body: input.body, quiet: true })
+          if (Option.isSome(yield* sessions.running(input.threadId))) return
+          const [step] = yield* sql<{ taskId: string; attemptId: string }>`
+            SELECT r.task_id, a.id AS attempt_id FROM threads t
+            JOIN runs r ON r.task_id = t.task_id AND r.state = 'running'
+            JOIN workflow_executions e ON e.run_id = r.id
+            JOIN nodes n ON n.execution_id = e.id AND n.node_key IN ('implement', 'settle')
+            JOIN node_attempts a ON a.node_id = n.id AND a.state IN ('running', 'waiting_attention')
+            WHERE t.id = ${input.threadId} AND t.kind = 'task'
+            ORDER BY a.admitted_at DESC LIMIT 1`
+          const current = step === undefined ? undefined : yield* currentRun(step.taskId)
+          if (step !== undefined && current !== undefined) {
+            const sessionId = yield* leadOn(current)
+            yield* begin(current, step.attemptId, sessionId, current.threadId, true)
+            return
+          }
+          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
+            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${input.threadId} ORDER BY started_at DESC LIMIT 1`
+          if (last === undefined) return
+          yield* sessions.start({
+            threadId: input.threadId,
+            agentId: last.agentId,
+            ...(last.model === null ? {} : { model: last.model }),
+            ...(last.effort === null ? {} : { effort: last.effort }),
+          })
+        })
+
       const resume = (input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly lead?: Lead }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1987,6 +2039,20 @@ export class Runs extends Context.Service<
           for (const step of left) {
             const current = yield* currentRun(step.taskId)
             if (current === undefined) continue
+            // A lead that asked the person a question still waits on them: their answer carries the step on.
+            if (step.nodeKey !== 'review' && (yield* asking(current.threadId))) {
+              const revision = yield* change('node_attempts', step.attemptId, { state: 'waiting_attention' })
+              yield* fact({
+                projectId: current.projectId,
+                aggregateType: 'node_attempt',
+                aggregateId: step.attemptId,
+                revision,
+                type: 'node_attempt.waiting_attention',
+                payload: { question: true },
+                actorId: instance.systemId,
+              })
+              continue
+            }
             const agent = (JSON.parse(step.config) as { agentId?: string }).agentId ?? null
             yield* stuck(
               current,
@@ -2151,6 +2217,7 @@ export class Runs extends Context.Service<
         publish: (taskId) => provide(publish(taskId)),
         answerStuck: (input) => provide(answerStuck(input)),
         resume: (input) => provide(resume(input)),
+        answered: (input) => provide(answered(input)),
       })
     }),
   )
