@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import type { LimitCall } from '@althar/contracts'
 import { type CommandEnvelope, Ids, newId, type ProjectId, type RunState, runLifecycle, transition } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
@@ -9,9 +10,9 @@ import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Changes, type Published } from './Changes'
 import { NotConnected } from './Connections'
-import { AttentionClosed, NoChangeToOpen, NotFound } from './errors'
+import { AttentionClosed, NoChangeToOpen, NotFound, NothingToWaitFor } from './errors'
 import { Instance } from './Instance'
-import { Limits, outWords } from './Limits'
+import { Limits, outWords, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
 import { Policies, usageLimitOf } from './Policies'
 import { conventionsAt } from './conventions'
@@ -171,12 +172,20 @@ export interface StuckInfo {
   readonly open: number
   /** What Althar did about it before asking, where it did something. */
   readonly tried?: ReadonlyArray<Tried>
+  /** For a usage limit: whose account, when it resets where it said, and who could take the step over. */
+  readonly limit?: LimitCall
 }
 
-/** The person's answer: tell the step's agent what to do, hand the step to an agent, or abandon it (a review is gone on without). */
+/**
+ * The person's answer: tell the step's agent what to do, hand the step to an
+ * agent (on the account and model they picked, where they did), or abandon
+ * it (a review is gone on without). A step a usage limit stopped can wait for
+ * the reset, where it is known.
+ */
 export type StuckAnswer =
   | { readonly kind: 'tell'; readonly note: string }
-  | { readonly kind: 'retry'; readonly agentId: string }
+  | { readonly kind: 'retry'; readonly agentId: string; readonly accountId?: string | undefined; readonly model?: string | undefined }
+  | { readonly kind: 'wait' }
   | { readonly kind: 'abandon' }
 
 /** The run was stopped or abandoned as a step was on its way: nothing more starts on it until it is resumed. */
@@ -715,6 +724,17 @@ export class Runs extends Context.Service<
           if (opened) yield* touchCard(run.taskId)
         })
 
+      /** The model a step's agent last ran on, on the step's own thread: the one it carries on with at a reset. */
+      const modelOnStep = (taskId: string, step: StuckInfo['step'], agentId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [last] = yield* sql<{ model: string | null }>`
+            SELECT s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+            WHERE t.task_id = ${taskId} AND t.kind = ${step === 'review' ? 'step' : 'task'} AND s.agent_id = ${agentId}
+            ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
+          return last?.model ?? null
+        })
+
       /** A step that reported after all no longer needs the person: its call is withdrawn. */
       const unstuck = (run: RunRow) =>
         Effect.gen(function* () {
@@ -860,7 +880,7 @@ export class Runs extends Context.Service<
        * another the person picked. The reviewer's thread spans the rounds. A
        * reviewer that can't start leaves the step needing the person.
        */
-      const review = (run: RunRow, round: number, settled?: string, reviewer?: string, model?: string | null) =>
+      const review = (run: RunRow, round: number, settled?: string, reviewer?: string, model?: string | null, accountId?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { review: planned } = yield* stepsOf(run)
@@ -878,7 +898,7 @@ export class Runs extends Context.Service<
           const admitted = yield* unlessStopped(sql.withTransaction(admit(run, 'review', round, step)))
           if (admitted === undefined) return undefined
           const { nodeId, attemptId } = admitted
-          const begun = yield* Effect.exit(reviewRound(run, round, settled, step, attemptId))
+          const begun = yield* Effect.exit(reviewRound(run, round, settled, step, attemptId, accountId))
           if (begun._tag === 'Failure')
             yield* stuck(
               run,
@@ -912,8 +932,15 @@ export class Runs extends Context.Service<
           (digests) => digests.join(' '),
         )
 
-      /** A round of review's copy, thread and session: its reviewer reads the work as it stands. */
-      const reviewRound = (run: RunRow, round: number, settled: string | undefined, step: PlanStep, attemptId: string) =>
+      /** A round of review's copy, thread and session: its reviewer reads the work as it stands, on the account picked, where one was. */
+      const reviewRound = (
+        run: RunRow,
+        round: number,
+        settled: string | undefined,
+        step: PlanStep,
+        attemptId: string,
+        accountId?: string,
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           // The round reads a copy of the work as it stands now, in each repository, and the record keeps which code that was (ADR-008).
@@ -945,10 +972,12 @@ export class Runs extends Context.Service<
             })}`
           // Handed to another agent, the round starts that one afresh; one being stopped isn't carried on with.
           const running = Option.filter(yield* sessions.running(threadId), (session) => !session.stopping)
-          // Handed to another agent, or its account out of usage, the round starts afresh, on another account where it is.
+          // Handed to another agent or account, or its account out of usage, the round starts afresh, on another account where it is.
           const spent = Option.isSome(running) && Option.isSome(yield* limits.outAccount(running.value.accountId))
-          if (Option.isSome(running) && (spent || running.value.agentId !== step.agentId)) yield* Effect.ignore(sessions.stop(threadId))
-          const onIt = Option.filter(running, (session) => !spent && session.agentId === step.agentId)
+          const elsewhere = (session: { readonly agentId: string; readonly accountId: string }) =>
+            session.agentId !== step.agentId || (accountId !== undefined && session.accountId !== accountId)
+          if (Option.isSome(running) && (spent || elsewhere(running.value))) yield* Effect.ignore(sessions.stop(threadId))
+          const onIt = Option.filter(running, (session) => !spent && !elsewhere(session))
           // Kept for another round, the reviewer is on the model its step names; one that won't move starts afresh.
           const kept = Option.isSome(onIt) && (yield* onModel(threadId, onIt.value.sessionId, step.model))
           if (Option.isSome(onIt) && !kept) yield* Effect.ignore(sessions.stop(threadId))
@@ -960,6 +989,7 @@ export class Runs extends Context.Service<
                 agentId: step.agentId,
                 ...(step.model === null ? {} : { model: step.model }),
                 ...(step.effort == null ? {} : { effort: step.effort }),
+                ...(accountId === undefined ? {} : { accountId }),
               })
           if (Option.isSome(live) || round > 0)
             yield* sessions.send({
@@ -1036,8 +1066,8 @@ export class Runs extends Context.Service<
           return now?.model === model
         })
 
-      /** The lead's session: the one running, or the plan's lead (or another the person picked) started. */
-      const leadOn = (run: RunRow, agentId?: string, model?: string | null, said?: string, effort?: string | null) =>
+      /** The lead's session: the one running, or the plan's lead (or another the person picked, on the account they picked) started. */
+      const leadOn = (run: RunRow, agentId?: string, model?: string | null, said?: string, effort?: string | null, accountId?: string) =>
         Effect.gen(function* () {
           const { implement } = yield* stepsOf(run)
           const wanted = agentId ?? implement?.agentId ?? 'claude-code'
@@ -1045,7 +1075,12 @@ export class Runs extends Context.Service<
           const live = Option.filter(yield* sessions.running(run.threadId), (session) => !session.stopping)
           // One on an account that is out of usage hands over, to the same agent's next account where it has one (ADR-012).
           const spent = Option.isSome(live) && Option.isSome(yield* limits.outAccount(live.value.accountId))
-          if (Option.isSome(live) && !spent && (agentId === undefined || live.value.agentId === agentId)) {
+          if (
+            Option.isSome(live) &&
+            !spent &&
+            (agentId === undefined || live.value.agentId === agentId) &&
+            (accountId === undefined || live.value.accountId === accountId)
+          ) {
             // Kept, it moves to a model asked for now; the plan's, or one the person set on it since, stays. One that won't move starts afresh.
             if (yield* onModel(run.threadId, live.value.sessionId, model)) return live.value.sessionId
             yield* Effect.ignore(sessions.stop(run.threadId))
@@ -1058,6 +1093,7 @@ export class Runs extends Context.Service<
               ...(model == null ? {} : { model }),
               ...(effort == null ? {} : { effort }),
               ...(said === undefined ? {} : { said, about: 'limit' as const }),
+              ...(accountId === undefined ? {} : { accountId }),
             })
           if (said !== undefined) yield* sayOut(run.threadId, run.projectId, said)
           // The plan's lead, unless it is out of usage and the project moves on: the next free agent instead.
@@ -1071,6 +1107,7 @@ export class Runs extends Context.Service<
             agentId: instead?.agentId ?? wanted,
             ...(chosen === null ? {} : { model: chosen }),
             ...(thinks === null ? {} : { effort: thinks }),
+            ...(accountId === undefined ? {} : { accountId }),
           })
         })
 
@@ -1128,8 +1165,9 @@ export class Runs extends Context.Service<
       /**
        * A step's agent is out of usage (docs/architecture/05). Where the
        * project moves on and an agent is free, the step goes to it, as when the
-       * person hands it over; otherwise it is held until the reset, or, with no
-       * reset known, it needs the person.
+       * person hands it over; otherwise it is held until the reset. Where the
+       * project asks, or with no reset known, it needs the person, with who
+       * could take it over and when the agent is back.
        */
       const outOfUsage = (on: NonNullable<Effect.Success<ReturnType<typeof stepOn>>>, agentId: string, accountId: string | null) =>
         Effect.gen(function* () {
@@ -1145,10 +1183,12 @@ export class Runs extends Context.Service<
             Effect.gen(function* () {
               // Its reset; one already past still waits an hour, so nothing brings the step back mid-handover.
               const until = out?.until ?? new Date(Date.parse(yield* timestamp) + Duration.toMillis(Duration.hours(1))).toISOString()
+              // The account and model it was on, so it carries on there at the reset, after a restart too.
+              const model = yield* modelOnStep(on.run.taskId, on.step, agentId)
               const revision = yield* change('node_attempts', on.attemptId, {
                 state: 'held',
                 holdReason: 'usage_limit',
-                output: JSON.stringify({ heldFor: agentId, until }),
+                output: JSON.stringify({ heldFor: agentId, until, account: accountId, model }),
               })
               yield* fact({
                 projectId: on.run.projectId,
@@ -1161,8 +1201,9 @@ export class Runs extends Context.Service<
               })
             }),
           )
-          if ((yield* usageLimitOfRun(on.run)) === 'move') {
-            const other = yield* otherStepOf(on.run, on.step === 'review' ? 'review' : 'implement')
+          const policy = yield* usageLimitOfRun(on.run)
+          const other = yield* otherStepOf(on.run, on.step === 'review' ? 'review' : 'implement')
+          if (policy === 'move') {
             // The same agent's next account first, on the same model, where the project turned that on; then the next free agent.
             const next = (yield* nextAccount(agentId, on.run.projectId))
               ? agentId
@@ -1181,7 +1222,15 @@ export class Runs extends Context.Service<
               return yield* carryOn(on.run, on.attemptId, info, { kind: 'retry', agentId: next }, handing, model, said)
             }
           }
-          if (out === null || resetsAt === null) return yield* stuck(on.run, { id: on.attemptId }, info)
+          if (policy === 'ask' || out === null || resetsAt === null) {
+            const choices = yield* limits.choices({
+              accountId,
+              projectId: on.run.projectId,
+              rather: other === undefined ? [] : [other],
+              ...(planned === undefined ? {} : { planned }),
+            })
+            return yield* stuck(on.run, { id: on.attemptId }, { ...info, limit: { accountId, resetsAt, choices } })
+          }
           yield* hold
           yield* sayOut(on.run.threadId, on.run.projectId, outWords({ from, resetsAt, waits: 'step' }))
           yield* touchCard(on.run.taskId)
@@ -1665,9 +1714,11 @@ export class Runs extends Context.Service<
       /**
        * The person's answer to a step that needs them. Telling sends their
        * words to the step's agent, started again if it went. Handing the step
-       * over runs it again on that agent: the lead's steps in its thread, a
-       * review as a new round. Abandoning stops the run; for a review, the
-       * task goes on without it and is ready.
+       * over runs it again on that agent, on the account and model picked
+       * where one was: the lead's steps in its thread, a review as a new
+       * round. Waiting holds a step a usage limit stopped until the reset.
+       * Abandoning stops the run; for a review, the task goes on without it
+       * and is ready.
        */
       const answerStuck = (input: { readonly envelope: CommandEnvelope; readonly attentionId: string; readonly answer: StuckAnswer }) =>
         Effect.gen(function* () {
@@ -1680,6 +1731,15 @@ export class Runs extends Context.Service<
                 WHERE id = ${input.attentionId} AND kind = 'stuck'`
               if (row === undefined) return yield* new NotFound({ kind: 'attention_request', id: input.attentionId })
               if (row.state !== 'open') return yield* new AttentionClosed({ attentionId: input.attentionId })
+              // Only a reset that is known can be waited for.
+              if (answer.kind === 'wait' && (JSON.parse(row.payload) as StuckInfo).limit?.resetsAt == null)
+                return yield* new NothingToWaitFor({ attentionId: input.attentionId })
+              // An account picked is one of the agent's own, still there; otherwise the call stays open.
+              if (answer.kind === 'retry' && answer.accountId !== undefined) {
+                const [owner] = yield* sql<{ agentId: string }>`
+                  SELECT agent_id FROM agent_accounts WHERE id = ${answer.accountId} AND removed_at IS NULL`
+                if (owner?.agentId !== answer.agentId) return yield* new NotFound({ kind: 'account', id: answer.accountId })
+              }
               const at = yield* timestamp
               const revision = yield* change('attention_requests', input.attentionId, { state: 'answered', answeredAt: at })
               yield* fact({
@@ -1698,7 +1758,14 @@ export class Runs extends Context.Service<
                 projectId: row.projectId,
                 attentionRequestId: input.attentionId,
                 outcome: 'answer',
-                reason: answer.kind === 'tell' ? answer.note : answer.kind === 'retry' ? `Hand the step to ${answer.agentId}` : 'Abandon',
+                reason:
+                  answer.kind === 'tell'
+                    ? answer.note
+                    : answer.kind === 'retry'
+                      ? `Hand the step to ${answer.agentId}`
+                      : answer.kind === 'wait'
+                        ? 'Wait for the reset'
+                        : 'Abandon',
                 decidedByActorId: input.envelope.actorId,
                 decidedAt: at,
               })}`
@@ -1718,7 +1785,56 @@ export class Runs extends Context.Service<
           const current = yield* currentRun(call.taskId)
           if (current === undefined) return
           const info = JSON.parse(call.payload) as StuckInfo
+          if (answer.kind === 'wait') return yield* waitForReset(current, call.attemptId, info, input.envelope)
           yield* carryOn(current, call.attemptId, info, answer, input.envelope)
+        })
+
+      /**
+       * A step a usage limit stopped, held until the reset as the person said:
+       * at it, the same agent carries it on, as for a project that waits. A
+       * reset already past by the answer carries it on now.
+       */
+      const waitForReset = (current: RunRow, attemptId: string | null, info: StuckInfo, envelope: CommandEnvelope) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const until = info.limit?.resetsAt
+          if (attemptId === null || info.agentId === null || until == null) return
+          if (Date.parse(until) <= Date.parse(yield* timestamp))
+            return yield* carryOn(current, attemptId, info, { kind: 'retry', agentId: info.agentId }, envelope)
+          const agentId = info.agentId
+          const from = (yield* limits.named(agentId, null, info.limit?.accountId)).agent
+          const model = yield* modelOnStep(current.taskId, info.step, agentId)
+          const held = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              // Stopped since the answer, the step waits for the person to resume it, not for the reset.
+              const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attemptId}`
+              if (still?.state !== 'waiting_attention' || !(yield* going(current))) return false
+              const revision = yield* change('node_attempts', attemptId, {
+                state: 'held',
+                holdReason: 'usage_limit',
+                output: JSON.stringify({ heldFor: agentId, until, account: info.limit?.accountId ?? null, model }),
+              })
+              yield* fact({
+                projectId: current.projectId,
+                aggregateType: 'node_attempt',
+                aggregateId: attemptId,
+                revision,
+                type: 'node_attempt.held',
+                payload: { reason: 'usage_limit', agentId, until },
+                actorId: envelope.actorId,
+              })
+              return true
+            }),
+          )
+          if (!held) return
+          // The person's doing, so not one the home lists as the loop's.
+          yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `The step waits until ${whenWords(until)}, when ${from} is back.`,
+          })
+          yield* touchCard(current.taskId)
+          yield* Queue.offer(holdsChanged, undefined)
         })
 
       /**
@@ -1730,7 +1846,7 @@ export class Runs extends Context.Service<
         current: RunRow,
         attemptId: string | null,
         info: StuckInfo,
-        answer: StuckAnswer,
+        answer: Exclude<StuckAnswer, { readonly kind: 'wait' }>,
         envelope: CommandEnvelope,
         model?: string | null,
         /** Why it carries on so, where Althar says: in place of the thread's own line for a switch. */
@@ -1748,6 +1864,9 @@ export class Runs extends Context.Service<
                   nodeId: string
                   state: string
                 }>`SELECT id, node_id, state FROM node_attempts WHERE id = ${attemptId}`
+          // The account and model the person picked, where they did; a model Althar chose comes first.
+          const accountId = answer.kind === 'retry' ? answer.accountId : undefined
+          const on = model ?? (answer.kind === 'retry' ? answer.model : undefined)
           /** The waiting attempt runs again, reminded afresh; whether it does, its run not stopped meanwhile. */
           const resume = (sessionId: string) =>
             attempt === undefined ? Effect.succeed(true) : begin(current, attempt.id, sessionId, current.threadId, true)
@@ -1797,7 +1916,8 @@ export class Runs extends Context.Service<
               info.round,
               info.why === 'round_limit' ? last?.summary : undefined,
               answer.kind === 'retry' ? answer.agentId : undefined,
-              model,
+              on,
+              accountId,
             )
             if (answer.kind === 'tell') {
               const [thread] = yield* sql<{
@@ -1813,7 +1933,7 @@ export class Runs extends Context.Service<
             return yield* finish(current, 'cancelled')
           }
           // The lead's step: its agent (or the one picked) on the task's thread, told again what the step is.
-          const sessionId = yield* leadOn(current, answer.kind === 'retry' ? answer.agentId : undefined, model, said, effort)
+          const sessionId = yield* leadOn(current, answer.kind === 'retry' ? answer.agentId : undefined, on, said, effort, accountId)
           if (!(yield* resume(sessionId))) return
           if (answer.kind === 'tell') yield* sessions.send({ envelope: envelope, threadId: current.threadId, body: answer.note })
           else
@@ -2004,13 +2124,15 @@ export class Runs extends Context.Service<
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not mark the steps a restart stopped', cause))),
       )
 
-      /** A step held for a usage limit runs again at the reset, on the agent it was held for. */
+      /** A step held for a usage limit runs again at the reset, on the agent, account and model it was held for. */
       const resumeHeld = (held: {
         readonly taskId: string
         readonly attemptId: string
         readonly nodeKey: string
         readonly iteration: number
         readonly agentId: string
+        readonly accountId: string | null
+        readonly model: string | null
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -2038,7 +2160,18 @@ export class Runs extends Context.Service<
             open: 0,
           }
           const resuming = yield* envelope('thread.send', { threadId: current.threadId, resumed: held.attemptId })
-          yield* carryOn(current, held.attemptId, info, { kind: 'retry', agentId: held.agentId }, resuming)
+          yield* carryOn(
+            current,
+            held.attemptId,
+            info,
+            {
+              kind: 'retry',
+              agentId: held.agentId,
+              ...(held.accountId === null ? {} : { accountId: held.accountId }),
+              ...(held.model === null ? {} : { model: held.model }),
+            },
+            resuming,
+          )
         })
 
       /** A message that waited for an agent's reset goes to it then: to its session, or, after a restart, to one started for it. */
@@ -2078,8 +2211,17 @@ export class Runs extends Context.Service<
               AND EXISTS (SELECT 1 FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
                 WHERE i.thread_id = t.id AND i.state = 'queued' AND a.kind = 'person')`
           const due: Array<{ readonly at: number; readonly run: Effect.Effect<void, unknown, Store> }> = held.map((step) => {
-            const { heldFor, until } = JSON.parse(step.output) as { heldFor: string; until: string }
-            return { at: Date.parse(until), run: resumeHeld({ ...step, agentId: heldFor }) }
+            // Held before Althar kept the account and model, it carries on as the agent picks.
+            const { heldFor, until, account, model } = JSON.parse(step.output) as {
+              heldFor: string
+              until: string
+              account?: string | null
+              model?: string | null
+            }
+            return {
+              at: Date.parse(until),
+              run: resumeHeld({ ...step, agentId: heldFor, accountId: account ?? null, model: model ?? null }),
+            }
           })
           for (const message of messages) {
             if (given.has(message.turnId)) continue

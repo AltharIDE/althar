@@ -28,3 +28,13 @@
 .small .more {
   width: 24px;
 }
+/* on the fill, the chevron keeps its colour and a hairline parts the halves */
+.signal .more {
+  margin-inline-start: 0;
+  color: var(--on-signal);
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--on-signal) 28%, transparent);
+}
+.signal .more[aria-expanded='true'] {
+  background: var(--signal-pressed);
+  color: var(--on-signal);
+}

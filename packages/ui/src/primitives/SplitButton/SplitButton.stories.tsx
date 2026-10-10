@@ -51,6 +51,8 @@ export const Default: Story = {}
 export const Small: Story = { args: { size: 'small' } }
 export const Disabled: Story = { args: { disabled: true } }
 export const Busy: Story = { args: { busy: true, children: 'Switching' } }
+/** The first way on an ask offers, in its violet. */
+export const Signal: Story = { args: { variant: 'signal' } }
 
 /** The button does the likely thing; the chevron opens the others, and Escape brings focus back to it. */
 export const ChoosingAnother: Story = {
@@ -113,6 +115,7 @@ export const AllStates: Story = {
         size="wide"
       />
       <States cells={row({ size: 'small' })} size="wide" />
+      <States cells={row({ variant: 'signal' })} size="wide" />
     </div>
   ),
 }

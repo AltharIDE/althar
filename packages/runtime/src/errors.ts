@@ -96,6 +96,11 @@ export class AlwaysNotOffered extends Schema.TaggedError<AlwaysNotOffered>()('Al
   scope: Schema.String,
 }) {}
 
+/** Waiting for a reset, for a call that has none to wait for: only a step a usage limit stopped, where its reset is known, can wait. */
+export class NothingToWaitFor extends Schema.TaggedError<NothingToWaitFor>()('NothingToWaitFor', {
+  attentionId: Schema.String,
+}) {}
+
 /** The message went to the agent before it could be taken back, or was taken back already. */
 export class AlreadyDelivered extends Schema.TaggedError<AlreadyDelivered>()('AlreadyDelivered', {
   itemId: Schema.String,

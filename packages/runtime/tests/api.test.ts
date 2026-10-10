@@ -25,6 +25,7 @@ import {
   NotAnIssue,
   RepositoriesNeeded,
   NotFound,
+  NothingToWaitFor,
   OutwardUncertain,
   SessionFailed,
   TaskRefused,
@@ -223,8 +224,10 @@ describe('the API', () => {
         assert.strictEqual(project.tasks, 0)
         // The same command again is a retry: the first one's result, and no second project.
         assert.deepStrictEqual(yield* client.OpenProject(opening), project)
-        // What it does when an agent is out of usage: moves on, until the person says it waits.
+        // What it does when an agent is out of usage: moves on, until the person says it asks them, or waits.
         assert.strictEqual(project.usageLimit, 'move')
+        yield* client.SetUsageLimit({ commandId: commandId(), projectId: project.id, policy: 'ask' })
+        assert.strictEqual((yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.usageLimit, 'ask')
         yield* client.SetUsageLimit({ commandId: commandId(), projectId: project.id, policy: 'wait' })
         assert.strictEqual((yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.usageLimit, 'wait')
         const creating = { commandId: commandId(), projectId: project.id, title: 'Say hello', description: 'Briefly.' }
@@ -1495,6 +1498,10 @@ describe('words', () => {
       'The project has no repository called mobile. It has api, web.',
     )
     assert.strictEqual(said(new NotFound({ kind: 'attention_request', id: 'a' })), "That call isn't there any more.")
+    assert.strictEqual(
+      said(new NothingToWaitFor({ attentionId: 'a' })),
+      "The agent didn't say when its limit resets, so there's no time to wait for. Pick another model, or try it again.",
+    )
     assert.strictEqual(said(new NotFound({ kind: 'something new', id: 'a' })), "That thing isn't there any more.")
     assert.strictEqual(said({ _tag: 'UnknownAgent', agentId: 'cursor' }), 'Althar has no agent called cursor.')
     assert.strictEqual(said({ _tag: 'SessionRunning' }), 'An agent is already working on this task.')

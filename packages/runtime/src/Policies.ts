@@ -17,8 +17,12 @@ import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rule
  * which way the project was set.
  */
 
-/** What a project does when an agent's account reaches its usage limit: move the work on to the next free agent, or wait for the reset. */
-export type UsageLimit = 'move' | 'wait'
+/**
+ * What a project does when an agent's account reaches its usage limit: move
+ * the work on to the next free agent, wait for the reset, or ask the person,
+ * with who is free and when the reset is.
+ */
+export type UsageLimit = 'move' | 'wait' | 'ask'
 
 export const ProjectRules = Schema.Struct({
   source: Schema.String,
@@ -51,7 +55,7 @@ export const ProjectRules = Schema.Struct({
   branchPattern: Schema.optional(Schema.String),
   titlePattern: Schema.optional(Schema.String),
   /** Without one, it moves on. */
-  usageLimit: Schema.optional(Schema.Literals(['move', 'wait'])),
+  usageLimit: Schema.optional(Schema.Literals(['move', 'wait', 'ask'])),
   /**
    * An agent's accounts here (ADR-012): whether work moves on to the agent's
    * next account when one runs out, which the person turns on (off without

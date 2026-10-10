@@ -64,7 +64,7 @@ export const text = {
         note: 'To the next agent signed in on a plan, in the order of your agents. It takes the work over from where it stands.',
       },
       [LimitPolicy.Wait]: { title: 'Wait for the reset', note: 'The step keeps its place and runs again at the reset.' },
-      [LimitPolicy.Ask]: { title: 'Ask me', note: 'A card in the thread, with the agents that are free.' },
+      [LimitPolicy.Ask]: { title: 'Ask me', note: 'The step waits for you: move it to a model that’s free, or wait for the reset.' },
     },
   },
 }
@@ -72,6 +72,8 @@ export const text = {
 const KINDS = Object.keys(text.kinds) as ReadonlyArray<RuleKind>
 
 const toEnd = { draft: TaskEnd.DraftPr, ready: TaskEnd.ReadyPr, none: TaskEnd.PushOnly } as const
+const toLimit = { move: LimitPolicy.Move, wait: LimitPolicy.Wait, ask: LimitPolicy.Ask } as const
+const fromLimit = { [LimitPolicy.Move]: 'move', [LimitPolicy.Wait]: 'wait', [LimitPolicy.Ask]: 'ask' } as const
 
 const toPolicy = {
   rules: PermissionPolicy.Rules,
@@ -226,9 +228,9 @@ export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => 
               name: repository.repository,
               path: repository.template,
             }))}
-            limitOptions={[LimitPolicy.Move, LimitPolicy.Wait]}
-            limits={rules.usageLimit === 'wait' ? LimitPolicy.Wait : LimitPolicy.Move}
-            onLimitsChange={(limit) => model.change({ usageLimit: limit === LimitPolicy.Wait ? 'wait' : 'move' })}
+            limitOptions={[LimitPolicy.Move, LimitPolicy.Wait, LimitPolicy.Ask]}
+            limits={toLimit[rules.usageLimit]}
+            onLimitsChange={(limit) => model.change({ usageLimit: fromLimit[limit] })}
             agentAccounts={agentAccountsOf(model.agents)}
             rotate={rules.rotateAccounts}
             onRotateChange={(rotateAccounts) => model.change({ rotateAccounts })}

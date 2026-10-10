@@ -112,6 +112,16 @@ export enum StuckAnswer {
   Abandoned = 'abandoned',
 }
 
+/** What you told work a usage limit paused to do. */
+export enum LimitAnswer {
+  /** Moved it to another model now. */
+  Moved = 'moved',
+  /** Kept its place until the reset. */
+  Waiting = 'waiting',
+  /** Tried the same agent again, as one that didn't say when it resets may be back. */
+  Again = 'again',
+}
+
 /** A step of a task's graph. */
 export enum StepState {
   Started = 'started',
