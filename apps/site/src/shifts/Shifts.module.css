@@ -18,8 +18,9 @@
 .mark[data-side='end'] .tip { left: auto; right: -4px; transform: none; }
 .mark[data-side][data-kind='access'] .tip, .mark[data-side][data-kind='outage'] .tip { transform: rotate(-45deg); }
 .axis { position: relative; height: 22px; margin-top: 8px; }
-.axis span { position: absolute; left: calc(var(--at) * 100%); font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
-.axis span::before { content: ''; position: absolute; left: 0; top: -8px; width: 1px; height: 6px; background: var(--line-3); }
+.axis > span { position: absolute; left: calc(var(--at) * 100%); font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
+.axis .monthShort { display: none; }
+.axis > span::before { content: ''; position: absolute; left: 0; top: -8px; width: 1px; height: 6px; background: var(--line-3); }
 
 /* ---- the list ---- */
 .list { padding: 56px 0 120px; }
@@ -59,9 +60,8 @@
   .tip { display: none; }
 }
 @media (max-width: 640px) {
-  /* The last month's name ends at its tick, so it stays on the page. */
-  .axis span { white-space: nowrap; }
-  .axis span:last-child { transform: translateX(-100%); }
-  .axis span:last-child::before { left: auto; right: 0; }
+  /* The months by their short names, so each fits at its tick. */
+  .axis .monthLong { display: none; }
+  .axis .monthShort { display: inline; }
   .monthName { font-size: 30px; }
 }

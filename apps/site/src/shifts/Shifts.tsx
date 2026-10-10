@@ -69,7 +69,8 @@ function Strip({ shifts }: { shifts: readonly Shift[] }) {
       <div className={s.axis} aria-hidden="true">
         {months.map((m) => (
           <span key={m.key} style={{ '--at': m.at } as CSSProperties}>
-            {m.label}
+            <span className={s.monthLong}>{m.label}</span>
+            <span className={s.monthShort}>{m.label.slice(0, 3)}</span>
           </span>
         ))}
       </div>

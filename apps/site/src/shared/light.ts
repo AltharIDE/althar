@@ -3,30 +3,26 @@ import { type Column, jitter, PICTURE } from '@althar/ui/opening'
 /*
  * The site's light: Althar's columns, graded as the app's light is
  * (foundations/Light): cobalt in the middle, brighter blues either side of
- * it, then sky, a blush and warm at the edges. The first screen raises it
- * and the other pages' heads stand in it (Glow).
+ * it, then sky, pale and warm at the edges. The first screen raises it
+ * with its words white inside it.
  */
 
 export type Tones = readonly [string, string, string]
 
 /**
  * The light's colours, bottom to top, by how far a column is from the middle,
- * graded as the app's light is (foundations/Light): cobalt in the middle,
- * brighter blues either side of it, then sky, pale, and warm at the edges.
- * Across the heart, where the words stand, every blue stays deep enough
- * most of the way up that white reads on it. `heart` is how wide that is,
- * 0 to 1.
+ * as the app's light has them (foundations/Light: columns.ts), with one
+ * difference: its cobalt heart is as wide as `heart` (0 to 1) and stays deep
+ * most of the way up, so white words read in it. Out from the heart, the
+ * app's own sky and pale, and its warm in the outer fifth.
  */
 export const tonesOf = (d: number, heart: number): Tones => {
   const u = d / heart
-  if (u < 0.34) return ['#2b3bff', '#3042ff', '#6372ff']
-  if (u < 0.68) return ['#2f4cff', '#3d60ff', '#8ea6ff']
-  if (u < 1) return ['#3860ff', '#4c78ff', '#adc4ff']
-  if (d < heart + 0.12) return ['#4f8cff', '#86b6ff', '#d6e8ff']
-  // From the sky to the warm, through a blush, as the app's light turns at its edges.
-  if (d < heart + 0.22) return ['#b4b8ff', '#e6d8f2', '#fbefec']
-  if (d < heart + 0.34) return ['#ffb08c', '#ffd1b6', '#fff1e8']
-  return ['#ff9a73', '#ffc4a3', '#ffece2']
+  if (u < 0.5) return ['#2b3bff', '#3042ff', '#6372ff']
+  if (u < 1) return ['#3550ff', '#4a6cff', '#9fb4ff']
+  if (d < heart + 0.12) return ['#5aa2ff', '#a2cfff', '#e6f1ff']
+  if (d < Math.max(0.8, heart + 0.2)) return ['#9fc6ff', '#d4e6ff', '#f3f7ff']
+  return ['#ffb995', '#ffd8c0', '#fff3ea']
 }
 
 /** How tall a column stands, as a share of the page: flat across the heart, then falling away, an arch. */
