@@ -13,6 +13,29 @@ export interface SignInCheck {
   readonly paidBy: PaidBy | 'unknown'
 }
 
+/** A terminal command for the same executable and account environment the runtime uses. */
+export const signInCommand = (
+  agent: AgentDefinition,
+  home: string | undefined,
+  node: string = process.execPath,
+  underElectron = process.versions.electron !== undefined,
+): string => {
+  const quote = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`
+  const spec = agent.signIn.loginRun?.(node)
+  const env = {
+    ...(spec === undefined ? {} : { ...asNode(spec, underElectron), ...spec.env }),
+    ...(home === undefined ? {} : { [agent.home.variable]: home }),
+  }
+  const line = spec === undefined ? agent.signIn.login : [spec.command, ...spec.args].map(quote).join(' ')
+  // Unset is significant: Claude chooses a different Keychain entry when its
+  // config variable is present, even if it names the default directory.
+  return [
+    ...(home === undefined ? ['env', '-u', agent.home.variable] : []),
+    ...Object.entries(env).map(([key, value]) => `${key}=${quote(value)}`),
+    line,
+  ].join(' ')
+}
+
 /**
  * Whether the user is signed in to an agent, and how that is paid for, from
  * its documented status command. A command that is missing, fails to run, or

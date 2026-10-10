@@ -1,8 +1,10 @@
+import { execFileSync } from 'node:child_process'
+
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import { type AgentDefinition, agents } from '../src/registry'
-import { signInCheck, signInStatus, signOut } from '../src/signIn'
+import { signInCheck, signInCommand, signInStatus, signOut } from '../src/signIn'
 
 const withStatus = (script: string): AgentDefinition => ({
   ...agents.codex,
@@ -10,6 +12,39 @@ const withStatus = (script: string): AgentDefinition => ({
 })
 
 describe('reading sign-in status', () => {
+  it('signs Codex in with the executable used for status and logout', () => {
+    const { signIn } = agents.codex
+    const login = signIn.loginRun?.(process.execPath)
+    assert.deepStrictEqual(login, { command: process.execPath, args: [...signIn.status(process.execPath).args.slice(0, 1), 'login'] })
+    assert.deepStrictEqual(login?.args.slice(0, 1), signIn.logout?.run(process.execPath).args.slice(0, 1))
+    assert.include(signInCommand(agents.codex, '/homes/work', process.execPath, true), "ELECTRON_RUN_AS_NODE='1'")
+  })
+
+  it('keeps shell metacharacters literal and overrides the terminal account home', () => {
+    const home = "/homes/Taari's account $(echo wrong)"
+    const agent: AgentDefinition = {
+      ...agents.codex,
+      signIn: {
+        ...agents.codex.signIn,
+        loginRun: (node) => ({
+          command: node,
+          args: ['-e', 'process.stdout.write(JSON.stringify({ home: process.env.CODEX_HOME, arg: process.argv[1] }))', home],
+        }),
+      },
+    }
+    const output = execFileSync('/bin/sh', ['-c', signInCommand(agent, home)], {
+      env: { ...process.env, CODEX_HOME: '/another/account' },
+      encoding: 'utf8',
+    })
+    assert.deepStrictEqual(JSON.parse(output), { home, arg: home })
+    const usual = execFileSync('/bin/sh', ['-c', signInCommand(agent, undefined)], {
+      env: { ...process.env, CODEX_HOME: '/another/account' },
+      encoding: 'utf8',
+    })
+    assert.deepStrictEqual(JSON.parse(usual), { arg: home })
+    assert.strictEqual(signInCommand(agents['claude-code'], undefined), 'env -u CLAUDE_CONFIG_DIR claude auth login')
+  })
+
   it("reads Claude Code's JSON", () => {
     const { read } = agents['claude-code'].signIn
     assert.isTrue(read('{"loggedIn": true, "authMethod": "claude.ai"}', 0))

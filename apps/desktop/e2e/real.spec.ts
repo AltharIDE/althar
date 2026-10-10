@@ -33,6 +33,7 @@ test('a real agent leads a task and answers', async () => {
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [chosen] })) as typeof dialog.showOpenDialog
     }, repo)
     const page = await app.firstWindow()
+    await page.getByRole('button', { name: 'Continue', exact: true }).click()
     await page.getByRole('button', { name: /Open a folder/ }).click()
     await page.getByRole('button', { name: 'New task' }).click()
     await page.getByLabel('What should change').fill('Say hello')

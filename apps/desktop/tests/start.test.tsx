@@ -306,7 +306,8 @@ describe('the start', () => {
     const host = fakeHost({ grantDropped: vi.fn(async () => null) })
     const onProject = vi.fn()
     const view = withServices(<Start onProject={onProject} />, client, host)
-    await screen.findByText('Your first project')
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    await screen.findByText('Open your project')
     await userEvent.click(screen.getByRole('button', { name: /Open a folder/ }))
     await screen.findByText('That folder is not in a git repository.')
     // ⌘N opens a folder here too.
@@ -320,7 +321,7 @@ describe('the start', () => {
     expect(onProject).not.toHaveBeenCalled()
   })
 
-  it('opens nothing when the picker is cancelled, and says when the runtime cannot answer', async () => {
+  it('keeps setup blocked and offers a retry when the runtime cannot answer', async () => {
     const { client } = fakeClient({
       listProjects: vi.fn(async () => Promise.reject(new Error('The runtime stopped'))),
       status: vi.fn(async () => Promise.reject(new Error('The runtime stopped'))),
@@ -328,8 +329,197 @@ describe('the start', () => {
     const host = fakeHost({ pickFolder: vi.fn(async () => null) })
     withServices(<Start onProject={vi.fn()} />, client, host)
     await screen.findAllByText("Althar's runtime didn't answer. If it keeps happening, restart Althar.")
+    expect(screen.queryByRole('button', { name: /Open a folder/ })).toBeNull()
+    expect((screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(client.status).toHaveBeenCalledWith({ recheck: true }))
+    expect(host.pickFolder).not.toHaveBeenCalled()
+    expect(client.openProject).not.toHaveBeenCalled()
+  })
+
+  it('recognizes existing sign-ins, hides account setup, and remembers Continue across remounts', async () => {
+    const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+    const host = fakeHost({ pickFolder: vi.fn(async () => null) })
+    const view = withServices(<Start onProject={vi.fn()} />, client, host)
+    await screen.findByRole('heading', { name: 'Connect an agent' })
+    expect(await screen.findByText('Ready')).toBeTruthy()
+    expect(screen.getByText('Sign-in status unavailable')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add an account' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Open a folder/ })).toBeNull()
+    fireEvent.keyDown(window, { key: 'n', metaKey: true })
+    fireEvent.drop(view.container.firstElementChild as Element, { dataTransfer: { files: [new File([], 'repo')] } })
+    expect(host.pickFolder).not.toHaveBeenCalled()
+    expect(host.grantDropped).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(client.signInAccount).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: /Open a folder/ }))
     expect(client.openProject).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Back to agents' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    view.unmount()
+    withServices(<Start onProject={vi.fn()} />, client, host)
+    expect(await screen.findByRole('heading', { name: 'Open your project' })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Connect an agent' })).toBeNull()
+  })
+
+  it('signs in the usual account and enables Continue after returning from Terminal', async () => {
+    let signedIn = false
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      status: vi.fn(async () => ({
+        apiVersion: 1,
+        appVersion: '0.0.0',
+        agents: [
+          {
+            ...agents[0]!,
+            signIn: signedIn ? ('signed_in' as const) : ('signed_out' as const),
+            accounts: [usual('acc_claude', signedIn ? 'signed_in' : 'signed_out')],
+          },
+        ],
+      })),
+    })
+    withServices(<Start onProject={vi.fn()} />, client)
+    const next = (await screen.findByRole('button', { name: 'Continue' })) as HTMLButtonElement
+    expect(next.disabled).toBe(true)
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_claude'))
+    expect(client.addAccount).not.toHaveBeenCalled()
+    signedIn = true
+    fireEvent.focus(window)
+    await waitFor(() => expect(next.disabled).toBe(false))
+    await userEvent.click(next)
+    expect(await screen.findByRole('heading', { name: 'Open your project' })).toBeTruthy()
+  })
+
+  it('detects a completed browser login after an early focus check, without another focus event', async () => {
+    let signedIn = false
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      status: vi.fn(async () => ({
+        apiVersion: 1,
+        appVersion: '0.0.0',
+        agents: [
+          {
+            ...agents[0]!,
+            signIn: signedIn ? ('signed_in' as const) : ('signed_out' as const),
+            accounts: [usual('acc_claude', signedIn ? 'signed_in' : 'signed_out')],
+          },
+        ],
+      })),
+    })
+    withServices(<Start onProject={vi.fn()} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_claude'))
+    fireEvent.focus(window)
+    await waitFor(() => expect(client.status).toHaveBeenCalledWith({ recheck: true }))
+    expect((screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement).disabled).toBe(true)
+    signedIn = true
+    // Neither another focus event nor Check again is needed after browser auth finishes.
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement).disabled).toBe(false), {
+      timeout: 4000,
+    })
+    expect(screen.getByText('Ready')).toBeTruthy()
+  })
+
+  it('keeps checking both pending logins when they finish in reverse order', async () => {
+    const ready = new Set<string>()
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      status: vi.fn(async () => ({
+        apiVersion: 1,
+        appVersion: '0.0.0',
+        agents: agents.slice(0, 2).map((agent) => ({
+          ...agent,
+          signIn: ready.has(agent.id) ? ('signed_in' as const) : ('signed_out' as const),
+          accounts: [usual(`acc_${agent.id}`, ready.has(agent.id) ? 'signed_in' : 'signed_out')],
+        })),
+      })),
+    })
+    withServices(<Start onProject={vi.fn()} />, client)
+    await screen.findAllByRole('button', { name: 'Sign in' })
+    await userEvent.click(screen.getAllByRole('button', { name: 'Sign in' })[0]!)
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_claude-code'))
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Sign in' })).toHaveLength(2))
+    await userEvent.click(screen.getAllByRole('button', { name: 'Sign in' })[1]!)
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_codex'))
+    ready.add('codex')
+    await waitFor(() => expect(screen.getAllByText('Ready')).toHaveLength(1), { timeout: 4000 })
+    ready.add('claude-code')
+    await waitFor(() => expect(screen.getAllByText('Ready')).toHaveLength(2), { timeout: 4000 })
+  })
+
+  it('keeps sign-in failures recoverable and offers the terminal fallback', async () => {
+    const signInAccount = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Sign-in failed'))
+      .mockResolvedValueOnce({ line: 'codex login', opened: false })
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      signInAccount,
+      status: vi.fn(async () => ({
+        apiVersion: 1,
+        appVersion: '0.0.0',
+        agents: [
+          {
+            ...agents[1]!,
+            signIn: 'signed_out' as const,
+            accounts: [usual('acc_codex', 'signed_out')],
+          },
+        ],
+      })),
+    })
+    withServices(<Start onProject={vi.fn()} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('alert')
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
+    await screen.findByText('Run this in a terminal to sign in, then come back: codex login')
+    expect((screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('offers sign-in for unknown status without treating it as a confirmed sign-in', async () => {
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      status: vi.fn(async () => ({ apiVersion: 1, appVersion: '0.0.0', agents: [agents[1]!] })),
+    })
+    withServices(<Start onProject={vi.fn()} />, client)
+    await screen.findByText('Sign-in status unavailable')
+    expect((screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_codex'))
+  })
+
+  it('lets unverified agents be set up later without claiming they are ready', async () => {
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      status: vi.fn(async () => ({ apiVersion: 1, appVersion: '0.0.0', agents: [agents[1]!] })),
+    })
+    const view = withServices(<Start onProject={vi.fn()} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Set up later' }))
+    expect(client.signInAccount).not.toHaveBeenCalled()
+    view.unmount()
+    withServices(<Start onProject={vi.fn()} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: /Open a folder/ }))
+    await waitFor(() => expect(client.openProject).toHaveBeenCalledWith('grant_picked'))
+  })
+
+  it('lets a returning user open projects even if every agent is signed out', async () => {
+    const { client } = fakeClient({
+      status: vi.fn(async () => ({
+        apiVersion: 1,
+        appVersion: '0.0.0',
+        agents: [
+          {
+            ...agents[0]!,
+            signIn: 'signed_out' as const,
+            accounts: [usual('acc_claude', 'signed_out')],
+          },
+        ],
+      })),
+    })
+    withServices(<Start onProject={vi.fn()} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Open a folder' }))
+    await waitFor(() => expect(client.openProject).toHaveBeenCalledWith('grant_picked'))
+    expect(screen.queryByRole('heading', { name: 'Connect an agent' })).toBeNull()
   })
 
   it('says how each agent is signed in', () => {

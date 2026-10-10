@@ -28,7 +28,7 @@ export const text = {
   },
   /** The kit's start screen, saying only what this app does: one folder, by the button or ⌘N. */
   first: {
-    create: { title: 'Open a folder', note: 'A repository, a folder in one, or a folder of them becomes a project', kbd: '⌘N' },
+    create: { title: 'Open a folder', note: 'Choose a local Git repository', kbd: '⌘N' },
     drop: 'Or drop the folder anywhere on this window.',
   },
 }
@@ -126,7 +126,7 @@ export function StartView({
 
   // ⌘N opens a folder, as the first screen says; the home has its own.
   useEffect(() => {
-    if (!first) return
+    if (!first || model.setupStep !== 'project') return
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'n' && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
         event.preventDefault()
@@ -187,7 +187,46 @@ export function StartView({
       <div className={s.window} {...drop}>
         <TitleBar lights="none">{null}</TitleBar>
         <div className={`${s.scroll} ${s.first}`}>
-          <Start runtimes={runtimesOf(model)} onCreate={open} text={text.first} />
+          <Start
+            step={model.setupStep}
+            onContinue={model.continueSetup}
+            onSkip={model.skipSetup}
+            onBack={model.backToAgents}
+            canContinue={model.status?.agents.some((agent) => agent.signIn === 'signed_in') ?? false}
+            checking={model.status === null}
+            opening={model.opening}
+            runtimes={(model.status?.agents ?? []).map((agent): RuntimeEntry => {
+              const entry = runtimeEntry(agent)
+              if (model.signingIn === agent.id) return { ...entry, state: RuntimeState.Checking }
+              return entry.state === RuntimeState.Ready
+                ? {
+                    ...entry,
+                    account: agent.signIn === 'signed_in' ? 'Ready' : 'Sign-in status unavailable',
+                    ...(agent.signIn === 'unknown'
+                      ? {
+                          detail: (
+                            <Button size="small" onClick={() => void model.signInAgent(agent.id)}>
+                              Sign in
+                            </Button>
+                          ),
+                        }
+                      : {}),
+                  }
+                : entry
+            })}
+            onSignIn={(agentId) => void model.signInAgent(agentId)}
+            onCreate={open}
+            text={text.first}
+          />
+          {model.setupStep === 'agents' && (
+            <p className={s.signInNote}>
+              {model.status?.agents.some((agent) => agent.signIn !== 'signed_in') &&
+                'Sign-in opens in Terminal. Return here when you’re done. '}
+              <Button size="small" variant="quiet" onClick={() => void model.checkAgents()}>
+                Check again
+              </Button>
+            </p>
+          )}
           <StartError model={model} />
         </div>
       </div>

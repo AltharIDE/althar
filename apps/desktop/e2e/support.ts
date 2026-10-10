@@ -6,7 +6,7 @@ import { _electron as electron, type ElectronApplication, type Page } from '@pla
 
 const app = join(import.meta.dirname, '..')
 
-export const launch = async (home: string, env: Record<string, string> = {}) => {
+export const launch = async (home: string, env: Record<string, string> = {}, { onboarding = false } = {}) => {
   const electronApp = await electron.launch({
     args: [app],
     env: {
@@ -17,7 +17,12 @@ export const launch = async (home: string, env: Record<string, string> = {}) => 
       ...env,
     },
   })
-  return { electronApp, page: await electronApp.firstWindow() }
+  const page = await electronApp.firstWindow()
+  // Most journeys begin after setup; onboarding tests exercise these steps explicitly.
+  if (!onboarding) {
+    await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  }
+  return { electronApp, page }
 }
 
 /** Answers the folder picker with `path`, as if the person chose it. */

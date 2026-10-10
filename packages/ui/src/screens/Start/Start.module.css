@@ -94,3 +94,13 @@
     transition: none;
   }
 }
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+}
+.way:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}

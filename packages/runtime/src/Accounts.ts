@@ -4,7 +4,7 @@ import { isAbsolute, join, relative, sep } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
 import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
-import { type AgentDefinition, signOut } from '@althar/provider-adapters'
+import { type AgentDefinition, signInCommand, signOut } from '@althar/provider-adapters'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -380,9 +380,9 @@ export class Accounts extends Context.Service<
               const account = yield* get(accountId)
               const definition = definitionOf(account.agentId)
               if (definition === undefined) return yield* new UnknownAgent({ agentId: account.agentId })
-              return account.home === null
-                ? definition.signIn.login
-                : `${definition.home.variable}=${quoted(account.home)} ${definition.signIn.login}`
+              // Terminal has its own environment and PATH. Preserve the account here,
+              // and use the bundled executable where the agent supplies one.
+              return signInCommand(definition, account.home ?? process.env[definition.home.variable])
             }),
           ),
       })

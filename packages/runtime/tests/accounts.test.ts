@@ -176,7 +176,16 @@ describe('accounts', () => {
         yield* accounts.remove(kept.id)
         assert.isTrue(existsSync(root))
         assert.strictEqual(yield* accounts.login(work.id), `FAKE_HOME='${work.home}' fake-login codex`)
-        assert.strictEqual(yield* accounts.login(usual?.id ?? ''), 'fake-login codex')
+        assert.strictEqual(yield* accounts.login(usual?.id ?? ''), 'env -u FAKE_HOME fake-login codex')
+        const previousHome = process.env.FAKE_HOME
+        try {
+          process.env.FAKE_HOME = '/tmp/althar-onboarding/codex'
+          assert.strictEqual(yield* accounts.login(usual?.id ?? ''), "FAKE_HOME='/tmp/althar-onboarding/codex' fake-login codex")
+          assert.strictEqual(yield* accounts.login(work.id), `FAKE_HOME='${work.home}' fake-login codex`)
+        } finally {
+          if (previousHome === undefined) delete process.env.FAKE_HOME
+          else process.env.FAKE_HOME = previousHome
+        }
         // An agent the registry doesn't know, as a test's `process` agent, runs in its usual folder, and has no sign-in to open.
         const [elsewhere] = yield* accounts.of('process')
         assert.deepStrictEqual(accounts.env(elsewhere ?? work), {})

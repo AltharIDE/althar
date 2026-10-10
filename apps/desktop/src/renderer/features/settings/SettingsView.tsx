@@ -70,7 +70,7 @@ export function SettingsView({
             {model.status === null ? (
               <p className={s.quiet}>{text.connecting}</p>
             ) : (
-              <Runtimes label={text.agents} runtimes={runtimesOf(model)} />
+              <Runtimes label={text.agents} runtimes={runtimesOf(model)} onSignIn={(agentId) => void model.signInAgent(agentId)} />
             )}
           </section>
           <section aria-labelledby="connections" className={s.section}>

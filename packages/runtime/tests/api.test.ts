@@ -438,7 +438,7 @@ describe('accounts, through the API', () => {
           const { client: plain } = yield* connected({ noTerminal: true })
           const [main] = (yield* plain.Status({})).agents.find((agent) => agent.id === 'codex')?.accounts ?? []
           assert.deepStrictEqual(yield* plain.SignInAccount({ commandId: commandId(), accountId: main?.id ?? '' }), {
-            line: 'fake-login codex',
+            line: 'env -u FAKE_HOME fake-login codex',
             opened: false,
           })
         }),

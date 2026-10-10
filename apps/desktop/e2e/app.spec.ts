@@ -25,7 +25,7 @@ test('opens a project, starts a task, and talks to its lead', async () => {
   try {
     await chooseFolder(electronApp, repo)
     await expect(page.getByText('Fake')).toHaveCount(0)
-    await expect(page.getByText('Claude Code')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Open your project' })).toBeVisible()
     await page.screenshot({ path: 'test-results/start.png' })
     await page.getByRole('button', { name: /Open a folder/ }).click()
 

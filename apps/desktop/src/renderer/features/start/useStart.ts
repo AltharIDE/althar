@@ -33,6 +33,13 @@ export interface StartModel {
   readonly projects: ReadonlyArray<ProjectSummary> | null
   readonly error: string | null
   readonly opening: boolean
+  readonly setupStep: 'agents' | 'project'
+  readonly continueSetup: () => void
+  readonly skipSetup: () => void
+  readonly backToAgents: () => void
+  readonly signInAgent: (agentId: string) => Promise<void>
+  readonly signingIn: string | null
+  readonly checkAgents: () => Promise<void>
   /** Asks for a folder and opens it as a project; the project, or null when the person cancelled. */
   readonly openFolder: () => Promise<ProjectSummary | null>
   /** Opens a folder dropped on the window as a project; null when it couldn't. */
@@ -62,6 +69,16 @@ export interface StartModel {
   readonly removeAnyway: () => Promise<void>
 }
 
+const SETUP = 'althar.agent-setup'
+
+const setupDone = () => {
+  try {
+    return window.localStorage.getItem(SETUP) === 'done'
+  } catch {
+    return false
+  }
+}
+
 /**
  * `recheck` asks every agent again as the screen opens, rather than trust the
  * runtime's last answer: where the person signs in, so after they did. The
@@ -78,6 +95,19 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
   const readFailure = projectsRead.error ?? statusRead.error
   const error = failed ?? (readFailure === null ? null : messageOf(readFailure))
   const [opening, setOpening] = useState(false)
+  const [continued, setContinued] = useState(setupDone)
+  const [signingIn, setSigningIn] = useState<string | null>(null)
+  const [awaitingSignIn, setAwaitingSignIn] = useState<ReadonlyArray<string>>([])
+  const canOpen = continued || (projects !== null && projects.length > 0)
+  // Completion means the person continued or explicitly chose to set up later.
+  const finishSetup = () => {
+    setContinued(true)
+    try {
+      window.localStorage.setItem(SETUP, 'done')
+    } catch {
+      // Still works for this window if storage is unavailable.
+    }
+  }
   const [forming, setForming] = useState<Forming | null>(null)
   const [creating, setCreating] = useState(false)
   const [found, setFound] = useState<Readonly<Record<string, ReadonlyArray<FoundAccount>>>>({})
@@ -103,6 +133,30 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [reloadStatus])
+
+  // Browser login can finish after the window regains focus. Keep asking until
+  // all pending accounts are signed in, with one request at a time and a bounded wait.
+  useEffect(() => {
+    if (awaitingSignIn.length === 0) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+    const until = Date.now() + 10 * 60_000
+    const check = async () => {
+      await reloadStatus(true)
+      if (cancelled) return
+      const accounts = cache.getQueryData<Status>(keys.status)?.agents.flatMap((agent) => agent.accounts) ?? []
+      if (awaitingSignIn.every((id) => accounts.some((one) => one.id === id && one.signIn === 'signed_in')) || Date.now() >= until) {
+        setAwaitingSignIn([])
+        return
+      }
+      timer = setTimeout(() => void check(), 2000)
+    }
+    timer = setTimeout(() => void check(), 2000)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [awaitingSignIn, cache, reloadStatus])
 
   /** The projects read again, so a project just made is in them when its screen opens. */
   const listed = useCallback(
@@ -131,10 +185,23 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
     (accountId: string) =>
       changing(async () => {
         const { line, opened } = await client.signInAccount(accountId)
+        setAwaitingSignIn((pending) => (pending.includes(accountId) ? pending : [...pending, accountId]))
         if (!opened) setError(`Run this in a terminal to sign in, then come back: ${line}`)
       }),
     [changing, client],
   )
+
+  const signInAgent = async (agentId: string) => {
+    const agent = status?.agents.find((one) => one.id === agentId)
+    const account = agent?.accounts.find((one) => one.home === null) ?? agent?.accounts[0]
+    if (account === undefined || signingIn !== null) return
+    setSigningIn(agentId)
+    try {
+      await signInAccount(account.id)
+    } finally {
+      setSigningIn(null)
+    }
+  }
 
   const addAccount = useCallback(
     (agentId: string, name: string, place: AccountPlace) =>
@@ -192,7 +259,7 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
     [client, listed],
   )
 
-  const openFolder = useCallback(async () => open(await host.pickFolder()), [host, open])
+  const openFolder = useCallback(async () => (canOpen && !opening ? open(await host.pickFolder()) : null), [canOpen, opening, host, open])
 
   const addFolders = useCallback(async () => {
     const grant = await host.pickFolder()
@@ -251,13 +318,28 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
     },
     [client, forming, listed],
   )
-  const openDropped = useCallback(async (file: File) => open(await host.grantDropped(file)), [host, open])
+  const openDropped = useCallback(
+    async (file: File) => (canOpen && !opening ? open(await host.grantDropped(file)) : null),
+    [canOpen, opening, host, open],
+  )
 
   return {
     status,
     projects,
     error,
     opening,
+    setupStep: continued ? 'project' : 'agents',
+    continueSetup: () => {
+      if (status?.agents.some((agent) => agent.signIn === 'signed_in')) finishSetup()
+    },
+    skipSetup: finishSetup,
+    backToAgents: () => setContinued(false),
+    signInAgent,
+    signingIn,
+    checkAgents: () => {
+      setError(null)
+      return reloadStatus(true)
+    },
     openFolder,
     openDropped,
     forming,

@@ -79,6 +79,8 @@ export interface AgentDefinition {
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
     readonly login: string
+    /** Bundled tools must sign in with the same executable that checks and uses the account. */
+    readonly loginRun?: (node: string) => LaunchSpec
     /**
      * Its own sign-out, run in an account's home when the person removes an
      * account Althar made, before its folder goes (ADR-012). Without one,
@@ -278,6 +280,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       /* "Logged in using ChatGPT" is the person's plan; "using an API key" is paid per use. */
       paidBy: (output) => (/using chatgpt/i.test(output) ? 'plan' : /api key/i.test(output) ? 'key' : undefined),
       login: 'codex login',
+      loginRun: (node) => ({ command: node, args: [bundledCodex(), 'login'] }),
       logout: { run: (node) => ({ command: node, args: [bundledCodex(), 'logout'] }), line: 'codex logout' },
     },
     home: {

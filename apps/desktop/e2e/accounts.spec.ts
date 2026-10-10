@@ -9,7 +9,7 @@ import { chooseFolder, launch } from './support'
 
 /*
  * Several accounts per agent (ADR-012), as the person sees them: added on
- * the start, each in a folder of its own, and named where one runs out.
+ * Settings, each in a folder of its own, and named where one runs out.
  * Claude Code's usual account is out for an hour here (ALTHAR_FAKE_OUT);
  * the one added isn't. A project doesn't rotate through an agent's accounts
  * until the person turns that on, so the work goes to another agent.
@@ -20,6 +20,12 @@ test('adds an account to an agent, and names the one that ran out when a task mo
   const repo = repository(home)
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_OUT: 'claude-code@usual:3600' })
   try {
+    await chooseFolder(electronApp, repo)
+    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    const tabs = page.getByRole('navigation', { name: 'Projects' })
+    await tabs.getByRole('button', { name: /^Home/ }).click()
+    await page.keyboard.press('Meta+,')
     const claude = page.getByRole('list', { name: 'Agents on this Mac' }).getByRole('listitem').filter({ hasText: 'Claude Code' }).first()
     await claude.getByRole('button', { name: 'Add an account' }).click()
     await page.getByRole('textbox', { name: 'Name' }).fill('work')
@@ -31,9 +37,7 @@ test('adds an account to an agent, and names the one that ran out when a task mo
     await expect(accounts.getByText('A folder of its own')).toBeVisible()
     await page.screenshot({ path: 'test-results/accounts-added.png', animations: 'disabled' })
 
-    await chooseFolder(electronApp, repo)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
-    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await tabs.getByRole('button', { name: /^meridian/ }).click()
     await page.getByRole('button', { name: 'New task' }).click()
     await page.getByLabel('What should change').fill('Add a retry to the checkout call')
     await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
