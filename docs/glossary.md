@@ -47,9 +47,12 @@ say the right. When something new needs a name on screen, add it here first.
 | Queue, "Enter queues it; the lead reads it next" | `after_current` | What you write while the lead works. It waits for the lead's current turn to end. |
 | Send now | `interrupt_and_continue` | Stops the lead's turn to read your message, then it carries on with both. |
 | Interrupt the lead | turn interrupt | The composer's square. Ends the lead's turn; the task stays open. The line in the thread reads "Interrupted by you". |
-| Stop the task | run suspended | From the task menu. Nothing runs until you resume it. Status: Stopped. |
-| Abandon | `cancel_run` | Ends the task without its change. It moves to Settled. |
-| Reopen | a new run on a finished task | Only for a task that is done. |
+| Hold, Restart the countdown | plan held, plan unheld | On a plan waiting to start: Hold stops its countdown, and it starts when you say; Restart the countdown counts its whole wait again, and it starts when that ends. |
+| Start now | plan accepted | Starts a plan waiting to start, from its card or the task menu. |
+| Stop the task | run suspended | From the task menu. Every agent on it stops, and the step it was on is cut short. Nothing runs, and nothing waits on you, until you resume it. Status: Stopped. |
+| Resume | run resumed | From the task menu, or by writing to a stopped task: the lead carries on the step it was on, with what you wrote first. |
+| Abandon | task abandoned, its run suspended | From the task menu, asked first. Ends the task without its change. It moves to Settled. Its worktree and branch stay. |
+| Reopen | an abandoned task open again | Only for an abandoned task, never a merged one. It opens on the same worktree and branch, where it was: a step cut short resumes, work that had passed is ready again. |
 | Althar restarted | reconciliation after process loss | Not said in threads: a lead that stopped with Althar starts again when the person next writes to it, and nothing it was doing runs twice. A step that was running asks the person to carry it on. |
 
 A call's kind reads the same everywhere it shows: on the board, in the bar's preview and on the home.
