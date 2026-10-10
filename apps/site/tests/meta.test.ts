@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { PAGE_META, pageMeta } from '../src/content/pages'
@@ -30,6 +33,15 @@ describe('page meta', () => {
       expect(p.description.length).toBeLessThanOrEqual(160)
       expect(p.description.endsWith('.')).toBe(true)
       expect(p.image).toMatch(/^\/og\/[a-z]+\.png$/)
+    }
+  })
+
+  it('has its preview image in public/og, a PNG at 1200×630', () => {
+    for (const p of pages) {
+      const png = readFileSync(resolve(import.meta.dirname, `../public${p.image}`))
+      // The PNG signature, then the header chunk's width and height.
+      expect(png.subarray(1, 4).toString()).toBe('PNG')
+      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1200, 630])
     }
   })
 

@@ -9,7 +9,7 @@ export interface PageMeta {
   title: string
   /** At most 160 characters: what search results and link previews show. */
   description: string
-  /** The link-preview image, 1200×630, from public/og/. */
+  /** The link-preview image, 1200×630, from public/og/: drawn from src/og/ by `bun run og`, or the wallpaper's own. */
   image: string
   /** False keeps the page out of search. */
   index: boolean
@@ -36,7 +36,7 @@ export const PAGE_META = {
     path: '/thesis',
     title: 'The Fourth Age of Software Engineering · Althar',
     description: 'The hypothesis Althar comes out of: how software engineering changes once coding agents are abundant.',
-    image: '/og/home.png',
+    image: '/og/thesis.png',
     index: true,
   },
   '/wallpaper': {
