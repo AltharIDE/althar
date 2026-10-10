@@ -546,8 +546,13 @@ Under the default project rule, the paused work moves on, in this order:
 
 Either way the new session takes the work over from a brief in the same
 workspace (03, Switching model or agent), and the thread shows one line per
-move. Otherwise a single attention request names everything paused and moves
-it together.
+move. Under the wait rule the work is held until the reset. Under the ask
+rule, or when the agent didn't say when it resets, the work needs the person:
+an attention request names whose limit it is, when it resets, and each
+account that could take the work over, with the model it would run. The
+window marks which of them are free as it asks. The person moves the work to
+one, waits for the reset, or, where the reset isn't known, tries the agent
+again. Each task the limit paused asks once.
 
 **Typed step results.** Each step type declares its output schema, for example:
 

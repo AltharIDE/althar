@@ -54,7 +54,10 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await openRules(page)
-    await page.getByRole('radio', { name: /Ask me/ }).click()
+    await page
+      .getByRole('radiogroup', { name: 'Permissions' })
+      .getByRole('radio', { name: /Ask me/ })
+      .click()
     await expect(page.getByText(/Nothing yet\. A permission answered/)).toBeVisible()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
 

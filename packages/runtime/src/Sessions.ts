@@ -298,6 +298,8 @@ export class Sessions extends Context.Service<
       readonly model?: string
       /** How hard it thinks, where the agent offers a choice; the agent's own default without one. */
       readonly effort?: string
+      /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
+      readonly accountId?: string
     }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Accepts input into the thread's queue, and delivers it when the session can take it. */
     send(input: {
@@ -331,6 +333,8 @@ export class Sessions extends Context.Service<
       readonly about?: 'limit' | 'stall'
       /** What the person said with it: the new agent's first turn, after its brief, and never the old one's. */
       readonly message?: { readonly envelope: CommandEnvelope; readonly body: string }
+      /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
+      readonly accountId?: string
     }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
     interrupt(threadId: string): Effect.Effect<void, NoSession>

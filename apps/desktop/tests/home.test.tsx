@@ -9,6 +9,7 @@ import { ProjectInk } from '@althar/ui'
 
 import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import { HomeView, lineOf, refOf } from '../src/renderer/features/home/HomeView'
+import { clock } from '../src/renderer/shared/time'
 import { useHome } from '../src/renderer/features/home/useHome'
 import { agentGlanceOf, marksOf, SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
 import { useStart } from '../src/renderer/features/start/useStart'
@@ -150,6 +151,17 @@ const busy = () =>
       stuck,
       { ...permission, id: 'a3', title: 'Write outside the worktree', command: null, projectId: 'p1' },
       { ...stuck, id: 'a4', stuck: { ...stuck.stuck!, agentId: null }, taskTitle: 'Nobody on it' },
+      {
+        ...stuck,
+        id: 'a5',
+        stuck: {
+          ...stuck.stuck!,
+          why: 'usage_limit',
+          agentId: 'codex',
+          limit: { accountId: 'acc_codex', resetsAt: '2026-09-29T14:00:00.000Z', choices: [] },
+        },
+        taskTitle: 'Out of it',
+      },
       { ...permission, id: 'x3', title: 'Gone call', projectId: 'gone' },
     ],
     events: [
@@ -194,6 +206,10 @@ describe('the home', () => {
     expect(within(needs).getByText('The agent stopped before the step was done.')).toBeTruthy()
     expect(within(needs).getAllByText('Write outside the worktree')).toHaveLength(2)
     expect(screen.queryByText(/^Gone/)).toBeNull()
+    // A step a usage limit stopped is out of usage, here as in its task, with when the agent is back.
+    const out = within(needs).getByRole('article', { name: 'Out of it' })
+    expect(within(out).getByText('Out of usage')).toBeTruthy()
+    expect(within(out).getByText(`Codex reached its usage limit, until ${clock('2026-09-29T14:00:00.000Z')}.`)).toBeTruthy()
 
     // Allowed where it is: the line stays, quiet, with what was said where its buttons were, and has focus.
     await userEvent.click(within(needs).getAllByRole('button', { name: 'Allow once' })[0]!)

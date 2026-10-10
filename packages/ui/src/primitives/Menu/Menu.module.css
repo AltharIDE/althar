@@ -73,6 +73,10 @@
 .item[data-disabled] {
   color: var(--t-4);
 }
+/* all of it, a model's name included, which has a colour of its own */
+.item[data-disabled] :where(*) {
+  color: inherit;
+}
 .item[data-state='checked'] {
   font-weight: 550;
 }

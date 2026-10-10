@@ -263,10 +263,15 @@ export interface Start {
   readonly effort?: string
 }
 
-/** Tell a step's agent what to do, hand the step to an agent, or abandon it. */
+/**
+ * Tell a step's agent what to do, hand the step to an agent (on an account
+ * and model, where one was picked), wait for a usage limit's reset, or
+ * abandon it.
+ */
 export type StuckAnswer =
   | { readonly kind: 'tell'; readonly note: string }
-  | { readonly kind: 'retry'; readonly agentId: string }
+  | { readonly kind: 'retry'; readonly agentId: string; readonly accountId?: string; readonly model?: string }
+  | { readonly kind: 'wait' }
   | { readonly kind: 'abandon' }
 
 /** What went wrong with a call, in words a view can show. */
