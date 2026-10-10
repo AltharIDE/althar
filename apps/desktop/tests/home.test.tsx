@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { ApiError } from '@althar/contracts'
 import type { HomeCall, HomeEvent, HomeTask, ProjectSummary } from '@althar/contracts'
 import { ProjectInk } from '@althar/ui'
 
@@ -254,6 +255,17 @@ describe('the home', () => {
     await userEvent.type(within(needs).getByRole('textbox', { name: 'Say what to do instead' }), 'Publish from CI{Enter}')
     expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'reject', reason: 'Publish from CI' })
     expect(await within(needs).findByText('Didn’t allow npm publish')).toBeTruthy()
+  })
+
+  it('brings back a permission whose answer didn’t go through, with what went wrong', async () => {
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...busy(), calls: [permission] })) })
+    vi.mocked(client.answer).mockRejectedValueOnce(new ApiError({ reason: 'AttentionClosed', message: 'That call was already answered.' }))
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /Needs you/ })
+    await userEvent.click(within(needs).getByRole('button', { name: 'Allow once' }))
+    expect(await screen.findByText('That call was already answered.')).toBeTruthy()
+    expect(await within(needs).findByRole('button', { name: 'Allow once' })).toBeTruthy()
+    expect(within(needs).queryByText('Allowed npm publish')).toBeNull()
   })
 
   it('opens the first ready task from the bar when no call waits', async () => {

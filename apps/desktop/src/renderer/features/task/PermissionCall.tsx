@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import type { AttentionRequest } from '@althar/contracts'
 import { Permission, Permissions } from '@althar/ui'
 
@@ -10,19 +12,31 @@ import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
  * in the dock beside the board, one.
  */
 
-/** Answers a call: allowed or refused, with what to do instead, and kept as a rule by the scope of an always. */
+/** Answers a call: allowed or refused, with what to do instead, and kept as a rule by the scope of an always; false where it didn't go through. */
 export type AnswerCall = (
   attentionId: string,
   decision: Reply['decision'],
   reason?: string,
   always?: Reply['always'],
-) => void | Promise<void>
+) => void | Promise<unknown>
 
-const send = (onAnswer: AnswerCall, attentionId: string, reply: Reply) =>
-  void onAnswer(attentionId, reply.decision, reply.reason, reply.always)
+/**
+ * Sends answers, and starts the cards afresh when one doesn't go through, so
+ * every call still waiting can be answered again: the kit's card keeps an
+ * answer once given, the runtime only once it took it.
+ */
+const useAnswers = (onAnswer: AnswerCall) => {
+  const [round, setRound] = useState(0)
+  const send = (attentionId: string, reply: Reply) =>
+    void Promise.resolve(onAnswer(attentionId, reply.decision, reply.reason, reply.always)).then((through) => {
+      if (through === false) setRound((now) => now + 1)
+    })
+  return { round, send }
+}
 
 export function PermissionCall({ request, project, onAnswer }: { request: AttentionRequest; project: string; onAnswer: AnswerCall }) {
-  return <Permission {...permissionOf(request)} project={project} onAnswer={(answer) => send(onAnswer, request.id, replyOf(answer))} />
+  const { round, send } = useAnswers(onAnswer)
+  return <Permission key={round} {...permissionOf(request)} project={project} onAnswer={(answer) => send(request.id, replyOf(answer))} />
 }
 
 /** The task's permission calls, as one stack: each answer goes back to its own agent. */
@@ -35,12 +49,14 @@ export function PermissionCalls({
   project: string
   onAnswer: AnswerCall
 }) {
+  const { round, send } = useAnswers(onAnswer)
   if (requests.length === 0) return null
   return (
     <Permissions
+      key={round}
       items={requests.map(permissionOf)}
       project={project}
-      onAnswer={(request, answer) => send(onAnswer, request.id, replyOf(answer))}
+      onAnswer={(request, answer) => send(request.id, replyOf(answer))}
     />
   )
 }

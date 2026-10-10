@@ -905,6 +905,27 @@ describe('a task', () => {
     expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a3', decision: 'allow' })
   })
 
+  it('makes calls answerable again when an answer of Allow all doesn’t go through', async () => {
+    const call = (id: string) => ({
+      id,
+      kind: 'permission' as const,
+      stuck: null,
+      title: `Run ${id}`,
+      reason: 'It asks.',
+      command: id,
+      createdAt: '2026-09-29T12:00:00.000Z',
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [call('a1'), call('a2')] })) })
+    vi.mocked(client.answer).mockImplementation(async ({ attentionId }) => {
+      if (attentionId === 'a2') throw new ApiError({ reason: 'SqlError', message: 'Althar couldn’t record that.' })
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Allow all 2' }))
+    expect(await screen.findByText('Althar couldn’t record that.')).toBeTruthy()
+    // The stack starts afresh with what still waits.
+    expect(await screen.findByRole('button', { name: 'Allow all 2' })).toBeTruthy()
+  })
+
   it('says in a line under a turn what the project’s rules let through, and which rule', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () =>

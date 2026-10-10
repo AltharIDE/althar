@@ -220,7 +220,10 @@ export function HomeView({
         kept: reply.always !== undefined,
       },
     ])
-    void model.answer(call.id, reply.decision, reply.reason, reply.always)
+    // One whose answer didn't go through comes back, with what went wrong.
+    void model.answer(call.id, reply.decision, reply.reason, reply.always).then((through) => {
+      if (!through) setAnswered((now) => now.filter((one) => one.id !== call.id))
+    })
   }
 
   const cards: ReadonlyArray<{ readonly key: string; readonly node: ReactNode }> = [

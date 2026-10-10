@@ -33,7 +33,8 @@ export interface WorkActions {
   readonly sendBack: (task: BoardTask, note: string) => Promise<boolean>
   /** Opens the pull request of a task whose work ended on its branch. */
   readonly openChange: (taskId: string) => Promise<boolean>
-  readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string, always?: AlwaysScope) => Promise<void>
+  /** Answers a call; with `always`, kept in the project's rules by that scope. Whether it went through. */
+  readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string, always?: AlwaysScope) => Promise<boolean>
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
   /** Says what went wrong reading what the actions act on. */
   readonly fail: (failure: unknown) => void
@@ -94,7 +95,13 @@ export const useWorkActions = (): WorkActions => {
       (attentionId, decision, reason, always) =>
         client
           .answer({ attentionId, decision, ...(reason === undefined ? {} : { reason }), ...(always === undefined ? {} : { always }) })
-          .catch(fail),
+          .then(
+            () => true,
+            (failure: unknown) => {
+              fail(failure)
+              return false
+            },
+          ),
       [client, fail],
     ),
     answerStuck: useCallback((attentionId, answer) => client.answerStuck({ attentionId, answer }).catch(fail), [client, fail]),
