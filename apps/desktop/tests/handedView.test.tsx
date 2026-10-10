@@ -174,6 +174,40 @@ describe('what an agent hands back, on a task', () => {
     expect(await screen.findByText(/listening on 4000/)).toBeTruthy()
   })
 
+  it('reads a running command’s output again whenever the watch starts again, though it had heard some', async () => {
+    const run = items.tool({ title: 'npm run dev', toolKind: 'execute', command: 'npm run dev', status: 'in_progress' })
+    const base = snapshot({ items: [items.you('Start it'), run] })
+    const live = { ...base, session: base.session === null ? null : { ...base.session, turnRunning: true } }
+    const readOutput = vi.fn().mockResolvedValue({ text: 'ready\n', dropped: 0 })
+    const { client, emit, rewatch } = fakeClient({ getThread: vi.fn(async () => live), readOutput })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: /Working for/ }))
+    expect(await screen.findByText(/^ready$/)).toBeTruthy()
+    act(() => emit({ _tag: 'Output', threadId: 'th1', itemId: run.id, text: 'ready\ncompiled\n', dropped: 0 }))
+    expect(await screen.findByText(/^compiled$/)).toBeTruthy()
+    // The watch broke while it printed more, then went quiet: listening again, it reads what it missed.
+    readOutput.mockResolvedValue({ text: 'ready\ncompiled\nlistening on 4000\n', dropped: 0 })
+    act(() => rewatch())
+    expect(await screen.findByText(/^listening on 4000$/)).toBeTruthy()
+  })
+
+  it('keeps what it heard over a read that began before it', async () => {
+    const run = items.tool({ title: 'npm run dev', toolKind: 'execute', command: 'npm run dev', status: 'in_progress' })
+    const base = snapshot({ items: [items.you('Start it'), run] })
+    const live = { ...base, session: base.session === null ? null : { ...base.session, turnRunning: true } }
+    let answer: (value: { text: string; dropped: number }) => void = () => {}
+    const readOutput = vi.fn(() => new Promise<{ text: string; dropped: number }>((resolve) => (answer = resolve)))
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => live), readOutput })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: /Working for/ }))
+    await waitFor(() => expect(readOutput).toHaveBeenCalled())
+    act(() => emit({ _tag: 'Output', threadId: 'th1', itemId: run.id, text: 'older\nnewer\n', dropped: 0 }))
+    expect(await screen.findByText(/^newer$/)).toBeTruthy()
+    // The read answers late, with less: what was heard after it began stands.
+    await act(async () => answer({ text: 'older\n', dropped: 0 }))
+    expect(screen.getByText(/^newer$/)).toBeTruthy()
+  })
+
   it('opens the turn’s screenshots in the lightbox, the arrows moving between them, and focus coming back', async () => {
     const user = userEvent.setup()
     const { client } = fakeClient({ getThread: vi.fn(async () => handing()) })

@@ -17,7 +17,8 @@ import { messageOf } from '../../data/client'
 import { CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
-import { type OutputSoFar, outputsCaughtUp, withOutput } from '../../shared/handed'
+import type { OutputSoFar } from '../../shared/handed'
+import { useOutputs } from '../../shared/useOutputs'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
@@ -90,6 +91,9 @@ export interface ProjectModel {
   readonly dismissError: () => void
 }
 
+/** A thread not yet read has no items. */
+const NO_ITEMS: ReadonlyArray<ThreadItem> = []
+
 export const useProject = (projectId: string): ProjectModel => {
   const { client, cache } = useServices()
   const read = reads(client)
@@ -102,7 +106,6 @@ export const useProject = (projectId: string): ProjectModel => {
   // The project's ending, which a task the person plans starts from.
   const end = useQuery(read.rules(projectId)).data?.end ?? null
   const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
-  const [outputs, setOutputs] = useState<ReadonlyMap<string, OutputSoFar>>(new Map())
   const [failed, setError] = useState<string | null>(null)
   const readFailure = thread.error ?? listed.error
   const error = failed ?? (readFailure === null ? null : messageOf(readFailure))
@@ -113,6 +116,8 @@ export const useProject = (projectId: string): ProjectModel => {
   const [newest] = useState(newestReads)
   const changed = useRef({ head: false, cards: false, items: new Set<string>() })
   const threadId = coordinator?.threadId ?? null
+  // What the coordinator's commands have printed so far, while they run.
+  const outputs = useOutputs(threadId, coordinator?.items ?? NO_ITEMS, coordinator?.session?.turnRunning ?? false)
 
   /** Changes the coordinator's thread as the window keeps it; nothing before it is first read. */
   const setCoordinator = useCallback(
@@ -131,7 +136,6 @@ export const useProject = (projectId: string): ProjectModel => {
     (items: ReadonlyArray<ThreadItem>) => {
       setCoordinator((current) => ({ ...current, items: mergeItems(current.items, items) }))
       setStreaming((current) => caughtUp(current, items))
-      setOutputs((current) => outputsCaughtUp(current, items))
     },
     [setCoordinator],
   )
@@ -164,11 +168,8 @@ export const useProject = (projectId: string): ProjectModel => {
   }, [client, threadId, coordinator, readHead, newest, arrived, fail])
 
   useWatch((event) => {
-    // A command's output as far as it has come, until the store has it whole.
-    if (event._tag === 'Output') {
-      if (event.threadId === threadId) setOutputs((current) => withOutput(current, event))
-      return
-    }
+    // A command's output as far as it has come is useOutputs'.
+    if (event._tag === 'Output') return
     if (event._tag === 'Streaming') {
       if (event.threadId !== threadId) return
       setStreaming((current) =>

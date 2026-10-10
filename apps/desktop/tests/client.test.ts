@@ -286,10 +286,18 @@ describe('the client', () => {
     expect(commands).toHaveLength(3)
 
     const heard: Array<WatchEvent> = []
-    const unwatch = client.watch((event) => heard.push(event), 10)
+    // Each time it starts listening, at first and again once it broke, it says so.
+    let listening = 0
+    const unwatch = client.watch(
+      (event) => heard.push(event),
+      10,
+      () => {
+        listening += 1
+      },
+    )
     await eventually(
-      async () => watches,
-      (seen) => seen.length >= 2,
+      async () => [watches.length, listening],
+      ([seen, said]) => (seen ?? 0) >= 2 && (said ?? 0) >= 2,
     )
     unwatch()
     expect(watches.slice(0, 2)).toEqual([10, 15])

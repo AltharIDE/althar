@@ -502,6 +502,7 @@ export const connectionList: ConnectionList = {
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
   const watching: Array<number | undefined> = []
+  const starts = new Set<() => void>()
   const client: Client = {
     status: vi.fn(async () => status),
     listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
@@ -601,15 +602,30 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     markReady: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
-    watch: (listener, since) => {
+    watch: (listener, since, onWatching) => {
       watching.push(since)
       listeners.add(listener)
-      return () => void listeners.delete(listener)
+      // A watch is listening from the moment it starts, as the runtime's stream does once it is open.
+      if (onWatching !== undefined) {
+        starts.add(onWatching)
+        onWatching()
+      }
+      return () => {
+        listeners.delete(listener)
+        if (onWatching !== undefined) starts.delete(onWatching)
+      }
     },
     close: vi.fn(async () => {}),
     ...overrides,
   }
-  return { client, emit: (event: WatchEvent) => listeners.forEach((listener) => listener(event)), listeners, watching }
+  return {
+    client,
+    emit: (event: WatchEvent) => listeners.forEach((listener) => listener(event)),
+    /** The watch broke and started again, as after the runtime restarted: it listens again from now. */
+    rewatch: () => starts.forEach((start) => start()),
+    listeners,
+    watching,
+  }
 }
 
 /** The app's preferences as a main process would keep them: where each starts, then each change. */

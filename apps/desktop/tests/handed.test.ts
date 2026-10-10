@@ -117,10 +117,10 @@ describe('a command in its tool call', () => {
     expect(part).toMatchObject({
       kind: 'tool',
       state: ToolState.Running,
-      ran: { kind: 'running', text: ' ✓ a\n ✓ b', dropped: 3, heard: true },
+      ran: { kind: 'running', text: ' ✓ a\n ✓ b', dropped: 3 },
     })
-    // Before the window has heard any of it, what it printed so far is read.
-    expect(turnOf([running], true).parts[0]).toMatchObject({ ran: { kind: 'running', text: '', dropped: 0, heard: false } })
+    // Before its first line, the cursor waits.
+    expect(turnOf([running], true).parts[0]).toMatchObject({ ran: { kind: 'running', text: '', dropped: 0 } })
     const ended = items.tool({
       title: 'npm test',
       toolKind: 'execute',
@@ -137,7 +137,6 @@ describe('a command in its tool call', () => {
       kind: 'running',
       text: 'x',
       dropped: 0,
-      heard: true,
     })
   })
 

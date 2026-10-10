@@ -20,8 +20,7 @@ export interface OutputSoFar {
 
 /** What a command shows in its tool call: its output so far while it runs, or how much it printed once it ended. */
 export type Ran =
-  /** `heard` once the window has heard its output stream; before then, what it printed so far is read. */
-  | { readonly kind: 'running'; readonly text: string; readonly dropped: number; readonly heard: boolean }
+  | { readonly kind: 'running'; readonly text: string; readonly dropped: number }
   | { readonly kind: 'ended'; readonly output: CommandOutput }
 
 /** A command's state for its tool call: null for a call that isn't a command, or one from before Althar kept output. */
@@ -32,7 +31,7 @@ export const ranOf = (
 ): Ran | null => {
   if (content.output !== null) return { kind: 'ended', output: content.output }
   if (state !== ToolState.Running || (content.toolKind !== 'execute' && soFar === undefined)) return null
-  return { kind: 'running', text: soFar?.text ?? '', dropped: soFar?.dropped ?? 0, heard: soFar !== undefined }
+  return { kind: 'running', text: soFar?.text ?? '', dropped: soFar?.dropped ?? 0 }
 }
 
 /** A screenshot, as Shots and the lightbox draw it. */

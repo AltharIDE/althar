@@ -8,7 +8,8 @@ import { keys, reads } from '../../data/reads'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
-import { type OutputSoFar, outputsCaughtUp, withOutput } from '../../shared/handed'
+import type { OutputSoFar } from '../../shared/handed'
+import { useOutputs } from '../../shared/useOutputs'
 import type { Streamed } from '../../shared/thread'
 import { useServices, useWatch } from '../../data/services'
 
@@ -21,6 +22,9 @@ import { useServices, useWatch } from '../../data/services'
  * working, the calls waiting) reads the thread's head again, without its
  * items. Earlier items are read a page at a time, when asked for.
  */
+
+/** A thread not yet read has no items. */
+const NO_ITEMS: ReadonlyArray<ThreadItem> = []
 
 /** How long changes are gathered before they are read. */
 const GATHER = 25
@@ -93,7 +97,8 @@ export const useTask = (threadId: string): TaskModel => {
   const status = useQuery(read.status()).data
   const agents = useMemo(() => status?.agents.filter((agent) => agent.signIn !== 'signed_out') ?? [], [status])
   const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
-  const [outputs, setOutputs] = useState<ReadonlyMap<string, OutputSoFar>>(new Map())
+  // What its commands have printed so far, while they run.
+  const outputs = useOutputs(threadId, snapshot?.items ?? NO_ITEMS, snapshot?.session?.turnRunning ?? false)
   const [failed, setError] = useState<string | null>(null)
   const error = failed ?? (thread.error === null ? null : messageOf(thread.error))
   const [pending, setPending] = useState(false)
@@ -125,7 +130,6 @@ export const useTask = (threadId: string): TaskModel => {
     (items: ReadonlyArray<ThreadItem>) => {
       setSnapshot((current) => ({ ...current, items: mergeItems(current.items, items) }))
       setStreaming((current) => caughtUp(current, items))
-      setOutputs((current) => outputsCaughtUp(current, items))
     },
     [setSnapshot],
   )
@@ -169,11 +173,8 @@ export const useTask = (threadId: string): TaskModel => {
   }, [client, threadId, readHead, newest, arrived, fail])
 
   useWatch((event) => {
-    // A command's output as far as it has come, until the store has it whole.
-    if (event._tag === 'Output') {
-      if (event.threadId === threadId) setOutputs((current) => withOutput(current, event))
-      return
-    }
+    // A command's output as far as it has come is useOutputs'.
+    if (event._tag === 'Output') return
     if (event._tag === 'Streaming') {
       if (event.threadId !== threadId) return
       setStreaming((current) =>

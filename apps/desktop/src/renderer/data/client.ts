@@ -225,8 +225,13 @@ export interface Client {
   readonly refreshTask: (taskId: string) => Promise<void>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
-  /** Calls `listener` with each change after `since` (or from now) until the returned function is called. */
-  readonly watch: (listener: (event: WatchEvent) => void, since?: number) => () => void
+  /**
+   * Calls `listener` with each change after `since` (or from now) until the
+   * returned function is called; and `onWatching` each time it starts
+   * listening, at first and again after it broke, when what streams only to
+   * those listening (an agent's words, a command's output) may have been missed.
+   */
+  readonly watch: (listener: (event: WatchEvent) => void, since?: number, onWatching?: () => void) => () => void
   readonly close: () => Promise<void>
 }
 
@@ -366,11 +371,13 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
-    watch: (listener, since) => {
+    watch: (listener, since, onWatching) => {
       let cursor = since
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.
+      // Said once the watch's request has gone, a moment after it starts, so a read made then comes after it on the port.
+      const started = Effect.sync(() => void setTimeout(() => onWatching?.(), 0))
       const heard = Effect.suspend(() =>
-        Stream.runForEach(api.Watch(cursor === undefined ? {} : { since: cursor }), (event) =>
+        Stream.runForEach(Stream.onStart(api.Watch(cursor === undefined ? {} : { since: cursor }), started), (event) =>
           Effect.sync(() => {
             if (event._tag === 'Changed') cursor = event.cursor
             listener(event)

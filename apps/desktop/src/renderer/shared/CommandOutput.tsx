@@ -10,7 +10,7 @@ import { linesOf, type Ran } from './handed'
 
 /*
  * A command's output in its tool call, as the kit's Terminal: while it runs,
- * what it has printed so far, the line being written ending in the cursor;
+ * what it has printed so far (useOutputs), the line being written ending in the cursor;
  * once it ends, what was kept, read when the person opens the call, never
  * before. Its last lines show, those before them a click away, and lines
  * Althar didn't keep are counted.
@@ -33,12 +33,7 @@ export interface CommandOutputProps {
 export function CommandOutput({ threadId, itemId, ran, exit, command }: CommandOutputProps) {
   const shown = command === undefined ? {} : { command }
   const ended = exit === null ? {} : { exit }
-  if (ran.kind === 'running')
-    return ran.heard ? (
-      <Running shown={shown} text={ran.text} dropped={ran.dropped} />
-    ) : (
-      <RunningUnheard threadId={threadId} itemId={itemId} shown={shown} />
-    )
+  if (ran.kind === 'running') return <Running shown={shown} text={ran.text} dropped={ran.dropped} />
   // What the tool said of a failure or a stop, after what it printed.
   const failed = ran.output.error === null ? {} : { failure: ran.output.error }
   if (!ran.output.kept)
@@ -53,13 +48,6 @@ function Running({ shown, text, dropped }: { shown: { readonly command?: string 
   const live = lines.pop() ?? ''
   const { lines: last, earlier } = linesOf(lines.join('\n'))
   return <Terminal {...shown} lines={[...last]} earlier={[...earlier]} omitted={dropped} live={live} />
-}
-
-/** A command that was running before the window heard it: what it printed before then is read once, until more streams in. */
-function RunningUnheard({ threadId, itemId, shown }: { threadId: string; itemId: string; shown: { readonly command?: string } }) {
-  const { client } = useServices()
-  const read = useQuery({ queryKey: ['output so far', threadId, itemId], queryFn: () => client.readOutput(threadId, itemId), gcTime: 0 })
-  return <Running shown={shown} text={read.data?.text ?? ''} dropped={read.data?.dropped ?? 0} />
 }
 
 function KeptOutput({

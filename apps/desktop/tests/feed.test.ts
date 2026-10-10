@@ -197,6 +197,21 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.thread('th1'))?.isInvalidated).toBe(true)
   })
 
+  it('tells whoever asks each time the watch listens again', () => {
+    const { feed, rewatch } = opened()
+    const again = vi.fn()
+    const unlisten = feed.rewatched(again)
+    rewatch()
+    expect(again).toHaveBeenCalledOnce()
+    unlisten()
+    rewatch()
+    expect(again).toHaveBeenCalledOnce()
+    feed.rewatched(again)
+    feed.stop()
+    rewatch()
+    expect(again).toHaveBeenCalledOnce()
+  })
+
   it('stops watching when told to', () => {
     const { feed, listeners } = opened()
     expect(listeners.size).toBe(1)
