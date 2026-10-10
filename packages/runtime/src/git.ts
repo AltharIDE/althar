@@ -267,3 +267,17 @@ export const pushTo = (
     ['push', '--quiet', '--no-verify', target.url, `${commit}:refs/heads/${branch}`],
     target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
   )
+
+/**
+ * The remote a repository's work goes to, as the person's own git would
+ * send it: the one its default branch follows, else `origin`, else its only
+ * remote; null where it has none, or several and no way to tell.
+ */
+export const remoteOf = (cwd: string, base: string) =>
+  Effect.gen(function* () {
+    const followed = yield* gitOutcome(cwd, 'for-each-ref', '--format=%(upstream:remotename)', `refs/heads/${base}`)
+    if (followed.code === 0 && followed.stdout !== '') return followed.stdout
+    const remotes = yield* namedRemotes(cwd).pipe(Effect.orElseSucceed(() => []))
+    const names = [...new Set(remotes.map((remote) => remote.name))]
+    return names.includes('origin') ? 'origin' : names.length === 1 ? (names[0] ?? null) : null
+  })

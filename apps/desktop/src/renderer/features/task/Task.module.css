@@ -5,27 +5,6 @@
   background: var(--n-2);
 }
 
-.head {
-  flex: none;
-  padding: 26px 24px 12px;
-  border-bottom: 1px solid var(--line);
-}
-
-/* TEMPORARY, on trial: the header as one row */
-.slimHead {
-  flex: none;
-  padding: 10px 24px 9px;
-  border-bottom: 1px solid var(--line);
-}
-/* TEMPORARY, on trial: the thread opens with the task's title */
-.opening {
-  margin: 8px 0 18px;
-  font: 600 23px/1.25 var(--font-display);
-  letter-spacing: -0.02em;
-  color: var(--t-1);
-  text-wrap: pretty;
-}
-
 .face {
   flex: 1;
   min-height: 0;
@@ -72,6 +51,14 @@
   font-size: 13px;
   color: var(--t-3);
 }
+/* Pushed with no connection: what connecting would add, under the change. */
+.offer {
+  margin: 14px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
 .changeActions {
   display: flex;
   align-items: center;
@@ -87,6 +74,22 @@
 }
 
 /* What the task made: the change set and what can be done with it, on the page, as wide as the header over it. */
+/* Its outputs, alone or beside where its code host is connected, as a conversation has a panel beside it. */
+.outputsFace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.withPanel {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(420px, 38vw, 600px);
+}
+.withPanel > .outputs {
+  height: 100%;
+}
 .outputs {
   flex: 1;
   min-height: 0;

@@ -18,7 +18,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `board` | The project's work in lanes: Board, BoardColumn, and a card or row for each lane. |
 | `dock` | What opens beside the board: Dock and a peek for each kind of card. |
 | `home` | Work across every project, as the home shows it: HomeSection, HomeRest, NeedCard, RunRow, SinceRow, ProjectRow, ProjectWord; and the home in small at the edge of the screen: Island, EdgeSheet, EdgeRow. |
-| `outputs` | What a task made: ChangeSet, ArtifactCard. |
+| `outputs` | What a task made: ChangeSet, ArtifactCard, ChangeView, and NoOutputs (where its lead has looked, before it has made anything). |
 | `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu. |
 | `setup` | What comes before a project, what sets one up, and Settings: Runtimes, SourceMap, Accounts and AccountSignIn, Connections, AgentTabs, ModelSwitches, ControlCenter, and Conventions (NamingRule, TemplateSources). |
 | `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), Start, Home, NewProject, ProjectRules. |

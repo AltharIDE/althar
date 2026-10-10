@@ -541,7 +541,9 @@ describe('settings', () => {
   it('offers where Althar shows in another app, on a Mac with a notch, and keeps a choice', async () => {
     const host = fakeHost()
     withServices(<Settings />, fakeClient().client, host)
-    const places = await screen.findByRole('radiogroup', { name: 'While you’re in another app' })
+    // A module of its own, saying where it shows now.
+    const panel = await openModule(/^While you’re in another app\s*Round the notch/)
+    const places = await within(panel).findByRole('radiogroup', { name: 'While you’re in another app' })
     expect(
       within(places)
         .getAllByRole('radio')
@@ -558,8 +560,9 @@ describe('settings', () => {
 
   it('says nothing of it without a notch, where it is the menu bar', async () => {
     withServices(<Settings />, fakeClient().client, fakeHost({ edge: vi.fn(async () => ({ place: 'island', notch: false })) }))
-    await screen.findByRole('radiogroup', { name: 'App icon' })
-    expect(screen.queryByRole('radiogroup', { name: 'While you’re in another app' })).toBeNull()
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await within(panel).findByRole('button', { name: /^App icon/ })
+    expect(within(panel).queryByRole('button', { name: /^While you’re in another app/ })).toBeNull()
   })
 
   it('goes back to where it was when a choice can’t be kept', async () => {
@@ -570,7 +573,8 @@ describe('settings', () => {
       }),
     })
     withServices(<Settings />, fakeClient().client, host)
-    const places = await screen.findByRole('radiogroup', { name: 'While you’re in another app' })
+    const panel = await openModule(/^While you’re in another app/)
+    const places = await within(panel).findByRole('radiogroup', { name: 'While you’re in another app' })
     await userEvent.click(within(places).getByRole('radio', { name: /Round the notch/ }))
     expect((await screen.findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
     expect(

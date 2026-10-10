@@ -107,23 +107,14 @@ describe('a project’s menu', () => {
     expect(tabNamed('meridian')).toBeNull()
   })
 
-  it('goes home when another window removes the project', async () => {
+  it('goes home when another window removes the project, from one of its tasks too', async () => {
     let listed: ReadonlyArray<ProjectSummary> = [project]
+    // From one of its tasks, as from the project.
     const { emit, router } = windowAt('/threads/th1', { listProjects: vi.fn(async () => ({ cursor: 3, projects: listed })) })
-    await screen.findByRole('button', { name: 'More for this project' })
+    await screen.findByRole('heading', { level: 1, name: 'Add a retry' })
     listed = []
     emit(changed('project', 'p1', null, 'p1'))
     await waitFor(() => expect(router.state.location.pathname).toBe('/'))
-  })
-
-  it('offers the same from a task’s bar, and opens the project’s repositories and rules', async () => {
-    const { router } = windowAt('/threads/th1')
-    await userEvent.click((await openMenu()).getByRole('menuitem', { name: /Repositories/ }))
-    await waitFor(() => expect(router.state.location.pathname).toBe('/projects/p1/repositories'))
-    expect(await screen.findByRole('heading', { name: 'Repositories' })).toBeTruthy()
-    router.history.push('/threads/th1')
-    await userEvent.click((await openMenu()).getByRole('menuitem', { name: 'Project rules' }))
-    await waitFor(() => expect(router.state.location.pathname).toBe('/projects/p1/rules'))
   })
 })
 

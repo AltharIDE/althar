@@ -1,5 +1,5 @@
 import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { available, type Fetch, type Product, type ProductInfo } from '@althar/connectors'
@@ -103,7 +103,9 @@ export class Agents extends Context.Service<
    * `gh` and `glab` signed out, their config folders an empty one; git's
    * credential helpers reset, so neither git nor `curl` through it signs in
    * as the person; and git never asks for a password. The person's SSH agent
-   * isn't passed on either (provider-adapters' process environment).
+   * isn't passed on either (provider-adapters' process environment). Nor
+   * are the MCP servers the person set up for an agent themselves, which
+   * Codex and OpenCode would otherwise load beside Althar's (ownTools.ts).
    */
   static readonly registry: Layer.Layer<Agents> = Layer.sync(Agents, () => {
     const signedOut = mkdtempSync(join(tmpdir(), 'althar-no-sign-in-'))
@@ -112,7 +114,8 @@ export class Agents extends Context.Service<
         definition,
         transport: (cwd: string, env: Readonly<Record<string, string>> = {}) => {
           const spec = definition.launch(process.execPath)
-          return { _tag: 'Process' as const, spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...env } }, cwd }
+          const own = definition.withoutOwnTools?.({ env: { ...process.env, ...env }, homeDir: homedir(), cwd }) ?? {}
+          return { _tag: 'Process' as const, spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...env } }, cwd }
         },
       })),
     )

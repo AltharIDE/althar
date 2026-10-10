@@ -45,10 +45,12 @@ test('opens a project, starts a task, and talks to its lead', async () => {
     // Its card shows in the Talk room, and opens the task.
     await page.getByRole('button', { name: /Open task/ }).click()
 
-    // Ready for you; it built nothing, so its conversation is all there is to see.
+    // Ready for you; it built nothing, and its Outputs say so, over Althar's light.
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
     await expect(page.getByText('Ready for you')).toBeVisible()
-    await expect(page.getByText('Nothing is built yet, so there is nothing else to look at.')).toBeVisible()
+    await page.keyboard.press('o')
+    await expect(page.getByRole('heading', { name: 'Nothing changed', level: 2 })).toBeVisible()
+    await page.keyboard.press('c')
     // The lead is briefed first, and reports its step; its summary is what shows, its work folded above it.
     await expect(page.getByText('Did the task.')).toBeVisible()
 
@@ -183,9 +185,10 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await page.getByRole('button', { name: /Open a folder/ }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
-    // Its remote is on GitHub, which isn't connected yet: tasks would end on their branch.
-    await expect(page.getByText("Althar isn't connected to GitHub, so tasks here end on their branch.")).toBeVisible()
-    await page.getByRole('button', { name: 'Connect GitHub' }).click()
+    // Its remote is on GitHub, which isn't connected yet: nothing says so up front, and the project's menu connects it.
+    await expect(page.getByText(/isn't connected to GitHub/)).toHaveCount(0)
+    await page.getByRole('button', { name: 'meridian options' }).click()
+    await page.getByRole('menuitem', { name: 'Connect GitHub' }).click()
 
     // GitHub has no sign-in of Althar's in this build, so it takes a token.
     const services = page.getByRole('list', { name: 'Code hosts and trackers' })

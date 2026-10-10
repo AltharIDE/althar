@@ -1,36 +1,16 @@
+/* One row in the bar: where it stands, a small track, the faces, then what else it opens. */
 .header {
   display: flex;
-  flex-direction: column;
-}
-.titleLine {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
-}
-.task {
-  flex: none;
-  font: 500 12px/1 var(--mono);
-  color: var(--t-3);
-}
-.title {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  font: 600 23px/1.25 var(--font-display);
-  letter-spacing: -0.02em;
-  color: var(--t-1);
-  /* one line, however long it was written: the whole of it on hover */
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .state {
   flex: none;
-  align-self: center;
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  margin-right: 2px;
   font-size: 12px;
   font-weight: 550;
   color: var(--t-2);
@@ -42,96 +22,25 @@
 .you .state {
   color: var(--signal);
 }
-.facts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 0;
-  margin: 8px 0 0;
-  font-size: 12.5px;
-  color: var(--t-2);
-}
-.dot {
-  width: 3px;
-  height: 3px;
-  margin: 0 9px;
-  border-radius: 99px;
-  background: var(--t-3);
-}
-.cost {
-  color: var(--t-3);
-}
+/* the steps as a small track beside where it stands */
 .track {
-  margin-top: 14px;
+  flex: none;
+  width: 64px;
 }
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  margin-top: 16px;
+.track i {
+  height: 4px;
 }
 .faces {
   flex: none;
-}
-.note {
-  margin: 0;
-  font-size: 12px;
-  color: var(--t-3);
+  margin-left: auto;
 }
 .actions {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 4px;
 }
-
-/* ---- line and quiet: one row ---------------------------------------------------- */
-.slim {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-.slimTitle {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  font: 600 16px/1.3 var(--font-display);
-  letter-spacing: -0.014em;
-  color: var(--t-1);
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.quiet .state {
-  margin-right: 2px;
-}
-.slimFaces {
-  flex: none;
-}
-.quiet .slimFaces {
+.header > .actions:only-of-type,
+.track + .actions,
+.state + .actions {
   margin-left: auto;
-}
-.slim .actions {
-  margin-left: 0;
-}
-.quiet .slim > .actions:only-of-type {
-  margin-left: auto;
-}
-/* the steps as a hairline under the line, the whole width */
-.hairline {
-  margin-top: 10px;
-}
-.hairline i {
-  height: 2px;
-  box-shadow: none;
-}
-/* the steps as a small track beside where it stands */
-.mini {
-  flex: none;
-  width: 64px;
-}
-.mini i {
-  height: 4px;
 }

@@ -1259,6 +1259,11 @@ describe('words', () => {
       said(new PushRefused({ taskId: 't', why: 'refused', remote: 'origin/main', said: 'protected branch hook declined' })),
       'origin/main refused the push: protected branch hook declined.',
     )
+    // Nowhere to push a branch to.
+    assert.strictEqual(
+      said(new NotFound({ kind: 'remote', id: 't' })),
+      'Its repositories have no remote to push to. Add one with git, then push again.',
+    )
     // Refused without a word why: just that it was.
     assert.strictEqual(said(new PushRefused({ taskId: 't', why: 'refused', remote: 'origin/main' })), 'origin/main refused the push.')
     // A merge that conflicts carries its files, for the window to have the lead settle them.

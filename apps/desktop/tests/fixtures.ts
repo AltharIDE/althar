@@ -483,6 +483,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     push: vi.fn(async () => {}),
     mergeHere: vi.fn(async () => {}),
     pushHere: vi.fn(async () => {}),
+    pushBranch: vi.fn(async () => {}),
     listEditors: vi.fn(async () => [
       { id: 'zed', name: 'Zed' },
       { id: 'finder', name: 'Finder' },

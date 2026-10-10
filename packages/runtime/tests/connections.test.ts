@@ -485,6 +485,19 @@ describe('the agents', () => {
     }).pipe(Effect.provide(Agents.registry)),
   )
 
+  it.effect('run without the MCP servers the person set up for Codex, in the account’s home or the repository', () =>
+    Effect.gen(function* () {
+      const agents = yield* Agents
+      const home = mkdtempSync(join(tmpdir(), 'althar-codex-home-'))
+      writeFileSync(join(home, 'config.toml'), '[mcp_servers.github]\ncommand = "npx"\n')
+      const codex = agents.list.find((entry) => entry.definition.id === 'codex')
+      const transport = codex?.transport(mkdtempSync(join(tmpdir(), 'althar-cwd-')), { CODEX_HOME: home })
+      const env = transport?._tag === 'Process' ? (transport.spec.env ?? {}) : {}
+      assert.deepStrictEqual(JSON.parse(env.CODEX_CONFIG ?? '{}'), { 'mcp_servers.github.enabled': false })
+      assert.strictEqual(env.CODEX_HOME, home)
+    }).pipe(Effect.provide(Agents.registry)),
+  )
+
   it('leave git with no credential helper to ask, whatever the person set', () => {
     // The person's git hands out a password to whoever asks. The system's config is left out, so the real keychain isn't asked.
     const home = mkdtempSync(join(tmpdir(), 'althar-home-'))

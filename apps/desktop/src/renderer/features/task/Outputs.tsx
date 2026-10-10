@@ -20,7 +20,11 @@ export const text = {
   title: 'What it changed',
   draftNote: 'Its checks run on it; mark it ready when you are',
   readyNote: 'Nothing merges until you accept it',
-  branchNote: 'Not merged or pushed yet',
+  branchNote: 'Not merged yet',
+  /** Pushed without a connection: what connecting would add, in the host's name. */
+  connectAfterPush: (host: string) =>
+    `Connected to ${host}, Althar would open the pull request itself, bring its checks and reviews back to the lead, and merge it there when you accept it.`,
+  connect: (host: string) => `Connect ${host}`,
   sofar: 'Its branch so far',
   closed: (change: ChangeSummary, host: string) => `${change.short} ${change.prefix}${change.number} was closed on ${host}.`,
   markReady: 'Mark ready for review',
@@ -127,6 +131,8 @@ export function Outputs({
   conflict = null,
   onResolve,
   onPushHere,
+  onPushBranch,
+  onConnect,
 }: {
   snapshot: ThreadSnapshot
   lead: ModelInfo
@@ -138,6 +144,10 @@ export function Outputs({
   onResolve?: () => void
   /** Pushes what it merged here to the remotes its branches follow. */
   onPushHere?: () => void
+  /** Pushes its branch to its repositories' remotes, with the person's own git, no connection needed. */
+  onPushBranch?: () => void
+  /** Opens where the project's code host is connected. */
+  onConnect?: () => void
   /** Accepts its pull requests: each merged on its host in turn, at the head shown, stopping at the first refused. */
   onAccept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => void
   onMergeHere: () => void
@@ -259,6 +269,19 @@ export function Outputs({
       />
     ) : null
 
+  // Where its branch stands on its repositories' remotes, pushed with the person's own git: there, behind, or not yet.
+  const remotes = task.here.flatMap((repo) => (repo.remote == null ? [] : [repo.remote]))
+  const remote =
+    remotes.length === 0
+      ? undefined
+      : {
+          name: [...new Set(remotes.map((one) => one.name))].join(', '),
+          pushed: remotes.every((one) => one.pushed),
+          ahead: remotes.reduce((sum, one) => sum + one.ahead, 0),
+          ...(onPushBranch === undefined ? {} : { onPush: onPushBranch, pushing: pending }),
+        }
+  const pushedSomewhere = remotes.some((one) => one.pushed)
+
   // Work on its branch: the repositories without a pull request, which merge here once it is ready; before that, its branch so far.
   const branchOnly = first === undefined && task.merged.length === 0 && (task.files.length > 0 || task.commits > 0)
   const here =
@@ -269,7 +292,13 @@ export function Outputs({
         note={ready ? text.branchNote : text.sofar}
         prs={
           task.here.length > 0
-            ? task.here.map((repo) => ({ repo: repo.name, files: filesIn(task.files, repo.repository, several) }))
+            ? task.here.map((repo) => ({
+                repo: repo.name,
+                files: filesIn(task.files, repo.repository, several),
+                ...(repo.remote?.newPullRequest == null
+                  ? {}
+                  : { newPullRequest: { url: repo.remote.newPullRequest, ...hostOfPage(repo.remote.newPullRequest, snapshot.host) } }),
+              }))
             : [{ repo: snapshot.project.name, files: filesIn(task.files, '', false) }]
         }
         checks={first === undefined ? reviews : []}
@@ -285,8 +314,19 @@ export function Outputs({
             : error === null
               ? {}
               : { error })}
+        {...(remote === undefined ? {} : { remote })}
         text={{ mergeHere: () => mergeHereLabel(task.here, first !== undefined) }}
       />
+    ) : null
+  // Pushed with no connection: what connecting would add, said once something is there to have a pull request.
+  const offer =
+    pushedSomewhere && snapshot.host !== null && !snapshot.host.connected && onConnect !== undefined ? (
+      <p className={s.offer}>
+        {text.connectAfterPush(snapshot.host.name)}{' '}
+        <Button size="small" onClick={onConnect}>
+          {text.connect(snapshot.host.name)}
+        </Button>
+      </p>
     ) : null
 
   const pushes = open.filter((one) => one.state === 'open' && one.unpushed > 0 && one.localHead !== null)
@@ -300,6 +340,7 @@ export function Outputs({
         {local}
         {done && <p className={s.quiet}>{text.mergedAll(task.merged)}</p>}
         {here}
+        {offer}
         {closed.map((one) => (
           <p key={one.url} className={s.quiet}>
             {text.closed(one, productName(one.product))}
@@ -338,6 +379,29 @@ export function Outputs({
     </div>
   )
 }
+
+/** The host a new pull request's page is on, by its name: the project's own host where it is that one, else as its address says. */
+const hostOfPage = (url: string, host: ThreadSnapshot['host']): { host?: string } => {
+  const name = (() => {
+    try {
+      return new URL(url).hostname
+    } catch {
+      return ''
+    }
+  })()
+  if (host !== null && name !== '' && host.webUrl.includes(name)) return { host: host.name }
+  const known = PAGE_HOSTS.find(([pattern]) => pattern.test(name))
+  return known === undefined ? {} : { host: known[1] }
+}
+
+const PAGE_HOSTS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^github\.com$/, 'GitHub'],
+  [/(^|\.)gitlab\./, 'GitLab'],
+  [/^bitbucket\.org$/, 'Bitbucket'],
+  [/^codeberg\.org$/, 'Codeberg'],
+  [/(^|\.)gitea\./, 'Gitea'],
+  [/(^|\.)forgejo\./, 'Forgejo'],
+]
 
 /** Whether a task has outputs to show: a pull request, or anything changed or committed on its branch. */
 export const hasOutputs = ({ task }: ThreadSnapshot) =>

@@ -195,6 +195,8 @@ export interface Client {
   readonly mergeHere: (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) => Promise<void>
   /** Pushes the default branches the task merged into here to their remotes, with the person's own git sign-in. */
   readonly pushHere: (taskId: string) => Promise<void>
+  /** Pushes the task's branch to its repositories' remotes, up to the commit the person saw in each, with their own git sign-in. */
+  readonly pushBranch: (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) => Promise<void>
   /** The editors on this Mac a task's files open in. */
   readonly listEditors: () => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
@@ -340,6 +342,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     merge: (taskId, head, url) => command((commandId) => api.Merge({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     mergeHere: (taskId, heads) => command((commandId) => api.MergeHere({ commandId, taskId, heads })),
     pushHere: (taskId) => command((commandId) => api.PushHere({ commandId, taskId })),
+    pushBranch: (taskId, heads) => command((commandId) => api.PushBranch({ commandId, taskId, heads })),
     listEditors: () => settle(api.ListEditors({})),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),

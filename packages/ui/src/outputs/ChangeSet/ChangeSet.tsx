@@ -31,6 +31,8 @@ export interface PullRequest {
   repo: string
   /** None for a repository whose work stays on its branch. */
   number?: number
+  /** For work on its branch, pushed: the host's page for a new pull request from it, and the host's name where known. */
+  newPullRequest?: { readonly url: string; readonly host?: string }
   /** Where it lives on the code host; a link only when it is http or https. */
   url?: string
   files: readonly ChangedFile[]
@@ -66,6 +68,15 @@ export interface ChangeSetText {
   here: string
   /** Pushing what merged here: to the branch its base follows. */
   push: (remote: string) => string
+  /** Work on its branch, as its remote has it: not there yet, behind by some commits, or there. */
+  notOn: (remote: string) => string
+  behindOn: (n: number, remote: string) => string
+  on: (remote: string) => string
+  /** Pushes the branch there. */
+  pushBranch: string
+  pushBranchLabel: (remote: string) => string
+  /** The host's page for a new pull request from the branch, pushed without a connection. */
+  newPullRequest: (host: string | undefined) => string
   /** Said beside that. */
   pushNote: string
   order: (numbers: readonly number[]) => string
@@ -109,6 +120,12 @@ export const changeSetText: ChangeSetText = {
   mergeHere: (base) => `Merge into ${base}`,
   here: 'Merges on this Mac',
   push: (remote) => `Push to ${remote}`,
+  notOn: (remote) => `Not on ${remote} yet`,
+  behindOn: (n, remote) => (n === 1 ? `1 commit not on ${remote} yet` : `${n} commits not on ${remote} yet`),
+  on: (remote) => `On ${remote}`,
+  pushBranch: 'Push',
+  pushBranchLabel: (remote) => `Push the branch to ${remote}`,
+  newPullRequest: (host) => (host === undefined ? 'Open a pull request' : `Open a pull request on ${host}`),
   pushNote: 'With your own git sign-in, as from a terminal',
   sendBack: 'Ask for changes',
   sendBackPlaceholder: 'What should change? The lead picks it up with this note',
@@ -168,6 +185,18 @@ export interface ChangeSetProps {
   onPush?: () => void
   /** The push is under way: Push shows it and ignores presses. */
   pushing?: boolean
+  /**
+   * Work on its branch, as its remote has it, with no connection to the
+   * host: the remote's name, whether it has the branch, how many commits it
+   * doesn't have, and pushing it there. Shown only on its branch.
+   */
+  remote?: {
+    readonly name: string
+    readonly pushed: boolean
+    readonly ahead: number
+    readonly onPush?: () => void
+    readonly pushing?: boolean
+  }
   /** Accepting is under way: Accept shows it and ignores presses. */
   accepting?: boolean
   /** The note is on its way to the lead: Ask for changes shows it and ignores presses. */
@@ -199,6 +228,7 @@ export function ChangeSet({
   onOpenFile,
   onPush,
   pushing = false,
+  remote,
   accepting = false,
   sendingBack = false,
   error,
@@ -240,6 +270,25 @@ export function ChangeSet({
             {prs.length > 1 && `${t.repos(prs.length)} · `}
             {t.commits(commits)}
           </span>
+          {here && remote && (
+            <span className={s.away}>
+              <span className={cx(s.where, remote.pushed && remote.ahead === 0 && s.there)}>
+                {!remote.pushed ? t.notOn(remote.name) : remote.ahead > 0 ? t.behindOn(remote.ahead, remote.name) : t.on(remote.name)}
+              </span>
+              {remote.onPush && (!remote.pushed || remote.ahead > 0) && (
+                <Button size="small" busy={remote.pushing ?? false} onClick={remote.onPush} aria-label={t.pushBranchLabel(remote.name)}>
+                  {t.pushBranch}
+                </Button>
+              )}
+              {/* One repository: its pull request is a press from here; several say so each beside its own. */}
+              {remote.pushed && prs.length === 1 && prs[0]?.newPullRequest && safeHref(prs[0].newPullRequest.url) && (
+                <a className={s.newPr} href={safeHref(prs[0].newPullRequest.url)} target="_blank" rel="noreferrer">
+                  {t.newPullRequest(prs[0].newPullRequest.host)}
+                  <Icon name="external" size={10} />
+                </a>
+              )}
+            </span>
+          )}
         </div>
         <div className={s.by}>
           <span className={s.who}>
@@ -280,6 +329,12 @@ export function ChangeSet({
                     {owner && <span className={s.owner}>{owner} /</span>} {name}
                   </span>
                   {p.number !== undefined && <span className={s.number}>{t.number(p.number)}</span>}
+                  {here && prs.length > 1 && remote?.pushed && p.newPullRequest && safeHref(p.newPullRequest.url) && (
+                    <a className={s.github} href={safeHref(p.newPullRequest.url)} target="_blank" rel="noreferrer">
+                      {t.newPullRequest(p.newPullRequest.host)}
+                      <Icon name="external" size={10} />
+                    </a>
+                  )}
                   {link && host && p.number !== undefined && (
                     <a
                       className={s.github}

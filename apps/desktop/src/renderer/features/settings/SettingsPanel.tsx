@@ -113,7 +113,15 @@ export interface SettingsPanelProps {
 
 /** Settings from the home's bar, with what it shows read here. */
 export function SettingsPanel(props: SettingsPanelProps) {
-  return <SettingsView {...props} accounts={useAccountSignIn(props.start)} connections={useConnections()} appIcon={useAppIcon()} edge={useEdgePlace()} />
+  return (
+    <SettingsView
+      {...props}
+      accounts={useAccountSignIn(props.start)}
+      connections={useConnections()}
+      appIcon={useAppIcon()}
+      edge={useEdgePlace()}
+    />
+  )
 }
 
 export function SettingsView({

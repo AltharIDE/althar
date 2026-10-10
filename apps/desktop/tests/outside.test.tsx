@@ -476,15 +476,18 @@ const issue: IssueSummary = {
 }
 
 describe('a project, reaching outside', () => {
-  it('says its host isn’t connected, and connects it beside the conversation', async () => {
+  it('says nothing of an unconnected host up front, and connects it from the project’s menu, beside the conversation', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
         coordinatorSnapshot({ host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: false } }),
       ),
     })
     withServices(<Project />, client)
-    expect(await screen.findByText("Althar isn't connected to GitHub, so tasks here end on their branch.")).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
+    await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    // Pushing needs no connection, so nothing stands in the way of the conversation.
+    expect(screen.queryByText(/isn't connected to GitHub/)).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'meridian options' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Connect GitHub' }))
     const panel = await screen.findByRole('complementary', { name: 'Code hosts and trackers' })
     expect(within(panel).getByText('GitHub')).toBeTruthy()
   })
