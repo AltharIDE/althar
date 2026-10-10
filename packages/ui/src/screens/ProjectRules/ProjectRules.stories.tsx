@@ -194,7 +194,7 @@ export const AlwaysAllowedWhileEverything: Story = {
 /** A long rule wraps rather than pushing its button away. */
 export const LongAllowedRule: Story = {
   args: {
-    alwaysAllowed: [{ id: 'long', label: `Running exactly ${'bun test src/refunds/limit.test.ts '.repeat(4).trim()}` }],
+    alwaysAllowed: [{ id: 'long', label: `Exactly “${'bun test src/refunds/limit.test.ts '.repeat(4).trim()}”` }],
     onRemoveAlwaysAllowed: fn(),
   },
 }
@@ -217,11 +217,34 @@ export const RemovingAllowedRules: Story = {
   },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Remove Running bun test' }))
+    await userEvent.click(c.getByRole('button', { name: 'Remove Commands starting “bun test”' }))
     await expect(args.onRemoveAlwaysAllowed).toHaveBeenCalledWith('command:prefix:bun test')
-    await waitFor(() => expect(c.getByRole('button', { name: 'Remove Running git status' })).toHaveFocus())
-    await userEvent.click(c.getByRole('button', { name: 'Remove Running git status' }))
+    await waitFor(() => expect(c.getByRole('button', { name: 'Remove Commands starting “git status”' })).toHaveFocus())
+    await userEvent.click(c.getByRole('button', { name: 'Remove Commands starting “git status”' }))
     await waitFor(() => expect(c.getByText(/Nothing yet/)).toHaveFocus())
+  },
+}
+
+/** A command on a list that comes first can't be always allowed: it says so beside the field, which stays open with what was typed. */
+export const AllowedRuleOnAnotherList: Story = {
+  args: {
+    alwaysAllowed: [],
+    onAddRule: undefined,
+    onAddNever: undefined,
+    onAddAlwaysAllowed: fn(() => '“bun test” is on “Never”, which comes first, so nothing changed. Take it off “Never” first.'),
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Add a rule' }))
+    const field = c.getByRole('textbox', { name: 'A command, as it starts' })
+    await userEvent.type(field, 'bun test{Enter}')
+    await expect(args.onAddAlwaysAllowed).toHaveBeenCalledWith('bun test')
+    await expect(c.getByRole('alert')).toHaveTextContent('is on “Never”, which comes first')
+    await expect(field).toHaveValue('bun test')
+    await expect(field).toHaveFocus()
+    // Typing again puts the message away.
+    await userEvent.type(field, 's')
+    await expect(c.queryByRole('alert')).toBeNull()
   },
 }
 

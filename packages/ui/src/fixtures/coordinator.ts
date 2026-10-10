@@ -134,11 +134,11 @@ export const NEVER_ON = ['secrets', 'force', 'proddb'] as const
 
 /** What Meridian lets through without asking: what permissions answered with "always allow" kept. */
 export const ALWAYS_ALLOWED = [
-  { id: 'command:prefix:bun test', label: 'Running bun test' },
-  { id: 'command:prefix:git status', label: 'Running git status' },
+  { id: 'command:prefix:bun test', label: 'Commands starting “bun test”' },
+  { id: 'command:prefix:git status', label: 'Commands starting “git status”' },
   {
     id: 'command:exact:pnpm replay --env staging --from 2026-09-25 refunds',
-    label: 'Running exactly pnpm replay --env staging --from 2026-09-25 refunds',
+    label: 'Exactly “pnpm replay --env staging --from 2026-09-25 refunds”',
   },
 ]
 

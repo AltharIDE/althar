@@ -167,16 +167,16 @@ export interface ProjectRulesProps {
   alwaysOn?: readonly string[]
   defaultAlwaysOn?: readonly string[]
   onAlwaysOnChange?: (value: readonly string[]) => void
-  /** Adds a rule to `always`: a command, by how it starts. The button is shown only with it. */
-  onAddRule?: (pattern: string) => void
+  /** Adds a rule to `always`: a command, by how it starts. The button is shown only with it. Returns why it can't be, said beside the field, which stays open. */
+  onAddRule?: (pattern: string) => string | undefined
   /** What is refused outright, whoever would answer and whatever the policy: the project's own list. Without it, no such row. */
   never?: readonly CheckItem[]
   /** The ids in `never` that are on. */
   neverOn?: readonly string[]
   defaultNeverOn?: readonly string[]
   onNeverOnChange?: (value: readonly string[]) => void
-  /** Adds a rule to `never`: a command, by how it starts. The button is shown only with it. */
-  onAddNever?: (pattern: string) => void
+  /** Adds a rule to `never`: a command, by how it starts. The button is shown only with it. Returns why it can't be, as `onAddRule`. */
+  onAddNever?: (pattern: string) => string | undefined
   /**
    * What is let through without asking, short of what always asks or is
    * never allowed: the rules a permission answered with "always allow" kept,
@@ -185,8 +185,12 @@ export interface ProjectRulesProps {
   alwaysAllowed?: readonly CheckItem[]
   /** Takes a rule off `alwaysAllowed`. Without it, the list can't be changed here. */
   onRemoveAlwaysAllowed?: (id: string) => void
-  /** Adds a rule to `alwaysAllowed`: a command, by how it starts. The button is shown only with it. */
-  onAddAlwaysAllowed?: (pattern: string) => void
+  /**
+   * Adds a rule to `alwaysAllowed`: a command, by how it starts. The button
+   * is shown only with it. Returns why it can't be, as when the command is on
+   * a list that comes first, said beside the field, which stays open.
+   */
+  onAddAlwaysAllowed?: (pattern: string) => string | undefined
   reach?: FindingsReach
   defaultReach?: FindingsReach
   /** Without it, no review findings row. */
@@ -422,11 +426,12 @@ function AllowedRules({ rules, onRemove, t }: { rules: readonly CheckItem[]; onR
   )
 }
 
-/** "Add a rule", then a command by how it starts, added as the list's. */
-function AddRule({ t, onAdd }: { t: ProjectRulesText; onAdd: (pattern: string) => void }) {
+/** "Add a rule", then a command by how it starts, added as the list's, or why it can't be, beside the field. */
+function AddRule({ t, onAdd }: { t: ProjectRulesText; onAdd: (pattern: string) => string | undefined }) {
   const [open, setOpen] = useState(false)
   const [pattern, setPattern] = useState('')
   const [empty, setEmpty] = useState(false)
+  const [refused, setRefused] = useState<string | null>(null)
   const fieldId = useId()
   const noteId = useId()
   const errorId = useId()
@@ -445,13 +450,17 @@ function AddRule({ t, onAdd }: { t: ProjectRulesText; onAdd: (pattern: string) =
     setOpen(false)
     setPattern('')
     setEmpty(false)
+    setRefused(null)
   }
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (pattern.trim() === '') return setEmpty(true)
-    onAdd(pattern.trim())
-    close()
+    const problem = onAdd(pattern.trim())
+    if (problem === undefined) return close()
+    setRefused(problem)
+    field.current?.focus()
   }
+  const problem = empty ? t.rule.empty : refused
   return (
     <form className={s.rule} onSubmit={submit}>
       <label className={s.label} htmlFor={fieldId}>
@@ -464,11 +473,12 @@ function AddRule({ t, onAdd }: { t: ProjectRulesText; onAdd: (pattern: string) =
           className={s.pattern}
           value={pattern}
           placeholder={t.rule.placeholder}
-          invalid={empty}
-          aria-describedby={[noteId, empty ? errorId : ''].filter(Boolean).join(' ')}
+          invalid={problem !== null}
+          aria-describedby={[noteId, problem === null ? '' : errorId].filter(Boolean).join(' ')}
           onChange={(event) => {
             setPattern(event.target.value)
             setEmpty(false)
+            setRefused(null)
           }}
           onKeyDown={(event) => {
             if (event.key === 'Escape') close()
@@ -481,7 +491,7 @@ function AddRule({ t, onAdd }: { t: ProjectRulesText; onAdd: (pattern: string) =
           {t.rule.cancel}
         </Button>
       </span>
-      {empty && <FieldError id={errorId}>{t.rule.empty}</FieldError>}
+      {problem !== null && <FieldError id={errorId}>{problem}</FieldError>}
       <span id={noteId} className={s.note}>
         {t.rule.note}
       </span>
