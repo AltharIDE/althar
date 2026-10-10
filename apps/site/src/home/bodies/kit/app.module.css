@@ -37,11 +37,12 @@
 /* Narrow: the home without its projects column, and less padding. */
 .narrow aside { display: none; }
 .narrow main > div { padding: 22px 14px 40px !important; }
-/* Narrow: the lead's plan wraps, each step's agents under its name, without the reasons. */
-:is(.talkOnly, .narrowPlan) ol[class*='steps'] > li { grid-template-columns: 22px minmax(0, 1fr) !important; row-gap: 6px; padding-top: 7px; padding-bottom: 7px; }
-:is(.talkOnly, .narrowPlan) ol[class*='steps'] > li > :nth-child(3) { grid-column: 2; flex-wrap: wrap; row-gap: 6px; }
-:is(.talkOnly, .narrowPlan) ol[class*='steps'] > li > :nth-child(n + 4) { display: none; }
-:is(.talkOnly, .narrowPlan) ol[class*='steps'] > li > :nth-child(2) { justify-self: start; }
+/* Narrow: the lead's plan without the reasons, each step's name in a column and its agents beside it, wrapping when there are two. */
+:is(.talkOnly, .narrowPlan) ol[class*='steps'] > li:not([class*='end']) { grid-template-columns: 22px 112px minmax(0, 1fr) !important; row-gap: 6px; padding-top: 6px; padding-bottom: 6px; }
+:is(.talkOnly, .narrowPlan) ol[class*='steps'] > li > :nth-child(3) { flex-wrap: wrap; gap: 6px; }
+/* Two agents on a step stand one under the other when they wrap: no plus left at a line's end. */
+:is(.talkOnly, .narrowPlan) ol[class*='steps'] > li > :nth-child(3) > [class*='plus'] { display: none; }
+:is(.talkOnly, .narrowPlan) ol[class*='steps'] > li:not([class*='end']) > :nth-child(n + 4) { display: none; }
 /* Narrow: the estimate on a line of its own over the countdown. */
 :is(.talkOnly, .narrowPlan) div[class*='foot'] { flex-wrap: wrap; row-gap: 6px; }
 :is(.talkOnly, .narrowPlan) div[class*='foot'] > span:first-child { flex-basis: 100%; }

@@ -31,16 +31,14 @@
 }
 @media (prefers-reduced-motion: reduce) { .float { animation: none; } }
 @media (max-width: 700px) {
-  /* Only a slice of the light shows under a slab this wide: softened into one pool. */
-  .slabLight { filter: blur(14px); }
-  /* Held up straight, its edge showing evenly below. */
-  .toRight, .toLeft { --turn: 0deg; }
+  /* On a phone the slab lies flat, a card on the page: no turn, no edge, no light under it, and it holds still. */
+  .slabLight { display: none; }
+  .float { animation: none; }
   .slab, .toLeft .slab {
-    transform: rotateX(4deg);
+    transform: none;
     box-shadow:
-      inset 0 1px 0 #fff,
-      0 1px 0 #dfe1f1, 0 2px 0 #d6d9ee, 0 3px 0 #ced1ea, 0 4px 0 #c6cae6, 0 5px 0 #bec2e2,
-      0 30px 60px rgba(6, 10, 70, 0.18),
-      0 60px 100px rgba(6, 10, 70, 0.08);
+      0 0 0 1px rgba(20, 20, 40, 0.06),
+      0 24px 60px rgba(20, 24, 70, 0.14),
+      0 6px 16px rgba(20, 24, 70, 0.06);
   }
 }

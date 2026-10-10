@@ -57,7 +57,8 @@ const MENU_SHEET = (
   />
 )
 
-const ISLAND = { x: 450, y: 0, w: 540, h: 600 }
+/** On a phone, the part of the screen each moment shows: the same for all, so the tour keeps one height as it turns. */
+const ISLAND = { x: 420, y: 0, w: 600, h: 600 }
 
 export const EDGE_MOMENTS: ReelMoment[] = [
   {
@@ -75,13 +76,7 @@ export const EDGE_MOMENTS: ReelMoment[] = [
     label: 'In the browser',
     stays: 4400,
     render: () => (
-      <Shot
-        w={1440}
-        h={900}
-        phone={{ x: 380, y: 0, w: 680, h: 520 }}
-        label="A pull request ready for you, said round the notch over a browser"
-        frame={s.screen}
-      >
+      <Shot w={1440} h={900} phone={ISLAND} label="A pull request ready for you, said round the notch over a browser" frame={s.screen}>
         <Desktop
           wallpaper="light"
           app="Chrome"
@@ -107,13 +102,7 @@ export const EDGE_MOMENTS: ReelMoment[] = [
     label: 'Anywhere else',
     stays: 4400,
     render: () => (
-      <Shot
-        w={1440}
-        h={900}
-        phone={{ x: 360, y: 0, w: 720, h: 560 }}
-        label="A permission asked round the notch over an empty desktop"
-        frame={s.screen}
-      >
+      <Shot w={1440} h={900} phone={ISLAND} label="A permission asked round the notch over an empty desktop" frame={s.screen}>
         <Desktop wallpaper="light" app="Finder" island={<IslandOpen open={false} saying={{ project: 'Halyard', kind: 'Permission' }} />} />
       </Shot>
     ),

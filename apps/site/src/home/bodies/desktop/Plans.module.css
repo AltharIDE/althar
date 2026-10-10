@@ -47,32 +47,28 @@
 
 .seen .plans li { opacity: 1; transform: none; }
 
-.foot { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--line); }
-.foot span { padding: 14px 26px; font-size: 13px; color: var(--t-2); }
-.foot span + span { box-shadow: inset 1px 0 0 var(--line); }
-.foot span::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 9px; border-radius: 50%; background: var(--live); vertical-align: 1px; }
 
 @media (prefers-reduced-motion: reduce) {
   .plans li { opacity: 1; transform: none; transition: none; }
 }
-/* Narrow: an agent to a row, its count large at the right, its plans one to a line under it. */
+/* Narrow: a list, as Settings draws it on a narrow window: each agent with its count beside it, its plans one to a line under it. */
 @media (max-width: 900px) {
   .panel { margin: 40px var(--gut) 0; border-radius: 18px; }
   .top { padding: 13px 16px; font-size: 14px; }
-  .columns, .foot { grid-template-columns: 1fr; }
-  .column + .column, .foot span + span { box-shadow: inset 0 1px 0 var(--line); }
-  .column { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 16px 16px 12px; }
+  .columns { grid-template-columns: 1fr; }
+  .column + .column { box-shadow: inset 0 1px 0 var(--line); }
+  .column { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 12px; padding: 14px 16px 8px; }
   .agent { gap: 10px; }
-  .mark { width: 34px; height: 34px; border-radius: 9px; }
-  .big { flex-direction: column; align-items: flex-end; gap: 4px; margin: 0; text-align: right; }
-  .big b { font-size: 46px; }
-  .big span { font-size: 13px; font-family: var(--font); font-weight: 400; letter-spacing: 0; color: var(--t-3); }
+  .agent b { font-size: 15px; }
+  .mark { width: 32px; height: 32px; border-radius: 9px; }
+  .big { align-items: baseline; gap: 6px; margin: 0; }
+  .big b { font-size: 30px; line-height: 1; }
+  .big span { font-size: 14px; }
   .plans { grid-column: 1 / -1; }
-  .plans li { grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; padding: 8px 0; }
+  .plans li { grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; padding: 9px 0; }
   .plans li:last-child { border-bottom: 0; }
   .planWords { display: flex; align-items: baseline; gap: 8px; }
   .planWords b { flex: none; font-size: 14px; }
   .planWords span { font-size: 12px; }
   .add { display: none; }
-  .foot span { padding: 10px 16px; font-size: 12.5px; }
 }

@@ -109,11 +109,6 @@ export function Plans({ play }: { play?: boolean } = {}) {
           </section>
         ))}
       </div>
-      <p className={s.foot}>
-        <span>Work starts on the first with room</span>
-        <span>One runs out, the next takes over</span>
-        <span>Signed in as you, on your plans</span>
-      </p>
     </div>
   )
 }

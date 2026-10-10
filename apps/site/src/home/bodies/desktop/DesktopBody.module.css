@@ -101,8 +101,10 @@
   .marks { gap: 18px 30px; margin-top: 36px; }
   .marks svg { width: 30px; height: 30px; }
   .end { margin-top: 110px; }
-  .endRow { flex-direction: column; justify-content: center; padding: 34px var(--gut) 36px; text-align: center; }
-  .endRow > div { justify-content: center; }
+  .endRow { flex-direction: column; align-items: stretch; gap: 22px; padding: 34px var(--gut) 36px; }
+  .endLine { font-size: 30px; line-height: 1.08; }
+  .endRow > div { display: grid; gap: 10px; }
+  .endRow > div > a { justify-content: center; height: 50px; }
 }
 
 /* ---- your plans: the panel lifted a little, in the light ---- */

@@ -25,11 +25,17 @@
 .on svg:not(.to) { opacity: 1; }
 .to { color: var(--t-4); margin: 0 3px; }
 
+/* The routes in one place: the one showing over the others laid out unseen, so the height holds as they turn. */
+.rows { display: grid; margin-top: 72px; }
+.rows > * { grid-area: 1 / 1; }
+.ghost { visibility: hidden; }
+.ghost .c1, .ghost .c2, .ghost .c3 { animation: none !important; }
+.narrow { display: none; }
+
 .row {
   display: grid;
   grid-template-columns: minmax(0, 0.95fr) 88px minmax(0, 1.05fr) 88px minmax(0, 0.82fr);
   align-items: center;
-  margin-top: 72px;
 }
 .col { display: grid; gap: 18px; min-width: 0; }
 .step { display: flex; align-items: center; gap: 8px; margin: 0; font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
@@ -56,9 +62,28 @@
   .wire::after { transform: none; }
 }
 @media (max-width: 900px) {
-  .row { grid-template-columns: 1fr; gap: 0; justify-items: stretch; margin-top: 32px; }
-  .wire { width: 2px; height: 32px; margin: 10px auto; }
-  .wire::after { transform: scaleY(0); transform-origin: 50% 0; }
-  .pairs { flex-direction: column; width: 100%; max-width: 360px; }
-  .pair { justify-content: center; font-size: 13.5px; }
+  .rows { margin-top: 32px; }
+  /* The three down a line: each step's number on it, the line filling from one to the next as they come in. */
+  .row { grid-template-columns: 1fr; gap: 26px; justify-items: stretch; }
+  .wire { display: none; }
+  .col { position: relative; gap: 12px; padding-left: 30px; }
+  .step { margin-left: -30px; gap: 12px; }
+  .c1::before, .c2::before, .c1::after, .c2::after {
+    content: ''; position: absolute; left: 8px; top: 24px; bottom: -27px; width: 2px; border-radius: 1px; background: var(--line-2);
+  }
+  .c1::after, .c2::after { background: var(--live); transform: scaleY(0); transform-origin: 50% 0; }
+  .seen .c1::after { animation: fall 600ms cubic-bezier(0.45, 0, 0.2, 1) 500ms forwards; }
+  .seen .c2::after { animation: fall 600ms cubic-bezier(0.45, 0, 0.2, 1) 1500ms forwards; }
+  .ghost .c1::after, .ghost .c2::after { animation: none; }
+  /* The switch: the routes side by side as their marks, the names said in the steps below. */
+  .pairs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; max-width: 380px; }
+  .pair { justify-content: center; gap: 6px; padding: 12px 6px; }
+  .pair span { display: none; }
+  .wide { display: none; }
+  .narrow { display: inline; }
+}
+@keyframes fall { to { transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .c1::after, .c2::after { transform: none; }
+  .seen .c1::after, .seen .c2::after { animation: none; }
 }

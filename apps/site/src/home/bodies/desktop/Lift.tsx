@@ -229,7 +229,7 @@ export function Lift() {
         )}
         <Head i={1} />
         <div ref={stage} className={s.stackedPicture}>
-          <Slab w={W} phoneW={410} label="The plan for task 432: a model for each step" maxScale={1}>
+          <Slab w={W} phoneW={410} light={!phone} label="The plan for task 432: a model for each step" maxScale={1}>
             <Growing whole={<Launch narrow={phone} />}>
               <Launch steps={steps} narrow={phone} />
             </Growing>

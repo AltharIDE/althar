@@ -12,7 +12,9 @@ import s from './Flow.module.css'
  * becomes a task, and the task ends as a pull request on your code host.
  * Three of each, in turn: Linear to GitHub, Jira to GitLab, Trello to
  * Bitbucket, drawn by the app's own issue, task and ready cards, joined by
- * a line that runs left to right as each comes in.
+ * a line that runs left to right as each comes in. On a phone the switch
+ * keeps the marks alone, the steps name the tracker and the host, and the
+ * three stand down a line that runs from one to the next.
  */
 
 const none = () => {}
@@ -97,6 +99,61 @@ const ROUTES: Route[] = [
   },
 ]
 
+/** One route's three cards, joined; `ghost` lays it out unseen, only to hold its room. */
+function RouteRow({ route, ghost = false }: { route: Route; ghost?: boolean }) {
+  return (
+    <div className={cx(s.row, ghost && s.ghost)} aria-hidden={ghost || undefined}>
+      <div className={cx(s.col, s.c1)}>
+        <p className={s.step}>
+          <b>1</b>
+          <span className={s.wide}>From your tracker</span>
+          <span className={s.narrow}>From {route.tracker.name}</span>
+        </p>
+        <Shot w={400} phoneW={360} label={`An issue in ${route.tracker.name}`} maxScale={1.15} frame={s.card}>
+          {route.issue}
+        </Shot>
+      </div>
+      <span className={cx(s.wire, s.w1)} aria-hidden="true" />
+      <div className={cx(s.col, s.c2)}>
+        <p className={s.step}>
+          <b>2</b> A task in Althar
+        </p>
+        <Shot w={440} phoneW={360} label={`Task ${route.task.task}, done`} maxScale={1.15} frame={s.card}>
+          <TaskCard
+            task={route.task.task}
+            title={route.task.title}
+            status={TaskStatus.Done}
+            steps={route.task.steps}
+            at={route.task.steps.length}
+            started="took 1h 18m"
+            lead={OPUS}
+            branch={route.task.branch}
+          />
+        </Shot>
+      </div>
+      <span className={cx(s.wire, s.w2)} aria-hidden="true" />
+      <div className={cx(s.col, s.c3)}>
+        <p className={s.step}>
+          <b>3</b>
+          <span className={s.wide}>To your host</span>
+          <span className={s.narrow}>To {route.host.name}</span>
+        </p>
+        <Shot w={340} phoneW={360} label={`A pull request on ${route.host.name}`} maxScale={1.15} frame={s.card}>
+          <AcceptCard
+            task={route.task.task}
+            title={route.task.title}
+            prs={[{ repo: route.pr.repo, number: route.pr.number, add: route.pr.add, del: route.pr.del }]}
+            host={{ name: route.host.name, brand: route.host.brand }}
+            checks={route.pr.checks}
+            at="just now"
+            onOpen={none}
+          />
+        </Shot>
+      </div>
+    </div>
+  )
+}
+
 const still = () =>
   typeof window !== 'undefined' &&
   (window.matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(window.location.search).has('t'))
@@ -153,6 +210,7 @@ export function Flow() {
               type="button"
               className={cx(s.pair, i === at && s.on)}
               aria-pressed={i === at}
+              aria-label={`${r.tracker.name} to ${r.host.name}`}
               onClick={() => setAt(i)}
             >
               <BrandMark brand={r.tracker.brand} size={18} />
@@ -167,50 +225,12 @@ export function Flow() {
         </div>
       </div>
 
-      <div key={at} className={s.row}>
-        <div className={cx(s.col, s.c1)}>
-          <p className={s.step}>
-            <b>1</b> From your tracker
-          </p>
-          <Shot w={400} phoneW={380} label={`An issue in ${route.tracker.name}`} maxScale={1.15} frame={s.card}>
-            {route.issue}
-          </Shot>
-        </div>
-        <span className={cx(s.wire, s.w1)} aria-hidden="true" />
-        <div className={cx(s.col, s.c2)}>
-          <p className={s.step}>
-            <b>2</b> A task in Althar
-          </p>
-          <Shot w={440} phoneW={380} label={`Task ${route.task.task}, done`} maxScale={1.15} frame={s.card}>
-            <TaskCard
-              task={route.task.task}
-              title={route.task.title}
-              status={TaskStatus.Done}
-              steps={route.task.steps}
-              at={route.task.steps.length}
-              started="took 1h 18m"
-              lead={OPUS}
-              branch={route.task.branch}
-            />
-          </Shot>
-        </div>
-        <span className={cx(s.wire, s.w2)} aria-hidden="true" />
-        <div className={cx(s.col, s.c3)}>
-          <p className={s.step}>
-            <b>3</b> To your host
-          </p>
-          <Shot w={340} phoneW={380} label={`A pull request on ${route.host.name}`} maxScale={1.15} frame={s.card}>
-            <AcceptCard
-              task={route.task.task}
-              title={route.task.title}
-              prs={[{ repo: route.pr.repo, number: route.pr.number, add: route.pr.add, del: route.pr.del }]}
-              host={{ name: route.host.name, brand: route.host.brand }}
-              checks={route.pr.checks}
-              at="just now"
-              onOpen={none}
-            />
-          </Shot>
-        </div>
+      {/* Every route laid out unseen in the same place, so the section keeps the height of the tallest as they turn. */}
+      <div className={s.rows}>
+        {ROUTES.map((r) => (
+          <RouteRow key={r.tracker.name} route={r} ghost />
+        ))}
+        <RouteRow key={at} route={route} />
       </div>
     </div>
   )

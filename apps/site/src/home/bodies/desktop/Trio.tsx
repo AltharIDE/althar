@@ -16,7 +16,7 @@ import s from './Trio.module.css'
  * floats in from below, slightly turned, stands, and floats away up as the
  * next comes in, its title changing over it. The steps down the side say
  * where you are and take you to one. Narrower, the three stand one under
- * the other in the same panel, each over its own light, without the stage.
+ * the other in the same panel, the light rising at its foot, without the stage.
  */
 
 interface Step {
@@ -182,6 +182,9 @@ export function Trio() {
   if (narrow)
     return (
       <section className={cx(s.trio, s.stacked)} aria-label="Your plans, limits and review">
+        <div className={s.foot} aria-hidden="true">
+          <Light height={1} />
+        </div>
         {STEPS.map((step) => (
           <div key={step.id} id={step.id} className={s.stackedStep}>
             <div className={s.head}>
@@ -192,12 +195,7 @@ export function Trio() {
               <h2 className={cx(t.title, s.title)}>{step.title}</h2>
               <p className={t.lead}>{step.lead}</p>
             </div>
-            <div className={s.stackedPiece}>
-              <div className={s.pieceLight} aria-hidden="true">
-                <Light height={0.8} motion="still" />
-              </div>
-              {step.piece(true)}
-            </div>
+            <div className={s.stackedPiece}>{step.piece(true)}</div>
           </div>
         ))}
       </section>

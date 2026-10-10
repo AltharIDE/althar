@@ -89,10 +89,9 @@
   }
   .seen .cutMark { opacity: 1; }
   .ticks li:nth-child(even) { display: none; }
-  /* The three sames, as three words. */
-  .same { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 18px; padding-top: 16px; }
-  .same b { font-size: 15px; }
-  .same span { display: none; }
+  /* The three sames need their sentences; on a phone the section's lead says it. */
+  .same { display: none; }
+  .chart { padding-bottom: 26px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .cutMark { transition: none; }
