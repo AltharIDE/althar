@@ -42,6 +42,8 @@ export const scenarios = {
    * withdraws the request, as the real agents do.
    */
   commandChoices: 'command-choices',
+  /** Carries on after a permission answer until the client cancels. */
+  deniedThenWait: 'denied-then-wait',
   /** A file edit, with Codex's options: the only rejection stops the turn. */
   fileEdit: 'file-edit',
   /** Like `fileEdit`, but it asks again every time the turn is resumed. */
@@ -62,6 +64,12 @@ export const scenarios = {
   settings: 'settings',
   /** The process exits mid-turn. Only when the agent runs as a process. */
   exit: 'exit',
+  /**
+   * Followed by a command, `run git status --short`: runs it, asking first
+   * with Codex's command options, each time as a tool call of its own, and
+   * says what was chosen (`chosen=allow_once`).
+   */
+  run: 'run ',
 } as const
 
 export const USAGE_LIMIT_MESSAGE = 'Claude AI usage limit reached|1759075200'
@@ -97,6 +105,16 @@ export const codexLikeMeanings = {
 }
 
 export interface FakeAgentOptions {
+  /** A scripted response to a permission judgment, with the actual session settings exposed to the test. */
+  readonly judgment?: (input: {
+    readonly prompt: string
+    readonly mode: string
+    readonly model: string
+    readonly effort: string
+    readonly mcpServers: number
+    readonly meta: Readonly<Record<string, unknown>> | undefined
+    readonly askToWrite: () => Promise<string>
+  }) => Promise<string>
   /** What `exit` does. The process entry point exits the process. */
   readonly exit?: () => void
   /**
@@ -141,6 +159,7 @@ interface SessionState {
   abort: AbortController | undefined
   directories: number
   mcpServers: number
+  meta: Readonly<Record<string, unknown>> | undefined
   /** Where the session works, for a step that writes. */
   cwd: string
   /** Althar's tools, when the session was given them over HTTP. */
@@ -149,6 +168,8 @@ interface SessionState {
   markers: Set<string>
   /** Markers it has played once already, such as `[lead:hang-once]`. */
   played: Set<string>
+  /** Commands it has run with `run`, so each is a tool call of its own. */
+  runs: number
 }
 
 /** What `[lead:explore]` reads, in order. */
@@ -507,6 +528,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         abort: undefined,
         directories: params.additionalDirectories?.length ?? 0,
         mcpServers: params.mcpServers.length,
+        meta: params._meta ?? undefined,
         cwd: params.cwd,
         tools: (() => {
           const server = params.mcpServers.find((candidate) => 'type' in candidate && candidate.type === 'http')
@@ -516,6 +538,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         })(),
         markers: new Set(),
         played: new Set(),
+        runs: 0,
       }
       sessions.set(sessionId, session)
       return {
@@ -587,6 +610,28 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
 
+      if (text.startsWith('You are the project coordinator, judging one permission request')) {
+        const reply =
+          options.judgment === undefined
+            ? '{"decision":"allow","reason":"This action is needed for the task."}'
+            : await options.judgment({
+                prompt: text,
+                mode: session.mode,
+                model: session.model,
+                effort: session.effort,
+                mcpServers: session.mcpServers,
+                meta: session.meta,
+                askToWrite: () =>
+                  ask(
+                    { toolCallId: 'judge-write', title: 'Write a file', kind: 'edit', rawInput: { path: '/tmp/judge-write.txt' } },
+                    commandOptions,
+                  ),
+              })
+        await update({ sessionUpdate: 'usage_update', used: 100, size: 10000, cost: { amount: 0.002, currency: 'USD' } })
+        await say(reply)
+        return ended({ inputTokens: 100, outputTokens: 20, totalTokens: 120 })
+      }
+
       // A lead that stalls or loops, where a marker says so.
       const stalled = await playStall(session, text, update)
       if (stalled !== undefined) return stalled
@@ -599,34 +644,40 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return ended()
       }
 
-      const resumed = text.includes("not allowed by the project's rules")
+      const resumed = /not allowed by (the project's rules|the coordinator)/.test(text)
       if (resumed && !session.stubborn) {
         await say('carrying on without it')
         return ended()
       }
       if (text === scenarios.stubborn) session.stubborn = true
-      const scenario = resumed ? scenarios.stubborn : text
+      const scenario = resumed ? scenarios.stubborn : text.startsWith(scenarios.run) ? scenarios.commandChoices : text
 
       switch (scenario) {
         case scenarios.commandChoices:
+        case scenarios.deniedThenWait:
         case scenarios.fileEdit:
         case scenarios.stubborn: {
-          const command = scenario === scenarios.commandChoices
+          const command = scenario === scenarios.commandChoices || scenario === scenarios.deniedThenWait
+          const run = text.startsWith(scenarios.run)
+          const line = run ? text.slice(scenarios.run.length) : 'make deploy'
+          // Each command it is told to run is a tool call of its own, so a thread can hold several.
+          if (run) session.runs += 1
           const toolCall = {
-            toolCallId: 'call-2',
-            title: command ? 'Run make deploy' : 'Edit app.ts',
+            toolCallId: run ? `run-${session.runs}` : 'call-2',
+            title: command ? `Run ${line}` : 'Edit app.ts',
             kind: command ? ('execute' as const) : ('edit' as const),
             // As agents do, the command itself, which the title only describes.
-            ...(command ? { rawInput: { command: 'make deploy' } } : {}),
+            ...(command ? { rawInput: { command: line } } : {}),
           }
           await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
           const chosen = await ask(toolCall, command ? commandOptions : fileEditOptions)
           await update({
             sessionUpdate: 'tool_call_update',
-            toolCallId: 'call-2',
+            toolCallId: toolCall.toolCallId,
             status: chosen.startsWith('allow') ? 'completed' : 'failed',
           })
           await say(`chosen=${chosen}`)
+          if (scenario === scenarios.deniedThenWait) while (!session.cancelled) await pause(10)
           return session.cancelled || chosen === 'cancel' || chosen === 'cancelled' ? { stopReason: 'cancelled' } : ended()
         }
         case scenarios.question: {

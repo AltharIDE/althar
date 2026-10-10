@@ -11,6 +11,8 @@ import { type Feed, HOME, HOME_SHOWN } from '../../data/feed'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { kindWords } from '../../shared/calls'
+import { refOf } from '../home/HomeView'
+import type { AnsweredCall } from '../home/needs'
 
 /*
  * The edge's view model: across every project, what waits on the person and
@@ -21,7 +23,7 @@ import { kindWords } from '../../shared/calls'
  * home; one whose answer didn't go through comes back, with what went wrong.
  */
 
-/** How long a call that just came in is said beside the notch, and rings quicker. */
+/** How long a call that just came in is said beside the notch. */
 export const SAY_FOR = 4_200
 /** How long changes are gathered before the edge reads again. */
 const GATHER = 120
@@ -46,23 +48,16 @@ export const followEdge = (feed: Feed, cache: QueryClient) => {
   })
 }
 
-/** A call the person answered from the edge, folded to a line until it closes. */
-export interface EdgeAnswered {
-  readonly id: string
-  readonly said: string
-  readonly denied: boolean
-  readonly project: string
-}
+/** A call the person answered from the edge, its line kept where it was, quiet, until the edge closes. */
+export type EdgeAnswered = AnsweredCall
 
 export interface EdgeModel {
   readonly home: HomeSnapshot | null
   /** The agents on this Mac, for their names. */
   readonly agents: ReadonlyArray<{ readonly id: string; readonly name: string }>
-  /** The call or ready task that has just come in. */
-  readonly fresh: string | null
   readonly saying: IslandSaying | null
   readonly answered: ReadonlyArray<EdgeAnswered>
-  readonly answer: (call: HomeCall, decision: 'allow' | 'reject', said: string) => void
+  readonly answer: (call: HomeCall, decision: 'allow' | 'reject') => void
   /** The edge closed: the answered lines go. */
   readonly closed: () => void
   /** Why the last answer didn't go through. */
@@ -75,7 +70,7 @@ const needIds = (home: HomeSnapshot) => [
   ...home.tasks.filter((task) => task.phase === 'ready').map((task) => task.taskId),
 ]
 
-/** A need, as the island says it: whose, and what kind. */
+/** A need, as the island says it: whose, by its project's mark, and what kind. */
 const sayingOf = (home: HomeSnapshot, id: string, projects: ReadonlyMap<string, ProjectSummary>): IslandSaying | null => {
   const call = home.calls.find((one) => one.id === id)
   const task = home.tasks.find((one) => one.taskId === id)
@@ -83,7 +78,7 @@ const sayingOf = (home: HomeSnapshot, id: string, projects: ReadonlyMap<string, 
   const project = projectId === undefined ? undefined : projects.get(projectId)
   if (project === undefined) return null
   const kind = call === undefined ? kindWords.ready : call.stuck === null ? kindWords.permission : kindWords.stuck
-  return { project: project.name, kind }
+  return { project: refOf(project), kind }
 }
 
 export const useEdge = (): EdgeModel => {
@@ -91,7 +86,6 @@ export const useEdge = (): EdgeModel => {
   const read = useQuery(edgeRead(client))
   const status = useQuery(reads(client).status())
   const home = read.data ?? null
-  const [fresh, setFresh] = useState<string | null>(null)
   const [saying, setSaying] = useState<IslandSaying | null>(null)
   const [answered, setAnswered] = useState<ReadonlyArray<EdgeAnswered>>([])
   const [error, setError] = useState<string | null>(null)
@@ -106,23 +100,18 @@ export const useEdge = (): EdgeModel => {
     seen.current = new Set(ids)
     const came = before === null ? undefined : ids.find((id) => !before.has(id))
     if (came === undefined) return
-    setFresh(came)
     setSaying(sayingOf(home, came, new Map(home.projects.map((project) => [project.id, project]))))
     clearTimeout(said.current)
-    said.current = setTimeout(() => {
-      setFresh(null)
-      setSaying(null)
-    }, SAY_FOR)
+    said.current = setTimeout(() => setSaying(null), SAY_FOR)
   }, [home])
   useEffect(() => () => clearTimeout(said.current), [])
 
-  const answer = (call: HomeCall, decision: 'allow' | 'reject', said: string) => {
-    const project = home?.projects.find((one) => one.id === call.projectId)?.name ?? ''
+  const answer = (call: HomeCall, decision: 'allow' | 'reject') => {
     setError(null)
-    setAnswered((now) => [...now, { id: call.id, said, denied: decision === 'reject', project }])
+    setAnswered((now) => [...now, { call, reply: { decision } }])
     client.answer({ attentionId: call.id, decision }).catch((failure: unknown) => {
       // It still waits: it comes back, and the edge says why.
-      setAnswered((now) => now.filter((one) => one.id !== call.id))
+      setAnswered((now) => now.filter((one) => one.call.id !== call.id))
       setError(messageOf(failure))
     })
   }
@@ -130,7 +119,6 @@ export const useEdge = (): EdgeModel => {
   return {
     home,
     agents: status.data?.agents ?? [],
-    fresh,
     saying,
     answered,
     answer,

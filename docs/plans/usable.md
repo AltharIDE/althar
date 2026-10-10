@@ -35,7 +35,7 @@ the runtime behind it and the app wiring it up.
    - "3 running · 2 need you" in the chrome.
 3. **Work that doesn't need you.**
    - **Usage limits handled:** move to the next agent free, or wait for the reset.
-   - **The lead answers permission asks** within the project's rules, which the
+   - **The coordinator answers permission asks** within the project's rules, which the
      kit's ProjectRules screen sets.
    - **A step that stalls** becomes a call.
    - **macOS notifications** and a dock badge when something needs you or is
@@ -94,8 +94,8 @@ One pull request each:
      made. The agents and their accounts, and the connections, moved to
      Settings (⌘,). Not yet: a card for an agent that is signed out.
 
-   Next:
-   1. The lead answers permission requests: the "lead decides" mode.
+   Added on 2026-10-10: the coordinator answers permission requests in its
+   opt-in mode, with recorded reasons and human fallback ([ADR-019](../decisions/019-coordinator-judges-permissions.md)).
 
    Decided on 2026-10-04:
    - **No "send back" step.** The task's chat is how the person sends work

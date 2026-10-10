@@ -33,8 +33,11 @@ export type PermissionAnswer =
   | { decision: Decision.Deny; cmd: string; note: string }
   | { decision: Decision.DenyAlways; cmd: string; scope: PermissionScope }
 
+/** The answers that keep a rule. */
+export type AlwaysDecision = Decision.AllowAlways | Decision.DenyAlways
+
 /** Whether an answer is a no. */
-function refuses(d: Decision): boolean {
+export function refuses(d: Decision): boolean {
   switch (d) {
     case Decision.AllowOnce:
     case Decision.AllowAlways:
@@ -67,6 +70,55 @@ export interface PermissionRequest {
   kind?: string
   /** The answers the agent offers, in its order; an ACP request names its own. Without them: allow once, allow always, deny. */
   offers?: readonly Decision[]
+  /**
+   * The scopes each "always" offers, as the consumer's rules would hold to
+   * them: an always-allow that something else overrides offers none. Without
+   * it, every scope the request carries. An always with no scope isn't
+   * offered.
+   */
+  scopes?: Partial<Record<AlwaysDecision, readonly PermissionScope[]>>
+}
+
+/** How the scopes of an "always" read as choices: this exact command, and commands starting a prefix. A kind is its own words. */
+export interface ScopeWords {
+  exact: string
+  prefix: (prefix: string) => string
+}
+
+/** The scopes an "always" offers for a request, with their words, narrowest first: this command, then how it starts, then its kind, as far as the request carries them and the consumer allows. */
+export function scopeChoices(
+  request: Pick<PermissionRequest, 'prefix' | 'kind' | 'scopes'>,
+  decision: AlwaysDecision,
+  words: ScopeWords,
+): { value: PermissionScope; label: string }[] {
+  const carried = [
+    { value: PermissionScope.Exact, label: words.exact },
+    ...(request.prefix ? [{ value: PermissionScope.Prefix, label: words.prefix(request.prefix) }] : []),
+    ...(request.kind ? [{ value: PermissionScope.Kind, label: request.kind }] : []),
+  ]
+  const allowed = request.scopes?.[decision]
+  return allowed === undefined ? carried : carried.filter((choice) => allowed.includes(choice.value))
+}
+
+/** The scopes an "always" offers for a request, narrowest first. */
+export function scopesFor(request: Pick<PermissionRequest, 'prefix' | 'kind' | 'scopes'>, decision: AlwaysDecision): PermissionScope[] {
+  return scopeChoices(request, decision, { exact: '', prefix: () => '' }).map((choice) => choice.value)
+}
+
+/** The answers a card offers: the request's own, less an "always" with no scope to keep it by. */
+export function offersFor(request: Pick<PermissionRequest, 'offers' | 'prefix' | 'kind' | 'scopes'>): Decision[] {
+  return (request.offers ?? OFFERS).filter((d) => {
+    switch (d) {
+      case Decision.AllowOnce:
+      case Decision.Deny:
+        return true
+      case Decision.AllowAlways:
+      case Decision.DenyAlways:
+        return scopesFor(request, d).length > 0
+      default:
+        return unreachable(d)
+    }
+  })
 }
 
 export interface PermissionText {
@@ -78,6 +130,8 @@ export interface PermissionText {
   /** Each answer, once given. */
   decided: Record<Decision, string>
   scopeLabel: string
+  /** The same, for never allow. */
+  neverScopeLabel: string
   prefixOption: (prefix: string) => string
   prefixSaid: (prefix: ReactNode) => ReactNode
   exact: string
@@ -116,6 +170,7 @@ export const permissionText: PermissionText = {
     [Decision.DenyAlways]: 'Denied always',
   },
   scopeLabel: 'What to always allow',
+  neverScopeLabel: 'What to never allow',
   prefixOption: (p) => `commands starting “${p}”`,
   prefixSaid: (p) => <>commands starting {p}</>,
   exact: 'this exact command',
@@ -140,7 +195,7 @@ export const permissionText: PermissionText = {
 const OFFERS: readonly Decision[] = [Decision.AllowOnce, Decision.AllowAlways, Decision.Deny]
 
 /** How far an "always" reaches, in words. */
-function scopeSaid(scope: PermissionScope, request: Pick<PermissionRequest, 'prefix' | 'kind'>, t: PermissionText): ReactNode {
+export function scopeSaid(scope: PermissionScope, request: Pick<PermissionRequest, 'prefix' | 'kind'>, t: PermissionText): ReactNode {
   switch (scope) {
     case PermissionScope.Prefix:
       return request.prefix ? t.prefixSaid(<Code>{request.prefix}</Code>) : t.exact
@@ -175,9 +230,10 @@ function Card({
   step,
   prefix,
   kind,
-  offers = OFFERS,
+  offers: asked,
+  scopes: allowed,
   project,
-  defaultDecision = offers[0] ?? Decision.AllowOnce,
+  defaultDecision,
   defaultScope = PermissionScope.Exact,
   pos = 1,
   total = 1,
@@ -186,7 +242,10 @@ function Card({
   onAll,
   t,
 }: CardProps) {
-  const [pick, setPick] = useState<Decision>(defaultDecision)
+  const offers = offersFor({ prefix, kind, ...(asked ? { offers: asked } : {}), ...(allowed ? { scopes: allowed } : {}) })
+  const [pick, setPick] = useState<Decision>(
+    defaultDecision !== undefined && offers.includes(defaultDecision) ? defaultDecision : (offers[0] ?? Decision.AllowOnce),
+  )
   const [scope, setScope] = useState(defaultScope)
   const [note, setNote] = useState('')
   const name = useId()
@@ -199,27 +258,57 @@ function Card({
     if (denying) noteField.current?.focus()
   }, [denying])
 
+  /* narrowest first: this command, then what the consumer says an always would cover; one that can't be kept by the scope picked keeps its narrowest */
+  const choicesOf = (d: AlwaysDecision) =>
+    scopeChoices({ prefix, kind, ...(allowed ? { scopes: allowed } : {}) }, d, { exact: t.exact, prefix: t.prefixOption })
+  const scopeOf = (d: AlwaysDecision) => {
+    const offered = choicesOf(d).map((choice) => choice.value)
+    return offered.includes(scope) ? scope : (offered[0] ?? PermissionScope.Exact)
+  }
+
   const answer = (): PermissionAnswer => {
     switch (pick) {
       case Decision.AllowOnce:
         return { decision: pick, cmd }
       case Decision.AllowAlways:
-        return { decision: pick, cmd, scope }
+        return { decision: pick, cmd, scope: scopeOf(pick) }
       case Decision.Deny:
         return { decision: pick, cmd, note }
       case Decision.DenyAlways:
-        return { decision: pick, cmd, scope }
+        return { decision: pick, cmd, scope: scopeOf(pick) }
       default:
         return unreachable(pick)
     }
   }
 
-  /* narrowest first: this command, then what the consumer says an always would cover */
-  const scopes = [
-    { value: PermissionScope.Exact, label: t.exact },
-    ...(prefix ? [{ value: PermissionScope.Prefix, label: t.prefixOption(prefix) }] : []),
-    ...(kind ? [{ value: PermissionScope.Kind, label: kind }] : []),
-  ]
+  /* what an always keeps: a choice where there are several, said where it reaches past this command, nothing where it is only this command */
+  const scopeLine = (d: AlwaysDecision) => {
+    const offered = choicesOf(d)
+    if (offered.length > 1)
+      return (
+        <span className={s.scopeLine}>
+          <Select
+            variant="filled"
+            label={d === Decision.AllowAlways ? t.scopeLabel : t.neverScopeLabel}
+            value={scopeOf(d)}
+            options={offered}
+            onChange={(next) => {
+              setScope(next)
+              setPick(d)
+            }}
+          />
+          <span>{t.inProject(project)}</span>
+        </span>
+      )
+    const [only] = offered
+    if (only === undefined || only.value === PermissionScope.Exact) return null
+    return (
+      <span className={s.scopeLine}>
+        <span className={s.scopeOnly}>{scopeSaid(only.value, { prefix, kind }, t)}</span>
+        <span>{t.inProject(project)}</span>
+      </span>
+    )
+  }
 
   return (
     <AskCard
@@ -276,21 +365,7 @@ function Card({
                 </span>
                 <span>{t.option[d]}</span>
               </label>
-              {(d === Decision.AllowAlways || d === Decision.DenyAlways) && scopes.length > 1 && (
-                <span className={s.scopeLine}>
-                  <Select
-                    variant="filled"
-                    label={t.scopeLabel}
-                    value={scope}
-                    options={scopes}
-                    onChange={(next) => {
-                      setScope(next)
-                      setPick(d)
-                    }}
-                  />
-                  <span>{t.inProject(project)}</span>
-                </span>
-              )}
+              {(d === Decision.AllowAlways || d === Decision.DenyAlways) && scopeLine(d)}
               {d === Decision.Deny && denying && (
                 <Field
                   ref={noteField}
@@ -498,7 +573,9 @@ export interface PermissionsProps {
  * underneath, so you know how many are coming. A stack forms only when steps
  * run side by side; each answer still goes back to its own agent. Requests
  * are followed by id, so one that arrives or is answered elsewhere does not
- * shift the others.
+ * shift the others. Allow all allows each once, never always, and the card
+ * in front beats once for all of them. A stack of one folds as one card
+ * does.
  */
 export function Permissions({ items, project, onAnswer, onUndo, className, text }: PermissionsProps) {
   const t = { ...permissionText, ...text }
@@ -522,6 +599,29 @@ export function Permissions({ items, project, onAnswer, onUndo, className, text 
       return a ? [[it, a] as const] : []
     })
     const denied = given.filter(([, a]) => refuses(a.decision)).length
+    const [only] = given
+    if (only && given.length === 1 && items.length === 1) {
+      const [it, a] = only
+      return (
+        <AskAnswered
+          className={className}
+          denied={refuses(a.decision)}
+          said={t.decided[a.decision]}
+          undo={t.undo}
+          focusOnMount={answeredHere}
+          onUndo={
+            onUndo &&
+            (() => {
+              onUndo(it, a)
+              setAnswers(new Map())
+              setAnsweredHere(false)
+            })
+          }
+        >
+          <Said answer={a} request={it} project={project} t={t} />
+        </AskAnswered>
+      )
+    }
     return (
       <AskAnswered
         className={className}
@@ -564,8 +664,7 @@ export function Permissions({ items, project, onAnswer, onUndo, className, text 
             next.set(it.id, a)
             onAnswer?.(it, a)
           }
-          setAnswers(next)
-          setAnsweredHere(true)
+          record(next, current.id, false)
         }}
       />
       {[0, 1].map((k) => (
@@ -580,7 +679,7 @@ export function Permissions({ items, project, onAnswer, onUndo, className, text 
   )
 }
 
-export type AllowedItem = { id: string; step: string; cmd: string } & (
+export type AllowedItem = { id: string; /** The step it came from, where there are steps to tell apart. */ step?: string; cmd: string } & (
   | { by: AllowedBy.Rule; /** The rule that allowed it. */ rule: string }
   | { by: AllowedBy.Lead; /** The lead that allowed it, and why. */ lead: ModelInfo; why: string }
 )
@@ -624,8 +723,8 @@ export function Allowed({ items, project, text, ...disclosure }: AllowedProps) {
       <Fold>
         <ul className={s.allowedList}>
           {items.map((it) => (
-            <li key={it.id}>
-              <span className={s.allowedStep}>{it.step}</span>
+            <li key={it.id} className={it.step === undefined ? s.noStep : undefined}>
+              {it.step !== undefined && <span className={s.allowedStep}>{it.step}</span>}
               <code className={s.allowedCmd}>{it.cmd}</code>
               <span className={s.allowedBy}>
                 <Who item={it} />

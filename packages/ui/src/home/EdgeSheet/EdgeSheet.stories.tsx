@@ -1,26 +1,26 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { fn } from 'storybook/test'
 
-import { EDGE_NEEDS, EDGE_WORK, type EdgeDemoRow, edgeRowOf } from '../../fixtures/edge'
-import { AskAnswered, AskNote } from '../../primitives/Ask/Ask'
+import { EDGE_NEEDS, EDGE_WORK, type EdgeDemoCall, edgeLineOf } from '../../fixtures/edge'
+import { PUBLISH } from '../../fixtures/home'
+import { NeedLine } from '../NeedLine/NeedLine'
 import { EdgeSheet } from './EdgeSheet'
 import s from './EdgeSheet.stories.module.css'
 
-const rowOf = (row: EdgeDemoRow) => edgeRowOf(row, fn())
+const lineOf = (call: EdgeDemoCall) => edgeLineOf(call, fn())
 
-const needs = EDGE_NEEDS.map(rowOf)
-const work = EDGE_WORK.map(rowOf)
+const needs = EDGE_NEEDS.map(lineOf)
 
 const meta = {
   title: 'Home/EdgeSheet',
   component: EdgeSheet,
   decorators: [(Story) => <div className={s.paper}>{Story()}</div>],
-  args: { waiting: needs.length, working: work.length, needs, work, onOpenApp: fn() },
+  args: { waiting: needs.length, needs, work: EDGE_WORK, onOpenApp: fn() },
 } satisfies Meta<typeof EdgeSheet>
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Under Althar's item in the menu bar: what needs you first, then what is in progress. */
+/** Under Althar's item in the menu bar: what needs you, and the work in progress in one line. */
 export const Paper: Story = {}
 
 /** In the island, the notch's black. */
@@ -29,27 +29,42 @@ export const Ink: Story = {
   decorators: [(Story) => <div className={s.ink}>{Story()}</div>],
 }
 
-/** Nothing waits on you: that section isn't there at all. */
+/** Nothing waits on you: it says so, over the work's line. */
 export const NothingWaits: Story = { args: { waiting: 0, needs: [] } }
 
 /** Nothing at all: it says so, and still opens Althar. */
-export const NothingAtAll: Story = { args: { waiting: 0, working: 0, needs: [], work: [] } }
+export const NothingAtAll: Story = { args: { waiting: 0, needs: [], work: { inProgress: 0 } } }
 
-/** A call just answered here folds to a line, as on the home. */
+/** Work held and stopped: the foot says how many of each, and nothing more. */
+export const HeldAndStopped: Story = { args: { work: { inProgress: 6, held: 2, stopped: 1 } } }
+
+/** A call just answered here stays its line, quiet, as on the home: same place, same height. */
 export const JustAnswered: Story = {
   args: {
     waiting: 1,
     needs: [
-      <AskAnswered key="h212" said="Allowed npm publish --tag next --access public">
-        <AskNote>in Halyard</AskNote>
-      </AskAnswered>,
+      <NeedLine
+        key="h212"
+        kind="Allowed"
+        project={PUBLISH.project}
+        task={PUBLISH.task}
+        title={PUBLISH.title}
+        command={PUBLISH.command}
+        answer={{ said: 'Once', note: 'in Halyard' }}
+      />,
       needs[1],
     ],
   },
 }
 
+/** Just answered, in the island's ink. */
+export const JustAnsweredInk: Story = {
+  args: { ...JustAnswered.args, tone: 'ink' },
+  decorators: [(Story) => <div className={s.ink}>{Story()}</div>],
+}
+
 /** An answer that didn't go through: the call is back, and the sheet says why first. */
 export const AnswerFailed: Story = { args: { failure: 'Althar’s runtime didn’t answer. If it keeps happening, restart Althar.' } }
 
-/** Without a way into the app, there is no foot. */
-export const WithoutFoot: Story = { args: { onOpenApp: undefined } }
+/** Without a way into the app, the head only counts. */
+export const WithoutWayIn: Story = { args: { onOpenApp: undefined } }

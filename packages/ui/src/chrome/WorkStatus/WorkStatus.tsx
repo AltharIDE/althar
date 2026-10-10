@@ -49,11 +49,12 @@ export interface WorkNeed {
 }
 
 export interface WorkStatusProps {
-  running: number
+  /** Without it, or with none, nothing is said of what runs. */
+  running?: number
   yours: number
   /** Open the first call that waits on you. Without it, the count is words, not a button. */
   onYours?: () => void
-  /** The dot rings. Only the home's bar asks for it: it is the one place where what needs you is meant to pull the eye. */
+  /** The dot rings, for a place where what needs you is meant to pull the eye. */
   ring?: boolean
   /** What waits on you, shown while the count is pointed at; without them, no preview. */
   needs?: ReadonlyArray<WorkNeed>
@@ -61,7 +62,7 @@ export interface WorkStatusProps {
   text?: Partial<WorkStatusText>
 }
 
-export function WorkStatus({ running, yours, onYours, needs, ring = false, className, text }: WorkStatusProps) {
+export function WorkStatus({ running = 0, yours, onYours, needs, ring = false, className, text }: WorkStatusProps) {
   const t = { ...workStatusText, ...text }
   return (
     <span className={cx(s.status, className)}>

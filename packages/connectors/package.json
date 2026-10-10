@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "How Althar talks to code hosts and trackers: a model for each, an adapter per product, and fakes for tests.",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

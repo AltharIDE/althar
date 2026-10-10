@@ -12,12 +12,12 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | --- | --- |
 | `foundations` | Tokens, icons, brand marks, project marks, Althar's light and its halftone mark, and the domain vocabularies. |
 | `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), `Model` (a model's mark and name, and how it is reached on hover), and Ask, which every part that asks a person shares. |
-| `thread` | What appears in a conversation: turns, tool calls, steps, permissions, questions, Stuck, documents. |
+| `thread` | What appears in a conversation: turns, tool calls, steps, permissions (a card, a stack with Allow all, their answers in small for a call on the home, and what a rule allowed), questions, Stuck, documents. |
 | `composer` | What writes into a conversation: Composer, DictationTray, ModelPick, ContextRing, Listening, Running. |
 | `coordinator` | What the coordinator shows about tasks: Issue, TaskLaunch, TaskCard, TaskMark, TaskHeld. |
 | `board` | The project's work in lanes: Board, BoardColumn, and a card or row for each lane. |
 | `dock` | What opens beside the board: Dock and a peek for each kind of card. |
-| `home` | Work across every project, as the home shows it: HomeSection, HomeRest, NeedCard, RunRow, SinceRow, ProjectRow, ProjectWord; and the home in small at the edge of the screen: Island, EdgeSheet, EdgeRow. |
+| `home` | Work across every project, as the home shows it: NeedLine, ProjectList, WorkTicks, SinceRow, HomeRest, ProjectWord; and what needs you at the edge of the screen: Island, EdgeSheet. |
 | `outputs` | What a task made: ChangeSet, ArtifactCard, ChangeView, and NoOutputs (where its lead has looked, before it has made anything). |
 | `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu, and the questions they ask first: RenameProject, RemoveProject, AbandonTask. |
 | `setup` | What comes before a project, what sets one up, and Settings: Runtimes, AgentInstall (an agent not on this device, and downloading it), SourceMap, Accounts and AccountSignIn, Connections, AgentTabs, ModelSwitches, ControlCenter, Preferences (the app's own: KeepAwake, OpenFilesIn, NotificationSettings, as rows of a SettingList that sit in any frame), and Conventions (NamingRule, TemplateSources). |
@@ -148,7 +148,7 @@ A pattern that appears in two components becomes one part, so the two cannot dri
 
 | Part | What it is | Used by |
 | --- | --- | --- |
-| Ask (`AskCard`, `AskFoot`, `AskAnswered`, `AskNote`) | A card that waits on a person, and the line it folds to once answered | Permission, GraphProposal, Question, Stuck, and the home's answered calls |
+| Ask (`AskCard`, `AskFoot`, `AskAnswered`, `AskNote`) | A card that waits on a person, and the line it folds to once answered | Permission, GraphProposal, Question, Stuck |
 | SidePanel | What opens beside a thread or the board | DocPanel, StepPanel, Dock |
 | TaskGlyph | Where a task stands, as a glyph | TaskCard, WorkCard, TaskHeader, WorkPeek |
 | FileChanges, Delta, DiffStat | Files a change touched, with lines added and removed | ChangeSet, AcceptPeek, and a tool call's meta |

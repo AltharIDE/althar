@@ -118,7 +118,12 @@ export function StartView({
   const opened = (project: ProjectSummary | null) => {
     if (project !== null) onProject(project.id)
   }
-  const modes = { [PermissionPolicy.Rules]: 'rules', [PermissionPolicy.Ask]: 'ask', [PermissionPolicy.AllowAll]: 'allow' } as const
+  const modes = {
+    [PermissionPolicy.Rules]: 'rules',
+    [PermissionPolicy.Coordinator]: 'coordinator',
+    [PermissionPolicy.Ask]: 'ask',
+    [PermissionPolicy.AllowAll]: 'allow',
+  } as const
   // With no project, or none read because the runtime didn't answer, the first screen, which says what went wrong.
   const first = (model.projects !== null && model.projects.length === 0) || (model.projects === null && model.error !== null)
 
@@ -127,7 +132,6 @@ export function StartView({
     const { forming } = model
     return (
       <div className={s.window}>
-        <TitleBar lights="none">{null}</TitleBar>
         <div className={`${s.scroll} ${s.first}`}>
           <NewProject
             defaultName={forming.name}
@@ -144,7 +148,7 @@ export function StartView({
             onRemove={model.leaveOut}
             onChooseFolders={() => void model.addFolders()}
             defaultPermissions={PermissionPolicy.Rules}
-            permissionOptions={[PermissionPolicy.Rules, PermissionPolicy.Ask, PermissionPolicy.AllowAll]}
+            permissionOptions={[PermissionPolicy.Rules, PermissionPolicy.Coordinator, PermissionPolicy.Ask, PermissionPolicy.AllowAll]}
             onCreate={({ name, permissions }) =>
               void model.create({ name, permissions: modes[permissions as keyof typeof modes] ?? 'rules' }).then(opened)
             }

@@ -25,6 +25,7 @@ import {
 } from '@althar/ui'
 
 import { useModelNames } from './modelNames'
+import { RuleReceipt } from './RuleReceipt'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
 import type { ArrivalContent, Block, Part, StepResult, TaskCardContent } from './thread'
 import s from './ThreadBlocks.module.css'
@@ -276,8 +277,11 @@ export function ThreadBlocks({
   card,
   queued,
   onPassOn,
+  project,
 }: {
   blocks: ReadonlyArray<Block>
+  /** The project whose rules let requests through, for the line that says so. */
+  project?: string
   /** The thread's session, whose model and account name its turns. */
   session?: { readonly agentId: string; readonly model: string | null; readonly account: string | null } | null
   /** Sends what someone outside said to the lead, in the person's name. */
@@ -333,6 +337,7 @@ export function ThreadBlocks({
                 ))}
               </WorkedFor>
             )}
+            <RuleReceipt parts={block.parts} {...(project === undefined ? {} : { project })} />
             {block.said.map((part) => (
               <PartView key={part.id} part={part} />
             ))}

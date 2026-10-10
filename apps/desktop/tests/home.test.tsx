@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { ApiError } from '@althar/contracts'
 import type { HomeCall, HomeEvent, HomeTask, ProjectSummary } from '@althar/contracts'
 import { ProjectInk } from '@althar/ui'
 
@@ -180,98 +181,177 @@ describe('the home', () => {
     const onTask = vi.fn()
     const { client } = fakeClient({ getHome: vi.fn(async () => busy()) })
     withServices(<Home onTask={onTask} />, client)
-    const needs = await screen.findByRole('region', { name: /Needs you/ })
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
     expect(within(needs).getByText('npm publish')).toBeTruthy()
     expect(within(needs).getByText('Claude Code stopped before the step was done.')).toBeTruthy()
     // A change on its branch says its size; tasks are named by their titles alone, never their slugs.
     expect(within(needs).getByText('On its branch: 3 files, +40 −12')).toBeTruthy()
     expect(within(needs).getByText('On its branch')).toBeTruthy()
     expect(screen.queryByText(/althar\/branch|retry-the-call|name-it/)).toBeNull()
-    // A change with its checks, the worst first.
-    expect(within(needs).getByText('1 check failed')).toBeTruthy()
-    expect(within(needs).getByText('No checks')).toBeTruthy()
+    // A change with its checks, the worst first, in its one line.
+    expect(within(needs).getByText(/1 check failed/)).toBeTruthy()
+    expect(within(needs).getByText(/no checks/)).toBeTruthy()
     expect(within(needs).getByText('The agent stopped before the step was done.')).toBeTruthy()
     expect(within(needs).getAllByText('Write outside the worktree')).toHaveLength(2)
     expect(screen.queryByText(/^Gone/)).toBeNull()
 
-    // Allowed where it is: the card folds to what was said.
+    // Allowed where it is: the line stays, quiet, with what was said where its buttons were, and has focus.
     await userEvent.click(within(needs).getAllByRole('button', { name: 'Allow once' })[0]!)
     expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'allow' })
-    expect(await within(needs).findByText('Allowed npm publish')).toBeTruthy()
-    expect(within(needs).getByText('in halyard')).toBeTruthy()
+    const settled = await within(needs).findByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })
+    await waitFor(() => expect(settled).toBe(document.activeElement))
+    expect(within(settled).queryByRole('button', { name: /Allow once|Deny/ })).toBeNull()
 
-    // Review opens the task itself, and the projects stay where they are.
-    await userEvent.click(within(needs).getAllByRole('button', { name: 'Review' })[0]!)
+    // Review opens the task itself, and the projects stay where they are; the answered line kept its project's place.
+    expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual(['halyard', 'meridian'])
+    await userEvent.click(within(within(needs).getByRole('article', { name: 'Name it better' })).getByRole('button', { name: 'Review' }))
     expect(onTask).toHaveBeenLastCalledWith('th5')
     expect(screen.queryByRole('complementary', { name: 'Beside the home' })).toBeNull()
     expect(screen.getByRole('complementary', { name: 'Projects' })).toBeTruthy()
 
-    // A stuck step opens its task to be answered there; so does a card's title.
+    // A stuck step opens its task to be answered there; so does a line's title.
     await userEvent.click(within(needs).getAllByRole('button', { name: 'Open' })[0]!)
     expect(onTask).toHaveBeenLastCalledWith('th4')
     await userEvent.click(within(needs).getByRole('button', { name: 'Name it better' }))
     expect(onTask).toHaveBeenLastCalledWith('th5')
   })
 
-  it('denies where it is, and opens the first thing that waits from the bar', async () => {
-    const onTask = vi.fn()
-    const { client } = fakeClient({ getHome: vi.fn(async () => busy()) })
-    withServices(<Home onTask={onTask} />, client)
-    const needs = await screen.findByRole('region', { name: /Needs you/ })
-    await userEvent.click(within(needs).getAllByRole('button', { name: 'Deny' })[0]!)
-    expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'reject' })
-    expect(await within(needs).findByText('Didn’t allow npm publish')).toBeTruthy()
-    await userEvent.click(within(screen.getAllByRole('banner')[0]!).getByRole('button', { name: /need you/ }))
-    expect(onTask).toHaveBeenCalledWith('th4')
-  })
-
-  it('opens the first ready task from the bar when no call waits', async () => {
-    const onTask = vi.fn()
-    const one = busy()
-    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...one, calls: [] })) })
-    withServices(<Home onTask={onTask} />, client)
-    await screen.findByRole('heading', { name: 'Name it better', level: 3 })
-    await userEvent.click(within(screen.getAllByRole('banner')[0]!).getByRole('button', { name: /needs? you/ }))
-    expect(onTask).toHaveBeenCalledWith('th5')
-  })
-
-  it('counts as running only the tasks that are, and shows no agents in the bar', async () => {
+  it('denies where it is', async () => {
     const { client } = fakeClient({ getHome: vi.fn(async () => busy()) })
     withServices(<Home />, client)
-    const bar = (await screen.findAllByRole('banner'))[0]!
-    // Two have an agent on them, or are held for a reset; the stopped one and the one waiting on a call are in progress, not running.
-    await within(bar).findByText('2 running')
-    expect(within(bar).queryByText(/Claude Code|Codex|OpenCode/)).toBeNull()
-    expect(within(bar).queryByRole('img')).toBeNull()
-    const progress = screen.getByRole('region', { name: /In progress/ })
-    expect(within(progress).getByText('Stopped work')).toBeTruthy()
-    expect(within(progress).getByText('Waits on a call')).toBeTruthy()
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
+    await userEvent.click(within(needs).getAllByRole('button', { name: 'Deny' })[0]!)
+    expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'reject' })
+    expect(await within(needs).findByRole('article', { name: 'Run npm publish', description: 'Denied Once · in halyard' })).toBeTruthy()
   })
 
-  it('shows what runs, what the loop did, and the projects, and opens each', async () => {
+  it('offers on a permission’s card what its task’s card offers: always allow, never allow, and deny with a note', async () => {
+    const offered: HomeCall = {
+      ...permission,
+      reason: "This project asks you before anything an agent does beyond the task's own files.",
+      command: 'npm test',
+      always: { command: 'npm test', prefix: 'npm test', kind: null, allow: ['exact', 'prefix'], deny: ['exact', 'prefix'] },
+    }
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...busy(), calls: [offered] })) })
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
+    await userEvent.click(within(needs).getByRole('button', { name: 'More answers' }))
+    expect(screen.getByText('An always or a never is kept in halyard’s rules')).toBeTruthy()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Always allow commands starting “npm test”' }))
+    expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'allow', always: 'prefix' })
+    expect(
+      await within(needs).findByRole('article', { name: 'Run npm publish', description: 'Allowed Always · kept in halyard’s rules' }),
+    ).toBeTruthy()
+  })
+
+  it('denies from a permission’s card with what to do instead', async () => {
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...busy(), calls: [permission] })) })
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
+    await userEvent.click(within(needs).getByRole('button', { name: 'More answers' }))
+    // Kept for the person by the always-ask list, and offered no always by the runtime: the note alone.
+    expect(screen.getAllByRole('menuitem')).toHaveLength(1)
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Deny, and say what to do instead' }))
+    await userEvent.type(within(needs).getByRole('textbox', { name: 'Say what to do instead' }), 'Publish from CI{Enter}')
+    expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'reject', reason: 'Publish from CI' })
+    expect(
+      await within(needs).findByRole('article', { name: 'Run npm publish', description: 'Denied Once · Publish from CI' }),
+    ).toBeTruthy()
+  })
+
+  it('brings back a permission whose answer didn’t go through, with what went wrong', async () => {
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...busy(), calls: [permission] })) })
+    vi.mocked(client.answer).mockRejectedValueOnce(new ApiError({ reason: 'AttentionClosed', message: 'That call was already answered.' }))
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
+    await userEvent.click(within(needs).getByRole('button', { name: 'Allow once' }))
+    expect(await screen.findByText('That call was already answered.')).toBeTruthy()
+    expect(await within(needs).findByRole('button', { name: 'Allow once' })).toBeTruthy()
+    expect(within(needs).queryByText('Allowed')).toBeNull()
+  })
+
+  it('has only settings at the end of the bar: no counts and no agents', async () => {
+    const { client } = fakeClient({ getHome: vi.fn(async () => busy()) })
+    withServices(<Home />, client)
+    const projects = await screen.findByRole('complementary', { name: 'Projects' })
+    // The work in progress is in its project's row, which says only what is off: the stopped one and the one waiting.
+    expect(within(projects).getByText('1 stopped · 1 waiting')).toBeTruthy()
+    const settings = screen.getByRole('button', { name: 'Settings' })
+    const end = settings.parentElement!
+    expect(within(end).getAllByRole('button')).toHaveLength(1)
+    expect(within(end).queryByText(/running|need you|Claude Code|Codex|OpenCode/)).toBeNull()
+  })
+
+  it('keeps an answered line where it was once the runtime no longer lists its call, and says only what still waits', async () => {
+    const later: HomeCall = {
+      ...permission,
+      id: 'a8',
+      threadId: 'th8',
+      title: 'Run cargo build',
+      command: 'cargo build',
+      createdAt: '2026-10-07T09:20:00.000Z',
+      projectId: 'p1',
+    }
+    let calls: ReadonlyArray<HomeCall> = [permission, later]
+    const { client, emit } = fakeClient({ getHome: vi.fn(async () => ({ ...busy(), tasks: [], calls })) })
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
+    expect(screen.getByText('in halyard and meridian')).toBeTruthy()
+    await userEvent.click(
+      within(within(needs).getByRole('article', { name: 'Run npm publish' })).getByRole('button', { name: 'Allow once' }),
+    )
+    // The runtime has closed it: read again, the line stays first, where it was, and only meridian still waits.
+    calls = [later]
+    act(() => emit(changed('attention_request', 'a1', 'th3', 'p2')))
+    await waitFor(() => expect(screen.getByText('in meridian')).toBeTruthy())
+    expect(
+      within(needs)
+        .getAllByRole('article')
+        .map((line) => line.getAttribute('aria-describedby') === null),
+    ).toEqual([false, true])
+    expect(within(needs).getByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })).toBeTruthy()
+  })
+
+  it('lists a task with a call on its line alone, not again in its project, until the call is answered', async () => {
+    const one = busy()
+    const { client } = fakeClient({
+      getHome: vi.fn(async () => ({ ...one, calls: [{ ...permission, id: 'a7', threadId: 'th7', taskTitle: 'Waits on a call' }] })),
+    })
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
+    const projects = screen.getByRole('complementary', { name: 'Projects' })
+    expect(within(projects).getByText('1 stopped')).toBeTruthy()
+    await userEvent.click(within(needs).getByRole('button', { name: 'Allow once' }))
+    expect(await within(projects).findByText('1 stopped · 1 waiting')).toBeTruthy()
+  })
+
+  it('gathers what needs you under its project, says what is off in each, and opens what the loop did', async () => {
     const onTask = vi.fn()
     const onProject = vi.fn()
     const { client } = fakeClient({ getHome: vi.fn(async () => busy()) })
     withServices(<Home onTask={onTask} onProject={onProject} />, client)
-    const runningNow = await screen.findByRole('region', { name: /In progress/ })
-    expect(within(runningNow).getByText(/Waits for Claude Code, back at/)).toBeTruthy()
-    expect(within(runningNow).getByText('No agent is working on it')).toBeTruthy()
-    expect(within(runningNow).getByText('Waits on you')).toBeTruthy()
-    await userEvent.click(within(runningNow).getByRole('button', { name: 'Retry the call' }))
-    expect(onTask).toHaveBeenLastCalledWith('th1')
-
-    const since = screen.getByRole('region', { name: /Since you looked, the last day/ })
-    expect(within(since).getByText('Moved to Codex.')).toBeTruthy()
-    expect(within(since).getByText('Answered 3 permission asks')).toBeTruthy()
-    // Each opens the task it happened to, still on the home or not.
-    await userEvent.click(within(since).getByRole('button', { name: 'Implement finished' }))
+    const projects = await screen.findByRole('complementary', { name: 'Projects' })
+    // Only what is off is said under the project's name.
+    expect(within(projects).getByText('1 held for a reset')).toBeTruthy()
+    // What needs you is gathered under the project it is in, in the order the first came, and opens its task.
+    expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual(['halyard', 'meridian'])
+    const meridian = screen.getByRole('region', { name: 'meridian' })
+    await userEvent.click(within(meridian).getByRole('button', { name: 'Name it better' }))
     expect(onTask).toHaveBeenLastCalledWith('th5')
-    await userEvent.click(within(since).getByRole('button', { name: 'Review settled' }))
+    expect(within(meridian).queryByText('Ended on its branch')).toBeNull()
+
+    // What the loop did is one line, which opens.
+    await userEvent.click(screen.getByRole('button', { name: /things since you looked, the last day/ }))
+    expect(screen.getByText('Moved to Codex.')).toBeTruthy()
+    expect(screen.getByText('Answered 3 permission asks')).toBeTruthy()
+    // Each opens the task it happened to, still on the home or not.
+    await userEvent.click(screen.getByRole('button', { name: 'Implement finished' }))
+    expect(onTask).toHaveBeenLastCalledWith('th5')
+    await userEvent.click(screen.getByRole('button', { name: 'Review settled' }))
     expect(onTask).toHaveBeenLastCalledWith('thg')
 
-    const projects = await screen.findByRole('complementary', { name: 'Projects' })
     expect(within(projects).getByText('No tasks yet')).toBeTruthy()
-    await userEvent.click(within(projects).getByRole('button', { name: /halyard/ }))
+    await userEvent.click(within(projects).getByRole('button', { name: /^halyard/ }))
     expect(onProject).toHaveBeenCalledWith('p2')
   })
 
@@ -307,16 +387,15 @@ describe('the home', () => {
     const { client } = fakeClient({ getHome: vi.fn(async () => home({ projects: [halyard] })) })
     withServices(<Home onTalk={onTalk} />, client)
     expect(await screen.findByRole('heading', { name: 'Nothing in halyard yet' })).toBeTruthy()
-    expect(screen.queryByRole('region', { name: /In progress/ })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Talk to halyard’s coordinator' }))
     expect(onTalk).toHaveBeenCalledWith('p2')
     expect(within(screen.getByRole('complementary', { name: 'Projects' })).getByText('No tasks yet')).toBeTruthy()
   })
 
-  it('is all quiet once its projects have had work', async () => {
+  it('says nothing needs you once its projects have had work', async () => {
     const { client } = fakeClient({ getHome: vi.fn(async () => home()) })
     withServices(<Home />, client)
-    expect(await screen.findByRole('heading', { name: 'All quiet' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Nothing needs you' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Talk to/ })).toBeNull()
   })
 
@@ -380,6 +459,12 @@ describe('the home', () => {
     expect(lineOf(dealt, projects, now)).toMatchObject({ icon: 'clock', what: 'Went quiet.', detail: 'Name it better' })
     expect(lineOf({ ...dealt, projectId: 'gone' }, projects, now)).toBeUndefined()
     expect(lineOf({ kind: 'answered', id: 'a', at, count: 1 }, projects, now)).toMatchObject({ what: 'Answered 1 permission ask' })
+    expect(lineOf({ kind: 'answered', id: 'c', at, count: 1, by: 'coordinator' }, projects, now)).toMatchObject({
+      what: 'Coordinator answered 1 permission ask',
+    })
+    expect(lineOf({ kind: 'answered', id: 'c', at, count: 3, by: 'coordinator' }, projects, now)).toMatchObject({
+      what: 'Coordinator answered 3 permission asks',
+    })
   })
 
   it('draws each project in its ink', () => {

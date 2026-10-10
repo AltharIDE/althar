@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { ApiError, type AgentStatus, PAGE, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
+import { ApiError, type AgentStatus, type AlwaysScope, PAGE, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -70,7 +70,8 @@ export interface TaskModel {
   readonly reopen: () => Promise<void>
   /** Starts its plan now, while it waits to start. */
   readonly startPlan: (planId: string) => Promise<void>
-  readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string) => Promise<void>
+  /** Answers a call; with `always`, the answer is kept in the project's rules by that scope. */
+  readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string, always?: AlwaysScope) => Promise<boolean>
   /** Answers a step that needs the person. */
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
   /** Marks the task's draft pull request ready for review: the one at `url`, in a task of several. */
@@ -325,8 +326,24 @@ export const useTask = (threadId: string): TaskModel => {
     },
     reopen: () => onTask((taskId) => client.reopenTask(taskId)),
     startPlan: (planId) => act(() => client.startPlan(planId)),
-    answer: (attentionId, decision, reason) =>
-      act(() => client.answer({ attentionId, decision, ...(reason === undefined || reason === '' ? {} : { reason }) })),
+    answer: async (attentionId, decision, reason, always) => {
+      // Whether it went through: a call whose answer didn't is answerable again.
+      let through = true
+      await act(() =>
+        client
+          .answer({
+            attentionId,
+            decision,
+            ...(reason === undefined || reason === '' ? {} : { reason }),
+            ...(always === undefined ? {} : { always }),
+          })
+          .catch((failure: unknown) => {
+            through = false
+            throw failure
+          }),
+      )
+      return through
+    },
     answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
     markReady: (url) => act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id, url))),
     markAllReady: (urls) =>

@@ -509,7 +509,10 @@ describe('the start', () => {
     expect(host.grantDropped).toHaveBeenCalledTimes(1)
   })
 
-  it('opens a folder of several repositories with the ones the person keeps, and others they add', async () => {
+  it.each([
+    ['Ask me', 'ask'],
+    ['The coordinator decides', 'coordinator'],
+  ])('opens a folder of several repositories with the selected %s permission mode', async (label, mode) => {
     const onProject = vi.fn()
     const found = (name: string, at: string) => ({ path: `${at}/${name}`, folder: null, name, branch: 'main', remote: null })
     const readFolder = vi.fn(async (grant: string) =>
@@ -532,7 +535,7 @@ describe('the start', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Remove docs' }))
     await userEvent.click(screen.getByRole('button', { name: /Choose folders/ }))
     expect(await screen.findByText('tools')).toBeTruthy()
-    await userEvent.click(screen.getByRole('radio', { name: /Ask me/ }))
+    await userEvent.click(screen.getByRole('radio', { name: new RegExp(label) }))
     await userEvent.click(screen.getByRole('button', { name: 'Create project' }))
     await waitFor(() => expect(onProject).toHaveBeenCalledTimes(1))
     expect(client.openProject).toHaveBeenCalledWith('grant_picked', {
@@ -543,7 +546,7 @@ describe('the start', () => {
         { grant: 'grant_more', path: '/code/tools' },
       ],
     })
-    expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', permissions: 'ask' })
+    expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', permissions: mode })
   })
 
   it('says what went wrong forming a project, keeps at least one repository, and goes back when cancelled', async () => {

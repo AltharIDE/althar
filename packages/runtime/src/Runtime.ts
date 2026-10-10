@@ -11,6 +11,7 @@ import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { Live } from './Live'
 import { Permissions } from './Permissions'
+import { PermissionJudge } from './PermissionJudge'
 import { Policies } from './Policies'
 import { Projects } from './Projects'
 import { Coordinator } from './Coordinator'
@@ -62,7 +63,8 @@ export const layer = (options: RuntimeLayerOptions) => {
       SignIns.layer.pipe(Layer.provideMerge(Accounts.layer.pipe(Layer.provideMerge(Policies.layer.pipe(Layer.provideMerge(base)))))),
     ),
   )
-  const core = Layer.mergeAll(Projects.layer, Sessions.layer).pipe(Layer.provideMerge(Permissions.layer.pipe(Layer.provideMerge(able))))
+  const judging = PermissionJudge.layer.pipe(Layer.provideMerge(able))
+  const core = Layer.mergeAll(Projects.layer, Sessions.layer).pipe(Layer.provideMerge(Permissions.layer.pipe(Layer.provideMerge(judging))))
   // A task's pull request and issue, through the person's connections to code hosts and trackers.
   const linked = Layer.mergeAll(Changes.layer, Issues.layer).pipe(Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(core))))
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.

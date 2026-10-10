@@ -1,5 +1,5 @@
 import type { ProjectRepository } from '@althar/contracts'
-import { BackCrumb, ChangeTarget, RepositoryRole, TitleBar } from '@althar/ui'
+import { BackCrumb, ChangeTarget, RepositoryRole } from '@althar/ui'
 import { type ProjectRepository as RepositoryEntry, ProjectRepositories } from '@althar/ui/screens'
 
 import { shortFolder } from '../../shared/folders'
@@ -51,10 +51,10 @@ export const entryOf = (repository: ProjectRepository): RepositoryEntry => ({
 export function RepositoriesView({ model, onBack }: { model: RepositoriesModel; onBack: () => void }) {
   return (
     <div className={s.window}>
-      <TitleBar lights="none">
-        <BackCrumb to={model.project ?? text.back} onBack={onBack} />
-      </TitleBar>
       <main className={s.scroll}>
+        <div className={s.back}>
+          <BackCrumb to={model.project ?? text.back} onBack={onBack} />
+        </div>
         {model.repositories === null ? (
           model.error === null ? (
             <PartPending label={pendingText.page} />

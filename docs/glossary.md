@@ -40,8 +40,9 @@ say the right. When something new needs a name on screen, add it here first.
 | Call | attention request | Something only a person can decide. Violet. |
 | Needs you | attention requests addressed to you, and tasks ready to accept | The board lane, the count in the title bar, and the violet number on a project's tab (the home's tab counts every project). |
 | Tab | a project the window keeps open | One per project the person keeps open, at the top of the window, after the home's. It goes back to where in the project they last were. ⌘1 is the home, ⌘2 onwards the projects. |
-| Round the notch, In the menu bar | the edge (`main/edge.ts`) | Where Althar shows what needs you and what runs while you're in another app: an island round the notch on a Mac that has one, or Althar's mark in the menu bar, with a dot while something needs you. Either opens to the home in small, where a permission is answered in place. Settings calls the choice "While you're in another app", and offers it only with a notch. |
-| Permission | permission attention request | A call asking whether an agent may do something, such as run a command or change a file. Allow or Don't allow. |
+| Round the notch, In the menu bar | the edge (`main/edge.ts`) | Where Althar shows what needs you while you're in another app: an island round the notch on a Mac that has one, which is the notch alone until something needs you, or Althar's mark in the menu bar, with a dot while something needs you. Either opens to what needs you, where a permission is answered in place, with the work in progress counted in one line under it. Settings calls the choice "While you're in another app", and offers it only with a notch. |
+| Permission | permission attention request | A call asking whether an agent may do something, such as run a command or change a file. Allow it once or always, or don't: with what to do instead, or never (on the edge, once or not). Several at once stack, with Allow all. |
+| Allowed, Denied; Once, Always, Never | a permission answered on the home or the edge | An answered permission's line, which stays where it was, at its height, quiet, until you leave: its kind says Allowed or Denied, and where its answers were it says what you said (Once, Always or Never), then where an always or a never was kept ("kept in meridian's rules"), your note when you denied with one, or else which project it was in. |
 | Stuck | attention request at the end of the repair ladder | A task that can't finish without you. There is no Failed status. |
 | Ready to accept | task phase `ready` | Work that is done and waits for you to accept it. |
 | Queue, "Enter queues it; the lead reads it next" | `after_current` | What you write while the lead works. It waits for the lead's current turn to end. |
@@ -72,6 +73,9 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Project rules | execution policy, `ProjectRules` | When agents need a yes, what always asks, what is never allowed, how a task ends, how its branches and pull requests are named, what a usage limit does, and which accounts work runs on (ADR-013). |
 | Always ask me | `alwaysAsk` kinds, `ask` command rules | What waits for the person whoever would answer: kinds of request, and commands they named by how they start. |
 | Never | `never` kinds and command rules | What is refused without asking anyone, even with everything allowed. |
+| Always allowed | `alwaysAllow` kinds, `allow` command rules | What is let through without asking, short of what always asks or is never allowed: kinds, and commands by how they start or exactly. Where the coordinator decides, these answer before it is asked. Answering a permission with "always allow" adds one (ADR-018). |
+| Allow always, Never allow | an answer that keeps a rule, by its scope | An answer that is also kept in the project's rules: for this exact command, commands starting the same way, or the kind of request. Offered only where the rule would hold. |
+| Allowed by the project's rules | a decision a rule made | The quiet line under a turn for what an allow rule let through, opening to each command and its rule. |
 | Settled | terminal states | Calls answered, changes accepted, tasks abandoned. |
 
 ## Words the interface doesn't use

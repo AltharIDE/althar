@@ -76,6 +76,26 @@ export class AttentionClosed extends Schema.TaggedError<AttentionClosed>()('Atte
   attentionId: Schema.String,
 }) {}
 
+/** An allow rule for words the project's rules ask about or never allow, which come first (ADR-018): it would replace them, or do nothing. */
+export class RuleOnAnotherList extends Schema.TaggedError<RuleOnAnotherList>()('RuleOnAnotherList', {
+  pattern: Schema.String,
+  exact: Schema.Boolean,
+  list: Schema.Literals(['ask', 'never']),
+}) {}
+
+/** A change made against rules that have moved on since it was read: another change came first, and would be lost. */
+export class RulesChanged extends Schema.TaggedError<RulesChanged>()('RulesChanged', {
+  projectId: Schema.String,
+  revision: Schema.Number,
+  expected: Schema.Number,
+}) {}
+
+/** An "always" answer by a scope the request wasn't offered: no rule of it would hold (ADR-018). */
+export class AlwaysNotOffered extends Schema.TaggedError<AlwaysNotOffered>()('AlwaysNotOffered', {
+  attentionId: Schema.String,
+  scope: Schema.String,
+}) {}
+
 /** The message went to the agent before it could be taken back, or was taken back already. */
 export class AlreadyDelivered extends Schema.TaggedError<AlreadyDelivered>()('AlreadyDelivered', {
   itemId: Schema.String,

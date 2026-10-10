@@ -11,11 +11,8 @@ import {
   EdgeSheet,
   IconButton,
   Island,
-  Logo,
-  NeedCard,
-  NeedChange,
-  NeedCommand,
-  NeedOptions,
+  type IslandSaying,
+  NeedLine,
   NextRow,
   ProjectHead,
   ProjectTabs,
@@ -25,7 +22,6 @@ import {
   SettledRow,
   TaskLaunch,
   type LaunchStep,
-  TitleBar,
   Turn,
   Verdict,
   FindingState,
@@ -40,7 +36,7 @@ import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 // Prototype: the kit's demo world, read from its source. Ported, the site would keep its own copy.
 import { CALLS, NEXT, READY_TWO_REPOS, RUNNING as BOARD_RUNNING, SETTLED } from '../../../../../../packages/ui/src/fixtures/board'
 import { FROM_231, PLAN_432 } from '../../../../../../packages/ui/src/fixtures/coordinator'
-import { EDGE_NEEDS, EDGE_WORK, edgeRowOf, NOTCH } from '../../../../../../packages/ui/src/fixtures/edge'
+import { EDGE_NEEDS, EDGE_WORK, edgeLineOf, NOTCH } from '../../../../../../packages/ui/src/fixtures/edge'
 import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../../../../../../packages/ui/src/fixtures/home'
 import { MARKED } from '../../../../../../packages/ui/src/fixtures/marks'
 import { FINDINGS, PROJECT, reviewDoc, STEPS } from '../../../../../../packages/ui/src/fixtures/meridian'
@@ -56,15 +52,16 @@ import s from './app.module.css'
 
 const none = () => {}
 
-/* ---- the frame every window shares: the tabs, with the system's lights drawn ---- */
+/* ---- the bar every window shares: the tabs, with the system's lights drawn, and the screen's own controls at its end ---- */
 
 const TABS = MARKED.map((p) => ({ id: p.id, name: p.name, seed: p.id, ink: p.ink, running: p.running, yours: p.yours ? 1 : 0 }))
 
-export function Tabs({ current }: { current: string | null }) {
-  return <ProjectTabs tabs={TABS.slice(0, 3)} current={current} onSelect={none} onClose={none} yours={3} lights="drawn" />
+export function Tabs({ current, only = false, end }: { current: string | null; only?: boolean; end?: ReactNode }) {
+  const tabs = only ? TABS.filter((tab) => tab.id === current) : TABS.slice(0, 3)
+  return <ProjectTabs tabs={tabs} current={current} onSelect={none} onClose={none} yours={3} lights="drawn" end={end} />
 }
 
-/* ---- the home: what needs you across every project, what runs, what happened ---- */
+/* ---- the home: what needs you across every project in the middle, the projects beside it ---- */
 
 export function HomeWindow({
   className,
@@ -75,65 +72,63 @@ export function HomeWindow({
   className?: string
   style?: CSSProperties
   looked?: string
-  /** Laid out for a narrow window: the stream alone. */
+  /** Laid out for a narrow window: what needs you alone. */
   narrow?: boolean
 }) {
   const needs = [
-    <NeedCard
-      key="publish"
-      kind={PUBLISH.kind}
-      project={PUBLISH.project}
-      task={PUBLISH.task}
-      title={PUBLISH.title}
-      at={PUBLISH.at}
-      detail={<NeedCommand command={PUBLISH.command} agent={PUBLISH.agent} step={PUBLISH.step} />}
-      actions={
-        <>
-          <Button size="small">Deny</Button>
-          <Button size="small" variant="signal">
-            Allow once
-          </Button>
-        </>
-      }
-    />,
-    <NeedCard
-      key="accept"
-      kind={READY.kind}
-      project={READY.project}
-      task={READY.task}
-      title={READY.title}
-      at={READY.at}
-      detail={<NeedChange {...READY.change} />}
-      actions={<Button size="small">Review</Button>}
-    />,
-    <NeedCard
-      key="decision"
-      kind={DECISION.kind}
-      project={DECISION.project}
-      task={DECISION.task}
-      title={DECISION.title}
-      at={DECISION.at}
-      detail={<NeedOptions options={DECISION.options} />}
-      actions={<Button size="small">Decide</Button>}
-    />,
+    {
+      key: 'publish',
+      project: PUBLISH.project,
+      line: (
+        <NeedLine
+          kind={PUBLISH.kind}
+          project={PUBLISH.project}
+          task={PUBLISH.task}
+          title={PUBLISH.title}
+          command={PUBLISH.command}
+          actions={
+            <>
+              <Button size="small">Deny</Button>
+              <Button size="small" variant="signal">
+                Allow once
+              </Button>
+            </>
+          }
+        />
+      ),
+    },
+    {
+      key: 'accept',
+      project: READY.project,
+      line: (
+        <NeedLine
+          kind={READY.kind}
+          project={READY.project}
+          task={READY.task}
+          title={READY.title}
+          brief={`${READY.change.repo} #${READY.change.number} · checks passed · +${READY.change.add} −${READY.change.del}`}
+          actions={<Button size="small">Review</Button>}
+        />
+      ),
+    },
+    {
+      key: 'decision',
+      project: DECISION.project,
+      line: (
+        <NeedLine
+          kind={DECISION.kind}
+          project={DECISION.project}
+          task={DECISION.task}
+          title={DECISION.title}
+          brief={DECISION.options.map((option) => option.label).join(' or ')}
+          actions={<Button size="small">Decide</Button>}
+        />
+      ),
+    },
   ]
   return (
     <div className={`${s.window} ${narrow ? s.narrow : ''} ${className ?? ''}`} style={style}>
-      {!narrow && <Tabs current={null} />}
-      <TitleBar
-        lights="none"
-        end={
-          <>
-            <WorkStatus running={RUNNING.length} yours={3} />
-            <IconButton icon="gear" label="Settings" kbd="⌘," size="small" />
-          </>
-        }
-      >
-        <span className={s.brand}>
-          <Logo size={15} />
-          Althar
-        </span>
-      </TitleBar>
+      {!narrow && <Tabs current={null} end={<IconButton icon="gear" label="Settings" kbd="⌘," size="small" />} />}
       <div className={s.body}>
         <Home
           waiting={3}
@@ -142,7 +137,6 @@ export function HomeWindow({
           since={SINCE}
           looked={looked}
           projects={PROJECT_LIST}
-          onOpenTask={none}
           onOpenEvent={none}
           onOpenProject={none}
           onTalk={none}
@@ -258,18 +252,22 @@ export function ProjectWindow({
 }) {
   return (
     <div className={`${s.window} ${talkOnly ? s.talkOnly : ''} ${centered ? s.centered : ''} ${className ?? ''}`} style={style}>
-      {!talkOnly && <Tabs current="meridian" />}
-      <TitleBar
-        lights="none"
+      <Tabs
+        current="meridian"
+        only={talkOnly}
         end={
-          <>
-            {!talkOnly && <WorkStatus running={4} yours={2} />}
+          talkOnly ? (
             <ChromeButton icon="plus" label="New task" />
-          </>
+          ) : (
+            <>
+              <RoomSwitch value={centered ? Room.Talk : Room.Both} onChange={none} text={{ key: () => '' }} />
+              <WorkStatus yours={2} />
+              <ChromeButton icon="more" label="More for this project" compact />
+              <ChromeButton icon="plus" label="New task" />
+            </>
+          )
         }
-      >
-        <RoomSwitch value={talkOnly || centered ? Room.Talk : Room.Both} onChange={none} text={{ key: () => '' }} />
-      </TitleBar>
+      />
       <div className={s.rooms}>
         <div className={s.talk}>
           <ProjectHead title="Meridian" meta={meta} side={!centered} />
@@ -373,23 +371,18 @@ export function IslandOpen({
   open = true,
   saying,
   waiting = EDGE_NEEDS.length,
-  running = EDGE_WORK.length,
 }: {
   open?: boolean
-  saying?: { project: string; kind: string }
+  saying?: IslandSaying
   waiting?: number
-  running?: number
 }) {
   return (
-    <Island notch={NOTCH} waiting={waiting} running={running} open={open} onOpenChange={none} onOpenApp={none} saying={saying ?? null}>
-      {/* Touched up: the ink sheet doesn't yet set the code chip's paper (a task is open for the app). */}
+    <Island notch={NOTCH} waiting={waiting} open={open} onOpenChange={none} onOpenApp={none} saying={saying ?? null}>
       <EdgeSheet
         tone="ink"
-        style={{ '--n-4': 'rgba(255, 255, 255, 0.1)' } as CSSProperties}
         waiting={EDGE_NEEDS.length}
-        working={EDGE_WORK.length}
-        needs={EDGE_NEEDS.map((row) => edgeRowOf(row, none))}
-        work={EDGE_WORK.map((row) => edgeRowOf(row, none))}
+        needs={EDGE_NEEDS.map((call) => edgeLineOf(call, none))}
+        work={EDGE_WORK}
         onOpenApp={none}
       />
     </Island>

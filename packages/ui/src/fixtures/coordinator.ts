@@ -132,6 +132,16 @@ export const NEVER = [
 ] as const
 export const NEVER_ON = ['secrets', 'force', 'proddb'] as const
 
+/** What Meridian lets through without asking: what permissions answered with "always allow" kept. */
+export const ALWAYS_ALLOWED = [
+  { id: 'command:prefix:bun test', label: 'Commands starting “bun test”' },
+  { id: 'command:prefix:git status', label: 'Commands starting “git status”' },
+  {
+    id: 'command:exact:pnpm replay --env staging --from 2026-09-25 refunds',
+    label: 'Exactly “pnpm replay --env staging --from 2026-09-25 refunds”',
+  },
+]
+
 /** Who could lead task 432, and why the coordinator picked Opus. */
 export const LEAD_OPTIONS: LeadOption[] = [
   { model: OPUS, note: 'Recommended · led 8 tasks on Meridian, 7 merged after one review round' },
