@@ -123,7 +123,8 @@ export function DockView({
     const stuck = call.stuck
     return (
       <Dock label={label} name={callKindOf(call)} sub={`${call.taskTitle} · ${ago(call.createdAt, new Date(now))}`} call onClose={onClose}>
-        {stuck === null ? (
+        {/* A question is answered where it was asked: the task opens to it. */}
+        {call.kind === 'question' ? null : stuck === null ? (
           <PermissionCall request={call} project={project} onAnswer={model.answer} />
         ) : (
           <StuckCall

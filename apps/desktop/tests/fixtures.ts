@@ -308,6 +308,34 @@ export const items = {
       ...content,
     },
   }),
+  question: (content: Partial<Extract<ThreadItem, { kind: 'question' }>['content']> = {}, agentId = 'claude-code'): ThreadItem => ({
+    ...next(),
+    agentId,
+    kind: 'question',
+    content: {
+      attentionId: 'q1',
+      message: 'Which database?',
+      toolCallId: null,
+      fields: [
+        {
+          id: 'database',
+          question: 'Which database should the cache use?',
+          type: 'choice',
+          options: [
+            { value: 'postgres', label: 'Postgres', note: 'what production runs' },
+            { value: 'sqlite', label: 'SQLite' },
+          ],
+          multiple: false,
+          wordsField: 'database_custom',
+          required: false,
+        },
+      ],
+      state: 'open',
+      answers: null,
+      withdrawn: null,
+      ...content,
+    },
+  }),
   card: (content: TaskCardContent, id?: string): ThreadItem => ({
     ...next(),
     ...(id === undefined ? {} : { id }),
@@ -565,6 +593,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     send: vi.fn(async () => {}),
     takeBack: vi.fn(async () => {}),
     answer: vi.fn(async () => {}),
+    answerQuestion: vi.fn(async () => {}),
     getCoordinator: vi.fn(async () => coordinatorSnapshot()),
     startTask: vi.fn(async () => task),
     startPlan: vi.fn(async () => {}),

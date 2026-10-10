@@ -44,6 +44,8 @@ export const text = {
   stopped: 'No agent is working on it',
   allow: 'Allow',
   deny: 'Don’t allow',
+  /** What a question's card offers: to answer it, in its task. */
+  answer: 'Answer',
   merged: (name: string) => `${name} merged`,
   closed: (name: string) => `${name} closed`,
   abandoned: 'Abandoned',
@@ -206,6 +208,18 @@ export function BoardView({
 
 /** A call as its card on the board says it: a step that needs the person, or an approval. */
 export const callCardOf = (waiting: BoardCall, name: (id: string | null) => string) => {
+  // An agent's question, with its options where it asks one thing: answered where it was asked.
+  if (waiting.kind === 'question') {
+    const [only, ...more] = waiting.question?.fields ?? []
+    return {
+      kind: kindWords.question,
+      title: waiting.title,
+      options: only === undefined || more.length > 0 ? [] : only.options.map((option) => option.label),
+      from: waiting.taskTitle,
+      at: ago(waiting.createdAt),
+      text: { decide: text.answer },
+    }
+  }
   if (waiting.stuck !== null) {
     const stuck = waiting.stuck
     return {

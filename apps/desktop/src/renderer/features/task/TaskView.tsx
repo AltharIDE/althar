@@ -583,6 +583,7 @@ export function TaskView({
                 session={session}
                 project={snapshot.project.name}
                 onPassOn={(words) => void model.send(words)}
+                onAnswerQuestion={model.answerQuestion}
               />
             </ThreadShellProvider>
             {snapshot.attention.map((request) =>
@@ -598,7 +599,7 @@ export function TaskView({
               ) : null,
             )}
             <PermissionCalls
-              requests={snapshot.attention.filter((request) => request.kind === 'permission' || request.stuck === null)}
+              requests={snapshot.attention.filter((request) => request.kind === 'permission')}
               project={snapshot.project.name}
               onAnswer={model.answer}
             />

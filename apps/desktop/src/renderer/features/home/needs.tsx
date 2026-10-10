@@ -5,6 +5,7 @@ import { Button, type EdgeWork, NeedLine, type ProjectRef } from '@althar/ui'
 
 import { kindWords } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
+import { briefOf as questionBrief } from '../../shared/questions'
 import { text as stuckText } from '../task/StuckCall'
 
 /*
@@ -32,6 +33,8 @@ export const needText = {
   deny: 'Deny',
   look: 'Open',
   review: 'Review',
+  /** An agent's question, opened where it was asked to answer it. */
+  answer: 'Answer',
   /** A change on its branch alone, by its size. */
   onBranch: 'On its branch',
   branchSize: (files: number, add: number, del: number) => `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
@@ -152,6 +155,20 @@ export const needsOf = ({
         },
       ]
     const stuck = call.stuck
+    // An agent's question is answered where it was asked: its line says what it asks, and opens it there.
+    if (call.kind === 'question') {
+      const brief = call.question === undefined ? undefined : questionBrief(call.question)
+      return [
+        {
+          id: call.id,
+          threadId: call.threadId,
+          kind: kindWords.question,
+          project,
+          title: call.title,
+          ...(brief === undefined ? {} : { brief }),
+        },
+      ]
+    }
     return [
       stuck === null
         ? {
@@ -226,8 +243,8 @@ export function needLineOf(
       onOpen={open}
       actions={
         permission === undefined ? (
-          <Button size="small" onClick={open}>
-            {need.kind === kindWords.ready ? needText.review : needText.look}
+          <Button size="small" {...(need.kind === kindWords.question ? { variant: 'signal' as const } : {})} onClick={open}>
+            {need.kind === kindWords.ready ? needText.review : need.kind === kindWords.question ? needText.answer : needText.look}
           </Button>
         ) : answers !== undefined ? (
           answers(permission, need.project)

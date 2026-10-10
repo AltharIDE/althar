@@ -560,6 +560,9 @@ export class Queries extends Context.Service<
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id
             WHERE i.thread_id = ${threadId}
+              -- An agent's tool call that asks the person is the question it asks, which stands in its place.
+              AND NOT (i.kind = 'tool_call' AND EXISTS (SELECT 1 FROM thread_items q WHERE q.thread_id = i.thread_id AND q.kind = 'question'
+                AND q.provider_session_id = i.provider_session_id AND json_extract(q.content, '$.toolCallId') = i.tool_call_id))
               -- A message taken back takes no place on a page; read by id, it says it was taken back.
               AND ${where.itemId === undefined ? sql`(u.state IS NULL OR u.state <> 'withdrawn')` : sql`i.id = ${where.itemId}`}
               AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}

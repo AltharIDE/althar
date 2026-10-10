@@ -235,6 +235,7 @@ describe('the client', () => {
           Send: () => Effect.die('unused'),
           TakeBack: () => Effect.die('unused'),
           Answer: () => Effect.die('unused'),
+          AnswerQuestion: () => Effect.die('unused'),
           GetCoordinator: () => Effect.die('unused'),
           StartTask: () => Effect.die('unused'),
           StartPlan: () => Effect.die('unused'),

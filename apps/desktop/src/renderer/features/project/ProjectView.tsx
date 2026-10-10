@@ -381,6 +381,7 @@ export function ProjectView({
                       session={session}
                       card={(card) => <Card card={card} actions={actions} />}
                       queued={text.queued}
+                      onAnswerQuestion={model.answerQuestion}
                     />
                   </ThreadShellProvider>
                 </Thread>
