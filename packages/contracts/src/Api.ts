@@ -1228,8 +1228,9 @@ export const Api = RpcGroup.make(
     {
       taskId: Schema.String,
       agentId: Schema.optional(Schema.String),
-      model: Schema.optional(Schema.String),
-      effort: Schema.optional(Schema.String),
+      /** Its model and effort: the agent's own where null or left out. */
+      model: Schema.optional(Schema.NullOr(Schema.String)),
+      effort: Schema.optional(Schema.NullOr(Schema.String)),
     },
     Schema.Void,
   ),
