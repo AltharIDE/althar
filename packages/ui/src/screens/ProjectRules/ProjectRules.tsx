@@ -59,9 +59,9 @@ export const projectRulesText: ProjectRulesText = {
       title: 'Allow, except what you keep',
       note: 'Agents carry on without stopping. What “Always ask me” lists waits for you; what “Never” lists is refused.',
     },
-    [PermissionPolicy.Lead]: {
-      title: 'The agent in charge decides',
-      note: 'Steps ask the lead. It allows what the task needs and passes the rest to you.',
+    [PermissionPolicy.Coordinator]: {
+      title: 'The coordinator decides',
+      note: 'The coordinator allows or denies requests within the project’s rules, with a reason. Anything it can’t decide waits for you.',
     },
     [PermissionPolicy.AllowAll]: { title: 'Allow everything', note: 'Nothing asks. Every request is still recorded on its task.' },
     [PermissionPolicy.Ask]: { title: 'Ask me', note: 'Anything no rule covers waits for you.' },
@@ -125,7 +125,7 @@ export const projectRulesText: ProjectRulesText = {
   foot: 'Graph changes inside a run’s budget apply at once, with 10 seconds to undo. Changes beyond it always ask.',
 }
 
-const PERMISSIONS = [PermissionPolicy.Lead, PermissionPolicy.AllowAll, PermissionPolicy.Ask] as const
+const PERMISSIONS = [PermissionPolicy.Coordinator, PermissionPolicy.AllowAll, PermissionPolicy.Ask] as const
 type Rotation = 'first' | 'next'
 const REACHES = [FindingsReach.Stuck, FindingsReach.All, FindingsReach.Learn] as const
 const ENDS = [TaskEnd.DraftPr, TaskEnd.ReadyPr, TaskEnd.PushOnly] as const
@@ -206,7 +206,7 @@ export function ProjectRules({
   project,
   permissionOptions = PERMISSIONS,
   permissions: permissionsProp,
-  defaultPermissions = PermissionPolicy.Lead,
+  defaultPermissions = PermissionPolicy.Coordinator,
   onPermissionsChange,
   always,
   alwaysOn: alwaysOnProp,

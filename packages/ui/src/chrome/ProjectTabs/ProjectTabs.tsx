@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { Logo } from '../../foundations/Logo/Logo'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
@@ -12,18 +12,19 @@ import { ChromeButton } from '../ChromeButton/ChromeButton'
 import s from './ProjectTabs.module.css'
 
 /*
- * The top of the window: a tab for the home, then one for each project the
- * person keeps open, so going from one project to another is one press.
- * Each project's tab carries its mark, with the running arc while work runs
- * there, and a violet dot after its name while anything there waits on you; the home's has the dot while anything waits in any project. How many is
- * read out, not shown. The tab that has the window
- * joins the screen's own bar below it. A project's tab closes from its ×,
- * and the + opens one of the other projects, or a folder as a new one.
- * However many are open, the home's tab stays put; the others give way
- * together, down to their marks, and past that they scroll, by wheel too,
- * fading at the side where more are, with a menu of them all. On
- * macOS the system draws the traffic lights over its start, so it keeps
- * their space, as the TitleBar does when it is the top.
+ * The top of the window, and its one bar: a tab for the home, then one for
+ * each project the person keeps open, so going from one project to another
+ * is one press; at the other end, what the screen under it puts there (its
+ * views, what waits on you, its menu). Each project's tab carries its mark,
+ * with the running arc while work runs there, and a violet dot after its
+ * name while anything there waits on you; the home's has the dot while
+ * anything waits in any project. How many is read out, not shown. Each tab
+ * is as wide as its name; the × shows on the one pointed at. The + opens one
+ * of the other projects, or a folder as a new one. However many are open,
+ * the home's tab stays put; the others give way together, down to their
+ * marks, and past that they scroll, by wheel too, fading at the side where
+ * more are, with a menu of them all. On macOS the system draws the traffic
+ * lights over its start, so it keeps their space.
  */
 
 /** A project as its tab shows it. */
@@ -82,6 +83,8 @@ export type ProjectTabsProps = RootProps<
     onOpen?: (id: string) => void
     /** Opens a folder as a new project. Without it or any others to open, there is no +. */
     onOpenFolder?: () => void
+    /** At the far end: what the screen under the tabs puts in the bar. */
+    end?: ReactNode
     /** space: leave room for the system's lights. drawn: draw stand-ins. none: no room. */
     lights?: 'space' | 'drawn' | 'none'
     text?: Partial<ProjectTabsText>
@@ -108,6 +111,7 @@ export function ProjectTabs({
   others = [],
   onOpen,
   onOpenFolder,
+  end,
   lights = 'space',
   className,
   text,
@@ -226,6 +230,7 @@ export function ProjectTabs({
           </Menu>
         )}
       </nav>
+      {end !== undefined && <div className={s.end}>{end}</div>}
     </header>
   )
 }

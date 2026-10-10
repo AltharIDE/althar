@@ -29,7 +29,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The defaults: the lead answers, the risky few always wait for you. */
+/** The defaults: the coordinator answers, the risky few always wait for you. */
 export const Default: Story = {}
 
 /** Turning a rule on, then allowing everything, which sets the always-ask list aside. */
@@ -104,7 +104,7 @@ export const AddingARule: Story = {
  */
 export const AsAltharHasIt: Story = {
   args: {
-    permissionOptions: [PermissionPolicy.Rules, PermissionPolicy.Ask, PermissionPolicy.AllowAll],
+    permissionOptions: [PermissionPolicy.Rules, PermissionPolicy.Coordinator, PermissionPolicy.Ask, PermissionPolicy.AllowAll],
     defaultPermissions: PermissionPolicy.Rules,
     limitOptions: [LimitPolicy.Move, LimitPolicy.Wait],
     onReachChange: undefined,
@@ -199,4 +199,15 @@ export const AllStates: Story = {
       ]}
     />
   ),
+}
+
+/** The coordinator decides; explicit always-ask rules remain enabled. */
+export const CoordinatorDecides: Story = {
+  args: { defaultPermissions: PermissionPolicy.Ask },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('radio', { name: /The coordinator decides/ }))
+    await expect(args.onPermissionsChange).toHaveBeenCalledWith(PermissionPolicy.Coordinator)
+    await expect(c.getByRole('checkbox', { name: /Pushing to main/ })).toBeEnabled()
+  },
 }

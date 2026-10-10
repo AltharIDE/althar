@@ -125,6 +125,13 @@ export interface AgentDefinition {
    */
   readonly sessionMeta?: (role?: 'lead' | 'reader') => Readonly<Record<string, unknown>>
   /**
+   * Verified session settings that remove the agent's built-in tools, disable
+   * user hooks and exclude its own MCP servers. Without this capability the
+   * runtime asks the person instead of starting a permission judge. A read-only
+   * sandbox is not sufficient: it can still read credentials outside the cwd.
+   */
+  readonly permissionJudge?: { readonly sessionMeta: Readonly<Record<string, unknown>> }
+  /**
    * What its environment adds, as it starts somewhere, to keep the person's
    * own MCP servers out of its sessions (ownTools.ts); without it, it loads
    * only the servers it is given.
@@ -302,6 +309,20 @@ const claudeReads = {
   },
 }
 
+// claude-agent-acp 0.88.0 forwards this explicit tools array to the SDK.
+// Removing the tool set also removes Read/Grep/Glob, which never ask in plan mode.
+const claudeJudges = {
+  claudeCode: {
+    options: {
+      tools: [],
+      settingSources: [],
+      allowDangerouslySkipPermissions: false,
+      strictMcpConfig: true,
+      settings: { disableAllHooks: true },
+    },
+  },
+}
+
 export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
   'claude-code': {
     id: 'claude-code',
@@ -335,6 +356,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     cli: { name: 'claude', bundled: () => bundledClaude() },
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
     sessionMeta: (role = 'lead') => (role === 'reader' ? claudeReads : claudeAsks),
+    permissionJudge: { sessionMeta: claudeJudges },
     knownGaps: [
       'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Althar always sets the mode.',
       "Hooks in the repository's or the user's settings run as code on the Mac whenever Claude uses a tool; they cannot approve past the ask rules.",

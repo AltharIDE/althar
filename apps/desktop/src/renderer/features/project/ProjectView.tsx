@@ -15,8 +15,6 @@ import {
   ThreadMeasure,
   ThreadShellProvider,
   ThreadSkeleton,
-  MenuItem,
-  MenuSeparator,
   ProjectHead,
 } from '@althar/ui'
 
@@ -40,7 +38,7 @@ import { ConnectionsView, text as connectionsText } from '../connections/Connect
 import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
 import { NewTask } from './NewTask'
-import { ProjectDialogs, ProjectItems, ProjectMenu, type ProjectMenuActions } from './ProjectMenu'
+import { ProjectDialogs, ProjectMenu, type ProjectMenuActions } from './ProjectMenu'
 import { nextRoom, ProjectBar } from './ProjectBar'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
@@ -76,7 +74,6 @@ export const text = {
   dismiss: 'Dismiss',
   boardFailed: 'Althar couldn’t read the board.',
   boardReading: 'Reading the board',
-  connect: (host: string) => `Connect ${host}`,
   newTask: 'New task',
   width: 'Width of the conversation',
   /** Where a project of several repositories is: how many, and their names. */
@@ -153,7 +150,6 @@ export function ProjectView({
   const both = useBothWidth()
   const lanes = board.board === null ? null : lanesOf(board.board)
   const yours = lanes === null ? 0 : yoursOf(lanes)
-  const working = lanes === null ? 0 : lanes.running.filter((task) => task.phase !== 'stopped').length
   // b steps through the views, when nothing is being typed; ⌘ and a number belongs to the window's tabs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -292,11 +288,20 @@ export function ProjectView({
       <ProjectBar
         room={room}
         onRoom={setRoom}
-        working={lanes === null ? null : working}
         yours={lanes === null ? null : yours}
         {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask) })}
         onYours={openYours}
-        {...(menu === undefined ? {} : { menu: <ProjectMenu {...menu} /> })}
+        {...(menu === undefined
+          ? {}
+          : {
+              menu: (
+                <ProjectMenu
+                  {...menu}
+                  // Pushing needs no connection, so connecting the host waits in the menu until it's wanted.
+                  {...(host === null || host.connected ? {} : { connect: { host: host.name, onConnect: () => setPanel('connections') } })}
+                />
+              ),
+            })}
         newTask={panel === 'task'}
         onNewTask={() => {
           if (room === Room.Board) setRoom(Room.Both)
@@ -306,29 +311,7 @@ export function ProjectView({
       <div className={room === Room.Both ? `${s.rooms} ${s.both}` : s.rooms}>
         {talking && (
           <div className={s.talk} style={room === Room.Both ? ({ '--talk-width': `${both.width}px` } as CSSProperties) : undefined}>
-            <ProjectHead
-              title={name}
-              meta={whereOf(model.project)}
-              side={room === Room.Both}
-              menu={
-                <>
-                  <MenuItem icon="plus" onSelect={() => setPanel('task')}>
-                    {text.newTask}
-                  </MenuItem>
-                  {host !== null && !host.connected && (
-                    <MenuItem icon="plug" onSelect={() => setPanel('connections')}>
-                      {text.connect(host.name)}
-                    </MenuItem>
-                  )}
-                  {menu && (
-                    <>
-                      <MenuSeparator />
-                      <ProjectItems {...menu} />
-                    </>
-                  )}
-                </>
-              }
-            />
+            <ProjectHead title={name} meta={whereOf(model.project)} side={room === Room.Both} />
             {coordinator === null ? (
               model.error === null ? (
                 <div className={s.reading}>

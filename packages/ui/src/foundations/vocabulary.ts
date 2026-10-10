@@ -208,8 +208,8 @@ export enum TaskEnd {
 export enum PermissionPolicy {
   /** What no rule keeps is allowed: the always-ask list waits for you, the never list is refused. */
   Rules = 'rules',
-  /** The lead allows what the task needs and passes the rest to you. */
-  Lead = 'lead',
+  /** The coordinator decides within the project’s rules and asks you when unsure. */
+  Coordinator = 'coordinator',
   /** Nothing asks; every request is still recorded. */
   AllowAll = 'all',
   /** Anything no rule covers waits for you. */
@@ -319,16 +319,6 @@ export enum BoardLane {
 }
 
 /** Why a planned task has not started. */
-/** The home's sections, in the order you deal with them. */
-export enum HomeLane {
-  /** Calls across every project that wait on you. */
-  Yours = 'you',
-  /** Tasks running in every project. */
-  Running = 'running',
-  /** What the loop did since you last looked: pull requests opened, limits moved, stalls restarted. */
-  Since = 'since',
-}
-
 export enum Wait {
   /** It starts after another task. */
   After = 'after',

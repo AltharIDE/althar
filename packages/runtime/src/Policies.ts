@@ -22,8 +22,8 @@ export type UsageLimit = 'move' | 'wait'
 
 export const ProjectRules = Schema.Struct({
   source: Schema.String,
-  /** What happens to what no rule keeps (rules.ts): allowed, asked about, or everything allowed. Allowed without it. */
-  permissions: Schema.optional(Schema.Literals(['rules', 'ask', 'allow'])),
+  /** What no rule keeps: allowed, judged by the coordinator, or asked about; allow mode overrides always-ask. Allowed without it. */
+  permissions: Schema.optional(Schema.Literals(['rules', 'coordinator', 'ask', 'allow'])),
   /** The kinds of request that always ask the person, by id (rules.ts). The MVP's first revisions held them in words, which read as every kind. */
   alwaysAsk: Schema.Array(Schema.String),
   /** The kinds refused outright, by id. */

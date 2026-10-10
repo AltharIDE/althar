@@ -26,6 +26,7 @@ const definition = (real: AgentDefinition): AgentDefinition => ({
     shared: () => [],
   },
   permissions: codexLikeMeanings,
+  permissionJudge: { sessionMeta: { fake: { tools: [] } } },
 })
 
 /**

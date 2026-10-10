@@ -55,10 +55,11 @@ export interface PermissionRequest {
   readonly options: ReadonlyArray<PermissionOption>
 }
 
-/** Althar's decision on a permission request, from the project's rules. `reason` is told to the agent when a rejection stops its turn. */
+/** Althar's permission decision. Coordinator denials are explained at the next turn boundary, even when the provider's rejection carries on. */
 export interface PermissionDecision {
   readonly decision: 'allow' | 'reject'
   readonly reason?: string
+  readonly decidedBy?: 'coordinator'
 }
 
 /** What was sent back for a decision: an option (and how far it reaches), or a cancelled request. */
@@ -246,9 +247,10 @@ const mcpServer = (server: McpServer): acp.McpServer =>
 interface Turn {
   readonly queue: Queue.Queue<SessionEvent, Failure | Cause.Done>
   readonly done: Deferred.Deferred<void>
-  /** Set when a rejection stopped the turn: the reason it is resumed with. */
+  /** A stopping rejection or coordinator denial to explain at the next turn boundary. */
   resumeWith: string | undefined
   resumes: number
+  cancelled: boolean
   failure: Classified | undefined
 }
 
@@ -322,13 +324,13 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         settled = true
         const { decision, reason } = decided
         const chosen = answerFor(request.options, decision, options.permissions)
-        const stops = chosen.stopsTurn && decision === 'reject'
+        const explain = decision === 'reject' && (chosen.stopsTurn || decided.decidedBy === 'coordinator')
         receive(params.sessionId, {
           _tag: 'Event',
           event: { _tag: 'PermissionAnswered', toolCallId: request.toolCallId, decision, ...chosen },
-          ...(stops
+          ...(explain
             ? {
-                resumeWith: `${request.title} was not allowed by the project's rules${reason === undefined ? '' : `: ${reason}`}. Carry on without it.`,
+                resumeWith: `${request.title} was not allowed by ${decided.decidedBy === 'coordinator' ? 'the coordinator' : "the project's rules"}${reason === undefined ? '' : `: ${reason}`}. Carry on without it.`,
               }
             : {}),
         })
@@ -615,10 +617,10 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
             )
           })
 
-        /** A prompt has stopped: resume it if a rejection stopped it, or end the turn. */
+        /** Explain pending refusals before ending the turn. ACP's permission response has no portable reason field. */
         const stopped = (turn: Turn, response: acp.PromptResponse) =>
           Effect.gen(function* () {
-            if (turn.resumeWith !== undefined && turn.resumes < MAX_RESUMES) {
+            if (!turn.cancelled && turn.resumeWith !== undefined && turn.resumes < MAX_RESUMES) {
               const reason = turn.resumeWith
               turn.resumeWith = undefined
               turn.resumes += 1
@@ -652,7 +654,11 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                   for (const event of yield* interpret(inbound.update)) yield* deliver(event)
                   return
                 case 'Event':
-                  if (turn !== undefined && inbound.resumeWith !== undefined) turn.resumeWith = inbound.resumeWith
+                  if (turn !== undefined && inbound.resumeWith !== undefined)
+                    turn.resumeWith = [turn.resumeWith, inbound.resumeWith]
+                      .filter((line) => line !== undefined)
+                      .join('\n')
+                      .slice(0, 8000)
                   return yield* deliver(inbound.event)
                 case 'Stopped':
                   if (turn !== undefined) yield* stopped(turn, inbound.response)
@@ -675,6 +681,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                 done: yield* Deferred.make<void>(),
                 resumeWith: undefined,
                 resumes: 0,
+                cancelled: false,
                 failure: undefined,
               }
               const idle = yield* Ref.modify(state.current, (running) =>
@@ -686,12 +693,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
             }),
           )
 
-        const cancel = Effect.andThen(
-          call('session/cancel', () => connection.agent.notify(acp.methods.agent.session.cancel, { sessionId })),
-          Effect.sync(() => {
-            for (const drop of waiting.get(sessionId) ?? []) drop()
-          }),
-        )
+        const cancel = Effect.gen(function* () {
+          const turn = yield* Ref.get(state.current)
+          if (Option.isSome(turn)) turn.value.cancelled = true
+          yield* call('session/cancel', () => connection.agent.notify(acp.methods.agent.session.cancel, { sessionId }))
+          for (const drop of waiting.get(sessionId) ?? []) drop()
+        })
 
         const interrupt = Effect.gen(function* () {
           const turn = yield* Ref.get(state.current)

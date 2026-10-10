@@ -1,5 +1,5 @@
 import { type AgentStatus, type CommandRule, fillPattern, type ProjectRulesView, type RuleKind } from '@althar/contracts'
-import { BackCrumb, LimitPolicy, PermissionPolicy, TaskEnd, TitleBar } from '@althar/ui'
+import { BackCrumb, LimitPolicy, PermissionPolicy, TaskEnd } from '@althar/ui'
 import { ProjectRules, projectRulesText } from '@althar/ui/screens'
 
 import { PartPending, pendingText } from '../../shared/Pending'
@@ -65,9 +65,20 @@ const KINDS = Object.keys(text.kinds) as ReadonlyArray<RuleKind>
 
 const toEnd = { draft: TaskEnd.DraftPr, ready: TaskEnd.ReadyPr, none: TaskEnd.PushOnly } as const
 
-const toPolicy = { rules: PermissionPolicy.Rules, ask: PermissionPolicy.Ask, allow: PermissionPolicy.AllowAll } as const
+const toPolicy = {
+  rules: PermissionPolicy.Rules,
+  coordinator: PermissionPolicy.Coordinator,
+  ask: PermissionPolicy.Ask,
+  allow: PermissionPolicy.AllowAll,
+} as const
 const fromPolicy = (policy: PermissionPolicy): ProjectRulesView['permissions'] =>
-  policy === PermissionPolicy.Ask ? 'ask' : policy === PermissionPolicy.AllowAll ? 'allow' : 'rules'
+  policy === PermissionPolicy.Coordinator
+    ? 'coordinator'
+    : policy === PermissionPolicy.Ask
+      ? 'ask'
+      : policy === PermissionPolicy.AllowAll
+        ? 'allow'
+        : 'rules'
 
 /** A command rule's id in the lists. */
 const commandId = (pattern: string) => `command:${pattern}`
@@ -113,10 +124,10 @@ export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => 
   const { rules } = model
   return (
     <div className={s.window}>
-      <TitleBar lights="none">
-        <BackCrumb to={model.project ?? text.back} onBack={onBack} />
-      </TitleBar>
       <main className={s.scroll}>
+        <div className={s.back}>
+          <BackCrumb to={model.project ?? text.back} onBack={onBack} />
+        </div>
         {model.error !== null && (
           <p className={s.error} role="alert">
             {model.error}
@@ -127,7 +138,7 @@ export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => 
         ) : (
           <ProjectRules
             project={model.project ?? ''}
-            permissionOptions={[PermissionPolicy.Rules, PermissionPolicy.Ask, PermissionPolicy.AllowAll]}
+            permissionOptions={[PermissionPolicy.Rules, PermissionPolicy.Coordinator, PermissionPolicy.Ask, PermissionPolicy.AllowAll]}
             permissions={toPolicy[rules.permissions]}
             onPermissionsChange={(policy) => model.change({ permissions: fromPolicy(policy) })}
             always={itemsOf(rules.commands, 'ask')}
