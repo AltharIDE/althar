@@ -42,6 +42,7 @@ export const text = {
     asked: 'Review asked for changes',
     settled: 'Review settled',
     answered: (n: number) => (n === 1 ? 'Answered 1 permission ask' : `Answered ${n} permission asks`),
+    coordinatorAnswered: (n: number) => (n === 1 ? 'Coordinator answered 1 permission ask' : `Coordinator answered ${n} permission asks`),
     withinRules: 'within the projects’ rules',
     since: (at: string) => `since ${at}`,
   },
@@ -68,7 +69,12 @@ export const lineOf = (
 ): Omit<HomeLine, 'id'> | undefined => {
   const t = text.event
   if (event.kind === 'answered')
-    return { icon: 'lock', what: t.answered(event.count), detail: t.withinRules, at: t.since(clock(event.at, now)) }
+    return {
+      icon: 'lock',
+      what: event.by === 'coordinator' ? t.coordinatorAnswered(event.count) : t.answered(event.count),
+      detail: t.withinRules,
+      at: t.since(clock(event.at, now)),
+    }
   const project = projects.get(event.projectId)
   if (project === undefined) return undefined
   // The task is named by its title, quieter, after what happened to it.

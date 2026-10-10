@@ -7,6 +7,7 @@ import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from './Changes'
+import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { Agents } from './Config'
 import { NotFound } from './errors'
@@ -121,7 +122,6 @@ export class Coordinator extends Context.Service<
       const sessions = yield* Sessions
       const projects = yield* Projects
       const plans = yield* Plans
-      const signIns = yield* SignIns
       const toolServer = yield* ToolServer
       const changes = yield* Changes
       const issues = yield* Issues
@@ -136,33 +136,14 @@ export class Coordinator extends Context.Service<
           return row === undefined ? yield* new NotFound({ kind: 'project', id: projectId }) : row.id
         })
 
-      /** Whatever the person used last: the coordinator's own last agent here, or the last agent anywhere. */
       const suggested = (projectId: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const threadId = yield* thread(projectId)
-          const [here] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
-            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC LIMIT 1`
-          const [anywhere] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
-            SELECT agent_id, model, effort FROM provider_sessions ORDER BY started_at DESC LIMIT 1`
-          const last = here ?? anywhere
-          const agentId =
-            last !== undefined && agents.list.some((entry) => entry.definition.id === last.agentId)
-              ? last.agentId
-              : agents.list[0]?.definition.id
-          if (agentId === undefined) return null
-          const status = yield* signIns.of(agentId)
-          // The last model used, unless the person switched it off since.
-          const blocked = yield* blockedModelsOf(agentId)
-          const again = last?.agentId === agentId && (last.model === null || !blocked.includes(last.model)) ? last : null
-          return {
-            agentId,
-            agentName: nameOf(agentId),
-            model: again?.model ?? null,
-            effort: again?.effort ?? null,
-            available: status !== 'signed_out',
-          } satisfies Suggested
-        })
+        suggestedCoordinator(projectId).pipe(
+          Effect.map((choice) => {
+            if (choice === null) return null
+            const { threadId: _threadId, ...pick } = choice
+            return pick
+          }),
+        )
 
       const say = (input: {
         readonly envelope: CommandEnvelope

@@ -93,10 +93,9 @@ Decided in [ADR-013](decisions/013-project-rules.md).
   - Leaning: with the cloud, alongside rules an organisation manages.
 - [ ] **An allowlist for "Ask me".** Asking about everything, a person will
   want some commands let through, as Cursor's and Roo's allowlists do.
-- [ ] **The lead decides.** Other tools' modes with a model as judge, such as
-  Claude Code's auto, Codex's auto-review and VS Code's Assisted, are this
-  row. Whether the lead answers or a separate cheaper model does is still
-  open (05).
+- [x] **Who judges permission requests.** The coordinator, using its agent
+  and model in a fresh read-only session, with task context and human fallback.
+  Decided in [ADR-019](decisions/019-coordinator-judges-permissions.md).
 - [ ] **The network.** Rules on domains, as Codex's network proxy and Claude
   Code's `WebFetch(domain:…)` have.
 
@@ -438,19 +437,10 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   and ask less as you agree with the lead's calls? Open: what counts as
   agreement, whether it is per project or per kind of decision, and how you see
   where it stands ("6 of 10 so far"). We don't yet know how to build it.
-- [ ] **Permissions: who answers.** Leaning: the lead answers permission
-  requests from its steps, inside the project's rules. Only what the rules keep
-  for you arrives as a card. Open:
-  - Does the lead answer, or a separate cheap judge model? The lead is busy and
-    expensive; a judge has no task context.
-  - ~~How does this map onto ACP?~~ Settled: every session starts in a mode
-    that asks, and Althar answers `session/request_permission` from the
-    rules. In the MVP the lead doesn't answer yet.
-    [ADR-007](decisions/007-permission-requests-reach-althar.md).
-  - ~~What goes on the default always-ask list?~~ Settled for now: pushes to
-    the default branch, force pushes, merges, deploy commands, and writes
-    outside the task's worktree.
-  *Prototype:* Project → "Project rules", and "Allowed without you".
+- [x] **Permissions: who answers.** The coordinator answers requests outside
+  explicit always-ask and never rules when its mode is selected. Its failures
+  and uncertainty reach the person; readers remain read-only. See
+  [ADR-019](decisions/019-coordinator-judges-permissions.md).
 - [ ] **Project rules: when and where they are set.** Leaning, as mocked in
   the kit's NewProject: creating a project asks one thing, who answers when
   agents need a yes (default "The agent in charge decides"), and every other rule starts

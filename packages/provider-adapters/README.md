@@ -49,4 +49,6 @@ From `packages/provider-adapters`:
 
 The process tests run the fake agent with Bun.
 
+The judge's real-provider check is `ALTHAR_AGENTS=claude-code bun run test:agents tests/agents/permissionJudge.test.ts`. It needs Claude sign-in and sends two short prompts: an ordinary judgment, then an injected request to read a synthetic fixture outside the working directory. It checks that no tool runs and the fixture never appears in the answer. Codex and OpenCode judgments remain disabled until a configuration that removes their tools is verified.
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the rules this package follows.

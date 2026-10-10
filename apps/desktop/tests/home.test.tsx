@@ -381,6 +381,12 @@ describe('the home', () => {
     expect(lineOf(dealt, projects, now)).toMatchObject({ icon: 'clock', what: 'Went quiet.', detail: 'Name it better' })
     expect(lineOf({ ...dealt, projectId: 'gone' }, projects, now)).toBeUndefined()
     expect(lineOf({ kind: 'answered', id: 'a', at, count: 1 }, projects, now)).toMatchObject({ what: 'Answered 1 permission ask' })
+    expect(lineOf({ kind: 'answered', id: 'c', at, count: 1, by: 'coordinator' }, projects, now)).toMatchObject({
+      what: 'Coordinator answered 1 permission ask',
+    })
+    expect(lineOf({ kind: 'answered', id: 'c', at, count: 3, by: 'coordinator' }, projects, now)).toMatchObject({
+      what: 'Coordinator answered 3 permission asks',
+    })
   })
 
   it('draws each project in its ink', () => {
