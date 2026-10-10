@@ -76,7 +76,7 @@ test('stops, resumes, abandons and reopens a task from its menu, and restarts a 
     await expect(page.getByRole('menu')).toHaveCount(0)
 
     // Back in the project, a plan the coordinator proposes, held, counts down again when let go.
-    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await say(page, 'Add a retry to the checkout call. [coordinator:plan] [lead:finish]')
     await expect(page.getByText(/^Starts in \d+s$/)).toBeVisible({ timeout: 20_000 })
