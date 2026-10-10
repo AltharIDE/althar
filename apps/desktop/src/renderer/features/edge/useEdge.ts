@@ -11,6 +11,7 @@ import { type Feed, HOME, HOME_SHOWN } from '../../data/feed'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { kindWords } from '../../shared/calls'
+import { refOf } from '../home/HomeView'
 
 /*
  * The edge's view model: across every project, what waits on the person and
@@ -21,7 +22,7 @@ import { kindWords } from '../../shared/calls'
  * home; one whose answer didn't go through comes back, with what went wrong.
  */
 
-/** How long a call that just came in is said beside the notch, and rings quicker. */
+/** How long a call that just came in is said beside the notch. */
 export const SAY_FOR = 4_200
 /** How long changes are gathered before the edge reads again. */
 const GATHER = 120
@@ -58,8 +59,6 @@ export interface EdgeModel {
   readonly home: HomeSnapshot | null
   /** The agents on this Mac, for their names. */
   readonly agents: ReadonlyArray<{ readonly id: string; readonly name: string }>
-  /** The call or ready task that has just come in. */
-  readonly fresh: string | null
   readonly saying: IslandSaying | null
   readonly answered: ReadonlyArray<EdgeAnswered>
   readonly answer: (call: HomeCall, decision: 'allow' | 'reject', said: string) => void
@@ -75,7 +74,7 @@ const needIds = (home: HomeSnapshot) => [
   ...home.tasks.filter((task) => task.phase === 'ready').map((task) => task.taskId),
 ]
 
-/** A need, as the island says it: whose, and what kind. */
+/** A need, as the island says it: whose, by its project's mark, and what kind. */
 const sayingOf = (home: HomeSnapshot, id: string, projects: ReadonlyMap<string, ProjectSummary>): IslandSaying | null => {
   const call = home.calls.find((one) => one.id === id)
   const task = home.tasks.find((one) => one.taskId === id)
@@ -83,7 +82,7 @@ const sayingOf = (home: HomeSnapshot, id: string, projects: ReadonlyMap<string, 
   const project = projectId === undefined ? undefined : projects.get(projectId)
   if (project === undefined) return null
   const kind = call === undefined ? kindWords.ready : call.stuck === null ? kindWords.permission : kindWords.stuck
-  return { project: project.name, kind }
+  return { project: refOf(project), kind }
 }
 
 export const useEdge = (): EdgeModel => {
@@ -91,7 +90,6 @@ export const useEdge = (): EdgeModel => {
   const read = useQuery(edgeRead(client))
   const status = useQuery(reads(client).status())
   const home = read.data ?? null
-  const [fresh, setFresh] = useState<string | null>(null)
   const [saying, setSaying] = useState<IslandSaying | null>(null)
   const [answered, setAnswered] = useState<ReadonlyArray<EdgeAnswered>>([])
   const [error, setError] = useState<string | null>(null)
@@ -106,13 +104,9 @@ export const useEdge = (): EdgeModel => {
     seen.current = new Set(ids)
     const came = before === null ? undefined : ids.find((id) => !before.has(id))
     if (came === undefined) return
-    setFresh(came)
     setSaying(sayingOf(home, came, new Map(home.projects.map((project) => [project.id, project]))))
     clearTimeout(said.current)
-    said.current = setTimeout(() => {
-      setFresh(null)
-      setSaying(null)
-    }, SAY_FOR)
+    said.current = setTimeout(() => setSaying(null), SAY_FOR)
   }, [home])
   useEffect(() => () => clearTimeout(said.current), [])
 
@@ -130,7 +124,6 @@ export const useEdge = (): EdgeModel => {
   return {
     home,
     agents: status.data?.agents ?? [],
-    fresh,
     saying,
     answered,
     answer,

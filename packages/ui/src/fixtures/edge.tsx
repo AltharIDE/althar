@@ -1,87 +1,62 @@
-import { TaskStatus } from '../foundations/vocabulary'
-import { EdgeRow } from '../home/EdgeRow/EdgeRow'
-import { NeedCommand } from '../home/NeedCard/NeedCard'
+import type { EdgeWork } from '../home/EdgeSheet/EdgeSheet'
+import { NeedLine } from '../home/NeedLine/NeedLine'
 import { Button } from '../primitives/Button/Button'
-import { HALYARD, MERIDIAN, PUBLISH, READY, TESSERA } from './home'
+import { PUBLISH, READY } from './home'
 
 /*
  * The home in small, as the edge of the screen shows it at 14:32 on a
- * Thursday: two calls that wait on you and the work in progress across
- * three projects. The island and the menu bar's sheet list these.
+ * Thursday: two calls that wait on you, and the work in progress across
+ * three projects, which the edge only counts. The island and the menu bar's
+ * sheet show these.
  */
 
-export interface EdgeDemoRow {
+export interface EdgeDemoCall {
   id: string
-  status: TaskStatus
-  project: typeof MERIDIAN
+  kind: string
+  project: typeof PUBLISH.project
+  task: string
   title: string
-  kind?: string
-  meta?: string
   command?: string
+  brief?: string
 }
 
-export const EDGE_NEEDS: readonly EdgeDemoRow[] = [
+export const EDGE_NEEDS: readonly EdgeDemoCall[] = [
+  { id: 'h212', kind: PUBLISH.kind, project: PUBLISH.project, task: PUBLISH.task, title: PUBLISH.title, command: PUBLISH.command },
   {
-    id: 'h212',
-    status: TaskStatus.Yours,
-    project: PUBLISH.project,
-    title: PUBLISH.title,
-    kind: PUBLISH.kind,
-    meta: PUBLISH.at,
-    command: PUBLISH.command,
+    id: 'm416',
+    kind: READY.kind,
+    project: READY.project,
+    task: READY.task,
+    title: READY.title,
+    brief: `${READY.change.repo} #${READY.change.number} · checks passed · +${READY.change.add} −${READY.change.del}`,
   },
-  { id: 'm416', status: TaskStatus.Yours, project: READY.project, title: READY.title, kind: READY.kind, meta: READY.at },
 ]
 
-export const EDGE_WORK: readonly EdgeDemoRow[] = [
-  {
-    id: 'm418',
-    status: TaskStatus.Running,
-    project: MERIDIAN,
-    title: 'Repair token refresh on privilege change',
-    meta: 'Repair · Sonnet 5 · 6m',
-  },
-  {
-    id: 'h207',
-    status: TaskStatus.Running,
-    project: HALYARD,
-    title: 'Rate-limit the admin routes per token',
-    meta: 'Implement · Codex · 41m',
-  },
-  { id: 't88', status: TaskStatus.Running, project: TESSERA, title: 'Tokens for the project inks', meta: 'Plan · Sonnet 5 · 1h 32m' },
-  {
-    id: 'h209',
-    status: TaskStatus.Paused,
-    project: HALYARD,
-    title: 'Retry failed upstream calls with backoff',
-    meta: 'Waits for Sonnet 5’s reset at 14:50',
-  },
-]
+/** Four in progress, one of them held for a reset. */
+export const EDGE_WORK: EdgeWork = { inProgress: 4, held: 1 }
 
 /** The MacBook Air 15's notch, in points. */
 export const NOTCH = { width: 179, height: 32 }
 
-/** A demo row as the app fills it: a permission with its command and answers, a ready task with Review. */
-export const edgeRowOf = ({ id, command, ...row }: EdgeDemoRow, onOpen?: () => void) => (
-  <EdgeRow
+/** A demo call as the app fills it: a permission with its command and answers, a ready task with Review. */
+export const edgeLineOf = ({ id, command, brief, ...call }: EdgeDemoCall, onOpen?: () => void) => (
+  <NeedLine
     key={id}
-    {...row}
+    {...call}
     {...(onOpen === undefined ? {} : { onOpen })}
-    {...(command === undefined ? {} : { detail: <NeedCommand command={command} /> })}
-    {...(row.kind === undefined
-      ? {}
-      : {
-          actions:
-            command === undefined ? (
-              <Button size="small">Review</Button>
-            ) : (
-              <>
-                <Button size="small" variant="signal">
-                  Allow once
-                </Button>
-                <Button size="small">Deny</Button>
-              </>
-            ),
-        })}
+    {...(command === undefined ? {} : { command })}
+    {...(brief === undefined ? {} : { brief })}
+    actions={
+      command === undefined ? (
+        <Button size="small">Review</Button>
+      ) : (
+        <>
+          <Button size="small">Deny</Button>
+          <Button size="small" variant="signal">
+            Allow once
+          </Button>
+        </>
+      )
+    }
   />
 )

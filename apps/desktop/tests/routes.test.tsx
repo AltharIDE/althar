@@ -65,9 +65,9 @@ describe('going from one task to another', () => {
     // Under way, the second opens on its conversation, though the first had opened on its outputs.
     expect(await screen.findByRole('region', { name: 'Thread' })).toBeTruthy()
     expect(screen.queryByRole('article', { name: 'Running one' })).toBeNull()
-    // Its bar goes back to its own project, and that project's tab to it, not to the first.
+    // Its way back goes to its own project, over its own title, and that project's tab to it, not to the first.
     expect(await screen.findByRole('button', { name: 'Back to p2' })).toBeTruthy()
-    expect(screen.getByRole('navigation', { name: 'Where you are' }).textContent).toContain('Running one')
+    expect(screen.getByRole('heading', { name: 'Running one' })).toBeTruthy()
     await waitFor(() =>
       expect(keptFrom(window.localStorage.getItem('althar.tabs'))?.places.p2).toEqual({ kind: 'thread', threadId: 'thb' }),
     )

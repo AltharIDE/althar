@@ -319,16 +319,6 @@ export enum BoardLane {
 }
 
 /** Why a planned task has not started. */
-/** The home's sections, in the order you deal with them. */
-export enum HomeLane {
-  /** Calls across every project that wait on you. */
-  Yours = 'you',
-  /** Tasks running in every project. */
-  Running = 'running',
-  /** What the loop did since you last looked: pull requests opened, limits moved, stalls restarted. */
-  Since = 'since',
-}
-
 export enum Wait {
   /** It starts after another task. */
   After = 'after',

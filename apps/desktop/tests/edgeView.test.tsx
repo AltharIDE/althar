@@ -27,8 +27,9 @@ const withServices = (node: ReactNode, client: Client, host: Host = fakeHost()) 
 
 /*
  * Althar at the edge of the screen: round the notch, or under the menu bar's
- * mark. What waits on the person first, answered in place or opened in the
- * window; what is in progress; a call that comes in said for a moment.
+ * mark. Only what waits on the person, answered in place or opened in the
+ * window; the work in progress, counted in one line; a call that comes in
+ * said for a moment.
  */
 
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', ink: 'rose', lastWorkAt: null }
@@ -76,7 +77,7 @@ function Edge({ shown = island }: { shown?: EdgePlaceShown }) {
 }
 
 describe('the edge', () => {
-  it('lists what waits on you, answered in place, then what is in progress', async () => {
+  it('lists what waits on you, answered in place, and counts what is in progress in a line', async () => {
     const { client } = fakeClient({
       getHome: vi.fn(async () => home({ tasks: [running, ready], calls: [permission], projects: [project, halyard] })),
     })
@@ -86,19 +87,21 @@ describe('the edge', () => {
     await userEvent.click(count)
     expect(count.getAttribute('aria-expanded')).toBe('true')
 
-    const needs = screen.getByRole('region', { name: /Needs you/ })
-    expect(within(needs).getByText('npm publish')).toBeTruthy()
-    expect(within(needs).getByText('Ready to accept')).toBeTruthy()
-    expect(within(needs).getByText('On its branch: 1 file, +1 −0')).toBeTruthy()
-    const work = screen.getByRole('region', { name: /In progress/ })
-    expect(within(work).getByText('Implement · Claude Code · 41m')).toBeTruthy()
+    const asks = screen.getByRole('article', { name: 'Run npm publish' })
+    expect(within(asks).getByText('npm publish')).toBeTruthy()
+    const done = screen.getByRole('article', { name: 'Name the limits better' })
+    expect(within(done).getByText('Ready to accept')).toBeTruthy()
+    expect(within(done).getByText('On its branch: 1 file, +1 −0')).toBeTruthy()
+    // What runs doesn't need you: it isn't listed, only counted.
+    expect(screen.getByText('1 in progress')).toBeTruthy()
+    expect(screen.queryByText(running.title)).toBeNull()
 
-    await userEvent.click(within(needs).getByRole('button', { name: 'Allow once' }))
+    await userEvent.click(within(asks).getByRole('button', { name: 'Allow once' }))
     expect(client.answer).toHaveBeenCalledWith(expect.objectContaining({ attentionId: 'a1', decision: 'allow' }))
-    expect(await within(needs).findByText('Allowed npm publish')).toBeTruthy()
+    expect(await screen.findByText('Allowed npm publish')).toBeTruthy()
   })
 
-  it('says why a stuck task waits, what a change is, and what each task in progress is doing', async () => {
+  it('says why a stuck task waits and what a change is, and counts the work held and stopped', async () => {
     const host = fakeHost()
     const stuck: HomeCall = {
       ...permission,
@@ -119,15 +122,12 @@ describe('the edge', () => {
     ]
     const { client } = fakeClient({ getHome: vi.fn(async () => home({ tasks, calls: [stuck], projects: [project, halyard] })) })
     withServices(<Edge shown={{ place: 'menu' }} />, client, host)
-    const needs = await screen.findByRole('region', { name: /Needs you/ })
-    expect(within(needs).getByText('Claude Code stopped before the step was done.')).toBeTruthy()
-    expect(within(needs).getByText('GitHub #1191 · +212 −41')).toBeTruthy()
-    await userEvent.click(within(needs).getByRole('button', { name: 'Open' }))
+    const stalled = await screen.findByRole('article', { name: 'Spike the cache' })
+    expect(within(stalled).getByText('Claude Code stopped before the step was done.')).toBeTruthy()
+    expect(within(screen.getByRole('article', { name: 'Name the limits better' })).getByText(/#1191 · .+ · \+212 −41$/)).toBeTruthy()
+    await userEvent.click(within(stalled).getByRole('button', { name: 'Open' }))
     expect(host.openInWindow).toHaveBeenCalledWith('th4')
-    const work = screen.getByRole('region', { name: /In progress/ })
-    expect(within(work).getByText(/^Waits for Codex, back at/)).toBeTruthy()
-    expect(within(work).getByText('No agent is working on it')).toBeTruthy()
-    expect(within(work).getByText('Waits on you')).toBeTruthy()
+    expect(screen.getByText('3 in progress · 1 held · 1 stopped')).toBeTruthy()
   })
 
   it('brings back a call whose answer didn’t go through, and says why', async () => {
@@ -138,11 +138,12 @@ describe('the edge', () => {
       }),
     })
     withServices(<Edge shown={{ place: 'menu' }} />, client)
-    const needs = await screen.findByRole('region', { name: /Needs you/ })
-    await userEvent.click(within(needs).getByRole('button', { name: 'Allow once' }))
+    await userEvent.click(
+      within(await screen.findByRole('article', { name: 'Run npm publish' })).getByRole('button', { name: 'Allow once' }),
+    )
     expect((await screen.findByRole('alert')).textContent).toMatch(/runtime didn.t answer/)
-    expect(within(needs).getByRole('button', { name: 'Allow once' })).toBeTruthy()
-    expect(within(needs).queryByText('Allowed npm publish')).toBeNull()
+    expect(within(screen.getByRole('article', { name: 'Run npm publish' })).getByRole('button', { name: 'Allow once' })).toBeTruthy()
+    expect(screen.queryByText('Allowed npm publish')).toBeNull()
   })
 
   it('keeps a call answered here as a line, with focus on it, until the island closes', async () => {
@@ -177,12 +178,13 @@ describe('the edge', () => {
       getHome: vi.fn(async () => home({ tasks: [running], calls, projects: [project, halyard] })),
     })
     withServices(<Edge />, client)
-    await screen.findByRole('button', { name: '1 running' })
+    // Only work in progress: the notch alone, which still opens.
+    await screen.findByRole('button', { name: 'Nothing needs you' })
     expect(screen.queryByText('Permission')).toBeNull()
     calls = [permission]
     act(() => emit(changed('attention_request', 'a1', 'th3', 'p2')))
     const region = screen.getByRole('region', { name: 'Althar' })
-    // Said beside the notch, and on its row in the sheet.
+    // Said beside the notch, whose by its mark, and on its line in the sheet.
     await waitFor(() => expect(within(region).getAllByText('Permission')).toHaveLength(2))
     expect(within(region).getAllByText('halyard')).toHaveLength(2)
     expect(screen.getByRole('button', { name: '1 needs you' })).toBeTruthy()
@@ -192,7 +194,7 @@ describe('the edge', () => {
     const pointed: Array<(on: boolean) => void> = []
     const host = fakeHost({ onEdgePointed: vi.fn((listener) => (pointed.push(listener), () => {})) })
     withServices(<Edge />, fakeClient({ getHome: vi.fn(async () => home({ tasks: [running] })) }).client, host)
-    const count = await screen.findByRole('button', { name: '1 running' })
+    const count = await screen.findByRole('button', { name: 'Nothing needs you' })
     expect(host.edgeDrawn).toHaveBeenCalled()
     act(() => pointed.forEach((listener) => listener(true)))
     await waitFor(() => expect(count.getAttribute('aria-expanded')).toBe('true'))
@@ -203,7 +205,8 @@ describe('the edge', () => {
   it('under the menu bar, is the sheet on paper, and says how tall it is', async () => {
     const host = fakeHost()
     withServices(<Edge shown={{ place: 'menu' }} />, fakeClient({ getHome: vi.fn(async () => home({ tasks: [running] })) }).client, host)
-    expect(await screen.findByRole('region', { name: /In progress/ })).toBeTruthy()
+    expect(await screen.findByText('1 in progress')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Nothing needs you' })).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Althar' })).toBeNull()
     expect(host.edgeSize).toHaveBeenCalled()
   })

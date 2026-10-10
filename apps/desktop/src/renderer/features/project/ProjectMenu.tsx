@@ -1,37 +1,35 @@
-import { ProjectMenu as Menu, ProjectMenuItems, RemoveProject, RenameProject } from '@althar/ui'
+import { ProjectMenu as Menu, RemoveProject, RenameProject } from '@althar/ui'
 
 import { shortFolder } from '../../shared/folders'
 import type { ProjectMenuModel } from './useProjectMenu'
 
 /*
- * A project's menu on its bar, the same items in the head of its
- * conversation, and the dialogs they open: rename, its repositories, its
- * rules, and removing it from Althar.
+ * A project's menu on its bar, and the dialogs it opens: rename, its
+ * repositories, its rules, connecting its code host when Althar isn't, and
+ * removing it from Althar.
  */
 
 export interface ProjectMenuActions {
   readonly model: ProjectMenuModel
   readonly onRepositories: () => void
   readonly onRules: () => void
+  /** The code host its repositories are on, while Althar isn't connected to it, and connecting it. */
+  readonly connect?: { readonly host: string; readonly onConnect: () => void }
 }
 
 /** What the kit's menu takes, from the model and the places it opens. */
-const itemsOf = ({ model, onRepositories, onRules }: ProjectMenuActions) => ({
+const itemsOf = ({ model, onRepositories, onRules, connect }: ProjectMenuActions) => ({
   ...(model.project === null ? {} : { repositories: model.project.repositories.length }),
   onRename: () => model.ask('rename'),
   onRepositories,
   onRules,
+  ...connect,
   onRemove: () => model.ask('remove'),
 })
 
 /** The bar's menu. */
 export function ProjectMenu(actions: ProjectMenuActions) {
   return <Menu {...itemsOf(actions)} />
-}
-
-/** The same items, for another menu: the head of the project's conversation. */
-export function ProjectItems(actions: ProjectMenuActions) {
-  return <ProjectMenuItems {...itemsOf(actions)} />
 }
 
 /** The dialog the menu opened, if one is. */
