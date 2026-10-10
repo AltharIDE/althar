@@ -47,7 +47,7 @@ export const taskMenuText: TaskMenuText = {
   resume: 'Resume',
   resumeAbout: 'The lead carries on from the step it was on, in a fresh session.',
   abandon: 'Abandon',
-  abandonAbout: 'It settles without its change. Its worktree and branch stay.',
+  abandonAbout: 'It ends here, and its change isn’t merged. Its worktree and branch stay.',
   reopen: 'Reopen',
   reopenAbout: 'It opens again, on the same worktree and branch.',
 }

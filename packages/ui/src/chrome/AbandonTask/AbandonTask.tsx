@@ -31,7 +31,7 @@ export interface AbandonTaskText {
 
 export const abandonTaskText: AbandonTaskText = {
   title: 'Abandon this task?',
-  description: 'It settles without its change.',
+  description: 'The task ends here, and its change isn’t merged.',
   working: 'The agents on it stop.',
   planned: 'Its plan doesn’t start.',
   worktree: (where) => `Its worktree stays in ${where}, as it is.`,
