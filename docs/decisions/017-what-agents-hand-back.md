@@ -50,7 +50,8 @@
     50 ms, as `Output`; it is kept when the command ends, or when its turn
     ends.
   - **The window reads past what an item says, when the person looks:** a
-    command's output (`ReadOutput`) when its tool call opens; a markdown
+    command's output (`ReadOutput`) when its tool call opens, or, while it
+    runs, what it printed before the window started listening; a markdown
     document an agent wrote (`ReadDocument`), from the task's worktree as it
     is now, up to 1 MB, never kept. A picture is served by the main process
     at `althar-picture://shot/<digest>` from the store, without the
