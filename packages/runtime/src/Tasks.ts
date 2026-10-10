@@ -10,6 +10,7 @@ import { NotFound, TaskRefused } from './errors'
 import { branchExists, restoreWorktree } from './git'
 import { Instance } from './Instance'
 import { Plans } from './Plans'
+import { touchQuestion } from './Questions'
 import { change, fact, timestamp } from './records'
 import { type Lead, PlanParameters, Runs } from './Runs'
 import { Sessions } from './Sessions'
@@ -210,6 +211,7 @@ export class Tasks extends Context.Service<
               actorId: envelope.actorId,
               commandId: envelope.commandId,
             })
+            yield* touchQuestion(call.id)
           }
           const active = yield* sql<{ id: string }>`SELECT id FROM run_attempts WHERE run_id = ${run.id} AND state = 'active'`
           for (const attempt of active) yield* change('run_attempts', attempt.id, { state: 'interrupted', endedAt: at })
@@ -287,6 +289,7 @@ export class Tasks extends Context.Service<
                   type: 'attention_request.withdrawn',
                   ...said,
                 })
+                yield* touchQuestion(call.id)
               }
               yield* suspend(input.taskId, input.envelope, 'abandoned')
               const revision = yield* change('tasks', input.taskId, { state, settledAt: at })

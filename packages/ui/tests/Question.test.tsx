@@ -26,6 +26,13 @@ describe('Question, keys', () => {
     expect(screen.getByRole('textbox', { name: questionText.otherField })).toHaveFocus()
   })
 
+  it('names each option by what it is, and describes it by what it means', () => {
+    render(<Question parts={[DATABASE]} />)
+    const postgres = screen.getByRole('radio', { name: 'Postgres, beside refunds' })
+    expect(postgres).toHaveAccessibleDescription(DATABASE.options[0]?.note ?? '')
+    expect(screen.getByText(DATABASE.options[1]?.note ?? '')).toBeVisible()
+  })
+
   it('with several questions, picks only in the one with focus', () => {
     render(<Question parts={[DATABASE, WAITING]} />)
     fireEvent.keyDown(screen.getByRole('button', { name: /Answer/ }), { key: '1' })

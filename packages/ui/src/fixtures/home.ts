@@ -64,16 +64,20 @@ export const DECISION = {
   ],
 }
 
-/** An agent's question, as the home shows it: the question, its options to answer by. */
+/** An agent's question, as the home shows it: the question, its options, each with what it means. */
 export const QUESTION = {
   kind: 'Question',
   project: MERIDIAN,
   task: '431',
   title: 'Which database should the refund queue live in?',
   options: [
-    { id: 'postgres', label: 'Postgres, beside refunds' },
-    { id: 'redis', label: 'Redis streams' },
-    { id: 'sqs', label: 'SQS, as payouts use' },
+    {
+      id: 'postgres',
+      label: 'Postgres, beside refunds',
+      note: 'One migration, in the database refunds already use. Retries poll the table.',
+    },
+    { id: 'redis', label: 'Redis streams', note: 'Fastest to consume, but a new service to run and back up.' },
+    { id: 'sqs', label: 'SQS, as payouts use', note: 'The same setup as payouts. Needs an AWS role for the refunds service.' },
   ],
 }
 

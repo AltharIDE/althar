@@ -23,7 +23,7 @@ import s from './Question.module.css'
 export interface QuestionOption {
   id: string
   label: string
-  /** A quieter note after it: what it implies. */
+  /** What it means, under it, as the agent explains it: what choosing it does, or costs. */
   note?: string
 }
 
@@ -495,14 +495,31 @@ function Part({
             const on = draft.optionIds.includes(o.id)
             return (
               <label key={o.id} className={cx(s.option, on && s.on)}>
-                <input type={type} name={name} className={s.input} checked={on} onChange={() => onPick(o.id)} />
+                {/* named by the option, described by what it means */}
+                <input
+                  type={type}
+                  name={name}
+                  className={s.input}
+                  checked={on}
+                  onChange={() => onPick(o.id)}
+                  aria-labelledby={`${name}-${i}`}
+                  aria-describedby={o.note ? `${name}-${i}-note` : undefined}
+                />
                 {key && (
                   <span className={s.key} aria-hidden="true">
                     {key}
                   </span>
                 )}
-                <span className={s.label}>{o.label}</span>
-                {o.note && <span className={s.note}>{o.note}</span>}
+                <span className={s.says}>
+                  <span className={s.label} id={`${name}-${i}`}>
+                    {o.label}
+                  </span>
+                  {o.note && (
+                    <span className={s.note} id={`${name}-${i}-note`}>
+                      {o.note}
+                    </span>
+                  )}
+                </span>
               </label>
             )
           })}

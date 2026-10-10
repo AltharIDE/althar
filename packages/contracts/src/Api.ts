@@ -598,6 +598,8 @@ export const ToolCallItem = Schema.Struct({
     locations: Schema.Array(ToolLocation),
     /** Refused when it asked: by the rules, the lead or the person. */
     declined: Schema.Boolean,
+    /** The agent asking the person something: its question stands in the thread in its place. */
+    asks: Schema.optional(Schema.Boolean),
     /** Let through without asking by the project's allow rules, the first that did (ADR-018); absent otherwise. */
     allowedBy: Schema.optional(AllowedBy),
     ...handedFields,

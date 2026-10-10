@@ -78,7 +78,7 @@ const lines = (
       kind={QUESTION.kind}
       project={QUESTION.project}
       title={QUESTION.title}
-      brief={QUESTION.options.map((o) => o.label).join('  or  ')}
+      options={QUESTION.options}
       onOpen={fn()}
       actions={
         <Button size="small" variant="signal">
@@ -126,7 +126,7 @@ const question = (props: Partial<Parameters<typeof NeedLine>[0]> = {}) => (
     project={QUESTION.project}
     task={QUESTION.task}
     title={QUESTION.title}
-    brief={QUESTION.options.map((o) => o.label).join('  or  ')}
+    options={QUESTION.options}
     onOpen={fn()}
     actions={
       <Button size="small" variant="signal">
@@ -137,15 +137,35 @@ const question = (props: Partial<Parameters<typeof NeedLine>[0]> = {}) => (
   />
 )
 
-/** A question an agent asks: what it asks, its options, and Answer. */
+/** A question an agent asks: what it asks, its options numbered as where it is answered, each with what it means, and Answer. */
 export const Question: Story = {
   render: () => <NeedList style={{ maxWidth: 760 }}>{question()}</NeedList>,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('heading', { name: QUESTION.title })).toBeInTheDocument()
-    await expect(c.getByText('Postgres, beside refunds or Redis streams or SQS, as payouts use')).toBeInTheDocument()
+    const options = c.getAllByRole('listitem')
+    await expect(options.map((option) => option.textContent)).toEqual(
+      QUESTION.options.map((option, i) => `${i + 1}${option.label} ${option.note}`),
+    )
     await expect(c.getByRole('button', { name: 'Answer' })).toBeInTheDocument()
   },
+}
+
+/** Several questions at once: the first, its options, and how many more wait in the task. */
+export const QuestionsSeveral: Story = {
+  render: () => <NeedList style={{ maxWidth: 760 }}>{question({ more: 'and 2 more questions' })}</NeedList>,
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('and 2 more questions')).toBeInTheDocument()
+  },
+}
+
+/** Options the agent didn't explain: just what each is. */
+export const QuestionBareOptions: Story = {
+  render: () => (
+    <NeedList style={{ maxWidth: 760 }}>
+      {question({ options: QUESTION.options.map(({ label }) => ({ label })), title: 'Which region should the queue run in?' })}
+    </NeedList>
+  ),
 }
 
 /** Answered: its kind grey, and what was said where Answer was. */
@@ -279,6 +299,7 @@ export const AllStates: Story = {
           ),
         },
         { state: 'question', node: <NeedList style={{ width: 760 }}>{question()}</NeedList> },
+        { state: 'questions, several', node: <NeedList style={{ width: 760 }}>{question({ more: 'and 2 more questions' })}</NeedList> },
         {
           state: 'question, answered',
           node: <NeedList style={{ width: 760 }}>{question({ kind: 'Answered', answer: { said: 'Postgres, beside refunds' } })}</NeedList>,

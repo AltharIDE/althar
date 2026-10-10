@@ -18,6 +18,7 @@ import { Questions } from '../src/Questions'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { Tasks } from '../src/Tasks'
 import { items, repository, runtime, task, turns, until } from './support'
 
 /*
@@ -109,7 +110,7 @@ describe('questions an agent asks the person', () => {
       const snapshot = yield* Effect.orDie(queries.thread(created.threadId))
       assert.deepStrictEqual(
         snapshot.attention.map((call) => [call.kind, call.title, call.question?.fields.length]),
-        [['question', 'Please answer the following questions.', 2]],
+        [['question', 'Which database should the cache use?', 2]],
       )
 
       // Each question needs an answer: an option, or words where the agent takes them.
@@ -126,6 +127,11 @@ describe('questions an agent asks the person', () => {
       assert.include(yield* replies(created.threadId), 'answer={"question_0_custom":"DuckDB","question_1":["Unit tests","Lint"]}')
       assert.strictEqual(yield* sessionState(sessionId), 'active')
 
+      // Every window hears the question's item changed, and reads it again.
+      const [heard] = yield* sql<{ n: number }>`
+        SELECT count(*) AS n FROM change_log c JOIN thread_items i ON i.id = c.aggregate_id
+        WHERE c.aggregate_type = 'thread_item' AND i.kind = 'question' AND i.thread_id = ${created.threadId}`
+      assert.isAtLeast(heard?.n ?? 0, 2)
       const [settled] = yield* shown(created.threadId)
       assert.deepStrictEqual(
         [settled?.state, settled?.answers],
@@ -237,12 +243,12 @@ describe('questions an agent asks the person', () => {
         assert.strictEqual(attempt?.state, 'waiting_attention')
 
         const question = yield* openQuestion(started.threadId)
-        const told = yield* answer(question.id, { database: { values: ['postgres'] } })
+        const told = yield* answer(question.id, { question_0: { values: ['Postgres'] } })
         if (told.told) return assert.fail('the agent that asked has gone')
         yield* runs.answered({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: told.threadId, body: told.body })
         assert.include(
           yield* until(replies(started.threadId), (rows) => rows.some((text) => text.startsWith('told='))),
-          'told=Which database? postgres',
+          'told=Which database should the cache use? Postgres',
         )
         const [running] = yield* until(
           sql<{ state: string }>`SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'implement'`,
@@ -328,6 +334,47 @@ describe('questions an agent asks the person', () => {
       yield* until(replies(threadId), (said) => said.includes('answer={"database":"postgres"}'))
     }).pipe(Effect.provide(withQueries())))
 
+  it("are withdrawn when their task is stopped, and every window hears it from the question's item", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const tasks = yield* Tasks
+      const plans = yield* Plans
+      const projects = yield* Projects
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
+      const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Pick the cache database',
+        description: 'Ask which database first. [lead:ask]',
+        draft: true,
+      })
+      const planId = yield* plans.propose({
+        projectId: project.projectId as Parameters<typeof plans.propose>[0]['projectId'],
+        taskId: created.taskId,
+        steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+        reason: null,
+        actorId: actor,
+      })
+      yield* plans.start(planId, actor)
+      const question = yield* openQuestion(created.threadId)
+      const [item] = yield* sql<{ id: string }>`SELECT id FROM thread_items WHERE thread_id = ${created.threadId} AND kind = 'question'`
+      const heard = () =>
+        Effect.map(
+          sql<{
+            n: number
+          }>`SELECT count(*) AS n FROM change_log WHERE aggregate_type = 'thread_item' AND aggregate_id = ${item?.id ?? ''}`,
+          ([row]) => row?.n ?? 0,
+        )
+      const before = yield* heard()
+      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: created.taskId })
+      const [stopped] = yield* until(shown(created.threadId), (rows) => rows[0]?.state === 'withdrawn')
+      assert.strictEqual(stopped?.withdrawn, 'task')
+      assert.isAbove(yield* heard(), before)
+      assert.instanceOf(yield* Effect.flip(answer(question.id, { question_0: { values: ['Postgres'] } })), AttentionClosed)
+    }).pipe(Effect.provide(withQueries())))
+
   it('take a number only as a number', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -365,7 +412,7 @@ describe('questions an agent asks the person', () => {
     )
     assert.strictEqual(
       callWords({ kind: 'question', payload: { message: 'Please answer the following questions.', fields: [...fields, ...fields] } }, []),
-      'Question: Please answer the following questions.',
+      'Question: Which database should the cache use? (and 1 more)',
     )
     assert.strictEqual(
       callWords({ kind: 'question', payload: { message: 'x'.repeat(200), fields: [] } }, []).length,

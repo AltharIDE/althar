@@ -82,6 +82,55 @@
 .command {
   font-size: 11.5px;
 }
+/* a question's options, one to a row, numbered as where it is answered: what each is, then what it means */
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 3px 0 1px;
+  padding: 0;
+  list-style: none;
+}
+/* the key, then what the option is and what it means as one passage, wrapping under itself to two lines at most */
+.option {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.key {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border-radius: 4px;
+  background: var(--n-4);
+  font: 600 10px var(--mono);
+  color: var(--t-2);
+}
+.says {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  text-wrap: pretty;
+}
+.label {
+  font-weight: 500;
+  color: var(--t-1);
+}
+.optionNote {
+  color: var(--t-3);
+}
 .whose {
   grid-area: whose;
   font-size: 12px;
@@ -175,9 +224,24 @@
     grid-area: title;
     font-size: 13px;
   }
-  .brief {
+  .brief,
+  .choices {
     grid-area: brief;
     font-size: 11.5px;
+  }
+  .choices .brief {
+    font-size: inherit;
+  }
+  /* too narrow to say what each option means: what each is, whole */
+  .option {
+    font-size: 12px;
+  }
+  .says {
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+  }
+  .optionNote {
+    display: none;
   }
   .kind,
   .whose {

@@ -38,10 +38,14 @@ test('asks the person a question on the home, keeps it across a restart, and car
     // On the home, the question waits on the person, with what it asks and its options.
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
     const needs = page.getByRole('region', { name: /needs? you/ })
-    const asked = needs.getByRole('article', { name: 'Which database?' })
+    const asked = needs.getByRole('article', { name: 'Which database should the cache use?' })
     await expect(asked).toBeVisible({ timeout: 20_000 })
     await expect(asked.getByText('Question', { exact: true })).toBeVisible()
-    await expect(asked.getByText(/postgres\s+or\s+sqlite/)).toBeVisible()
+    // Each option with what it means, numbered as where it is answered.
+    await expect(asked.getByRole('listitem')).toHaveText([
+      /^1Postgres What production already runs/,
+      /^2SQLite One file beside the service/,
+    ])
     if (shots) await page.screenshot({ path: join(shots, 'app-home-question.png') })
 
     // The runtime goes down in the middle, and comes back: the question still waits.
@@ -62,15 +66,17 @@ test('asks the person a question on the home, keeps it across a restart, and car
     await asked.getByRole('button', { name: 'Answer' }).click()
     await toConversation(page)
     await expect(page.getByText('Needs your answer')).toBeVisible()
+    await expect(page.getByText('Needs you', { exact: true })).toBeVisible()
     if (shots) await page.screenshot({ path: join(shots, 'app-thread-question.png') })
-    await page.getByRole('radio', { name: /sqlite/ }).click()
+    await expect(page.getByRole('radio', { name: 'SQLite' })).toHaveAccessibleDescription(/One file beside the service/)
+    await page.getByRole('radio', { name: 'SQLite' }).click()
     await page.getByRole('button', { name: /^Answer/ }).click()
     await expect(page.getByText('Ready for you', { exact: true })).toBeVisible({ timeout: 20_000 })
     await expect(page.getByText('Needs your answer')).toHaveCount(0)
     if (shots) await page.screenshot({ path: join(shots, 'app-thread-question-answered.png') })
     // What the lead was told folds with the work that led to its step's result.
     await page.getByRole('button', { name: /^Worked for/ }).click()
-    await expect(page.getByText('told=Which database? sqlite')).toBeVisible()
+    await expect(page.getByText('told=Which database should the cache use? SQLite')).toBeVisible()
   } finally {
     await electronApp.close()
   }

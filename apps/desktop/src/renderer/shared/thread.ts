@@ -361,6 +361,8 @@ export const blocksOf = (
     spans.set(part.id, { from: at, to: at })
   }
   for (const item of source.items) {
+    // The agent asking the person something: its question stands in its place.
+    if (item.kind === 'tool_call' && item.content.asks === true) continue
     switch (item.kind) {
       case 'user_message': {
         // What waits its turn shows in the composer's queue, where it can be edited or taken back; what was taken back is gone.

@@ -17,6 +17,7 @@ import {
 import { waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
 import { kindWords, whereOf } from '../../shared/calls'
+import { lineOf as questionLine } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -210,11 +211,12 @@ export function BoardView({
 export const callCardOf = (waiting: BoardCall, name: (id: string | null) => string) => {
   // An agent's question, with its options where it asks one thing: answered where it was asked.
   if (waiting.kind === 'question') {
-    const [only, ...more] = waiting.question?.fields ?? []
+    const { options, more } = questionLine(waiting.question ?? { fields: [] })
     return {
       kind: kindWords.question,
       title: waiting.title,
-      options: only === undefined || more.length > 0 ? [] : only.options.map((option) => option.label),
+      ...(more === undefined ? {} : { because: more }),
+      options: options.map((option) => option.label),
       from: whereOf(waiting),
       at: ago(waiting.createdAt),
       text: { decide: text.answer },

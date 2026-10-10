@@ -282,13 +282,21 @@ export const LIMIT_OPTIONS: readonly RateLimitOption[] = [
 
 /* What the lead asks before it builds the refund queue. */
 
-/** One question, with a note on each option. */
+/** One question, each option with what it means, as the agent explains it. */
 export const OVER_LIMIT: QuestionPart = {
   id: 'over-limit',
   question: 'Should a partner over the limit get the refund queued, or refused?',
   options: [
-    { id: 'refuse', label: 'Refuse with 429 and Retry-After', note: 'matches charges' },
-    { id: 'queue', label: 'Queue it and return 202', note: 'goes against a project note' },
+    {
+      id: 'refuse',
+      label: 'Refuse with 429 and Retry-After',
+      note: 'The partner retries after the window, as charges already do. Nothing new to run or watch.',
+    },
+    {
+      id: 'queue',
+      label: 'Queue it and return 202',
+      note: 'The refund goes through once the limit allows. Goes against the project note that refunds never wait.',
+    },
   ],
 }
 
@@ -298,9 +306,13 @@ export const DATABASE: QuestionPart = {
   header: 'Database',
   question: 'Which database should the refund queue live in?',
   options: [
-    { id: 'postgres', label: 'Postgres, beside refunds', note: 'one migration' },
-    { id: 'redis', label: 'Redis streams', note: 'a new service to run' },
-    { id: 'sqs', label: 'SQS, as payouts use', note: 'needs an AWS role' },
+    {
+      id: 'postgres',
+      label: 'Postgres, beside refunds',
+      note: 'One migration, in the database refunds already use. Retries poll the table.',
+    },
+    { id: 'redis', label: 'Redis streams', note: 'Fastest to consume, but a new service to run and back up.' },
+    { id: 'sqs', label: 'SQS, as payouts use', note: 'The same setup as payouts. Needs an AWS role for the refunds service.' },
   ],
 }
 
@@ -309,9 +321,9 @@ export const WAITING: QuestionPart = {
   header: 'Waiting',
   question: 'How long may a queued refund wait before it is refused after all?',
   options: [
-    { id: '15m', label: '15 minutes' },
-    { id: '1h', label: 'An hour' },
-    { id: 'day', label: 'Until the end of the day', note: 'UTC' },
+    { id: '15m', label: '15 minutes', note: 'Covers a burst over the limit; anything longer is refused.' },
+    { id: '1h', label: 'An hour', note: 'Covers the partner’s hourly batch.' },
+    { id: 'day', label: 'Until the end of the day', note: 'Waits until midnight UTC, when the partner’s limit resets.' },
   ],
 }
 
@@ -321,9 +333,9 @@ export const WHO_HEARS: QuestionPart = {
   question: 'Who should hear when a refund has waited over 15 minutes?',
   multiple: true,
   options: [
-    { id: 'partner', label: 'The partner', note: 'refund.delayed webhook' },
-    { id: 'success', label: 'Partner success', note: 'in Slack' },
-    { id: 'oncall', label: 'The on-call engineer', note: 'pages at night' },
+    { id: 'partner', label: 'The partner', note: 'Through a new refund.delayed webhook, which they have to subscribe to.' },
+    { id: 'success', label: 'Partner success', note: 'A message in their Slack channel.' },
+    { id: 'oncall', label: 'The on-call engineer', note: 'A page, at any hour.' },
   ],
 }
 

@@ -48,7 +48,7 @@ export const scenarios = {
   fileEdit: 'file-edit',
   /** Like `fileEdit`, but it asks again every time the turn is resumed. */
   stubborn: 'stubborn',
-  /** Asks the person a question and repeats the answer. */
+  /** Asks the person a plain question, as an MCP server's form does, and repeats the answer. */
   question: 'question',
   /**
    * Asks as Claude Code's AskUserQuestion does: a tool call, then a form of
@@ -640,9 +640,67 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
 
-      /** Asks the person: one question, or, as Claude Code asks, two in a form; cancelling the turn withdraws it. */
-      const askPerson = async (claude: boolean): Promise<string> => {
-        if (claude)
+      /**
+       * Asks the person: one plain question, as an MCP server's form asks it; or, as Claude Code asks,
+       * one or two in a form, each option with what it means. Cancelling the turn withdraws it.
+       */
+      const askPerson = async (form: 'plain' | 'one' | 'two'): Promise<string> => {
+        const database = {
+          type: 'string',
+          title: 'Database',
+          description: 'Which database should the cache use?',
+          oneOf: [
+            {
+              const: 'Postgres',
+              title: 'Postgres',
+              description: 'What production already runs: the cache is one more table, backed up with the rest.',
+            },
+            {
+              const: 'SQLite',
+              title: 'SQLite',
+              description: 'One file beside the service, with no server to run, but nothing shared between instances.',
+            },
+          ],
+        }
+        const checks = {
+          type: 'array',
+          title: 'Checks',
+          description: 'Which checks should run before it lands?',
+          items: {
+            anyOf: [
+              { const: 'Unit tests', title: 'Unit tests', description: 'Fast, and already run on every push.' },
+              { const: 'Lint', title: 'Lint', description: 'Catches what the type checker doesn’t, in seconds.' },
+              { const: 'End-to-end', title: 'End-to-end', description: 'Drives the app as a person would; takes a few minutes.' },
+            ],
+          },
+        }
+        const request: acp.CreateElicitationRequest =
+          form === 'plain'
+            ? {
+                sessionId: params.sessionId,
+                mode: 'form',
+                message: 'Which database?',
+                requestedSchema: {
+                  type: 'object',
+                  properties: { database: { type: 'string', enum: ['postgres', 'sqlite'] } },
+                  required: ['database'],
+                },
+              }
+            : {
+                sessionId: params.sessionId,
+                toolCallId: 'ask-1',
+                mode: 'form',
+                message: form === 'one' ? database.description : 'Please answer the following questions.',
+                requestedSchema: {
+                  type: 'object',
+                  properties: {
+                    question_0: database,
+                    question_0_custom: { type: 'string', title: 'Other' },
+                    ...(form === 'two' ? { question_1: checks, question_1_custom: { type: 'string', title: 'Other' } } : {}),
+                  },
+                } as acp.ElicitationSchema,
+              }
+        if (form !== 'plain')
           await update({
             sessionUpdate: 'tool_call',
             toolCallId: 'ask-1',
@@ -652,55 +710,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             rawInput: {},
           })
         const answer = await client
-          .request<acp.CreateElicitationResponse, acp.CreateElicitationRequest>(
-            acp.methods.client.elicitation.create,
-            claude
-              ? {
-                  sessionId: params.sessionId,
-                  toolCallId: 'ask-1',
-                  mode: 'form',
-                  message: 'Please answer the following questions.',
-                  requestedSchema: {
-                    type: 'object',
-                    properties: {
-                      question_0: {
-                        type: 'string',
-                        title: 'Database',
-                        description: 'Which database should the cache use?',
-                        oneOf: [
-                          { const: 'Postgres', title: 'Postgres', description: 'what production runs' },
-                          { const: 'SQLite', title: 'SQLite', description: 'one file, no server' },
-                        ],
-                      },
-                      question_0_custom: { type: 'string', title: 'Other' },
-                      question_1: {
-                        type: 'array',
-                        title: 'Checks',
-                        description: 'Which checks should run before it lands?',
-                        items: {
-                          anyOf: [
-                            { const: 'Unit tests', title: 'Unit tests' },
-                            { const: 'Lint', title: 'Lint' },
-                            { const: 'End-to-end', title: 'End-to-end' },
-                          ],
-                        },
-                      },
-                      question_1_custom: { type: 'string', title: 'Other' },
-                    },
-                  },
-                }
-              : {
-                  sessionId: params.sessionId,
-                  mode: 'form',
-                  message: 'Which database?',
-                  requestedSchema: {
-                    type: 'object',
-                    properties: { database: { type: 'string', enum: ['postgres', 'sqlite'] } },
-                    required: ['database'],
-                  },
-                },
-            { cancellationSignal: (session.abort = new AbortController()).signal },
-          )
+          .request<acp.CreateElicitationResponse, acp.CreateElicitationRequest>(acp.methods.client.elicitation.create, request, {
+            cancellationSignal: (session.abort = new AbortController()).signal,
+          })
           .catch((): acp.CreateElicitationResponse => ({ action: 'cancel' }))
         session.abort = undefined
         return answer.action === 'accept'
@@ -741,7 +753,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // A lead that asks the person first, `[lead:ask]`, once: then it plays its part with the answer.
       if (text.includes('[lead:ask]') && !session.played.has('[lead:ask]')) {
         session.played.add('[lead:ask]')
-        await say(await askPerson(false))
+        await say(await askPerson('one'))
         if (session.cancelled) return { stopReason: 'cancelled' }
       }
 
@@ -795,7 +807,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         }
         case scenarios.question:
         case scenarios.questions: {
-          await say(await askPerson(scenario === scenarios.questions))
+          await say(await askPerson(scenario === scenarios.questions ? 'two' : 'plain'))
           return session.cancelled ? { stopReason: 'cancelled' } : ended()
         }
         case scenarios.quota:

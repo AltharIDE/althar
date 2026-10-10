@@ -17,7 +17,7 @@ import { Instance } from './Instance'
 import { Live } from './Live'
 import { moveSession, releaseSession } from './Permissions'
 import { change, fact, timestamp } from './records'
-import { addItem } from './threads'
+import { addItem, updateItem } from './threads'
 
 /*
  * Questions an agent asks the person (DEV-13), such as Claude Code's
@@ -74,9 +74,12 @@ interface Waiting {
   released: boolean
 }
 
-/** The question in a line, for the call's title. */
-export const questionTitle = (payload: Pick<QuestionPayload, 'message' | 'fields'>) =>
-  payload.fields.length === 1 && payload.fields[0] !== undefined ? payload.fields[0].question : payload.message
+/**
+ * The question in a line, for the call's title: what it asks first. An
+ * agent asking several at once says little in its message ("Please answer
+ * the following questions."), so the first question names them.
+ */
+export const questionTitle = (payload: Pick<QuestionPayload, 'message' | 'fields'>) => payload.fields[0]?.question ?? payload.message
 
 /** What the person said, question by question, for an agent told afterwards. */
 export const answerWords = (fields: ReadonlyArray<QuestionField>, answers: Readonly<Record<string, FieldAnswer>>) =>
@@ -84,6 +87,21 @@ export const answerWords = (fields: ReadonlyArray<QuestionField>, answers: Reado
     const said = answers[field.id]
     const words = said === undefined ? '' : saidOf(field, said)
     return [`${field.question} ${words === '' ? '(no answer)' : words}`]
+  })
+
+/**
+ * A question's call changed (answered, withdrawn): its thread item, which
+ * shows it, is read again by every window showing the thread. Nothing for
+ * a call that isn't a question.
+ */
+export const touchQuestion = (attentionId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ projectId: ProjectId; itemId: string; content: string }>`
+      SELECT a.project_id, i.id AS item_id, i.content FROM attention_requests a
+      JOIN thread_items i ON i.id = json_extract(a.payload, '$.itemId')
+      WHERE a.id = ${attentionId} AND a.kind = 'question'`
+    if (row !== undefined) yield* updateItem(row.projectId, row.itemId, JSON.parse(row.content))
   })
 
 type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | Live
@@ -135,6 +153,7 @@ export class Questions extends Context.Service<
                 type: 'attention_request.withdrawn',
                 actorId: instance.systemId,
               })
+              yield* touchQuestion(attentionId)
               yield* releaseSession(waiter.context.sessionId)
               return true
             }),
@@ -279,6 +298,7 @@ export class Questions extends Context.Service<
                 actorId: input.envelope.actorId,
                 commandId: input.envelope.commandId,
               })
+              yield* touchQuestion(input.attentionId)
               yield* releaseSession(payload.sessionId)
             }),
           })

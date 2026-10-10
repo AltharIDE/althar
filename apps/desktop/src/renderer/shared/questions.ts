@@ -1,5 +1,5 @@
 import type { FieldAnswer, QuestionField } from '@althar/contracts'
-import type { QuestionAnswer, QuestionPart } from '@althar/ui'
+import type { NeedOption, QuestionAnswer, QuestionPart } from '@althar/ui'
 
 /*
  * An agent's question (DEV-13) between the runtime's terms and the kit's: its
@@ -14,8 +14,8 @@ export const questionText = {
     task: 'The task stopped.',
   },
   answer: 'Answer',
-  /** Between a question's options, in a line. */
-  or: '  or  ',
+  /** Under a question's options in a list: the others asked with it. */
+  more: (n: number) => (n === 1 ? 'and 1 more question' : `and ${n} more questions`),
 }
 
 /** Whether a field takes an answer in the person's own words. */
@@ -54,10 +54,16 @@ export const pickedOf = (answers: Readonly<Record<string, FieldAnswer>>): Questi
     ]),
   )
 
-/** The question in a line, for a list: what it asks, by its options where it has a handful, or by what each of several asks. */
-export const briefOf = (question: { readonly fields: ReadonlyArray<QuestionField> }): string | undefined => {
-  const [only, ...more] = question.fields
-  if (only === undefined) return undefined
-  if (more.length > 0) return question.fields.map((field) => field.header ?? field.question).join(' · ')
-  return only.options.length > 0 ? only.options.map((option) => option.label).join(questionText.or) : undefined
+/**
+ * The question as a list shows it: the options of what it asks first, each
+ * with what it means, and how many more questions wait with it.
+ */
+export const lineOf = (question: {
+  readonly fields: ReadonlyArray<QuestionField>
+}): { readonly options: ReadonlyArray<NeedOption>; readonly more?: string } => {
+  const [first, ...rest] = question.fields
+  return {
+    options: (first?.options ?? []).map((option) => ({ label: option.label, ...(option.note === undefined ? {} : { note: option.note }) })),
+    ...(rest.length === 0 ? {} : { more: questionText.more(rest.length) }),
+  }
 }

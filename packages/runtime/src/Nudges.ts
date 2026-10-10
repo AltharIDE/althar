@@ -68,9 +68,10 @@ export const callWords = (
   }
   if (call.kind === 'question') {
     const fields = field(call.payload, 'fields')
-    const [only] = Array.isArray(fields) && fields.length === 1 ? fields : []
-    const asked = (text(only, 'question') || text(call.payload, 'message')).replace(/\s+/g, ' ').trim()
-    return asked === '' ? 'Question' : `Question: ${asked.length > 140 ? `${asked.slice(0, 139)}…` : asked}`
+    const asks: ReadonlyArray<unknown> = Array.isArray(fields) ? fields : []
+    const asked = (text(asks[0], 'question') || text(call.payload, 'message')).replace(/\s+/g, ' ').trim()
+    const more = asks.length > 1 ? ` (and ${asks.length - 1} more)` : ''
+    return asked === '' ? 'Question' : `Question: ${asked.length > 140 ? `${asked.slice(0, 139)}…` : asked}${more}`
   }
   const program = text(call.payload, 'kind') === 'execute' ? programOf(text(call.payload, 'command')) : undefined
   if (program !== undefined) return `Needs you: ${program}`

@@ -125,6 +125,8 @@ interface ItemRow {
   /** For a question: its call's state and payload, where its answer is. */
   readonly questionState?: string | null
   readonly questionPayload?: string | null
+  /** For a tool call: the agent asking the person something, which its question stands for. */
+  readonly asks?: number | null
   readonly createdAt: string
 }
 
@@ -300,6 +302,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
             return path === '' ? [] : [{ path, ...(typeof line === 'number' ? { line } : {}) }]
           }),
           declined: row.decision === 'reject',
+          ...(row.asks === 1 ? { asks: true } : {}),
           ...(allowedBy === undefined ? {} : { allowedBy }),
           pictures: picturesOf(field(content, 'pictures')),
           files: filesOf(field(content, 'files')),
@@ -555,15 +558,15 @@ export class Queries extends Context.Service<
               (SELECT d.rule FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS rule,
-              q.state AS question_state, q.payload AS question_payload
+              q.state AS question_state, q.payload AS question_payload,
+              -- An agent's tool call that asks the person is the question it asks, which stands in its place.
+              (i.kind = 'tool_call' AND EXISTS (SELECT 1 FROM thread_items x WHERE x.thread_id = i.thread_id AND x.kind = 'question'
+                AND x.provider_session_id = i.provider_session_id AND json_extract(x.content, '$.toolCallId') = i.tool_call_id)) AS asks
             FROM thread_items i
             LEFT JOIN attention_requests q ON i.kind = 'question' AND q.id = json_extract(i.content, '$.attentionId')
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id
             WHERE i.thread_id = ${threadId}
-              -- An agent's tool call that asks the person is the question it asks, which stands in its place.
-              AND NOT (i.kind = 'tool_call' AND EXISTS (SELECT 1 FROM thread_items q WHERE q.thread_id = i.thread_id AND q.kind = 'question'
-                AND q.provider_session_id = i.provider_session_id AND json_extract(q.content, '$.toolCallId') = i.tool_call_id))
               -- A message taken back takes no place on a page; read by id, it says it was taken back.
               AND ${where.itemId === undefined ? sql`(u.state IS NULL OR u.state <> 'withdrawn')` : sql`i.id = ${where.itemId}`}
               AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}
