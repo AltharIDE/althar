@@ -140,12 +140,37 @@ type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Secrets |
 export interface RemotePlace {
   /** The host's name: github.com. */
   readonly host: string
-  /** The repository's path there. */
+  /** The repository's path there: under the instance's own path, where a code host is known. */
   readonly path: ReadonlyArray<string>
   /** The code host there, where Althar knows one: by its hosted service, or an instance the person connected; and whether it is the hosted service. */
   readonly code: { readonly product: Product; readonly name: string; readonly hosted: boolean } | null
+  /** The repository's page there; null where no code host is known. */
+  readonly url: string | null
   /** The connection to it there: one signed in, else one that needs signing in again; null where there is none. */
   readonly connection: ConnectionInfo | null
+}
+
+/**
+ * A repository's path on its code host, and its page there. A remote repeats
+ * an instance's own path (a server at example.org/git), which the path is
+ * read under. Bitbucket Data Center's pages are a project's repository,
+ * whatever its remote says (`scm/prj/api` over HTTPS), or a person's own.
+ */
+export const pageOf = (product: Product, web: string, path: ReadonlyArray<string>) => {
+  const base = web.replace(/\/+$/, '')
+  let under: ReadonlyArray<string> = []
+  try {
+    under = new URL(base).pathname.split('/').filter((segment) => segment !== '')
+  } catch {
+    // A connection's address is checked when it is made; a hosted one is Althar's own.
+  }
+  const own = under.every((segment, at) => path[at]?.toLowerCase() === segment.toLowerCase()) ? path.slice(under.length) : path
+  if (product !== 'bitbucket_dc') return { path: own, url: `${base}/${own.join('/')}` }
+  const [key = '', slug = ''] = own[0]?.toLowerCase() === 'scm' ? own.slice(1) : own
+  return {
+    path: [key, slug],
+    url: key.startsWith('~') ? `${base}/users/${key.slice(1)}/repos/${slug}` : `${base}/projects/${key.toUpperCase()}/repos/${slug}`,
+  }
 }
 
 /** An address's host name, lowercase; null for one that isn't an address. */
@@ -650,14 +675,21 @@ export class Connections extends Context.Service<
           const row = here.find((candidate) => candidate.state === 'ready') ?? here[0]
           const product = row?.product ?? hostedOf(connectors.products).get(ref.host)
           const info = product === undefined ? undefined : infoOf(product)
+          const connection = row === undefined ? null : toInfo(row)
+          if (info === undefined || !info.host)
+            return { host: ref.host, path: ref.path, code: null, url: null, connection } satisfies RemotePlace
+          const hosted = info.hosted !== null && hostnameOf(info.hosted.webUrl) === ref.host
+          const page = pageOf(
+            info.product,
+            connection?.webUrl ?? (hosted ? info.hosted?.webUrl : undefined) ?? `https://${ref.host}`,
+            ref.path,
+          )
           return {
             host: ref.host,
-            path: ref.path,
-            code:
-              info === undefined || !info.host
-                ? null
-                : { product: info.product, name: info.name, hosted: info.hosted !== null && hostnameOf(info.hosted.webUrl) === ref.host },
-            connection: row === undefined ? null : toInfo(row),
+            path: page.path,
+            code: { product: info.product, name: info.name, hosted },
+            url: page.url,
+            connection,
           } satisfies RemotePlace
         })
 

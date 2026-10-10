@@ -199,7 +199,7 @@ export const handlers = Api.toLayer(
                 name: place.code?.name ?? place.host,
                 instance: place.code === null || place.code.hosted ? null : place.host,
                 path,
-                url: place.code === null ? null : `${place.connection?.webUrl ?? `https://${place.host}`}/${path}`,
+                url: place.url,
                 account: place.connection === null ? null : { login: place.connection.account.login, state: place.connection.state },
               }
         return { ...repository, host }

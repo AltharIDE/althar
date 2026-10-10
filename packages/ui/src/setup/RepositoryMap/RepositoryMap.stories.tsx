@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { MAP_HALYARD, MAP_HOSTS, MAP_MERIDIAN } from '../../fixtures/setup'
@@ -34,6 +35,9 @@ export const Meridian: Story = {
     await expect(map.getByRole('list', { name: 'On this Mac' }).querySelectorAll('li')).toHaveLength(3)
     await expect(map.getByRole('region', { name: 'GitHub' })).toHaveTextContent('Connected as balazs')
     await expect(map.getByRole('region', { name: 'GitLab' })).toHaveTextContent('Not connected')
+    // Each card says where its work goes, as the wires draw it.
+    await expect(map.getByText('Its work goes to meridian-ops/infra on GitLab.')).toBeInTheDocument()
+    await expect(canvasElement.querySelectorAll('svg g')).toHaveLength(3)
   },
 }
 
@@ -53,13 +57,35 @@ export const Fork: Story = {
   },
 }
 
-/** Where a fork's pull requests open, changed. */
+/** Where a fork's pull requests open, changed: its pull requests' wire goes there, and its card says so. */
 export const ChangingTarget: Story = {
   args: Fork.args,
+  render: function Changing(args) {
+    const [repositories, setRepositories] = useState(args.repositories)
+    return (
+      <RepositoryMap
+        {...args}
+        repositories={repositories}
+        onTargetChange={(id, target) => {
+          args.onTargetChange(id, target)
+          setRepositories((now) => now.map((one) => (one.id === id && one.fork ? { ...one, fork: { ...one.fork, target } } : one)))
+        }}
+      />
+    )
+  },
   play: async ({ args, canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('combobox', { name: 'Where halyard-api’s pull requests open' }))
+    const map = within(canvasElement)
+    await expect(map.getByText('pull requests')).toBeInTheDocument()
+    await expect(map.getByText('It pushes to balazs/halyard-api on GitHub, and its pull requests open on halyard/api.')).toBeInTheDocument()
+    await userEvent.click(map.getByRole('combobox', { name: 'Where halyard-api’s pull requests open' }))
     await userEvent.click(await within(document.body).findByRole('option', { name: 'balazs/halyard-api' }))
     await expect(args.onTargetChange).toHaveBeenCalledWith('halyard', ChangeTarget.Fork)
+    // One wire now, to the fork, which it pushes to and opens its pull requests on.
+    await expect(await map.findByText('pushes, pull requests')).toBeInTheDocument()
+    await expect(canvasElement.querySelectorAll('svg g')).toHaveLength(1)
+    await expect(
+      map.getByText('It pushes to balazs/halyard-api on GitHub, and its pull requests open on balazs/halyard-api.'),
+    ).toBeInTheDocument()
   },
 }
 
@@ -124,6 +150,7 @@ export const Elsewhere: Story = {
     const map = within(canvasElement)
     await expect(map.getByText('Not on this Mac')).toBeVisible()
     await expect(map.getByText('Stays on this Mac')).toBeVisible()
+    await expect(map.getByText('Its work stays on this Mac.')).toBeInTheDocument()
     await expect(map.getByRole('region', { name: 'git.meridian.dev' })).toHaveTextContent('Not a host Althar connects to')
     // Althar can't connect a host it doesn't know.
     await expect(map.queryByRole('button', { name: /Connect/ })).toBeNull()

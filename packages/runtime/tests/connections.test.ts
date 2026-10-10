@@ -10,7 +10,7 @@ import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents, Connectors, withoutSignIns } from '../src/Config'
-import { Connections, NotConnected, SignInUnavailable } from '../src/Connections'
+import { Connections, NotConnected, pageOf, SignInUnavailable } from '../src/Connections'
 import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import * as Runtime from '../src/Runtime'
@@ -336,15 +336,18 @@ describe('a connection', () => {
         host: 'github.com',
         path: ['meridian', 'api'],
         code: { product: 'github', name: 'GitHub', hosted: true },
+        url: 'https://github.com/meridian/api',
         connection: null,
       })
       const own = yield* connections.placeOf('git@git.meridian.dev:meridian/api.git')
       assert.deepStrictEqual(own?.code, { product: 'github', name: 'GitHub', hosted: false })
       assert.strictEqual(own?.connection?.id, connection.id)
+      assert.strictEqual(own?.url, 'https://git.meridian.dev/meridian/api')
       assert.deepStrictEqual(yield* connections.placeOf('git@git.example.org:team/infra.git'), {
         host: 'git.example.org',
         path: ['team', 'infra'],
         code: null,
+        url: null,
         connection: null,
       })
       assert.isNull(yield* connections.placeOf('/a/local/path'))
@@ -364,6 +367,31 @@ describe('a connection', () => {
         }),
       ),
     )
+  })
+})
+
+describe('a repository’s page on its code host', () => {
+  it('is read under the instance’s own path, and on Bitbucket Data Center as a project’s repository or a person’s own', () => {
+    assert.deepStrictEqual(pageOf('github', 'https://github.com', ['meridian', 'api']), {
+      path: ['meridian', 'api'],
+      url: 'https://github.com/meridian/api',
+    })
+    assert.deepStrictEqual(pageOf('gitlab', 'https://example.org/git/', ['git', 'ops', 'infra', 'deploy']), {
+      path: ['ops', 'infra', 'deploy'],
+      url: 'https://example.org/git/ops/infra/deploy',
+    })
+    // Over SSH, and over HTTPS, under the server's own path.
+    assert.deepStrictEqual(pageOf('bitbucket_dc', 'https://example.org', ['prj', 'api']), {
+      path: ['prj', 'api'],
+      url: 'https://example.org/projects/PRJ/repos/api',
+    })
+    assert.strictEqual(
+      pageOf('bitbucket_dc', 'https://example.org/bitbucket', ['bitbucket', 'scm', 'prj', 'api']).url,
+      'https://example.org/bitbucket/projects/PRJ/repos/api',
+    )
+    assert.strictEqual(pageOf('bitbucket_dc', 'https://example.org', ['~me', 'notes']).url, 'https://example.org/users/me/repos/notes')
+    // An address that isn't one keeps the path whole.
+    assert.strictEqual(pageOf('gitlab', 'not an address', ['ops', 'infra']).url, 'not an address/ops/infra')
   })
 })
 

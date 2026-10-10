@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { useState } from 'react'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Button } from '../Button/Button'
 import { Field } from '../Field/Field'
@@ -68,5 +69,34 @@ export const Escaping: Story = {
     await page.findByRole('dialog', { name: 'Hand the conversation over?' })
     await userEvent.keyboard('{Escape}')
     await expect(args.onClose).toHaveBeenCalledOnce()
+  },
+}
+
+/** Opened from a button and closed, it gives focus back to the button. */
+export const GivingFocusBack: Story = {
+  render: function Opening(args) {
+    const [open, setOpen] = useState(false)
+    return (
+      <>
+        <Button onClick={() => setOpen(true)}>Hand it over</Button>
+        {open && (
+          <Dialog
+            {...args}
+            onClose={() => {
+              args.onClose()
+              setOpen(false)
+            }}
+          />
+        )}
+      </>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(document.body)
+    const opener = within(canvasElement).getByRole('button', { name: 'Hand it over' })
+    await userEvent.click(opener)
+    await page.findByRole('dialog', { name: 'Hand the conversation over?' })
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(opener).toHaveFocus())
   },
 }

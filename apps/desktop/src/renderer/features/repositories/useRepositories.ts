@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
 import type { ChangeTarget, ProjectRepository, RepositoryRole } from '@althar/contracts'
 
@@ -53,7 +53,9 @@ export const useRepositories = (projectId: string): RepositoriesModel => {
   const summary = useQuery(read.projects()).data?.projects.find((each) => each.id === projectId)
   const [failed, setError] = useState<string | null>(null)
   const [reading, setReading] = useState<ReadonlyArray<ReadingFolder>>([])
-  const [adding, setAdding] = useState(false)
+  // Folders still to add, one after another: the page is adding while any are.
+  const [waiting, setWaiting] = useState(0)
+  const queue = useRef<Promise<void>>(Promise.resolve())
   const error = failed ?? (listed.error === null ? null : messageOf(listed.error))
   const key = keys.repositories(projectId)
   const worktrees = summary?.worktrees ?? null
@@ -108,34 +110,41 @@ export const useRepositories = (projectId: string): RepositoriesModel => {
   /**
    * Adds the repositories at a folder the person granted: read first, so
    * the page shows each one coming that the project doesn't have yet, until
-   * the repositories are read again with them. No grant, as when the picker
-   * is cancelled, adds nothing; a drop that isn't a folder says so.
+   * the repositories are read again with them; folders picked or dropped
+   * while one is added wait their turn. No grant, as when the picker is
+   * cancelled, adds nothing; a drop that isn't a folder says so.
    */
   const addGranted = useCallback(
-    async (grant: string | null, name: string | null = null) => {
+    (grant: string | null, name: string | null = null): Promise<void> => {
       if (grant === null) {
         // Only a folder on this Mac has one; something else dropped doesn't.
         if (name !== null) setError(`${name} isn’t a folder on ${device.this}.`)
-        return
+        return Promise.resolve()
       }
-      setError(null)
-      setAdding(true)
-      try {
-        const folder = await client.readFolder(grant)
-        const have = new Set((cache.getQueryData<ReadonlyArray<ProjectRepository>>(key) ?? []).map((repository) => repository.path))
-        // Each comes whole, by its own name, as the runtime adds it: a folder inside one adds the repository it is in.
-        setReading(
-          folder.repositories
-            .filter((repository) => !have.has(repository.path))
-            .map((repository) => ({ id: repository.path, name: repository.name, where: shortFolder(repository.path) })),
-        )
-        await client.addRepositories(projectId, grant)
-      } catch (failure) {
-        setError(messageOf(failure))
-      }
-      await again()
-      setReading([])
-      setAdding(false)
+      setWaiting((now) => now + 1)
+      // One folder at a time, in the order they came, so none clears what another shows.
+      const added = queue.current
+        .then(async () => {
+          setError(null)
+          try {
+            const folder = await client.readFolder(grant)
+            const have = new Set((cache.getQueryData<ReadonlyArray<ProjectRepository>>(key) ?? []).map((repository) => repository.path))
+            // Each comes whole, by its own name, as the runtime adds it: a folder inside one adds the repository it is in.
+            setReading(
+              folder.repositories
+                .filter((repository) => !have.has(repository.path))
+                .map((repository) => ({ id: repository.path, name: repository.name, where: shortFolder(repository.path) })),
+            )
+            await client.addRepositories(projectId, grant)
+          } catch (failure) {
+            setError(messageOf(failure))
+          }
+          await again()
+          setReading([])
+        })
+        .finally(() => setWaiting((now) => now - 1))
+      queue.current = added
+      return added
     },
     [client, cache, key, projectId, again],
   )
@@ -145,7 +154,7 @@ export const useRepositories = (projectId: string): RepositoriesModel => {
     worktrees: worktrees === null ? null : shortFolder(worktrees),
     repositories: listed.data ?? null,
     reading,
-    adding,
+    adding: waiting > 0,
     error,
     setRole: (repositoryId, role) => change(repositoryId, { role }),
     setTarget: (repositoryId, target) => change(repositoryId, { target }),

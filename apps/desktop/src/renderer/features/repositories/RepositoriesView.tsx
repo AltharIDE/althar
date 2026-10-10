@@ -29,6 +29,7 @@ export const text = {
     here: `On ${device.this}`,
     elsewhere: `Not on ${device.this}`,
     stays: `Stays on ${device.this}`,
+    staysHere: `Its work stays on ${device.this}.`,
   },
 }
 

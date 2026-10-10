@@ -86,6 +86,8 @@ export interface RepositoryMapText {
   worktreesUnmade: string
   pushes: string
   pullRequests: string
+  /** A fork's one wire, when its pull requests open on the fork it pushes to. */
+  both: string
   fork: string
   upstream: string
   target: string
@@ -102,6 +104,10 @@ export interface RepositoryMapText {
   /** The group for repositories with no remote. */
   nowhere: string
   stays: string
+  /** Where a repository's work goes, said on its card for a screen reader, as the wires draw it. */
+  goes: (path: string, host: string) => string
+  forkGoes: (fork: string, pullRequests: string, host: string) => string
+  staysHere: string
 }
 
 export const repositoryMapText: RepositoryMapText = {
@@ -121,6 +127,7 @@ export const repositoryMapText: RepositoryMapText = {
   worktreesUnmade: 'Tasks work in their own worktrees, never in these folders',
   pushes: 'pushes',
   pullRequests: 'pull requests',
+  both: 'pushes, pull requests',
   fork: 'Your fork',
   upstream: 'The repository it forks',
   target: 'Pull requests open on',
@@ -142,6 +149,9 @@ export const repositoryMapText: RepositoryMapText = {
   signInAgain: (host) => `Sign in to ${host} again`,
   nowhere: 'No remote',
   stays: 'Stays on this Mac',
+  goes: (path, host) => `Its work goes to ${path} on ${host}.`,
+  forkGoes: (fork, pullRequests, host) => `It pushes to ${fork} on ${host}, and its pull requests open on ${pullRequests}.`,
+  staysHere: 'Its work stays on this Mac.',
 }
 
 export type RepositoryMapProps = RootProps<
@@ -259,6 +269,15 @@ const reachWords = (host: MapHost, t: RepositoryMapText) => {
   }
 }
 
+/** Where a repository's work goes, in words, for those who can't see the wires. */
+const goesWords = (repository: MapRepository, hostOf: (id: string) => MapHost | undefined, t: RepositoryMapText) => {
+  const { remote, fork } = repository
+  if (remote === undefined) return t.staysHere
+  const host = hostOf(remote.host)?.name ?? remote.host
+  if (fork === undefined) return t.goes(remote.path, host)
+  return t.forkGoes(remote.path, fork.target === ChangeTarget.Fork ? remote.path : fork.upstream, host)
+}
+
 /** What the host's button does: connect it, sign in to it again, or nothing for a host Althar doesn't connect to. */
 const connectWords = (host: MapHost, t: RepositoryMapText) => {
   switch (host.reach) {
@@ -306,10 +325,13 @@ export function RepositoryMap({
     const remote = repository.remote
     if (remote === undefined) return []
     const dashed = !connected(remote.host)
-    return repository.fork === undefined
-      ? [{ id: repository.id, from: repository.id, to: repository.id, dashed }]
+    if (repository.fork === undefined) return [{ id: repository.id, from: repository.id, to: repository.id, dashed }]
+    // A fork's pull requests open where the person said: on the repository it forks, or on the fork it pushes to.
+    const fork = { id: `${repository.id}:fork`, from: repository.id, to: `${repository.id}:fork`, dashed }
+    return repository.fork.target === ChangeTarget.Fork
+      ? [{ ...fork, label: t.both }]
       : [
-          { id: `${repository.id}:fork`, from: repository.id, to: `${repository.id}:fork`, dashed, label: t.pushes },
+          { ...fork, label: t.pushes },
           { id: `${repository.id}:upstream`, from: repository.id, to: `${repository.id}:upstream`, dashed, label: t.pullRequests },
         ]
   })
@@ -415,6 +437,8 @@ export function RepositoryMap({
                 />
               </div>
               <span className={cx(s.where, repository.where === undefined && s.elsewhere)}>{repository.where ?? t.elsewhere}</span>
+              {/* What the wires draw, said: where its work goes. */}
+              <VisuallyHidden>{goesWords(repository, hostOf, t)}</VisuallyHidden>
               <div className={s.foot}>
                 {repository.branch !== undefined && (
                   <span className={s.branch}>

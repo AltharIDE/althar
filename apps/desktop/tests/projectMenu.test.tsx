@@ -205,11 +205,50 @@ describe('a project’s repositories', () => {
     expect(opened).toHaveBeenCalledWith('https://github.com/meridian/api', '_blank')
     opened.mockRestore()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Connect GitLab' }))
+    const connect = screen.getByRole('button', { name: 'Connect GitLab' })
+    await userEvent.click(connect)
     const dialog = within(await screen.findByRole('dialog', { name: 'Code hosts and trackers' }))
     expect(await dialog.findByRole('list', { name: 'Code hosts' })).toBeTruthy()
     await userEvent.click(dialog.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // Focus comes back to where it was.
+    await waitFor(() => expect(document.activeElement).toBe(connect))
+  })
+
+  it('adds folders dropped while one is being added after it, and stays busy until the last', async () => {
+    const pending: Array<() => void> = []
+    const { client } = fakeClient({
+      readFolder: vi.fn(async (grant: string) => ({
+        kind: 'repository' as const,
+        name: grant,
+        repositories: [{ path: `/Users/me/code/${grant}`, folder: null, name: grant, branch: 'main', remote: null }],
+        project: null,
+      })),
+      addRepositories: vi.fn(() => new Promise<void>((resolve) => pending.push(resolve))),
+    })
+    const grantDropped = vi.fn(async (file: File) => file.name)
+    withServices(<Repositories />, client, fakeHost({ grantDropped }))
+    await screen.findByRole('list', { name: 'On this Mac' })
+    const page = screen.getByRole('heading', { level: 1, name: 'Repositories' }).closest('header')?.parentElement ?? document.body
+    const drop = (name: string) => {
+      const dataTransfer = { types: ['Files'], files: [new File([], name)] }
+      fireEvent.dragEnter(page, { dataTransfer })
+      fireEvent.drop(page, { dataTransfer })
+    }
+    drop('meridian-docs')
+    expect(await screen.findByText('~/code/meridian-docs')).toBeTruthy()
+    drop('meridian-sdk')
+    await waitFor(() => expect(grantDropped).toHaveBeenCalledTimes(2))
+    // The second waits for the first.
+    expect(client.addRepositories).toHaveBeenCalledOnce()
+    pending[0]?.()
+    expect(await screen.findByText('~/code/meridian-sdk')).toBeTruthy()
+    await waitFor(() => expect(screen.queryByText('~/code/meridian-docs')).toBeNull())
+    expect(screen.getByRole('button', { name: 'Add a folder' }).getAttribute('aria-busy')).toBe('true')
+    await waitFor(() => expect(client.addRepositories).toHaveBeenLastCalledWith('p1', 'meridian-sdk'))
+    pending[1]?.()
+    await waitFor(() => expect(screen.queryByText('Reading it. Nothing in it changes')).toBeNull())
+    expect(screen.getByRole('button', { name: 'Add a folder' }).getAttribute('aria-busy')).toBeNull()
   })
 
   it('goes back on Escape, but not while something else has it', async () => {
