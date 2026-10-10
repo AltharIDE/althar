@@ -7,6 +7,7 @@ import { PartPending, pendingText } from '../../shared/Pending'
 import s from './Repositories.module.css'
 import type { RepositoriesModel } from './useRepositories'
 import { device } from '../../shared/device'
+import { useWindowChrome } from '../../shared/useWindowChrome'
 
 /*
  * A project's repositories: each one's place, branch and remote, its role,
@@ -49,9 +50,11 @@ export const entryOf = (repository: ProjectRepository): RepositoryEntry => ({
 })
 
 export function RepositoriesView({ model, onBack }: { model: RepositoriesModel; onBack: () => void }) {
+  // No tabs yet while a project is being formed: off a Mac the window's own buttons sit in the bar.
+  const chrome = useWindowChrome()
   return (
     <div className={s.window}>
-      <TitleBar lights="none">
+      <TitleBar {...chrome}>
         <BackCrumb to={model.project ?? text.back} onBack={onBack} />
       </TitleBar>
       <main className={s.scroll}>

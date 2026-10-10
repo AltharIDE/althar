@@ -3,6 +3,7 @@ name: desktop
 on:
   push:
     branches: [main]
+    tags: ['v*']
     paths: ['apps/desktop/**', 'packages/connectors/**', 'packages/contracts/**', 'packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/desktop.yml']
   pull_request:
     paths: ['apps/desktop/**', 'packages/connectors/**', 'packages/contracts/**', 'packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/desktop.yml']
@@ -12,8 +13,8 @@ permissions:
 
 concurrency:
   group: desktop-${{ github.ref }}
-  # A publish on main runs to the end; everywhere else a newer push takes over.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # A run for main or a version tag runs to the end; everywhere else a newer push takes over.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   verify:
@@ -37,7 +38,8 @@ jobs:
       - run: bun run check
       - run: bun run test:coverage
       # The end-to-end tests run the built app, with the fake agent, on a virtual display, with a keyring:
-      # Althar refuses to seal sign-ins in plain text (basic_text), so a token would fail to save without one.
+      # a runner's desktop isn't one Electron recognises, so it would fall back to plain text, which Althar
+      # refuses; the main process asks for libsecret (keyring.ts), and gnome-keyring answers.
       - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0
       - run: dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e'
       - uses: actions/upload-artifact@v6
@@ -47,7 +49,7 @@ jobs:
           path: apps/desktop/test-results
           retention-days: 7
 
-  # The packages as a build test on every branch: a broken package shows on the pull request. Nothing is published here.
+  # The packages as a build test on every branch: a broken package shows on the pull request. A version tag publishes this very build.
   package:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -65,53 +67,43 @@ jobs:
       - run: bun install --frozen-lockfile
         working-directory: .
       - run: bun run package
-
-  # Whether this main commit carries a version tag nothing was published for yet.
-  release:
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      publishing: ${{ steps.tag.outputs.publishing }}
-      tag: ${{ steps.tag.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v5
+      - uses: actions/upload-artifact@v6
         with:
-          fetch-depth: 0
-      - name: The tag on this commit, if it has none published
-        id: tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          tag=$(git tag --points-at HEAD | grep -E '^v[0-9]' | head -n1)
-          publishing=false
-          if [ -n "$tag" ] && ! gh release view "$tag" >/dev/null 2>&1; then publishing=true; fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "publishing=$publishing" >> "$GITHUB_OUTPUT"
+          name: desktop-packages
+          path: |
+            apps/desktop/out/dist/Althar-*.AppImage
+            apps/desktop/out/dist/althar_*.deb
+            apps/desktop/out/dist/althar-*.rpm
+          if-no-files-found: error
 
-  # Only main, only a new version tag, and only when the work is verified: the packages join the GitHub Release.
+  # A version tag releases the checked work: the tag must be v<apps/desktop's version>, and what is released is the package job's own build.
   publish:
-    needs: [verify, package, release]
-    if: needs.release.outputs.publishing == 'true'
+    needs: [verify, package]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 10
     permissions:
       contents: write
-    defaults:
-      run:
-        working-directory: apps/desktop
     steps:
       - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .node-version
-      - run: bun install --frozen-lockfile
+      - name: The tag and the version agree
         working-directory: .
-      - run: bun run package
+        run: |
+          version="v$(node -p "require('./apps/desktop/package.json').version")"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME and apps/desktop/package.json's version ($version) disagree. Bump the version, then tag again."
+            exit 1
+          fi
+      - uses: actions/download-artifact@v6
+        with:
+          name: desktop-packages
+          path: apps/desktop/out/dist
       - name: The packages on the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ needs.release.outputs.tag }}" out/dist/Althar-*.AppImage out/dist/althar_*.deb out/dist/althar-*.rpm --generate-notes --title "${{ needs.release.outputs.tag }}"
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "A release for $GITHUB_REF_NAME is already there; nothing to do."
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" apps/desktop/out/dist/Althar-*.AppImage apps/desktop/out/dist/althar_*.deb apps/desktop/out/dist/althar-*.rpm --generate-notes --title "$GITHUB_REF_NAME"

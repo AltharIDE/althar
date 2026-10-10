@@ -1,4 +1,4 @@
-import { TitleBar } from '../../chrome/TitleBar/TitleBar'
+import { TitleBar, type TitleBarWindow } from '../../chrome/TitleBar/TitleBar'
 import { Logo } from '../../foundations/Logo/Logo'
 import { Button } from '../../primitives/Button/Button'
 import s from './OpenFailed.module.css'
@@ -24,14 +24,19 @@ export interface OpenFailedProps {
   /** What went wrong, as it was said. */
   reason: string
   onRetry: () => void
+  /** Off a Mac, the window's own buttons in the bar; on macOS the system draws its lights. */
+  lights?: 'space' | 'drawn'
+  window?: TitleBarWindow
   text?: Partial<OpenFailedText>
 }
 
-export function OpenFailed({ reason, onRetry, text }: OpenFailedProps) {
+export function OpenFailed({ reason, onRetry, lights = 'space', window, text }: OpenFailedProps) {
   const t = { ...openFailedText, ...text }
   return (
     <div className={s.screen}>
-      <TitleBar lights="space">{null}</TitleBar>
+      <TitleBar lights={lights} {...(window === undefined ? {} : { window })}>
+        {null}
+      </TitleBar>
       <main className={s.body}>
         <div className={s.box} role="alert">
           <Logo size={28} className={s.mark} />

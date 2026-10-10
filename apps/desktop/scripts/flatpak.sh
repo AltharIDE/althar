@@ -14,3 +14,4 @@ flatpak-builder --user --force-clean --install out/flatpak-build flatpak/dev.alt
 
 echo
 echo "installed; run it with: flatpak run dev.althar.app"
+echo "The Flatpak is experimental: a task running under GNOME and KDE is still being measured."

@@ -20,6 +20,8 @@ import { Context, Effect, Layer, Schema } from 'effect'
 /** Secrets couldn't be kept or given back. */
 export class SecretsUnavailable extends Schema.TaggedError<SecretsUnavailable>()('SecretsUnavailable', {
   reason: Schema.String,
+  /** The main process's own keyring refusal: its words are the person's, and only these are shown verbatim (words.ts). */
+  keyring: Schema.optional(Schema.Boolean),
 }) {}
 
 /** What seals a secret so that only Althar can open it, and opens it again: in the app, its main process. */

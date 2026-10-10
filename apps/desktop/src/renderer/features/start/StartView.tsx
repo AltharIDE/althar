@@ -14,6 +14,7 @@ import s from './Start.module.css'
 import { useFirstProject } from './useFirstProject'
 import type { StartModel } from './useStart'
 import { device, platform } from '../../shared/device'
+import { useWindowChrome } from '../../shared/useWindowChrome'
 
 /*
  * Where the window starts. With no project yet, the kit's Start screen: the
@@ -115,6 +116,8 @@ export function StartView({
   /** The home, once there are projects. */
   home: () => ReactNode
 }) {
+  // No tabs yet on these screens: off a Mac the window's own buttons sit in their bars.
+  const chrome = useWindowChrome()
   const opened = (project: ProjectSummary | null) => {
     if (project !== null) onProject(project.id)
   }
@@ -127,7 +130,7 @@ export function StartView({
     const { forming } = model
     return (
       <div className={s.window}>
-        <TitleBar lights="none">{null}</TitleBar>
+        <TitleBar {...chrome}>{null}</TitleBar>
         <div className={`${s.scroll} ${s.first}`}>
           <NewProject
             defaultName={forming.name}
@@ -175,6 +178,8 @@ function First({
   accounts: AccountSignInModel
   onProject: (projectId: string) => void
 }) {
+  // No tabs on the first screen: off a Mac the window's own buttons sit in its bar.
+  const chrome = useWindowChrome()
   const project = useFirstProject()
   const make = () =>
     void project.make().then((made) => {
@@ -202,7 +207,7 @@ function First({
   const error = project.error ?? model.error
   return (
     <div className={`${s.window} ${s.bare}`}>
-      <TitleBar lights="none" className={s.over}>
+      <TitleBar {...chrome} className={s.over}>
         {null}
       </TitleBar>
       <Start

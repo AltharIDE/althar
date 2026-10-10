@@ -23,4 +23,4 @@ export { factFor, factsIn, type ModelFact, ModelFacts, type ModelFactsOptions } 
 export { Limits, type Out } from './Limits'
 export { Policies, type ProjectRules, type UsageLimit } from './Policies'
 export { databaseIn, defaultProfile, defaultWorktrees } from './locations'
-export { InstallFailed, Installs } from './Installs'
+export { InstallFailed, Installs, type OnDevice } from './Installs'

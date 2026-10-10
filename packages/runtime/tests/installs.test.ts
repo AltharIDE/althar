@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { agents } from '@althar/provider-adapters'
+import { agents, type LaunchSpec, usingLocated } from '@althar/provider-adapters'
 import { assert, describe, expect, it } from '@effect/vitest'
 import { Effect, Exit } from 'effect'
 
@@ -142,6 +142,54 @@ describe('downloading an agent', () => {
     const usual = using({ fetch, search: { env: { PATH: '' }, dirs: [join(theirs, 'bin')] } })
     const there = await usual.run(Effect.map(Installs, (installs) => installs.locate(opencode)))
     assert.deepStrictEqual(Exit.isSuccess(there) ? there.value : null, { command: join(theirs, 'bin', 'opencode'), whose: 'theirs' })
+  })
+
+  it('in a sandbox that cannot see the device, finds and runs the person’s own command out there', async () => {
+    const ran: Array<string> = []
+    const onDevice = {
+      reachable: true,
+      where: (name: string) => (name === 'opencode' ? '/device/bin/opencode' : null),
+      run: (spec: LaunchSpec, at: { readonly env: Readonly<Record<string, string>> }) => {
+        ran.push(spec.command)
+        return { command: 'flatpak-spawn', args: ['--host', spec.command, ...spec.args], env: at.env }
+      },
+    }
+    const { run } = using({ onDevice, platform: process.platform, arch: process.arch })
+    const found = await run(Effect.map(Installs, (installs) => installs.locate(opencode)))
+    const located = Exit.isSuccess(found) ? found.value : null
+    assert.strictEqual(located?.command, '/device/bin/opencode')
+    assert.strictEqual(located?.whose, 'theirs')
+    const launched = usingLocated(opencode, () => located)
+      .launch('node')
+      .onDevice?.({ env: {} })
+    assert.strictEqual(launched?.command, 'flatpak-spawn')
+    assert.deepStrictEqual(launched?.args, ['--host', '/device/bin/opencode', 'acp'])
+    assert.deepStrictEqual(ran, ['/device/bin/opencode'])
+    // A copy that is here still stands where the device cannot be reached...
+    const unreachable = { ...onDevice, reachable: false, where: () => null }
+    const shipped = await using({ onDevice: unreachable, platform: process.platform, arch: process.arch }).run(
+      Effect.map(Installs, (installs) => installs.locate(agents['claude-code'])),
+    )
+    assert.isTrue(Exit.isSuccess(shipped) && shipped.value?.whose === 'bundled' && shipped.value.out === undefined)
+    // ...and where there is none here either, the run goes out there anyway, so its failure says what to put right.
+    const theirs = await using({ onDevice: unreachable }).run(Effect.map(Installs, (installs) => installs.locate(opencode)))
+    assert.isTrue(Exit.isSuccess(theirs) && theirs.value?.command === 'opencode' && typeof theirs.value.out === 'function')
+  })
+
+  it('keeps a copy downloaded at the person’s asking in the sandbox, even where the device has its own', async () => {
+    const { fetch } = github(archive())
+    const onDevice = {
+      reachable: true,
+      where: () => '/device/bin/opencode',
+      run: () => ({ command: 'flatpak-spawn', args: [] }),
+    }
+    const { root, run } = using({ fetch, onDevice })
+    await run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))
+    const found = await run(Effect.map(Installs, (installs) => installs.locate(opencode)))
+    assert.deepStrictEqual(Exit.isSuccess(found) ? found.value : null, {
+      command: join(root, 'opencode', 'current', 'opencode'),
+      whose: 'althar',
+    })
   })
 
   it('says what stopped it at each step, and lets only one download of an agent run at a time', async () => {

@@ -4,6 +4,7 @@ import { ProjectTabs, type Room } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { tabsStoreOf } from './store'
+import { useWindowChrome } from '../../shared/useWindowChrome'
 import { beside, byNumber } from './tabs'
 import s from './Tabs.module.css'
 import { useTabs } from './useTabs'
@@ -42,6 +43,8 @@ export const useLastRoom = (projectId: string): readonly [Room | null, (room: Ro
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
   const { host } = useServices()
+  // The window's own buttons in the strip, and whether the third says maximize or restore.
+  const chrome = useWindowChrome()
   const { select, current } = tabs
   const open = tabs.tabs.map((tab) => tab.id)
   const order = open.join(' ')
@@ -78,6 +81,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
             onOpenFolder={tabs.openFolder}
             // macOS draws its traffic lights over the strip; elsewhere the strip draws the window's own buttons.
             lights={host.platform === 'darwin' ? 'space' : 'drawn'}
+            maximized={chrome.window?.maximized === true}
             onCloseWindow={() => host.window('close')}
             onMinimize={() => host.window('minimize')}
             onToggleMaximize={() => host.window('toggle-maximize')}

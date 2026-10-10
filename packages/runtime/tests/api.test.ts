@@ -1254,8 +1254,18 @@ describe('words', () => {
       said({
         _tag: 'SecretsUnavailable',
         reason: 'Althar has nowhere safe to keep sign-ins: install and start a keyring (gnome-keyring or KWallet), then try again.',
+        keyring: true,
       }),
       'Althar has nowhere safe to keep sign-ins: install and start a keyring (gnome-keyring or KWallet), then try again.',
+    )
+    // Anything else that couldn't be kept — a file that won't write, a bad name, an empty reason — gets the generic sentence.
+    assert.strictEqual(
+      said({ _tag: 'SecretsUnavailable', reason: "Couldn't write: Error: EACCES: permission denied" }),
+      "Althar's runtime couldn't do that. Its log has the details.",
+    )
+    assert.strictEqual(
+      said({ _tag: 'SecretsUnavailable', reason: '', keyring: true }),
+      "Althar's runtime couldn't do that. Its log has the details.",
     )
     assert.strictEqual(said({ _tag: 'SessionRunning' }), 'An agent is already working on this task.')
     assert.strictEqual(said(new SessionFailed({ agentId: 'codex', reason: 'stack', summary: '' })), "Codex couldn't start.")
@@ -1393,6 +1403,29 @@ describe('words', () => {
     assert.strictEqual(summarize(Cause.fail(new AgentExited({ code: 1, signal: null, stderr: '' }))), 'The agent stopped.')
     assert.strictEqual(summarize(Cause.die(new Error('It broke'))), 'It broke.')
     assert.strictEqual(summarize(Cause.empty), '')
+    // A command the sandbox could not take out to the device says what to put right, not that it is missing.
+    assert.include(
+      agentSaid(
+        new AgentStartFailed({ command: 'flatpak-spawn', reason: 'Portal call failed: org.freedesktop.DBus.Error.ServiceUnknown' }),
+      ) ?? '',
+      'org.freedesktop.Flatpak',
+    )
+    assert.include(
+      agentSaid(new AgentStartFailed({ command: 'opencode', reason: 'spawn flatpak-spawn ENOENT' })) ?? '',
+      'org.freedesktop.Flatpak',
+    )
+    // The same where it started and then could not reach the device: the bridge's sentence, not "the agent stopped".
+    assert.include(
+      agentSaid(
+        new AgentExited({
+          code: 1,
+          signal: null,
+          stderr:
+            'Portal call failed: org.freedesktop.DBus.Error.ServiceUnknown\nHint: --host only works when the Flatpak is allowed to talk to org.freedesktop.Flatpak',
+        }),
+      ) ?? '',
+      'org.freedesktop.Flatpak',
+    )
   })
 })
 

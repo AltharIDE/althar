@@ -27,23 +27,21 @@ export const signInCheck = (
 ): Effect.Effect<SignInCheck> =>
   Effect.callback<SignInCheck>((resume) => {
     const spec = agent.signIn.status(node)
-    execFile(
-      spec.command,
-      [...spec.args],
-      { timeout: 15_000, env: { ...process.env, ...asNode(spec), ...spec.env, ...home } },
-      (error, stdout, stderr) => {
-        if (error !== null && typeof error.code !== 'number') return resume(Effect.succeed({ status: 'unknown', paidBy: 'unknown' }))
-        const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : null
-        const output = `${stdout}\n${stderr}`
-        const signedIn = agent.signIn.read(output, exitCode)
-        resume(
-          Effect.succeed({
-            status: signedIn === undefined ? 'unknown' : signedIn ? 'signed_in' : 'signed_out',
-            paidBy: agent.signIn.paidBy?.(output) ?? 'unknown',
-          }),
-        )
-      },
-    )
+    const env = { ...process.env, ...asNode(spec), ...spec.env, ...home }
+    // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled.
+    const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
+    execFile(launched.command, [...launched.args], { timeout: 15_000, env }, (error, stdout, stderr) => {
+      if (error !== null && typeof error.code !== 'number') return resume(Effect.succeed({ status: 'unknown', paidBy: 'unknown' }))
+      const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : null
+      const output = `${stdout}\n${stderr}`
+      const signedIn = agent.signIn.read(output, exitCode)
+      resume(
+        Effect.succeed({
+          status: signedIn === undefined ? 'unknown' : signedIn ? 'signed_in' : 'signed_out',
+          paidBy: agent.signIn.paidBy?.(output) ?? 'unknown',
+        }),
+      )
+    })
   })
 
 /** Whether the user is signed in to an agent (see `signInCheck`). */
@@ -64,8 +62,8 @@ export const signOut = (
   if (logout === undefined) return Effect.succeed(true)
   return Effect.callback<boolean>((resume) => {
     const spec = logout.run(node)
-    execFile(spec.command, [...spec.args], { timeout: 15_000, env: { ...process.env, ...asNode(spec), ...spec.env, ...home } }, (error) =>
-      resume(Effect.succeed(error === null)),
-    )
+    const env = { ...process.env, ...asNode(spec), ...spec.env, ...home }
+    const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
+    execFile(launched.command, [...launched.args], { timeout: 15_000, env }, (error) => resume(Effect.succeed(error === null)))
   })
 }

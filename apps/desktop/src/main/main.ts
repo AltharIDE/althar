@@ -3,7 +3,7 @@ import { stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
+import { locations as locationsOf } from './locations'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, isPreferenceKey } from './appPreferences'
@@ -35,8 +35,8 @@ import {
   utilityProcess,
 } from 'electron'
 
-import { hidesAppMenu, windowOptions } from './windowOptions'
-import { keyringIsSafe, keyringUnavailable } from './keyring'
+import { appMenu, windowOptions } from './windowOptions'
+import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -73,6 +73,8 @@ let dictation: ReturnType<typeof startDictation> | undefined
  * (ALTHAR_FAKE_SPEECH), and a microphone the system is never asked about
  * (ALTHAR_FAKE_MICROPHONE, and with the fake model), Chromium's own.
  */
+/* The end-to-end tests show the window's failure screen: the runtime isn't started, so no port ever comes. Packaged builds leave this out. */
+const noRuntime = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_NO_RUNTIME === '1'
 const fakeSpeech = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_SPEECH === '1'
 const fakeMicrophone = fakeSpeech || (__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_MICROPHONE === '1')
 if (fakeMicrophone) {
@@ -81,11 +83,18 @@ if (fakeMicrophone) {
 }
 const restarts: Array<number> = []
 
-/** The profile and worktrees, as the command-line client has them, so both see the same projects. */
-const locations = () => ({ profile: defaultProfile(process.env, process.platform), worktrees: defaultWorktrees(process.env) })
+/** The profile and worktrees, as the command-line client has them: a Flatpak's home is a fresh empty one each run, so it keeps worktrees beside its profile (locations.ts). */
+const locations = () => locationsOf(process.env, process.platform, homedir())
 
 // Althar is the name windows, window managers and the desktop see, whichever way the app was started.
 app.setName('Althar')
+
+// Off a Mac Electron draws the application menu's bar at the top of every window, frameless or not; the menu is kept for its accelerators (appMenu), and its bar is hidden here (windowOptions.ts, ADR-019).
+if (process.platform !== 'darwin') app.on('browser-window-created', (_event, window) => window.setMenuBarVisibility(false))
+
+// Off a Mac, ask for a secret service where Electron would fall back to plain text (keyring.ts).
+const store = passwordStore(process.argv, process.env.XDG_CURRENT_DESKTOP, process.env.FLATPAK_ID !== undefined, process.platform)
+if (store !== null) app.commandLine.appendSwitch('password-store', store)
 
 /*
  * Where the window keeps what it remembers, its tabs and pinned models. A
@@ -199,11 +208,13 @@ const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
 const seal = (child: UtilityProcess, message: RuntimeMessage) => {
   if (message.requestId === undefined || typeof message.value !== 'string') return
   const { requestId, value } = message
+  // On Linux a keyring may be missing: Electron would fall back to plain text (basic_text), which is no seal at all, so it fails like a missing keychain would.
+  const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'keychain'
+  if (!safeStorage.isEncryptionAvailable() || !keyringIsSafe(process.platform, backend)) {
+    // Marked: these words are the person's — the window shows them verbatim, and nothing else from here (words.ts).
+    return child.postMessage({ type: 'sealed', requestId, error: keyringUnavailable(process.platform), keyring: true })
+  }
   try {
-    // On Linux a keyring may be missing: Electron would fall back to plain text (basic_text), which is no seal at all, so it fails like a missing keychain would.
-    const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'keychain'
-    if (!safeStorage.isEncryptionAvailable() || !keyringIsSafe(process.platform, backend))
-      throw new Error(keyringUnavailable(process.platform))
     child.postMessage({
       type: 'sealed',
       requestId,
@@ -326,6 +337,9 @@ const openWindow = () => {
     },
   })
   windows.add(window)
+  // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).
+  window.on('maximize', () => window.webContents.send('althar:maximized', true))
+  window.on('unmaximize', () => window.webContents.send('althar:maximized', false))
   window.on('closed', () => {
     windows.delete(window)
     // Off a Mac, closing Althar's last window quits, as it did before the edge kept pages of its own open.
@@ -361,6 +375,9 @@ ipcMain.handle('althar:pick-folder', async (event, purpose: unknown) => {
   const path = result.canceled ? undefined : result.filePaths[0]
   return path === undefined ? null : allowFolder(path)
 })
+
+// Whether the window is maximized, as its own buttons ask.
+ipcMain.handle('althar:maximized', (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false)
 
 // The window's own buttons, from its strip: close, minimize, or maximize and back (windowOptions.ts names the chrome).
 ipcMain.on('althar:window', (event, action: unknown) => {
@@ -466,8 +483,9 @@ ipcMain.on('althar:edge-open', (_event, threadId: unknown) => {
 })
 
 void app.whenReady().then(() => {
-  // Off a Mac the app has no menu bar: no File Edit View Window, and nothing on Alt.
-  if (hidesAppMenu(process.platform)) Menu.setApplicationMenu(null)
+  // Off a Mac the trimmed menu is kept for its accelerators and its bar is hidden on every window (windowOptions.ts, the browser-window-created listener above), with reload and devtools while developing.
+  const menu = appMenu(process.platform, !app.isPackaged)
+  if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
   // The window asks for nothing but the microphone, to dictate (dictation.ts): no notifications, camera or anything else a page can ask for.
   // Althar's own notifications come from here, as the runtime says something needs the person.
   dictation = startDictation({
@@ -483,7 +501,7 @@ void app.whenReady().then(() => {
   powerMonitor.on('on-ac', awake.powerChanged)
   // Linux may not say when the power source changes, so there it is looked at again each minute too.
   if (process.platform === 'linux') setInterval(awake.powerChanged, 60_000).unref()
-  startRuntime()
+  if (!noRuntime) startRuntime()
   openWindow()
   edge = startEdge({
     profile: () => locations().profile,

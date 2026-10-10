@@ -1,0 +1,66 @@
+.lights {
+  flex: none;
+  align-self: center;
+  display: flex;
+  gap: 9px;
+  width: 66px;
+  margin-right: 10px;
+  padding-left: 4px;
+}
+
+.lights button {
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: none;
+  border-radius: 99px;
+  background: var(--traffic);
+  cursor: default;
+  transition: background var(--base) var(--ease);
+}
+
+/* The glyph says what the dot does; it comes on hover, and where the keyboard is. */
+.lights button::after {
+  font-size: 9px;
+  line-height: 1;
+  color: transparent;
+  transition: color var(--base) var(--ease);
+}
+.lights .close::after {
+  content: '×';
+}
+.lights .minimize::after {
+  content: '−';
+}
+.lights .maximize::after {
+  content: '□';
+}
+.lights .maximize[data-restore]::after {
+  content: '❐';
+}
+
+.lights:hover button::after,
+.lights:focus-within button::after,
+.lights button:focus-visible::after {
+  color: #4a3b33;
+}
+
+.lights:hover .close,
+.lights:focus-within .close {
+  background: #e0685c;
+}
+.lights:hover .minimize,
+.lights:focus-within .minimize {
+  background: #dfa53f;
+}
+.lights:hover .maximize,
+.lights:focus-within .maximize {
+  background: #62b04f;
+}
+
+.lights button:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}

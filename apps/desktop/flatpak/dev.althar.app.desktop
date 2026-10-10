@@ -5,5 +5,5 @@ Terminal=false
 Type=Application
 Icon=dev.althar.app
 StartupWMClass=dev.althar.app
-Comment=Althar is an open-source environment for running software projects with AI coding agents.
+Comment=Althar is an environment for running software projects with AI coding agents.
 Categories=Development;

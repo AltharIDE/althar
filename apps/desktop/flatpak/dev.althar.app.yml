@@ -14,13 +14,21 @@ separate-locales: false
 # Narrow on purpose: the agents need the network, the window needs a display
 # and the GPU, and sign-ins need the host's keyring through the secrets
 # service. No host filesystem: project folders reach the app through the
-# file chooser's document portal.
+# file chooser's document portal, and the person's own agents and editors
+# are found and run where they are installed, through flatpak-spawn.
 finish-args:
   - --share=network
   - --socket=wayland
   - --socket=fallback-x11
+  # X11 clients need shared memory; without it fallback-x11 is slow and some drawing breaks (Flathub's Electron sample keeps it too).
+  - --share=ipc
   - --device=dri
   - --talk-name=org.freedesktop.secrets
+  # The person's own agents and editors, found and run where they are
+  # installed (Codex among them: flatpak/codex-host.sh); nothing else.
+  - --talk-name=org.freedesktop.Flatpak
+  # The person's ssh-agent, for the git pushes Althar makes itself.
+  - --socket=ssh-auth
 
 modules:
   - name: althar
@@ -34,11 +42,23 @@ modules:
       - install -Dm644 dev.althar.app.desktop /app/share/applications/dev.althar.app.desktop
       - install -Dm644 cobalt.png /app/share/icons/hicolor/512x512/apps/dev.althar.app.png
       - install -Dm644 dev.althar.app.metainfo.xml /app/share/metainfo/dev.althar.app.metainfo.xml
+      # git from the SDK: the runtime has none, and Althar and its agents run it in the sandbox.
+      - install -Dm755 /usr/bin/git /app/libexec/althar/git
+      - cp -a /usr/libexec/git-core /app/libexec/git-core
+      - mkdir -p /app/share/git-core
+      - cp -a /usr/share/git-core/templates /app/share/git-core/templates
+      - install -Dm755 git.sh /app/bin/git
+      # The Codex the adapter drives, out where its own sandbox can run (flatpak/codex-host.sh).
+      - install -Dm755 codex-host.sh /app/bin/althar-host-codex
     sources:
       - type: dir
         path: ../out/dist/linux-unpacked
       - type: file
         path: althar.sh
+      - type: file
+        path: git.sh
+      - type: file
+        path: codex-host.sh
       - type: file
         path: dev.althar.app.desktop
       - type: file

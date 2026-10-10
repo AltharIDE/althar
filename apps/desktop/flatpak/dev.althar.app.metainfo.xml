@@ -7,7 +7,7 @@
   <project_license>LicenseRef-proprietary</project_license>
   <launchable type="desktop-id">dev.althar.app.desktop</launchable>
   <description>
-    <p>Althar is an open-source environment for running software projects with AI coding agents.</p>
+    <p>Althar is an environment for running software projects with AI coding agents.</p>
     <p>It keeps the project in one place: its rules, knowledge, decisions, tasks and history, and hands the work to whichever agents suit it, such as Claude Code, Codex or OpenCode.</p>
   </description>
   <categories>

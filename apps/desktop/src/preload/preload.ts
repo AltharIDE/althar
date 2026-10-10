@@ -25,6 +25,12 @@ ipcRenderer.on('althar:edge-pointed', (_event, on: unknown) => {
   if (typeof on === 'boolean') for (const listener of pointing) listener(on)
 })
 
+/* Whether the window is maximized, on the window's own buttons' account. */
+const maximized = new Set<(maximized: boolean) => void>()
+ipcRenderer.on('althar:maximized', (_event, on: unknown) => {
+  if (typeof on === 'boolean') for (const listener of maximized) listener(on)
+})
+
 /* A thread a notification the person clicked opens: held until the page listens, as a window that just opened doesn't yet. */
 let pending: string | undefined
 const opening = new Set<(threadId: string) => void>()
@@ -47,6 +53,11 @@ contextBridge.exposeInMainWorld('althar', {
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
   window: (action: WindowAction): void => ipcRenderer.send('althar:window', action),
+  maximized: (): Promise<boolean> => ipcRenderer.invoke('althar:maximized'),
+  onMaximized: (listener: (maximized: boolean) => void): (() => void) => {
+    maximized.add(listener)
+    return () => void maximized.delete(listener)
+  },
   pickFolder: (purpose: 'project' | 'account' = 'project'): Promise<string | null> => ipcRenderer.invoke('althar:pick-folder', purpose),
   // Only a file the person dropped has a path; one the page made has none.
   grantDropped: (file: File): Promise<string | null> => {

@@ -38,6 +38,50 @@ From `apps/desktop`:
 | `bun run test:e2e` | Builds the app and drives it with Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; and, with the fake GitHub, connecting it and a task ending in a draft pull request |
 | `bun run verify` | Check, coverage and the end-to-end tests, as CI runs them |
 
+### On Linux
+
+`bun run package` makes an AppImage, a deb and an rpm of the app (Linux
+only). Off a Mac the window is frameless and draws its own chrome: the tabs'
+strip is the title bar, with the window's own buttons, and the screens with
+no tabs carry them too. A trimmed menu is kept for its accelerators (text
+zoom, full screen, quit; reload and devtools while developing), and its bar
+is hidden on every window, as Electron would otherwise draw it above the
+app's own chrome. Sign-ins are sealed in the desktop's keyring;
+where Electron wouldn't find one, the app asks for libsecret, which
+gnome-keyring, KeePassXC and KWallet all serve — see
+[ADR-019](../../docs/decisions/019-linux-windows-packages-and-the-keyring.md).
+
+The packaged app is checked on a real desktop, not under CI's Xvfb:
+`scripts/x11-smoke.sh` needs `xdotool`, `xprop` and `wmctrl` on a running X11
+session, `scripts/flatpak-smoke.sh` checks the Flatpak's own environment, and
+[DEVELOPMENT.md](../../DEVELOPMENT.md#reviewing-on-linux) lists the legs
+(X11, Wayland, packages, Flatpak, keyring).
+
+### The Flatpak
+
+**The Flatpak is experimental**: a task running under GNOME and KDE is still
+being measured. `scripts/flatpak.sh` builds the Flatpak from what `bun run package` staged
+and installs it for the user; `scripts/flatpak-smoke.sh` runs the checks that
+are its own environment's (git inside, the device outside, the window's entry
+and the narrow permissions). The sandbox is deliberately narrow — network, a
+display, the GPU, the keyring, and through `org.freedesktop.Flatpak` the
+person's own tools — and everything about what it reaches and what it does
+not is in [ADR-018](../../docs/decisions/018-what-the-flatpak-reaches.md). In
+short:
+
+- The person's own agents and editors are found and run on the device through
+  `flatpak-spawn`, with the environment an agent should have and no ssh agent
+  or signed-in tool in it. Everything is gated on `FLATPAK_ID`; dev, macOS,
+  AppImage, deb and rpm are unchanged.
+- Codex's own sandbox cannot run inside the Flatpak (no user namespaces); its
+  adapter drives the person's own Codex on the device instead
+  (`flatpak/codex-host.sh`). Without one installed there, a session says so.
+- Project folders reach the app through the document portal, and a path is
+  translated only at the device boundary (`/run/flatpak/doc/<id>` ↔
+  `/run/user/<uid>/doc/<id>`).
+- The Flatpak keeps its own profile (`~/.var/app/dev.althar.app/data/althar`)
+  with worktrees beside it, separate from the CLI's.
+
 ### The packaged app: not done yet
 
 `bun run package` makes an app for the Mac that built it. Before one goes to anyone else:

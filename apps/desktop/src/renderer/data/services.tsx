@@ -88,6 +88,10 @@ export interface Host {
   readonly platform: string
   /** Closes, minimizes, or maximizes and restores the window itself. */
   readonly window: (action: WindowAction) => void
+  /** Whether the window is maximized now, for the buttons' maximize or restore. */
+  readonly maximized: () => Promise<boolean>
+  /** Calls `listener` as the window is maximized or restored, until the returned function is called. */
+  readonly onMaximized: (listener: (maximized: boolean) => void) => () => void
   /** Asks the person for a folder, for a project or an agent's account; its grant, or null when they cancel. */
   readonly pickFolder: (purpose?: 'project' | 'account') => Promise<string | null>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */

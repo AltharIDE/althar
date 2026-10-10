@@ -9,6 +9,7 @@ import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Menu, MenuGroup, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
+import { WindowButtons } from '../WindowButtons/WindowButtons'
 import s from './ProjectTabs.module.css'
 
 /*
@@ -57,6 +58,7 @@ export interface ProjectTabsText {
   closeWindow: string
   minimizeWindow: string
   maximizeWindow: string
+  restoreWindow: string
 }
 
 export const projectTabsText: ProjectTabsText = {
@@ -72,6 +74,7 @@ export const projectTabsText: ProjectTabsText = {
   closeWindow: 'Close the window',
   minimizeWindow: 'Minimize the window',
   maximizeWindow: 'Maximize the window',
+  restoreWindow: 'Restore the window',
 }
 
 export type ProjectTabsProps = RootProps<
@@ -98,6 +101,8 @@ export type ProjectTabsProps = RootProps<
     onMinimize?: () => void
     /** Maximizes, or restores what it maximized. */
     onToggleMaximize?: () => void
+    /** The window is maximized: the third button restores it. */
+    maximized?: boolean
     text?: Partial<ProjectTabsText>
   }
 >
@@ -126,6 +131,7 @@ export function ProjectTabs({
   onCloseWindow,
   onMinimize,
   onToggleMaximize,
+  maximized = false,
   className,
   text,
   ...rest
@@ -168,22 +174,22 @@ export function ProjectTabs({
   }, [current, tabs.length])
   return (
     <header className={cx(s.strip, className)} data-drag="" {...rest}>
-      {lights !== 'none' && (
-        <span className={s.lights} aria-hidden={lights === 'space' || undefined}>
-          {lights === 'drawn' ? (
-            <>
-              <button type="button" aria-label={t.closeWindow} onClick={onCloseWindow} />
-              <button type="button" aria-label={t.minimizeWindow} onClick={onMinimize} />
-              <button type="button" aria-label={t.maximizeWindow} onClick={onToggleMaximize} />
-            </>
-          ) : (
-            <>
-              <i />
-              <i />
-              <i />
-            </>
-          )}
-        </span>
+      {lights === 'drawn' ? (
+        <WindowButtons
+          onClose={onCloseWindow}
+          onMinimize={onMinimize}
+          onToggleMaximize={onToggleMaximize}
+          maximized={maximized}
+          text={{ close: t.closeWindow, minimize: t.minimizeWindow, maximize: t.maximizeWindow, restore: t.restoreWindow }}
+        />
+      ) : (
+        lights !== 'none' && (
+          <span className={s.lights} aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        )
       )}
       <nav className={s.nav} aria-label={t.label}>
         <ul className={s.pinned}>

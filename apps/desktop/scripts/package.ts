@@ -23,6 +23,8 @@ const desktop = join(import.meta.dirname, '..')
 const out = join(desktop, 'out')
 const stage = join(out, 'stage')
 const mac = process.platform === 'darwin'
+// The Linux packages are built on Linux: electron-builder has no deb, rpm or AppImage elsewhere, and left to it the three-package check below would fail without saying why.
+if (!mac && process.platform !== 'linux') throw new Error(`The Linux packages are built on Linux, not on ${process.platform}.`)
 const own = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
   readonly productName: string
   readonly version: string
@@ -90,6 +92,8 @@ for (const [name, version] of Object.entries(pinned)) {
 }
 
 const electron = dirname(require.resolve('electron/package.json'))
+// Electron's own installer is idempotent: it fetches the binary where it is missing and leaves a complete install alone. It runs every time, because bun can install Electron in CI without its postinstall, and a partial extraction can leave the metadata (path.txt, dist/version) without the executable.
+execFileSync(process.execPath, ['install.js'], { cwd: electron, stdio: 'inherit' })
 const electronVersion = readFileSync(join(electron, 'dist', 'version'), 'utf8').trim()
 
 await build({
@@ -133,13 +137,17 @@ await build({
             category: 'Development',
             maintainer: 'Althar <hello@althar.ai>',
             synopsis: 'Run software projects with AI coding agents',
-            description: 'Althar is an open-source environment for running software projects with AI coding agents.',
+            description: 'Althar is an environment for running software projects with AI coding agents.',
             // The .desktop file is named after desktopName, and its StartupWMClass follows it, matching the window's app_id.
             syncDesktopName: true,
           },
+          // Sign-ins need a keyring to be sealed with (main/keyring.ts); electron-builder's own recommends list is replaced by this one.
           deb: {
-            // Sign-ins need a keyring to be sealed with (window-chrome's keyring guard); the tray needs the indicator library.
-            recommends: ['libappindicator3-1', 'gnome-keyring | kwallet6 | kwallet'],
+            recommends: ['gnome-keyring | kwallet6 | kwallet'],
+          },
+          rpm: {
+            // The rpm target has no recommends field: fpm's own tag carries the same hint, as a suggestion, not a requirement.
+            fpm: ['--rpm-tag', 'Recommends: gnome-keyring'],
           },
         }),
   },
