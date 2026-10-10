@@ -60,6 +60,59 @@ describe('a project’s rules', () => {
     expect(onBack).toHaveBeenCalled()
   })
 
+  it('lists what is always allowed, each rule taken off at once, and adds one by how a command starts', async () => {
+    const { client } = fakeClient({
+      getProjectRules: vi.fn(async () => ({
+        ...projectRules,
+        alwaysAllow: ['deploy' as const],
+        commands: [
+          { pattern: 'git status', decision: 'allow' as const },
+          { pattern: 'git status', decision: 'never' as const, match: 'exact' as const },
+          { pattern: 'bun test src/a.test.ts', decision: 'allow' as const, match: 'exact' as const },
+        ],
+      })),
+    })
+    withServices(<Rules />, client)
+    const allowed = await screen.findByRole('list', { name: 'Always allowed' })
+    expect(
+      within(allowed)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(['Deploying and publishing', 'Running git status', 'Running exactly bun test src/a.test.ts'])
+    // An exact rule for the same words is a rule of its own, in its own list.
+    expect(within(screen.getByRole('group', { name: 'Never' })).getByRole('checkbox', { name: 'Running exactly git status' })).toBeTruthy()
+
+    await userEvent.click(within(allowed).getByRole('button', { name: 'Remove Running git status' }))
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith({
+        projectId: 'p1',
+        alwaysAllow: ['deploy'],
+        commands: [
+          { pattern: 'git status', decision: 'never', match: 'exact' },
+          { pattern: 'bun test src/a.test.ts', decision: 'allow', match: 'exact' },
+        ],
+      }),
+    )
+    await userEvent.click(
+      within(screen.getByRole('list', { name: 'Always allowed' })).getByRole('button', { name: 'Remove Deploying and publishing' }),
+    )
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith(expect.objectContaining({ alwaysAllow: [] })))
+
+    // The third list's button adds to it.
+    await userEvent.click(screen.getAllByRole('button', { name: 'Add a rule' })[2]!)
+    await userEvent.type(screen.getByRole('textbox', { name: 'A command, as it starts' }), 'npm test{Enter}')
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith(
+        expect.objectContaining({ commands: expect.arrayContaining([{ pattern: 'npm test', decision: 'allow' }]) }),
+      ),
+    )
+  })
+
+  it('says nothing is always allowed yet, and how a rule gets there', async () => {
+    withServices(<Rules />, fakeClient().client)
+    expect(await screen.findByText(/Nothing yet\. A permission answered with “always allow” adds its rule here\./)).toBeTruthy()
+  })
+
   it('offers the accounts of an agent with more than one: which run work here, and whether work moves on to the next', async () => {
     const codex = agents[1] ?? agents[0]!
     const { client } = fakeClient({

@@ -9,6 +9,7 @@ import {
   NeedCard,
   NeedChange,
   NeedCommand,
+  PermissionAnswers,
   ProjectInk,
   type ProjectRef,
   TaskStatus,
@@ -19,6 +20,7 @@ import { Home, type HomeEvent as HomeLine, type HomeProject, type HomeRun } from
 
 import { waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
+import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import { productBrand, productName } from '../../shared/products'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { trackOf } from '../board/BoardView'
@@ -49,6 +51,8 @@ export const text = {
   allowed: (what: string) => `Allowed ${what}`,
   denied: (what: string) => `Didn’t allow ${what}`,
   answeredIn: (project: string) => `in ${project}`,
+  /** An always or a never, kept as a rule. */
+  keptIn: (project: string) => `kept in ${project}’s rules`,
   /** A change on its branch alone, by its size. */
   onBranch: 'On its branch',
   branchSize: (files: number, add: number, del: number) => `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
@@ -119,6 +123,8 @@ interface Answered {
   readonly said: string
   readonly denied: boolean
   readonly project: string
+  /** Kept as a rule: an always or a never. */
+  readonly kept: boolean
 }
 
 export function HomeView({
@@ -202,18 +208,19 @@ export function HomeView({
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  const answer = (call: HomeCall, project: ProjectRef, decision: 'allow' | 'reject') => {
+  const answer = (call: HomeCall, project: ProjectRef, reply: Reply) => {
     const what = call.command ?? call.title
     setAnswered((now) => [
       ...now,
       {
         id: call.id,
-        said: decision === 'allow' ? text.allowed(what) : text.denied(what),
-        denied: decision === 'reject',
+        said: reply.decision === 'allow' ? text.allowed(what) : text.denied(what),
+        denied: reply.decision === 'reject',
         project: project.name,
+        kept: reply.always !== undefined,
       },
     ])
-    void model.answer(call.id, decision)
+    void model.answer(call.id, reply.decision, reply.reason, reply.always)
   }
 
   const cards: ReadonlyArray<{ readonly key: string; readonly node: ReactNode }> = [
@@ -237,14 +244,11 @@ export function HomeView({
                 title={call.title}
                 detail={<NeedCommand command={call.command ?? call.title} />}
                 actions={
-                  <>
-                    <Button size="small" onClick={() => answer(call, project, 'reject')}>
-                      {text.deny}
-                    </Button>
-                    <Button size="small" variant="signal" onClick={() => answer(call, project, 'allow')}>
-                      {text.allow}
-                    </Button>
-                  </>
+                  <PermissionAnswers
+                    request={permissionOf(call)}
+                    project={project.name}
+                    onAnswer={(given) => answer(call, project, replyOf(given))}
+                  />
                 }
               />
             ) : (
@@ -411,7 +415,7 @@ export function HomeView({
               ...cards.map(({ key, node }) => <div key={key}>{node}</div>),
               ...answered.map((one) => (
                 <AskAnswered key={one.id} said={one.said} denied={one.denied} focusOnMount>
-                  <AskNote>{text.answeredIn(one.project)}</AskNote>
+                  <AskNote>{one.kept ? text.keptIn(one.project) : text.answeredIn(one.project)}</AskNote>
                 </AskAnswered>
               )),
             ]}

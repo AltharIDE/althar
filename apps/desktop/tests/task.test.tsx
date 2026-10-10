@@ -822,7 +822,7 @@ describe('a task', () => {
     await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'default' }))
   })
 
-  it('answers what the rules keep for the person', async () => {
+  it('answers what the rules keep for the person, several as one stack', async () => {
     const call = {
       id: 'a1',
       kind: 'permission' as const,
@@ -837,16 +837,96 @@ describe('a task', () => {
     })
     withServices(<Task />, client)
     await screen.findByText('Needs you')
-    const [first, second] = await screen
-      .findAllByRole('group', { name: 'Your answer' })
-      .then((groups) => groups.map((group) => group.closest('div') as HTMLElement))
-    await userEvent.click(within(first!.parentElement!).getByRole('button', { name: /^Allow/ }))
+    expect(screen.getByText(/1 of 2/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /^Allow(?! all)/ }))
     await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'allow' }))
-    const card = second!.parentElement!
-    await userEvent.click(within(card).getByRole('radio', { name: /No, and say what to do instead/ }))
-    await userEvent.type(within(card).getByPlaceholderText('Say what to do instead'), 'Open a PR instead')
-    await userEvent.click(within(card).getByRole('button', { name: /^Deny/ }))
+    await screen.findByText(/2 of 2/)
+    await userEvent.click(screen.getByRole('radio', { name: /No, and say what to do instead/ }))
+    await userEvent.type(screen.getByPlaceholderText('Say what to do instead'), 'Open a PR instead')
+    await userEvent.click(screen.getByRole('button', { name: /^Deny/ }))
     await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a2', decision: 'reject', reason: 'Open a PR instead' }))
+  })
+
+  it('keeps an answer as a rule by the scope the runtime offers, and offers no always it wouldn’t keep', async () => {
+    const call = {
+      id: 'a1',
+      kind: 'permission' as const,
+      stuck: null,
+      title: 'Run git status',
+      reason: "This project asks you before anything an agent does beyond the task's own files.",
+      command: 'git status --short',
+      createdAt: '2026-09-29T12:00:00.000Z',
+      always: {
+        command: 'git status --short',
+        prefix: 'git status',
+        kind: null,
+        allow: ['exact', 'prefix'] as const,
+        deny: ['exact'] as const,
+      },
+    }
+    const held = {
+      ...call,
+      id: 'a2',
+      reason: 'Deploying or publishing always asks.',
+      command: 'make deploy',
+      always: { command: 'make deploy', prefix: 'make deploy', kind: 'deploy' as const, allow: [], deny: ['kind'] as const },
+    }
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [call, held] })) })
+    withServices(<Task />, client)
+    await screen.findByText('Needs you')
+    await userEvent.click(screen.getByRole('radio', { name: /Yes, and always allow/ }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'What to always allow' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'commands starting “git status”' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Allow(?! all)/ }))
+    await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'allow', always: 'prefix' }))
+    // Held for the person by the always-ask list: never, by its kind, but no always allow.
+    await screen.findByText(/2 of 2/)
+    expect(screen.queryByRole('radio', { name: /Yes, and always allow/ })).toBeNull()
+    await userEvent.click(screen.getByRole('radio', { name: /No, and never allow/ }))
+    expect(screen.getByText('deploying and publishing')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /^Deny/ }))
+    await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a2', decision: 'reject', always: 'kind' }))
+  })
+
+  it('allows every call in the stack once with Allow all', async () => {
+    const call = (id: string) => ({
+      id,
+      kind: 'permission' as const,
+      stuck: null,
+      title: `Run ${id}`,
+      reason: 'It asks.',
+      command: id,
+      createdAt: '2026-09-29T12:00:00.000Z',
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [call('a1'), call('a2'), call('a3')] })) })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Allow all 3' }))
+    await waitFor(() => expect(client.answer).toHaveBeenCalledTimes(3))
+    expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a3', decision: 'allow' })
+  })
+
+  it('says in a line under a turn what the project’s rules let through, and which rule', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [
+            items.you('Check the tree'),
+            items.tool({
+              title: 'Run git status --short',
+              toolKind: 'execute',
+              command: 'git status --short',
+              allowedBy: { pattern: 'git status', match: 'prefix' },
+            }),
+            items.says('Clean.'),
+          ],
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    const line = await screen.findByRole('button', { name: /Allowed 1 request/ })
+    expect(line.textContent).toContain('by meridian’s rules')
+    await userEvent.click(line)
+    expect(await screen.findByText('commands starting “git status”')).toBeTruthy()
   })
 
   it('shows a step that needs the person, and takes their answer: tell the lead, hand it on, or abandon it', async () => {

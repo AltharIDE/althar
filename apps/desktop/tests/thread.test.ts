@@ -262,4 +262,17 @@ describe('tool calls', () => {
     expect(targetOf(tool({ title: 'Read file', toolKind: 'read' }), '/w')).toBe('file')
     expect(targetOf(tool({ title: 'List files', toolKind: 'search' }), '/w')).toBe('files')
   })
+
+  it('carries the rule that let a call through without asking, and nothing where none did', () => {
+    const [turn] = blocksOf(
+      source([
+        items.tool({ command: 'git status --short', toolKind: 'execute', allowedBy: { pattern: 'git status', match: 'prefix' } }),
+        items.tool({ command: 'ls', toolKind: 'execute' }),
+      ]),
+      new Map(),
+      at,
+    )
+    const tools = turn?.kind === 'turn' ? turn.parts.flatMap((part) => (part.kind === 'tool' ? [part.allowedBy ?? null] : [])) : []
+    expect(tools).toEqual([{ pattern: 'git status', match: 'prefix' }, null])
+  })
 })

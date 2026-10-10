@@ -37,7 +37,7 @@ import { stepNames, stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
-import { PermissionCall } from './PermissionCall'
+import { PermissionCalls } from './PermissionCall'
 import { StuckCall } from './StuckCall'
 import { ConnectPanel } from './ConnectPanel'
 import { NoOutputsView } from './NoOutputsView'
@@ -511,6 +511,7 @@ export function TaskView({
                 ),
               ]}
               session={session}
+              project={snapshot.project.name}
               onPassOn={(words) => void model.send(words)}
             />
             {snapshot.attention.map((request) =>
@@ -523,10 +524,13 @@ export function TaskView({
                   agentName={agentName}
                   onAnswer={(attentionId, answer) => void model.answerStuck(attentionId, answer)}
                 />
-              ) : (
-                <PermissionCall key={request.id} request={request} project={snapshot.project.name} onAnswer={model.answer} />
-              ),
+              ) : null,
             )}
+            <PermissionCalls
+              requests={snapshot.attention.filter((request) => request.kind === 'permission' || request.stuck === null)}
+              project={snapshot.project.name}
+              onAnswer={model.answer}
+            />
           </Thread>
         </TaskFace>
       )}

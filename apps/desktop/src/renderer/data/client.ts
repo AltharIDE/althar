@@ -2,6 +2,7 @@ import {
   type AccountSignInState,
   type AccountStatus,
   type AgentModels,
+  type AlwaysScope,
   type AppSettings,
   type FoundAccount,
   type ProjectRulesView,
@@ -115,10 +116,12 @@ export interface Client {
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
+  /** The person's answer to a permission; with `always`, kept in the project's rules by that scope, one of those offered. */
   readonly answer: (input: {
     readonly attentionId: string
     readonly decision: 'allow' | 'reject'
     readonly reason?: string
+    readonly always?: AlwaysScope
   }) => Promise<void>
   /** The project's coordinator thread, with the newest `limit` items before `before`. */
   readonly getCoordinator: (projectId: string, page?: { readonly before?: number; readonly limit?: number }) => Promise<CoordinatorSnapshot>

@@ -44,6 +44,7 @@ export const projectRules: ProjectRulesView = {
   permissions: 'rules',
   alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
   never: [],
+  alwaysAllow: [],
   commands: [],
   end: null,
   usageLimit: 'move',

@@ -225,6 +225,37 @@ describe('the home', () => {
     expect(onTask).toHaveBeenCalledWith('th4')
   })
 
+  it('offers on a permission’s card what its task’s card offers: always allow, never allow, and deny with a note', async () => {
+    const offered: HomeCall = {
+      ...permission,
+      reason: "This project asks you before anything an agent does beyond the task's own files.",
+      command: 'npm test',
+      always: { command: 'npm test', prefix: 'npm test', kind: null, allow: ['exact', 'prefix'], deny: ['exact', 'prefix'] },
+    }
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...busy(), calls: [offered] })) })
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /Needs you/ })
+    await userEvent.click(within(needs).getByRole('button', { name: 'More answers' }))
+    expect(screen.getByText('An always or a never is kept in halyard’s rules')).toBeTruthy()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Always allow commands starting “npm test”' }))
+    expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'allow', always: 'prefix' })
+    expect(await within(needs).findByText('Allowed npm test')).toBeTruthy()
+    expect(within(needs).getByText('kept in halyard’s rules')).toBeTruthy()
+  })
+
+  it('denies from a permission’s card with what to do instead', async () => {
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...busy(), calls: [permission] })) })
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /Needs you/ })
+    await userEvent.click(within(needs).getByRole('button', { name: 'More answers' }))
+    // Kept for the person by the always-ask list, and offered no always by the runtime: the note alone.
+    expect(screen.getAllByRole('menuitem')).toHaveLength(1)
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Deny, and say what to do instead' }))
+    await userEvent.type(within(needs).getByRole('textbox', { name: 'Say what to do instead' }), 'Publish from CI{Enter}')
+    expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'reject', reason: 'Publish from CI' })
+    expect(await within(needs).findByText('Didn’t allow npm publish')).toBeTruthy()
+  })
+
   it('opens the first ready task from the bar when no call waits', async () => {
     const onTask = vi.fn()
     const one = busy()

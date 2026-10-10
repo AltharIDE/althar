@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 
-import type { BoardTask } from '@althar/contracts'
+import type { AlwaysScope, BoardTask } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { useServices } from '../../data/services'
@@ -33,7 +33,7 @@ export interface WorkActions {
   readonly sendBack: (task: BoardTask, note: string) => Promise<boolean>
   /** Opens the pull request of a task whose work ended on its branch. */
   readonly openChange: (taskId: string) => Promise<boolean>
-  readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string) => Promise<void>
+  readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string, always?: AlwaysScope) => Promise<void>
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
   /** Says what went wrong reading what the actions act on. */
   readonly fail: (failure: unknown) => void
@@ -91,7 +91,10 @@ export const useWorkActions = (): WorkActions => {
     ),
     openChange: useCallback((taskId) => busy(setOpening, taskId, () => client.openChange(taskId)), [busy, client]),
     answer: useCallback(
-      (attentionId, decision, reason) => client.answer({ attentionId, decision, ...(reason === undefined ? {} : { reason }) }).catch(fail),
+      (attentionId, decision, reason, always) =>
+        client
+          .answer({ attentionId, decision, ...(reason === undefined ? {} : { reason }), ...(always === undefined ? {} : { always }) })
+          .catch(fail),
       [client, fail],
     ),
     answerStuck: useCallback((attentionId, answer) => client.answerStuck({ attentionId, answer }).catch(fail), [client, fail]),
