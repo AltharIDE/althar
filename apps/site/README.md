@@ -66,4 +66,4 @@ The developer page's drafts are in `althar-designs/althar-dev/` (`a.html` is the
 - Re-check that Claude plans may still be used through third-party apps; the page's first claim depends on it.
 - Prerender it, as the pitch app does, so the page reads without JavaScript.
 - Split the main bundle further; most of it is `@althar/ui`.
-- Choose the licence, and check the links against the real repository, which may not be public yet.
+- Check the links against the real repository: `facts.ts` still points at thetastemakers/althar, which GitHub redirects to AltharIDE/althar.

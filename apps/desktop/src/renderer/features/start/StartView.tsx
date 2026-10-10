@@ -127,7 +127,6 @@ export function StartView({
     const { forming } = model
     return (
       <div className={s.window}>
-        <TitleBar lights="none">{null}</TitleBar>
         <div className={`${s.scroll} ${s.first}`}>
           <NewProject
             defaultName={forming.name}

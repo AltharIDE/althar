@@ -33,7 +33,7 @@ export interface EdgeHost {
 /** The island's window: room for it open, and for a call said beside the notch. Clicks go through what it doesn't draw. */
 const ISLAND = { width: 600, height: 640 }
 /** The menu bar's sheet, as wide as the page draws it; as tall as what it holds, up to the screen. */
-const SHEET = { width: 400, height: 420, gap: 6 }
+const SHEET = { width: 360, height: 420, gap: 6 }
 /** How long the screens settle after a change before the notch is looked for again. */
 const SETTLE = 400
 /** How often the pointer is looked at, while there is an island: often enough to feel at once, rarely enough to cost nothing. */

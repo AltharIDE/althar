@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Althar's site: the developer page, the shifts and the thesis, built with Vite+ and @althar/ui.",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vp dev",

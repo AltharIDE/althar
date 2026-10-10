@@ -38,7 +38,7 @@ import { device, platform } from '../../shared/device'
 import { edgePlaces } from '../../shared/edge'
 import { useEditorList, useEditorPictures } from '../../shared/OpenIn'
 import { useSounds } from '../../shared/useSounds'
-import { type EdgeGlance, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
+import { type EdgeGlance, EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { productBrand } from '../../shared/products'
 import { clock } from '../../shared/time'
@@ -82,7 +82,7 @@ export const text = {
   icon: 'App icon',
   iconFailed: 'That icon couldn’t be kept. Try again.',
   edge: 'While you’re in another app',
-  edgeNote: 'Where Althar shows what needs you and what runs.',
+  edgeNote: 'Where Althar shows what needs you, while you work in another app.',
   edgeFailed: 'That couldn’t be kept. Try again.',
   coAuthorFailed: 'That couldn’t be kept. Try again.',
   version: (version: string) => `Althar ${version}`,
@@ -391,7 +391,7 @@ export function SettingsView({
       {showing === 'edge' && edge.place !== null && (
         <ControlDetail title={text.edge} onBack={all}>
           <ControlSheet>
-            <p className={s.quiet}>{glance === undefined || glance.lines.length === 0 ? text.examples : text.edgeNote}</p>
+            <p className={s.quiet}>{shownGlance(glance) === EXAMPLE ? text.examples : text.edgeNote}</p>
             <EdgePlaces
               label={text.edge}
               options={edgePlaces.map((one) => ({
