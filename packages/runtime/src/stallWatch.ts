@@ -260,6 +260,7 @@ export const makeStallWatch = (limits: StallLimits) => {
         watch.lifeAt = now
         return []
       case 'Streaming':
+      case 'Output':
         if (watch.turn !== null) watch.lifeAt = now
         return []
       case 'Agent': {

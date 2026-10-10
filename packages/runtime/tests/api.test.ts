@@ -69,6 +69,7 @@ const connected = (
         secrets: Secrets.memory(),
         connectors: options.connectors ?? fakeConnectors({}),
         accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
+        artifactsRoot: mkdtempSync(join(tmpdir(), 'althar-artifacts-')),
         ...(options.noTerminal === true
           ? {}
           : { openTerminal: (line: string) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(true)) }),
@@ -99,6 +100,75 @@ const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.sess
 const texts = (thread: ThreadSnapshot) => thread.items.map((item) => ('text' in item.content ? item.content.text : item.kind))
 
 describe('the API', () => {
+  it.live('streams a command’s output, then reads what it printed and the document the agent wrote', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Hand it back' })
+        const outputs = yield* Effect.forkChild(
+          Stream.runCollect(
+            Stream.take(
+              Stream.filter(client.Watch({}), (event) => event._tag === 'Output' && event.threadId === task.threadId),
+              2,
+            ),
+          ),
+        )
+        yield* Effect.sleep('50 millis')
+        yield* client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'codex' })
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.handsBack, disposition: 'after_current' })
+        const thread = yield* eventually(
+          client.GetThread({ threadId: task.threadId }),
+          (value) => idle(value) && value.items.some((item) => item.kind === 'agent_message' && item.content.text.includes('charges')),
+        )
+        const streamed = (yield* Fiber.join(outputs)) as ReadonlyArray<WatchEvent>
+        assert.isTrue(streamed.every((event) => event._tag === 'Output' && event.text.startsWith(' ✓ charges/limit')))
+        const tools = thread.items.flatMap((item) => (item.kind === 'tool_call' ? [item] : []))
+        const ran = tools.find((item) => item.content.command === 'npm test')
+        const printed = ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n 52 passed\n'
+        assert.deepStrictEqual(
+          [ran?.content.exit, ran?.content.output],
+          [0, { kept: true, lines: 3, bytes: Buffer.byteLength(printed), dropped: 0 }],
+        )
+        assert.deepStrictEqual(yield* client.ReadOutput({ threadId: task.threadId, itemId: ran?.id ?? '' }), { text: printed, dropped: 0 })
+        const lint = tools.find((item) => item.content.command === 'npm run lint')
+        assert.deepStrictEqual([lint?.content.status, lint?.content.exit, lint?.content.output?.lines], ['failed', 1, 3])
+        // The screenshot, by its digest and size; the document by its path.
+        const shot = tools.find((item) => item.content.pictures.length > 0)
+        assert.deepInclude(shot?.content.pictures[0], { mediaType: 'image/png', width: 480, height: 300, unkept: null })
+        const wrote = tools.find((item) => item.content.files.some((file) => file.how === 'wrote'))
+        const path = wrote?.content.files[0]?.path ?? ''
+        assert.isTrue(path.endsWith('/docs/notes.md'))
+        const document = yield* client.ReadDocument({ threadId: task.threadId, path })
+        assert.deepStrictEqual([document.lines, document.body.startsWith('# Notes')], [8, true])
+        assert.deepStrictEqual((yield* client.ReadDocument({ threadId: task.threadId, path: 'docs/notes.md' })).body, document.body)
+        // What the message handed back: a file it points at, and a picture.
+        const said = thread.items.findLast((item) => item.kind === 'agent_message')
+        assert.deepStrictEqual(
+          said?.kind === 'agent_message' ? [said.content.files.map((file) => file.how), said.content.pictures.length] : [],
+          [['linked'], 1],
+        )
+        // Only markdown, only inside the worktree, and only what is there.
+        const refused = (asked: string) =>
+          Effect.map(Effect.flip(client.ReadDocument({ threadId: task.threadId, path: asked })), (error) => error.message)
+        assert.strictEqual(yield* refused('report.csv'), 'Only markdown documents open here. Open the file in your editor.')
+        assert.strictEqual(yield* refused('/etc/../etc/hosts.md'), "That document isn't there any more.")
+        assert.strictEqual(yield* refused('docs/gone.md'), "That document isn't there any more.")
+        assert.strictEqual(
+          (yield* Effect.flip(client.ReadOutput({ threadId: task.threadId, itemId: shot?.id ?? '' }))).message,
+          "That output isn't there any more.",
+        )
+        // The coordinator writes no documents.
+        const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+        assert.strictEqual(
+          (yield* Effect.flip(client.ReadDocument({ threadId: coordinator.threadId, path: 'docs/notes.md' }))).reason,
+          'NotFound',
+        )
+      }),
+    ),
+  )
+
   it.live('opens a project by its grant, runs a task, and says what changes after a cursor', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -203,7 +273,7 @@ describe('the API', () => {
         )
         assert.isEmpty((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).items)
         const reply = yield* client.GetThreadItem({ threadId: task.threadId, itemId: newest.items[0]?.id ?? '' })
-        assert.deepStrictEqual(reply.content, { text: 'Hello' })
+        assert.deepStrictEqual(reply.content, { text: 'Hello', pictures: [], files: [] })
 
         // A tool call keeps what the thread shows: the files it touched, not its raw input and output.
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.tool, disposition: 'after_current' })
@@ -218,6 +288,10 @@ describe('the API', () => {
           command: null,
           locations: [{ path: 'hello.txt' }],
           declined: false,
+          pictures: [],
+          files: [],
+          output: null,
+          exit: null,
         })
 
         const choosing = { commandId: commandId(), threadId: task.threadId, model: 'large' }
@@ -1401,6 +1475,10 @@ describe('thread items', () => {
       command: "bash -lc 'make test'",
       locations: [{ path: '/w/a', line: 2 }],
       declined: true,
+      pictures: [],
+      files: [],
+      output: null,
+      exit: null,
     })
     assert.deepStrictEqual(itemOf(row('plan', { entries: 'none' }))?.content, { entries: [] })
     assert.deepStrictEqual(itemOf(row('notice', { source: 'agent', severity: 'loud', title: 'Hm' }))?.content, {
@@ -1409,7 +1487,7 @@ describe('thread items', () => {
       title: 'Hm',
       description: null,
     })
-    assert.deepStrictEqual(itemOf({ ...row('agent_message', null), content: 'not json' })?.content, { text: '' })
+    assert.deepStrictEqual(itemOf({ ...row('agent_message', null), content: 'not json' })?.content, { text: '', pictures: [], files: [] })
     assert.isUndefined(itemOf(row('something_new', {})))
     assert.deepStrictEqual(
       itemOf(

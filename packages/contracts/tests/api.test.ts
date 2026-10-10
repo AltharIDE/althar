@@ -18,7 +18,7 @@ describe('the API', () => {
       decode({ ...base, kind: 'user_message', content: { text: 'Hi', links: [] }, input: { state: 'queued', interrupting: false } }).kind,
       'user_message',
     )
-    assert.strictEqual(decode({ ...base, kind: 'agent_thought', content: { text: 'Hmm' } }).kind, 'agent_thought')
+    assert.strictEqual(decode({ ...base, kind: 'agent_thought', content: { text: 'Hmm', pictures: [], files: [] } }).kind, 'agent_thought')
     const tool = decode({
       ...base,
       kind: 'tool_call',
@@ -29,9 +29,44 @@ describe('the API', () => {
         command: null,
         locations: [{ path: '/w/a.ts', line: 3 }],
         declined: false,
+        pictures: [],
+        files: [],
+        output: null,
+        exit: null,
       },
     })
     assert.deepStrictEqual(tool.kind === 'tool_call' && tool.content.locations, [{ path: '/w/a.ts', line: 3 }])
+    // What a command printed and the pictures it handed back come with it; a picture not kept says why.
+    const ran = decode({
+      ...base,
+      kind: 'tool_call',
+      content: {
+        title: 'npm test',
+        toolKind: 'execute',
+        status: 'failed',
+        command: 'npm test',
+        locations: [],
+        declined: false,
+        pictures: [
+          { digest: null, mediaType: 'image/png', bytes: 30_000_000, width: null, height: null, name: 'big.png', unkept: 'too_large' },
+        ],
+        files: [{ path: '/w/docs/plan.md', how: 'wrote', mediaType: null, bytes: null, title: null }],
+        output: { kept: true, lines: 12, bytes: 420, dropped: 0 },
+        exit: 1,
+      },
+    })
+    assert.deepStrictEqual(ran.kind === 'tool_call' && [ran.content.exit, ran.content.output?.lines], [1, 12])
+    assert.throws(() =>
+      decode({
+        ...base,
+        kind: 'agent_message',
+        content: {
+          text: 'Look',
+          pictures: [{ digest: 'a', mediaType: 'image/png', bytes: 1, width: 1, height: 1, name: null, unkept: 'lost' }],
+          files: [],
+        },
+      }),
+    )
     assert.strictEqual(decode({ ...base, kind: 'plan', content: { entries: [{ content: 'Test it', status: 'pending' }] } }).kind, 'plan')
     assert.strictEqual(
       decode({ ...base, kind: 'notice', content: { source: 'runtime', severity: 'info', title: 'Codex takes over.', description: null } })
@@ -180,6 +215,8 @@ describe('the API', () => {
               PasteAccountSignInCode: () => Effect.die('unused'),
               CancelAccountSignIn: () => Effect.die('unused'),
               GetThreadItem: () => Effect.die('unused'),
+              ReadOutput: () => Effect.die('unused'),
+              ReadDocument: () => Effect.die('unused'),
               GetCoordinator: () => Effect.die('unused'),
               StartTask: () => Effect.die('unused'),
               StartPlan: () => Effect.void,

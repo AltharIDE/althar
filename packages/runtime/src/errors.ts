@@ -132,3 +132,12 @@ export class NotAnIssue extends Schema.TaggedError<NotAnIssue>()('NotAnIssue', {
 export class ChangedSinceSeen extends Schema.TaggedError<ChangedSinceSeen>()('ChangedSinceSeen', {
   taskId: Schema.String,
 }) {}
+
+/**
+ * A document the window asked for that Althar won't read: a file that isn't
+ * markdown, one outside the task's worktrees, or one too large to show.
+ */
+export class DocumentRefused extends Schema.TaggedError<DocumentRefused>()('DocumentRefused', {
+  path: Schema.String,
+  reason: Schema.Literals(['not_markdown', 'outside', 'too_large']),
+}) {}

@@ -2,7 +2,7 @@ import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
 import type { AccountRefused } from './Accounts'
-import type { CantMerge, NoChangeToOpen, ProjectRefused } from './errors'
+import type { CantMerge, DocumentRefused, NoChangeToOpen, ProjectRefused } from './errors'
 
 /*
  * What went wrong, in words a person reads in the window. The runtime's
@@ -91,6 +91,8 @@ const kinds: Readonly<Record<string, string>> = {
   folder: 'folder',
   account: 'account',
   repository: 'repository',
+  output: 'output',
+  document: 'document',
 }
 
 /** What went wrong, for the window: the error's tag as its reason, and words for the person. */
@@ -118,6 +120,8 @@ export const words = (
         return `That ${kinds[text(error, 'kind')] ?? 'thing'} isn't there any more.`
       case 'UnknownAgent':
         return `Althar has no agent called ${text(error, 'agentId')}.`
+      case 'DocumentRefused':
+        return documentRefused[text(error, 'reason') as DocumentRefused['reason']] ?? 'Althar can’t show that file here.'
       case 'SessionRunning':
         return 'An agent is already working on this task.'
       case 'NoSession':
@@ -244,6 +248,7 @@ export const expected = new Set([
   'NotARepository',
   'RepositoriesNeeded',
   'ProjectRefused',
+  'DocumentRefused',
   'NotFound',
   'UnknownAgent',
   'SessionRunning',
@@ -252,6 +257,13 @@ export const expected = new Set([
   'AlreadyDelivered',
   'CommandIdReused',
 ])
+
+/** Why a document isn't shown, by reason. */
+const documentRefused: Readonly<Record<DocumentRefused['reason'], string>> = {
+  not_markdown: 'Only markdown documents open here. Open the file in your editor.',
+  outside: 'This file isn’t in the task’s worktree, so Althar doesn’t show it.',
+  too_large: 'This document is too large to show here. Open it in your editor.',
+}
 
 /** Why a project can't be changed so, by reason. */
 const projectRefused = {

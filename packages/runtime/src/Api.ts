@@ -307,9 +307,11 @@ export const handlers = Api.toLayer(
                   agentId: event.agentId,
                   text: event.text,
                 })
-              : event._tag === 'Agent' && event.event._tag === 'ContextUsage'
-                ? Stream.make({ _tag: 'Context', threadId: event.threadId, used: event.event.used, size: event.event.size })
-                : Stream.empty,
+              : event._tag === 'Output'
+                ? Stream.make({ _tag: 'Output', threadId: event.threadId, itemId: event.itemId, text: event.text, dropped: event.dropped })
+                : event._tag === 'Agent' && event.event._tag === 'ContextUsage'
+                  ? Stream.make({ _tag: 'Context', threadId: event.threadId, used: event.event.used, size: event.event.size })
+                  : Stream.empty,
           ),
         ),
       ),
@@ -466,6 +468,8 @@ export const handlers = Api.toLayer(
           }),
         ),
       GetThreadItem: ({ threadId, itemId }) => api(queries.item(threadId, itemId)),
+      ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
+      ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       GetFileDiff: ({ taskId, path }) => api(queries.fileDiff(taskId, path)),
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
       GetHome: ({ since }) => api(queries.home(since)),

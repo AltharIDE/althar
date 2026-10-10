@@ -497,14 +497,64 @@ export const UserMessageItem = Schema.Struct({
   ),
 })
 
-/** What an agent said or thought, as far as the store has it. */
+/**
+ * A picture an agent handed back, in a message or a tool's result: kept in
+ * the artifact store by its digest, by which the window asks for its bytes,
+ * or not kept, saying why.
+ */
+export const Picture = Schema.Struct({
+  /** Its SHA-256; null for one that wasn't kept. */
+  digest: Schema.NullOr(Schema.String),
+  mediaType: Schema.String,
+  bytes: Schema.Number,
+  width: Schema.NullOr(Schema.Number),
+  height: Schema.NullOr(Schema.Number),
+  /** What it is called, where the agent said. */
+  name: Schema.NullOr(Schema.String),
+  /** Why it wasn't kept: too large, a kind the window doesn't draw, or nowhere to keep it. */
+  unkept: Schema.NullOr(Schema.Literals(['too_large', 'unsupported', 'unkept'])),
+})
+export type Picture = typeof Picture.Type
+
+/** A file an agent wrote whole, or pointed at: by its path as it named it, never its contents. */
+export const FileMention = Schema.Struct({
+  path: Schema.String,
+  how: Schema.Literals(['wrote', 'linked']),
+  mediaType: Schema.NullOr(Schema.String),
+  bytes: Schema.NullOr(Schema.Number),
+  title: Schema.NullOr(Schema.String),
+})
+export type FileMention = typeof FileMention.Type
+
+/** What a command printed, once it ended: whether it was kept (ReadOutput reads it), how much, and how many of its first lines weren't kept. */
+export const CommandOutput = Schema.Struct({
+  /** False when it printed nothing, or there was nowhere to keep it. */
+  kept: Schema.Boolean,
+  lines: Schema.Number,
+  bytes: Schema.Number,
+  dropped: Schema.Number,
+})
+export type CommandOutput = typeof CommandOutput.Type
+
+/** What a message or a tool call handed back beside its words. */
+const handedFields = {
+  pictures: Schema.Array(Picture),
+  files: Schema.Array(FileMention),
+}
+
+/** What an agent said or thought, as far as the store has it, and the pictures and files it handed back as it spoke. */
 export const AgentTextItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literals(['agent_message', 'agent_thought']),
-  content: Schema.Struct({ text: Schema.String }),
+  content: Schema.Struct({ text: Schema.String, ...handedFields }),
 })
 
-/** A tool call: what it is, how it stands, the command it runs and the files it touches, without its raw input and output. */
+/**
+ * A tool call: what it is, how it stands, the command it runs and the files
+ * it touches, without its raw input and output; and what it handed back:
+ * pictures, files it wrote whole or pointed at, and, for a command that
+ * ended, what it printed and its exit code.
+ */
 export const ToolCallItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('tool_call'),
@@ -518,6 +568,9 @@ export const ToolCallItem = Schema.Struct({
     locations: Schema.Array(ToolLocation),
     /** Refused when it asked: by the rules, the lead or the person. */
     declined: Schema.Boolean,
+    ...handedFields,
+    output: Schema.NullOr(CommandOutput),
+    exit: Schema.NullOr(Schema.Number),
   }),
 })
 
@@ -1048,8 +1101,24 @@ export const WatchEvent = Schema.Union([
     text: Schema.String,
   }),
   Schema.Struct({ _tag: Schema.Literal('Context'), threadId: Schema.String, ...ContextUse.fields }),
+  /** A command's output as far as it has come, while it runs: its last lines, whole each time, and how many came before them. */
+  Schema.Struct({
+    _tag: Schema.Literal('Output'),
+    threadId: Schema.String,
+    itemId: Schema.String,
+    text: Schema.String,
+    dropped: Schema.Number,
+  }),
 ])
 export type WatchEvent = typeof WatchEvent.Type
+
+/** What a command printed, as kept: its end, and how many lines before it weren't kept. */
+export const OutputText = Schema.Struct({ text: Schema.String, dropped: Schema.Number })
+export type OutputText = typeof OutputText.Type
+
+/** A markdown document an agent wrote, read from where it is now: its path as asked, its text, and how big. */
+export const DocumentText = Schema.Struct({ path: Schema.String, body: Schema.String, bytes: Schema.Number, lines: Schema.Number })
+export type DocumentText = typeof DocumentText.Type
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
 
@@ -1141,6 +1210,14 @@ export const Api = RpcGroup.make(
   /** The person left the home: what the loop does from now on is new to them. */
   command('LeftHome', {}, Schema.Void),
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
+  /** What a command in a thread printed, as kept once it ended. */
+  call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
+  /**
+   * A markdown document an agent in a thread wrote, as it is now in the
+   * task's worktree: by the path the thread names it by. Only a markdown
+   * file inside one of the task's worktrees, and not too large to read.
+   */
+  call('ReadDocument', { threadId: Schema.String, path: Schema.String }, DocumentText),
   /** The project's coordinator thread, made the first time it is asked for. */
   call('GetCoordinator', { projectId: Schema.String, before: Schema.optional(Schema.Int), limit }, CoordinatorSnapshot),
   /** Starts a task you planned yourself: it shows in the coordinator's thread like one it planned, and starts at once. */

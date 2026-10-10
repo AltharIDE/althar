@@ -19,6 +19,8 @@ export type LiveEvent =
       readonly agentId: string
       readonly text: string
     }
+  /** A command's output as far as it has come, as its last lines, keyed by its tool call's item. */
+  | { readonly _tag: 'Output'; readonly threadId: string; readonly itemId: string; readonly text: string; readonly dropped: number }
   | {
       readonly _tag: 'SessionStarted'
       readonly threadId: string

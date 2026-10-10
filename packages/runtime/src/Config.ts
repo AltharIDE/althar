@@ -15,6 +15,12 @@ export interface RuntimeOptions {
   readonly worktreeRoot: string
   /** Where the homes of accounts Althar makes go (ADR-012): `<root>/<account>`. Without it, it makes none. */
   readonly accountsRoot?: string
+  /**
+   * Where the artifact store keeps its bytes (`Artifacts.ts`): pictures
+   * agents hand back and what commands print, `<root>/<digest>`. Without it,
+   * nothing is kept, and the thread says so.
+   */
+  readonly artifactsRoot?: string
   /** Where agents Althar downloads at the person's asking are kept (`Installs.ts`): `<root>/<agent>`. Without it, it downloads none. */
   readonly agentsRoot?: string
   /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
