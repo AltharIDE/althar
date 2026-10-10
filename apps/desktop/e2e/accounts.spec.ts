@@ -20,7 +20,11 @@ test('adds an account to an agent, and names the one that ran out when a task mo
   const repo = repository(home)
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_OUT: 'claude-code@usual:3600' })
   try {
-    const claude = page.getByRole('list', { name: 'Agents on this Mac' }).getByRole('listitem').filter({ hasText: 'Claude Code' }).first()
+    const claude = page
+      .getByRole('list', { name: /Agents on this (Mac|PC|computer)/ })
+      .getByRole('listitem')
+      .filter({ hasText: 'Claude Code' })
+      .first()
     await claude.getByRole('button', { name: 'Add an account' }).click()
     await page.screenshot({ path: 'test-results/accounts-adding.png', animations: 'disabled' })
     await page.getByRole('button', { name: 'Sign in in Terminal' }).click()

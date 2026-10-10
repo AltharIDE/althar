@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch } from './support'
+import { launch, openFirstProject } from './support'
 
 /*
  * The window's own chrome, as Linux gets it: no application menu — the tabs'
@@ -29,8 +29,7 @@ test('draws the window’s own chrome off a Mac, and its buttons reach the windo
     // No application menu at all: no File Edit View Window, and nothing on Alt.
     expect(await electronApp.evaluate(({ Menu }) => Menu.getApplicationMenu())).toBeNull()
 
-    await chooseFolder(electronApp, repo)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
     // Catch what each button asks for, and keep the maximized state, so the toggle is judged.
