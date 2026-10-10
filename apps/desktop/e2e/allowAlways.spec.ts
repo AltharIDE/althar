@@ -86,8 +86,9 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
 
     // On the home, its card offers the same: always allow, from beside Allow once.
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
-    const needs = page.getByRole('region', { name: /Needs you/ })
+    const needs = page.getByRole('region', { name: /needs? you/ })
     await expect(needs.getByText('git status -s', { exact: true })).toBeVisible()
+    if (shots) await page.screenshot({ path: join(shots, 'app-home-permission.png') })
     await needs.getByRole('button', { name: 'More answers' }).click()
     await expect(page.getByRole('menuitem', { name: 'Always allow commands starting “git status”' })).toBeVisible()
     await page.waitForTimeout(400)
