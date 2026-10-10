@@ -30,6 +30,7 @@ import type { PermissionRequest } from '@althar/provider-adapters'
 export type Verdict =
   | { readonly verdict: 'allow' }
   | { readonly verdict: 'ask'; readonly reason: string }
+  | { readonly verdict: 'judge'; readonly reason: string }
   | { readonly verdict: 'deny'; readonly reason: string }
 
 /**
@@ -63,10 +64,11 @@ const kept = (reason: string, rule: RuleId | 'unclear'): Kept => ({ reason, rule
 export interface ProjectRuleSet {
   /**
    * What happens to what no rule keeps: it is allowed (`rules`), it waits
-   * for the person (`ask`); or everything is allowed (`allow`), the
+   * for the person (`ask`), or the coordinator judges (`coordinator`);
+   * or everything is allowed (`allow`), the
    * always-ask list with it, and only what is never allowed is refused.
    */
-  readonly mode: 'rules' | 'ask' | 'allow'
+  readonly mode: 'rules' | 'coordinator' | 'ask' | 'allow'
   /** The kinds that ask the person. */
   readonly ask: ReadonlyArray<RuleId>
   /** The kinds refused outright, whoever would answer. */
@@ -82,11 +84,13 @@ export const sayRules = (rules: ProjectRuleSet): string => {
   const asks = [...rules.ask.map((id) => RULE_WORDS[id]), ...named('ask')]
   const never = [...rules.never.map((id) => RULE_WORDS[id]), ...named('never')]
   return [
-    rules.mode === 'ask'
-      ? "Agents may read anything and change a task's own files; everything else waits for the person."
-      : rules.mode === 'allow' || asks.length === 0
-        ? 'Agents may do anything.'
-        : `Agents may do anything but these, which wait for the person: ${asks.join('; ')}.`,
+    rules.mode === 'coordinator'
+      ? `The coordinator judges permission requests within these rules. Always ask the person: ${asks.length === 0 ? 'none' : asks.join('; ')}.`
+      : rules.mode === 'ask'
+        ? "Agents may read anything and change a task's own files; everything else waits for the person."
+        : rules.mode === 'allow' || asks.length === 0
+          ? 'Agents may do anything.'
+          : `Agents may do anything but these, which wait for the person: ${asks.join('; ')}.`,
     ...(never.length === 0 ? [] : [`Never allowed: ${never.join('; ')}.`]),
   ].join(' ')
 }
@@ -795,6 +799,7 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
  *   the project asks about, waits for the person;
  * - a project that asks about everything asks about the rest, except reads
  *   and changes to the task's own files, which every agent's sandbox keeps;
+ * - coordinator mode judges the remaining requests;
  * - anything else is allowed.
  */
 export const decide = (request: PermissionRequest, context: RuleContext): Verdict => {
@@ -828,8 +833,9 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   if (named !== undefined) return ask(`The project's rules ask before \`${named.pattern.trim()}\`.`)
   // Reads, and changes to the task's own files, go through, as they would in any agent's sandbox.
   const ownFiles = CHANGES.includes(request.kind) && found.length === 0
-  if (project.mode === 'ask' && !LOOKS.includes(request.kind) && !ownFiles)
-    return ask("This project asks you before anything an agent does beyond the task's own files.")
+  const routine = LOOKS.includes(request.kind) || ownFiles
+  if (project.mode === 'coordinator' && !routine) return { verdict: 'judge', reason: 'The coordinator decides within the project rules.' }
+  if (project.mode === 'ask' && !routine) return ask("This project asks you before anything an agent does beyond the task's own files.")
   return ALLOW
 }
 

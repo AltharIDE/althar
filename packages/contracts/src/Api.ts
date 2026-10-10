@@ -267,8 +267,8 @@ export type RepositoryConventions = typeof RepositoryConventions.Type
 /** A project's rules, as its rules screen shows them. */
 export const ProjectRulesView = Schema.Struct({
   projectId: Schema.String,
-  /** What happens to what no rule keeps: allowed (`rules`), asked about (`ask`); or everything allowed (`allow`), short of `never`. */
-  permissions: Schema.Literals(['rules', 'ask', 'allow']),
+  /** What no rule keeps: allowed (`rules`), coordinator judgment, or asked about (`ask`); `allow` overrides always-ask, short of `never`. */
+  permissions: Schema.Literals(['rules', 'coordinator', 'ask', 'allow']),
   alwaysAsk: Schema.Array(RuleKind),
   never: Schema.Array(RuleKind),
   commands: Schema.Array(CommandRule),
@@ -955,6 +955,8 @@ export const HomeEvent = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal('answered'),
     id: Schema.String,
+    /** Omitted by older runtimes, whose answers all came from the rules. */
+    by: Schema.optional(Schema.Literals(['rules', 'coordinator'])),
     /** The first of them. */
     at: Schema.String,
     count: Schema.Number,
@@ -1315,7 +1317,7 @@ export const Api = RpcGroup.make(
     'SetProjectRules',
     {
       projectId: Schema.String,
-      permissions: Schema.optional(Schema.Literals(['rules', 'ask', 'allow'])),
+      permissions: Schema.optional(Schema.Literals(['rules', 'coordinator', 'ask', 'allow'])),
       alwaysAsk: Schema.optional(Schema.Array(RuleKind)),
       never: Schema.optional(Schema.Array(RuleKind)),
       commands: Schema.optional(Schema.Array(CommandRule)),

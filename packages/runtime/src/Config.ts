@@ -48,6 +48,8 @@ export interface RuntimeOptions {
   readonly fetch?: Fetch
   /** How long stopping an agent waits for it to end its turn before it stops its process: 10 seconds unless a test says otherwise. */
   readonly stopGrace?: Duration.Duration
+  /** Maximum time for the coordinator to judge a permission, including startup: one minute by default. */
+  readonly permissionJudgeTimeout?: Duration.Duration
   /** When a turn counts as stalled, and how much work goes on before the person is asked (`Stalls.ts`). */
   readonly stalls?: StallOptions
   /** Where what is known of models comes from (`ModelFacts.ts`); without it, nothing is fetched and nothing is known. */

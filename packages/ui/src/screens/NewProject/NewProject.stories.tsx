@@ -84,7 +84,7 @@ export const AFolderOfRepositories: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.queryByRole('combobox', { name: /^Role of/ })).toBeNull()
-    await expect(c.queryByRole('radio', { name: /The agent in charge decides/ })).toBeNull()
+    await expect(c.queryByRole('radio', { name: /The coordinator decides/ })).toBeNull()
     await expect(c.getByRole('radio', { name: /Allow, except what you keep/ })).toBeChecked()
     const [first] = c.getAllByRole('button', { name: /^Remove / })
     if (first !== undefined) await userEvent.click(first)

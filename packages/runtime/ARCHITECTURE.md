@@ -30,7 +30,9 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `conventions.ts` | A team's conventions, as each repository writes them down (DEV-42): naming patterns read from its docs, its pull request template, branch and title names by pattern, and a description kept in its template |
 | `Nudges.ts` | What reaches the person outside the window: each thing that comes to need them, a call or a task ready, and how many wait |
 | `Models.ts` | The models each agent offers and how hard each can think, from its latest session or asked once a launch |
-| `Permissions.ts` | Records permission requests and decisions; asks the person what the rules keep for them |
+| `Permissions.ts` | Records requests and decisions, applies rules before coordinator judgments, and asks the person on reserved requests or judgment failure |
+| `PermissionJudge.ts` | At most two fresh coordinator judgments, requiring verified tool removal, with task context, validated answers and usage metrics (ADR-019) |
+| `coordinatorChoice.ts` | The shared agent and model selection for coordinator conversations and judgments |
 | `rules.ts` | The rules: what no project can change (credentials, the code host), each kind of request they keep for the person, and the project's rules on top, never before ask before allow; for a role that only reads, only what reads. Commands are read as a shell would split them |
 | `threads.ts` | Turns agent events into thread items; writes the thread as text for a brief |
 | `Live.ts` | What is happening now, for clients that watch, with each message's text as far as it has come |
@@ -99,7 +101,7 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 - **Stopping never waits on an agent for ever.** One that doesn't end its turn within the grace is stopped with its process, and its turn recorded as cut short.
 - **A review copy leaves out ignored files,** such as `node_modules`, since it is the worktree's tree; a reviewer can't run tests that need what the lead installed.
 - **Findings are settled by the lead alone.** The person sees them but doesn't answer them yet.
-- **The lead's own permission requests are answered by the rules,** not by the lead, and the coordinator doesn't answer a lead's questions yet.
+- **Permission judgments are opt-in.** The coordinator answers permission requests in its mode; conversational questions from leads still need the person.
 - **No timeout per step yet.** A step whose agent keeps working without end isn't stopped; the MVP plan's budget per node will bound it.
 - **Session commands have no receipts in the store.** A retry within a launch gets the first one's result; across a restart, the session is gone anyway.
 - **Rules read commands, not what they do.** A script that writes outside the worktree isn't caught by the rules; the agents' sandboxes are the boundary (Codex's and Claude's). OpenCode has no sandbox yet.
