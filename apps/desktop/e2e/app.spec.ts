@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch, say, toConversation } from './support'
+import { launch, openFirstProject, say, toConversation } from './support'
 
 /*
  * The app as someone uses it: open a folder as a project, start a task, and
@@ -18,16 +18,28 @@ import { chooseFolder, launch, say, toConversation } from './support'
  * is pushed to it lands in a bare repository on disk.
  */
 
-test('opens a project, starts a task, and talks to its lead', async () => {
+test('makes the first project of a repository it found, starts a task, and talks to its lead', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
-  const repo = repository(home)
+  // Where people keep code: the first screen finds it there, with another worked on longer ago.
+  const projects = join(home, 'Projects')
+  mkdirSync(projects)
+  repository(projects, 'halyard')
+  repository(projects)
   const { electronApp, page } = await launch(home)
   try {
-    await chooseFolder(electronApp, repo)
     await expect(page.getByText('Fake')).toHaveCount(0)
-    await expect(page.getByText('Claude Code')).toBeVisible()
+    await expect(page.getByText('Claude Code').first()).toBeVisible()
+    const found = page.getByRole('list', { name: 'Repositories for the project' })
+    await expect(found.getByRole('checkbox')).toHaveText([/meridian.*~\/Projects\/meridian/, /halyard/])
+    // Once the launch has played over it.
+    await page.waitForTimeout(2500)
     await page.screenshot({ path: 'test-results/start.png' })
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await found.getByRole('checkbox', { name: /meridian/ }).click()
+    await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('meridian')
+    await expect(found.getByRole('checkbox', { name: /meridian/ })).toBeChecked()
+    await page.waitForTimeout(800)
+    await page.screenshot({ path: 'test-results/start-forming.png' })
+    await page.getByRole('button', { name: /Make the project/ }).click()
 
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.screenshot({ path: 'test-results/project.png' })
@@ -142,8 +154,7 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
   const repo = repository(home)
   const { electronApp, page } = await launch(home)
   try {
-    await chooseFolder(electronApp, repo)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
@@ -190,8 +201,7 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
   execFileSync('git', ['remote', 'add', 'origin', 'https://github.test/meridian/api.git'], { cwd: repo })
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_REMOTE: remote })
   try {
-    await chooseFolder(electronApp, repo)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
     // Its remote is on GitHub, which isn't connected yet: tasks would end on their branch.
@@ -342,9 +352,8 @@ test('notifies the person of a ready task while they look elsewhere, counts it o
   const repo = repository(home)
   const { electronApp, page } = await launch(home)
   try {
-    await chooseFolder(electronApp, repo)
     await catchWhatReachesThem(electronApp)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await openFirstProject(electronApp, page, repo)
     await page.getByRole('button', { name: 'New task' }).click()
     await page.getByLabel('What should change').fill('Add a retry to the checkout call')
     await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
@@ -373,9 +382,8 @@ test('tells only what the person keeps on, keeps the Mac awake while work runs, 
   const first = await launch(home)
   try {
     const { electronApp, page } = first
-    await chooseFolder(electronApp, repo)
     await catchWhatReachesThem(electronApp)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
     // While a task runs, the Mac is held awake, once; stopped, nothing runs and it is let go.

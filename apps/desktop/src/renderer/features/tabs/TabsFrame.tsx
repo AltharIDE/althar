@@ -13,7 +13,8 @@ import { useTabs } from './useTabs'
  * project's. ⌘1 goes to the home, ⌘2 to ⌘8 to the projects in order, ⌘9 to
  * the last, and Control-Tab to the next tab (with Shift, the one before),
  * as in a browser. A screen's own bar sits under the tabs, so it leaves the
- * system's lights to them.
+ * system's lights to them. Before there is any project there are no tabs:
+ * the first screen has the whole window.
  */
 
 const VisitContext = createContext<(threadId: string, projectId: string) => void>(() => undefined)
@@ -64,16 +65,18 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   return (
     <VisitContext.Provider value={tabs.visit}>
       <div className={s.frame}>
-        <ProjectTabs
-          tabs={tabs.tabs}
-          current={current}
-          yours={tabs.yours}
-          others={tabs.others}
-          onSelect={select}
-          onClose={tabs.close}
-          onOpen={tabs.open}
-          onOpenFolder={tabs.openFolder}
-        />
+        {!tabs.none && (
+          <ProjectTabs
+            tabs={tabs.tabs}
+            current={current}
+            yours={tabs.yours}
+            others={tabs.others}
+            onSelect={select}
+            onClose={tabs.close}
+            onOpen={tabs.open}
+            onOpenFolder={tabs.openFolder}
+          />
+        )}
         <div className={s.screen}>{children}</div>
       </div>
     </VisitContext.Provider>

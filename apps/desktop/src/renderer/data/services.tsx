@@ -20,6 +20,21 @@ import type { Feed } from './feed'
  * the main process shows the picker, or is told what was dropped, and hands
  * back a grant the runtime knows the folder by.
  */
+/** The repositories found on this computer, as main reads them: each by an id it grants by, never by its path. */
+export interface FoundRepositories {
+  /** The places looked in, as the person knows them: ~/Projects. */
+  readonly lookedIn: ReadonlyArray<string>
+  readonly repositories: ReadonlyArray<{
+    readonly id: string
+    readonly name: string
+    /** Where it is, as the person knows the place: ~/Projects/meridian. */
+    readonly where: string
+    readonly branch: string | null
+    /** When it was last worked on, in ms since the epoch. */
+    readonly worked: number
+  }>
+}
+
 export interface Host {
   /** The system Althar runs on: darwin, win32, linux. */
   readonly platform: string
@@ -27,6 +42,10 @@ export interface Host {
   readonly pickFolder: (purpose?: 'project' | 'account') => Promise<string | null>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */
   readonly grantDropped: (file: File) => Promise<string | null>
+  /** The git repositories where people usually keep code on this computer, newest work first, and where it looked. */
+  readonly findRepositories: () => Promise<FoundRepositories>
+  /** A grant for a repository it found, by its id; null for one it didn't. */
+  readonly grantFound: (id: string) => Promise<string | null>
   /** The icon the person gave the app, by name (see `shared/appIcons`), or null where there is no Dock to show one. */
   readonly appIcon: () => Promise<string | null>
   /** Gives the app another icon, kept and shown on the Dock at once. */

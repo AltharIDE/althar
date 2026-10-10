@@ -12,7 +12,19 @@
   overflow: auto;
 }
 
-/* The kit's first screen leaves the page's margins to the host. */
+/* Before there is a project the window is all page: the bar only drags it, over the page, under the system's lights. */
+.bare {
+  position: relative;
+}
+.bare .over {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  background: transparent;
+  border-bottom: 0;
+}
+
+/* The kit's new-project screen leaves the page's margins to the host. */
 .first {
   padding: 72px 40px 64px;
 }

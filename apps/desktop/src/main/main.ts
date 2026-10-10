@@ -12,6 +12,7 @@ import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
 import { dockCount, soundOf, tells } from './notify'
 import { readAppPreferences, writeAppPreference } from './preferences'
+import { findRepositories, forWindow, placesFor } from './repositories'
 import { alertSounds, playSound } from './sounds'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
 import { bundleOf } from '../runtime/editors'
@@ -39,7 +40,9 @@ import {
  * state. It starts the runtime in a utility process and restarts it if it
  * crashes, gives each window a message port to it, and on quit asks the
  * runtime to stop its sessions before the app goes. Folders reach the runtime
- * from here, never from the window, which gets a grant for each. It seals and
+ * from here, never from the window, which gets a grant for each: one the
+ * person picked or dropped, or one of the repositories it found where people
+ * keep code (repositories.ts), for the first screen to offer. It seals and
  * opens the runtime's secrets, such as a code host's token, with Electron's
  * safeStorage, whose key the keychain keeps for this app alone: the runtime
  * keeps them sealed and never holds the key. It gives the Dock the icon the
@@ -340,6 +343,28 @@ ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   if (typeof path !== 'string' || path === '') return null
   const found = await stat(path).catch(() => undefined)
   return found?.isDirectory() === true ? allowFolder(path) : null
+})
+
+/* The repositories the first screen offers, by the id the window has for each: only these are granted by id. */
+const foundHere = new Map<string, string>()
+
+// The repositories where people keep code on this computer, for the first screen: each by an id, never by its path.
+ipcMain.handle('althar:find-repositories', async () => {
+  // The end-to-end tests give a home of their own, so what the tester keeps isn't offered.
+  const home = process.env.ALTHAR_CODE_HOME || homedir()
+  const found = await findRepositories(placesFor(home, process.platform))
+  foundHere.clear()
+  return forWindow(found, home, (path) => {
+    const id = randomUUID()
+    foundHere.set(id, path)
+    return id
+  })
+})
+
+// A grant for one of them, once the person ticks it and makes the project: one main found, and nothing else.
+ipcMain.handle('althar:grant-found', async (_event, id: unknown) => {
+  const path = typeof id === 'string' ? foundHere.get(id) : undefined
+  return path === undefined ? null : allowFolder(path)
 })
 
 // The icon the person chose, or null where there is no Dock to show one; and a new one, shown on the Dock, then kept. Anything else fails, and the window says so.
