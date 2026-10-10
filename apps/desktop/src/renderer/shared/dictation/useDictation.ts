@@ -205,7 +205,15 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
       voice.prepare().catch(() => (prepared.current = false))
     }
     learn()
-    const now = live(transcribe, (text) => setInterim(joined(text.settled, text.unsettled)))
+    const now = live(
+      transcribe,
+      (text) => setInterim(joined(text.settled, text.unsettled)),
+      // A pass as they stopped that wrote fewer words than showed goes in the window's log, as counts only, so a loss can be traced.
+      (ended) => {
+        if (ended.whole === null || ended.whole < ended.shown)
+          console.warn('[dictation] the last pass wrote less than showed', JSON.stringify(ended))
+      },
+    )
     try {
       recording.current = await record((frame) => {
         setLevels((bars) => [...bars.slice(1 - BARS), frame.level])

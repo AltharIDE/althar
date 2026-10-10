@@ -53,6 +53,61 @@ const play = async (said: ReturnType<typeof live>, rec: ReturnType<typeof record
   }
 }
 
+/** A writer whose passes say what they are told, in turn. */
+const saying = (...texts: Array<string>) => {
+  let at = 0
+  return vi.fn(async () => texts[Math.min(at++, texts.length - 1)] as string)
+}
+
+describe('what shows holds still', () => {
+  it('keeps the words two passes agree on, adds what comes after, and hides the full stop until it settles', async () => {
+    const shown: Array<LiveText> = []
+    const said = live(saying('Open the.', 'Open the refund.', 'Open the refunds ledger.', 'Open a refund ledger now.'), (text) =>
+      shown.push(text),
+    )
+    const rec = recording()
+    await play(said, rec, 0.1, 4.2, true)
+    // "refunds" was never said twice, so it doesn't stay; "the" was, so a pass that says "a" doesn't move it.
+    expect(shown.map((text) => text.unsettled)).toEqual([
+      'Open the',
+      'Open the refund',
+      'Open the refunds ledger',
+      'Open the refund ledger now',
+    ])
+  })
+
+  it('settles a stretch the last pass heard to its end as it showed, without writing it again', async () => {
+    const shown: Array<LiveText> = []
+    const transcribe = saying('Open the refund ledger.', 'Open the refund ledger.')
+    const said = live(transcribe, (text) => shown.push(text))
+    const rec = recording()
+    await play(said, rec, 0.1, 2, true)
+    await play(said, rec, 2.1, 3.5, false)
+    // Quiet, but a pass was due and heard it all; the pause then settles it as it showed.
+    expect(shown.at(-1)).toEqual({ settled: 'Open the refund ledger.', unsettled: '' })
+    expect(transcribe).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps what showed when the pass as they stop comes back much shorter', async () => {
+    const said = live(saying('Alpha beta gamma.', 'Alpha beta gamma.', 'Alpha beta gamma delta.', 'Zeta.'), () => {})
+    const rec = recording()
+    await play(said, rec, 0.1, 2, true)
+    await play(said, rec, 2.1, 2.8, false)
+    await play(said, rec, 2.9, 4, true)
+    // The whole pass says one word where five showed: the settled stretch stands, and the rest is written.
+    expect(await said.finish({ samples: new Float32Array(5 * RATE), sampleRate: RATE })).toBe('Alpha beta gamma delta. Zeta.')
+  })
+
+  it('hears a voice as speech however long it goes on without a pause', async () => {
+    const w = writer()
+    const said = live(w.transcribe, () => {})
+    const rec = recording()
+    // Forty seconds of steady speech: the room never gets as loud as the voice, so passes keep coming.
+    await play(said, rec, 0.1, 40, true)
+    expect(w.passes.length).toBeGreaterThan(30)
+  })
+})
+
 describe('writing down as someone speaks', () => {
   it('writes the unsettled again about once a second, and settles a stretch at a pause', async () => {
     const shown: Array<LiveText> = []
@@ -141,9 +196,12 @@ describe('writing down as someone speaks', () => {
     expect(shown).toEqual([])
   })
 
-  it('joins stretches with a space, leaving out what is empty', () => {
+  it('joins stretches with a space, leaving out what is empty, and goes on in lower case where a sentence didn’t end', () => {
     expect(joined('One.', 'Two.')).toBe('One. Two.')
     expect(joined('', 'Two.')).toBe('Two.')
     expect(joined('One.', '')).toBe('One.')
+    expect(joined('I want to', 'Open the file.')).toBe('I want to open the file.')
+    expect(joined('I want to', 'I think so.')).toBe('I want to I think so.')
+    expect(joined('Check the', 'API first.')).toBe('Check the API first.')
   })
 })
