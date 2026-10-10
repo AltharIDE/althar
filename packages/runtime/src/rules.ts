@@ -984,6 +984,36 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
 /** How far an "always" answer reaches (ADR-017): this exact command, commands that start the same way, or the kind it is. */
 export type AlwaysScope = 'exact' | 'prefix' | 'kind'
 
+/** A rule an "always" answer keeps: a kind, or a command by how it starts or exactly, let through or never allowed. */
+export type AlwaysRule =
+  | { readonly decision: 'allow' | 'never'; readonly kind: RuleId }
+  | { readonly decision: 'allow' | 'never'; readonly pattern: string; readonly match: 'prefix' | 'exact' }
+
+/** The project's rules with an always rule among them. */
+const withAlways = (project: ProjectRuleSet, rule: AlwaysRule): ProjectRuleSet => {
+  if (!('kind' in rule))
+    return {
+      ...project,
+      commands: [
+        ...project.commands,
+        { pattern: rule.pattern, decision: rule.decision, ...(rule.match === 'exact' ? { match: 'exact' as const } : {}) },
+      ],
+    }
+  return rule.decision === 'allow'
+    ? { ...project, allow: [...project.allow, rule.kind] }
+    : { ...project, never: [...project.never, rule.kind] }
+}
+
+/**
+ * Whether an always rule would hold for a request under the rules as the
+ * context has them: an allow rule only where it would let it through, a
+ * never rule where it would refuse it.
+ */
+export const holds = (request: PermissionRequest, context: RuleContext, rule: AlwaysRule): boolean => {
+  const verdict = decide(request, { ...context, project: withAlways(context.project ?? MVP_RULES, rule) })
+  return rule.decision === 'allow' ? verdict.verdict === 'allow' && verdict.rules !== undefined : verdict.verdict === 'deny'
+}
+
 /** What an "always" answer to a request would keep in the project's rules, and the scopes each answer holds for. */
 export interface Always {
   /** The command, as an exact rule keeps it; none where it runs none, or is too long to keep. */
@@ -1057,27 +1087,29 @@ export const alwaysOf = (request: PermissionRequest, context: RuleContext): Alwa
     commands.find((each) => readerWordsReason(each.words) !== undefined) ??
     commands[0]
   const prefix = subject === undefined ? null : prefixOf(subject.words)
+  const always: Omit<Always, 'allow' | 'deny'> = { command, prefix, kind }
   const scopes = (decision: 'allow' | 'never'): ReadonlyArray<AlwaysScope> =>
     (['exact', 'prefix', 'kind'] as const).filter((scope) => {
-      const rule = ((): Partial<ProjectRuleSet> | undefined => {
-        switch (scope) {
-          case 'exact':
-            return command === null ? undefined : { commands: [...project.commands, { pattern: command, decision, match: 'exact' }] }
-          case 'prefix':
-            return prefix === null ? undefined : { commands: [...project.commands, { pattern: prefix, decision }] }
-          case 'kind':
-            return kind === null
-              ? undefined
-              : decision === 'allow'
-                ? { allow: [...project.allow, kind] }
-                : { never: [...project.never, kind] }
-        }
-      })()
-      if (rule === undefined) return false
-      const verdict = decide(request, { ...context, project: { ...project, ...rule } })
-      return decision === 'allow' ? verdict.verdict === 'allow' && verdict.rules !== undefined : verdict.verdict === 'deny'
+      const rule = alwaysRuleOf(always, decision, scope)
+      return rule !== undefined && holds(request, context, rule)
     })
-  return { command, prefix, kind, allow: scopes('allow'), deny: scopes('never') }
+  return { ...always, allow: scopes('allow'), deny: scopes('never') }
+}
+
+/** The rule an "always" by a scope would keep, by the words a call was offered: none where it has none for that scope. */
+export const alwaysRuleOf = (
+  always: Pick<Always, 'command' | 'prefix' | 'kind'>,
+  decision: 'allow' | 'never',
+  scope: AlwaysScope,
+): AlwaysRule | undefined => {
+  switch (scope) {
+    case 'exact':
+      return always.command === null ? undefined : { decision, pattern: always.command, match: 'exact' }
+    case 'prefix':
+      return always.prefix === null ? undefined : { decision, pattern: always.prefix, match: 'prefix' }
+    case 'kind':
+      return always.kind === null ? undefined : { decision, kind: always.kind }
+  }
 }
 
 // ---- Roles that only read ----------------------------------------------------

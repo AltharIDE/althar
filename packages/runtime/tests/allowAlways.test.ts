@@ -1,7 +1,7 @@
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect, Layer } from 'effect'
+import { Context, Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { AlwaysNotOffered, AttentionClosed } from '../src/errors'
@@ -102,6 +102,82 @@ const answer = (attentionId: string, decision: 'allow' | 'reject', always?: 'exa
       ...(always === undefined ? {} : { always }),
     })
   })
+
+/**
+ * A task's lead under "Ask me", answered by a Permissions of its own, so a
+ * test can step between what it reads of the rules and what it does with
+ * them: `next` runs once, just after its next read of the rules.
+ */
+const separateLead = Effect.gen(function* () {
+  const sessions = yield* Sessions
+  const instance = yield* Instance
+  const policies = yield* Policies
+  const sql = yield* SqlClient.SqlClient
+  const { project, task: created } = yield* task()
+  const projectId = project.projectId as ProjectId
+  yield* policies.set(projectId, { permissions: 'ask' }, instance.personId)
+  const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
+  yield* until(turns(created.threadId), (rows) => rows.length >= 1 && rows.every(finished))
+  const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${created.taskId}`
+  let hook: ((projectId: ProjectId, real: typeof policies) => Effect.Effect<unknown>) | undefined
+  // Fresh: the runtime has its own, built already.
+  const separate = yield* Layer.build(
+    Layer.fresh(Permissions.layer).pipe(
+      Layer.provide(
+        Layer.succeed(
+          Policies,
+          Policies.of({
+            ...policies,
+            current: (id) =>
+              Effect.tap(policies.current(id), () => {
+                const once = hook
+                hook = undefined
+                return once === undefined ? Effect.void : once(id, policies)
+              }),
+          }),
+        ),
+      ),
+    ),
+  )
+  const permissions = Context.get(separate, Permissions)
+  let calls = 0
+  return {
+    projectId,
+    next: (run: (projectId: ProjectId, real: typeof policies) => Effect.Effect<unknown>) => void (hook = run),
+    ask: (command: string) =>
+      permissions.decide(
+        {
+          projectId,
+          threadId: created.threadId,
+          taskId: created.taskId,
+          sessionId,
+          meanings: { rejectAndContinue: ['decline'], rejectAndStop: ['cancel'], allowScopes: { allow_once: 'once' } },
+          rules: { role: 'task', context: { worktree: workspace?.path ?? '', defaultBranch: 'main' } },
+        },
+        {
+          sessionId: 'fake',
+          toolCallId: `separate-${(calls += 1)}`,
+          title: `Run ${command}`,
+          kind: 'execute',
+          rawInput: { command },
+          paths: [],
+          options: [
+            { optionId: 'allow_once', name: 'Yes', kind: 'allow_once' },
+            { optionId: 'decline', name: 'No', kind: 'reject_once' },
+          ],
+        },
+      ),
+    answer: (attentionId: string, decision: 'allow' | 'reject', always?: 'exact' | 'prefix' | 'kind') =>
+      Effect.gen(function* () {
+        return yield* permissions.answer({
+          envelope: yield* Runtime.envelope('attention.answer', { attentionId, decision, always }),
+          attentionId,
+          decision,
+          ...(always === undefined ? {} : { always }),
+        })
+      }),
+  }
+})
 
 describe('Allow always and Deny always (ADR-017)', () => {
   it.live('Allow always for `git status` by how it starts: the next is let through by the rule, says so, and the rule is kept', () =>
@@ -298,64 +374,58 @@ describe('answers that meet each other', () => {
 
   it.live('decides again a call made while the rules changed, which the change itself never saw', () =>
     Effect.gen(function* () {
-      const sessions = yield* Sessions
       const instance = yield* Instance
-      const policies = yield* Policies
       const sql = yield* SqlClient.SqlClient
-      const { project, task: created } = yield* task()
-      yield* policies.set(project.projectId, { permissions: 'ask' }, instance.personId)
-      const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
-      yield* until(turns(created.threadId), (rows) => rows.length >= 1 && rows.every(finished))
-      const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${created.taskId}`
-      // Permissions whose first read of the rules is followed, at once, by the person letting everything through.
-      let armed = true
-      // Fresh: the runtime has its own, built already.
-      const racing = Layer.fresh(Permissions.layer).pipe(
-        Layer.provide(
-          Layer.succeed(
-            Policies,
-            Policies.of({
-              ...policies,
-              current: (projectId) =>
-                Effect.tap(policies.current(projectId), () =>
-                  armed
-                    ? Effect.andThen(
-                        Effect.sync(() => (armed = false)),
-                        Effect.orDie(policies.set(projectId, { permissions: 'allow' }, instance.personId)),
-                      )
-                    : Effect.void,
-                ),
-            }),
-          ),
-        ),
-      )
-      const decided = yield* Effect.flatMap(Permissions, (permissions) =>
-        permissions.decide(
-          {
-            projectId: project.projectId as ProjectId,
-            threadId: created.threadId,
-            taskId: created.taskId,
-            sessionId,
-            meanings: { rejectAndContinue: ['decline'], rejectAndStop: ['cancel'], allowScopes: { allow_once: 'once' } },
-            rules: { role: 'task', context: { worktree: workspace?.path ?? '', defaultBranch: 'main' } },
-          },
-          {
-            sessionId: 'fake',
-            toolCallId: 'race-1',
-            title: 'Run cargo build',
-            kind: 'execute',
-            rawInput: { command: 'cargo build' },
-            paths: [],
-            options: [
-              { optionId: 'allow_once', name: 'Yes', kind: 'allow_once' },
-              { optionId: 'decline', name: 'No', kind: 'reject_once' },
-            ],
-          },
-        ),
-      ).pipe(Effect.provide(racing), Effect.timeout('5 seconds'))
+      const lead = yield* separateLead
+      // The first read of the rules is followed, at once, by the person letting everything through.
+      lead.next((projectId, policies) => Effect.orDie(policies.set(projectId, { permissions: 'allow' }, instance.personId)))
+      const decided = yield* lead.ask('cargo build').pipe(Effect.timeout('5 seconds'))
       assert.deepStrictEqual(decided, { decision: 'allow', reason: 'Allowed by the project rules.' })
       const [call] = yield* sql<{ state: string }>`SELECT state FROM attention_requests`
       assert.strictEqual(call?.state, 'answered')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('keeps no always whose rule the person changed while the answer was on its way, and records no rule it didn’t keep', () =>
+    Effect.gen(function* () {
+      const instance = yield* Instance
+      const policies = yield* Policies
+      const sql = yield* SqlClient.SqlClient
+      const lead = yield* separateLead
+      const asking = yield* Effect.forkChild(lead.ask('bun test'))
+      const [call] = yield* until(sql<{ id: string }>`SELECT id FROM attention_requests WHERE state = 'open'`, (rows) => rows.length === 1)
+      // As the answer is checked, the person keeps `bun test` for themselves on the rules screen.
+      lead.next((projectId, real) =>
+        Effect.orDie(real.set(projectId, { commands: [{ pattern: 'bun test', decision: 'ask' }] }, instance.personId)),
+      )
+      const refused = yield* Effect.flip(lead.answer(call?.id ?? '', 'allow', 'prefix'))
+      assert.instanceOf(refused, AlwaysNotOffered)
+      assert.deepStrictEqual(yield* sql`SELECT id FROM decisions`, [])
+      assert.deepStrictEqual((yield* policies.current(lead.projectId)).rules.commands, [{ pattern: 'bun test', decision: 'ask' }])
+      yield* lead.answer(call?.id ?? '', 'allow')
+      assert.deepStrictEqual((yield* Fiber.join(asking)).decision, 'allow')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('keeps the rule the card offered, never another the rules now point at', () =>
+    Effect.gen(function* () {
+      const instance = yield* Instance
+      const policies = yield* Policies
+      const sql = yield* SqlClient.SqlClient
+      const lead = yield* separateLead
+      yield* Effect.forkChild(lead.ask('bun test && npm test'))
+      const [call] = yield* until(
+        sql<{ payload: string; id: string }>`SELECT id, payload FROM attention_requests WHERE state = 'open'`,
+        (rows) => rows.length === 1,
+      )
+      assert.strictEqual(JSON.parse(call?.payload ?? '{}').always.prefix, 'bun test')
+      // Meanwhile `npm test` goes on the always-ask list, which would make it the command a never is about.
+      yield* policies.set(lead.projectId, { commands: [{ pattern: 'npm test', decision: 'ask' }] }, instance.personId)
+      yield* lead.answer(call?.id ?? '', 'reject', 'prefix')
+      assert.deepStrictEqual((yield* policies.current(lead.projectId)).rules.commands, [
+        { pattern: 'npm test', decision: 'ask' },
+        { pattern: 'bun test', decision: 'never' },
+      ])
     }).pipe(Effect.provide(withQueries())),
   )
 

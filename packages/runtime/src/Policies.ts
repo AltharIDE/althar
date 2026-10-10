@@ -6,7 +6,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { fact, timestamp } from './records'
-import { type ProjectRuleSet, type RuleId, RULES } from './rules'
+import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rules'
 
 /*
  * A project's rules (the glossary's project rules; docs/architecture/05,
@@ -81,9 +81,7 @@ export const ruleSetOf = (rules: ProjectRules): ProjectRuleSet => ({
 })
 
 /** A rule an "always" answer keeps (ADR-017): a kind, or a command by how it starts or exactly, let through or never allowed. */
-export type Remembered =
-  | { readonly decision: 'allow' | 'never'; readonly kind: RuleId }
-  | { readonly decision: 'allow' | 'never'; readonly pattern: string; readonly match: 'prefix' | 'exact' }
+export type Remembered = AlwaysRule
 
 /**
  * The rules with one kept: a never in place of an allow for the same words,

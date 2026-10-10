@@ -26,6 +26,8 @@ import {
   type Always,
   type AlwaysScope,
   alwaysOf,
+  alwaysRuleOf,
+  holds,
   commandOf,
   decide,
   decideReader,
@@ -68,22 +70,15 @@ interface Waiting {
   readonly digest: string
   /** What the rules read it in: a task's lead's, as only a lead waits on the person. */
   readonly rules: RuleContext
+  /** What an "always" answer would keep, as the call offered it: the words a scope keeps are these, never others found later. */
+  readonly always: Always
 }
 
 /** The rule an "always" answer by this scope keeps, where it was offered: let through, or never allowed. */
-export const rememberedOf = (always: Always, decision: 'allow' | 'reject', scope: AlwaysScope): Remembered | undefined => {
-  const offered = decision === 'allow' ? always.allow : always.deny
-  if (!offered.includes(scope)) return undefined
-  const kept = decision === 'allow' ? ('allow' as const) : ('never' as const)
-  switch (scope) {
-    case 'exact':
-      return always.command === null ? undefined : { decision: kept, pattern: always.command, match: 'exact' }
-    case 'prefix':
-      return always.prefix === null ? undefined : { decision: kept, pattern: always.prefix, match: 'prefix' }
-    case 'kind':
-      return always.kind === null ? undefined : { decision: kept, kind: always.kind }
-  }
-}
+export const rememberedOf = (always: Always, decision: 'allow' | 'reject', scope: AlwaysScope): Remembered | undefined =>
+  (decision === 'allow' ? always.allow : always.deny).includes(scope)
+    ? alwaysRuleOf(always, decision === 'allow' ? 'allow' : 'never', scope)
+    : undefined
 
 /** What a waiting request's call keeps of what an "always" would save, as its payload holds it. */
 const alwaysPayload = (always: Always) => ({
@@ -455,6 +450,7 @@ export class Permissions extends Context.Service<
             requestId,
             digest,
             rules: requestContext.rules.context,
+            always,
           }
           waiting.set(attentionId, waiter)
           // The rules may have changed while the call was being made, and been decided again without it: then it is decided again now.
@@ -501,17 +497,15 @@ export class Permissions extends Context.Service<
                   }),
                 })
               }
-              // An "always" keeps the rule offered by that scope as the rules now are: none they would override, as when what
-              // always asks has changed since the call was made.
-              const saved =
-                always === undefined
-                  ? undefined
-                  : rememberedOf(
-                      alwaysOf(waiter.request, (yield* judge(waiter.context.projectId, waiter.rules, waiter.request)).context),
-                      decision,
-                      always,
-                    )
-              if (always !== undefined && saved === undefined) return yield* new AlwaysNotOffered({ attentionId, scope: always })
+              // An "always" keeps the very rule the call offered by that scope, and only while it would hold: checked again
+              // with the answer, against the rules as they are then.
+              let keep: { readonly scope: AlwaysScope; readonly rule: Remembered; readonly context: RuleContext } | undefined
+              if (always !== undefined) {
+                const rule = rememberedOf(waiter.always, decision, always)
+                if (rule === undefined) return yield* new AlwaysNotOffered({ attentionId, scope: always })
+                // Where a push without a destination goes is read now, from git, before the answer's transaction.
+                keep = { scope: always, rule, context: (yield* judge(waiter.context.projectId, waiter.rules, waiter.request)).context }
+              }
               const answered: PermissionDecision = { decision, ...(reason === undefined ? {} : { reason }) }
               yield* commands.execute({
                 envelope,
@@ -521,6 +515,12 @@ export class Permissions extends Context.Service<
                   // Answered meanwhile by the rules, as when another answer kept a rule that covers it.
                   const [attention] = yield* sql<{ state: string }>`SELECT state FROM attention_requests WHERE id = ${attentionId}`
                   if (attention?.state !== 'open') return yield* new AttentionClosed({ attentionId })
+                  // A rule the rules as they now are would override, as when the person has since kept it for themselves, isn't kept.
+                  if (keep !== undefined) {
+                    const now = ruleSetOf((yield* policies.current(waiter.context.projectId)).rules)
+                    if (!holds(waiter.request, { ...keep.context, project: now }, keep.rule))
+                      return yield* new AlwaysNotOffered({ attentionId, scope: keep.scope })
+                  }
                   const revision = yield* change('attention_requests', attentionId, { state: 'answered', answeredAt: yield* timestamp })
                   yield* fact({
                     projectId: waiter.context.projectId,
@@ -537,18 +537,18 @@ export class Permissions extends Context.Service<
                     decision: answered,
                     actorId: envelope.actorId,
                     commandId: envelope.commandId,
-                    ...(saved === undefined ? {} : { saved }),
+                    ...(keep === undefined ? {} : { saved: keep.rule }),
                   })
                   yield* release(waiter.context.sessionId)
                   // The rule goes in with the answer, as a revision of the project's rules recorded as the person's.
-                  if (saved !== undefined) yield* policies.remember(waiter.context.projectId, saved, envelope.actorId)
+                  if (keep !== undefined) yield* policies.remember(waiter.context.projectId, keep.rule, envelope.actorId)
                 }),
               })
               waiting.delete(attentionId)
               yield* Deferred.succeed(waiter.deferred, answered)
               yield* live.publish({ _tag: 'AttentionClosed', threadId: waiter.context.threadId, attentionId, outcome: 'answered' })
               // A rule kept answers every other request it now covers, or refuses.
-              if (saved !== undefined) yield* reconsider(waiter.context.projectId)
+              if (keep !== undefined) yield* reconsider(waiter.context.projectId)
             }).pipe(
               Effect.catchTags({
                 SqlError: Effect.die,
