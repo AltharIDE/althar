@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from 'react'
 
-import { AskAnswered, AskNote, EdgeSheet, Island, ISLAND_HOVER, type NotchSize } from '@althar/ui'
+import { EdgeSheet, Island, ISLAND_HOVER, type NotchSize } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { refOf, text as homeText } from '../home/HomeView'
@@ -37,7 +37,7 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
   const { host } = useServices()
   const [open, setOpen] = useState(false)
   const showing = useShowing()
-  // Calls answered here fold to lines while the edge stays open, as on the home; closed, they go.
+  // Calls answered here stay their lines, quiet, while the edge stays open, as on the home; closed, they go.
   const away = shown.place === 'island' ? !open : !showing
   const onAway = useEffectEvent(() => model.closed())
   useEffect(() => {
@@ -47,7 +47,7 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
   const name = (id: string | null) => model.agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   const refs = new Map((home?.projects ?? []).map((project) => [project.id, refOf(project)]))
   const tasks = home?.tasks ?? []
-  const calls = (home?.calls ?? []).filter((call) => !model.answered.some((one) => one.id === call.id))
+  const calls = (home?.calls ?? []).filter((call) => !model.answered.some((one) => one.call.id === call.id))
   const ready = tasks.filter((task) => task.phase === 'ready')
   // What has a call above isn't counted again in the work.
   const called = new Set((home?.calls ?? []).map((call) => call.threadId))
@@ -55,22 +55,9 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
   const waiting = calls.length + ready.length
   const openThread = (threadId: string) => host.openInWindow(threadId)
 
-  const needs: ReadonlyArray<ReactNode> = [
-    ...needsOf({ calls, ready, refs, agentName: name }).map((need) =>
-      needLineOf(need, {
-        onOpen: openThread,
-        onAnswer: (call, _project, decision) => {
-          const what = call.command ?? call.title
-          model.answer(call, decision, decision === 'allow' ? text.allowed(what) : text.denied(what))
-        },
-      }),
-    ),
-    ...model.answered.map((one) => (
-      <AskAnswered key={one.id} said={one.said} denied={one.denied} focusOnMount>
-        <AskNote>{text.answeredIn(one.project)}</AskNote>
-      </AskAnswered>
-    )),
-  ]
+  const needs: ReadonlyArray<ReactNode> = needsOf({ calls: home?.calls ?? [], answered: model.answered, ready, refs, agentName: name }).map(
+    (need) => needLineOf(need, { onOpen: openThread, onAnswer: (call, _project, decision) => model.answer(call, decision) }),
+  )
 
   const sheet = (
     <EdgeSheet

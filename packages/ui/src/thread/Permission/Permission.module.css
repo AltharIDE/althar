@@ -103,6 +103,9 @@
   align-items: center;
   gap: 6px;
 }
+.scopeOnly {
+  color: var(--t-1);
+}
 .note {
   flex-basis: 100%;
   margin: 2px 0 2px 28px;
@@ -236,6 +239,9 @@
   gap: 1px 12px;
   padding: 6px 0;
 }
+.allowedList li.noStep {
+  grid-template-columns: minmax(0, 1fr);
+}
 .allowedList li + li {
   border-top: 1px solid var(--line);
 }
@@ -253,4 +259,18 @@
 }
 .allowedBy {
   color: var(--t-3);
+}
+
+/* a permission's answers in small, as on a call on the home */
+.answers {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.noting {
+  width: min(340px, 52vw);
+}
+.noting > form {
+  flex: 1;
+  min-width: 0;
 }

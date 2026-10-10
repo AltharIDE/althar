@@ -286,6 +286,27 @@ describe('AgentConnection', () => {
       }),
     )
 
+    it.live('runs the command it is given, asking first, as a tool call of its own each time', () =>
+      withConnection(
+        fake,
+        (connection, permissions) =>
+          Effect.gen(function* () {
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+            const first = yield* Stream.runCollect(session.prompt(`${scenarios.run}git status --short`))
+            yield* Stream.runCollect(session.prompt(`${scenarios.run}git status`))
+            assert.strictEqual(text(first), 'chosen=allow_once')
+            assert.deepStrictEqual(
+              (yield* Ref.get(permissions)).map((request) => [request.toolCallId, request.kind, request.rawInput]),
+              [
+                ['run-1', 'execute', { command: 'git status --short' }],
+                ['run-2', 'execute', { command: 'git status' }],
+              ],
+            )
+          }),
+        allow,
+      ),
+    )
+
     it.live("picks the rejection that carries on, by the agent's option meanings", () =>
       Effect.gen(function* () {
         const { events } = yield* turn(scenarios.commandChoices, reject)

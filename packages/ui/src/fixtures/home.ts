@@ -31,6 +31,15 @@ export const PUBLISH = {
   command: 'npm publish --tag next --access public',
 }
 
+/** A permission meridian's lead asked for, as allowed always on the home. */
+export const STATUS = {
+  kind: 'Permission',
+  project: MERIDIAN,
+  task: '416',
+  title: 'Run git status -s',
+  command: 'git status -s',
+}
+
 export const READY = {
   kind: 'Ready to accept',
   project: MERIDIAN,

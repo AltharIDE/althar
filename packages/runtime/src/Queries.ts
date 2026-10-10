@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
+  AllowedBy,
+  AttentionRequest,
   type BoardSnapshot,
   type ChangeSummary,
   ChecksSummary,
@@ -109,8 +111,17 @@ interface ItemRow {
   readonly disposition: string | null
   /** For a tool call that asked: what was decided, last. */
   readonly decision: string | null
+  /** For a tool call the project's allow rules let through: the rules, as the decision keeps them (ADR-018). */
+  readonly rule?: string | null
   readonly createdAt: string
 }
+
+const decodeAllowedBy = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(AllowedBy)))
+const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
+
+/** The first of the allow rules a decision keeps, or none where it keeps none. */
+const allowedByOf = (rule: string | null | undefined) =>
+  rule === null || rule === undefined ? undefined : Option.getOrUndefined(decodeAllowedBy(rule))?.[0]
 
 /** A step that needs the person, as its call's payload holds it. */
 export const stuckOf = (payload: unknown): StuckStep => {
@@ -166,6 +177,11 @@ const callOf = (request: { readonly id: string; readonly kind: string; readonly 
     reason: text(payload, 'reason'),
     command: text(payload, 'command') || null,
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
+    // What an "always" would keep, for a permission that says (ADR-018); earlier ones don't.
+    ...Option.match(decodeAlways(field(payload, 'always')), {
+      onNone: () => ({}),
+      onSome: (always) => (always === undefined ? {} : { always }),
+    }),
     createdAt: request.createdAt,
   }
 }
@@ -242,6 +258,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return { ...base, kind: row.kind, content: { text: text(content, 'text') } }
     case 'tool_call': {
       const locations = field(content, 'locations')
+      const allowedBy = row.decision === 'allow' ? allowedByOf(row.rule) : undefined
       return {
         ...base,
         kind: 'tool_call',
@@ -256,6 +273,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
             return path === '' ? [] : [{ path, ...(typeof line === 'number' ? { line } : {}) }]
           }),
           declined: row.decision === 'reject',
+          ...(allowedBy === undefined ? {} : { allowedBy }),
         },
       }
     }
@@ -480,7 +498,10 @@ export class Queries extends Context.Service<
             SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, u.state AS input_state, u.disposition, i.created_at,
               (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
-                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision
+                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,
+              (SELECT d.rule FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
+                WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
+                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS rule
             FROM thread_items i
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id

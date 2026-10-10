@@ -243,9 +243,28 @@ export type FolderReading = typeof FolderReading.Type
 export const RuleKind = Schema.Literals(['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'])
 export type RuleKind = typeof RuleKind.Type
 
-/** A command the person named, by how it starts (`npm publish`, `terraform *`): asked about, or refused. */
-export const CommandRule = Schema.Struct({ pattern: Schema.String, decision: Schema.Literals(['ask', 'never']) })
+/**
+ * A command the person named: asked about, refused, or let through without
+ * asking (ADR-018). By how it starts (`npm publish`, `terraform *`), or, with
+ * `match: 'exact'`, as this whole line.
+ */
+export const CommandRule = Schema.Struct({
+  pattern: Schema.String,
+  decision: Schema.Literals(['ask', 'never', 'allow']),
+  match: Schema.optional(Schema.Literals(['prefix', 'exact'])),
+})
 export type CommandRule = typeof CommandRule.Type
+
+/** How far an "always" answer to a permission reaches (ADR-018): this exact command, commands that start the same way, or the kind it is. */
+export const AlwaysScope = Schema.Literals(['exact', 'prefix', 'kind'])
+export type AlwaysScope = typeof AlwaysScope.Type
+
+/** What let a request through without asking: a kind the project always allows, or one of its command rules. */
+export const AllowedBy = Schema.Union([
+  Schema.Struct({ kind: RuleKind }),
+  Schema.Struct({ pattern: Schema.String, match: Schema.Literals(['prefix', 'exact']) }),
+])
+export type AllowedBy = typeof AllowedBy.Type
 
 /** A name pattern a repository's docs spell out, and the doc, by its path in the repository. */
 export const FoundPattern = Schema.Struct({ pattern: Schema.String, from: Schema.String })
@@ -265,10 +284,17 @@ export type RepositoryConventions = typeof RepositoryConventions.Type
 /** A project's rules, as its rules screen shows them. */
 export const ProjectRulesView = Schema.Struct({
   projectId: Schema.String,
-  /** What no rule keeps: allowed (`rules`), coordinator judgment, or asked about (`ask`); `allow` overrides always-ask, short of `never`. */
+  /** Which revision of the rules these are: a change that replaces a list names it, so one made meanwhile isn't lost. */
+  revision: Schema.Number,
+  /**
+   * What no rule keeps: allowed (`rules`), judged by the coordinator (`coordinator`), or asked about (`ask`);
+   * or everything allowed (`allow`), what always asks with it, short of `never`.
+   */
   permissions: Schema.Literals(['rules', 'coordinator', 'ask', 'allow']),
   alwaysAsk: Schema.Array(RuleKind),
   never: Schema.Array(RuleKind),
+  /** The kinds let through without asking, short of what always asks or is never allowed (ADR-018). */
+  alwaysAllow: Schema.Array(RuleKind),
   commands: Schema.Array(CommandRule),
   /** How a task ends when its plan doesn't say; null: a draft pull request where Althar is connected to the host, else its branch. */
   end: Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
@@ -518,6 +544,8 @@ export const ToolCallItem = Schema.Struct({
     locations: Schema.Array(ToolLocation),
     /** Refused when it asked: by the rules, the lead or the person. */
     declined: Schema.Boolean,
+    /** Let through without asking by the project's allow rules, the first that did (ADR-018); absent otherwise. */
+    allowedBy: Schema.optional(AllowedBy),
   }),
 })
 
@@ -746,6 +774,23 @@ export const AttentionRequest = Schema.Struct({
   command: Schema.NullOr(Schema.String),
   /** For a step that needs the person: which, and why. */
   stuck: Schema.NullOr(StuckStep),
+  /**
+   * For a permission: what an "always" answer would keep in the project's
+   * rules (ADR-018), and the scopes Allow always and Deny always each hold
+   * for; none offered for an answer whose rule wouldn't hold, as Allow
+   * always for what always asks. Absent where it can't be kept as a rule.
+   */
+  always: Schema.optional(
+    Schema.Struct({
+      /** This exact command; null where it runs none. */
+      command: Schema.NullOr(Schema.String),
+      /** How its command starts, as a rule keeps it: `git status`. */
+      prefix: Schema.NullOr(Schema.String),
+      kind: Schema.NullOr(RuleKind),
+      allow: Schema.Array(AlwaysScope),
+      deny: Schema.Array(AlwaysScope),
+    }),
+  ),
   createdAt: Schema.String,
 })
 export type AttentionRequest = typeof AttentionRequest.Type
@@ -1219,9 +1264,15 @@ export const Api = RpcGroup.make(
     },
     Schema.Void,
   ),
+  /** The person's answer to a permission; with `always`, it is also kept in the project's rules by that scope, one of those offered. */
   command(
     'Answer',
-    { attentionId: Schema.String, decision: Schema.Literals(['allow', 'reject']), reason: Schema.optional(Schema.String) },
+    {
+      attentionId: Schema.String,
+      decision: Schema.Literals(['allow', 'reject']),
+      reason: Schema.optional(Schema.String),
+      always: Schema.optional(AlwaysScope),
+    },
     Schema.Void,
   ),
   /** The connections on this Mac, and the code hosts and trackers a person can connect. */
@@ -1291,6 +1342,7 @@ export const Api = RpcGroup.make(
       permissions: Schema.optional(Schema.Literals(['rules', 'coordinator', 'ask', 'allow'])),
       alwaysAsk: Schema.optional(Schema.Array(RuleKind)),
       never: Schema.optional(Schema.Array(RuleKind)),
+      alwaysAllow: Schema.optional(Schema.Array(RuleKind)),
       commands: Schema.optional(Schema.Array(CommandRule)),
       end: Schema.optional(Schema.NullOr(Schema.Literals(['draft', 'ready', 'none']))),
       usageLimit: Schema.optional(Schema.Literals(['move', 'wait'])),
@@ -1299,6 +1351,8 @@ export const Api = RpcGroup.make(
       /** Null goes back to what each repository says. */
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
+      /** The revision the change was made against: refused (`RulesChanged`) where the rules have moved on since. */
+      expectedRevision: Schema.optional(Schema.Number),
     },
     ProjectRulesView,
   ),

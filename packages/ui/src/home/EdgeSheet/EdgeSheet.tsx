@@ -13,8 +13,8 @@ import s from './EdgeSheet.module.css'
  * into Althar; then each call as a NeedLine, answered in place where a click
  * will do; and at the foot, one quiet line for the work in progress, which
  * doesn't need you. Paper under Althar's item in the menu bar; ink in the
- * island, which is the notch's black. A call just answered folds to an
- * AskAnswered line, as on the home.
+ * island, which is the notch's black. A call just answered stays its line,
+ * quiet, as on the home.
  */
 
 /** The work in progress, counted for the foot: how many, and of those, how many are held or stopped. */
