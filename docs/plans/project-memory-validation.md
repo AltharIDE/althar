@@ -1,21 +1,39 @@
 # Project memory validation
 
-Recorded on 10 October 2026. This is an evidence log, not a declaration that
-all repository checks or GitHub checks have passed. Final broad verification
-is still in progress.
+Recorded on 10 October 2026. Implementation commit `192ac2a` includes the
+current main branch and the unified window-bar integration. All ten GitHub
+checks passed on that commit. Current head status is available on
+[PR #85](https://github.com/AltharIDE/althar/pull/85).
 
-## Checks observed
+## Verification evidence
 
 | Check | Result | What it establishes |
 |---|---|---|
-| Runtime integration suites | 27 tests passed | Includes scripted cross-task, cross-provider delivery after restart and interruption, source tools, later corrections and failure/retry behavior. |
-| Core memory and coordinator suites | 41 tests passed; 2 final focused regressions passed | Extraction, retrieval, source lifecycle, isolation, bounded output and provenance behavior covered by the focused suite. |
-| SQLite persistence suite | 41 tests passed | Storage and migration checks passed in the implementation run. |
-| Live Codex recipient check | 1 test passed, 45.61 seconds | A real ACP Codex session read retained synthetic prior evidence and distinguished an observed failure from a suspected cause. |
+| Runtime | 500 passed; coverage gate passed | Interrupted cross-task/provider delivery after restart, later corrections, scoped tools, source lifecycle, recovery and normal task behavior. |
+| Desktop | 381 passed; coverage gate passed | RPC/client/cache, routing, project isolation, source inspection and revision-safe retirement. |
+| Electron E2E | 14 passed; 2 opt-in checks skipped | Built renderer, real RPC and SQLite; memory capture, inspection, retirement/restoration and source navigation. |
+| Shared UI | 1,032 passed; 4 skipped; coverage and Storybook build passed | Existing component behavior and the merged project-menu integration. |
+| Persistence / provider adapters | 41 / 133 passed; coverage gates passed | Migration/storage and provider adapter compatibility. |
+| Contracts / domain / connectors / CLI | 12 / 66 / 237 / 29 passed | Contract compatibility and unaffected runtime boundaries. |
+| Repository static checks | Passed | Formatting, lint and types; existing warnings remain. |
+| Site workflow | Passed | Shared UI changes build and test with the site. |
+| Pitch E2E | 36 passed; 2 skipped locally | Existing browser checks, after installing the required Chromium binary. |
+| Live Codex recipient | 1 passed, 45.61 seconds | A real ACP Codex session read retained synthetic prior evidence and distinguished an observed failure from a suspected cause. |
 
-The first three counts record completed focused runs reported during the
-implementation. Subsequent changes require their affected checks to be rerun;
-these counts do not stand in for final whole-repository verification.
+GitHub evidence: [harness](https://github.com/AltharIDE/althar/actions/runs/38073929081),
+[desktop](https://github.com/AltharIDE/althar/actions/runs/38073929092),
+[UI](https://github.com/AltharIDE/althar/actions/runs/38073929114),
+[site](https://github.com/AltharIDE/althar/actions/runs/38073929152).
+Runtime coverage was 98.15% lines and 90.06% branches in CI; desktop was
+97.19% lines and 90.10% branches. Thresholds were not weakened.
+
+Local broad tests were serialized with `--maxWorkers=2` after parallel
+runs caused wall-clock timeouts under machine load. The final fresh local
+runtime run also passed all 500 tests and its coverage gate. Tests caught
+and fixed current queued inputs being retrieved as history and stale
+projections being served during a correction backlog. The backlog fixture
+exceeds 2,048 sources; older same-thread evidence is also tested after a
+72,000-character item evicts it from the bounded transcript.
 
 ## Live check and its limits
 
@@ -41,10 +59,12 @@ model reasoning quality. No specific Codex model is claimed. Scripted provider
 fixtures separately exercise automatic briefing across tasks/providers and
 runtime restart.
 
-## Remaining final verification
+## Scope and limitations
 
-- Whole-repository tests, coverage, type checks, formatting and builds:
-  pending final results and resolution of failures.
-- Rendered desktop memory flow: passed against the built Electron app, real RPC and SQLite with scripted providers; source inspection, retirement/restoration and navigation verified.
-- Post-push GitHub checks: pending PR creation and completion.
-- Same-thread historical retrieval, queued-input exclusion and bounded initial-backlog behavior: focused regressions passed, including withholding known stale projections until corrections are indexed.
+Capture and delivery are automatic; the UI is for inspection and lifecycle
+control. Retrieval is lexical and consolidation is extractive. Paraphrases
+without shared terms may be missed; contradictory reports stay attributed.
+Indexed history samples observed revisions, and the initial catch-up budget
+can leave pending sources. Known outdated projections are withheld until
+refreshed. Raw tool output and file bodies remain outside the retention
+policy. The implementation does not claim semantic root-cause inference.
