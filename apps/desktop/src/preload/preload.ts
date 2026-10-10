@@ -3,7 +3,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 /*
  * The window's bridge to the main process, and nothing more: the port to the
  * runtime, handed on to the page, folders the person chose, by the picker or
- * a drop, each as a grant, the thread a notification they clicked opens,
+ * a drop or among the repositories main found, each as a grant, the thread a notification they clicked opens,
  * the icon they gave the app, the app's own preferences, and where Althar
  * shows at the edge of the screen. The edge's own pages say through it where they draw, and what to
  * open in the window, and hear whether the pointer is on the island. The page never sees or sends a
@@ -44,6 +44,8 @@ contextBridge.exposeInMainWorld('althar', {
   setPreference: (key: string, value: unknown): Promise<unknown> => ipcRenderer.invoke('althar:set-preference', key, value),
   sounds: (): Promise<ReadonlyArray<string>> => ipcRenderer.invoke('althar:sounds'),
   editorPicture: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:editor-picture', id),
+  findRepositories: (): Promise<unknown> => ipcRenderer.invoke('althar:find-repositories'),
+  grantFound: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:grant-found', id),
   playSound: (name: string): Promise<void> => ipcRenderer.invoke('althar:play-sound', name),
   edge: (): Promise<{ place: string; notch: boolean } | null> => ipcRenderer.invoke('althar:edge'),
   setEdge: (place: string): Promise<void> => ipcRenderer.invoke('althar:set-edge', place),

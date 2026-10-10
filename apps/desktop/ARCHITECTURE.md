@@ -18,8 +18,8 @@ flowchart LR
 
 | Where | What it holds | What it never holds |
 | --- | --- | --- |
-| `src/main` | Windows, the app's lifecycle, the runtime's process and its restarts, the folder picker and folder grants, external links, notifications and the Dock's count, the app's own preferences (`appPreferences.ts`, kept in the profile's `desktop.json`), and keeping the Mac awake while work runs | Projects, tasks, rules, sessions |
-| `src/preload` | The bridge: hands the page its port, and asks main for grants for picked and dropped folders | Node, the file system, a shell, paths |
+| `src/main` | Windows, the app's lifecycle, the runtime's process and its restarts, the folder picker and folder grants, the repositories found where people keep code for the first screen (`repositories.ts`), external links, notifications and the Dock's count, the app's own preferences (`appPreferences.ts`, kept in the profile's `desktop.json`), and keeping the Mac awake while work runs | Projects, tasks, rules, sessions |
+| `src/preload` | The bridge: hands the page its port, and asks main for grants for picked and dropped folders and for repositories it found | Node, the file system, a shell, paths |
 | `src/runtime` | The runtime (`@althar/runtime`), serving the API over each window's port, and telling the main process what needs the person | Anything about windows |
 | `src/renderer` | The window: views, view models and the data layer (ADR-010) | Effect outside `data/`; Node |
 
@@ -33,7 +33,7 @@ flowchart LR
 - **The window watches once.** It watches the change feed from where its first read of the projects stood, for every screen (`data/feed.ts`), so nothing after that read is missed. A watch that breaks picks up from the last change it heard.
 - **What changes reaches the window three ways.** `Changed` comes from the store's change feed, with the thread it belongs to: a task's screen reads a changed item alone, and anything else about the thread reads the thread's head without its items. `Streaming` carries an agent's message or thought as far as it has come, at most every 50 ms, with its kind and agent: the thread shows it from its first words, before it has read the item, and in place of the stored text until the store catches up. `Context` is how full the context of the agent on a thread is, as the agent says; the conversation's session keeps it.
 - **A thread comes a page at a time:** the newest hundred items, and earlier pages when asked.
-- **Folders come from main, as grants.** The folder picker and dropped folders go through main, which tells the runtime the folder and hands the window a grant; the window opens a project by its grant and never names a path (07).
+- **Folders come from main, as grants.** The folder picker and dropped folders go through main, which tells the runtime the folder and hands the window a grant; the window opens a project by its grant and never names a path (07). The repositories main finds for the first screen reach the window by an id and where each is, as the person knows the place; main grants one only by that id, once the person ticks it and makes the project.
 - **Quitting asks the runtime to stop** every session and record it, and waits up to 20 seconds before the app goes.
 
 ## The window
@@ -43,7 +43,7 @@ MVVM in feature folders ([ADR-010](../../docs/decisions/010-desktop-app-mvvm.md)
 | Folder | What it holds |
 | --- | --- |
 | `data/` | The client: Effect inside, plain promises and a subscription outside; the window's cache of what it read and its watch on the change feed ([ADR-014](../../docs/decisions/014-window-keeps-what-it-read.md)); opening the window; the services view models reach through React; the models each agent offers, read once for the window |
-| `features/start` | Where the window starts: the first screen with no project yet, a folder of several repositories before it is a project, and the home once there are projects; opening a folder by the button, ⌘N or a drop |
+| `features/start` | Where the window starts: the first screen with no project yet, where the agents answer and the first project is made of the repositories found, added or dropped; a folder of several repositories opened from the home before it is a project; and the home once there are projects |
 | `features/home` | The home: across projects, what waits on you, what runs and what the loop did since you left, with the projects beside it and the agents' marks in the bar |
 | `features/settings` | The agents on this Mac with their accounts, the code hosts and trackers, keeping the Mac awake and the editor files open in, notifications, the app's icon and where Althar shows in another app |
 | `features/project` | A project's menu (rename, its repositories, its rules, remove from Althar, each asked in a dialog first), on its bar and its tasks' bars. A project's window: the coordinator's thread with each task's card (its plan before it starts, then where it stands), the agent the coordinator runs on, and a task you plan yourself, beside it |

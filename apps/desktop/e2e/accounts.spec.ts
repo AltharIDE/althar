@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch } from './support'
+import { launch, openFirstProject } from './support'
 
 /*
  * Several accounts per agent (ADR-012), as the person sees them: added on
@@ -35,8 +35,7 @@ test('adds an account to an agent, and names the one that ran out when a task mo
     await expect(accounts.getByText('main', { exact: true })).toBeVisible()
     await page.screenshot({ path: 'test-results/accounts-added.png', animations: 'disabled' })
 
-    await chooseFolder(electronApp, repo)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.getByRole('button', { name: 'New task' }).click()
     await page.getByLabel('What should change').fill('Add a retry to the checkout call')

@@ -1,4 +1,4 @@
-import { type DragEvent, type ReactNode, useEffect } from 'react'
+import { type ReactNode, useEffect } from 'react'
 
 import type { AgentStatus, ProjectSummary } from '@althar/contracts'
 import { Button, PermissionPolicy, type RuntimeEntry, RuntimeState, SourceOrigin, TitleBar } from '@althar/ui'
@@ -11,13 +11,16 @@ import { AgentAccounts } from '../accounts/AgentAccounts'
 import type { AccountSignInModel } from '../accounts/useAccountSignIn'
 import { text as rulesText } from '../rules/RulesView'
 import s from './Start.module.css'
+import { useFirstProject } from './useFirstProject'
 import type { StartModel } from './useStart'
-import { device } from '../../shared/device'
+import { device, platform } from '../../shared/device'
 
 /*
- * Where the window starts. With no project yet, the kit's Start screen, whose
- * one way in is opening a folder; a folder of several repositories first
- * asks which to keep. Once there are projects, the home.
+ * Where the window starts. With no project yet, the kit's Start screen: the
+ * agents answering round the mark, and the repositories found where people
+ * keep code, ticked into the first project (useFirstProject). Once there are
+ * projects, the home, whose Open a folder reads the folder first; one of
+ * several repositories asks which to keep.
  */
 
 export const text = {
@@ -28,10 +31,15 @@ export const text = {
     sources: { label: 'Repositories', note: 'The ones its tasks may change. You can add others from elsewhere.' },
     foot: 'Althar read these folders and changed nothing in them. Tasks work in worktrees of their own.',
   },
-  /** The kit's start screen, saying only what this app does: one folder, by the button or ⌘N. */
-  first: {
-    create: { title: 'Open a folder', note: 'A repository, a folder in one, or a folder of them becomes a project', kbd: '⌘N' },
-    drop: 'Or drop the folder anywhere on this window.',
+  /** The kit's first screen, in this computer's words, with the keys this system has. */
+  first: () => {
+    const key = platform === 'darwin' ? '⌘' : 'Ctrl+'
+    return {
+      looking: `Looking around ${device.this}…`,
+      agentsLabel: `Agents on ${device.this}`,
+      add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: `${key}N` },
+      createKbd: platform === 'darwin' ? '⌘⏎' : 'Ctrl+Enter',
+    }
   },
 }
 
@@ -67,7 +75,7 @@ export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']
   }
 }
 
-/** The agents on this Mac, each with its accounts to add, sign in, rename, order and remove. */
+/** The agents on this computer, each with its accounts to add, sign in, rename, order and remove. */
 export const runtimesOf = (model: StartModel, signIn: AccountSignInModel): ReadonlyArray<RuntimeEntry> =>
   model.status?.agents.map((agent) =>
     runtimeEntry(
@@ -110,32 +118,9 @@ export function StartView({
   const opened = (project: ProjectSummary | null) => {
     if (project !== null) onProject(project.id)
   }
-  const open = () => void model.openFolder().then(opened)
   const modes = { [PermissionPolicy.Rules]: 'rules', [PermissionPolicy.Ask]: 'ask', [PermissionPolicy.AllowAll]: 'allow' } as const
   // With no project, or none read because the runtime didn't answer, the first screen, which says what went wrong.
   const first = (model.projects !== null && model.projects.length === 0) || (model.projects === null && model.error !== null)
-
-  // ⌘N opens a folder, as the first screen says; the home has its own.
-  useEffect(() => {
-    if (!first) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'n' && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
-        event.preventDefault()
-        open()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  })
-
-  const drop = {
-    onDragOver: (event: DragEvent) => event.preventDefault(),
-    onDrop: (event: DragEvent) => {
-      event.preventDefault()
-      const file = event.dataTransfer.files[0]
-      if (file !== undefined) void model.openDropped(file).then(opened)
-    },
-  }
 
   // A folder of several repositories: which to keep, the project's name, and who answers when agents need a yes.
   if (model.forming !== null) {
@@ -173,25 +158,72 @@ export function StartView({
     )
   }
 
-  if (first) {
-    return (
-      <div className={s.window} {...drop}>
-        <TitleBar lights="none">{null}</TitleBar>
-        <div className={`${s.scroll} ${s.first}`}>
-          <Start
-            runtimes={runtimesOf(model, accounts)}
-            onCreate={open}
-            onInstall={(id) => void model.install(id)}
-            text={{ ...text.first, agents: `Agents on ${device.this}` }}
-            runtimesText={{ missing: `Not installed on ${device.this}` }}
-          />
-          <StartError model={model} />
-        </div>
-      </div>
-    )
-  }
+  if (first) return <First model={model} accounts={accounts} onProject={onProject} />
 
   if (model.projects === null) return <HomePending />
 
   return home()
+}
+
+/** The first screen: the agents answering, the repositories found, and the first project made of those ticked. */
+function First({
+  model,
+  accounts,
+  onProject,
+}: {
+  model: StartModel
+  accounts: AccountSignInModel
+  onProject: (projectId: string) => void
+}) {
+  const project = useFirstProject()
+  const make = () =>
+    void project.make().then((made) => {
+      if (made !== null) onProject(made.id)
+    })
+
+  // ⌘N adds a folder, ⌘⏎ makes the project, as the screen says; Ctrl off a Mac.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const command = platform === 'darwin' ? event.metaKey : event.ctrlKey
+      if (!command || event.shiftKey || event.altKey) return
+      if (event.key.toLowerCase() === 'n') {
+        event.preventDefault()
+        void project.add()
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        make()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  const error = project.error ?? model.error
+  return (
+    <div className={`${s.window} ${s.bare}`}>
+      <TitleBar lights="none" className={s.over}>
+        {null}
+      </TitleBar>
+      <Start
+        // Still asking until the runtime answers, or says it can't.
+        runtimes={model.status === null && model.error === null ? null : runtimesOf(model, accounts)}
+        onInstall={(id) => void model.install(id)}
+        repositories={project.candidates}
+        {...(project.lookedIn === null || project.lookedIn.length === 0 ? {} : { lookedIn: project.lookedIn.join(', ') })}
+        picked={project.picked}
+        onPick={project.toggle}
+        onAdd={() => void project.add()}
+        onDrop={(files) => void project.addDropped(files)}
+        name={project.name}
+        onNameChange={project.rename}
+        onCreate={make}
+        creating={project.making}
+        {...(error === null ? {} : { error })}
+        text={text.first()}
+        runtimesText={{ missing: `Not installed on ${device.this}` }}
+      />
+      {model.unremoved !== null && <StartError model={model} />}
+    </div>
+  )
 }

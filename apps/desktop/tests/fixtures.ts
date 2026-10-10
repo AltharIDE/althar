@@ -604,6 +604,8 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   playSound: vi.fn(async () => {}),
   pickFolder: vi.fn(async () => 'grant_picked'),
   grantDropped: vi.fn(async () => 'grant_dropped'),
+  findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
+  grantFound: vi.fn(async (id: string) => `grant_${id}`),
   onOpen: vi.fn(() => () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),
