@@ -75,16 +75,12 @@ export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']
   }
 }
 
-/**
- * The agents on this computer, as the first screen lists them: one not
- * signed in with its accounts under it, to sign one in there; one signed in
- * says who as, and Settings has the rest.
- */
+/** The agents on this computer, each with its accounts to add, sign in, rename, order and remove. */
 export const runtimesOf = (model: StartModel, signIn: AccountSignInModel): ReadonlyArray<RuntimeEntry> =>
   model.status?.agents.map((agent) =>
     runtimeEntry(
       agent,
-      agent.installed && agent.signIn !== 'signed_in' ? <AgentAccounts agent={agent} start={model} signIn={signIn} /> : undefined,
+      agent.installed ? <AgentAccounts agent={agent} start={model} signIn={signIn} /> : undefined,
       model.installFailed[agent.id],
     ),
   ) ?? []

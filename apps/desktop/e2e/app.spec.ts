@@ -30,7 +30,7 @@ test('makes the first project of a repository it found, starts a task, and talks
     await expect(page.getByText('Fake')).toHaveCount(0)
     await expect(page.getByText('Claude Code').first()).toBeVisible()
     const found = page.getByRole('list', { name: 'Repositories for the project' })
-    await expect(found.getByRole('checkbox')).toHaveText([/meridian.*~\/Projects\/meridian/, /halyard/])
+    await expect(found.getByRole('listitem')).toHaveText([/meridian.*~\/Projects\/meridian/, /halyard/, /Add a folder/])
     // Once the launch has played over it.
     await page.waitForTimeout(2500)
     await page.screenshot({ path: 'test-results/start.png' })
