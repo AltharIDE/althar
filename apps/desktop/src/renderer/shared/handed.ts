@@ -1,5 +1,5 @@
 import type { CommandOutput, FileMention, Picture } from '@althar/contracts'
-import { type ImageRef, ToolState } from '@althar/ui'
+import { type ImageRef, ToolKind, ToolState } from '@althar/ui'
 
 import { pictureUrl } from '../../main/pictureAddress'
 
@@ -200,17 +200,30 @@ export const linesOf = (output: string): { readonly lines: ReadonlyArray<string>
 }
 
 /**
- * Where each file a thread names was last touched, by its whole path: by the tool call that last
- * named it, and how that call stood. A document read from where it is now is
- * read again when this changes, so a card and the panel follow its edits.
+ * What each document a thread shows was last changed by, as far as the
+ * thread can tell, by its whole path: the last tool call that named it, and
+ * the last command that ended, which may have rewritten it without naming
+ * it, as a script or `sed` does. A document is read again when this
+ * changes, so a card and the panel follow its edits; only documents shown
+ * are read.
  */
-export const lastTouches = (
-  parts: ReadonlyArray<{ readonly kind: string; readonly id: string; readonly state?: string; readonly touches?: ReadonlyArray<string> }>,
+export const documentVersions = (
+  parts: ReadonlyArray<{
+    readonly kind: string
+    readonly id: string
+    readonly state?: string
+    readonly toolKind?: string
+    readonly touches?: ReadonlyArray<string>
+  }>,
   worktree: string | null,
-): ReadonlyMap<string, string> => {
+): ((whole: string) => string) => {
   const touched = new Map<string, string>()
-  for (const part of parts) for (const path of part.touches ?? []) touched.set(wholePath(path, worktree), `${part.id}:${part.state ?? ''}`)
-  return touched
+  let ran = ''
+  for (const part of parts) {
+    for (const path of part.touches ?? []) touched.set(wholePath(path, worktree), `${part.id}:${part.state ?? ''}`)
+    if (part.toolKind === ToolKind.Run && part.state !== ToolState.Running && part.state !== ToolState.Declined) ran = part.id
+  }
+  return (whole) => `${touched.get(whole) ?? ''} ${ran}`
 }
 
 /** Commands' output so far that the store now has whole: a call that ended no longer streams. */

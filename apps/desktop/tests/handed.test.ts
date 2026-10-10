@@ -1,13 +1,13 @@
 import type { Picture, ThreadItem } from '@althar/contracts'
-import { ToolState } from '@althar/ui'
+import { ToolKind, ToolState } from '@althar/ui'
 import { describe, expect, it } from 'vitest'
 
 import {
   bytesText,
   editorPath,
   handedBy,
+  documentVersions,
   kindOf,
-  lastTouches,
   linesOf,
   LINES_SHOWN,
   NOTHING_HANDED,
@@ -189,19 +189,23 @@ describe('files, as people read them', () => {
     expect(editorPath('a.md', 'api')).toBeNull()
   })
 
-  it('knows where each file was last touched, so a document is read again after an edit', () => {
-    const touched = lastTouches(
+  it('knows what each document was last changed by: a call that named it, or any command that ended', () => {
+    const versionOf = documentVersions(
       [
-        { kind: 'tool', id: 'one', state: 'done', touches: ['/w/meridian/docs/a.md'] },
+        { kind: 'tool', id: 'one', state: ToolState.Done, toolKind: ToolKind.Edit, touches: ['/w/meridian/docs/a.md'] },
         { kind: 'message', id: 'two' },
-        { kind: 'tool', id: 'three', state: 'running', touches: ['/w/meridian/docs/a.md', '/w/meridian/b.ts'] },
+        { kind: 'tool', id: 'three', state: ToolState.Running, toolKind: ToolKind.Edit, touches: ['docs/a.md', '/w/meridian/b.ts'] },
+        // A command that ended may have rewritten anything; one still running, or refused, nothing yet.
+        { kind: 'tool', id: 'four', state: ToolState.Failed, toolKind: ToolKind.Run, touches: [] },
+        { kind: 'tool', id: 'five', state: ToolState.Running, toolKind: ToolKind.Run },
+        { kind: 'tool', id: 'six', state: ToolState.Declined, toolKind: ToolKind.Run },
       ],
       '/w/meridian',
     )
     // By which file it is: its whole path.
-    expect([...touched]).toEqual([
-      ['/w/meridian/docs/a.md', 'three:running'],
-      ['/w/meridian/b.ts', 'three:running'],
-    ])
+    expect(versionOf('/w/meridian/docs/a.md')).toBe('three:running four')
+    expect(versionOf('/w/meridian/b.ts')).toBe('three:running four')
+    expect(versionOf('/w/meridian/c.md')).toBe(' four')
+    expect(documentVersions([], null)('/w/a.md')).toBe(' ')
   })
 })

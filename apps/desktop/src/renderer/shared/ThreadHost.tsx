@@ -53,7 +53,7 @@ export function DocumentPanel({
 }: {
   threadId: string
   doc: DocRef
-  /** Where the document was last touched in the thread: a new one reads it again. */
+  /** What the document was last changed by in the thread: a new one reads it again. */
   version: string
   onClose: () => void
   /** Opens it in the person's editor; without it, there is no such button. */
@@ -62,7 +62,12 @@ export function DocumentPanel({
   const { client } = useServices()
   // Read by which file it is, where the card said; otherwise by its path.
   const source = doc.source ?? doc.path
-  const read = useQuery({ ...reads(client).document(threadId, source ?? '', version), enabled: source !== undefined })
+  // Read again as it opens, whatever was read before: the panel shows the file as it is now.
+  const read = useQuery({
+    ...reads(client).document(threadId, source ?? '', version),
+    enabled: source !== undefined,
+    refetchOnMount: 'always',
+  })
   return (
     <DocPanel
       doc={{ ...doc, body: read.data?.body ?? doc.body }}

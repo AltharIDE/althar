@@ -280,6 +280,42 @@ describe('what an agent hands back, on a task', () => {
     expect(client.openInEditor).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/t/meridian/task/api/docs/notes.md' }))
   })
 
+  it('reads its documents again when a command ends, which may have rewritten one without naming it', async () => {
+    const readDocument = vi
+      .fn()
+      .mockResolvedValueOnce({ path: '/w/meridian/docs/notes.md', body: '# Notes\n\nFirst.\n', bytes: 16, lines: 3 })
+      .mockResolvedValue({ path: '/w/meridian/docs/notes.md', body: '# Notes\n\nRewritten by a script.\n', bytes: 30, lines: 3 })
+    // A script rewrites the document: the command says no file it touched.
+    const script = {
+      ...items.tool({ title: 'python3 tidy.py', toolKind: 'execute', command: 'python3 tidy.py', status: 'completed' }),
+      id: 'i-script',
+      sequence: 1_000,
+    }
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => handing()), readDocument, getThreadItem: vi.fn(async () => script) })
+    withServices(<Task />, client)
+    const card = await screen.findByRole('article', { name: 'notes.md' })
+    expect(await within(card).findByText('First.')).toBeTruthy()
+    act(() => emit(changed('thread_item', 'i-script')))
+    expect(await within(card).findByText('Rewritten by a script.')).toBeTruthy()
+    expect(readDocument).toHaveBeenCalledTimes(2)
+  })
+
+  it('reads a document again as its panel opens', async () => {
+    const user = userEvent.setup()
+    const readDocument = vi
+      .fn()
+      .mockResolvedValueOnce({ path: '/w/meridian/docs/notes.md', body: '# Notes\n\nFirst.\n', bytes: 16, lines: 3 })
+      .mockResolvedValue({ path: '/w/meridian/docs/notes.md', body: '# Notes\n\nAs it is now.\n', bytes: 22, lines: 3 })
+    const { client } = fakeClient({ getThread: vi.fn(async () => handing()), readDocument })
+    withServices(<Task />, client)
+    const card = await screen.findByRole('article', { name: 'notes.md' })
+    expect(await within(card).findByText('First.')).toBeTruthy()
+    await user.click(within(card).getByRole('button', { name: 'Read in the panel' }))
+    const panel = await screen.findByRole('complementary', { name: 'notes.md' })
+    expect(await within(panel).findByText('As it is now.')).toBeTruthy()
+    expect(readDocument).toHaveBeenCalledTimes(2)
+  })
+
   it('says a document couldn’t be read, in the card', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => handing()),

@@ -36,7 +36,7 @@ import { type Choice, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { stepNames, stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
-import { editorPath, lastTouches, wholePath } from '../../shared/handed'
+import { documentVersions, editorPath, wholePath } from '../../shared/handed'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
@@ -327,8 +327,8 @@ export function TaskView({
       now,
     ),
   ]
-  // Where each file was last touched, so a document open beside the thread follows its edits.
-  const touched = lastTouches(
+  // What each document was last changed by, so one open beside the thread follows its edits.
+  const versionOf = documentVersions(
     blocks.flatMap((block) => (block.kind === 'turn' ? block.parts : [])),
     snapshot.task.worktree,
   )
@@ -506,7 +506,7 @@ export function TaskView({
                 key={host.doc.source ?? host.doc.path ?? host.doc.title}
                 threadId={snapshot.threadId}
                 doc={host.doc}
-                version={touched.get(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree)) ?? ''}
+                version={versionOf(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree))}
                 onClose={host.closeDoc}
                 {...(openFile === undefined || docInEditor === null ? {} : { onOpen: () => openFile(docInEditor) })}
               />

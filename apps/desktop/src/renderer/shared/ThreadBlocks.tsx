@@ -27,7 +27,7 @@ import {
 
 import { CommandOutput } from './CommandOutput'
 import { HandedBack } from './HandedBack'
-import { lastTouches } from './handed'
+import { documentVersions } from './handed'
 import { useModelNames } from './modelNames'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
 import type { ArrivalContent, Block, Part, StepResult, TaskCardContent } from './thread'
@@ -337,8 +337,8 @@ export function ThreadBlocks({
   const done = new Set(blocks.flatMap((block) => (block.kind === 'step' ? [block.result.step] : [])))
   const of = 1 + (done.has('review') || done.has('settle') ? 1 : 0) + (done.has('publish') ? 1 : 0)
   const named = useModelNames()
-  // Where each file was last touched, so a document is read again after an edit.
-  const touched = lastTouches(
+  // What each document was last changed by, so it is read again after an edit.
+  const versionOf = documentVersions(
     blocks.flatMap((block) => (block.kind === 'turn' ? block.parts : [])),
     worktree,
   )
@@ -389,7 +389,7 @@ export function ThreadBlocks({
             {block.said.map((part) => (
               <PartView key={part.id} part={part} threadId={threadId} />
             ))}
-            <HandedBack handed={block.handed} threadId={threadId} touched={touched} {...(openFile === undefined ? {} : { openFile })} />
+            <HandedBack handed={block.handed} threadId={threadId} versionOf={versionOf} {...(openFile === undefined ? {} : { openFile })} />
           </Turn>
         )
       }

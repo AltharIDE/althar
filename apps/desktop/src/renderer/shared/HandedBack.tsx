@@ -17,18 +17,18 @@ import { bytesText, type Handed, type HandedFile } from './handed'
 export interface HandedBackProps {
   readonly handed: Handed
   readonly threadId: string
-  /** Where each file was last touched, so a document is read again after an edit. */
-  readonly touched: ReadonlyMap<string, string>
+  /** What each document was last changed by, so it is read again after an edit (documentVersions). */
+  readonly versionOf: (whole: string) => string
   /** Opens a file of the task's in the person's editor, by its whole path; without it, there is no such button. */
   readonly openFile?: (path: string) => void
 }
 
-export function HandedBack({ handed, threadId, touched, openFile }: HandedBackProps) {
+export function HandedBack({ handed, threadId, versionOf, openFile }: HandedBackProps) {
   return (
     <>
       {handed.pictures.length > 0 && <Shots items={handed.pictures} />}
       {handed.documents.map((file) => (
-        <DocumentCard key={file.id} file={file} threadId={threadId} version={touched.get(file.whole) ?? ''} openFile={openFile} />
+        <DocumentCard key={file.id} file={file} threadId={threadId} version={versionOf(file.whole)} openFile={openFile} />
       ))}
       {handed.files.map((file) => (
         <FileArtifact
