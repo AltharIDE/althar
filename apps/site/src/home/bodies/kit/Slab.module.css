@@ -25,11 +25,22 @@
 }
 .slabLight {
   position: absolute; left: -10%; right: -10%; bottom: -18%; height: 80%; z-index: -1; opacity: 0.9; pointer-events: none; overflow: hidden;
-  -webkit-mask-image: radial-gradient(60% 70% at 50% 100%, #000 40%, transparent 75%);
-  mask-image: radial-gradient(60% 70% at 50% 100%, #000 40%, transparent 75%);
+  /* Gone before every edge of its box, the floor included, so the light never ends on a line. */
+  -webkit-mask-image: radial-gradient(closest-side at 50% 58%, #000 35%, transparent 100%);
+  mask-image: radial-gradient(closest-side at 50% 58%, #000 35%, transparent 100%);
 }
 @media (prefers-reduced-motion: reduce) { .float { animation: none; } }
 @media (max-width: 700px) {
+  /* Only a slice of the light shows under a slab this wide: softened into one pool. */
+  .slabLight { filter: blur(14px); }
+  /* Held up straight, its edge showing evenly below. */
   .toRight, .toLeft { --turn: 0deg; }
-  .slab { transform: rotateX(4deg) rotateZ(0.3deg); }
+  .slab, .toLeft .slab {
+    transform: rotateX(4deg);
+    box-shadow:
+      inset 0 1px 0 #fff,
+      0 1px 0 #dfe1f1, 0 2px 0 #d6d9ee, 0 3px 0 #ced1ea, 0 4px 0 #c6cae6, 0 5px 0 #bec2e2,
+      0 30px 60px rgba(6, 10, 70, 0.18),
+      0 60px 100px rgba(6, 10, 70, 0.08);
+  }
 }

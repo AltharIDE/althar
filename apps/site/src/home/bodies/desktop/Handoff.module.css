@@ -68,14 +68,32 @@
 @media (prefers-reduced-motion: reduce) {
   .bar, .rest, .restLabel, .ready, .event { transition: none; }
 }
+/* Shown on a phone only: the moment it moved, said above the lanes and marked on each track. */
+.eventLine, .cutMark { display: none; }
+
 @media (max-width: 700px) {
-  .handoff { margin-top: 40px; padding: 24px 18px 22px; border-radius: 18px; }
+  .handoff { margin-top: 40px; padding: 22px 18px 20px; border-radius: 18px; }
   .head { flex-direction: column; gap: 4px; font-size: 16px; }
-  .lane { grid-template-columns: 1fr; gap: 6px; height: auto; padding: 12px 0 26px; }
-  .track { height: 22px; }
-  .overlay { left: 0; }
+  .eventLine { display: block; margin: 18px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--n-2); font-size: 13px; color: var(--t-2); }
+  .eventLine time { margin-right: 6px; font: 500 12px var(--mono); color: var(--t-1); }
+  .chart { margin-top: 10px; padding-bottom: 30px; }
+  .lane { grid-template-columns: 1fr; gap: 10px; height: auto; padding: 14px 0 30px; }
+  .lane:last-child { padding-bottom: 18px; }
+  .track { height: 14px; }
+  .overlay { left: 0; top: auto; height: 30px; }
+  .event { display: none; }
+  .cutMark {
+    display: block; position: absolute; top: -6px; bottom: -6px; width: 0;
+    border-left: 1px dashed var(--t-2);
+    opacity: 0; transition: opacity 500ms ease 1500ms;
+  }
+  .seen .cutMark { opacity: 1; }
   .ticks li:nth-child(even) { display: none; }
-  .chart { margin-top: 64px; }
-  .eventLabel { white-space: normal; width: 230px; font-size: 12.5px; }
-  .same { grid-template-columns: 1fr; gap: 14px; }
+  /* The three sames, as three words. */
+  .same { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 18px; padding-top: 16px; }
+  .same b { font-size: 15px; }
+  .same span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cutMark { transition: none; }
 }

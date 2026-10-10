@@ -5,6 +5,7 @@ import { Get } from '../../../shared/Close'
 import { HomeWindow, IslandOpen } from '../kit/app'
 import { EdgeTour } from '../kit/EdgeTour'
 import { Desktop, MacWindow } from '../kit/Mac'
+import { NarrowWindow, useNarrow } from '../kit/Narrow'
 import { Shot } from '../kit/Shot'
 import t from '../kit/type.module.css'
 import s from './DesktopBody.module.css'
@@ -53,23 +54,38 @@ function Scene({
 }
 
 /** A Mac's screen: the picture of a desktop, in a thin black bezel. */
-function Screen({
-  children,
-  label,
-  phone,
-}: {
-  children: ReactNode
-  label: string
-  phone?: { x: number; y: number; w: number; h: number }
-}) {
+function Screen({ children, label }: { children: ReactNode; label: string }) {
   return (
     <div className={s.screenWrap}>
       <div className={s.bezel}>
-        <Shot w={1440} h={900} phone={phone} label={label} frame={s.screen}>
+        <Shot w={1440} h={900} label={label} frame={s.screen}>
           {children}
         </Shot>
       </div>
     </div>
+  )
+}
+
+/** The home on a Mac's screen; on a phone, the home's own narrow window, the stream alone. */
+function HomeScreen() {
+  const phone = useNarrow()
+  const label = "Althar's home: three things that need you, five tasks running, and what happened since you looked"
+  if (phone)
+    return (
+      <div className={s.narrowWrap}>
+        <NarrowWindow label={label} h={520}>
+          <HomeWindow narrow />
+        </NarrowWindow>
+      </div>
+    )
+  return (
+    <Screen label={label}>
+      <Desktop island={<IslandOpen open={false} />}>
+        <MacWindow style={{ left: 70, top: 26, width: 1300, height: 820 }}>
+          <HomeWindow />
+        </MacWindow>
+      </Desktop>
+    </Screen>
   )
 }
 
@@ -86,16 +102,7 @@ export function DesktopBody() {
         }
         lead="What needs you, across every project, on top. Under it, everything running: which agent, which step, how long. Under that, what happened since you looked."
       >
-        <Screen
-          label="Althar's home: three things that need you, five tasks running, and what happened since you looked"
-          phone={{ x: 330, y: 120, w: 620, h: 560 }}
-        >
-          <Desktop island={<IslandOpen open={false} />}>
-            <MacWindow style={{ left: 70, top: 26, width: 1300, height: 820 }}>
-              <HomeWindow />
-            </MacWindow>
-          </Desktop>
-        </Screen>
+        <HomeScreen />
       </Scene>
 
       <Lift />
@@ -129,13 +136,12 @@ export function DesktopBody() {
         <Flow />
       </Scene>
 
-      <section className={s.end} aria-labelledby="end-h">
-        <div className={s.head}>
-          <h2 id="end-h" className={cx(t.title, t.big)}>
+      <section className={s.end} aria-label="Download Althar">
+        <div className={s.endRow}>
+          <p className={s.endLine}>
             Bring the agents <b>you already pay for.</b>
-          </h2>
+          </p>
           <Get tone="paper" />
-          <p className={t.mono}>Free and open source · macOS, Windows and Linux</p>
         </div>
       </section>
     </main>

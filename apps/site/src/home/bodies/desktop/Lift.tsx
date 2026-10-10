@@ -1,9 +1,10 @@
 import { Turn, WorkedFor, You } from '@althar/ui'
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 
 import { cx } from '../../../lib/cx'
-import { DOCS_PLAN, Launch, ProjectWindow, useAssembling } from '../kit/app'
+import { DOCS_PLAN, Growing, Launch, ProjectWindow, useAssembling } from '../kit/app'
 import { Desktop, MacWindow } from '../kit/Mac'
+import { NarrowWindow, useNarrow } from '../kit/Narrow'
 import { useSeen } from '../kit/seen'
 import { Shot } from '../kit/Shot'
 import { Slab } from '../kit/Slab'
@@ -18,7 +19,9 @@ import s from './Lift.module.css'
  * screen, turns into the room, grows, and settles at the left, while the
  * window steps back to the right and the title above turns from the
  * coordinator to the team it put together. Scrolling back puts it back.
- * On a phone the two moments stand one under the other.
+ * Narrower, the two moments stand one under the other; on a phone the
+ * window is the app's own narrow one, the conversation alone, and the plan
+ * stands under it as a slab that keeps its room while it grows.
  */
 
 /** How wide the plan is laid out, in px: as wide as it is in the window. */
@@ -49,18 +52,6 @@ const clamp = (x: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, x))
 const ease = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2)
 const lerp = (a: number, b: number, k: number) => a + (b - a) * k
 
-function useNarrow() {
-  const query = '(max-width: 900px)'
-  const [narrow, setNarrow] = useState(() => window.matchMedia(query).matches)
-  useEffect(() => {
-    const q = window.matchMedia(query)
-    const on = () => setNarrow(q.matches)
-    q.addEventListener('change', on)
-    return () => q.removeEventListener('change', on)
-  }, [])
-  return narrow
-}
-
 function Head({ i, className, hidden }: { i: number; className?: string; hidden?: boolean }) {
   const head = HEADS[i]!
   return (
@@ -75,15 +66,17 @@ function Head({ i, className, hidden }: { i: number; className?: string; hidden?
   )
 }
 
-/** The coordinator's conversation: your ask, what it read, its answer, and a plan for each task. `spot` holds the first plan. */
+/** The coordinator's conversation: your ask, what it read, its answer, and a plan for each task unless `plans` is off. `spot` holds the first plan. */
 function Thread({
   steps,
   docs,
   spot,
+  plans = true,
 }: {
   steps: ReturnType<typeof useAssembling>
   docs: ReturnType<typeof useAssembling>
   spot?: (el: HTMLDivElement | null) => void
+  plans?: boolean
 }) {
   return (
     <>
@@ -99,26 +92,22 @@ function Thread({
           Codex writes them, Sonnet reads them over. Change anyone before they start.
         </p>
       </Turn>
-      <div ref={spot}>
-        <Launch steps={steps} />
-      </div>
-      {docs.length > 0 && <Launch task="433" title="Fix the refunds docs" steps={docs} from={false} estimate="About 10 min" />}
+      {plans && (
+        <>
+          <div ref={spot}>
+            <Launch steps={steps} />
+          </div>
+          {docs.length > 0 && <Launch task="433" title="Fix the refunds docs" steps={docs} from={false} estimate="About 10 min" />}
+        </>
+      )}
     </>
   )
 }
 
-function Screen({
-  children,
-  label,
-  phone,
-}: {
-  children: ReactNode
-  label: string
-  phone?: { x: number; y: number; w: number; h: number }
-}) {
+function Screen({ children, label }: { children: ReactNode; label: string }) {
   return (
     <div className={s.bezel}>
-      <Shot w={1440} h={900} phone={phone} label={label} frame={s.screenFrame}>
+      <Shot w={1440} h={900} label={label} frame={s.screenFrame}>
         <Desktop>
           <MacWindow style={{ left: 40, top: 24, width: 1360, height: 826 }}>{children}</MacWindow>
         </Desktop>
@@ -128,7 +117,8 @@ function Screen({
 }
 
 export function Lift() {
-  const narrow = useNarrow()
+  const narrow = useNarrow(900)
+  const phone = useNarrow()
   const section = useRef<HTMLElement>(null)
   const stage = useRef<HTMLDivElement>(null)
   const screen = useRef<HTMLDivElement>(null)
@@ -223,18 +213,26 @@ export function Lift() {
     return (
       <section id="team" className={s.stacked} aria-label="The coordinator">
         <Head i={0} />
-        <div className={s.stackedPicture}>
-          <Screen
-            label="Meridian's coordinator: you ask for two things, it reads the project and answers with a plan for each"
-            phone={{ x: 330, y: 150, w: 780, h: 720 }}
+        {phone ? (
+          <NarrowWindow
+            label="Meridian's coordinator: you ask for two things, it reads the project and answers with a task for each"
+            h={540}
           >
-            <ProjectWindow centered meta="The coordinator · 3 repositories, your rules" thread={<Thread steps={steps} docs={docs} />} />
-          </Screen>
-        </div>
+            <ProjectWindow talkOnly meta="The coordinator · 3 repositories" thread={<Thread steps={steps} docs={docs} plans={false} />} />
+          </NarrowWindow>
+        ) : (
+          <div className={s.stackedPicture}>
+            <Screen label="Meridian's coordinator: you ask for two things, it reads the project and answers with a plan for each">
+              <ProjectWindow centered meta="The coordinator · 3 repositories, your rules" thread={<Thread steps={steps} docs={docs} />} />
+            </Screen>
+          </div>
+        )}
         <Head i={1} />
         <div ref={stage} className={s.stackedPicture}>
-          <Slab w={W} phoneW={430} label="The plan for task 432: a model for each step" maxScale={1}>
-            <Launch steps={steps} />
+          <Slab w={W} phoneW={410} label="The plan for task 432: a model for each step" maxScale={1}>
+            <Growing whole={<Launch narrow={phone} />}>
+              <Launch steps={steps} narrow={phone} />
+            </Growing>
           </Slab>
         </div>
       </section>

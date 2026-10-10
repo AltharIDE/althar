@@ -38,6 +38,7 @@
 
 /* ---- a phone: the two moments one under the other ---- */
 .stacked { display: grid; gap: 40px; padding: 96px 0 0; }
+.stacked > * { min-width: 0; }
 .stacked .head { grid-area: auto; padding: 0 var(--gut); }
 .stackedPicture { padding: 0 var(--gut); }
 .stackedPicture .bezel { padding: 6px; border-radius: 18px; }

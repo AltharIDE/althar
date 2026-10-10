@@ -3,6 +3,7 @@ import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef,
 
 import { cx } from '../../../lib/cx'
 import { TwoLabReview } from '../kit/app'
+import { useNarrow } from '../kit/Narrow'
 import { Shot } from '../kit/Shot'
 import t from '../kit/type.module.css'
 import { Handoff } from './Handoff'
@@ -14,8 +15,8 @@ import s from './Trio.module.css'
  * one stage in Althar's light. The stage stays while you scroll; each piece
  * floats in from below, slightly turned, stands, and floats away up as the
  * next comes in, its title changing over it. The steps down the side say
- * where you are and take you to one. On a phone the three stand one under
- * the other in the same light, without the stage.
+ * where you are and take you to one. Narrower, the three stand one under
+ * the other in the same panel, each over its own light, without the stage.
  */
 
 interface Step {
@@ -86,19 +87,6 @@ const still = () =>
   typeof window !== 'undefined' &&
   (window.matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(window.location.search).has('t'))
 
-/** Whether the page is a phone's width: the three then stand one under the other. */
-function useNarrow() {
-  const query = '(max-width: 900px)'
-  const [narrow, setNarrow] = useState(() => window.matchMedia(query).matches)
-  useEffect(() => {
-    const q = window.matchMedia(query)
-    const on = () => setNarrow(q.matches)
-    q.addEventListener('change', on)
-    return () => q.removeEventListener('change', on)
-  }, [])
-  return narrow
-}
-
 /** A piece laid out at `width` and scaled down, never up, to fit the box it is given. */
 function Fit({ width, children }: { width: number; children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null)
@@ -128,7 +116,7 @@ function Fit({ width, children }: { width: number; children: ReactNode }) {
 }
 
 export function Trio() {
-  const narrow = useNarrow()
+  const narrow = useNarrow(900)
   const section = useRef<HTMLElement>(null)
   const stage = useRef<HTMLDivElement>(null)
   const [at, setAt] = useState(0)
@@ -194,9 +182,6 @@ export function Trio() {
   if (narrow)
     return (
       <section className={cx(s.trio, s.stacked)} aria-label="Your plans, limits and review">
-        <div className={s.light} aria-hidden="true">
-          <Light height={0.4} />
-        </div>
         {STEPS.map((step) => (
           <div key={step.id} id={step.id} className={s.stackedStep}>
             <div className={s.head}>
@@ -207,7 +192,12 @@ export function Trio() {
               <h2 className={cx(t.title, s.title)}>{step.title}</h2>
               <p className={t.lead}>{step.lead}</p>
             </div>
-            <div className={s.stackedPiece}>{step.piece(true)}</div>
+            <div className={s.stackedPiece}>
+              <div className={s.pieceLight} aria-hidden="true">
+                <Light height={0.8} motion="still" />
+              </div>
+              {step.piece(true)}
+            </div>
           </div>
         ))}
       </section>

@@ -31,16 +31,24 @@
 .quiet { margin: 0; color: var(--t-3); }
 
 /* Narrow: only the conversation, the whole width. */
-.talkOnly .talk { flex: 1; width: auto; border-right: 0; }
+.talkOnly .talk { flex: 1; width: auto; min-width: 0; border-right: 0; }
 .talkOnly .thread { padding: 4px 16px 0; }
 .talkOnly .composer { padding: 10px 16px 16px; }
 /* Narrow: the home without its projects column, and less padding. */
 .narrow aside { display: none; }
 .narrow main > div { padding: 22px 14px 40px !important; }
 /* Narrow: the lead's plan wraps, each step's agents under its name, without the reasons. */
-.talkOnly ol[class*='steps'] > li { grid-template-columns: 22px minmax(0, 1fr) !important; row-gap: 6px; padding-top: 7px; padding-bottom: 7px; }
-.talkOnly ol[class*='steps'] > li > :nth-child(3) { grid-column: 2; flex-wrap: wrap; row-gap: 6px; }
-.talkOnly ol[class*='steps'] > li > :nth-child(n + 4) { display: none; }
+:is(.talkOnly, .narrowPlan) ol[class*='steps'] > li { grid-template-columns: 22px minmax(0, 1fr) !important; row-gap: 6px; padding-top: 7px; padding-bottom: 7px; }
+:is(.talkOnly, .narrowPlan) ol[class*='steps'] > li > :nth-child(3) { grid-column: 2; flex-wrap: wrap; row-gap: 6px; }
+:is(.talkOnly, .narrowPlan) ol[class*='steps'] > li > :nth-child(n + 4) { display: none; }
+:is(.talkOnly, .narrowPlan) ol[class*='steps'] > li > :nth-child(2) { justify-self: start; }
+/* Narrow: the estimate on a line of its own over the countdown. */
+:is(.talkOnly, .narrowPlan) div[class*='foot'] { flex-wrap: wrap; row-gap: 6px; }
+:is(.talkOnly, .narrowPlan) div[class*='foot'] > span:first-child { flex-basis: 100%; }
+/* A plan that grows a step at a time, over the room it will take once whole, so nothing under it moves. */
+.reserve { display: grid; }
+.reserve > * { grid-area: 1 / 1; }
+.reserve > :first-child { visibility: hidden; }
 
 /* Settings: the Control Center's panel, frosted, as a picture. */
 .panel {

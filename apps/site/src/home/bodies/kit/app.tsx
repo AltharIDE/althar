@@ -223,7 +223,8 @@ export function Launch({
   task = '432',
   title = 'Backfill idempotency keys on refunds created before PR 1184',
   from = true,
-  estimate = 'About 40 min · about $2 on your subscriptions',
+  estimate,
+  narrow = false,
 }: {
   steps?: readonly LaunchStep[]
   wait?: number
@@ -231,9 +232,12 @@ export function Launch({
   title?: string
   from?: boolean
   estimate?: string
+  /** Laid out for a narrow window: each step's agents under its name, the estimate shorter. */
+  narrow?: boolean
 }) {
   const plan = steps ?? PLAN_432
-  return (
+  estimate ??= narrow ? 'About 40 min · about $2' : 'About 40 min · about $2 on your subscriptions'
+  const launch = (
     <TaskLaunch
       task={task}
       title={title}
@@ -257,6 +261,17 @@ export function Launch({
       wait={wait}
       onStart={none}
     />
+  )
+  return narrow ? <div className={s.narrowPlan}>{launch}</div> : launch
+}
+
+/** A plan growing a step at a time (`children`), over the room it takes once `whole`, so nothing under it moves as it grows. */
+export function Growing({ children, whole }: { children: ReactNode; whole: ReactNode }) {
+  return (
+    <div className={s.reserve}>
+      <div aria-hidden="true">{whole}</div>
+      {children}
+    </div>
   )
 }
 

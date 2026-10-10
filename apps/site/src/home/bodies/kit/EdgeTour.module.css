@@ -87,7 +87,10 @@
 .cornerStill .cornerMark { background: rgba(255, 255, 255, 0.22); }
 
 @media (max-width: 1100px) {
+  /* The words over the picture, centred as every other section's are. */
   .menuNote { grid-template-columns: 1fr; gap: 40px; }
+  .menuWords { justify-items: center; text-align: center; }
+  .choose { justify-content: center; }
 }
 @media (max-width: 700px) {
   .menuNote { grid-template-columns: 1fr; gap: 32px; margin-top: 80px; }

@@ -81,9 +81,16 @@
 }
 
 /* ---- a phone: the three one under the other, in the same light ---- */
-.stacked { height: auto; margin: 96px 12px 0; padding: 56px 0 40px; border-radius: 24px; background: #efede7; overflow: hidden; isolation: isolate; }
-.stacked .light { height: 30%; }
+.stacked { height: auto; margin: 96px 12px 0; padding: 56px 0 72px; border-radius: 24px; background: #efede7; overflow: hidden; isolation: isolate; }
 .stackedStep { padding: 0 var(--gut); }
-.stackedStep + .stackedStep { margin-top: 80px; }
-.stackedPiece { margin-top: 32px; }
-.stackedPiece > div { margin-left: 0; margin-right: 0; }
+.stackedStep + .stackedStep { margin-top: 96px; }
+.stackedPiece { position: relative; isolation: isolate; margin-top: 32px; }
+.stackedPiece > div:not(.pieceLight) { margin-left: 0; margin-right: 0; }
+/* Each piece over its own light, standing at its foot and gone before every edge of its box. */
+.pieceLight {
+  position: absolute; left: 0; right: 0; bottom: -64px; height: 70%; z-index: -1; overflow: hidden; pointer-events: none;
+  /* Only a slice of it shows under a piece this wide: softened into one pool, it reads as light and not as columns. */
+  filter: blur(14px); opacity: 0.85;
+  -webkit-mask-image: radial-gradient(closest-side at 50% 62%, #000 30%, transparent 100%);
+  mask-image: radial-gradient(closest-side at 50% 62%, #000 30%, transparent 100%);
+}
