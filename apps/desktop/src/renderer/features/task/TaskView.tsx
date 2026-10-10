@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { ThreadSnapshot } from '@althar/contracts'
 import {
@@ -8,7 +8,6 @@ import {
   Delivery,
   DiffLineKind,
   type FileView,
-  Heading,
   Composer,
   Issue,
   LinkButton,
@@ -26,7 +25,6 @@ import {
 
 import { waitsWords } from '../../shared/agents'
 import { contextMeter } from '../../shared/ContextMeter'
-import { headerTrial } from '../../shared/trial'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
@@ -41,6 +39,8 @@ import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { PermissionCall } from './PermissionCall'
 import { StuckCall } from './StuckCall'
+import { ConnectPanel } from './ConnectPanel'
+import { NoOutputsView } from './NoOutputsView'
 import { conflictsOf, hasOutputs, Outputs } from './Outputs'
 import s from './Task.module.css'
 import { useChanges } from './useChanges'
@@ -90,7 +90,6 @@ export const text = {
   stopped: 'Stopped',
   faces: { talk: 'Conversation', out: 'Outputs' } satisfies Record<Face, string>,
   facesKbd: { talk: 'c', out: 'o' } satisfies Record<Face, string>,
-  nothingBuilt: 'Nothing is built yet, so there is nothing else to look at.',
   /** How long it has been on what it is doing now, or since it last changed. */
   since: {
     step: (step: string, took: string) => `${step} · ${took}`,
@@ -201,18 +200,17 @@ const firstChange = (view: FileView): number | undefined => {
 export function TaskView({
   model,
   onBack,
-  nav,
 }: {
   model: TaskModel
   /** Back to the project, on Escape. */
   onBack: () => void
-  /** The project's bar over it; a bare bar until the task says which project it is in. */
-  nav?: ReactNode
 }) {
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while a lead is on the task: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
+  // Where its code host is connected, opened beside its outputs once its branch is pushed.
+  const [connecting, setConnecting] = useState(false)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
   const [face, setFace] = useState<Face | null>(null)
   // Ready, or merged here with its remote still to have it, it opens on what it made: there is something there to do.
@@ -252,27 +250,26 @@ export function TaskView({
     if ((showsTask && !was.task) || (showsOutputs && !was.outputs) || (showsChanges && !was.changes)) readFiles()
   }, [showsTask, showsOutputs, showsChanges, readFiles])
   // c and o switch the faces, and Escape goes back to the project: never while typing, or with something else open.
-  const outputs = model.snapshot !== null && hasOutputs(model.snapshot)
   const open = changes.open
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || typing(event) || open) return
       if (event.key === 'Escape' && event.target === document.body) onBack()
-      else if (outputs && event.key === text.facesKbd.talk) setFace('talk')
-      else if (outputs && event.key === text.facesKbd.out) setFace('out')
+      else if (event.key === text.facesKbd.talk) setFace('talk')
+      else if (event.key === text.facesKbd.out) setFace('out')
       else return
       event.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onBack, outputs, open])
+  }, [onBack, open])
   // A running turn says how long it has worked so far, and a task under way how long it has run.
   const now = useNow(ticking(model.snapshot))
   const snapshot = model.snapshot
   if (snapshot === null) {
     return (
       <div className={s.window}>
-        {nav ?? <TitleBar lights="none">{null}</TitleBar>}
+        <TitleBar lights="none">{null}</TitleBar>
         {model.error === null ? (
           <div className={s.reading}>
             <ThreadMeasure>
@@ -301,7 +298,7 @@ export function TaskView({
   const { status, state } = statusOf(snapshot, agentName)
   const elapsed = elapsedOf(snapshot, now)
   const since = sinceOf(snapshot, now)
-  const shown: Face = outputs ? (face ?? 'talk') : 'talk'
+  const shown: Face = face ?? 'talk'
   const busy = session?.turnRunning ?? false
   const queue = queueShown(session, model.pending)
   // A stopped task picks up with its last lead, on its model, while that agent can lead (or before the agents are read); else the agent that last spoke; else the first; with every one signed out, none.
@@ -409,68 +406,59 @@ export function TaskView({
     </div>
   )
 
-  // TEMPORARY: the header on trial, while the person picks one.
-  const trial = headerTrial()
-  const header = (layout: 'stack' | 'line' | 'quiet') => (
-    <TaskHeader
-      layout={layout}
-      title={snapshot.task.title}
-      status={status}
-      state={state}
-      lead={lead}
-      {...(snapshot.task.branch === null ? {} : { branch: snapshot.task.branch })}
-      {...(since === null ? {} : { since })}
-      {...(elapsed === null ? {} : { elapsed })}
-      steps={trackFor(snapshot.task.steps, snapshot.task.step, snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled')}
-      {...(outputs
-        ? {
-            faces: (['talk', 'out'] as const).map((value) => ({ value, label: text.faces[value], kbd: text.facesKbd[value] })),
-            face: shown,
-            onFace: setFace,
-          }
-        : { facesNote: text.nothingBuilt })}
-      actions={actions}
-    />
-  )
-
   return (
     <div className={s.window}>
-      {trial === 'bar' ? (
-        // The bar is the header: the way back and which task, then where it stands, its faces and what it opens.
-        <TitleBar lights="none" end={header('quiet')}>
-          <BackCrumb to={snapshot.project.name} kbd="esc" title={snapshot.task.title} onBack={onBack} />
-        </TitleBar>
-      ) : (
-        (nav ?? <TitleBar lights="none">{null}</TitleBar>)
-      )}
-      {trial !== 'bar' && (
-        <div className={trial === 'now' ? s.head : s.slimHead}>
-          {/* Both faces keep the conversation's width, so switching doesn't move the page. */}
-          <ThreadMeasure>{header(trial === 'now' ? 'stack' : trial === 'line' ? 'line' : 'quiet')}</ThreadMeasure>
+      {/* The bar is the header: the way back and which task, then where it stands, its faces and what it opens. */}
+      <TitleBar
+        lights="none"
+        end={
+          <TaskHeader
+            title={snapshot.task.title}
+            status={status}
+            state={state}
+            lead={lead}
+            {...(snapshot.task.branch === null ? {} : { branch: snapshot.task.branch })}
+            {...(since === null ? {} : { since })}
+            {...(elapsed === null ? {} : { elapsed })}
+            steps={trackFor(snapshot.task.steps, snapshot.task.step, snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled')}
+            faces={(['talk', 'out'] as const).map((value) => ({ value, label: text.faces[value], kbd: text.facesKbd[value] }))}
+            face={shown}
+            onFace={setFace}
+            actions={actions}
+          />
+        }
+      >
+        <BackCrumb to={snapshot.project.name} kbd="esc" title={snapshot.task.title} titleLevel={1} onBack={onBack} />
+      </TitleBar>
+      {shown === 'out' && !hasOutputs(snapshot) ? (
+        <NoOutputsView snapshot={snapshot} lead={lead.name} />
+      ) : shown === 'out' ? (
+        <div className={connecting ? s.withPanel : s.outputsFace}>
+          <Outputs
+            snapshot={snapshot}
+            lead={lead}
+            pending={model.pending}
+            error={model.error}
+            onAccept={(changes) => void model.accept(changes)}
+            onMergeHere={() => void model.mergeHere()}
+            onOpenChange={() => void model.openChange()}
+            onPush={(head, url) => void model.push(head, url)}
+            onMarkReady={(url) => void model.markReady(url)}
+            // Sending it back is a note to its lead, which starts it again if it stopped.
+            onSendBack={(note) => send(note, false)}
+            onOpenFile={changes.show}
+            conflict={model.conflict}
+            onPushHere={() => void model.pushHere()}
+            onPushBranch={() => void model.pushBranch()}
+            onConnect={() => setConnecting(true)}
+            // So is a conflict to settle, in words the lead acts on.
+            onResolve={() => {
+              model.dismissConflict()
+              send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
+            }}
+          />
+          {connecting && <ConnectPanel onClose={() => setConnecting(false)} />}
         </div>
-      )}
-      {shown === 'out' ? (
-        <Outputs
-          snapshot={snapshot}
-          lead={lead}
-          pending={model.pending}
-          error={model.error}
-          onAccept={(changes) => void model.accept(changes)}
-          onMergeHere={() => void model.mergeHere()}
-          onOpenChange={() => void model.openChange()}
-          onPush={(head, url) => void model.push(head, url)}
-          onMarkReady={(url) => void model.markReady(url)}
-          // Sending it back is a note to its lead, which starts it again if it stopped.
-          onSendBack={(note) => send(note, false)}
-          onOpenFile={changes.show}
-          conflict={model.conflict}
-          onPushHere={() => void model.pushHere()}
-          // So is a conflict to settle, in words the lead acts on.
-          onResolve={() => {
-            model.dismissConflict()
-            send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
-          }}
-        />
       ) : (
         <TaskFace className={s.face} composer={composer}>
           <Thread label={text.thread} busy={busy}>
@@ -490,11 +478,6 @@ export function TaskView({
                   {...(issue.container === null ? {} : { meta: issue.container })}
                 />
               </div>
-            )}
-            {trial === 'opening' && !snapshot.earlier && (
-              <Heading level={1} className={s.opening}>
-                {snapshot.task.title}
-              </Heading>
             )}
             {snapshot.earlier && (
               <ThreadDivider

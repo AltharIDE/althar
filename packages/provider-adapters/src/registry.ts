@@ -1,6 +1,7 @@
 import type { InAppSignIn } from './signInFlow'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
+import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
 
 /*
  * Each agent is an entry here, not a code path (docs/architecture/03). The
@@ -123,6 +124,12 @@ export interface AgentDefinition {
    * (the coordinator, a reviewer), whose writes are refused outright.
    */
   readonly sessionMeta?: (role?: 'lead' | 'reader') => Readonly<Record<string, unknown>>
+  /**
+   * What its environment adds, as it starts somewhere, to keep the person's
+   * own MCP servers out of its sessions (ownTools.ts); without it, it loads
+   * only the servers it is given.
+   */
+  readonly withoutOwnTools?: (at: StartingAt) => Readonly<Record<string, string>>
   /** What it does differently, for the support matrix. */
   readonly knownGaps: ReadonlyArray<string>
 }
@@ -238,11 +245,12 @@ const loggedInField = (output: string): boolean | undefined => {
  * carry on, so a rejection works as it does for the other agents.
  */
 const asks = { edit: 'ask', bash: 'ask', webfetch: 'ask' }
-const openCodeConfig = JSON.stringify({
+const openCodeBase = {
   permission: asks,
   agent: { build: { permission: asks }, plan: { permission: asks } },
   experimental: { continue_loop_on_deny: true },
-})
+}
+const openCodeConfig = JSON.stringify(openCodeBase)
 
 /**
  * Claude Code reads the user's settings and the repository's committed
@@ -368,6 +376,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       shared: only(['config.toml', 'AGENTS.md', 'skills', 'prompts', 'rules']),
     },
     version: (node) => ({ command: node, args: [bundledCodex(), '--version'] }),
+    withoutOwnTools: codexWithoutOwnTools,
     /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
      * on; `cancel` stops the turn and is the only rejection offered for a file
@@ -426,6 +435,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     },
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
     version: () => ({ command: 'opencode', args: ['--version'] }),
+    withoutOwnTools: openCodeWithoutOwnTools(openCodeBase),
     /* MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256. Seen 9 October 2026, v1.18.35. */
     cli: {
       name: 'opencode',

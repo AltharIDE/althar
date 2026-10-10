@@ -6,6 +6,7 @@ import { ApiError, type StuckStep, type ThreadSnapshot } from '@althar/contracts
 import { TaskStatus } from '@althar/ui'
 
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
+import { lookedOf, noOutputsOf, readsOf } from '../src/renderer/features/task/NoOutputsView'
 import { conflictsOf } from '../src/renderer/features/task/Outputs'
 import { elapsedOf, sinceOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
@@ -88,7 +89,12 @@ describe('a task', () => {
     await screen.findByRole('heading', { name: 'Add a retry', level: 1 })
     // The lead's model, by the name its agent gives it.
     expect((await screen.findAllByText('Claude Opus')).length).toBeGreaterThan(0)
-    expect(screen.getByText('althar/add-a-retry')).toBeTruthy()
+    // Its branch, and who leads it, are said with where it stands, and shown on hover.
+    expect(screen.getByRole('banner', { name: 'Add a retry' }).textContent).toMatch(/althar\/add-a-retry/)
+    // Nothing made yet, the Outputs face is there all the same, and says so.
+    await userEvent.click(screen.getByRole('radio', { name: /Outputs/ }))
+    expect(screen.getByRole('heading', { name: 'Nothing changed yet' })).toBeTruthy()
+    await userEvent.keyboard('c')
     // Work under way has no pull request to open yet.
     expect(screen.queryByRole('button', { name: 'Open a pull request' })).toBeNull()
     expect(screen.getByText('Idle')).toBeTruthy()
@@ -179,6 +185,136 @@ describe('a task', () => {
         .map((step) => step.textContent),
     ).toEqual(['Implement, done', 'Review, now'])
     expect(screen.getByText(/1h 4m/)).toBeTruthy()
+  })
+
+  it('pushes its branch with the person’s own git, then offers its host’s pull request page, and what connecting would add', async () => {
+    const file: ChangedFile = { path: 'src/checkout.ts', from: null, status: 'modified', add: 4, del: 1, binary: false, uncommitted: false }
+    const page = 'https://github.com/meridian/api/compare/main...althar/add-a-retry?expand=1'
+    const at = (remote: { pushed: boolean; ahead: number }) => {
+      const base = thread({ session: null })
+      return {
+        ...base,
+        host: { product: 'github' as const, name: 'GitHub', webUrl: 'https://github.com', connected: false },
+        task: {
+          ...base.task,
+          phase: 'ready' as const,
+          files: [file],
+          commits: 2,
+          here: [
+            {
+              repository: 'meridian',
+              name: 'meridian',
+              branch: 'main',
+              head: 'abc111',
+              remote: { name: 'origin', branch: 'althar/add-a-retry', newPullRequest: page, ...remote },
+            },
+          ],
+        },
+      }
+    }
+    let stands = { pushed: false, ahead: 2 }
+    const { client } = fakeClient({ getThread: vi.fn(async () => at(stands)) })
+    const view = withServices(<Task />, client)
+    const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(outputs.getByText('Not on origin yet')).toBeTruthy()
+    // Nothing to connect for, before anything is pushed.
+    expect(screen.queryByText(/Connected to GitHub, Althar would/)).toBeNull()
+    await userEvent.click(outputs.getByRole('button', { name: 'Push the branch to origin' }))
+    await waitFor(() => expect(client.pushBranch).toHaveBeenCalledWith('t1', [{ repository: 'meridian', head: 'abc111' }]))
+    view.unmount()
+
+    // Pushed: its pull request is a press away on GitHub, and connecting would let Althar carry it from there.
+    stands = { pushed: true, ahead: 0 }
+    withServices(<Task />, client)
+    const pushed = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(pushed.getByText('On origin')).toBeTruthy()
+    expect(pushed.getByRole('link', { name: /Open a pull request on GitHub/ }).getAttribute('href')).toBe(page)
+    expect(pushed.queryByRole('button', { name: 'Push the branch to origin' })).toBeNull()
+    expect(
+      screen.getByText(/Connected to GitHub, Althar would open the pull request itself, bring its checks and reviews back to the lead/),
+    ).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
+    expect(await screen.findByRole('complementary', { name: 'Code hosts and trackers' })).toBeTruthy()
+    await userEvent.click(
+      within(screen.getByRole('complementary', { name: 'Code hosts and trackers' })).getByRole('button', { name: /Close/ }),
+    )
+    expect(screen.queryByRole('complementary', { name: 'Code hosts and trackers' })).toBeNull()
+  })
+
+  it('says why a push of its branch didn’t go, in the remote’s words', async () => {
+    const base = thread({ session: null })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({
+        ...base,
+        task: {
+          ...base.task,
+          phase: 'ready' as const,
+          commits: 1,
+          here: [
+            {
+              repository: 'meridian',
+              name: 'meridian',
+              branch: 'main',
+              head: 'abc111',
+              remote: { name: 'origin', branch: 'althar/add-a-retry', newPullRequest: null, pushed: false, ahead: 1 },
+            },
+          ],
+        },
+      })),
+      pushBranch: vi.fn(async () =>
+        Promise.reject(new ApiError({ reason: 'PushRefused', message: 'origin/althar/add-a-retry refused the push: protected branch.' })),
+      ),
+    })
+    withServices(<Task />, client)
+    const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    await userEvent.click(outputs.getByRole('button', { name: 'Push the branch to origin' }))
+    expect(await outputs.findByText('origin/althar/add-a-retry refused the push: protected branch.')).toBeTruthy()
+  })
+
+  it('names each repository’s pull request page by its host, and says how far behind its remote is', async () => {
+    const base = thread({ session: null })
+    const repo = (name: string, page: string | null, pushed: boolean, ahead: number) => ({
+      repository: name,
+      name,
+      branch: 'main',
+      head: `${name}-head`,
+      remote: { name: 'origin', branch: 'althar/add-a-retry', newPullRequest: page, pushed, ahead },
+    })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({
+        ...base,
+        host: null,
+        task: {
+          ...base.task,
+          phase: 'ready' as const,
+          commits: 3,
+          files: [{ path: 'api/a.ts', from: null, status: 'modified' as const, add: 1, del: 0, binary: false, uncommitted: false }],
+          here: [
+            repo('api', 'https://gitlab.acme.dev/web/api/-/merge_requests/new?x', true, 1),
+            repo('web', 'https://codeberg.org/me/web/compare/main...x', true, 2),
+            repo('docs', 'https://git.example.org/me/docs/x', true, 0),
+            { ...repo('tools', null, false, 0), remote: null },
+          ],
+        },
+      })),
+    })
+    withServices(<Task />, client)
+    const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    // Its remote is behind by what each repository has that it doesn't.
+    expect(outputs.getByText('3 commits not on origin yet')).toBeTruthy()
+    expect(outputs.getByRole('link', { name: 'Open a pull request on GitLab' })).toBeTruthy()
+    expect(outputs.getByRole('link', { name: 'Open a pull request on Codeberg' })).toBeTruthy()
+    expect(outputs.getByRole('link', { name: 'Open a pull request' })).toBeTruthy()
+    // With no host Althar knows, nothing to connect.
+    expect(screen.queryByText(/Althar would open the pull request itself/)).toBeNull()
+    await userEvent.click(outputs.getByRole('button', { name: 'Push the branch to origin' }))
+    await waitFor(() =>
+      expect(client.pushBranch).toHaveBeenCalledWith('t1', [
+        { repository: 'api', head: 'api-head' },
+        { repository: 'web', head: 'web-head' },
+        { repository: 'docs', head: 'docs-head' },
+      ]),
+    )
   })
 
   it('opens on its outputs once ready, switches faces by c and o, and goes back on Escape', async () => {
@@ -1032,5 +1168,79 @@ describe('a task', () => {
     expect(elapsedOf({ ...base, task: { ...task, phase: 'ready' }, items: [reported, said] }, at(59))).toBe('40m')
     expect(elapsedOf({ ...base, task: { ...task, phase: 'stopped' }, items: [reported, said] }, at(59))).toBe('50m')
     expect(elapsedOf({ ...base, task: { ...task, phase: 'settled', settledAt: at(20) } }, at(59))).toBe('20m')
+  })
+})
+
+describe('a task’s outputs before it has made anything', () => {
+  const at = (task: Partial<ThreadSnapshot['task']>, more: Partial<ThreadSnapshot> = {}) => {
+    const base = snapshot()
+    return snapshot({ ...more, task: { ...base.task, worktree: '/w/meridian', ...task } })
+  }
+
+  it('says what is true by how the task stands', () => {
+    const working = noOutputsOf(at({ phase: 'running' }, { session: { ...snapshot().session!, turnRunning: true } }), 'Claude Opus 5')
+    expect([working.title, working.note, working.working]).toEqual([
+      'Nothing changed yet',
+      'What Claude Opus 5 changes shows here as it goes.',
+      true,
+    ])
+    expect(noOutputsOf(at({ phase: 'planned' }), 'Claude Opus 5').note).toBe(
+      'It starts when its plan does. What its lead changes shows here.',
+    )
+    expect(noOutputsOf(at({ phase: 'stopped' }, { session: null }), 'Claude Opus 5').note).toBe(
+      'Claude Opus 5 stopped before changing anything. Tell it to carry on in the conversation.',
+    )
+    const ended = noOutputsOf(at({ phase: 'settled' }, { session: null }), 'Claude Opus 5')
+    expect([ended.title, ended.note, ended.working]).toEqual([
+      'Nothing changed',
+      'It ended without changing a file. What it found is in the conversation.',
+      false,
+    ])
+  })
+
+  it('lists the files its lead has looked at, the latest first, each once, and only the task’s', () => {
+    const looked = lookedOf(
+      at(
+        {},
+        {
+          items: [
+            items.tool({ locations: [{ path: '/w/meridian/README.md' }] }),
+            items.tool({ locations: [{ path: '/w/meridian/src/checkout.ts' }, { path: '/Users/me/.codex/memories/MEMORY.md' }] }),
+            items.says('Looking.'),
+            items.tool({ toolKind: 'execute', command: "nl -ba src/retry.ts | sed -n '1,40p'; cat ../elsewhere.md" }),
+            items.tool({ locations: [{ path: '/w/meridian/README.md' }] }),
+          ],
+        },
+      ),
+    )
+    expect(looked).toEqual(['README.md', 'src/retry.ts', 'src/checkout.ts'])
+  })
+
+  it('reads the files a shell command looks at, as agents run them, and nothing from anything else', () => {
+    // As Codex and Claude Code ran them in a real profile.
+    expect(readsOf(`/bin/zsh -lc "nl -ba src/scenes/menu.ts | sed -n '1,110p'; nl -ba src/scenes/hall.ts | sed -n '140,205p'"`)).toEqual([
+      'src/scenes/menu.ts',
+      'src/scenes/hall.ts',
+    ])
+    expect(readsOf('cat src/content/identities.ts src/ui/together.ts; wc -l index.html hall.html; ls; cat package.json')).toEqual([
+      'src/content/identities.ts',
+      'src/ui/together.ts',
+      'index.html',
+      'hall.html',
+      'package.json',
+    ])
+    expect(readsOf("sed -n '1,5p;24,36p' /Users/me/.codex/memories/MEMORY.md")).toEqual(['/Users/me/.codex/memories/MEMORY.md'])
+    expect(readsOf('head -n 20 src/a.ts && tail -n 5 src/b.ts')).toEqual(['src/a.ts', 'src/b.ts'])
+    expect(readsOf("sed -e 's/a/b/' src/c.ts")).toEqual(['src/c.ts'])
+    // An option's value isn't a file; a file under the folder is the task's.
+    expect(readsOf('bat -r 1:40 src/x.ts && nl -w 3 ./src/y.ts || tail -n 5 ../outside.ts')).toEqual([
+      'src/x.ts',
+      './src/y.ts',
+      '../outside.ts',
+    ])
+    expect(readsOf("sed --in-place 's/a/b/' src/c.ts")).toEqual([])
+    // Edited in place, it is written, not read.
+    expect(readsOf("sed -i '' 's#http://localhost#http://127.0.0.1#' check.mjs")).toEqual([])
+    expect(readsOf('git status --short; npm run build; grep -rn "x" src | head -40; cat src/*.ts; cat $f')).toEqual([])
   })
 })

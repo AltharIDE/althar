@@ -801,6 +801,25 @@ export const TaskRepositoryHere = Schema.Struct({
   name: Schema.String,
   branch: Schema.String,
   head: Schema.NullOr(Schema.String),
+  /**
+   * Where the task's own branch stands on the repository's remote, for
+   * pushing it without a connection: the remote it goes to, whether the
+   * remote has it, how many commits of it the remote doesn't have, and the
+   * host's page for a new pull request from it, where that can be told.
+   * None for a repository without a remote.
+   */
+  remote: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        name: Schema.String,
+        /** The task's branch, as it is named there. */
+        branch: Schema.String,
+        pushed: Schema.Boolean,
+        ahead: Schema.Number,
+        newPullRequest: Schema.NullOr(Schema.String),
+      }),
+    ),
+  ),
 })
 export type TaskRepositoryHere = typeof TaskRepositoryHere.Type
 
@@ -1307,6 +1326,16 @@ export const Api = RpcGroup.make(
   ),
   /** Pushes the default branches a task merged into here to the remotes they follow, with the person's own git sign-in. */
   command('PushHere', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Pushes a task's branch, in each repository without a pull request, to
+   * that repository's remote, up to the commit the person saw in each, with
+   * their own git sign-in: no connection needed, and nothing opened there.
+   */
+  command(
+    'PushBranch',
+    { taskId: Schema.String, heads: Schema.Array(Schema.Struct({ repository: Schema.String, head: Schema.String })) },
+    Schema.Void,
+  ),
   /** The editors on this device a task's files open in, by the name people know them. */
   call('ListEditors', {}, Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
   /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */

@@ -153,6 +153,65 @@ describe('merging a task here', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('pushes the task’s branch with the person’s own git, up to what they saw, and says where a pull request can be', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      // Its remote reads as GitHub, and takes pushes in a folder here.
+      const remote = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+      git(remote, 'init', '-q', '--bare', '-b', 'main')
+      git(root, 'remote', 'add', 'origin', 'https://github.com/meridian/api.git')
+      git(root, 'remote', 'set-url', '--push', 'origin', remote)
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      const slug = worktrees[0]?.slug ?? ''
+      const branch = git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD')
+      const head = commit(worktree, 'retry.ts', 'retry\n')
+      const queries = yield* Queries
+      const remoteOf = Effect.map(queries.thread(task.threadId, {}), (snapshot) => snapshot.task.here[0]?.remote)
+      assert.deepStrictEqual(yield* remoteOf, {
+        name: 'origin',
+        branch,
+        pushed: false,
+        ahead: 1,
+        newPullRequest: `https://github.com/meridian/api/compare/main...${branch}?expand=1`,
+      })
+      const changes = yield* Changes
+      assert.deepStrictEqual(yield* changes.pushBranch(task.taskId, [{ repository: slug, head }]), [{ branch, remote: 'origin' }])
+      assert.strictEqual(git(remote, 'rev-parse', branch), head)
+      assert.include(
+        (yield* notices(task.threadId)).map((notice) => notice.title),
+        `Pushed ${branch} to origin.`,
+      )
+      assert.deepInclude(yield* remoteOf, { pushed: true, ahead: 0 })
+      // More from the lead: the remote is behind it, and a commit the person didn't see isn't pushed.
+      const later = commit(worktree, 'more.ts', 'more\n')
+      assert.deepInclude(yield* remoteOf, { pushed: true, ahead: 1 })
+      assert.deepStrictEqual(cantOf(yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: slug, head: 'f'.repeat(40) }]))), [
+        'CantMerge',
+        'changed',
+        '',
+      ])
+      yield* changes.pushBranch(task.taskId, [{ repository: slug, head: later }])
+      assert.strictEqual(git(remote, 'rev-parse', branch), later)
+      // The task stays as it was: pushing isn't merging.
+      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('has nowhere to push a branch in a repository without a remote', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      const { task, worktrees } = yield* taskIn([root], root)
+      const head = commit(worktrees[0]?.path ?? '', 'retry.ts', 'retry\n')
+      const queries = yield* Queries
+      assert.isNull((yield* queries.thread(task.threadId, {})).task.here[0]?.remote)
+      const changes = yield* Changes
+      const none = yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }]))
+      assert.deepStrictEqual([(none as { _tag?: string })._tag, (none as { kind?: string }).kind], ['NotFound', 'remote'])
+      assert.strictEqual(((yield* Effect.flip(changes.pushBranch('task_unknown', []))) as { _tag?: string })._tag, 'NotFound')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('pushes nothing where the default branch follows no remote, and says what git said where the remote is gone', () =>
     Effect.gen(function* () {
       const root = repository()

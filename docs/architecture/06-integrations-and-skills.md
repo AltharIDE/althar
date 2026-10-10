@@ -194,8 +194,9 @@ service's model.
 | Checks | Check runs and commit statuses; Actions logs | The head pipeline's jobs, with logs | Build statuses; Pipelines step logs | Build statuses; Code Insights reports | A check: name, state, link; logs as a capability |
 | Listening, polling | ETags (a "not modified" reply is free) | ETags too; a merge request's threads are read whole, having no `updated_after` | `updated_on` | The pull request's activities | A cursor per thing listened to |
 
-- **Pushing is git,** with the connection's token, never the person's
-  credential helper. Althar pushes what the lead committed and commits
+- **Pushing is git** (ADR-016). Where the host is connected, Althar's own
+  steps push with the connection's token, never the person's credential
+  helper. Althar pushes what the lead committed and commits
   nothing itself; a step that ends in a push isn't done while the worktree
   has uncommitted files, so the lead commits what belongs to the task and
   clears away the rest. The record keeps the commit pushed.
@@ -250,6 +251,18 @@ service's model.
   says how many commits aren't on the pull request yet, and Push pushes up to
   the commit they saw, never one the lead made since. The lead has no tool to
   push.
+- **Without a connection, the person pushes the task's branch with their own
+  git** (ADR-016): to the remote that repository's work goes to (the one its
+  default branch follows, else `origin`, else its only remote), under the
+  branch's name, up to the commit they saw, never forced, a prompt for a
+  password failing rather than waiting. The task says whether the remote has
+  the branch and how many commits it doesn't have, and links to the host's
+  page for a new pull request from it where that can be told (GitHub, GitLab,
+  Bitbucket; a GitLab, Gitea or Forgejo of a team's own by its name). Once
+  something is pushed to a host Althar knows but isn't connected to, the task
+  says what connecting would add: the pull request opened by Althar, its
+  checks and reviews back to the lead, the merge on accept. Nothing is said
+  of connecting before then; the project's menu always has Connect.
 - **A repository without a pull request merges here, as the person says.**
   Where a task ended on its branch (no host Althar knows, a host not
   connected, or "push the branch only"), the person can merge it into each
@@ -361,6 +374,12 @@ Agents reach code hosts and trackers only through Althar:
   signed out, git's credential helpers reset (`credential.helper` empty, in
   git's environment), git's prompts off, and no SSH agent. Althar pushes
   for them. The environment is the boundary.
+- **Nor with the MCP servers the person set up for them** (ADR-016). Claude
+  Code loads only the servers it is given. Codex and OpenCode load every one
+  their config names, so each of the person's is switched off by name as the
+  agent starts: Codex's through `CODEX_CONFIG`, OpenCode's in the config it
+  takes from `OPENCODE_CONFIG_CONTENT`, the names read from the agent's home
+  and the repository's own config.
 - **The rules refuse** `gh` and `glab` commands that change a host, with a
   reason that names Althar's tool; and, for every role, the ways to
   credentials a shell still has: the keychain's `security`, and git's helpers

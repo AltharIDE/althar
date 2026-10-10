@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import type { AgentStatus, PlanStep, TaskEnd as End } from '@althar/contracts'
-import { ActionButton, type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@althar/ui'
+import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@althar/ui'
 
 import { waitsWords } from '../../shared/agents'
 import { type NameModel, useModelNames } from '../../shared/modelNames'
@@ -10,7 +10,6 @@ import { productBrand } from '../../shared/products'
 import { stepIndex, stepNames, stepText } from '../../shared/steps'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
-import s from './Project.module.css'
 
 /*
  * A task's card in the Talk room. Before it starts, its plan: who does each
@@ -54,8 +53,6 @@ export interface CardActions {
   readonly onHold: (planId: string) => void
   readonly onChange: (planId: string, steps: ReadonlyArray<PlanStep>, end?: End | null) => void
   readonly onOpen: (threadId: string) => void
-  /** TEMPORARY, on trial: offers to connect the code host where a ready task ended on its branch. */
-  readonly connect?: { readonly label: string; readonly why: string; readonly onConnect: () => void }
 }
 
 type Plan = NonNullable<TaskCardContent['plan']>
@@ -151,9 +148,7 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
           ? undefined
           : text.now[card.step]
   const from = fromOf(card)
-  // TEMPORARY, on trial: a ready task that ended on its branch says what connecting the host would have made of it.
-  const offer = actions.connect !== undefined && status === TaskStatus.Done && card.change === null ? actions.connect : undefined
-  const taskCard = (
+  return (
     <TaskCard
       task={card.slug}
       title={card.title}
@@ -169,17 +164,5 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
       onOpen={() => actions.onOpen(card.threadId)}
       text={{ status: text.status, task: text.task }}
     />
-  )
-  if (offer === undefined) return taskCard
-  return (
-    <>
-      {taskCard}
-      <p className={s.offerLine}>
-        {offer.why}{' '}
-        <ActionButton size="small" icon="pr" onClick={offer.onConnect}>
-          {offer.label}
-        </ActionButton>
-      </p>
-    </>
   )
 }

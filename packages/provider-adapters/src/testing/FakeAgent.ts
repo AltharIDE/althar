@@ -149,6 +149,17 @@ interface SessionState {
   played: Set<string>
 }
 
+/** What `[lead:explore]` reads, in order. */
+const EXPLORED = [
+  'README.md',
+  'src/checkout/index.ts',
+  'src/checkout/payment.ts',
+  'src/checkout/retry.test.ts',
+  'src/lib/http/client.ts',
+  'src/lib/backoff.ts',
+  'docs/payments.md',
+]
+
 /** Worktrees where a lead has stopped answering once: started afresh, it answers. Kept across sessions, as a restart makes a new one. */
 const wedgedIn = new Set<string>()
 
@@ -159,7 +170,8 @@ const wedgedIn = new Set<string>()
  * stop when cancelled either, until it is started afresh. `[lead:loop]` runs a
  * failing \`npm test\` three times in a row, every turn, then waits until
  * cancelled; `[lead:loop-once]` does that once. `[lead:long-once]` stops once
- * at its output limit, and `[lead:refuse]` refuses. Otherwise, nothing: the
+ * at its output limit, and `[lead:refuse]` refuses. `[lead:explore]` reads
+ * a few files, changes none, and works on until cancelled. Otherwise, nothing: the
  * turn goes on as it would.
  */
 const playStall = async (
@@ -179,6 +191,22 @@ const playStall = async (
   if (session.markers.has('[lead:wedge-once]') && !wedgedIn.has(session.cwd)) {
     wedgedIn.add(session.cwd)
     return await hang(true)
+  }
+  if (session.markers.has('[lead:explore]')) {
+    for (const [i, file] of EXPLORED.entries()) {
+      const path = join(session.cwd, file)
+      await update({
+        sessionUpdate: 'tool_call',
+        toolCallId: `read-${i}`,
+        title: `Read ${file}`,
+        kind: 'read',
+        status: 'completed',
+        rawInput: { path },
+        locations: [{ path }],
+      })
+      await pause(30)
+    }
+    return await hang()
   }
   if (session.markers.has('[lead:hang]') || once('[lead:hang-once]')) {
     await update({

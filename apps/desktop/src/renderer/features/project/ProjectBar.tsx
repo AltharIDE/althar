@@ -31,7 +31,6 @@ export function ProjectBar({
   menu,
   onNewTask,
   newTask = false,
-  more,
 }: {
   place: BarPlace
   /** How many run and wait; null until the board is read, when nothing is said. */
@@ -46,15 +45,12 @@ export function ProjectBar({
   onNewTask: () => void
   /** A new task is being planned beside the conversation. */
   newTask?: boolean
-  /** TEMPORARY, on trial: something more at the bar's end, before what runs. */
-  more?: ReactNode
 }) {
   return (
     <TitleBar
       lights="none"
       end={
         <>
-          {more}
           {working !== null && yours !== null && (
             <WorkStatus
               running={working}

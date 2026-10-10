@@ -1,3 +1,4 @@
+import { HOSTED, newPullRequestLink } from '@althar/connectors'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -28,7 +29,7 @@ import { Coordinator } from './Coordinator'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { GitFailed, NotFound } from './errors'
 import { Instance } from './Instance'
-import { commitsAhead, commitsOf, gitOutcome, indexStamp } from './git'
+import { commitsAhead, commitsOf, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
 import { commandIn } from './rules'
 import { Sessions } from './Sessions'
 
@@ -578,6 +579,7 @@ export class Queries extends Context.Service<
             name: string
             defaultBranch: string
             path: string
+            branch: string
             baseRef: string | null
             baseCommit: string | null
             root: string | null
@@ -585,7 +587,7 @@ export class Queries extends Context.Service<
             taskId: string
             projectId: string
           }>`
-            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, w.base_ref, w.base_commit,
+            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, w.branch, w.base_ref, w.base_commit,
               l.path AS root, w.task_id, w.project_id,
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
@@ -660,6 +662,29 @@ export class Queries extends Context.Service<
         })
 
       /**
+       * Where a task's branch stands on its repository's remote, for pushing
+       * it without a connection: the remote it goes to, whether that has the
+       * branch, how many commits of it it doesn't have, and the host's page
+       * for a new pull request from it. None without a remote.
+       */
+      const branchRemoteOf = (root: string, worktree: string, branch: string, base: string, head: string, baseCommit: string | null) =>
+        Effect.gen(function* () {
+          const remote = yield* remoteOf(root, base)
+          if (remote === null) return null
+          const [there = null] = yield* commitsOf(root, [`refs/remotes/${remote}/${branch}`])
+          const from = there ?? baseCommit
+          const ahead = from === null || from === head ? 0 : yield* commitsAhead(worktree, from, head).pipe(Effect.orElseSucceed(() => 0))
+          const url = (yield* namedRemotes(root).pipe(Effect.orElseSucceed(() => []))).find((one) => one.name === remote)?.url
+          return {
+            name: remote,
+            branch,
+            pushed: there !== null,
+            ahead,
+            newPullRequest: url === undefined ? null : newPullRequestLink(url, branch, base, HOSTED),
+          }
+        }).pipe(Effect.orElseSucceed(() => null))
+
+      /**
        * What git says of a task's worktrees, as its screens show it: what it
        * changed, committed or not, and in how many commits, from where it
        * meets its default branch; and its repositories that merge here, for
@@ -709,7 +734,28 @@ export class Queries extends Context.Service<
                 return {
                   worktree,
                   changed,
-                  here: merges && !merged ? [{ repository: worktree.slug, name: worktree.name, branch: worktree.defaultBranch, head }] : [],
+                  here:
+                    merges && !merged
+                      ? [
+                          {
+                            repository: worktree.slug,
+                            name: worktree.name,
+                            branch: worktree.defaultBranch,
+                            head,
+                            remote:
+                              head === null || worktree.root === null
+                                ? null
+                                : yield* branchRemoteOf(
+                                    worktree.root,
+                                    worktree.path,
+                                    worktree.branch,
+                                    worktree.defaultBranch,
+                                    head,
+                                    worktree.baseCommit,
+                                  ),
+                          },
+                        ]
+                      : [],
                   merged:
                     remote === null ? [] : [{ repository: worktree.slug, name: worktree.name, branch: worktree.defaultBranch, ...remote }],
                 }

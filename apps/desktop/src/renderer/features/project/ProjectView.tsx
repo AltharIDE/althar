@@ -1,11 +1,7 @@
 import { type CSSProperties, useEffect, useState } from 'react'
 
 import {
-  ActionButton,
-  Button,
   Composer,
-  Heading,
-  Tooltip,
   LinkButton,
   ResizeHandle,
   SidePanel,
@@ -23,7 +19,6 @@ import {
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
-import { githubTrial } from '../../shared/trial'
 import { shortFolder } from '../../shared/folders'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
@@ -77,14 +72,7 @@ export const text = {
   dismiss: 'Dismiss',
   boardFailed: 'Althar couldn’t read the board.',
   boardReading: 'Reading the board',
-  notConnected: (host: string) => `Althar isn't connected to ${host}, so tasks here end on their branch.`,
   connect: (host: string) => `Connect ${host}`,
-  /** TEMPORARY, on trial: the offer said where it matters, once, or in the bar. */
-  asPullRequest: (host: string) => `It ended on its branch. Connected to ${host}, it would be a pull request, with its checks and reviews.`,
-  why: (host: string) =>
-    `Connected to ${host}, a task here ends as a pull request instead of on its branch: its checks run there, what reviewers say comes back to its lead, and it merges there when you accept it.`,
-  endsOnBranch: 'Tasks here end on their branch',
-  notNow: 'Not now',
   newTask: 'New task',
   width: 'Width of the conversation',
   /** Where a project of several repositories is: how many, and their names. */
@@ -204,20 +192,6 @@ export function ProjectView({
     (first === undefined ? null : { agentId: first.id, model: null, effort: null })
   const name = model.project?.name ?? coordinator?.project.name ?? text.project
 
-  // TEMPORARY: where the offer to connect the code host is on trial, and whether this project said not now to it.
-  const githubAt = githubTrial()
-  const offer = host !== null && !host.connected ? host : null
-  const notNowKey = `althar.trial.notnow.${coordinator?.project.id ?? ''}`
-  const [saidNotNow, setNotNow] = useState(false)
-  const notNow =
-    saidNotNow ||
-    (() => {
-      try {
-        return window.localStorage.getItem(notNowKey) === '1'
-      } catch {
-        return false
-      }
-    })()
   const actions: CardActions = {
     project: name,
     agents: model.agents,
@@ -226,9 +200,6 @@ export function ProjectView({
     onHold: (planId) => void model.holdPlan(planId),
     onChange: (planId, steps, end) => void model.changePlan(planId, steps, end),
     onOpen: onTask,
-    ...(githubAt === 'end' && offer !== null
-      ? { connect: { label: text.connect(offer.name), why: text.asPullRequest(offer.name), onConnect: () => setPanel('connections') } }
-      : {}),
   }
 
   const send = (body: string, now: boolean) => {
@@ -262,14 +233,6 @@ export function ProjectView({
         <p className={s.handover}>
           {text.handingOver(named(waiting.agentId, waiting.model).name, named(session.agentId, session.model).name)}{' '}
           <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
-        </p>
-      )}
-      {githubAt === 'now' && host !== null && !host.connected && (
-        <p className={s.host}>
-          {text.notConnected(host.name)}{' '}
-          <ActionButton size="small" onClick={() => setPanel('connections')}>
-            {text.connect(host.name)}
-          </ActionButton>
         </p>
       )}
       {session === null && model.agents.length === 0 && <p className={s.quiet}>{text.needsAgent}</p>}
@@ -324,17 +287,6 @@ export function ProjectView({
         onYours={openYours}
         {...(menu === undefined ? {} : { menu: <ProjectMenu {...menu} /> })}
         newTask={panel === 'task'}
-        {...(githubAt === 'bar' && offer !== null
-          ? {
-              more: (
-                <Tooltip label={text.why(offer.name)}>
-                  <ActionButton icon="pr" onClick={() => setPanel('connections')}>
-                    {text.connect(offer.name)}
-                  </ActionButton>
-                </Tooltip>
-              ),
-            }
-          : {})}
         onNewTask={() => {
           if (room === Room.Board) setRoom(Room.Both)
           setPanel('task')
@@ -412,32 +364,6 @@ export function ProjectView({
                 }
               >
                 <Thread label={text.conversation} busy={busy}>
-                  {githubAt === 'once' && offer !== null && !notNow && (
-                    <section className={s.offer} aria-labelledby="offer-title">
-                      <Heading level={2} id="offer-title" className={s.offerTitle}>
-                        {text.endsOnBranch}
-                      </Heading>
-                      <p className={s.offerWhy}>{text.why(offer.name)}</p>
-                      <div className={s.offerActions}>
-                        <Button size="small" icon="pr" onClick={() => setPanel('connections')}>
-                          {text.connect(offer.name)}
-                        </Button>
-                        <ActionButton
-                          size="small"
-                          onClick={() => {
-                            setNotNow(true)
-                            try {
-                              window.localStorage.setItem(notNowKey, '1')
-                            } catch {
-                              // Kept for this window only.
-                            }
-                          }}
-                        >
-                          {text.notNow}
-                        </ActionButton>
-                      </div>
-                    </section>
-                  )}
                   {coordinator.earlier && (
                     <ThreadDivider
                       icon="up"

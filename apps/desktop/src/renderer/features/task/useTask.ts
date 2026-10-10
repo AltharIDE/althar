@@ -69,6 +69,8 @@ export interface TaskModel {
   readonly mergeHere: () => Promise<void>
   /** Pushes what it merged here to the remotes its default branches follow. */
   readonly pushHere: () => Promise<void>
+  /** Pushes its branch to its repositories' remotes, up to the heads shown, with the person's own git. */
+  readonly pushBranch: () => Promise<void>
   /**
    * Accepts its pull requests: merges each on its host in turn, at the head
    * the person saw, and stops at the first that is refused, so the rest
@@ -304,6 +306,15 @@ export const useTask = (threadId: string): TaskModel => {
         }
       }),
     pushHere: () => act(async () => (snapshot === null ? undefined : client.pushHere(snapshot.task.id))),
+    pushBranch: () =>
+      act(async () => {
+        if (snapshot === null) return
+        // Each repository with a remote, at the head the person saw: a commit the lead made since isn't pushed unseen.
+        const heads = snapshot.task.here.flatMap((repo) =>
+          repo.remote == null || repo.head === null ? [] : [{ repository: repo.repository, head: repo.head }],
+        )
+        await client.pushBranch(snapshot.task.id, heads)
+      }),
     accept: (changes) =>
       act(async () => {
         if (snapshot === null) return

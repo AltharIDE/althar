@@ -187,6 +187,7 @@ describe('the client', () => {
           Push: () => Effect.die('unused'),
           MergeHere: () => Effect.die('unused'),
           PushHere: () => Effect.die('unused'),
+          PushBranch: () => Effect.die('unused'),
           ListEditors: () => Effect.die('unused'),
           InstallAgent: () => Effect.die('unused'),
           OpenInEditor: () => Effect.die('unused'),
