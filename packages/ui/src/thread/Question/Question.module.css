@@ -1,15 +1,54 @@
-.q {
-  padding: 13px 14px 12px;
-  border-radius: var(--r-lg);
-  background: var(--signal-paper);
-  box-shadow: inset 0 0 0 1px var(--signal-line);
+/* the card is an Ask; these are what a question adds to it */
+.count {
+  font-weight: 450;
+  color: var(--t-3);
 }
-.title {
-  margin: 0 0 10px;
-  font-size: 13.5px;
+/* what the agent said above several questions: lighter than the questions under it */
+.message {
+  font-weight: 450;
+}
+.many {
+  margin-left: 8px;
+  font-size: 11.5px;
+  font-weight: 450;
+  color: var(--t-3);
+}
+/* several questions: a little more room under what the agent said, or under the kicker where it said nothing */
+.titled {
+  margin-top: 4px;
+}
+.untitled {
+  margin-top: 12px;
+}
+.parts {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.part {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 8px;
+}
+.header {
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--t-3);
+}
+.question {
+  margin: 0;
+  font-size: 13px;
   font-weight: 550;
   color: var(--t-1);
 }
+
 .options {
   display: flex;
   flex-direction: column;
@@ -36,13 +75,18 @@
 .option:hover {
   box-shadow: inset 0 0 0 1px var(--signal-line);
 }
+/* the own-words option is a field to write in, so it isn't paper */
+.other {
+  background: transparent;
+}
 .otherPick {
   display: flex;
   align-items: center;
   align-self: stretch;
   cursor: pointer;
 }
-.option:has(.radio:focus-visible) {
+.option:has(.input:focus-visible),
+.option:has(.field:focus-visible) {
   outline: 1.5px solid var(--signal);
   outline-offset: 1px;
 }
@@ -50,7 +94,8 @@
 .on:hover {
   box-shadow: inset 0 0 0 1.5px var(--signal);
 }
-.radio {
+/* the input is real, for the keyboard and assistive technology; the numbered key is what shows */
+.input {
   position: absolute;
   opacity: 0;
   width: 1px;
@@ -72,33 +117,86 @@
   background: var(--signal);
   color: var(--on-signal);
 }
+.label {
+  min-width: 0;
+  padding: 8px 0;
+}
 .note {
   margin-left: auto;
+  flex: none;
   font-size: 11.5px;
   color: var(--t-3);
 }
-.other {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--line-2);
-}
 .field {
   flex: 1;
+  min-width: 0;
   height: 34px;
   font-size: 13px;
+}
+.field:focus-visible {
+  outline: none;
 }
 .field::placeholder {
   color: var(--t-3);
 }
-.foot {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 10px;
+.words {
+  height: 36px;
+  font-size: 13px;
 }
+
+/* sent, waiting: the questions stay as they were, and can't be changed */
+.options:disabled .option {
+  color: var(--t-3);
+  cursor: default;
+}
+.options:disabled .option:hover {
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.options:disabled .on,
+.options:disabled .on:hover {
+  box-shadow: inset 0 0 0 1.5px var(--signal-line);
+}
+.options:disabled .otherPick {
+  cursor: default;
+}
+
+.error {
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* answered, or withdrawn: a line for each question */
+.lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* the question gives way to what was said, down to a part of the line */
 .asked {
-  min-width: 0;
+  flex: 1 1 0;
+  min-width: 30%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--t-3);
+}
+.notAnswered {
+  color: var(--t-2);
+}
+/* withdrawn, nothing was said: the question takes only its room, and why follows it */
+.unasked {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.why {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .option {
+    transition: none;
+  }
 }

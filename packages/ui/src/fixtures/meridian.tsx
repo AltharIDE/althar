@@ -5,6 +5,7 @@
  */
 import type { DiffLine } from '../thread/Diff/Diff'
 import type { AllowedItem, PermissionRequest } from '../thread/Permission/Permission'
+import type { QuestionPart } from '../thread/Question/Question'
 import type { RateLimitOption } from '../thread/RateLimit/RateLimit'
 import type { ReviewFinding } from '../thread/Review/Review'
 import type { StepRef } from '../thread/Shell/Shell'
@@ -278,6 +279,65 @@ export const LIMIT_OPTIONS: readonly RateLimitOption[] = [
   { model: QWEN, note: 'Ollama · this Mac, slower' },
   { model: SONNET, note: 'same limit, resets 14:00', busy: true },
 ]
+
+/* What the lead asks before it builds the refund queue. */
+
+/** One question, with a note on each option. */
+export const OVER_LIMIT: QuestionPart = {
+  id: 'over-limit',
+  question: 'Should a partner over the limit get the refund queued, or refused?',
+  options: [
+    { id: 'refuse', label: 'Refuse with 429 and Retry-After', note: 'matches charges' },
+    { id: 'queue', label: 'Queue it and return 202', note: 'goes against a project note' },
+  ],
+}
+
+/** Three at once, as Claude Code asks them: each with a short name, the last taking several picks. */
+export const DATABASE: QuestionPart = {
+  id: 'store',
+  header: 'Database',
+  question: 'Which database should the refund queue live in?',
+  options: [
+    { id: 'postgres', label: 'Postgres, beside refunds', note: 'one migration' },
+    { id: 'redis', label: 'Redis streams', note: 'a new service to run' },
+    { id: 'sqs', label: 'SQS, as payouts use', note: 'needs an AWS role' },
+  ],
+}
+
+export const WAITING: QuestionPart = {
+  id: 'wait',
+  header: 'Waiting',
+  question: 'How long may a queued refund wait before it is refused after all?',
+  options: [
+    { id: '15m', label: '15 minutes' },
+    { id: '1h', label: 'An hour' },
+    { id: 'day', label: 'Until the end of the day', note: 'UTC' },
+  ],
+}
+
+export const WHO_HEARS: QuestionPart = {
+  id: 'notify',
+  header: 'Who hears',
+  question: 'Who should hear when a refund has waited over 15 minutes?',
+  multiple: true,
+  options: [
+    { id: 'partner', label: 'The partner', note: 'refund.delayed webhook' },
+    { id: 'success', label: 'Partner success', note: 'in Slack' },
+    { id: 'oncall', label: 'The on-call engineer', note: 'pages at night' },
+  ],
+}
+
+export const QUEUE_QUESTIONS = {
+  title: 'The queue it is. Three things before I build it.',
+  parts: [DATABASE, WAITING, WHO_HEARS],
+} as const
+
+/** Answered in words only: there are no options to pick from. */
+export const FIRST_PARTNER: QuestionPart = {
+  id: 'first-partner',
+  question: 'Which partner should try the queue first?',
+  options: [],
+}
 
 /** A partner dashboard, drawn for the screenshots the agent sends. */
 export function Dash({ after }: { after?: boolean }) {

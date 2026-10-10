@@ -64,6 +64,19 @@ export const DECISION = {
   ],
 }
 
+/** An agent's question, as the home shows it: the question, its options to answer by. */
+export const QUESTION = {
+  kind: 'Question',
+  project: MERIDIAN,
+  task: '431',
+  title: 'Which database should the refund queue live in?',
+  options: [
+    { id: 'postgres', label: 'Postgres, beside refunds' },
+    { id: 'redis', label: 'Redis streams' },
+    { id: 'sqs', label: 'SQS, as payouts use' },
+  ],
+}
+
 export const SIGNED_OUT = {
   kind: 'Sign-in',
   project: TESSERA,
