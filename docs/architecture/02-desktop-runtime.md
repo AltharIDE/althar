@@ -93,6 +93,7 @@ flowchart LR
 | Electron main | Windows, deep links, application quit, updates, narrow IPC bridge | Workflow rules, provider sessions, project state |
 | Runtime | Commands, queries, policy, workflow scheduling, persistence, process supervision | Provider model loop or window state |
 | Provider child | Provider-native conversation, model/tool loop, provider context | Althar project or workflow truth |
+| Speech process | Dictation's speech model: bringing it down, and turning speech into text on this machine (ADR-017) | Anything but speech; it starts when someone dictates and stops when idle |
 | SQLite | Canonical local structured state | Large blobs or live process streams |
 | Artifact store | Content-addressed immutable bytes | Mutable domain authority |
 
@@ -202,6 +203,18 @@ person's choice beside the app's icon, and, since a panel above the menu bar
 isn't told when the pointer arrives while another app is active, watches the
 pointer against where the island draws. The island never takes focus from
 what the person is typing in.
+
+### Dictation
+
+The composer's microphone records in the window, in memory. The first time
+someone presses it, with no speech model on the machine, the composer offers
+the model and its size; nothing comes down until they say so, and the
+microphone is asked for first. The main process asks the system for the
+microphone, reads whether the model is there from the profile's `speech/`
+folder, and starts a speech utility process to bring it down and to turn
+what was said into text. That process runs a native addon (sherpa-onnx), so
+it is kept apart from the runtime, and stops once it has sat idle. Nothing
+said leaves the machine (ADR-017).
 
 ### Window close and application quit
 

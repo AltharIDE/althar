@@ -1275,6 +1275,12 @@ export const Api = RpcGroup.make(
   command('CancelAccountSignIn', { flowId: Schema.String }, Schema.Void),
   /** A project's rules. */
   call('GetProjectRules', { projectId: Schema.String }, ProjectRulesView),
+  /**
+   * The names a project's code uses that have parts (`RefundLedger`,
+   * `useEffect`, `charges-api.ts`), most used first, so dictation can write
+   * them as the project does (ADR-017).
+   */
+  call('GetVocabulary', { projectId: Schema.String }, Schema.Array(Schema.String)),
   /** Changes what is given of a project's rules, as a new revision recorded as the person's. */
   command(
     'SetProjectRules',

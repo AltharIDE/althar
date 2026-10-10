@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { expect, test } from '@playwright/test'
 
+import { deviceWords } from '../src/renderer/shared/device'
 import { repository } from '../tests/repository'
 import { launch, openFirstProject } from './support'
 
@@ -20,8 +21,9 @@ test('adds an account to an agent, and names the one that ran out when a task mo
   const repo = repository(home)
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_OUT: 'claude-code@usual:3600' })
   try {
+    // The list is named for this computer as its system calls it: this Mac, this PC, this computer.
     const claude = page
-      .getByRole('list', { name: /Agents on this (Mac|PC|computer)/ })
+      .getByRole('list', { name: `Agents on ${deviceWords(process.platform).this}` })
       .getByRole('listitem')
       .filter({ hasText: 'Claude Code' })
       .first()

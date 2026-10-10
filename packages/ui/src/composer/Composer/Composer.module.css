@@ -51,6 +51,8 @@
 }
 
 .interim {
+  max-height: 200px;
+  overflow: hidden;
   padding: 1px 4px 0 1px;
   font-size: 13.5px;
   line-height: 1.55;
@@ -60,8 +62,14 @@
   pointer-events: none;
 }
 
+/* what is written, drawn here while words arrive, since the field's own text goes clear under it */
 .written {
+  color: var(--t-1);
+}
+
+.composer textarea.under {
   color: transparent;
+  caret-color: var(--t-1);
 }
 
 /* what you sent while it worked, above the field, in order */
@@ -114,6 +122,18 @@
 
 .queuedEdit {
   flex: none;
+}
+
+/* the composer with what sits on its top edge: what floats over the thread, and a tray joined to it in the flow */
+.stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* a tray is inset a little, so the composer reads as what it belongs to */
+.tray {
+  margin: 0 10px;
 }
 
 /* floats on the top edge, over the end of the thread */

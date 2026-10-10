@@ -11,7 +11,7 @@ import { build } from 'electron-builder'
  * AppImage, deb and rpm on Linux, built on the platform it runs on. The
  * bundles hold everything but the agent adapters, which run as processes of
  * their own and are found in node_modules, so the app is staged with the
- * bundles, the icons, the menu bar's pictures, and a flat install of the adapters alone, with the
+ * bundles, the icons, the menu bar's pictures, and a flat install of the adapters and the speech engine alone, with the
  * packages that carry the agents' own binaries pinned to the versions the
  * workspace runs, so the app ships what dev and CI tested. Electron comes
  * from the copy already installed, at the version the app is tested on.
@@ -32,6 +32,8 @@ const own = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
 
 /** The packages the runtime starts as processes, at the versions the app depends on. */
 const ADAPTERS = ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']
+/** Native addons the bundles load from node_modules: dictation's speech engine, with its binaries for this platform (ADR-017). */
+const NATIVE = ['sherpa-onnx-node']
 
 /** The packages that carry the agents' binaries, by the adapter that brings each; their platform packages are pinned by them. */
 const BINARIES: Record<string, string> = {
@@ -73,7 +75,7 @@ writeFileSync(
       desktopName: 'althar.desktop',
       type: 'module',
       main: 'dist/main/main.js',
-      dependencies: Object.fromEntries(ADAPTERS.map((name) => [name, own.dependencies[name]])),
+      dependencies: Object.fromEntries([...ADAPTERS, ...NATIVE].map((name) => [name, own.dependencies[name]])),
       overrides: pinned,
     },
     null,
@@ -117,6 +119,11 @@ await build({
             icon: join(desktop, 'resources', 'icon.icns'),
             category: 'public.app-category.developer-tools',
             identity: null,
+            // What macOS shows as it asks for the microphone, the first time someone dictates.
+            extendInfo: {
+              NSMicrophoneUsageDescription:
+                'Althar listens only while you dictate into a message, and turns what you say into text on this Mac.',
+            },
           },
         }
       : {
@@ -141,7 +148,14 @@ await build({
 if (mac) {
   // electron-builder names the folder for the architecture, but for Intel's.
   const app = join(out, 'dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', `${own.productName}.app`)
-  execFileSync('codesign', ['--force', '--deep', '--sign', '-', app], { stdio: 'inherit' })
+  // The microphone's entitlement, for when the app runs hardened: dictation records with it.
+  execFileSync(
+    'codesign',
+    ['--force', '--deep', '--sign', '-', '--entitlements', join(desktop, 'resources', 'entitlements.mac.plist'), app],
+    {
+      stdio: 'inherit',
+    },
+  )
   process.stdout.write(`\n${app}\n`)
 } else {
   const made = readdirSync(join(out, 'dist')).filter((name) => /\.(AppImage|deb|rpm)$/.test(name))

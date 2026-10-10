@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { _electron as electron, expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
+import { mainWindow } from './support'
 
 /*
  * The app with a real agent, as a process started from the runtime's utility
@@ -32,7 +33,7 @@ test('a real agent leads a task and answers', async () => {
     await app.evaluate(({ dialog }, chosen) => {
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [chosen] })) as typeof dialog.showOpenDialog
     }, repo)
-    const page = await app.firstWindow()
+    const page = await mainWindow(app)
     await page.getByRole('button', { name: /Add a folder/ }).click()
     await page.getByRole('button', { name: /Make the project/ }).click()
     await page.getByRole('button', { name: 'New task' }).click()
