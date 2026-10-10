@@ -135,10 +135,11 @@ export class ChangedSinceSeen extends Schema.TaggedError<ChangedSinceSeen>()('Ch
 
 /**
  * A task that can't take that turn in its course: a merged task is done for
- * good, so it is never abandoned or reopened; and one whose worktree went
- * with its branch can't be reopened on it.
+ * good, so it is never abandoned or reopened; one whose worktree went with
+ * its branch can't be reopened on it; and an abandoned one has no agent on
+ * it until it is reopened.
  */
 export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['merged', 'branch_gone']),
+  why: Schema.Literals(['merged', 'branch_gone', 'abandoned']),
 }) {}

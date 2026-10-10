@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 
 import { type CommandEnvelope, type ProjectId, RunState, runLifecycle, TaskState, taskLifecycle, transition } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
+import { Context, type Crypto, Effect, Layer, Option, Schema, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
@@ -132,6 +132,18 @@ export class Tasks extends Context.Service<
       const runs = yield* Runs
       const plans = yield* Plans
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
+      /*
+       * A task's course changes one at a time, through stopping its agents
+       * and starting them: a resume pressed while a stop still waits for its
+       * agents to go runs once they have.
+       */
+      const locks = new Map<string, Semaphore.Semaphore>()
+      const oneAtATime = <A, E>(taskId: string, effect: Effect.Effect<A, E, Store>) =>
+        Effect.suspend(() => {
+          const lock = locks.get(taskId) ?? Semaphore.makeUnsafe(1)
+          locks.set(taskId, lock)
+          return provide(lock.withPermits(1)(effect))
+        })
 
       /**
        * Every agent on the task stops: its lead's, and its steps', on the
@@ -247,9 +259,10 @@ export class Tasks extends Context.Service<
               const state = yield* transition(taskLifecycle, now, 'abandoned')
               const at = yield* timestamp
               const said = { actorId: input.envelope.actorId, commandId: input.envelope.commandId }
-              // Its plan doesn't start: declined, its countdown with it.
+              // Its plan doesn't start: declined, its countdown with it; and one its start had accepted, but made no run of yet.
               const proposed = yield* sql<{ id: string }>`
-                SELECT id FROM task_plans WHERE task_id = ${input.taskId} AND state = 'proposed'`
+                SELECT id FROM task_plans p WHERE p.task_id = ${input.taskId}
+                  AND (p.state = 'proposed' OR (p.state = 'accepted' AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.plan_id = p.id)))`
               for (const plan of proposed) {
                 const revision = yield* change('task_plans', plan.id, { state: 'declined', startsAt: null, decidedAt: at })
                 yield* fact({
@@ -357,10 +370,10 @@ export class Tasks extends Context.Service<
         })
 
       return Tasks.of({
-        stop: (input) => provide(stop(input)),
-        resume: (input) => provide(resume(input)),
-        abandon: (input) => provide(abandon(input)),
-        reopen: (input) => provide(reopen(input)),
+        stop: (input) => oneAtATime(input.taskId, stop(input)),
+        resume: (input) => oneAtATime(input.taskId, resume(input)),
+        abandon: (input) => oneAtATime(input.taskId, abandon(input)),
+        reopen: (input) => oneAtATime(input.taskId, reopen(input)),
       })
     }),
   )

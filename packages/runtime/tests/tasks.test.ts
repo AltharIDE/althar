@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { ActorId, ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Deferred, Duration, Effect, Layer, Option } from 'effect'
+import { Deferred, Duration, Effect, Fiber, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
@@ -90,6 +91,46 @@ const shown = (threadId: string) =>
   })
 
 const command = (type: string) => Runtime.envelope(type, {})
+
+/**
+ * A gate on one of the runtime's own git commands, for a race that needs
+ * something to wait in the middle: armed, the next command whose words
+ * include `words` waits until the gate opens, and says it was caught. Git
+ * is found through a wrapper put first on the path, which runs the real one;
+ * the path is put back when the test ends.
+ */
+const gitGate = (words: string) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const dir = mkdtempSync(join(tmpdir(), 'althar-git-gate-'))
+      const real = execFileSync('which', ['git']).toString().trim()
+      writeFileSync(
+        join(dir, 'git'),
+        [
+          '#!/bin/sh',
+          `case "$*" in *"${words}"*)`,
+          `  if mv "${dir}/armed" "${dir}/caught" 2>/dev/null; then while [ ! -e "${dir}/open" ]; do sleep 0.02; done; fi ;;`,
+          'esac',
+          `exec "${real}" "$@"`,
+          '',
+        ].join('\n'),
+        { mode: 0o755 },
+      )
+      const path = process.env.PATH
+      process.env.PATH = `${dir}:${path ?? ''}`
+      return {
+        path,
+        arm: () => writeFileSync(join(dir, 'armed'), ''),
+        caught: () => existsSync(join(dir, 'caught')),
+        open: () => writeFileSync(join(dir, 'open'), ''),
+      }
+    }),
+    (gate) =>
+      Effect.sync(() => {
+        gate.open()
+        process.env.PATH = gate.path
+      }),
+  )
 
 /** The runtime with a fake GitHub, asked for news often. */
 const withGitHub = (github: FakeService) => withQueries({ connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })
@@ -604,6 +645,121 @@ describe('a task’s course', () => {
       assert.deepStrictEqual([(refused as { _tag?: string })._tag, (refused as { why?: string }).why], ['TaskRefused', 'merged'])
     }).pipe(Effect.provide(withGitHub(github)))
   })
+
+  it.live('brings back, held, the plan of a task abandoned as its plan was starting, so it can start again', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const runs = yield* Runs
+      const sql = yield* SqlClient.SqlClient
+      const { task, planId, actor } = yield* planned('Later [lead:finish]')
+      // Its start had accepted the plan, and abandoning comes before the run that start makes.
+      yield* sql`UPDATE task_plans SET state = 'accepted', starts_at = NULL WHERE id = ${planId}`
+      yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
+      yield* runs.run(planId)
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM runs`)[0]?.n, 0)
+      yield* tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId })
+      const reopened = yield* shown(task.threadId)
+      assert.deepStrictEqual([reopened.state, reopened.phase, reopened.actions], ['draft', 'held', ['start', 'abandon']])
+      assert.isNotNull(reopened.planId)
+      // The start that was on its way makes no run of the plan it had, now declined; the one brought back starts.
+      yield* runs.run(planId)
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM runs`)[0]?.n, 0)
+      yield* plans.start(reopened.planId ?? '', actor)
+      yield* standsAt(task.threadId, (now) => now.phase === 'ready')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('starts or hands over no agent on an abandoned task until it is reopened', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const sessions = yield* Sessions
+      const { task, planId, actor } = yield* planned('Retry checkout [lead:wait]')
+      yield* plans.start(planId, actor)
+      yield* standsAt(task.threadId, (now) => now.phase === 'running')
+      yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
+      for (const refused of [
+        yield* Effect.flip(sessions.start({ threadId: task.threadId, agentId: 'codex' })),
+        yield* Effect.flip(sessions.switchAgent({ threadId: task.threadId, agentId: 'codex' })),
+      ])
+        assert.deepStrictEqual([(refused as { _tag?: string })._tag, (refused as { why?: string }).why], ['TaskRefused', 'abandoned'])
+      assert.isFalse(yield* onThread(task.threadId))
+      // Reopened, an agent starts on it again.
+      yield* tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId })
+      yield* sessions.start({ threadId: task.threadId, agentId: 'codex' })
+      assert.isTrue(yield* onThread(task.threadId))
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('drops a step’s report that arrives after its task was stopped and resumed, and starts nothing from it', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const sql = yield* SqlClient.SqlClient
+      // The lead's report waits on the runtime's look at what isn't committed: the task is stopped and resumed meanwhile.
+      const gate = yield* gitGate('core.quotePath=false diff --name-only HEAD')
+      const { task, planId, actor } = yield* planned('Retry checkout [lead:finish] [review:wait]', [implement(), reviewBy()], {
+        end: 'none',
+      })
+      gate.arm()
+      yield* plans.start(planId, actor)
+      yield* until(
+        Effect.sync(() => (gate.caught() ? [true] : [])),
+        (rows) => rows.length === 1,
+      )
+      const [stale] = yield* sql<{ id: string }>`
+        SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'implement' ORDER BY a.admitted_at LIMIT 1`
+      yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      // The resumed lead reports, and its review starts.
+      const reviews = sql<{ id: string }>`
+        SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'review'`
+      yield* until(reviews, (rows) => rows.length === 1)
+      // The report from before goes through now: it is dropped, and said in the record.
+      gate.open()
+      yield* until(
+        sql<{
+          type: string
+        }>`SELECT type FROM record_events WHERE aggregate_id = ${stale?.id ?? ''} AND type = 'node_attempt.report_dropped'`,
+        (rows) => rows.length === 1,
+      )
+      const [kept] = yield* sql<{ state: string; stopped: number | null }>`
+        SELECT state, json_extract(output, '$.stopped') AS stopped FROM node_attempts WHERE id = ${stale?.id ?? ''}`
+      assert.deepStrictEqual({ ...kept }, { state: 'cancelled', stopped: 1 })
+      assert.strictEqual((yield* reviews).length, 1)
+      const reported = yield* sql<{ n: number }>`
+        SELECT count(*) AS n FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result' AND json_extract(content, '$.step') = 'implement'`
+      assert.strictEqual(reported[0]?.n, 1)
+    }).pipe(Effect.scoped, Effect.provide(withQueries({ stopGrace: Duration.millis(500) }))),
+  )
+
+  it.live('resumes only once stopping has stopped the lead, so the resumed step keeps its lead', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const sessions = yield* Sessions
+      const sql = yield* SqlClient.SqlClient
+      // A lead that doesn't stop when asked: stopping it waits out the grace, and Resume is pressed meanwhile.
+      const { task, planId, actor } = yield* planned('Retry checkout [lead:wedge-once] [lead:finish]')
+      yield* plans.start(planId, actor)
+      yield* until(
+        Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) && live.value.turnRunning ? [live] : [])),
+        (rows) => rows.length === 1,
+      )
+      const stopping = yield* Effect.forkChild(tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId }))
+      yield* until(sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.taskId}`, (rows) => rows[0]?.state === 'suspended')
+      yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
+      yield* Fiber.join(stopping)
+      // The resumed lead is a fresh one, which carries the step on to the end; nothing waits on the person.
+      yield* standsAt(task.threadId, (now) => now.phase === 'ready')
+      assert.deepStrictEqual(yield* callsOf(task.taskId), [])
+      assert.strictEqual(
+        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM provider_sessions WHERE thread_id = ${task.threadId}`)[0]?.n,
+        2,
+      )
+    }).pipe(Effect.provide(withQueries({ stopGrace: Duration.seconds(2) }))),
+  )
 
   it.live('lets a held plan count down again, and starts it when the countdown ends', () =>
     Effect.gen(function* () {

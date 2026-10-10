@@ -26,6 +26,7 @@ import {
   NotFound,
   SessionFailed,
   SessionRunning,
+  TaskRefused,
   type UnknownAgent,
 } from './errors'
 import { Instance } from './Instance'
@@ -287,7 +288,7 @@ export class Sessions extends Context.Service<
       readonly model?: string
       /** How hard it thinks, where the agent offers a choice; the agent's own default without one. */
       readonly effort?: string
-    }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | Failure>
+    }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Accepts input into the thread's queue, and delivers it when the session can take it. */
     send(input: {
       readonly envelope: CommandEnvelope
@@ -320,7 +321,7 @@ export class Sessions extends Context.Service<
       readonly about?: 'limit' | 'stall'
       /** What the person said with it: the new agent's first turn, after its brief, and never the old one's. */
       readonly message?: { readonly envelope: CommandEnvelope; readonly body: string }
-    }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | Failure>
+    }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
     interrupt(threadId: string): Effect.Effect<void, NoSession>
     /** Stops the thread's session, after ending its turn. */
@@ -336,6 +337,8 @@ export class Sessions extends Context.Service<
         readonly pid: number | null
         /** How full its context is, in tokens, as the agent last said; null until it says. */
         readonly context: { readonly used: number; readonly size: number } | null
+        /** It is being stopped: on its way out, not one to carry on with. */
+        readonly stopping: boolean
       }>
     >
   }
@@ -364,6 +367,15 @@ export class Sessions extends Context.Service<
             SELECT p.id AS project_id FROM threads t JOIN projects p ON p.id = t.project_id
             WHERE t.id = ${threadId} AND p.archived_at IS NOT NULL`
           if (removed !== undefined) return yield* new NotFound({ kind: 'project', id: removed.projectId })
+        })
+
+      /** An abandoned task has no agent on it until it is reopened. */
+      const notAbandoned = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [abandoned] = yield* sql<{ taskId: string }>`
+            SELECT k.id AS task_id FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${threadId} AND k.state = 'abandoned'`
+          if (abandoned !== undefined) return yield* new TaskRefused({ taskId: abandoned.taskId, why: 'abandoned' })
         })
 
       const loadThread = (threadId: string) =>
@@ -1079,6 +1091,7 @@ export class Sessions extends Context.Service<
           Effect.gen(function* () {
             if (threads.has(input.threadId)) return yield* new SessionRunning({ threadId: input.threadId })
             yield* inLiveProject(input.threadId)
+            yield* notAbandoned(input.threadId)
             const thread = yield* loadThread(input.threadId)
             const entry = yield* (yield* Agents).get(input.agentId)
             const account = yield* limits.pick({
@@ -1436,6 +1449,7 @@ export class Sessions extends Context.Service<
         exclusive(
           input.threadId,
           Effect.gen(function* () {
+            yield* notAbandoned(input.threadId)
             const thread = yield* loadThread(input.threadId)
             const entry = yield* (yield* Agents).get(input.agentId)
             const previous = threads.get(input.threadId)
@@ -1513,6 +1527,7 @@ export class Sessions extends Context.Service<
                   turnRunning: running.turnRunning,
                   pid: running.connection.process?.pid ?? null,
                   context: running.context,
+                  stopping: running.stopping,
                 })
           }),
       })

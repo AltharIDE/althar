@@ -184,7 +184,10 @@ Failure policy is node-specific:
 A task's course is the person's to steer, from its menu. Each action is
 offered only where it applies, and the runtime works that out in one place
 (`Tasks.actionsOf`), for the menu and for the commands alike, so a command
-that no longer applies does nothing and two presses are one. Both lifecycles
+that no longer applies does nothing and two presses are one. A task's
+commands run one at a time, through stopping its agents and starting them,
+so a Resume pressed while a Stop waits for its agents runs once they have
+gone, and an agent on its way out is never carried on with. Both lifecycles
 are data in `@althar/domain` (`taskLifecycle`, `runLifecycle`).
 
 ```mermaid
@@ -225,7 +228,10 @@ stateDiagram-v2
   the call a step waited on is withdrawn. Then every agent on the task stops,
   its lead's and its steps', so no step takes an agent going as one that
   went. Nothing new is admitted on a suspended run, an agent a step was
-  starting as it stopped is stopped once it is up, and publishing Althar had
+  starting as it stopped is stopped once it is up, a step's report that
+  arrives from before the stop (and a resume) is dropped and said in the
+  record, since what may write to a run is fenced by its run attempt, and
+  publishing Althar had
   begun on the host says what it did there when it ends, without ending the
   run or asking the person anything. Nothing runs, and nothing waits on the
   person, until it is resumed; publishing again then adopts what is there.
@@ -240,7 +246,8 @@ stateDiagram-v2
   starts too, so it is read now. Resume never starts an agent with nothing
   to do: there is always the step to carry on.
 - **Abandon** applies to any task not yet settled, and asks first. In one
-  transaction its plan, if still waiting, is declined; its calls are
+  transaction its plan, if still waiting, or accepted with no run made of
+  it yet, is declined; its calls are
   withdrawn; its run, if it runs, is suspended as by Stop; the task becomes
   `abandoned` and settles. Then every agent on it stops. Its worktree and its
   branch stay where they are: Althar never removes the person's worktrees
@@ -255,6 +262,8 @@ stateDiagram-v2
   run is still suspended, so it resumes like a stopped one; a run that had
   passed is ready again; a task abandoned before its plan started is a
   draft again, its plan proposed anew and held. Nothing starts on its own.
+  While a task is abandoned no agent starts on it; writing to it reopens it
+  first, refused as Reopen is, and what was written is the lead's first word.
 
 ## Dynamic graph evolution
 

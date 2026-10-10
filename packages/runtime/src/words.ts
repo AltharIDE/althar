@@ -240,6 +240,7 @@ const noChangeToOpen = {
 const taskRefused = {
   merged: 'The task is merged, so it stays done.',
   branch_gone: 'The task’s worktree and its branch are both gone, so it can’t be reopened on them.',
+  abandoned: 'The task is abandoned. Reopen it to carry on.',
 } as const satisfies Record<TaskRefused['why'], string>
 
 /** Errors the person caused or can put right; anything else is worth the log. */

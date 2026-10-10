@@ -1362,6 +1362,7 @@ describe('words', () => {
       said(new TaskRefused({ taskId: 't', why: 'branch_gone' })),
       'The task’s worktree and its branch are both gone, so it can’t be reopened on them.',
     )
+    assert.strictEqual(said(new TaskRefused({ taskId: 't', why: 'abandoned' })), 'The task is abandoned. Reopen it to carry on.')
     // A merge that conflicts carries its files, for the window to have the lead settle them.
     assert.deepStrictEqual(words(new CantMerge({ taskId: 't', why: 'conflicts', detail: 'README.md' }), name), {
       reason: 'CantMerge',
