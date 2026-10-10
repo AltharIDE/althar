@@ -170,7 +170,9 @@ describe('a project’s rules', () => {
   it('sends quick changes one after another, each against the rules the last one left', async () => {
     let revision = 3
     const { client } = fakeClient({ getProjectRules: vi.fn(async () => ({ ...projectRules, revision })) })
-    vi.mocked(client.setProjectRules).mockImplementation(async ({ projectId, expectedRevision: _, ...change }) => {
+    vi.mocked(client.setProjectRules).mockImplementation(async ({ projectId, expectedRevision, ...change }) => {
+      // Each names the rules as they stand when it arrives, the last one's included.
+      expect(expectedRevision).toBe(revision)
       await new Promise((resolve) => setTimeout(resolve, 30))
       revision += 1
       return { ...projectRules, ...change, projectId, revision }

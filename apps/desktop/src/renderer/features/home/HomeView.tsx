@@ -1,7 +1,7 @@
 import { type DragEvent, useEffect, useState } from 'react'
 
 import type { HomeCall, HomeEvent, HomeTask, ProjectSummary } from '@althar/contracts'
-import { AskAnswered, AskNote, type IconName, PermissionAnswers, ProjectInk, type ProjectRef, TaskStatus } from '@althar/ui'
+import { type IconName, PermissionAnswers, ProjectInk, type ProjectRef, TaskStatus } from '@althar/ui'
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
@@ -12,7 +12,7 @@ import { SettingsPanel } from '../settings/SettingsPanel'
 import type { StartModel } from '../start/useStart'
 import s from './Home.module.css'
 import type { HomeModel } from './useHome'
-import { needLineOf, needsOf, needText, workOf } from './needs'
+import { type AnsweredCall, needLineOf, needsOf, needText, workOf } from './needs'
 
 /*
  * The window you come back to, once there are projects: the kit's Home.
@@ -28,11 +28,6 @@ import { needLineOf, needsOf, needText, workOf } from './needs'
 
 export const text = {
   ...needText,
-  allowed: (what: string) => `Allowed ${what}`,
-  denied: (what: string) => `Didn’t allow ${what}`,
-  answeredIn: (project: string) => `in ${project}`,
-  /** An always or a never, kept as a rule. */
-  keptIn: (project: string) => `kept in ${project}’s rules`,
   lastWork: (when: string) => `Last task ${when}`,
   noWork: 'No tasks yet',
   /** Before the person ever left the home here, it shows the last day. */
@@ -93,15 +88,6 @@ export const lineOf = (
   }
 }
 
-/** A call the person answered here, folded to a line until they leave. */
-interface Answered {
-  readonly said: string
-  readonly denied: boolean
-  readonly project: ProjectRef
-  /** Kept as a rule: an always or a never. */
-  readonly kept: boolean
-}
-
 export function HomeView({
   model,
   start,
@@ -118,7 +104,8 @@ export function HomeView({
 }) {
   const home = model.home
   const now = useNow(true)
-  const [answered, setAnswered] = useState<ReadonlyArray<Answered & { readonly id: string }>>([])
+  // Calls answered here: each stays its line, quiet, where it was, until the person leaves.
+  const [answered, setAnswered] = useState<ReadonlyArray<AnsweredCall>>([])
   const [settings, setSettings] = useState(false)
   const agents = start.status?.agents ?? []
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
@@ -128,15 +115,15 @@ export function HomeView({
   const tasks = home?.tasks ?? []
   // In progress is every task not ready to accept; only those with an agent on them, or held for a reset, are running.
   const ready = tasks.filter((task) => task.phase === 'ready')
-  const calls = (home?.calls ?? []).filter((call) => !answered.some((one) => one.id === call.id))
+  const calls = (home?.calls ?? []).filter((call) => !answered.some((one) => one.call.id === call.id))
   // What has a card above isn't listed again under it.
   const carded = new Set(calls.map((call) => call.threadId))
   const working = tasks.filter((task) => task.phase !== 'ready' && !carded.has(task.threadId))
   const waiting = calls.length + ready.length
 
-  const needs = needsOf({ calls, ready, refs, agentName: name })
+  const needs = needsOf({ calls: home?.calls ?? [], answered, ready, refs, agentName: name })
   // What waits now, and how much is in progress, for Settings' pictures of the edge of the screen.
-  const glance: EdgeGlance = { waiting, needs: needs.slice(0, 3), work: workOf(working) }
+  const glance: EdgeGlance = { waiting, needs: needs.filter((need) => need.answer === undefined).slice(0, 3), work: workOf(working) }
 
   const openFolder = () => void start.openFolder().then((opened) => opened !== null && onProject(opened.id))
   // ⌘N opens a folder, and ⌘, opens and closes settings. ⌘ and a number belongs to the window's tabs.
@@ -152,52 +139,28 @@ export function HomeView({
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  const answer = (call: HomeCall, project: ProjectRef, reply: Reply) => {
-    const what = call.command ?? call.title
-    setAnswered((now) => [
-      ...now,
-      {
-        id: call.id,
-        said: reply.decision === 'allow' ? text.allowed(what) : text.denied(what),
-        denied: reply.decision === 'reject',
-        project,
-        kept: reply.always !== undefined,
-      },
-    ])
+  const answer = (call: HomeCall, reply: Reply) => {
+    setAnswered((now) => [...now, { call, reply }])
     // One whose answer didn't go through comes back, with what went wrong.
     void model.answer(call.id, reply.decision, reply.reason, reply.always).then((through) => {
-      if (!through) setAnswered((now) => now.filter((one) => one.id !== call.id))
+      if (!through) setAnswered((now) => now.filter((one) => one.call.id !== call.id))
     })
   }
 
-  // What waits, each gathered under its project; a call answered here stays as a line until the person leaves.
-  const waits: ReadonlyArray<HomeNeed> = [
-    ...needs.map((need) => ({
-      key: need.id,
-      project: need.project,
-      line: needLineOf(need, {
-        onOpen: onTask,
-        onAnswer: (call, project, decision) => answer(call, project, { decision }),
-        // Every answer the call offers (ADR-018): Deny and Allow once, the rest in a menu beside them.
-        answers: (call, project) => (
-          <PermissionAnswers
-            request={permissionOf(call)}
-            project={project.name}
-            onAnswer={(given) => answer(call, project, replyOf(given))}
-          />
-        ),
-      }),
-    })),
-    ...answered.map((one) => ({
-      key: one.id,
-      project: one.project,
-      line: (
-        <AskAnswered said={one.said} denied={one.denied} focusOnMount>
-          <AskNote>{one.kept ? text.keptIn(one.project.name) : text.answeredIn(one.project.name)}</AskNote>
-        </AskAnswered>
+  // What waits, each gathered under its project; a call answered here stays its line, quiet, until the person leaves.
+  const waits: ReadonlyArray<HomeNeed> = needs.map((need) => ({
+    key: need.id,
+    project: need.project,
+    ...(need.answer === undefined ? {} : { answered: true }),
+    line: needLineOf(need, {
+      onOpen: onTask,
+      onAnswer: (call, _project, decision) => answer(call, { decision }),
+      // Every answer the call offers (ADR-018): Deny and Allow once, the rest in a menu beside them.
+      answers: (call, project) => (
+        <PermissionAnswers request={permissionOf(call)} project={project.name} onAnswer={(given) => answer(call, replyOf(given))} />
       ),
-    })),
-  ]
+    }),
+  }))
 
   const runs: ReadonlyArray<HomeRun> = working.flatMap((task) => {
     const project = refs.get(task.projectId)

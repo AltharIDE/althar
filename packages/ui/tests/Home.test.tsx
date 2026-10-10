@@ -28,6 +28,19 @@ describe('Home', () => {
     expect(container.querySelectorAll('[class*="ping"]')).toHaveLength(0)
   })
 
+  it('names and marks only the projects whose calls still wait, keeping a line just answered where it was', () => {
+    const { container } = home({
+      waiting: 1,
+      needs: [need('a', MERIDIAN, 'A call'), { ...need('b', HALYARD, 'Answered'), answered: true }],
+    })
+    expect(screen.getByText('in Meridian')).toBeInTheDocument()
+    expect(screen.queryByText('in Meridian and Halyard')).toBeNull()
+    expect(container.querySelectorAll('header [class*="stack"] > *')).toHaveLength(1)
+    expect((container.querySelector('main') as HTMLElement).style.getPropertyValue('--wash-2')).toBe('')
+    // The answered line stays, under its project.
+    expect(within(screen.getByRole('region', { name: 'Halyard' })).getByText('Answered')).toBeInTheDocument()
+  })
+
   it('gathers the calls under the project each is from, in the order the first came', () => {
     home({ waiting: 3, needs: [need('a', MERIDIAN, 'First'), need('b', HALYARD, 'Second'), need('c', MERIDIAN, 'Third')] })
     const groups = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)

@@ -90,7 +90,7 @@ Each feature holds its route (`route.tsx`, with what it reads before it shows), 
 - **Findings are shown, not answered.** A review's findings are left to the lead, which settles them; the kit's answers to them aren't wired up.
 - **Views are tested with Testing Library,** not with Storybook stories fed view-model output as ADR-010 says; the app has no Storybook of its own yet.
 - **Tasks have no numbers.** The kit's headers show a task's number; the app shows the title alone.
-- **An answered call disappears** once the thread is read again, rather than folding to a line saying what was said. On the home, a permission answered on its card folds to a line until you leave.
+- **An answered call disappears** once the thread is read again, rather than folding to a line saying what was said. On the home and the edge, a permission answered on its line stays that line, quiet, until you leave.
 - **The home has no sign-in card yet.** An agent that is signed out shows in the bar, in violet; signing it in is in Settings.
 - **A packaged app started from the Finder** gets a short `PATH`, so agents on the user's own `PATH` (OpenCode, Claude's status check) may not be found. Development runs from a terminal and inherits its `PATH`.
 - **No packaging, signing or updates yet.** The bundled adapters run on Electron's own binary as Node, so a signed app has to keep the RunAsNode fuse on; see the open questions.

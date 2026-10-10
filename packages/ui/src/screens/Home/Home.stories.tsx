@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { type ReactNode, useState } from 'react'
+import { cloneElement, isValidElement, type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { ProjectTabs } from '../../chrome/ProjectTabs/ProjectTabs'
@@ -22,9 +22,8 @@ import {
 import { MARKED, SEEDS } from '../../fixtures/marks'
 import { ProjectInk } from '../../foundations/ProjectMark/drawing'
 import { TaskStatus } from '../../foundations/vocabulary'
-import { NeedLine } from '../../home/NeedLine/NeedLine'
+import { NeedLine, type NeedLineProps } from '../../home/NeedLine/NeedLine'
 import type { ProjectRef } from '../../home/ProjectWord/ProjectWord'
-import { AskAnswered, AskNote } from '../../primitives/Ask/Ask'
 import { Button } from '../../primitives/Button/Button'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { States } from '../../storybook/States'
@@ -74,7 +73,9 @@ function Window({ waiting, children }: { waiting: number; children: ReactNode })
 /** Opens a call's task, by its call. */
 const openTask = fn()
 
+/** What was said to a call answered here: the line's kind once answered, and what stands where its answers were. */
 interface Said {
+  kind: string
   said: string
   note: string
   denied?: boolean
@@ -83,11 +84,6 @@ interface Said {
 function Day({ troubled = false, ...props }: Omit<HomeProps, 'needs' | 'waiting'> & { troubled?: boolean }) {
   const [answers, setAnswers] = useState<Record<string, Said>>({})
   const answer = (id: string, said: Said) => setAnswers((now) => ({ ...now, [id]: said }))
-  const undo = (id: string) =>
-    setAnswers((now) => {
-      const { [id]: _, ...rest } = now
-      return rest
-    })
 
   const cards: { id: string; project: ProjectRef; node: ReactNode }[] = [
     ...(troubled
@@ -107,7 +103,7 @@ function Day({ troubled = false, ...props }: Omit<HomeProps, 'needs' | 'waiting'
                     size="small"
                     variant="signal"
                     icon="terminal"
-                    onClick={() => answer('signin', { said: 'Codex signed in', note: 'the review on 88 carries on' })}
+                    onClick={() => answer('signin', { kind: 'Signed in', said: 'Codex', note: 'the review on 88 carries on' })}
                   >
                     Sign in to Codex
                   </Button>
@@ -129,14 +125,14 @@ function Day({ troubled = false, ...props }: Omit<HomeProps, 'needs' | 'waiting'
                   <>
                     <Button
                       size="small"
-                      onClick={() => answer('stuck', { said: 'Stopped Spike C', note: 'Compare runs on A and B', denied: true })}
+                      onClick={() => answer('stuck', { kind: 'Stopped', said: 'Spike C', note: 'Compare runs on A and B', denied: true })}
                     >
                       Stop the spike
                     </Button>
                     <Button
                       size="small"
                       variant="signal"
-                      onClick={() => answer('stuck', { said: 'Started afresh on Codex', note: 'a different agent this time' })}
+                      onClick={() => answer('stuck', { kind: 'Started afresh', said: 'On Codex', note: 'a different agent this time' })}
                     >
                       Try it on Codex
                     </Button>
@@ -161,14 +157,14 @@ function Day({ troubled = false, ...props }: Omit<HomeProps, 'needs' | 'waiting'
             <>
               <Button
                 size="small"
-                onClick={() => answer('publish', { said: 'Denied', note: 'the lead hears why at Release', denied: true })}
+                onClick={() => answer('publish', { kind: 'Denied', said: 'Once', note: 'the lead hears why at Release', denied: true })}
               >
                 Deny
               </Button>
               <Button
                 size="small"
                 variant="signal"
-                onClick={() => answer('publish', { said: 'Allowed npm publish', note: 'went back to Release' })}
+                onClick={() => answer('publish', { kind: 'Allowed', said: 'Once', note: 'in Halyard' })}
               >
                 Allow once
               </Button>
@@ -232,17 +228,20 @@ function Day({ troubled = false, ...props }: Omit<HomeProps, 'needs' | 'waiting'
         waiting={waiting.length}
         needs={cards.map(({ id, project, node }) => {
           const said = answers[id]
-          return {
-            key: id,
-            project,
-            line: said ? (
-              <AskAnswered said={said.said} denied={said.denied ?? false} onUndo={() => undo(id)} focusOnMount>
-                <AskNote>{said.note}</AskNote>
-              </AskAnswered>
-            ) : (
-              node
-            ),
-          }
+          // Answered, a line stays where it was, quiet: its kind says which way, and what was said stands where its answers were.
+          return said && isValidElement<NeedLineProps>(node)
+            ? {
+                key: id,
+                project,
+                answered: true,
+                line: cloneElement(node, {
+                  kind: said.kind,
+                  actions: undefined,
+                  answer: { said: said.said, note: said.note, ...(said.denied ? { denied: true } : {}) },
+                  focusOnMount: true,
+                }),
+              }
+            : { key: id, project, line: node }
         })}
       />
     </Window>
@@ -255,7 +254,9 @@ export const Busy: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Allow once' }))
-    await expect(await canvas.findByText('Allowed npm publish')).toBeInTheDocument()
+    // The line stays where it was, quiet: allowed, once.
+    await expect(await canvas.findByText('Allowed')).toBeInTheDocument()
+    await expect(canvas.getByRole('heading', { name: '2 things need you', level: 2 })).toBeInTheDocument()
     await userEvent.click(canvas.getByRole('button', { name: 'Decide' }))
     await expect(openTask).toHaveBeenCalledWith('decision')
   },

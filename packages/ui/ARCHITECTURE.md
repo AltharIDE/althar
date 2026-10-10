@@ -148,7 +148,7 @@ A pattern that appears in two components becomes one part, so the two cannot dri
 
 | Part | What it is | Used by |
 | --- | --- | --- |
-| Ask (`AskCard`, `AskFoot`, `AskAnswered`, `AskNote`) | A card that waits on a person, and the line it folds to once answered | Permission, GraphProposal, Question, Stuck, and the home's answered calls |
+| Ask (`AskCard`, `AskFoot`, `AskAnswered`, `AskNote`) | A card that waits on a person, and the line it folds to once answered | Permission, GraphProposal, Question, Stuck |
 | SidePanel | What opens beside a thread or the board | DocPanel, StepPanel, Dock |
 | TaskGlyph | Where a task stands, as a glyph | TaskCard, WorkCard, TaskHeader, WorkPeek |
 | FileChanges, Delta, DiffStat | Files a change touched, with lines added and removed | ChangeSet, AcceptPeek, and a tool call's meta |

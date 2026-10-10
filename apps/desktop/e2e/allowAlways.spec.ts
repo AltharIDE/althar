@@ -12,13 +12,36 @@ import { launch, openFirstProject, say, toConversation } from './support'
  * `git status` waits as a call; answered with Allow always for commands
  * starting `git status`, the next one runs without asking and the thread
  * says which rule let it through; the rule is on the rules screen, and
- * taken off there, the next one asks again. The lead is the fake agent,
- * which runs what follows `run `.
+ * taken off there, the next one asks again. On the home, answered with
+ * Allow always, its line stays where it was, quiet, above another task's
+ * call still waiting. The lead is the fake agent, which runs what follows
+ * `run `.
  */
 
 const openRules = async (page: Page) => {
   await page.getByRole('button', { name: 'More for this project' }).click()
   await page.getByRole('menuitem', { name: 'Project rules' }).click()
+}
+
+/** Plans a task with no review, as the person would, starts it, and opens its conversation once it is ready. */
+const startTask = async (page: Page, title: string) => {
+  await page.getByRole('button', { name: 'New task' }).click()
+  await page.getByLabel('What should change').fill(title)
+  await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
+  await page.getByRole('button', { name: /^Review:/ }).click()
+  await page.getByRole('button', { name: 'No review' }).click()
+  await page.getByRole('button', { name: 'Start the task' }).click()
+  const card = page.getByRole('article', { name: title }).last()
+  await expect(card.getByText('Ready', { exact: true })).toBeVisible()
+  await card.getByRole('button', { name: /Open task/ }).click()
+  await toConversation(page)
+}
+
+/** Back from a task to its project, with nothing in hand that Escape would answer first. */
+const backToProject = async (page: Page) => {
+  await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined))
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 }
 
 const shots = process.env.ALTHAR_SHOTS
@@ -35,15 +58,7 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     await expect(page.getByText(/Nothing yet\. A permission answered/)).toBeVisible()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
 
-    await page.getByRole('button', { name: 'New task' }).click()
-    await page.getByLabel('What should change').fill('Look at the tree')
-    await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
-    await page.getByRole('button', { name: /^Review:/ }).click()
-    await page.getByRole('button', { name: 'No review' }).click()
-    await page.getByRole('button', { name: 'Start the task' }).click()
-    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
-    await page.getByRole('button', { name: /Open task/ }).click()
-    await toConversation(page)
+    await startTask(page, 'Look at the tree')
 
     // The lead's `git status` waits for the person, who allows commands starting so always.
     await say(page, 'run git status')
@@ -68,9 +83,7 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     if (shots) await page.screenshot({ path: join(shots, 'app-allowed-by-rule.png') })
 
     // The rule is on the rules screen; taken off there, the next asks again.
-    await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined))
-    await page.keyboard.press('Escape')
-    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await backToProject(page)
     await openRules(page)
     const allowed = page.getByRole('list', { name: 'Always allowed' })
     await expect(allowed.getByRole('listitem')).toHaveText(['Commands starting “git status”'])
@@ -83,18 +96,31 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     await toConversation(page)
     await say(page, 'run git status -s')
     await expect(page.getByText('Needs your permission')).toBeVisible()
+    // Another task's lead asks for something else, and waits after it.
+    await backToProject(page)
+    await startTask(page, 'Run the tests')
+    await say(page, 'run npm test')
+    await expect(page.getByText('Needs your permission')).toBeVisible()
 
     // On the home, its card offers the same: always allow, from beside Allow once.
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
     const needs = page.getByRole('region', { name: /needs? you/ })
-    await expect(needs.getByText('git status -s', { exact: true })).toBeVisible()
+    const status = needs.getByRole('article', { name: 'Run git status -s' })
+    const tests = needs.getByRole('article', { name: 'Run npm test' })
+    await expect(status.getByText('git status -s', { exact: true })).toBeVisible()
+    await expect(tests).toBeVisible()
     if (shots) await page.screenshot({ path: join(shots, 'app-home-permission.png') })
-    await needs.getByRole('button', { name: 'More answers' }).click()
+    await status.getByRole('button', { name: 'More answers' }).click()
     await expect(page.getByRole('menuitem', { name: 'Always allow commands starting “git status”' })).toBeVisible()
     await page.waitForTimeout(400)
     if (shots) await page.screenshot({ path: join(shots, 'app-home-more-answers.png') })
     await page.getByRole('menuitem', { name: 'Always allow commands starting “git status”' }).click()
-    await expect(needs.getByText('kept in meridian’s rules')).toBeVisible()
+    // Answered, its line stays where it was, quiet, saying what was said; the other still waits under it.
+    await expect(status).toHaveAccessibleDescription('Allowed Always · kept in meridian’s rules')
+    await expect(status.getByRole('button')).toHaveCount(1)
+    await expect(tests.getByRole('button', { name: 'Allow once' })).toBeVisible()
+    await expect(needs.getByRole('article').nth(0)).toHaveAccessibleName('Run git status -s')
+    await expect(needs.getByRole('article').nth(1)).toHaveAccessibleName('Run npm test')
     await page.waitForTimeout(400)
     if (shots) await page.screenshot({ path: join(shots, 'app-home-answered-always.png') })
   } finally {

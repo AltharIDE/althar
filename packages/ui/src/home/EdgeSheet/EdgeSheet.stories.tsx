@@ -2,7 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { fn } from 'storybook/test'
 
 import { EDGE_NEEDS, EDGE_WORK, type EdgeDemoCall, edgeLineOf } from '../../fixtures/edge'
-import { AskAnswered, AskNote } from '../../primitives/Ask/Ask'
+import { PUBLISH } from '../../fixtures/home'
+import { NeedLine } from '../NeedLine/NeedLine'
 import { EdgeSheet } from './EdgeSheet'
 import s from './EdgeSheet.stories.module.css'
 
@@ -37,17 +38,29 @@ export const NothingAtAll: Story = { args: { waiting: 0, needs: [], work: { inPr
 /** Work held and stopped: the foot says how many of each, and nothing more. */
 export const HeldAndStopped: Story = { args: { work: { inProgress: 6, held: 2, stopped: 1 } } }
 
-/** A call just answered here folds to a line, as on the home. */
+/** A call just answered here stays its line, quiet, as on the home: same place, same height. */
 export const JustAnswered: Story = {
   args: {
     waiting: 1,
     needs: [
-      <AskAnswered key="h212" said="Allowed npm publish --tag next --access public">
-        <AskNote>in Halyard</AskNote>
-      </AskAnswered>,
+      <NeedLine
+        key="h212"
+        kind="Allowed"
+        project={PUBLISH.project}
+        task={PUBLISH.task}
+        title={PUBLISH.title}
+        command={PUBLISH.command}
+        answer={{ said: 'Once', note: 'in Halyard' }}
+      />,
       needs[1],
     ],
   },
+}
+
+/** Just answered, in the island's ink. */
+export const JustAnsweredInk: Story = {
+  args: { ...JustAnswered.args, tone: 'ink' },
+  decorators: [(Story) => <div className={s.ink}>{Story()}</div>],
 }
 
 /** An answer that didn't go through: the call is back, and the sheet says why first. */
