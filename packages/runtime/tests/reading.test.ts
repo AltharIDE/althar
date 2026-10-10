@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -28,7 +28,22 @@ describe('reading a document an agent wrote', () => {
       const { two, worktrees } = folders()
       const whole = yield* documentText(join(two, 'docs', 'plan.md'), worktrees)
       assert.deepStrictEqual(whole, { path: join(two, 'docs', 'plan.md'), body: '# Plan\n\nOne line.\n', bytes: 18, lines: 3 })
-      assert.strictEqual((yield* documentText('docs/plan.md', worktrees)).body, whole.body)
+      // A path from a worktree's root names the first worktree's file, as the window names it.
+      assert.instanceOf(yield* Effect.flip(documentText('docs/plan.md', worktrees)), NotFound)
+    }),
+  )
+
+  it.effect('reads a document by the one path it names, and never another repository’s file of the same name', () =>
+    Effect.gen(function* () {
+      const { one, two, worktrees } = folders()
+      mkdirSync(join(one, 'docs'))
+      writeFileSync(join(one, 'docs', 'plan.md'), '# The first repository’s plan\n')
+      assert.strictEqual((yield* documentText('docs/plan.md', worktrees)).body, '# The first repository’s plan\n')
+      // Gone from the repository it was written in: not found, rather than the other's file of the same name.
+      rmSync(join(one, 'docs', 'plan.md'))
+      assert.instanceOf(yield* Effect.flip(documentText(join(one, 'docs', 'plan.md'), worktrees)), NotFound)
+      assert.instanceOf(yield* Effect.flip(documentText('docs/plan.md', worktrees)), NotFound)
+      assert.strictEqual((yield* documentText(join(two, 'docs', 'plan.md'), worktrees)).body, '# Plan\n\nOne line.\n')
     }),
   )
 

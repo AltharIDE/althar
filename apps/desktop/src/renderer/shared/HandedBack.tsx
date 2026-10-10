@@ -28,7 +28,7 @@ export function HandedBack({ handed, threadId, touched, openFile }: HandedBackPr
     <>
       {handed.pictures.length > 0 && <Shots items={handed.pictures} />}
       {handed.documents.map((file) => (
-        <DocumentCard key={file.id} file={file} threadId={threadId} version={touched.get(file.shown) ?? ''} openFile={openFile} />
+        <DocumentCard key={file.id} file={file} threadId={threadId} version={touched.get(file.whole) ?? ''} openFile={openFile} />
       ))}
       {handed.files.map((file) => (
         <FileArtifact
@@ -56,10 +56,12 @@ function DocumentCard({
   openFile: ((path: string) => void) | undefined
 }) {
   const { client } = useServices()
-  const read = useQuery(reads(client).document(threadId, file.shown, version))
+  // Read by which file it is, so one gone is gone, not another of the same name.
+  const read = useQuery(reads(client).document(threadId, file.whole, version))
   return (
     <FileArtifact
       path={file.shown}
+      source={file.whole}
       kind={file.kind}
       loading={read.isPending}
       {...(read.data === undefined ? {} : { body: read.data.body, size: bytesText(read.data.bytes), lines: read.data.lines })}

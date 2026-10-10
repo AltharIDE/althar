@@ -14,6 +14,7 @@ import {
   outputsCaughtUp,
   ranOf,
   shownPath,
+  wholePath,
   withOutput,
 } from '../src/renderer/shared/handed'
 import { blocksOf } from '../src/renderer/shared/thread'
@@ -169,6 +170,13 @@ describe('files, as people read them', () => {
     expect([bytesText(512), bytesText(2048), bytesText(3.5 * 1024 * 1024)]).toEqual(['512 B', '2 KB', '3.5 MB'])
   })
 
+  it('knows a file by its whole path, wherever it was named from', () => {
+    expect(wholePath('docs/a.md', '/w/meridian')).toBe('/w/meridian/docs/a.md')
+    expect(wholePath('file:///t/web/a%20b.md', '/w/meridian')).toBe('/t/web/a b.md')
+    expect(wholePath('/t/web/c.md', null)).toBe('/t/web/c.md')
+    expect(wholePath('docs/a.md', null)).toBe('docs/a.md')
+  })
+
   it('opens a file in the editor by its whole path, only inside the task’s folder, where its worktrees are', () => {
     expect(editorPath('docs/a.md', '/t/meridian/task/api')).toBe('/t/meridian/task/api/docs/a.md')
     // Another of the task's repositories is beside the first, in the same folder.
@@ -188,9 +196,10 @@ describe('files, as people read them', () => {
       ],
       '/w/meridian',
     )
+    // By which file it is: its whole path.
     expect([...touched]).toEqual([
-      ['docs/a.md', 'three:running'],
-      ['b.ts', 'three:running'],
+      ['/w/meridian/docs/a.md', 'three:running'],
+      ['/w/meridian/b.ts', 'three:running'],
     ])
   })
 })

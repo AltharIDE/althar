@@ -13,7 +13,10 @@ import type { StepState } from '../../foundations/vocabulary'
 
 export interface DocRef {
   title?: string
+  /** Where it is, as the person reads it. */
   path?: string
+  /** Where the host reads it from, where that isn't its path as shown: its whole path, say. */
+  source?: string
   /** The document, as markdown. */
   body: string
 }

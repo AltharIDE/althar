@@ -43,6 +43,8 @@ export interface HandedFile {
   readonly id: string
   readonly path: string
   readonly shown: string
+  /** Its whole path: which file it is, what it is read by, and what follows its edits. */
+  readonly whole: string
   /** Its whole path, where it is in the task's folder, for the editor to open; null elsewhere. */
   readonly local: string | null
   /** What kind of file, from its name: Markdown, CSV. */
@@ -101,14 +103,22 @@ export const shownPath = (path: string, worktree: string | null) => {
 }
 
 /**
+ * A file's whole path, which is which file it is: a `file://` address as its
+ * path, and one named from the task's worktree put back under it.
+ */
+export const wholePath = (path: string, worktree: string | null): string => {
+  const local = path.startsWith('file://') ? decodeURIComponent(path.slice('file://'.length)) : path
+  return local.startsWith('/') || worktree === null ? local : `${worktree}/${local}`
+}
+
+/**
  * A file's whole path, as the editor opens it: one named from the task's
  * worktree is put back under it. Only one inside the task's folder, where
  * all its worktrees are (ADR-006), opens; null for anywhere else.
  */
 export const editorPath = (path: string, worktree: string | null): string | null => {
   if (worktree === null) return null
-  const local = path.startsWith('file://') ? decodeURIComponent(path.slice('file://'.length)) : path
-  const whole = local.startsWith('/') ? local : `${worktree}/${local}`
+  const whole = wholePath(path, worktree)
   const folder = worktree.slice(0, worktree.lastIndexOf('/'))
   return folder !== '' && whole.startsWith(`${folder}/`) ? whole : null
 }
@@ -169,6 +179,7 @@ export const handedBy = (parts: ReadonlyArray<PartHanded>, worktree: string | nu
         id: `${part.id}:${shown}`,
         path: file.path,
         shown,
+        whole: wholePath(file.path, worktree),
         local: editorPath(file.path, worktree),
         kind: kindOf(shown),
         size: file.bytes === null ? null : bytesText(file.bytes),
@@ -190,7 +201,7 @@ export const linesOf = (output: string): { readonly lines: ReadonlyArray<string>
 }
 
 /**
- * Where each file a thread names was last touched: by the tool call that last
+ * Where each file a thread names was last touched, by its whole path: by the tool call that last
  * named it, and how that call stood. A document read from where it is now is
  * read again when this changes, so a card and the panel follow its edits.
  */
@@ -199,7 +210,7 @@ export const lastTouches = (
   worktree: string | null,
 ): ReadonlyMap<string, string> => {
   const touched = new Map<string, string>()
-  for (const part of parts) for (const path of part.touches ?? []) touched.set(shownPath(path, worktree), `${part.id}:${part.state ?? ''}`)
+  for (const part of parts) for (const path of part.touches ?? []) touched.set(wholePath(path, worktree), `${part.id}:${part.state ?? ''}`)
   return touched
 }
 

@@ -172,7 +172,7 @@ describe('what an agent hands back, on a task', () => {
     withServices(<Task />, client)
     const card = await screen.findByRole('article', { name: 'notes.md' })
     expect(await within(card).findByText(/Refunds share the partner budget/)).toBeTruthy()
-    expect(client.readDocument).toHaveBeenCalledWith('th1', 'docs/notes.md')
+    expect(client.readDocument).toHaveBeenCalledWith('th1', '/w/meridian/docs/notes.md')
     await user.click(within(card).getByRole('button', { name: 'Open in editor' }))
     expect(client.openInEditor).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/w/meridian/docs/notes.md' }))
     await user.click(within(card).getByRole('button', { name: 'Read in the panel' }))
@@ -183,6 +183,41 @@ describe('what an agent hands back, on a task', () => {
     expect(client.openInEditor).toHaveBeenCalledWith(expect.objectContaining({ path: '/w/meridian/docs/notes.md' }))
     await user.click(within(panel).getByRole('button', { name: /Close the panel/ }))
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'notes.md' })).toBeNull())
+  })
+
+  it('reads a document by the whole path it was written at, in the card and the panel, and opens that one in the editor', async () => {
+    const user = userEvent.setup()
+    // A task of two repositories: the lead wrote the first one's docs/notes.md; the second has one too.
+    const two = handing({
+      task: { ...handing().task, worktree: '/t/meridian/task/api' },
+      items: [
+        items.you('Write it up'),
+        items.tool({
+          title: 'Write docs/notes.md',
+          toolKind: 'edit',
+          locations: [{ path: '/t/meridian/task/api/docs/notes.md' }],
+          files: [{ path: '/t/meridian/task/api/docs/notes.md', how: 'wrote', mediaType: null, bytes: null, title: null }],
+        }),
+        items.says('Done.'),
+      ],
+    })
+    const readDocument = vi.fn(async (_threadId: string, path: string) =>
+      path === '/t/meridian/task/api/docs/notes.md'
+        ? { path, body: '# The api’s notes\n', bytes: 18, lines: 1 }
+        : { path, body: '# The web’s notes\n', bytes: 18, lines: 1 },
+    )
+    const { client } = fakeClient({ getThread: vi.fn(async () => two), readDocument })
+    withServices(<Task />, client)
+    const card = await screen.findByRole('article', { name: 'notes.md' })
+    expect(await within(card).findByText('The api’s notes')).toBeTruthy()
+    expect(readDocument.mock.calls.map(([, path]) => path)).toEqual(['/t/meridian/task/api/docs/notes.md'])
+    // The panel reads it by the same path, again as it opens.
+    await user.click(within(card).getByRole('button', { name: 'Read in the panel' }))
+    const panel = await screen.findByRole('complementary', { name: 'notes.md' })
+    expect(within(panel).getByText('The api’s notes')).toBeTruthy()
+    expect(new Set(readDocument.mock.calls.map(([, path]) => path))).toEqual(new Set(['/t/meridian/task/api/docs/notes.md']))
+    await user.click(within(panel).getByRole('button', { name: 'Open in editor' }))
+    expect(client.openInEditor).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/t/meridian/task/api/docs/notes.md' }))
   })
 
   it('says a document couldn’t be read, in the card', async () => {

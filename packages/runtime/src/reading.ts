@@ -35,23 +35,23 @@ export const outputText = (threadId: string, itemId: string) =>
 
 /**
  * A markdown document an agent wrote, from the task's worktrees as they are
- * now: by the path the thread names it by, whole or from a worktree's root.
- * Only a markdown file inside one of them, links followed, and no larger
- * than DOCUMENT_READ.
+ * now: by its whole path, or from the first worktree's root, as the window
+ * names a file. One path is one file: a file that has gone is not found,
+ * never another of the same name in another repository. Only a markdown
+ * file inside the worktrees, links followed, and no larger than
+ * DOCUMENT_READ.
  */
 export const documentText = (path: string, worktrees: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     if (!MARKDOWN.has(extname(path).toLowerCase())) return yield* new DocumentRefused({ path, reason: 'not_markdown' })
-    const candidates = isAbsolute(path) ? [path] : worktrees.map((worktree) => join(worktree, path))
-    for (const candidate of candidates) {
-      const found = yield* Effect.promise(() => stat(candidate).catch(() => null))
-      if (found === null) continue
-      const real = yield* inside(candidate, worktrees)
-      if (real === null) return yield* new DocumentRefused({ path, reason: 'outside' })
-      if (!found.isFile()) break
-      if (found.size > DOCUMENT_READ) return yield* new DocumentRefused({ path, reason: 'too_large' })
-      const body = yield* Effect.promise(() => readFile(real, 'utf8'))
-      return { path, body, bytes: found.size, lines: countLines(body) }
-    }
-    return yield* new NotFound({ kind: 'document', id: path })
+    const [first] = worktrees
+    const whole = isAbsolute(path) ? path : first === undefined ? null : join(first, path)
+    const found = whole === null ? null : yield* Effect.promise(() => stat(whole).catch(() => null))
+    if (whole === null || found === null) return yield* new NotFound({ kind: 'document', id: path })
+    const real = yield* inside(whole, worktrees)
+    if (real === null) return yield* new DocumentRefused({ path, reason: 'outside' })
+    if (!found.isFile()) return yield* new NotFound({ kind: 'document', id: path })
+    if (found.size > DOCUMENT_READ) return yield* new DocumentRefused({ path, reason: 'too_large' })
+    const body = yield* Effect.promise(() => readFile(real, 'utf8'))
+    return { path, body, bytes: found.size, lines: countLines(body) }
   })

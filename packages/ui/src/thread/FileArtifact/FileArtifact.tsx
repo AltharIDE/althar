@@ -30,6 +30,8 @@ export type FileArtifactProps = RootProps<
   'article',
   {
     path: string
+    /** Where the host reads it from, where that isn't its path as shown: handed to the side panel with it. */
+    source?: string
     /** What kind of file: Markdown, CSV. */
     kind: string
     size?: string
@@ -56,6 +58,7 @@ export type FileArtifactProps = RootProps<
  */
 export function FileArtifact({
   path,
+  source,
   kind,
   size,
   lines,
@@ -77,7 +80,12 @@ export function FileArtifact({
   let more: ReactNode = null
   if (openDoc && readable)
     more = (
-      <button type="button" className={s.more} aria-describedby={titleId} onClick={() => openDoc({ path, body })}>
+      <button
+        type="button"
+        className={s.more}
+        aria-describedby={titleId}
+        onClick={() => openDoc({ path, ...(source === undefined ? {} : { source }), body })}
+      >
         <span className={s.pill}>
           {t.readMore}
           <Icon name="arrow" size={11} />

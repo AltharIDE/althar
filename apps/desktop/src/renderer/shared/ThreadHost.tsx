@@ -60,7 +60,9 @@ export function DocumentPanel({
   onOpen?: () => void
 }) {
   const { client } = useServices()
-  const read = useQuery({ ...reads(client).document(threadId, doc.path ?? '', version), enabled: doc.path !== undefined })
+  // Read by which file it is, where the card said; otherwise by its path.
+  const source = doc.source ?? doc.path
+  const read = useQuery({ ...reads(client).document(threadId, source ?? '', version), enabled: source !== undefined })
   return (
     <DocPanel
       doc={{ ...doc, body: read.data?.body ?? doc.body }}
