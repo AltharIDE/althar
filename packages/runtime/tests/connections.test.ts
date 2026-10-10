@@ -264,6 +264,11 @@ describe('a connection', () => {
         type: string
       }>`SELECT type FROM record_events WHERE aggregate_type = 'connection' ORDER BY sequence DESC LIMIT 1`
       assert.strictEqual(fact?.type, 'connection.reauth_required')
+      // A repository there still knows who it was, and that the sign-in stopped working.
+      assert.deepInclude((yield* connections.placeOf('git@github.com:meridian/api.git'))?.connection, {
+        id: connection.id,
+        state: 'reauth_required',
+      })
       // Signed in again, it is ready.
       refused = false
       yield* connections.connectToken({ product: 'github', token: 't2', actorId: instance.personId })
@@ -326,6 +331,23 @@ describe('a connection', () => {
       assert.strictEqual(connection.webUrl, 'https://git.meridian.dev')
       assert.isNull(yield* connections.hostOf(['https://github.com/meridian/api.git', '/a/local/path']))
       assert.deepStrictEqual((yield* connections.hostOf(['git@git.meridian.dev:meridian/api.git']))?.path, ['meridian', 'api'])
+      // Where a remote is: a hosted service Althar knows, an instance the person connected, a host it doesn't know, or none.
+      assert.deepStrictEqual(yield* connections.placeOf('https://github.com/meridian/api.git'), {
+        host: 'github.com',
+        path: ['meridian', 'api'],
+        code: { product: 'github', name: 'GitHub', hosted: true },
+        connection: null,
+      })
+      const own = yield* connections.placeOf('git@git.meridian.dev:meridian/api.git')
+      assert.deepStrictEqual(own?.code, { product: 'github', name: 'GitHub', hosted: false })
+      assert.strictEqual(own?.connection?.id, connection.id)
+      assert.deepStrictEqual(yield* connections.placeOf('git@git.example.org:team/infra.git'), {
+        host: 'git.example.org',
+        path: ['team', 'infra'],
+        code: null,
+        connection: null,
+      })
+      assert.isNull(yield* connections.placeOf('/a/local/path'))
       assert.isNull(yield* connections.resolve('https://example.com/x'))
       assert.strictEqual((yield* connections.resolve('https://git.meridian.dev/meridian/api/pull/3'))?.ref.kind, 'change')
       assert.lengthOf(yield* connections.trackers, 1)

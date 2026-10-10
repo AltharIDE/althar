@@ -198,9 +198,17 @@ the project again.
 
 - **Renaming** changes its name only. Its slug, and so the folders its tasks'
   worktrees are in, stays, and so does its mark, drawn from its id.
-- **Adding** a folder binds the repositories at it, as opening it would find
-  them: the one it is or is in, whole, or those directly inside it. One left
-  out before comes back with its role and slug.
+- **Adding** a folder, picked or dropped, binds the repositories at it, as
+  opening it would find them: the one it is or is in, whole, or those
+  directly inside it. One left out before comes back with its role and slug.
+- **Where a repository's work goes** is read from its remote (`origin`, else
+  its first; as it was added where this device has no clone): the code host
+  it is on, its path there, and whether the person is connected there, and
+  as whom, from the connections on this device. Nothing is asked of the
+  host. A host Althar doesn't know is named by its address; a repository
+  with no remote, or one that is a folder, keeps its work on this device.
+  The Repositories screen draws each folder wired to where its work goes,
+  and reads it again when a connection is made or stops working.
 - **Leaving a repository out** sets its binding's `detached_at`. New tasks
   can't require it and the coordinator stops reading it; tasks made with it
   keep their requirement and their worktree. The last binding stays, since a

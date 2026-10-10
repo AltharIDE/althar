@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,8 +10,9 @@ import { chooseFolder, launch, openFirstProject } from './support'
 
 /*
  * A project after it is made, from its bar's menu: renamed, a repository
- * added and left out, and removed from Althar, each showing in the tabs and
- * the home at once, with the person's folders left exactly as they were.
+ * added, its host connected from where its work goes, and left out, and
+ * removed from Althar, each showing in the tabs and the home at once, with
+ * the person's folders left exactly as they were.
  */
 
 const menu = async (page: Page, item: string | RegExp) => {
@@ -31,6 +33,8 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const meridian = repository(home, 'meridian')
   const web = repository(home, 'meridian-web')
+  // Its work goes to the fake GitHub, which isn't connected yet.
+  execFileSync('git', ['remote', 'add', 'origin', 'https://github.test/meridian/web.git'], { cwd: web })
   const { electronApp, page } = await launch(home)
   const tabs = page.getByRole('navigation', { name: 'Projects' })
   try {
@@ -47,20 +51,40 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await expect(page.getByRole('heading', { name: 'Refunds v2', level: 1 })).toBeVisible()
     await expect(tabs.getByRole('button', { name: /^Refunds v2/ })).toBeVisible()
 
-    // A repository added, with its role; then left out again.
+    // A repository added, with its role, and where its work goes; GitHub connected from there; then left out again.
     await menu(page, /Repositories/)
-    await expect(page.getByRole('heading', { name: 'Repositories' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Repositories', level: 1 })).toBeVisible()
     await chooseFolder(electronApp, web)
     await page.getByRole('button', { name: 'Add a folder' }).click()
-    const list = page.getByRole('list', { name: 'Repositories' })
-    await expect(list.getByText('meridian-web', { exact: true })).toBeVisible()
-    await expect(list.getByRole('combobox', { name: 'Role of meridian-web' })).toHaveText(/Frontend/)
+    const here = page.getByRole('list', { name: 'On this Mac' })
+    await expect(here.getByText('meridian-web', { exact: true })).toBeVisible()
+    await expect(here.getByRole('combobox', { name: 'Role of meridian-web' })).toHaveText(/Frontend/)
+    const github = page.getByRole('region', { name: 'GitHub' })
+    await expect(github.getByText('meridian/web')).toBeVisible()
+    await expect(github.getByText('Not connected')).toBeVisible()
+    // Its own work stays here: it has no remote.
+    await expect(page.getByRole('region', { name: 'No remote' }).getByText('meridian', { exact: true })).toBeVisible()
     await page.screenshot({ path: 'test-results/project-repositories.png', animations: 'disabled' })
-    await list.getByRole('button', { name: 'Leave out meridian-web' }).click()
-    await expect(list.getByText('meridian-web', { exact: true })).toBeHidden()
-    // The last one stays.
-    await expect(list.getByRole('button', { name: /Leave out/ })).toBeHidden()
-    await page.getByRole('button', { name: 'Back to Refunds v2' }).click()
+    await github.getByRole('button', { name: 'Connect GitHub' }).click()
+    const connecting = page.getByRole('dialog', { name: 'Code hosts and trackers' })
+    const services = connecting.getByRole('list', { name: 'Code hosts' })
+    await services.getByRole('button', { name: 'Add a token' }).click()
+    await services.getByLabel('GitHub token').fill('github_pat_e2e')
+    await services.getByRole('button', { name: 'Save' }).click()
+    await expect(services.getByText('Signed in as you')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(connecting).toHaveCount(0)
+    // The page hears it, and says who Althar is there.
+    await expect(github.getByText('Connected as you')).toBeVisible()
+    await page.screenshot({ path: 'test-results/project-repositories-connected.png', animations: 'disabled' })
+    await here.getByRole('button', { name: 'More for meridian-web' }).click()
+    await page.getByRole('menuitem', { name: /Leave out of Refunds v2/ }).click()
+    await expect(here.getByText('meridian-web', { exact: true })).toBeHidden()
+    // The last one stays: with no remote, it has nothing more to offer.
+    await expect(here.getByRole('button', { name: /More for/ })).toBeHidden()
+    // Escape goes back.
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('heading', { name: 'Refunds v2', level: 1 })).toBeVisible()
 
     // On the home, by its new name.
     await tabs.getByRole('button', { name: /^Home/ }).click()

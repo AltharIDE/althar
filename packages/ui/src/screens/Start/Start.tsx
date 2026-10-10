@@ -1,5 +1,5 @@
 import { Checkbox } from 'radix-ui'
-import { type DragEvent, useId, useRef, useState } from 'react'
+import { useId } from 'react'
 
 import { HalftoneMark } from '../../foundations/HalftoneMark/HalftoneMark'
 import { Icon } from '../../foundations/Icon/Icon'
@@ -7,6 +7,7 @@ import { Light } from '../../foundations/Light/Light'
 import { BrandChip } from '../../foundations/Marks/Marks'
 import { RuntimeState } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
+import { useDragOver } from '../../lib/dragOver'
 import { Button } from '../../primitives/Button/Button'
 import { Kbd } from '../../primitives/Kbd/Kbd'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
@@ -135,39 +136,6 @@ export const placeOn = (i: number, count: number) => {
   const at = count === 1 ? 0 : i / (count - 1)
   const angle = ((270 - span / 2 + span * at) * Math.PI) / 180
   return { x: 50 + Math.cos(angle) * RING.radius * 50, y: 50 - Math.sin(angle) * RING.radius * 50 }
-}
-
-/** A folder held over the window: whether one is, with the counting a drag's enters and leaves need. */
-function useDragOver(onDrop: StartProps['onDrop']) {
-  const [over, setOver] = useState(false)
-  const depth = useRef(0)
-  const carriesFiles = (event: DragEvent) => event.dataTransfer.types.includes('Files')
-  if (onDrop === undefined) return { over: false, handlers: {} }
-  return {
-    over,
-    handlers: {
-      onDragEnter: (event: DragEvent) => {
-        if (!carriesFiles(event)) return
-        event.preventDefault()
-        depth.current += 1
-        setOver(true)
-      },
-      onDragOver: (event: DragEvent) => {
-        if (carriesFiles(event)) event.preventDefault()
-      },
-      onDragLeave: () => {
-        depth.current = Math.max(0, depth.current - 1)
-        if (depth.current === 0) setOver(false)
-      },
-      onDrop: (event: DragEvent) => {
-        event.preventDefault()
-        depth.current = 0
-        setOver(false)
-        const files = [...event.dataTransfer.files]
-        if (files.length > 0) onDrop(files)
-      },
-    },
-  }
 }
 
 /** Before any project: the agents found on this computer, round the mark and in rows, and picking the first project's repositories. */

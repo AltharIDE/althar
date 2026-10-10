@@ -1,16 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import {
-  type Account,
-  ChangeRequest,
-  Comment,
-  ConnectorFailed,
-  hostedOf,
-  parseRemote,
-  type Person,
-  type Product,
-  type Repository,
-} from '@althar/connectors'
+import { type Account, ChangeRequest, Comment, ConnectorFailed, type Person, type Product, type Repository } from '@althar/connectors'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore } from 'effect'
@@ -467,19 +457,13 @@ export class Changes extends Context.Service<
       /** The host a repository's remotes are on, and whether Althar is connected to it; null where they name none it knows. */
       const hostOfRemotes = (remotes: ReadonlyArray<string>): Effect.Effect<Host | null, never, Store> =>
         Effect.gen(function* () {
-          const connected = yield* connections.hostOf(remotes)
-          if (connected !== null) {
-            const { info } = yield* connections.adapters(connected.connectionId)
-            return { product: info.product, name: info.name, webUrl: info.webUrl, connected: true }
-          }
-          const hosted = hostedOf(connections.products)
-          for (const remote of remotes) {
-            const ref = parseRemote(remote)
-            const product = ref === null ? undefined : hosted.get(ref.host)
-            const info = product === undefined ? undefined : connections.products.find((candidate) => candidate.product === product)
-            if (info !== undefined && info.host && ref !== null)
-              return { product: info.product, name: info.name, webUrl: `https://${ref.host}`, connected: false }
-          }
+          const places = yield* Effect.forEach(remotes, (remote) => connections.placeOf(remote))
+          for (const place of places)
+            if (place?.code != null && place.connection?.state === 'ready')
+              return { product: place.code.product, name: place.code.name, webUrl: place.connection.webUrl, connected: true }
+          for (const place of places)
+            if (place?.code != null)
+              return { product: place.code.product, name: place.code.name, webUrl: `https://${place.host}`, connected: false }
           return null
         }).pipe(Effect.orElseSucceed(() => null))
 

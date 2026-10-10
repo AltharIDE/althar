@@ -136,6 +136,27 @@ const BROWSER_WAIT = Duration.minutes(10)
 
 type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Secrets | Connectors
 
+/** Where a repository's remote is, as Althar reads it without asking the host. */
+export interface RemotePlace {
+  /** The host's name: github.com. */
+  readonly host: string
+  /** The repository's path there. */
+  readonly path: ReadonlyArray<string>
+  /** The code host there, where Althar knows one: by its hosted service, or an instance the person connected; and whether it is the hosted service. */
+  readonly code: { readonly product: Product; readonly name: string; readonly hosted: boolean } | null
+  /** The connection to it there: one signed in, else one that needs signing in again; null where there is none. */
+  readonly connection: ConnectionInfo | null
+}
+
+/** An address's host name, lowercase; null for one that isn't an address. */
+const hostnameOf = (url: string) => {
+  try {
+    return new URL(url).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
 export interface Adapters {
   readonly host?: CodeHost
   readonly tracker?: Tracker
@@ -169,6 +190,12 @@ export class Connections extends Context.Service<
     hostOf(
       remotes: ReadonlyArray<string>,
     ): Effect.Effect<{ readonly connectionId: string; readonly host: CodeHost; readonly path: ReadonlyArray<string> } | null, unknown>
+    /**
+     * Where a remote is: the host, the repository's path there, the code host
+     * Althar knows there, and the connection that reaches it, signed in or
+     * needing it again; null for a remote that names no host, such as a folder.
+     */
+    placeOf(remote: string): Effect.Effect<RemotePlace | null, unknown>
     /** What a link points at, and the connection that reaches it; null for a link no connection reaches. */
     resolve(link: string): Effect.Effect<({ readonly connectionId: string; readonly ref: LinkRef } & Adapters) | null, unknown>
     /** Every ready tracker: each connection's, for listing someone's issues. */
@@ -615,6 +642,25 @@ export class Connections extends Context.Service<
           return null
         })
 
+      const placeOf = (remote: string) =>
+        Effect.gen(function* () {
+          const ref = parseRemote(remote)
+          if (ref === null) return null
+          const here = (yield* rows).filter((row) => hostnameOf(row.webUrl) === ref.host && infoOf(row.product)?.host === true)
+          const row = here.find((candidate) => candidate.state === 'ready') ?? here[0]
+          const product = row?.product ?? hostedOf(connectors.products).get(ref.host)
+          const info = product === undefined ? undefined : infoOf(product)
+          return {
+            host: ref.host,
+            path: ref.path,
+            code:
+              info === undefined || !info.host
+                ? null
+                : { product: info.product, name: info.name, hosted: info.hosted !== null && hostnameOf(info.hosted.webUrl) === ref.host },
+            connection: row === undefined ? null : toInfo(row),
+          } satisfies RemotePlace
+        })
+
       const resolve = (link: string) =>
         Effect.gen(function* () {
           const ref = parseLink(link, yield* knownHosts)
@@ -666,6 +712,7 @@ export class Connections extends Context.Service<
           ),
         adapters: (connectionId) => provide(Effect.map(rowOf(connectionId), (row) => ({ ...adaptersOf(row), info: toInfo(row) }))),
         hostOf: (remotes) => provide(hostOf(remotes)),
+        placeOf: (remote) => provide(placeOf(remote)),
         resolve: (link) => provide(resolve(link)),
         trackers: provide(
           Effect.map(rows, (all) =>

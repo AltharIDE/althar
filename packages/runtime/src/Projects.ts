@@ -189,7 +189,7 @@ export interface ProjectRepository {
   /** The folder inside it the project is about, if any. */
   readonly folder: string | null
   readonly branch: string | null
-  /** Its first remote, without credentials. */
+  /** Where its work goes: its `origin`, else its first remote, without credentials, as its clone here has them, or as it was added. */
   readonly remote: string | null
   readonly role: RepositoryRole
   /** The fork its remotes make it, with where its tasks open pull requests: as before, on the fork, until the person says. */
@@ -716,9 +716,10 @@ export class Projects extends Context.Service<
             folder: string | null
             role: string
             changeTarget: ChangeTarget | null
+            remotes: string
             tasks: number
           }>`
-            SELECT b.id, b.display_name AS name, l.path, b.folder, b.role, b.change_target,
+            SELECT b.id, b.display_name AS name, l.path, b.folder, b.role, b.change_target, b.remote_fingerprints AS remotes,
               (SELECT count(DISTINCT w.task_id) FROM workspaces w JOIN tasks k ON k.id = w.task_id
                 WHERE w.binding_id = b.id AND k.state NOT IN ('done', 'abandoned')) AS tasks
             FROM repository_bindings b
@@ -727,15 +728,21 @@ export class Projects extends Context.Service<
             ORDER BY b.created_at, b.rowid`
           return yield* Effect.forEach(rows, (row) =>
             Effect.gen(function* () {
-              const here = row.path === null ? null : yield* describe(row.path, row.folder)
-              const fork = yield* forkAt(row.path)
+              // Its remotes as its clone here has them; where there is none, as it was added.
+              const named = row.path === null ? [] : yield* namedRemotes(row.path).pipe(Effect.orElseSucceed(() => []))
+              const added = Option.getOrElse(
+                Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(row.remotes),
+                () => [],
+              )
+              const fork = forkOf(named)
               return {
                 id: row.id,
                 name: row.name,
                 path: row.path,
                 folder: row.folder,
-                branch: here?.branch ?? null,
-                remote: here?.remote ?? null,
+                branch: row.path === null ? null : ((yield* currentBranch(row.path)) ?? null),
+                remote:
+                  (named.find((remote) => remote.name === 'origin') ?? named[0])?.url ?? (row.path === null ? (added[0] ?? null) : null),
                 role: Schema.is(RepositoryRole)(row.role) ? row.role : 'other',
                 fork:
                   fork === null

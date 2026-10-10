@@ -989,7 +989,16 @@ describe('a project’s menu, through the API', () => {
         )
         const docs = again[2]
         assert.deepStrictEqual(docs?.fork, { fork: 'you/refund-docs', upstream: 'meridian/refund-docs', target: 'fork' })
-        assert.strictEqual(docs?.remote, 'git@github.com:you/refund-docs.git')
+        // Its work goes to GitHub, which Althar knows but isn't connected to; one with no remote stays here.
+        assert.deepStrictEqual(docs?.host, {
+          product: 'github',
+          name: 'GitHub',
+          instance: null,
+          path: 'you/refund-docs',
+          url: 'https://github.com/you/refund-docs',
+          account: null,
+        })
+        assert.isNull(again[0]?.host)
         yield* client.SetRepository({
           commandId: commandId(),
           projectId: project.id,

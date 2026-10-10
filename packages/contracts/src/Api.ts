@@ -191,6 +191,31 @@ export type RepositoryRole = typeof RepositoryRole.Type
 export const ChangeTarget = Schema.Literals(['upstream', 'fork'])
 export type ChangeTarget = typeof ChangeTarget.Type
 
+/** A code host or tracker Althar connects to. Cloud and Data Center are separate products. */
+export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
+export type Product = typeof Product.Type
+
+/**
+ * Where a repository's work goes: the code host its remote is on, its path
+ * there, and who Althar reaches it as. A host Althar doesn't know is named
+ * by its address alone.
+ */
+export const RepositoryHost = Schema.Struct({
+  /** The code host, where Althar knows it; null for one it doesn't. */
+  product: Schema.NullOr(Product),
+  /** As the page says it: GitHub; or, for a host Althar doesn't know, its address, git.example.com. */
+  name: Schema.String,
+  /** A company's own server, by its address, where the host isn't the hosted service: gitlab.example.com. */
+  instance: Schema.NullOr(Schema.String),
+  /** Its path there: meridian/app. A fork's is the fork's. */
+  path: Schema.String,
+  /** Its page there; null on a host Althar doesn't know. */
+  url: Schema.NullOr(Schema.String),
+  /** Who Althar is signed in as there, and whether that sign-in still works; null where it isn't connected. */
+  account: Schema.NullOr(Schema.Struct({ login: Schema.String, state: Schema.Literals(['ready', 'reauth_required']) })),
+})
+export type RepositoryHost = typeof RepositoryHost.Type
+
 /** One of a project's repositories, as this Mac has it. */
 export const ProjectRepository = Schema.Struct({
   id: Schema.String,
@@ -199,9 +224,10 @@ export const ProjectRepository = Schema.Struct({
   path: Schema.NullOr(Schema.String),
   /** The folder inside it the project is about, such as one package of a monorepo; null for all of it. */
   folder: Schema.NullOr(Schema.String),
+  /** The branch checked out there. */
   branch: Schema.NullOr(Schema.String),
-  /** Its first remote, without any password in it. */
-  remote: Schema.NullOr(Schema.String),
+  /** Where its work goes, from its `origin` (else its first remote); null with no remote, or one that is a folder. */
+  host: Schema.NullOr(RepositoryHost),
   role: RepositoryRole,
   /** The fork its remotes make it (an `upstream` beside `origin`), by each one's path on its host, and where its pull requests open. */
   fork: Schema.NullOr(Schema.Struct({ fork: Schema.String, upstream: Schema.String, target: ChangeTarget })),
@@ -329,10 +355,6 @@ export const TaskList = Schema.Struct({ cursor: Cursor, tasks: Schema.Array(Task
 export type TaskList = typeof TaskList.Type
 
 /* ---- Code hosts and trackers (docs/architecture/06) ---- */
-
-/** A code host or tracker Althar connects to. Cloud and Data Center are separate products. */
-export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
-export type Product = typeof Product.Type
 
 /** A person's sign-in to a code host or tracker, on this Mac. */
 export const ConnectionSummary = Schema.Struct({

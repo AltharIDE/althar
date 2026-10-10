@@ -49,3 +49,9 @@
     box-shadow: none;
   }
 }
+
+/* Opened over a project's view or its repositories: the services' two columns, with room to sign one in. */
+.dialog {
+  top: 10vh;
+  max-height: 80vh;
+}

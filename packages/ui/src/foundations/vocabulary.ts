@@ -429,6 +429,18 @@ export enum ChangeTarget {
   Fork = 'fork',
 }
 
+/** Whether Althar reaches the code host a repository's work goes to, as the person's sign-in there stands. */
+export enum HostReach {
+  /** Signed in: Althar opens the pull requests there, and brings their checks and reviews back. */
+  Connected = 'connected',
+  /** A host Althar connects to, not connected: branches push with the person's own git. */
+  NotConnected = 'not-connected',
+  /** Connected once; its sign-in stopped working, and it needs signing in again. */
+  SignInAgain = 'sign-in-again',
+  /** A host Althar doesn't know, so it can't be connected: branches push with the person's own git. */
+  Unknown = 'unknown',
+}
+
 /** A way an agent's account signs in. */
 export enum SignInWay {
   /** The agent's own sign-in, opened in the browser on this machine, which comes back to it by itself. */

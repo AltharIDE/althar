@@ -1,13 +1,14 @@
 import { useState } from 'react'
 
 import { Brand } from '../foundations/brands/brands'
-import { RuntimeState, SourceOrigin } from '../foundations/vocabulary'
+import { ChangeTarget, HostReach, RepositoryRole, RuntimeState, SourceOrigin } from '../foundations/vocabulary'
 import type { SelectOption } from '../primitives/Select/Select'
 import type { AccountEntry, FoundFolder } from '../setup/Accounts/Accounts'
 import type { AgentTab } from '../setup/AgentTabs/AgentTabs'
 import type { ServiceConnection, ServiceOption } from '../setup/Connections/Connections'
 import type { AgentGlance, MarkGlance } from '../setup/ControlCenter/ControlCenter'
 import type { SwitchedModel } from '../setup/ModelSwitches/ModelSwitches'
+import type { MapHost, MapRepository } from '../setup/RepositoryMap/RepositoryMap'
 import type { RuntimeEntry } from '../setup/Runtimes/Runtimes'
 import type { SourceEntry } from '../setup/SourceMap/SourceMap'
 
@@ -322,3 +323,53 @@ export const CODEX_MODELS: SwitchedModel[] = [
 
 /** The line each commit gets while Althar is co-author: its GitHub account's private address, so GitHub shows its picture. */
 export const CO_AUTHOR_TRAILER = 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>'
+
+/* Meridian's repositories after it is made: two on GitHub, connected, and its infrastructure on GitLab, which isn't. */
+export const MAP_HOSTS: MapHost[] = [
+  { id: 'github', name: 'GitHub', brand: Brand.GitHub, reach: HostReach.Connected, account: 'balazs' },
+  { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab, reach: HostReach.NotConnected },
+]
+
+export const MAP_MERIDIAN: MapRepository[] = [
+  {
+    id: 'app',
+    name: 'meridian-app',
+    where: '~/code/meridian-app',
+    branch: 'main',
+    role: RepositoryRole.Frontend,
+    tasks: 2,
+    remote: { host: 'github', path: 'meridian/app', href: 'https://github.com/meridian/app' },
+  },
+  {
+    id: 'api',
+    name: 'meridian-api',
+    where: '~/code/meridian-api',
+    branch: 'refunds-v2',
+    role: RepositoryRole.Service,
+    tasks: 1,
+    remote: { host: 'github', path: 'meridian/api', href: 'https://github.com/meridian/api' },
+  },
+  {
+    id: 'infra',
+    name: 'meridian-infra',
+    where: '~/code/meridian-infra',
+    branch: 'trunk',
+    role: RepositoryRole.Infrastructure,
+    tasks: 0,
+    remote: { host: 'gitlab', path: 'meridian-ops/infra', href: 'https://gitlab.com/meridian-ops/infra' },
+  },
+]
+
+/* Halyard's one repository: a fork, pushing to yours, its pull requests opening on theirs. */
+export const MAP_HALYARD: MapRepository[] = [
+  {
+    id: 'halyard',
+    name: 'halyard-api',
+    where: '~/code/halyard-api',
+    branch: 'main',
+    role: RepositoryRole.Service,
+    tasks: 1,
+    remote: { host: 'github', path: 'balazs/halyard-api', href: 'https://github.com/balazs/halyard-api' },
+    fork: { upstream: 'halyard/api', target: ChangeTarget.Upstream },
+  },
+]

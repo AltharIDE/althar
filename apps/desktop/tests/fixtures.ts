@@ -143,7 +143,7 @@ export const models: ReadonlyArray<AgentModels> = [
   { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], blocked: [], probing: true },
 ]
 
-/** A project's repositories as this Mac has them: one plain, one a fork. */
+/** A project's repositories as this Mac has them: one plain and one a fork, on GitHub as you, and one on GitLab, not connected. */
 export const repositories: ReadonlyArray<ProjectRepository> = [
   {
     id: 'repo_api',
@@ -151,7 +151,14 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     path: '/Users/me/code/meridian-api',
     folder: null,
     branch: 'main',
-    remote: 'git@github.com:meridian/api.git',
+    host: {
+      product: 'github',
+      name: 'GitHub',
+      instance: null,
+      path: 'meridian/api',
+      url: 'https://github.com/meridian/api',
+      account: { login: 'you', state: 'ready' },
+    },
     role: 'service',
     fork: null,
     tasks: 1,
@@ -162,9 +169,34 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     path: '/Users/me/code/meridian-web',
     folder: null,
     branch: 'main',
-    remote: 'git@github.com:you/meridian-web.git',
+    host: {
+      product: 'github',
+      name: 'GitHub',
+      instance: null,
+      path: 'you/meridian-web',
+      url: 'https://github.com/you/meridian-web',
+      account: { login: 'you', state: 'ready' },
+    },
     role: 'frontend',
     fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'fork' },
+    tasks: 0,
+  },
+  {
+    id: 'repo_infra',
+    name: 'meridian-infra',
+    path: '/Users/me/code/meridian-infra',
+    folder: null,
+    branch: 'trunk',
+    host: {
+      product: 'gitlab',
+      name: 'GitLab',
+      instance: null,
+      path: 'meridian-ops/infra',
+      url: 'https://gitlab.com/meridian-ops/infra',
+      account: null,
+    },
+    role: 'infrastructure',
+    fork: null,
     tasks: 0,
   },
 ]

@@ -134,7 +134,7 @@ describe('the window’s watch', () => {
     expect(marks(changed('thread_item', 'i1', 'th9', 'p1'))).toBe(false)
   })
 
-  it('reads a project’s repositories again only while they show, and marks its threads when it is renamed', async () => {
+  it('reads a project’s repositories again only while they show, as a connection changes too, and marks its threads when it is renamed', async () => {
     const { client, cache, emit, read } = opened()
     // A task on screen reads its project's new name at once.
     const onScreen = new QueryObserver(cache, read.thread('th1'))
@@ -160,11 +160,15 @@ describe('the window’s watch', () => {
     await settle()
     expect(cache.getQueryState(keys.thread('th1'))?.isInvalidated).toBe(false)
     expect(client.getRepositories).toHaveBeenCalledTimes(2)
+    // A code host connected, which no project names, says where any project's work goes.
+    emit(changed('connection', 'c1', null, null))
+    await settle()
+    expect(client.getRepositories).toHaveBeenCalledTimes(3)
     stop()
     // Off screen, a task made in it marks them for the next visit.
     emit(changed('task', 't1', 'th1', 'p1'))
     await settle()
-    expect(client.getRepositories).toHaveBeenCalledTimes(2)
+    expect(client.getRepositories).toHaveBeenCalledTimes(3)
     expect(cache.getQueryState(keys.repositories('p1'))?.isInvalidated).toBe(true)
   })
 
