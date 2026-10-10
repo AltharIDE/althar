@@ -1,0 +1,100 @@
+/* Three steps on one stage in Althar's light: the stage stays while the page scrolls under it. */
+
+.trio { position: relative; height: calc(var(--n) * 120svh); margin-top: 120px; }
+.anchor { position: absolute; left: 0; width: 1px; height: 1px; scroll-margin-top: 0; }
+
+.sticky { position: sticky; top: 0; height: 100svh; padding: 76px 16px 16px; }
+.panel { position: relative; isolation: isolate; height: 100%; overflow: hidden; border-radius: 30px; background: #efede7; }
+.light {
+  position: absolute; left: 0; right: 0; bottom: -2%; height: 62%; z-index: -1; pointer-events: none; overflow: hidden;
+  /* Its foot fades into the panel's floor, so the light never ends on the panel's edge. */
+  -webkit-mask-image: linear-gradient(to top, transparent 3%, #000 calc(3% + 110px));
+  mask-image: linear-gradient(to top, transparent 3%, #000 calc(3% + 110px));
+}
+
+/* The steps stand in one place; the one the scroll is on shows. */
+.steps { display: grid; height: 100%; --tx: 0; --ty: 0; }
+.step { grid-area: 1 / 1; display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; padding: 48px 150px 36px; pointer-events: none; }
+.now { pointer-events: auto; }
+
+.head { display: grid; justify-items: center; gap: 14px; max-width: 900px; margin: 0 auto; text-align: center; }
+.title { font-size: clamp(34px, 4.2vw, 64px); }
+.lead { max-width: 620px; font-size: 17px; }
+
+.step .head { transition: opacity 500ms ease, transform 700ms cubic-bezier(0.22, 1, 0.36, 1), filter 500ms ease; }
+.next .head { opacity: 0; transform: translateY(26px); filter: blur(8px); }
+.past .head { opacity: 0; transform: translateY(-26px); filter: blur(8px); }
+.now .head { transition-delay: 160ms; }
+
+/* The piece: it floats in from below, turned back, stands slightly turned, and floats away up. */
+.stage {
+  min-height: 0; margin-top: 36px;
+  transition: opacity 700ms ease, transform 1000ms cubic-bezier(0.22, 1, 0.36, 1), filter 700ms ease;
+}
+.next .stage { opacity: 0; transform: translateY(16vh) scale(0.94); filter: blur(6px); }
+.past .stage { opacity: 0; transform: translateY(-14vh) scale(0.96); filter: blur(6px); }
+.now .stage { transition-delay: 80ms; }
+
+.fit { display: flex; justify-content: center; align-items: flex-start; width: 100%; height: 100%; }
+.fitInner { flex: none; transform-origin: 50% 0; perspective: 2000px; }
+.tilt {
+  transform-style: preserve-3d;
+  transition: transform 1000ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform: rotateX(calc(7deg - var(--ty) * 2deg)) rotateY(calc(var(--tx) * 3deg));
+  animation: float 9s ease-in-out infinite;
+}
+.next .tilt { transform: rotateX(30deg); }
+.past .tilt { transform: rotateX(-18deg); }
+@keyframes float { 50% { translate: 0 -8px; } }
+
+/* Each piece, as a slab: its edge showing below and to the side, its shadow far under it. */
+.trio .tilt > * {
+  margin: 0;
+  max-width: none;
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 0 0 1px rgba(20, 20, 40, 0.05),
+    0 1px 0 #dfe1f1, 0 2px 0 #d6d9ee, 0 3px 0 #ced1ea, 0 4px 0 #c6cae6, 0 5px 0 #bec2e2, 0 6px 0 #b4b9de,
+    0 40px 80px rgba(6, 10, 70, 0.2),
+    0 80px 140px rgba(6, 10, 70, 0.1);
+}
+.reviewCard { padding: 10px; border-radius: 16px; background: var(--n-1); }
+
+/* The steps down the side: where you are, and a way to each. */
+.index { position: absolute; left: 34px; top: 50%; display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; transform: translateY(-50%); }
+.indexItem {
+  display: inline-flex; align-items: center; gap: 10px; padding: 6px 0; border: 0; background: none;
+  font: 500 14px var(--font); color: var(--t-3); cursor: pointer; transition: color 300ms ease;
+}
+.indexItem span { font: 500 11px var(--mono); color: var(--t-4); transition: color 300ms ease; }
+.indexItem:hover { color: var(--t-1); }
+.indexOn { color: var(--t-1); }
+.indexOn span { color: var(--live); }
+
+@media (prefers-reduced-motion: reduce) {
+  .step .head, .stage, .tilt { transition-duration: 1ms; }
+  .tilt { animation: none; }
+}
+@media (max-width: 1200px) {
+  .step { padding: 40px 48px 70px; }
+  .index { left: 50%; top: auto; bottom: 18px; display: flex; gap: 22px; transform: translateX(-50%); }
+}
+
+/* ---- a phone: the three one under the other, in the same light ---- */
+.stacked { height: auto; margin: 96px 12px 0; padding: 56px 0 170px; border-radius: 24px; background: #efede7; overflow: hidden; isolation: isolate; }
+.stackedStep { padding: 0 var(--gut); }
+.stackedStep + .stackedStep { margin-top: 96px; }
+.stackedPiece { margin-top: 32px; }
+.stackedPiece > div { margin-left: 0; margin-right: 0; }
+/* The light, rising at the panel's foot under the last piece, as the stage has it: its top fades, and its foot fades into the floor. */
+.foot {
+  /* Tall, behind the last piece, so what shows under it is the columns standing, not their tops. */
+  position: absolute; left: 0; right: 0; bottom: 0; height: 560px; z-index: -1; overflow: hidden; pointer-events: none;
+  -webkit-mask-image: linear-gradient(to top, transparent 2%, #000 20%, #000 72%, transparent);
+  mask-image: linear-gradient(to top, transparent 2%, #000 20%, #000 72%, transparent);
+}
+.short { display: none; }
+@media (max-width: 700px) {
+  .long { display: none; }
+  .short { display: inline; }
+}

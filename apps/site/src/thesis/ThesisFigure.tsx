@@ -365,9 +365,6 @@ export function ThesisFigure({ source }: { source: string }) {
     <figure className={s.thesisFigure} data-kind={model.kind} data-variant={model.variant}>
       <div className={s.figureStage}>
         <FigureBody model={model} />
-        <figcaption className={s.figureCaption}>
-          Figure <i aria-hidden="true" />
-        </figcaption>
       </div>
       <pre className={s.figureSource}>Diagram source: {source}</pre>
     </figure>

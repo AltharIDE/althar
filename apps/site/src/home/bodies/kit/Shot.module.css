@@ -1,0 +1,5 @@
+.shot { position: relative; width: 100%; display: flex; justify-content: center; }
+.frame { position: relative; overflow: hidden; max-width: 100%; }
+/* Laid out at its design size, scaled from its top left. */
+.stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; user-select: none; }
+.start { justify-content: flex-start; }

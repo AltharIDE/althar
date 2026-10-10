@@ -1,0 +1,13 @@
+/* What every footer carries: the mark and name, and the links in two groups. */
+
+.signature { display: inline-flex; align-items: center; gap: 12px; color: inherit; text-decoration: none; font-weight: 650; font-size: 22px; letter-spacing: -0.02em; }
+
+.links { display: flex; gap: 72px; }
+.links p { margin: 0 0 14px; font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.6; }
+.links ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.links a { color: inherit; text-decoration: none; font-size: 15px; transition: opacity 200ms ease; }
+.links a:hover { opacity: 0.6; }
+
+@media (max-width: 640px) {
+  .links { gap: 48px; }
+}

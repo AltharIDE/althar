@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, type ComponentType } from 'react'
 
 import { pageMeta } from './content/pages'
+import { Docs } from './docs/Docs'
 import { Home } from './home/Home'
 import { Shifts } from './shifts/Shifts'
 import { Wallpaper } from './wallpaper/Wallpaper'
@@ -13,6 +14,7 @@ const PAGES: Record<string, ComponentType> = {
   '/shifts': Shifts,
   '/thesis': Thesis,
   '/wallpaper': Wallpaper,
+  '/docs': Docs,
   /** The earlier, enterprise-facing page: kept for the company version, linked from nowhere. */
   '/enterprise': EnterpriseHome,
 }
