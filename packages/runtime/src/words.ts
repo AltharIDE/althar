@@ -179,6 +179,9 @@ export const words = (
         return "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again."
       case 'ConnectorFailed':
         return hostSaid(productOf(text(error, 'product')), text(error, 'reason'), text(error, 'message'))
+      // The keychain's own words: the main process says why it isn't available, and what to do on Linux.
+      case 'SecretsUnavailable':
+        return text(error, 'reason')
       default:
         return agentSaid(error) ?? "Althar's runtime couldn't do that. Its log has the details."
     }

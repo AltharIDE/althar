@@ -7,24 +7,24 @@
 
 ## 2. Ablak-chrome
 
-- [ ] 2.1 Main: `Menu.setApplicationMenu(null)` nem-darwinon, az app indulásakor; ellenőrzés: új unit teszt a döntés függvényére, és Linuxon futtatva nincs menüsáv
-- [ ] 2.2 Main: a `windowOptions(platform)` tiszta függvény kiemelése (frame, titleBarStyle, trafficLightPosition, icon, backgroundColor), és a `BrowserWindow` ezt használja; ellenőrzés: unit tesztek darwinra és linuxra (frame:false, hiddenInset csak darwinon)
-- [ ] 2.3 Main: `app.setName('Althar')` és a Linux `icon` beállítása a `resources/icons/cobalt.png`-re; ellenőrzés: X11 alatt futtatva az ablak ikonja Althar, nem generikus
-- [ ] 2.4 Preload: `althar.platform` (a preload `process.platform`-ja) és `althar.window(action: 'close' | 'minimize' | 'toggle-maximize')` átadása; ellenőrzés: a preload teszt (ha van) vagy a 2.6 e2e igazolja a csatorna működését
-- [ ] 2.5 Main: `ipcMain.on('althar:window', …)` bekötése a sender ablakára (close/minimize/toggle-maximize); ellenőrzés: e2e vagy unit teszt a műveletek célba érésére
-- [ ] 2.6 UI kit: a `ProjectTabs` `drawn` módja valódi gombokat rajzol (`onCloseWindow`, `onMinimize`, `onToggleMaximize` callbackekkel), accessible name, fókuszgyűrű, hover; a macOS `space` mód változatlan; ellenőrzés: új komponens tesztek (render, callbackek, billentyűzet, a11y) zölden, Storybook story frissítve
-- [ ] 2.7 Renderer: a `TabsFrame` a platform szerint adja a `lights` értéket és beköti a window-callbackeket a preload bridge-re; dupla kattintás a sávon `toggle-maximize`; ellenőrzés: teszt a platform-váltásra és a callbackekre
-- [ ] 2.8 E2E: Linuxon (CI, xvfb) nincs menüsáv, a saját gombok megjelennek és működnek (minimalizálás, maximalizálás oda-vissza, bezárás), a macOS viselkedést nem érinti; ellenőrzés: `bun run test:e2e` zölden fut
+- [x] 2.1 Main: `Menu.setApplicationMenu(null)` nem-darwinon, az app indulásakor; ellenőrzés: új unit teszt a döntés függvényére, és Linuxon futtatva nincs menüsáv
+- [x] 2.2 Main: a `windowOptions(platform)` tiszta függvény kiemelése (frame, titleBarStyle, trafficLightPosition, icon, backgroundColor), és a `BrowserWindow` ezt használja; ellenőrzés: unit tesztek darwinra és linuxra (frame:false, hiddenInset csak darwinon)
+- [x] 2.3 Main: `app.setName('Althar')` és a Linux `icon` beállítása a `resources/icons/cobalt.png`-re; ellenőrzés: X11 alatt futtatva az ablak ikonja Althar, nem generikus
+- [x] 2.4 Preload: `althar.platform` (a preload `process.platform`-ja) és `althar.window(action: 'close' | 'minimize' | 'toggle-maximize')` átadása; ellenőrzés: a preload teszt (ha van) vagy a 2.6 e2e igazolja a csatorna működését
+- [x] 2.5 Main: `ipcMain.on('althar:window', …)` bekötése a sender ablakára (close/minimize/toggle-maximize); ellenőrzés: e2e vagy unit teszt a műveletek célba érésére
+- [x] 2.6 UI kit: a `ProjectTabs` `drawn` módja valódi gombokat rajzol (`onCloseWindow`, `onMinimize`, `onToggleMaximize` callbackekkel), accessible name, fókuszgyűrű, hover; a macOS `space` mód változatlan; ellenőrzés: új komponens tesztek (render, callbackek, billentyűzet, a11y) zölden, Storybook story frissítve
+- [x] 2.7 Renderer: a `TabsFrame` a platform szerint adja a `lights` értéket és beköti a window-callbackeket a preload bridge-re; a dupla kattintás a sávon natív viselkedés (spike-ban mérve: KDE Wayland és XWayland alatt maximalizál, app-szintű kezelő nem kell); ellenőrzés: teszt a platform-váltásra és a callbackekre
+- [x] 2.8 E2E: Linuxon (CI, xvfb) nincs menüsáv, a saját gombok megjelennek és működnek (minimalizálás, maximalizálás oda-vissza, bezárás), a macOS viselkedést nem érinti; ellenőrzés: `bun run test:e2e` zölden fut
 
 ## 3. App-identitás Linuxon
 
-- [ ] 3.1 A futásidejű WM class egyeztetése a `.desktop` `StartupWMClass`-jával (productName alapján), és szükség esetén korrekció; ellenőrzés: telepített csomaggal KDE Wayland alatt a taszkbár az Althar ikont és nevet mutatja, az ablak a helyes apphoz társul
+- [x] 3.1 A futásidejű WM class egyeztetése a `.desktop` `StartupWMClass`-jával (productName alapján), és szükség esetén korrekció; ellenőrzés: telepített csomaggal KDE Wayland alatt a taszkbár az Althar ikont és nevet mutatja, az ablak a helyes apphoz társul (KDE + XFCE taszkbár igazolva, WM_CLASS=althar)
 - [ ] 3.2 A fejlesztői futtatás identitásának dokumentálása (Waylanden futásidőben nincs ikon); ellenőrzés: README/DEVELOPMENT bekezdés megvan
 
 ## 4. Linux csomagolás (AppImage, deb, rpm)
 
-- [ ] 4.1 `scripts/package.ts` platform-tudatossá tétele: a macOS-ág (icns, codesign, mac-arm64 útvonal) darwinra kerül, linuxra `AppImage`, `deb`, `rpm` targetek, ikon és kategória; ellenőrzés: Linuxon `bun run package` lefut és mindhárom artefaktum létrejön, macOS-en a script változatlan eredményt ad (száraz futtatás/ellenőrzés)
-- [ ] 4.2 Füstteszt: a deb/rpm telepíthető, az AppImage futtatható, az app projektet nyit és a fake agentes e2e végigmegy; ellenőrzés: kézi/CI füstteszt leírása és eredménye
+- [x] 4.1 `scripts/package.ts` platform-tudatossá tétele: a macOS-ág (icns, codesign, mac-arm64 útvonal) darwinra kerül, linuxra `AppImage`, `deb`, `rpm` targetek, ikon és kategória; ellenőrzés: Linuxon `bun run package` lefut és mindhárom artefaktum létrejön, macOS-en a script változatlan eredményt ad (száraz futtatás/ellenőrzés)
+- [x] 4.2 Füstteszt: a deb/rpm telepíthető, az AppImage futtatható, az app projektet nyit és a fake agentes e2e végigmegy; ellenőrzés: kézi/CI füstteszt leírása és eredménye (scripts/x11-smoke.sh, Debian 13 VM: 13/13 zöld; rpm kézzel KDE-n, AppImage futtatva)
 - [ ] 4.3 Csomag-ellenőrzés: ikonok az ikon-témában, `.desktop` `Name`/`Exec`/`Icon`/`StartupWMClass`, indítás GNOME és KDE alatt; ellenőrzés: checklist kitöltve, minden pont zöld
 
 ## 5. Flatpak
@@ -35,14 +35,14 @@
 
 ## 6. Keyring
 
-- [ ] 6.1 A main a `safeStorage.getSelectedStorageBackend()`-del elutasítja a `basic_text` backandet (hangos hiba a meglévő üzenettel); ellenőrzés: unit teszt a döntésre + kézi ellenőrzés keyring nélküli környezetben
+- [x] 6.1 A main a `safeStorage.getSelectedStorageBackend()`-del elutasítja a `basic_text` backandet (hangos, érthető hiba: Linuxon keyring-telepítési útmutatás, ami a window-ig eljut); ellenőrzés: unit teszt a döntésre és az üzenetre + kézi ellenőrzés keyring nélküli környezetben (Debian VM: nem mentette, majd a szöveges üzenet igazolva)
 - [ ] 6.2 Token mentés/olvasás gnome-keyringgel és kwallet-tal; ellenőrzés: kézi ellenőrzés GNOME és KDE alatt, újraindítás után is működik
 
 ## 7. CI
 
-- [ ] 7.1 A `desktop` workflow Linux csomagépítő jobot kap (AppImage, deb, rpm) PR-on és mainen, artefaktum-feltöltéssel; ellenőrzés: PR-on zölden lefut, a csomagolás hibája pirosat ad, mainen az artefaktumok letölthetők
-- [ ] 7.2 Flatpak build a CI-ban (runtime cache-dzsel, hosszabb timeouttal, külön jobban); ellenőrzés: a job zölden lefut, az artefaktum letölthető
-- [ ] 7.3 A meglévő check/coverage/e2e lépések változatlanul zöldek, a coverage gate 90% marad; ellenőrzés: `bun run verify` a desktopon zölden fut
+- [ ] 7.1 A `desktop` workflow Linux csomagépítő jobot kap (AppImage, deb, rpm; Flatpak külön jobban, runtime cache-dzsel) minden ágon build-tesztként, publikálás nélkül; ellenőrzés: PR-on zölden lefut, a csomagolás hibája pirosat ad
+- [ ] 7.2 Publish job: a verify zöld eredményére épülve (`needs`), main pushnál, a HEAD-on lévő version tag esetén csatolja a csomagokat a GitHub Release-hez, de csak új tagra (amelyhez még nincs kiadás); ellenőrzés: új taggal publikál, meglévő taggal és tag nélkül nem fut le a publish
+- [x] 7.3 A meglévő check/coverage/e2e lépések változatlanul zöldek, a coverage gate 90% marad; ellenőrzés: `bun run verify` a desktopon zölden fut
 
 ## 8. Dokumentáció és zárás
 

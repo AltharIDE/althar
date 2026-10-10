@@ -600,6 +600,7 @@ const keptPreferences = (): Pick<Host, 'preferences' | 'setPreference'> => {
 export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   ...keptPreferences(),
   platform: 'darwin',
+  window: vi.fn(),
   sounds: vi.fn(async () => ['Basso', 'Glass', 'Ping', 'Purr']),
   editorPicture: vi.fn(async (id: string) => `data:image/png;base64,${id}`),
   playSound: vi.fn(async () => {}),

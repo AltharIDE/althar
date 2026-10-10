@@ -1199,6 +1199,13 @@ describe('words', () => {
     assert.strictEqual(said(new NotFound({ kind: 'attention_request', id: 'a' })), "That call isn't there any more.")
     assert.strictEqual(said(new NotFound({ kind: 'something new', id: 'a' })), "That thing isn't there any more.")
     assert.strictEqual(said({ _tag: 'UnknownAgent', agentId: 'cursor' }), 'Althar has no agent called cursor.')
+    assert.strictEqual(
+      said({
+        _tag: 'SecretsUnavailable',
+        reason: 'Althar has nowhere safe to keep sign-ins: install and start a keyring (gnome-keyring or KWallet), then try again.',
+      }),
+      'Althar has nowhere safe to keep sign-ins: install and start a keyring (gnome-keyring or KWallet), then try again.',
+    )
     assert.strictEqual(said({ _tag: 'SessionRunning' }), 'An agent is already working on this task.')
     assert.strictEqual(said(new SessionFailed({ agentId: 'codex', reason: 'stack', summary: '' })), "Codex couldn't start.")
     assert.strictEqual(

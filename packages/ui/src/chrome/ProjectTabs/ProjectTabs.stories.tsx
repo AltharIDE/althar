@@ -69,6 +69,9 @@ function Window({ initial, current: start = 'meridian', ...props }: Partial<Proj
           setCurrent(id)
         }}
         onOpenFolder={fn()}
+        onCloseWindow={fn()}
+        onMinimize={fn()}
+        onToggleMaximize={fn()}
         {...props}
       />
       <TitleBar lights="none" end={shown && <WorkStatus running={shown.running ? 2 : 0} yours={shown.yours} onYours={fn()} />}>
@@ -104,6 +107,21 @@ export const OnlyHome: Story = { args: { initial: [], current: null } }
 export const EveryProjectOpen: Story = { args: { initial: ALL } }
 /** In the app the system draws the lights; the strip keeps their space. */
 export const NativeLights: Story = { args: { lights: 'space' } }
+
+/** Off a Mac the same three dots are the window's own buttons; they answer to mouse and keyboard. */
+export const WindowButtons: Story = {
+  args: { onCloseWindow: fn(), onMinimize: fn(), onToggleMaximize: fn() },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Minimize the window' }))
+    await expect(args.onMinimize).toHaveBeenCalledTimes(1)
+    // Tab reaches them like any control, and Enter presses what it reaches.
+    const close = c.getByRole('button', { name: 'Close the window' })
+    close.focus()
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onCloseWindow).toHaveBeenCalledTimes(1)
+  },
+}
 
 export const SwitchingOpeningAndClosing: Story = {
   play: async ({ canvasElement }) => {

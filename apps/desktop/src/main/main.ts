@@ -22,6 +22,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   MessageChannelMain,
   nativeImage,
   Notification,
@@ -33,6 +34,9 @@ import {
   type UtilityProcess,
   utilityProcess,
 } from 'electron'
+
+import { hidesAppMenu, windowOptions } from './windowOptions'
+import { keyringIsSafe, keyringUnavailable } from './keyring'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -65,6 +69,9 @@ const restarts: Array<number> = []
 
 /** The profile and worktrees, as the command-line client has them, so both see the same projects. */
 const locations = () => ({ profile: defaultProfile(process.env, process.platform), worktrees: defaultWorktrees(process.env) })
+
+// Althar is the name windows, window managers and the desktop see, whichever way the app was started.
+app.setName('Althar')
 
 /*
  * Where the window keeps what it remembers, its tabs and pinned models. A
@@ -179,7 +186,10 @@ const seal = (child: UtilityProcess, message: RuntimeMessage) => {
   if (message.requestId === undefined || typeof message.value !== 'string') return
   const { requestId, value } = message
   try {
-    if (!safeStorage.isEncryptionAvailable()) throw new Error('The keychain Althar seals sign-ins with isn’t available.')
+    // On Linux a keyring may be missing: Electron would fall back to plain text (basic_text), which is no seal at all, so it fails like a missing keychain would.
+    const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'keychain'
+    if (!safeStorage.isEncryptionAvailable() || !keyringIsSafe(process.platform, backend))
+      throw new Error(keyringUnavailable(process.platform))
     child.postMessage({
       type: 'sealed',
       requestId,
@@ -282,6 +292,9 @@ const openOutside = (url: string) => {
   }
 }
 
+/** Althar's picture for the window's icon on Linux, at the size X11 takes: the full-size file would silently overflow the property and leave the window iconless. */
+const windowIcon = () => nativeImage.createFromPath(join(here, '../../resources/icons/cobalt.png')).resize({ width: 128, height: 128 })
+
 const openWindow = () => {
   const window = new BrowserWindow({
     width: 1280,
@@ -289,11 +302,8 @@ const openWindow = () => {
     minWidth: 880,
     minHeight: 600,
     show: false,
-    // The page's own paper, so nothing else shows before its first frame.
-    backgroundColor: '#f4f2ec',
-    titleBarStyle: 'hiddenInset',
-    // Centred in the window's tabs, 40 high.
-    trafficLightPosition: { x: 16, y: 14 },
+    // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), and on Linux it carries Althar's icon.
+    ...windowOptions(process.platform, windowIcon()),
     webPreferences: {
       preload: join(here, '../preload/preload.cjs'),
       sandbox: true,
@@ -336,6 +346,18 @@ ipcMain.handle('althar:pick-folder', async (event, purpose: unknown) => {
   const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
   const path = result.canceled ? undefined : result.filePaths[0]
   return path === undefined ? null : allowFolder(path)
+})
+
+// The window's own buttons, from its strip: close, minimize, or maximize and back (windowOptions.ts names the chrome).
+ipcMain.on('althar:window', (event, action: unknown) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (window === null) return
+  if (action === 'close') window.close()
+  else if (action === 'minimize') window.minimize()
+  else if (action === 'toggle-maximize') {
+    if (window.isMaximized()) window.unmaximize()
+    else window.maximize()
+  }
 })
 
 // A folder dropped on the window, by the path the preload read from the drop: only a folder on disk gets a grant.
@@ -430,6 +452,8 @@ ipcMain.on('althar:edge-open', (_event, threadId: unknown) => {
 })
 
 void app.whenReady().then(() => {
+  // Off a Mac the app has no menu bar: no File Edit View Window, and nothing on Alt.
+  if (hidesAppMenu(process.platform)) Menu.setApplicationMenu(null)
   // The window asks for nothing: no notifications, camera, microphone or anything else a page can ask for.
   // Althar's own notifications come from here, as the runtime says something needs the person.
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, done) => done(false))
