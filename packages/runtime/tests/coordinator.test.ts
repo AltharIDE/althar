@@ -80,7 +80,13 @@ describe('the coordinator loop', () => {
         ],
       )
       assert.strictEqual(planned?.plan?.reason, 'It knows the code.')
+      // The task keeps what the person said it from, in their words, for its thread to open with and its lead to read.
+      const [kept] = yield* sql<{ request: string | null }>`SELECT request FROM tasks`
+      assert.strictEqual(kept?.request, 'Add a retry. [coordinator:plan] [lead:finish] [review:findings]')
       const [ready] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
+      const [briefed] = yield* sql<{ prompt: string }>`
+        SELECT d.prompt FROM turn_deliveries d WHERE d.thread_id = ${ready?.threadId ?? ''} ORDER BY d.requested_at LIMIT 1`
+      assert.include(briefed?.prompt, 'What the person asked for, in their words:\n\nAdd a retry. [coordinator:plan]')
       assert.deepStrictEqual([ready?.summary, ready?.lead, ready?.startedAt !== null], ['Fixed the heading.', 'claude-code', true])
 
       // A turn of the lead's starts and ends the card's work under way, and says so both times: a step reports mid-turn.
@@ -417,6 +423,13 @@ describe('the coordinator loop', () => {
       yield* plans.change(planId, [{ key: 'implement', agentId: 'codex', model: 'large', skipped: false }], actor)
       const [changed] = yield* cardsOf(projectId)
       assert.strictEqual(changed?.plan?.steps[0]?.agentId, 'codex')
+      // Before any agent starts on it, its task is led by the plan's lead, on the plan's model, not by nobody.
+      const queries = yield* Queries
+      assert.deepStrictEqual((yield* Effect.orDie(queries.thread(changed?.threadId ?? '', {}))).task.lead, {
+        agentId: 'codex',
+        model: 'large',
+        account: null,
+      })
       // Held, it doesn't start on its own.
       yield* Effect.sleep('600 millis')
       assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'held')
@@ -469,7 +482,11 @@ describe('the coordinator loop', () => {
 })
 
 /** A task planned by hand and started: its lead, and a review when given one. */
-const planned = (title: string, description: string, steps: ReadonlyArray<{ key: 'implement' | 'review'; agentId: string }>) =>
+const planned = (
+  title: string,
+  description: string,
+  steps: ReadonlyArray<{ key: 'implement' | 'review'; agentId: string; model?: string }>,
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const plans = yield* Plans
@@ -487,7 +504,7 @@ const planned = (title: string, description: string, steps: ReadonlyArray<{ key:
     const planId = yield* plans.propose({
       projectId: projectId as Parameters<typeof plans.propose>[0]['projectId'],
       taskId: task.taskId,
-      steps: steps.map((step) => ({ ...step, model: null, skipped: false })),
+      steps: steps.map((step) => ({ ...step, model: step.model ?? null, skipped: false })),
       reason: null,
       actorId: actor,
     })
@@ -602,6 +619,27 @@ describe('a step that needs the person', () => {
         ['failed', 'succeeded'],
       )
     }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('starts afresh, each round, a reviewer that says yes to its step’s model but stays on another', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { task } = yield* planned('Tighten the types', '[lead:finish] [review:always]', [
+        { key: 'implement', agentId: 'claude-code' },
+        { key: 'review', agentId: 'codex', model: 'large' },
+      ])
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why], ['review', 'round_limit'])
+      // Not kept on a model it wasn't asked for: each round's reviewer is a new one, told the step's model again.
+      const reviewers = yield* sql<{ model: string | null; state: string }>`
+        SELECT s.model, s.state FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+        WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND t.node_key = 'review' ORDER BY s.started_at`
+      assert.strictEqual(reviewers.length, 3)
+      assert.deepStrictEqual(
+        reviewers.map((reviewer) => reviewer.model),
+        ['small', 'small', 'small'],
+      )
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50), each: { codex: { staysOn: ['large'] } } }))),
   )
 
   it.live('hands a review that never reports to another reviewer, whose round starts afresh', () =>
@@ -783,6 +821,11 @@ describe("the coordinator's tools", () => {
         /^No lead is running on tidy-the-readme/,
       )
       // A draft needs only a title; a plan needs only its lead.
+      // A title is a few words; the rest of what was asked goes in the description.
+      assert.match(
+        yield* callTool(access, 'draft_task', { title: 'Bump the version and also update the changelog and the docs to say what changed' }),
+        /^That title is 79 characters\. Keep it to 60/,
+      )
       assert.match(yield* callTool(access, 'draft_task', { title: 'Bump the version' }), /^Drafted bump-the-version\./)
       // Called again, unsure the first worked, it gets the same task, not a second.
       assert.match(yield* callTool(access, 'draft_task', { title: 'Bump the version ' }), /^Drafted bump-the-version\./)

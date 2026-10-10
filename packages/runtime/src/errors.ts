@@ -108,6 +108,20 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
   detail: Schema.String,
 }) {}
 
+/**
+ * A default branch merged here that its remote won't take: it has commits
+ * this one doesn't (`behind`), git couldn't sign in there (`denied`), or the
+ * remote itself said no, such as a protected branch (`refused`, with what it said).
+ */
+export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused', {
+  taskId: Schema.String,
+  why: Schema.Literals(['behind', 'denied', 'refused']),
+  /** The branch it follows: origin/main. */
+  remote: Schema.String,
+  /** What the remote said, for one it refused. */
+  said: Schema.optional(Schema.String),
+}) {}
+
 /** A link given for an issue points at something else on its host: `what` is it, in the host's words ("pull request", "merge request"). */
 export class NotAnIssue extends Schema.TaggedError<NotAnIssue>()('NotAnIssue', {
   link: Schema.String,

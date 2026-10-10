@@ -30,6 +30,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Permission/Permission.tsx': 'the allowed line, which folds',
   'thread/Document/Document.tsx': 'the fold at the foot of a document',
   'thread/Step/Step.tsx': 'the caret that opens a step',
+  'thread/Diff/Diff.tsx': 'a folded stretch of unchanged lines, which opens in place',
   /* an option in a list or a rail */
   'composer/ModelPick/ModelPick.tsx': 'the picker and its options',
   'composer/ModelBrowser/ModelBrowser.tsx': 'the rail and a model’s row',
@@ -45,6 +46,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Furniture/Furniture.tsx': 'the floating jump to the latest',
   'composer/Listening/Listening.tsx': 'the listening pill, and stop on its sunk bar',
   'composer/Running/Running.tsx': 'the running pill, and its actions on the sunk bar',
+  'setup/ControlCenter/ControlCenter.tsx': 'a module, the whole of which opens it out, and a round switch',
   'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',

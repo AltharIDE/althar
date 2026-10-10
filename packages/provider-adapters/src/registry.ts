@@ -1,5 +1,7 @@
+import type { InAppSignIn } from './signInFlow'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
+import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
 
 /*
  * Each agent is an entry here, not a code path (docs/architecture/03). The
@@ -79,6 +81,8 @@ export interface AgentDefinition {
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
     readonly login: string
+    /** Its sign-in as Althar runs it, without a terminal (`signInFlow.ts`); without it, `login` in a terminal. */
+    readonly inApp?: InAppSignIn
     /**
      * Its own sign-out, run in an account's home when the person removes an
      * account Althar made, before its folder goes (ADR-012). Without one,
@@ -104,14 +108,89 @@ export interface AgentDefinition {
     readonly shared: (names: ReadonlyArray<string>) => ReadonlyArray<string>
   }
   readonly permissions: PermissionMeanings
+  /** What prints its own version, for Settings; without it, none is shown. */
+  readonly version?: (node: string) => LaunchSpec
+  /**
+   * The command its launch, sign-in and version run by name, and the copies
+   * of it Althar has where the person has none of their own: one that
+   * ships with Althar, and one Althar can download at the person's asking
+   * (only for an agent whose license lets anyone fetch and run its
+   * releases). The person's own always comes first (`installs.ts`).
+   */
+  readonly cli?: AgentCli
   /**
    * What goes in `_meta` on `session/new`, to keep the agent asking whatever
    * its settings say (ADR-007): for a lead, or for a role that only reads
    * (the coordinator, a reviewer), whose writes are refused outright.
    */
   readonly sessionMeta?: (role?: 'lead' | 'reader') => Readonly<Record<string, unknown>>
+  /**
+   * What its environment adds, as it starts somewhere, to keep the person's
+   * own MCP servers out of its sessions (ownTools.ts); without it, it loads
+   * only the servers it is given.
+   */
+  readonly withoutOwnTools?: (at: StartingAt) => Readonly<Record<string, string>>
   /** What it does differently, for the support matrix. */
   readonly knownGaps: ReadonlyArray<string>
+}
+
+export interface AgentCli {
+  /** The command by name, as on the person's PATH; `.exe` is added on Windows. */
+  readonly name: string
+  /** The copy that ships with Althar, by its path; null where this platform has none. */
+  readonly bundled?: () => string | null
+  /** Where Althar can download it. */
+  readonly download?: AgentDownload
+}
+
+export interface AgentDownload {
+  /** Its GitHub repository, owner/name: its latest release is what is downloaded. */
+  readonly repository: string
+  /** The release's file for each `platform-arch`, as Node names them: a zip or a gzipped tar with the command in it. */
+  readonly assets: Readonly<Record<string, string>>
+  /** About how big the download is, as the person reads it. */
+  readonly size: string
+}
+
+/** Whether this Linux runs on musl, as Alpine does, rather than glibc: Node's report names glibc's version where there is one. */
+export const isMusl = (platform: string = process.platform): boolean => {
+  if (platform !== 'linux') return false
+  try {
+    const report = process.report?.getReport() as { header?: { glibcVersionRuntime?: string } } | undefined
+    return report?.header?.glibcVersionRuntime === undefined
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Claude Code's own program as the Agent SDK ships it, for this platform and
+ * processor: the copy its sessions run on (claude-agent-acp starts it), so it
+ * is there even where the person never installed Claude Code. Null where
+ * it isn't.
+ */
+export const bundledClaude = (
+  platform: string = process.platform,
+  arch: string = process.arch,
+  musl: boolean = isMusl(platform),
+): string | null => {
+  try {
+    const fromAdapter = createRequire(require.resolve('@agentclientprotocol/claude-agent-acp/package.json'))
+    // The SDK exports no package.json, so it is found by its entry, as Node resolves it.
+    const fromSdk = createRequire(fromAdapter.resolve('@anthropic-ai/claude-agent-sdk'))
+    const binary = platform === 'win32' ? 'claude.exe' : 'claude'
+    // On Linux, the build for its C library first, the other only if that one is missing.
+    for (const variant of platform !== 'linux' ? [''] : musl ? ['-musl', ''] : ['', '-musl']) {
+      try {
+        return join(dirname(fromSdk.resolve(`@anthropic-ai/claude-agent-sdk-${platform}-${arch}${variant}/package.json`)), binary)
+      } catch {
+        // The next build.
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
 }
 
 /** Shares these names, where the usual folder has them. */
@@ -166,11 +245,12 @@ const loggedInField = (output: string): boolean | undefined => {
  * carry on, so a rejection works as it does for the other agents.
  */
 const asks = { edit: 'ask', bash: 'ask', webfetch: 'ask' }
-const openCodeConfig = JSON.stringify({
+const openCodeBase = {
   permission: asks,
   agent: { build: { permission: asks }, plan: { permission: asks } },
   experimental: { continue_loop_on_deny: true },
-})
+}
+const openCodeConfig = JSON.stringify(openCodeBase)
 
 /**
  * Claude Code reads the user's settings and the repository's committed
@@ -239,6 +319,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       read: loggedInField,
       paidBy: claudePaidBy,
       login: 'claude auth login',
+      inApp: { kind: 'claude-login', ways: ['browser'], run: () => ({ command: 'claude', args: ['auth', 'login', '--claudeai'] }) },
       // Its sign-in is a Keychain item named after the home's path, which deleting the folder would leave behind.
       logout: { run: () => ({ command: 'claude', args: ['auth', 'logout'] }), line: 'claude auth logout' },
     },
@@ -249,6 +330,9 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       shared: only(['settings.json', 'CLAUDE.md', 'agents', 'commands', 'skills', 'plugins', 'output-styles']),
     },
     /* From claude-agent-acp's permissions/options/shared.js. Rejecting skips the action and Claude carries on. */
+    version: () => ({ command: 'claude', args: ['--version'] }),
+    /* Its sign-in, status and version run `claude`: the person's own, else the copy its sessions run on, which ships with Althar. */
+    cli: { name: 'claude', bundled: () => bundledClaude() },
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
     sessionMeta: (role = 'lead') => (role === 'reader' ? claudeReads : claudeAsks),
     knownGaps: [
@@ -278,6 +362,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       /* "Logged in using ChatGPT" is the person's plan; "using an API key" is paid per use. */
       paidBy: (output) => (/using chatgpt/i.test(output) ? 'plan' : /api key/i.test(output) ? 'key' : undefined),
       login: 'codex login',
+      // The bundled Codex, as its status check runs.
+      inApp: {
+        kind: 'codex-app-server',
+        ways: ['browser', 'device'],
+        run: (node) => ({ command: node, args: [bundledCodex(), 'app-server'] }),
+      },
       logout: { run: (node) => ({ command: node, args: [bundledCodex(), 'logout'] }), line: 'codex logout' },
     },
     home: {
@@ -285,6 +375,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       usual: (env, homeDir) => env.CODEX_HOME || join(homeDir, '.codex'),
       shared: only(['config.toml', 'AGENTS.md', 'skills', 'prompts', 'rules']),
     },
+    version: (node) => ({ command: node, args: [bundledCodex(), '--version'] }),
+    withoutOwnTools: codexWithoutOwnTools,
     /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
      * on; `cancel` stops the turn and is the only rejection offered for a file
@@ -342,6 +434,26 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       shared: (names) => names.filter((name) => name !== 'opencode'),
     },
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
+    version: () => ({ command: 'opencode', args: ['--version'] }),
+    withoutOwnTools: openCodeWithoutOwnTools(openCodeBase),
+    /* MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256. Seen 9 October 2026, v1.18.35. */
+    cli: {
+      name: 'opencode',
+      download: {
+        repository: 'anomalyco/opencode',
+        assets: {
+          'darwin-arm64': 'opencode-darwin-arm64.zip',
+          'darwin-x64': 'opencode-darwin-x64.zip',
+          'linux-arm64': 'opencode-linux-arm64.tar.gz',
+          'linux-x64': 'opencode-linux-x64.tar.gz',
+          'linux-arm64-musl': 'opencode-linux-arm64-musl.tar.gz',
+          'linux-x64-musl': 'opencode-linux-x64-musl.tar.gz',
+          'win32-arm64': 'opencode-windows-arm64.zip',
+          'win32-x64': 'opencode-windows-x64.zip',
+        },
+        size: '45 MB',
+      },
+    },
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { once: 'once' } },
     knownGaps: [
       'Provider rate limits come back as errors; API keys have no plan windows.',

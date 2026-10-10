@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./screens": "./src/screens/index.ts",
+    "./opening": "./src/opening.ts",
     "./styles.css": "./src/styles/global.css"
   },
   "scripts": {

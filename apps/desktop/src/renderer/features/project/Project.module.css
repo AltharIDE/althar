@@ -41,16 +41,6 @@
   --lane-min: 186px;
 }
 
-/* The code host isn't connected: a quiet line over the composer, with the way to connect it. */
-.host {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px 8px;
-  margin: 0;
-  color: var(--t-3);
-  font-size: 12px;
-}
 
 .face {
   flex: 1;
@@ -80,6 +70,13 @@
   margin: 0;
   color: var(--danger);
   font-size: 13px;
+}
+
+/* Another agent picked, waiting for what the person says next. */
+.handover {
+  margin: 0;
+  color: var(--t-2);
+  font-size: 12.5px;
 }
 
 .quiet {

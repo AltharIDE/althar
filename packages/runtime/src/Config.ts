@@ -1,20 +1,31 @@
 import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { available, type Fetch, type Product, type ProductInfo } from '@althar/connectors'
-import { agents, type AgentDefinition, type Transport } from '@althar/provider-adapters'
+import { agents, type AgentDefinition, type Transport, usingLocated } from '@althar/provider-adapters'
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import { UnknownAgent } from './errors'
+import { Installs } from './Installs'
+import type { ModelFactsOptions } from './ModelFacts'
 
 export interface RuntimeOptions {
   /** Where task worktrees go: `<root>/<project>/<task>/<repository>` (ADR-006). */
   readonly worktreeRoot: string
   /** Where the homes of accounts Althar makes go (ADR-012): `<root>/<account>`. Without it, it makes none. */
   readonly accountsRoot?: string
+  /** Where agents Althar downloads at the person's asking are kept (`Installs.ts`): `<root>/<agent>`. Without it, it downloads none. */
+  readonly agentsRoot?: string
   /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
   readonly openTerminal?: (line: string) => Effect.Effect<boolean>
+  /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */
+  readonly openUrl?: (url: string) => Effect.Effect<boolean>
+  /** The editors on this device a task's files open in, and opening one on a folder, at a file and line where it can; without it, none. */
+  readonly editors?: {
+    readonly list: () => ReadonlyArray<{ readonly id: string; readonly name: string }>
+    readonly open: (editor: string, folder: string, file: string | null, line: number | null) => Effect.Effect<boolean>
+  }
   readonly appVersion: string
   /** What this device is called, when the profile is new. */
   readonly deviceName: string
@@ -34,6 +45,8 @@ export interface RuntimeOptions {
   readonly stopGrace?: Duration.Duration
   /** When a turn counts as stalled, and how much work goes on before the person is asked (`Stalls.ts`). */
   readonly stalls?: StallOptions
+  /** Where what is known of models comes from (`ModelFacts.ts`); without it, nothing is fetched and nothing is known. */
+  readonly modelFacts?: ModelFactsOptions
 }
 
 /** Each is the default unless a test says otherwise. */
@@ -93,20 +106,34 @@ export class Agents extends Context.Service<
    * `gh` and `glab` signed out, their config folders an empty one; git's
    * credential helpers reset, so neither git nor `curl` through it signs in
    * as the person; and git never asks for a password. The person's SSH agent
-   * isn't passed on either (provider-adapters' process environment).
+   * isn't passed on either (provider-adapters' process environment). Nor
+   * are the MCP servers the person set up for an agent themselves, which
+   * Codex and OpenCode would otherwise load beside Althar's (ownTools.ts).
    */
-  static readonly registry: Layer.Layer<Agents> = Layer.sync(Agents, () => {
+  static readonly registry: Layer.Layer<Agents, never, Installs> = Layer.effect(
+    Agents,
+    Effect.gen(function* () {
+      const installs = yield* Installs
+      return Agents.fromRegistry((definition) => usingLocated(definition, () => installs.locate(definition)))
+    }),
+  )
+
+  /** The registry's agents, each as `located` points its commands: at the person's own, or the copy Althar downloaded. */
+  static readonly fromRegistry = (located: (definition: AgentDefinition) => AgentDefinition = (definition) => definition) => {
     const signedOut = mkdtempSync(join(tmpdir(), 'althar-no-sign-in-'))
     return Agents.from(
-      Object.values(agents).map((definition) => ({
-        definition,
-        transport: (cwd: string, env: Readonly<Record<string, string>> = {}) => {
-          const spec = definition.launch(process.execPath)
-          return { _tag: 'Process' as const, spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...env } }, cwd }
-        },
-      })),
+      Object.values(agents)
+        .map(located)
+        .map((definition) => ({
+          definition,
+          transport: (cwd: string, env: Readonly<Record<string, string>> = {}) => {
+            const spec = definition.launch(process.execPath)
+            const own = definition.withoutOwnTools?.({ env: { ...process.env, ...env }, homeDir: homedir(), cwd }) ?? {}
+            return { _tag: 'Process' as const, spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...env } }, cwd }
+          },
+        })),
     )
-  })
+  }
 }
 
 /** What an agent's environment adds so it carries none of the person's sign-ins to code hosts. */

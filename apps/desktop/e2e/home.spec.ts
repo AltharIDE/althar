@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch } from './support'
+import { chooseFolder, launch, openFirstProject } from './support'
 
 /*
  * The home, once there are projects: what waits on you, what is in progress, and what
@@ -34,8 +34,7 @@ test('comes back to what runs and what waits across projects, with the projects 
   const tabs = page.getByRole('navigation', { name: 'Projects' })
   try {
     // A task that keeps working in one project.
-    await chooseFolder(electronApp, meridian)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await openFirstProject(electronApp, page, meridian)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await startTask(page, LONG, '[lead:wait]')
     await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
@@ -70,40 +69,50 @@ test('comes back to what runs and what waits across projects, with the projects 
     await tabs.getByRole('button', { name: /^Home/ }).click()
     await expect(page.getByRole('heading', { name: 'Name the limits better', level: 3 })).toHaveCount(0)
 
-    // Settings hold the agents and their accounts, the connections, the app's icon and where Althar shows, kept in the profile.
+    // Settings is a panel from the bar: the agents and their accounts, the code hosts, the app's icon and where Althar shows, kept in the profile.
     await page.keyboard.press('Meta+,')
-    await expect(page.getByRole('heading', { name: 'Agents on this Mac' })).toBeVisible()
-    await expect(page.getByText('Claude Code')).toBeVisible()
-    await page.screenshot({ path: 'test-results/settings.png' })
+    const settings = page.getByRole('dialog', { name: 'Settings' })
+    await expect(settings.getByText('Claude Code')).toBeVisible()
+    await page.screenshot({ path: 'test-results/settings.png', animations: 'disabled' })
+    await settings.getByRole('button', { name: /^Agents/ }).click()
+    await expect(settings.getByRole('list', { name: 'Claude Code accounts' })).toBeVisible()
+    await page.screenshot({ path: 'test-results/settings-agents.png', animations: 'disabled' })
+    await settings.getByRole('button', { name: 'Back to all settings' }).click()
     // The icon is the Dock's, so where there is no Dock (Linux, as CI runs) there is none to choose.
-    const icons = page.getByRole('radiogroup', { name: 'App icon' })
     if (process.platform === 'darwin') {
+      await settings.getByRole('button', { name: /^App icon/ }).click()
+      const icons = settings.getByRole('radiogroup', { name: 'App icon' })
       await expect(icons.getByRole('radio', { name: 'Cobalt', exact: true })).toBeChecked()
       await icons.getByRole('radio', { name: 'Ink' }).click()
       await expect(icons.getByRole('radio', { name: 'Ink' })).toBeChecked()
       await expect.poll(() => readFileSync(join(home, 'profile', 'desktop.json'), 'utf8')).toContain('"icon": "ink"')
-      await icons.scrollIntoViewIfNeeded()
-      await page.screenshot({ path: 'test-results/settings-icon.png' })
+      await page.screenshot({ path: 'test-results/settings-icon.png', animations: 'disabled' })
+      // Escape steps back to all of them, then closes the panel.
+      await page.keyboard.press('Escape')
+      await expect(settings.getByRole('button', { name: /^App icon/ })).toBeVisible()
     } else {
-      await expect(page.getByRole('heading', { name: 'App icon' })).toHaveCount(0)
+      await expect(settings.getByRole('button', { name: /^App icon/ })).toHaveCount(0)
     }
     // While the person is in another app, Althar shows round the notch, on a Mac that has one, or in the menu bar.
     // Only with a notch is there a choice; the edge is a page of its own, with what needs you and what runs.
-    const places = page.getByRole('radiogroup', { name: 'While you’re in another app' })
     const edgePage = (place: string) => electronApp.windows().find((window) => window.url().includes(`place=${place}`))
     const edge = await page.evaluate(() => window.althar.edge())
     if (edge?.notch === true) {
       await expect.poll(() => edgePage('island') !== undefined).toBe(true)
       const island = edgePage('island')
       if (island !== undefined) await expect(island.getByRole('region', { name: 'Althar' })).toHaveCount(1)
+      await settings.getByRole('button', { name: /^While you’re in another app/ }).click()
+      const places = settings.getByRole('radiogroup', { name: 'While you’re in another app' })
       await expect(places.getByRole('radio', { name: /Round the notch/ })).toBeChecked()
       await places.getByRole('radio', { name: /In the menu bar/ }).click()
       await expect.poll(() => readFileSync(join(home, 'profile', 'desktop.json'), 'utf8')).toContain('"edge": "menu"')
       await expect.poll(() => edgePage('island') === undefined && edgePage('menu') !== undefined).toBe(true)
+      await page.keyboard.press('Escape')
     } else {
-      await expect(page.getByRole('heading', { name: 'While you’re in another app' })).toHaveCount(0)
+      await expect(settings.getByRole('button', { name: /^While you’re in another app/ })).toHaveCount(0)
     }
-    await tabs.getByRole('button', { name: /^Home/ }).click()
+    await page.keyboard.press('Escape')
+    await expect(settings).toHaveCount(0)
     await expect(projects.getByRole('button', { name: /meridian/ })).toBeVisible()
 
     // ⌘2 opens the first project's tab, ⌘1 the home's.

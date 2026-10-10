@@ -12,6 +12,7 @@ import { Accounts, SignOutFailed } from '../src/Accounts'
 import { Agents, RuntimeConfig } from '../src/Config'
 import { Instance } from '../src/Instance'
 import { Limits } from '../src/Limits'
+import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
@@ -19,6 +20,7 @@ import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Secrets } from '../src/Secrets'
 import { anyOf, SignIns } from '../src/SignIns'
+import { usableModels } from '../src/usableModels'
 import { fakeAgents, fakeConnectors, items, launches, repository, runtime, until } from './support'
 
 /*
@@ -316,6 +318,28 @@ describe('accounts', () => {
       assert.strictEqual((yield* limits.named('opencode', null, null)).agent, 'Fake opencode')
       // The account signed out doesn't count: the agent isn't out while another can run.
       assert.isTrue((yield* limits.out('codex'))._tag === 'None')
+    }).pipe(Effect.provide(withAccounts({}, [away])))
+  })
+
+  it.live('offer no model of an agent whose only account a project allows is signed out', () => {
+    const away = folder('away')
+    return Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const projects = yield* Projects
+      const models = yield* Models
+      const signedOut = yield* accounts.add({ agentId: 'codex', name: 'Away', folder: away })
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
+      const routesOn = Effect.map(usableModels(project.projectId), (usable) =>
+        usable.flatMap((model) => model.routes.map((route) => route.agentId)),
+      )
+      assert.include(yield* routesOn, 'codex')
+      // Its usual account is signed in, but the project runs Codex only on the one that isn't.
+      yield* policies.setAccounts(project.projectId, { rotate: true, only: { codex: [signedOut.id] } }, instance.personId)
+      assert.notInclude(yield* routesOn, 'codex')
+      assert.include(yield* routesOn, 'claude-code')
     }).pipe(Effect.provide(withAccounts({}, [away])))
   })
 

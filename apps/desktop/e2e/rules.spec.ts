@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch } from './support'
+import { launch, openFirstProject } from './support'
 
 /*
  * A project's rules (ADR-013), as the person changes them: from the
@@ -24,8 +24,7 @@ test('changes a project’s rules from its title bar, and keeps them', async () 
   const repo = repository(home)
   const { electronApp, page } = await launch(home)
   try {
-    await chooseFolder(electronApp, repo)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await openRules(page)
     await expect(page.getByRole('radio', { name: /Allow, except what you keep/ })).toBeChecked()

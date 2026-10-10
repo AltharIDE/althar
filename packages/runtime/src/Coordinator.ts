@@ -2,14 +2,19 @@ import { createHash } from 'node:crypto'
 
 import { type CommandEnvelope, type ProjectId } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
+import { knownModelName } from '@althar/contracts'
 import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from './Changes'
+import { Accounts } from './Accounts'
 import { Agents } from './Config'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
+import { Limits } from './Limits'
+import { ModelFacts } from './ModelFacts'
+import { Models } from './Models'
 import { Plans } from './Plans'
 import { Policies, ruleSetOf } from './Policies'
 import { Projects } from './Projects'
@@ -17,10 +22,12 @@ import { sayRules } from './rules'
 import { envelope } from './envelope'
 import { type PlanStep } from './Runs'
 import { type Disposition, Sessions } from './Sessions'
+import { blockedModelsOf } from './preferences'
 import { withRole } from './roles'
 import { SignIns } from './SignIns'
 import { addItem, transcript } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { describeModels, routeTo, usableModels } from './usableModels'
 
 /*
  * The project's coordinator (docs/architecture/04; docs/plans/mvp.md, "The
@@ -29,6 +36,9 @@ import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServe
  * tools, which it has as its only way to change anything. It starts when you
  * first say something to it, on the agent you last used.
  */
+
+/** How long a task's title may be: it is read in a line, beside other things, on every screen. */
+export const TITLE_LENGTH = 60
 
 /** The coordinator couldn't start on the agent it would use, and the person picks another. */
 export class CoordinatorUnavailable extends Schema.TaggedError<CoordinatorUnavailable>()('CoordinatorUnavailable', {
@@ -59,6 +69,10 @@ type Store =
   | Changes
   | Issues
   | Policies
+  | Models
+  | ModelFacts
+  | Limits
+  | Accounts
 
 const Drafted = Schema.Struct({
   title: Schema.String,
@@ -67,10 +81,12 @@ const Drafted = Schema.Struct({
   repositories: Schema.optional(Schema.Array(Schema.String)),
 })
 const Asked = Schema.Struct({ issue: Schema.String })
+/* A step's model, as list_models names it; or, as plans once did, an agent and its own id for the model. */
+const StepPick = Schema.Struct({ model: Schema.optional(Schema.String), agent: Schema.optional(Schema.String) })
 const Proposed = Schema.Struct({
   task: Schema.String,
-  lead: Schema.Struct({ agent: Schema.String, model: Schema.optional(Schema.String), reason: Schema.optional(Schema.String) }),
-  review: Schema.optional(Schema.NullOr(Schema.Struct({ agent: Schema.String, model: Schema.optional(Schema.String) }))),
+  lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
+  review: Schema.optional(Schema.NullOr(StepPick)),
 })
 const Named = Schema.Struct({ task: Schema.String })
 const Passed = Schema.Struct({ task: Schema.String, message: Schema.String, now: Schema.optional(Schema.Boolean) })
@@ -136,11 +152,14 @@ export class Coordinator extends Context.Service<
               : agents.list[0]?.definition.id
           if (agentId === undefined) return null
           const status = yield* signIns.of(agentId)
+          // The last model used, unless the person switched it off since.
+          const blocked = yield* blockedModelsOf(agentId)
+          const again = last?.agentId === agentId && (last.model === null || !blocked.includes(last.model)) ? last : null
           return {
             agentId,
             agentName: nameOf(agentId),
-            model: last?.agentId === agentId ? last.model : null,
-            effort: last?.agentId === agentId ? last.effort : null,
+            model: again?.model ?? null,
+            effort: again?.effort ?? null,
             available: status !== 'signed_out',
           } satisfies Suggested
         })
@@ -279,6 +298,11 @@ export class Coordinator extends Context.Service<
       const draft = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const { title, description, issue: from, repositories } = yield* read(Drafted, input)
+          // A title is read at a glance, in a line on every screen: the rest of what was asked goes in the description.
+          if (title.trim().length > TITLE_LENGTH)
+            return yield* new ToolRefused({
+              message: `That title is ${title.trim().length} characters. Keep it to ${TITLE_LENGTH}: what should change, in a few words. The rest belongs in the description.`,
+            })
           // The issue it comes from is read first: its key goes in the task's branch.
           const issue =
             from === undefined
@@ -290,6 +314,14 @@ export class Coordinator extends Context.Service<
                       () => new ToolRefused({ message: `Althar can't read ${from}. Draft the task without it, or check the link.` }),
                     ),
                   )
+          // What the person said in the turn the coordinator is on is what they asked for, not what they sent since: the task's thread starts with it.
+          const sql = yield* SqlClient.SqlClient
+          const said = yield* sql<{ body: string }>`
+            SELECT u.body FROM turn_deliveries d JOIN turn_delivery_inputs di ON di.delivery_id = d.id JOIN user_inputs u ON u.id = di.user_input_id
+            WHERE d.provider_session_id = ${access.sessionId}
+              AND d.requested_at = (SELECT max(requested_at) FROM turn_deliveries WHERE provider_session_id = ${access.sessionId})
+            ORDER BY di.position`
+          const request = said.length === 0 ? undefined : said.map((input) => input.body).join('\n\n')
           // The same title from the same session is the same command: an agent that calls again, unsure the first worked, gets the first task.
           const commandId = `cmd_${createHash('sha256').update(`${access.sessionId}\u0000${title.trim().toLowerCase()}`).digest('hex').slice(0, 32)}`
           const created = yield* projects
@@ -301,6 +333,7 @@ export class Coordinator extends Context.Service<
               draft: true,
               ...(issue === undefined ? {} : { issueKey: issue.key }),
               ...(repositories === undefined ? {} : { repositories }),
+              ...(request === undefined ? {} : { request }),
             })
             .pipe(
               // A project of several repositories needs to hear which the task changes: said so, with the ones it has.
@@ -320,22 +353,53 @@ export class Coordinator extends Context.Service<
           return `Drafted ${created.slug}${issue === undefined ? '' : `, from ${issue.key}`}. Now propose its plan with propose_plan.`
         })
 
+      /** The models the coordinator can give work to in the project, as it reads them. */
+      const listModels = (access: ToolAccess) => Effect.map(usableModels(access.projectId), describeModels)
+
+      /**
+       * A step's agent and model, from what the plan names (ADR-015): a model
+       * as list_models writes it, taken the best way there is; or an agent, on
+       * its own id for a model or on its own default.
+       */
+      const stepOf = (projectId: string, pick: typeof StepPick.Type) =>
+        Effect.gen(function* () {
+          if (pick.model !== undefined) {
+            const route = routeTo(yield* usableModels(projectId), pick.model, pick.agent)
+            if (route !== null) return { agentId: route.agentId, model: route.model }
+            if (pick.agent === undefined)
+              return yield* new ToolRefused({
+                message: `No model called ${pick.model} can be used now. ${describeModels(yield* usableModels(projectId))}`,
+              })
+          }
+          if (pick.agent === undefined) return yield* new ToolRefused({ message: 'Name the model, as list_models writes it.' })
+          const agentId = yield* agentOf(pick.agent)
+          // Named the old way, by agent, a model the person switched off is still off: the same model another way, by the name people know it by, or none.
+          if (pick.model !== undefined && (yield* blockedModelsOf(agentId)).includes(pick.model)) {
+            const offered = (yield* (yield* Models).catalog)
+              .find((one) => one.agentId === agentId)
+              ?.models.find((model) => model.id === pick.model)
+            const agentName = agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
+            const elsewhere =
+              offered === undefined
+                ? null
+                : routeTo(yield* usableModels(projectId), knownModelName({ id: agentId, name: agentName }, offered))
+            if (elsewhere !== null) return { agentId: elsewhere.agentId, model: elsewhere.model }
+            return yield* new ToolRefused({
+              message: `The person switched ${pick.model} off. ${describeModels(yield* usableModels(projectId))}`,
+            })
+          }
+          return { agentId, model: pick.model ?? null }
+        })
+
       const propose = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const proposed = yield* read(Proposed, input)
           const task = yield* taskOf(access, proposed.task)
           if (task.state !== 'draft')
             return yield* new ToolRefused({ message: `${task.slug} has started already; message its lead instead.` })
-          const steps: Array<PlanStep> = [
-            { key: 'implement', agentId: yield* agentOf(proposed.lead.agent), model: proposed.lead.model ?? null, skipped: false },
-          ]
+          const steps: Array<PlanStep> = [{ key: 'implement', ...(yield* stepOf(access.projectId, proposed.lead)), skipped: false }]
           if (proposed.review !== null && proposed.review !== undefined)
-            steps.push({
-              key: 'review',
-              agentId: yield* agentOf(proposed.review.agent),
-              model: proposed.review.model ?? null,
-              skipped: false,
-            })
+            steps.push({ key: 'review', ...(yield* stepOf(access.projectId, proposed.review)), skipped: false })
           yield* plans.propose({
             projectId: access.projectId as ProjectId,
             taskId: task.id,
@@ -430,11 +494,11 @@ export class Coordinator extends Context.Service<
         tool('read_thread', "A task's thread as text: what the person, the lead and Althar said, oldest first.", named, readThread),
         tool(
           'draft_task',
-          "Drafts a task for a change: its title, saying what should change, in a line, and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue. Then propose its plan.",
+          `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue. Then propose its plan.`,
           {
             type: 'object',
             properties: {
-              title: { type: 'string' },
+              title: { type: 'string', maxLength: TITLE_LENGTH },
               description: { type: 'string' },
               issue: { type: 'string', description: 'The issue it comes from: its link, or its key (MER-231, #12).' },
               repositories: {
@@ -461,21 +525,29 @@ export class Coordinator extends Context.Service<
           (access) => findIssues(access),
         ),
         tool(
+          'list_models',
+          'The models you can give work to now, by who makes them, with how each scores and whether a plan pays for it.',
+          nothing,
+          (access) => listModels(access),
+        ),
+        tool(
           'propose_plan',
-          "Proposes a drafted task's plan: its lead, who implements it, with why in a sentence; and its reviewer, another agent that only reads, or null for something trivial. It starts on its own after 25 seconds unless the person holds or changes it.",
+          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. Name each model as list_models writes it. It starts on its own after 25 seconds unless the person holds or changes it.",
           {
             type: 'object',
             properties: {
               task: { type: 'string', description: "The task's slug." },
               lead: {
                 type: 'object',
-                properties: { agent: { type: 'string' }, model: { type: 'string' }, reason: { type: 'string' } },
-                required: ['agent'],
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, reason: { type: 'string' } },
+                required: ['model'],
               },
               review: {
                 type: ['object', 'null'],
-                properties: { agent: { type: 'string' }, model: { type: 'string' } },
-                required: ['agent'],
+                properties: {
+                  model: { type: 'string', description: 'As list_models writes it; another maker’s than the lead’s where there is one.' },
+                },
+                required: ['model'],
               },
             },
             required: ['task', 'lead'],

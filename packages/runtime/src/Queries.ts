@@ -1,3 +1,4 @@
+import { HOSTED, newPullRequestLink } from '@althar/connectors'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -28,7 +29,7 @@ import { Coordinator } from './Coordinator'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { GitFailed, NotFound } from './errors'
 import { Instance } from './Instance'
-import { commitsAhead, commitsOf, gitOutcome, indexStamp } from './git'
+import { commitsAhead, commitsOf, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
 import { commandIn } from './rules'
 import { Sessions } from './Sessions'
 
@@ -505,9 +506,11 @@ export class Queries extends Context.Service<
             model: string | null
             effort: string | null
             config: string
+            account: string | null
           }>`
-            SELECT id, agent_id, state, model, effort, config FROM provider_sessions
-            WHERE thread_id = ${threadId} AND state IN (${sql.unsafe(live)}) ORDER BY started_at DESC LIMIT 1`
+            SELECT s.id, s.agent_id, s.state, s.model, s.effort, s.config, a.name AS account FROM provider_sessions s
+            LEFT JOIN agent_accounts a ON a.id = s.account_id
+            WHERE s.thread_id = ${threadId} AND s.state IN (${sql.unsafe(live)}) ORDER BY s.started_at DESC LIMIT 1`
           if (session === undefined) return null
           const running = yield* sessions.running(threadId)
           const definition = Option.getOrUndefined(yield* Effect.option(agents.get(session.agentId)))
@@ -522,6 +525,7 @@ export class Queries extends Context.Service<
             agentName: definition?.definition.name ?? session.agentId,
             state: session.state,
             model: session.model,
+            account: session.account,
             effort: session.effort,
             models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
             turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
@@ -575,6 +579,7 @@ export class Queries extends Context.Service<
             name: string
             defaultBranch: string
             path: string
+            branch: string
             baseRef: string | null
             baseCommit: string | null
             root: string | null
@@ -582,7 +587,7 @@ export class Queries extends Context.Service<
             taskId: string
             projectId: string
           }>`
-            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, w.base_ref, w.base_commit,
+            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, w.branch, w.base_ref, w.base_commit,
               l.path AS root, w.task_id, w.project_id,
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
@@ -646,6 +651,40 @@ export class Queries extends Context.Service<
         )
       }
 
+      /** The branch a default branch follows on its remote (origin/main), and how many commits the remote doesn't have; none without one. */
+      const aheadOf = (root: string, branch: string) =>
+        Effect.gen(function* () {
+          const followed = yield* gitOutcome(root, 'for-each-ref', '--format=%(upstream:short)', `refs/heads/${branch}`)
+          const remote = followed.code === 0 && followed.stdout !== '' ? followed.stdout : null
+          if (remote === null) return { remote, ahead: 0 }
+          const counted = yield* gitOutcome(root, 'rev-list', '--count', `${remote}..refs/heads/${branch}`)
+          return { remote, ahead: counted.code === 0 ? Number(counted.stdout) || 0 : 0 }
+        })
+
+      /**
+       * Where a task's branch stands on its repository's remote, for pushing
+       * it without a connection: the remote it goes to, whether that has the
+       * branch, how many commits of it it doesn't have, and the host's page
+       * for a new pull request from it. None without a remote.
+       */
+      const branchRemoteOf = (root: string, worktree: string, branch: string, base: string, head: string, baseCommit: string | null) =>
+        Effect.gen(function* () {
+          const remote = yield* remoteOf(root, base)
+          if (remote === null) return null
+          const [there = null] = yield* commitsOf(root, [`refs/remotes/${remote}/${branch}`])
+          const from = there ?? baseCommit
+          const ahead = from === null || from === head ? 0 : yield* commitsAhead(worktree, from, head).pipe(Effect.orElseSucceed(() => 0))
+          // Where the branch goes: the remote's push URL, which can be a fork of the one it fetches from.
+          const url = (yield* namedRemotes(root, 'push').pipe(Effect.orElseSucceed(() => []))).find((one) => one.name === remote)?.url
+          return {
+            name: remote,
+            branch,
+            pushed: there !== null,
+            ahead,
+            newPullRequest: url === undefined ? null : newPullRequestLink(url, branch, base, HOSTED),
+          }
+        }).pipe(Effect.orElseSucceed(() => null))
+
       /**
        * What git says of a task's worktrees, as its screens show it: what it
        * changed, committed or not, and in how many commits, from where it
@@ -690,10 +729,36 @@ export class Queries extends Context.Service<
                   ],
                   { concurrency: 'unbounded' },
                 )
+                // Merged here, once it holds work of its own: whether its default branch is on its remote yet.
+                const mergedHere = merges && merged && head !== worktree.baseCommit && worktree.root !== null
+                const remote = mergedHere && worktree.root !== null ? yield* aheadOf(worktree.root, worktree.defaultBranch) : null
                 return {
                   worktree,
                   changed,
-                  here: merges && !merged ? [{ repository: worktree.slug, name: worktree.name, branch: worktree.defaultBranch, head }] : [],
+                  here:
+                    merges && !merged
+                      ? [
+                          {
+                            repository: worktree.slug,
+                            name: worktree.name,
+                            branch: worktree.defaultBranch,
+                            head,
+                            remote:
+                              head === null || worktree.root === null
+                                ? null
+                                : yield* branchRemoteOf(
+                                    worktree.root,
+                                    worktree.path,
+                                    worktree.branch,
+                                    worktree.defaultBranch,
+                                    head,
+                                    worktree.baseCommit,
+                                  ),
+                          },
+                        ]
+                      : [],
+                  merged:
+                    remote === null ? [] : [{ repository: worktree.slug, name: worktree.name, branch: worktree.defaultBranch, ...remote }],
                 }
               }),
             { concurrency: 'unbounded' },
@@ -710,6 +775,7 @@ export class Queries extends Context.Service<
             ),
             commits: each.reduce((sum, { changed }) => sum + changed.commits, 0),
             here: each.flatMap(({ here }) => here),
+            merged: each.flatMap(({ merged }) => merged),
           }
         })
 
@@ -873,6 +939,7 @@ export class Queries extends Context.Service<
             waiting: number
             review: string | null
             lead: string | null
+            leadModel: string | null
             firstSession: string | null
             starting: number
             held: string | null
@@ -888,6 +955,7 @@ export class Queries extends Context.Service<
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') AS waiting,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
+              (SELECT model FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_model,
               (SELECT min(started_at) FROM provider_sessions WHERE thread_id = t.id) AS first_session,
               -- A step admitted and not yet running, or a session still starting: its agent is on its way.
               (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
@@ -958,6 +1026,8 @@ export class Queries extends Context.Service<
             step: task.step,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (planned.find((step) => step.key === 'implement')?.agentId || null),
+            // Its session's model once one started; the plan's until then.
+            leadModel: task.lead === null ? (planned.find((step) => step.key === 'implement')?.model ?? null) : task.leadModel,
             branch: task.branch,
             startedAt: task.runAt ?? task.firstSession,
             waits: waitsOf(task.held),
@@ -1189,6 +1259,7 @@ export class Queries extends Context.Service<
             taskId: string
             title: string
             description: string
+            request: string | null
             slug: string
             state: string
             branch: string | null
@@ -1197,7 +1268,7 @@ export class Queries extends Context.Service<
             baseCommit: string | null
             settledAt: string | null
           }>`
-            SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.slug, k.state,
+            SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.request, k.slug, k.state,
               k.settled_at, w.branch, w.path AS worktree, w.base_ref, w.base_commit
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
@@ -1216,9 +1287,14 @@ export class Queries extends Context.Service<
           // Where it stands, from its card, which shows its links too: the header reads those with git, below.
           const card = yield* cardFor(head.taskId, { issue: null, changes: [] })
           const session = yield* sessionOf(threadId)
-          // Its links, whose open pull requests say what isn't pushed, and what git says of its worktrees, read at the same time.
-          const [links, said] = yield* Effect.all(
-            [linksOf(head.taskId), gitOf(head.taskId, { changed: true, here: true, fresh: page.fresh === true })],
+          // Who leads it when no lead runs: the last on its thread, else its plan's.
+          const [last] = yield* sql<{ agentId: string; model: string | null; account: string | null }>`
+            SELECT s.agent_id, s.model, a.name AS account FROM provider_sessions s LEFT JOIN agent_accounts a ON a.id = s.account_id
+            WHERE s.thread_id = ${threadId} ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
+          const planned = card?.plan?.steps.find((step) => step.key === 'implement')
+          // Its links, whose open pull requests say what isn't pushed, what git says of its worktrees, and its host, read at the same time.
+          const [links, said, host] = yield* Effect.all(
+            [linksOf(head.taskId), gitOf(head.taskId, { changed: true, here: true, fresh: page.fresh === true }), hostOf(head.projectId)],
             {
               concurrency: 'unbounded',
             },
@@ -1227,10 +1303,12 @@ export class Queries extends Context.Service<
             threadId,
             cursor: at,
             project: { id: head.projectId, name: head.projectName },
+            host,
             task: {
               id: head.taskId,
               title: head.title,
               description: head.description,
+              request: head.request,
               slug: head.slug,
               state: head.state,
               branch: head.branch,
@@ -1239,6 +1317,7 @@ export class Queries extends Context.Service<
               phase: card?.phase ?? null,
               waits: card?.waits ?? null,
               steps: card?.plan?.steps ?? [],
+              lead: last ?? (planned === undefined ? null : { agentId: planned.agentId, model: planned.model, account: null }),
               step: card?.step ?? null,
               startedAt: card?.startedAt ?? null,
               stepAt: onStep?.admittedAt ?? null,
@@ -1247,6 +1326,7 @@ export class Queries extends Context.Service<
               files: said.files,
               commits: said.commits,
               here: said.here,
+              merged: said.merged,
             },
             session,
             attention: attention.map(callOf),

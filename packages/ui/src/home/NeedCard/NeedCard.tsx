@@ -3,7 +3,7 @@ import { type ReactNode, useId } from 'react'
 import type { CodeHost } from '../../foundations/codeHost'
 import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
-import { Model, type ModelInfo } from '../../foundations/Model/Model'
+import { Model, type ModelInfo } from '../../primitives/Model/Model'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Code } from '../../primitives/Code/Code'
@@ -88,7 +88,7 @@ export function NeedCard({
       </div>
       <div className={s.body}>
         <div className={s.main}>
-          <Heading level={headingLevel} className={s.title} id={titleId}>
+          <Heading level={headingLevel} className={s.title} id={titleId} title={title}>
             {onOpen ? (
               <button type="button" className={s.open} onClick={onOpen}>
                 {title}

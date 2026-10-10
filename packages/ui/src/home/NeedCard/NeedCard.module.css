@@ -67,13 +67,20 @@
 }
 .title {
   margin: 0;
+  overflow: hidden;
   font: 600 14.5px/1.35 var(--font-display);
   letter-spacing: -0.012em;
   color: var(--t-1);
-  text-wrap: pretty;
+  /* one line: the whole of it on hover */
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .open {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
   text-align: left;
+  text-overflow: ellipsis;
   color: inherit;
 }
 .open:hover {

@@ -482,7 +482,23 @@ describe('the agents', () => {
         GIT_CONFIG_VALUE_0: '',
         GIT_TERMINAL_PROMPT: '0',
       })
-    }).pipe(Effect.provide(Agents.registry)),
+    }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
+  )
+
+  it.effect('run without the MCP servers the person set up for Codex, in the account’s home or the repository', () =>
+    Effect.gen(function* () {
+      const agents = yield* Agents
+      const home = mkdtempSync(join(tmpdir(), 'althar-codex-home-'))
+      writeFileSync(join(home, 'config.toml'), '[mcp_servers.github]\ncommand = "npx"\n')
+      const codex = agents.list.find((entry) => entry.definition.id === 'codex')
+      const transport = codex?.transport(mkdtempSync(join(tmpdir(), 'althar-cwd-')), { CODEX_HOME: home })
+      const env = transport?._tag === 'Process' ? (transport.spec.env ?? {}) : {}
+      assert.deepStrictEqual(JSON.parse(env.CODEX_CONFIG ?? '{}'), {
+        'mcp_servers.github.command': 'npx',
+        'mcp_servers.github.enabled': false,
+      })
+      assert.strictEqual(env.CODEX_HOME, home)
+    }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
   )
 
   it('leave git with no credential helper to ask, whatever the person set', () => {

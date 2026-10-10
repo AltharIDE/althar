@@ -1,0 +1,9 @@
+/* The light, standing on its floor, a little wider than its box. Each column breathes. */
+.glow { position: absolute; left: -8%; right: -8%; bottom: 0; height: 100%; pointer-events: none; }
+.column {
+  position: absolute; bottom: 0; height: 100%;
+  transform-origin: 50% 100%; transform: scaleY(var(--h));
+  animation: breathe var(--beat) ease-in-out var(--after) infinite;
+}
+@keyframes breathe { 50% { transform: scaleY(calc(var(--h) * var(--up))); } }
+@media (prefers-reduced-motion: reduce) { .column { animation: none; } }

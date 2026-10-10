@@ -57,7 +57,9 @@ const started = (title: string) =>
   })
 
 const nudged = (events: ReadonlyArray<NudgeEvent>) => events.flatMap((event) => (event._tag === 'Nudge' ? [[event.title, event.body]] : []))
+const kinds = (events: ReadonlyArray<NudgeEvent>) => events.flatMap((event) => (event._tag === 'Nudge' ? [event.kind] : []))
 const counts = (events: ReadonlyArray<NudgeEvent>) => events.flatMap((event) => (event._tag === 'Waiting' ? [event.count] : []))
+const busy = (events: ReadonlyArray<NudgeEvent>) => events.flatMap((event) => (event._tag === 'Working' ? [event.working] : []))
 
 describe('nudges', () => {
   it.live('say when a task is ready and when a step needs the person, with how many things wait, and less once answered', () =>
@@ -78,6 +80,8 @@ describe('nudges', () => {
         Duration.seconds(20),
       )
       assert.deepStrictEqual(nudged(events)[1], ['Quietly', 'Needs you: Implement is stuck'])
+      // Each by what it is about, so the app tells only what the person asked to be told.
+      assert.deepStrictEqual(kinds(events), ['ready', 'stopped'])
       yield* until(
         Effect.sync(() => counts(events)),
         (seen) => seen.at(-1) === 2,
@@ -131,6 +135,103 @@ describe('nudges', () => {
         Duration.seconds(20),
       )
       assert.deepStrictEqual(nudged(events)[1], ['Retry the checkout [lead:finish]', 'Ready: Did the task.'])
+      yield* stop
+    }).pipe(Effect.provide(withNudges())),
+  )
+
+  it.live('say whether work runs: an agent on a step, or the lead talking after its run, and not once it is stuck, stopped or done', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const last = (want: boolean) =>
+        until(
+          Effect.sync(() => busy(events)),
+          (seen) => seen.at(-1) === want,
+          Duration.seconds(20),
+        )
+      // Nothing runs before the first task.
+      yield* last(false)
+      // A step its agent is on runs; stopped, its agent is gone and nothing runs.
+      const sessions = yield* Sessions
+      const held = yield* started('Hold the line [lead:wait]')
+      yield* last(true)
+      yield* sessions.stop(held.threadId)
+      yield* last(false)
+      // Stuck on the person, nothing runs either.
+      yield* started('Quietly')
+      yield* until(
+        Effect.sync(() => nudged(events)),
+        (said) => said.some(([title]) => title === 'Quietly'),
+        Duration.seconds(20),
+      )
+      yield* last(false)
+      // Abandoned, still nothing.
+      const sql = yield* SqlClient.SqlClient
+      const [call] = yield* sql<{ id: string }>`
+        SELECT a.id FROM attention_requests a JOIN tasks k ON k.id = a.task_id WHERE a.state = 'open' AND k.title = 'Quietly'`
+      const runs = yield* Runs
+      yield* runs.answerStuck({
+        envelope: yield* Runtime.envelope('attention.answer', {}),
+        attentionId: call?.id ?? '',
+        answer: { kind: 'abandon' },
+      })
+      yield* last(false)
+      // A task ready, its run over; its lead at work on what the person said after is work running too.
+      const task = yield* started('Retry the checkout [lead:finish]')
+      yield* until(
+        Effect.sync(() => kinds(events)),
+        (said) => said.includes('ready'),
+        Duration.seconds(20),
+      )
+      yield* last(false)
+      const body = 'And log each retry. [lead:wait]'
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }),
+        threadId: task.threadId,
+        body,
+        disposition: 'after_current',
+      })
+      yield* last(true)
+      yield* sessions.interrupt(task.threadId)
+      yield* last(false)
+      // Only changes are said.
+      assert.isTrue(busy(events).every((working, at, all) => at === 0 || working !== all[at - 1]))
+      yield* stop
+    }).pipe(Effect.provide(withNudges())),
+  )
+
+  it.live('say work runs while a plan counts down to its start, and not once it is held', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const instance = yield* Instance
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const task = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Later',
+        draft: true,
+      })
+      const planId = yield* plans.propose({
+        projectId: project.projectId as ProjectId,
+        taskId: task.taskId,
+        steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        reason: null,
+        actorId: instance.personId,
+        end: null,
+        startsIn: Duration.hours(1),
+      })
+      yield* until(
+        Effect.sync(() => busy(events)),
+        (seen) => seen.at(-1) === true,
+        Duration.seconds(10),
+      )
+      yield* plans.hold(planId, instance.personId)
+      yield* until(
+        Effect.sync(() => busy(events)),
+        (seen) => seen.at(-1) === false,
+        Duration.seconds(10),
+      )
       yield* stop
     }).pipe(Effect.provide(withNudges())),
   )

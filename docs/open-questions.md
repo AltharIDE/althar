@@ -411,13 +411,14 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 - [ ] **What an agent row offers once it is ready.** Today a ready row says who
   it is signed in as, and nothing else. Does it need "use for this project",
   a default model, or a sign-out that hands off to the agent's own?
-- [ ] **API keys and local models.** "Connect another" now opens a panel
-  (kit `setup/ConnectAgent`): apps Althar can run but didn't find, APIs that
-  take a key (typed once, hidden, into the Keychain), model servers on this
-  Mac, and any agent that speaks ACP by its command. Leaning: keys and local
-  models run through OpenCode, so Althar still calls no model API itself
-  ([ADR-002](decisions/002-acp-for-every-agent.md)). Open: which apps and APIs
-  are listed at launch, and how a connected key shows in the agent list.
+- [ ] **API keys and local models.** Adding another agent (apps Althar can
+  run but didn't find, APIs that take a key, model servers on this Mac, any
+  agent that speaks ACP by its command) has no screen since the unused
+  `ConnectAgent` panel was removed. Leaning: keys and local models run
+  through OpenCode, so Althar still calls no model API itself
+  ([ADR-002](decisions/002-acp-for-every-agent.md)). Open: where adding one
+  lives in Settings, which apps and APIs are listed at launch, and how a
+  connected key shows in the agent list.
 - [ ] **Choosing subpaths in a workspace.** The map offers "only these
   folders" as one suggested choice. Choosing folders freely needs a tree
   picker, which doesn't exist yet.

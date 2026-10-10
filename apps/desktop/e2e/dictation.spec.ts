@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch } from './support'
+import { launch, openFirstProject } from './support'
 
 /*
  * Dictating into the coordinator the first time, in the built app: the
@@ -21,8 +21,7 @@ test('offers the speech model on the first press, downloads it, listens, and wri
   const meridian = repository(home, 'meridian')
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_SPEECH: '1' })
   try {
-    await chooseFolder(electronApp, meridian)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await openFirstProject(electronApp, page, meridian)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     const box = page.getByRole('textbox', { name: /^Tell .* something/ })
     await box.fill('Before the PR, ')
@@ -44,7 +43,8 @@ test('offers the speech model on the first press, downloads it, listens, and wri
     await expect(stop).toHaveAccessibleName('Stop dictating, 0:01', { timeout: 5_000 })
     // What is heard shows faint where it will land, as it is said, and the field waits.
     const faint = page.locator('[aria-hidden="true"][class*="interim"]')
-    await expect(faint).toHaveText('Before the PR, Also check the webhook retry path.')
+    // The full stop the model ends each pass with shows only once the stretch settles.
+    await expect(faint).toHaveText('Before the PR, Also check the webhook retry path')
     await expect(box).toHaveJSProperty('readOnly', true)
     await page.screenshot({ path: 'test-results/dictation-listening.png', animations: 'disabled' })
     await stop.click()

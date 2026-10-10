@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
@@ -12,10 +12,11 @@ import { assert, describe, it } from '@effect/vitest'
 import { Cause, Context, Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
-import { connection, services } from '../src/Api'
+import { connection, isInside, services } from '../src/Api'
 import {
   ChangedSinceSeen,
   CantMerge,
+  PushRefused,
   EffortUnchanged,
   GitFailed,
   NoChangeToOpen,
@@ -31,7 +32,7 @@ import { NotConnected } from '../src/Connections'
 import { Folders } from '../src/Folders'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
-import { Connectors } from '../src/Config'
+import { Connectors, type RuntimeOptions } from '../src/Config'
 import { Secrets } from '../src/Secrets'
 import { ConnectorFailed, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
@@ -51,6 +52,8 @@ const connected = (
     readonly connectors?: Layer.Layer<Connectors>
     /** Where the app can't open Terminal, as the command-line client. */
     readonly noTerminal?: boolean
+    /** The editors a task's files open in, and what opening one does. */
+    readonly editors?: RuntimeOptions['editors']
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -70,6 +73,7 @@ const connected = (
           ? {}
           : { openTerminal: (line: string) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(true)) }),
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
+        ...(options.editors === undefined ? {} : { editors: options.editors }),
       }),
     )
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
@@ -230,6 +234,10 @@ describe('the API', () => {
         yield* client.SetDefaultEffort({ commandId: commandId(), agentId: 'codex', model: 'large', effort: 'high' })
         const codex = (yield* client.GetModels({})).find((agent) => agent.agentId === 'codex')
         assert.deepStrictEqual(codex?.defaults, [{ model: 'large', effort: 'high' }])
+        yield* client.SetModelBlocked({ commandId: commandId(), agentId: 'codex', model: 'large', blocked: true })
+        assert.deepStrictEqual((yield* client.GetModels({})).find((agent) => agent.agentId === 'codex')?.blocked, ['large'])
+        yield* client.SetModelBlocked({ commandId: commandId(), agentId: 'codex', model: 'large', blocked: false })
+        assert.deepStrictEqual((yield* client.GetModels({})).find((agent) => agent.agentId === 'codex')?.blocked, [])
 
         // How full the agent's context is reaches a client as the agent says it, and its session says it after.
         const contexts = yield* Effect.forkChild(
@@ -269,6 +277,30 @@ describe('the API', () => {
         yield* Fiber.join(heard)
         // The fallback read is a second away; the signal brings it far sooner.
         assert.isBelow(Date.now() - started, 500)
+      }),
+    ),
+  )
+
+  it.live('hands a thread to another agent with what the person said, through the API', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Retry' })
+        yield* client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'large' })
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        const switching = { commandId: commandId(), threadId: task.threadId, agentId: 'opencode', body: 'Take it from here' }
+        yield* client.SwitchAgent(switching)
+        // Sent again, it is the same switch: the message isn't said twice.
+        yield* client.SwitchAgent(switching)
+        const after = yield* eventually(
+          client.GetThread({ threadId: task.threadId }),
+          (thread) => idle(thread) && thread.session?.agentId === 'opencode',
+        )
+        assert.deepStrictEqual(
+          after.items.filter((item) => item.kind === 'user_message').map((item) => item.content.text),
+          ['Take it from here'],
+        )
       }),
     ),
   )
@@ -497,6 +529,22 @@ describe('a project’s vocabulary, through the API', () => {
   )
 })
 
+describe('settings, through the API', () => {
+  it.live('has Althar as co-author until the person turns it off, and keeps that', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        const line = 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>'
+        assert.deepStrictEqual(yield* client.GetSettings({}), { coAuthor: { on: true, line } })
+        yield* client.SetCoAuthor({ commandId: commandId(), on: false })
+        assert.deepStrictEqual(yield* client.GetSettings({}), { coAuthor: { on: false, line } })
+        yield* client.SetCoAuthor({ commandId: commandId(), on: true })
+        assert.isTrue((yield* client.GetSettings({})).coAuthor.on)
+      }),
+    ),
+  )
+})
+
 describe('project rules, through the API', () => {
   it.live('reads a project’s rules, and changes them in part as the person', () =>
     Effect.scoped(
@@ -617,6 +665,47 @@ const asLeft = (folder: string) =>
     .toSorted((a, b) => a.localeCompare(b))
     .map((path) => `${path}:${readFileSync(path).toString('hex')}`)
     .join('\n')
+
+describe('editors, through the API', () => {
+  it('tells a file in a task’s folder from one out of it, as Windows writes paths too', () => {
+    assert.isTrue(isInside('/w/api', '/w/api/src/a.ts'))
+    assert.isTrue(isInside('C:\\w\\api', 'C:\\w\\api\\src\\a.ts', win32))
+    assert.isTrue(isInside('C:\\w\\api', 'C:\\w\\api\\..notes', win32))
+    for (const out of ['C:\\w\\api', 'C:\\w\\api-2\\a.ts', 'C:\\w\\a.ts', 'D:\\w\\api\\a.ts'])
+      assert.isFalse(isInside('C:\\w\\api', out, win32))
+  })
+
+  it.live('lists the editors here, and opens one on a task’s folder at its file, never a path outside it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const opens: Array<[string, string, string | null, number | null]> = []
+        const { client, grant } = yield* connected({
+          editors: {
+            list: () => [{ id: 'zed', name: 'Zed' }],
+            open: (editor, folder, file, line) => Effect.sync(() => void opens.push([editor, folder, file, line])).pipe(Effect.as(true)),
+          },
+        })
+        assert.deepStrictEqual(yield* client.ListEditors({}), [{ id: 'zed', name: 'Zed' }])
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Edit' })
+        const worktree = realpathSync((yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? '')
+        assert.isTrue(yield* client.OpenInEditor({ commandId: commandId(), taskId: task.id, editor: 'zed', path: 'src/a.ts', line: 12 }))
+        assert.isTrue(yield* client.OpenInEditor({ commandId: commandId(), taskId: task.id, editor: 'zed' }))
+        assert.isFalse(yield* client.OpenInEditor({ commandId: commandId(), taskId: task.id, editor: 'zed', path: '../../etc/passwd' }))
+        // Nor out by a link inside it.
+        symlinkSync(tmpdir(), join(worktree, 'out'))
+        assert.isFalse(yield* client.OpenInEditor({ commandId: commandId(), taskId: task.id, editor: 'zed', path: 'out/anything.txt' }))
+        // Nor by a link to a folder that isn't there yet.
+        symlinkSync(join(tmpdir(), `althar-nowhere-${Date.now()}`), join(worktree, 'gone'))
+        assert.isFalse(yield* client.OpenInEditor({ commandId: commandId(), taskId: task.id, editor: 'zed', path: 'gone/new.ts' }))
+        assert.deepStrictEqual(opens, [
+          ['zed', worktree, join(worktree, 'src/a.ts'), 12],
+          ['zed', worktree, null, null],
+        ])
+      }),
+    ),
+  )
+})
 
 describe('a project’s menu, through the API', () => {
   it.live('renames a project, and adds, leaves out and changes its repositories', () =>
@@ -1233,6 +1322,32 @@ describe('words', () => {
       said({ _tag: 'NoChangeToOpen', why: 'something new' }),
       "The task's work isn't done yet. Its pull request opens when it is.",
     )
+    // A push the remote refused says how to put it right.
+    assert.deepStrictEqual(
+      (['behind', 'denied'] as const).map((why) => said(new PushRefused({ taskId: 't', why, remote: 'origin/main' }))),
+      [
+        'origin/main has commits that aren’t here yet, so it didn’t take the push. Pull them in, then push again.',
+        'git couldn’t sign in to push to origin/main. Push once from a terminal so your sign-in is kept, then push again here.',
+      ],
+    )
+    assert.strictEqual(
+      said(new PushRefused({ taskId: 't', why: 'refused', remote: 'origin/main', said: 'protected branch hook declined' })),
+      'origin/main refused the push: protected branch hook declined.',
+    )
+    // Nowhere to push a branch to.
+    assert.strictEqual(
+      said(new NotFound({ kind: 'remote', id: 't' })),
+      'Its repositories have no remote to push to. Add one with git, then push again.',
+    )
+    // Refused without a word why: just that it was.
+    assert.strictEqual(said(new PushRefused({ taskId: 't', why: 'refused', remote: 'origin/main' })), 'origin/main refused the push.')
+    // A merge that conflicts carries its files, for the window to have the lead settle them.
+    assert.deepStrictEqual(words(new CantMerge({ taskId: 't', why: 'conflicts', detail: 'README.md' }), name), {
+      reason: 'CantMerge',
+      message: 'It conflicts with the default branch, in README.md. Tell the lead to bring its branch up to date, then merge again.',
+      why: 'conflicts',
+      detail: 'README.md',
+    })
     assert.deepStrictEqual(words(new Error('boom'), name), {
       reason: 'Unknown',
       message: "Althar's runtime couldn't do that. Its log has the details.",

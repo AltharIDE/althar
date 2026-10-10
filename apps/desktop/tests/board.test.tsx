@@ -274,9 +274,9 @@ describe('the board', () => {
     // At the head the dock showed.
     expect(merge).toHaveBeenLastCalledWith('t4', 'abc123', 'https://github.com/meridian/api/pull/12')
     // Sent back, its lead, which stopped, starts again with the note as its first turn.
-    await userEvent.click(within(dock).getByRole('button', { name: /Send back/ }))
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
     await userEvent.type(within(dock).getByRole('textbox'), 'Name it better.')
-    await userEvent.click(within(dock).getByRole('button', { name: /Send back/ }))
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
     await waitFor(() => expect(send).toHaveBeenCalledWith({ threadId: 'th4', body: 'Name it better.', disposition: 'after_current' }))
     await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
     // The note is queued first, so the lead reads it in its first turn.

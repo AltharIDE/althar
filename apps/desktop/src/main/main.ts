@@ -6,9 +6,17 @@ import { join } from 'node:path'
 import { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
+import { type AppPreferences, DEFAULT_PREFERENCES, isPreferenceKey } from './appPreferences'
+import { keepingAwake } from './awake'
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
+import { dockCount, soundOf, tells } from './notify'
+import { readAppPreferences, writeAppPreference } from './preferences'
+import { findRepositories, forWindow, placesFor } from './repositories'
+import { alertSounds, playSound } from './sounds'
+// Where each editor is, from the runtime's list of them, so its icon can be drawn here.
+import { bundleOf } from '../runtime/editors'
 
 import {
   app,
@@ -18,6 +26,8 @@ import {
   MessageChannelMain,
   nativeImage,
   Notification,
+  powerMonitor,
+  powerSaveBlocker,
   safeStorage,
   shell,
   type UtilityProcess,
@@ -30,13 +40,18 @@ import {
  * state. It starts the runtime in a utility process and restarts it if it
  * crashes, gives each window a message port to it, and on quit asks the
  * runtime to stop its sessions before the app goes. Folders reach the runtime
- * from here, never from the window, which gets a grant for each. It seals and
+ * from here, never from the window, which gets a grant for each: one the
+ * person picked or dropped, or one of the repositories it found where people
+ * keep code (repositories.ts), for the first screen to offer. It seals and
  * opens the runtime's secrets, such as a code host's token, with Electron's
  * safeStorage, whose key the keychain keeps for this app alone: the runtime
  * keeps them sealed and never holds the key. It gives the Dock the icon the
  * person chose, and puts Althar at the edge of the screen (edgeWindows.ts):
- * round the notch, or in the menu bar. Dictation's microphone, model and
- * speech process are in dictation.ts.
+ * round the notch, or in the menu bar. It keeps the app's own preferences
+ * (appPreferences.ts) and acts on them: the Mac kept awake while work runs
+ * (awake.ts), and which notifications show, with a sound or not, and the
+ * Dock's count (notify.ts).
+ * Dictation's microphone, model and speech process are in dictation.ts.
  */
 
 const here = import.meta.dirname
@@ -88,7 +103,9 @@ interface RuntimeMessage {
   readonly value?: unknown
   readonly event?: {
     readonly _tag?: string
+    readonly kind?: unknown
     readonly count?: unknown
+    readonly working?: unknown
     readonly title?: unknown
     readonly body?: unknown
     readonly threadId?: unknown
@@ -97,6 +114,28 @@ interface RuntimeMessage {
 
 /* Notifications the person may still click: kept, so they aren't collected before then. */
 const shown = new Set<Notification>()
+
+/* The Mac held awake while work runs, by the app-suspension blocker: the display may still sleep. */
+const awake = keepingAwake({
+  hold: () => powerSaveBlocker.start('prevent-app-suspension'),
+  release: (id) => powerSaveBlocker.stop(id),
+  onBattery: () => powerMonitor.isOnBatteryPower(),
+})
+
+/* How many things wait, as the runtime last said, for the Dock's count as it is turned on and off. */
+let waiting = 0
+
+/*
+ * The app's own preferences: where each starts until the file is read, then
+ * as kept. A change waits for that read, so the read can't undo it.
+ */
+let preferences: AppPreferences = DEFAULT_PREFERENCES
+const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
+  preferences = kept
+  awake.wants(kept)
+  // A count the runtime gave before the file was read is shown again as the person has it.
+  if (waiting > 0) app.setBadgeCount(dockCount(waiting, kept))
+})
 
 /* Althar's own windows, apart from the edge's pages. */
 const windows = new Set<BrowserWindow>()
@@ -123,20 +162,23 @@ const openThread = (threadId: string) => {
 }
 
 /**
- * What the runtime says needs the person: a notification, unless they are
- * looking at the window, where it shows already; and how many things wait, on
- * the Dock. Never for progress.
+ * What the runtime says needs the person: a notification of each kind they
+ * want told, unless they are looking at the window, where it shows already;
+ * and how many things wait, on the Dock while its count is on. Never for
+ * progress. And whether any work runs, to keep the Mac awake by.
  */
 const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
+  if (event._tag === 'Working' && typeof event.working === 'boolean') return awake.working(event.working)
   if (event._tag === 'Waiting' && typeof event.count === 'number') {
+    waiting = event.count
     edge?.waiting(event.count)
-    return void app.setBadgeCount(event.count)
+    return void app.setBadgeCount(dockCount(waiting, preferences))
   }
   if (event._tag !== 'Nudge' || typeof event.title !== 'string' || typeof event.body !== 'string' || typeof event.threadId !== 'string')
     return
-  if (BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) return
+  if (!tells(event.kind, preferences) || BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) return
   const { threadId } = event
-  const notification = new Notification({ title: event.title, body: event.body })
+  const notification = new Notification({ title: event.title, body: event.body, ...soundOf(preferences) })
   shown.add(notification)
   notification.on('click', () => {
     shown.delete(notification)
@@ -181,6 +223,8 @@ const startRuntime = () => {
   })
   child.once('exit', (code) => {
     runtime = undefined
+    // Nothing runs without the runtime; a new one says again.
+    awake.working(false)
     for (const [requestId, settle] of granting) {
       settle(null)
       granting.delete(requestId)
@@ -315,6 +359,28 @@ ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   return found?.isDirectory() === true ? allowFolder(path) : null
 })
 
+/* The repositories the first screen offers, by the id the window has for each: only these are granted by id. */
+const foundHere = new Map<string, string>()
+
+// The repositories where people keep code on this computer, for the first screen: each by an id, never by its path.
+ipcMain.handle('althar:find-repositories', async () => {
+  // The end-to-end tests give a home of their own, so what the tester keeps isn't offered.
+  const home = process.env.ALTHAR_CODE_HOME || homedir()
+  const found = await findRepositories(placesFor(home, process.platform))
+  foundHere.clear()
+  return forWindow(found, home, (path) => {
+    const id = randomUUID()
+    foundHere.set(id, path)
+    return id
+  })
+})
+
+// A grant for one of them, once the person ticks it and makes the project: one main found, and nothing else.
+ipcMain.handle('althar:grant-found', async (_event, id: unknown) => {
+  const path = typeof id === 'string' ? foundHere.get(id) : undefined
+  return path === undefined ? null : allowFolder(path)
+})
+
 // The icon the person chose, or null where there is no Dock to show one; and a new one, shown on the Dock, then kept. Anything else fails, and the window says so.
 ipcMain.handle('althar:app-icon', () => (app.dock === undefined ? null : readAppIcon(locations().profile)))
 ipcMain.handle('althar:set-app-icon', async (_event, icon: unknown) => {
@@ -322,6 +388,36 @@ ipcMain.handle('althar:set-app-icon', async (_event, icon: unknown) => {
   showIcon(icon)
   await writeAppIcon(locations().profile, icon)
 })
+
+// The app's own preferences, as kept; and a change to one, kept, then acted on at once. Anything a key can't hold fails, and the window says so.
+ipcMain.handle('althar:preferences', async () => {
+  await preferencesRead
+  return preferences
+})
+ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unknown) => {
+  if (!isPreferenceKey(key)) throw new Error(`Althar has no preference ${String(key)}.`)
+  await preferencesRead
+  // Merged into the preferences as they stand once it is kept, so changes made together each stay.
+  const kept = await writeAppPreference(locations().profile, key, value)
+  preferences = { ...preferences, [key]: kept }
+  awake.wants(preferences)
+  app.setBadgeCount(dockCount(waiting, preferences))
+  return preferences
+})
+
+// An editor's icon, as Finder draws it, by its id; null for one not found. Only editors Althar knows are drawn.
+ipcMain.handle('althar:editor-picture', async (_event, id: unknown) => {
+  const path = typeof id === 'string' ? bundleOf(id) : null
+  if (path === null) return null
+  const picture = await nativeImage
+    .createThumbnailFromPath(path, { width: 128, height: 128 })
+    .catch(() => app.getFileIcon(path, { size: 'normal' }))
+  return picture.isEmpty() ? null : picture.toDataURL()
+})
+
+// The Mac's alert sounds a notification can play, and one played once, as Settings offers them.
+ipcMain.handle('althar:sounds', () => alertSounds())
+ipcMain.handle('althar:play-sound', (_event, name: unknown) => playSound(name, undefined, () => shell.beep()))
 
 // Where Althar shows while the person is in another app, and whether this Mac has a notch to choose the island by.
 ipcMain.handle('althar:edge', () => edge?.state() ?? null)
@@ -358,6 +454,11 @@ void app.whenReady().then(() => {
     fakeMicrophone,
   })
   void showChosenIcon()
+  // Plugged in or on battery changes whether the Mac is held awake.
+  powerMonitor.on('on-battery', awake.powerChanged)
+  powerMonitor.on('on-ac', awake.powerChanged)
+  // Linux may not say when the power source changes, so there it is looked at again each minute too.
+  if (process.platform === 'linux') setInterval(awake.powerChanged, 60_000).unref()
   startRuntime()
   openWindow()
   edge = startEdge({

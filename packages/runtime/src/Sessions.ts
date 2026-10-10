@@ -87,6 +87,8 @@ interface TaskThread {
   readonly taskId: string
   readonly title: string
   readonly description: string
+  /** What the person asked for, in their words, where Althar kept it. */
+  readonly request: string | null
   readonly worktree: string
   readonly branch: string
   readonly baseRef: string
@@ -121,6 +123,7 @@ interface ReviewThread {
   readonly taskId: string
   readonly title: string
   readonly description: string
+  readonly request: string | null
   /** The copy of each repository's worktree it reads, and where it starts, as for the lead. */
   readonly repositories: ReadonlyArray<TaskRepository>
   readonly cwd: string
@@ -137,6 +140,12 @@ const startIn = (repositories: ReadonlyArray<{ readonly worktree: string; readon
   if (first === undefined) return ''
   return repositories.length === 1 ? join(first.worktree, first.within ?? '') : dirname(first.worktree)
 }
+
+/** What the person asked for, in their words, for a brief: where it says more than the task's title and description. */
+const askedFor = (thread: { readonly title: string; readonly description: string; readonly request: string | null }) =>
+  thread.request === null || thread.request === thread.title || thread.request === `${thread.title}\n\n${thread.description}`
+    ? []
+    : [`What the person asked for, in their words:\n\n${thread.request}`]
 
 /** A role's Althar tools. */
 const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
@@ -309,6 +318,8 @@ export class Sessions extends Context.Service<
       readonly said?: string
       /** What the loop dealt with by switching, for the home: an agent's usage limit, or a step gone quiet. */
       readonly about?: 'limit' | 'stall'
+      /** What the person said with it: the new agent's first turn, after its brief, and never the old one's. */
+      readonly message?: { readonly envelope: CommandEnvelope; readonly body: string }
     }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
     interrupt(threadId: string): Effect.Effect<void, NoSession>
@@ -377,8 +388,8 @@ export class Sessions extends Context.Service<
             JOIN repository_bindings b ON b.id = w.binding_id
             WHERE t.id = ${threadId}
             ORDER BY b.created_at, b.rowid`
-          const [task] = yield* sql<{ projectId: ProjectId; taskId: string; title: string; description: string }>`
-            SELECT t.project_id, t.task_id, k.title, k.description FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${threadId}`
+          const [task] = yield* sql<{ projectId: ProjectId; taskId: string; title: string; description: string; request: string | null }>`
+            SELECT t.project_id, t.task_id, k.title, k.description, k.request FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${threadId}`
           const [first] = repositories
           if (task === undefined || first === undefined)
             return yield* new NotFound({ kind: 'task thread with a ready worktree', id: threadId })
@@ -419,7 +430,8 @@ export class Sessions extends Context.Service<
         })
 
       /** Records a new session, still starting, on the account it runs on. */
-      const createSession = (thread: ThreadContext, agentId: string, account: Account) =>
+      /** A session, starting; on the model asked for, so it is named by it from the first. */
+      const createSession = (thread: ThreadContext, agentId: string, account: Account, model?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessionId = yield* newId(Ids.providerSession)
@@ -436,6 +448,7 @@ export class Sessions extends Context.Service<
                 accountId: account.id,
                 controllerGeneration: 1,
                 state: 'starting',
+                ...(model === undefined ? {} : { model }),
                 startedAt: yield* timestamp,
               })}`
               yield* sessionFact(thread, sessionId, 1, 'provider_session.starting', { agentId, accountId: account.id })
@@ -1074,7 +1087,7 @@ export class Sessions extends Context.Service<
               threadId: input.threadId,
               ...accountOf(input),
             })
-            const sessionId = yield* createSession(thread, entry.definition.id, account)
+            const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
             // Every session starts from a brief (ADR-005), even the first on a task.
             return yield* activate(connected, {
@@ -1206,20 +1219,25 @@ export class Sessions extends Context.Service<
           // It keeps its effort where the model offers it, as most agents do by themselves; else the person's default for it, or its own.
           yield* settleEffort(definition, running.agent, was)
           const options = yield* running.agent.options
+          // What the agent says it is on now, which is what the thread says too, whatever was asked for.
+          const model = optionValue(options, definition.options.model) ?? input.model
           const sql = yield* SqlClient.SqlClient
           yield* sql.withTransaction(
             Effect.gen(function* () {
               const revision = yield* change('provider_sessions', running.sessionId, {
-                model: optionValue(options, definition.options.model),
+                model,
                 effort: optionValue(options, definition.options.effort),
               })
-              yield* sessionFact(running.thread, running.sessionId, revision, 'provider_session.model_changed', { model: input.model })
+              yield* sessionFact(running.thread, running.sessionId, revision, 'provider_session.model_changed', {
+                model,
+                ...(model === input.model ? {} : { asked: input.model }),
+              })
             }),
           )
           yield* addItem({ projectId: running.thread.projectId, threadId: input.threadId, sessionId: running.sessionId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `Model changed to ${input.model}.`,
+            title: `Model changed to ${model}.`,
           })
         })
 
@@ -1288,6 +1306,7 @@ export class Sessions extends Context.Service<
           return [
             "You are reviewing another agent's change, in Althar. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
             `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
+            ...askedFor(thread),
             thread.repositories.length === 1
               ? `The change is in ${thread.repositories[0]?.worktree ?? thread.cwd}: a copy of the lead's work as it stood when this round began, which Althar throws away after; nothing you do there reaches the lead. See the change with \`git diff ${thread.repositories[0]?.baseCommit ?? 'HEAD~1'}\` there; new files are in it.`
               : `The change spans several repositories, each copied as the lead's work stood when this round began, side by side in ${thread.cwd}; Althar throws them away after, and nothing you do there reaches the lead. See each one's change with git diff there; new files are in it:\n${thread.repositories.map((repository) => `- ${repository.name}: ${repository.worktree}, \`git diff ${repository.baseCommit ?? 'HEAD~1'}\``).join('\n')}`,
@@ -1340,6 +1359,7 @@ export class Sessions extends Context.Service<
                 : 'You are working on a task in a git worktree of its own. Althar keeps its record and answers your permission requests.'
               : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
+            ...askedFor(thread),
             several
               ? `Its repositories are side by side in ${thread.cwd}, each with its own branch and history; commit in each one you change:\n${thread.repositories.map((repository) => `- ${withRole(repository.name, repository.role)}: ${where(repository)}.`).join('\n')}`
               : `The worktree is ${thread.repositories[0] === undefined ? thread.worktree : `${where(thread.repositories[0])}. The repository is ${withRole(thread.repositories[0].name, thread.repositories[0].role)}`}.`,
@@ -1359,13 +1379,12 @@ export class Sessions extends Context.Service<
           ].join('\n\n')
         })
 
-      /** The coordinator's brief: its role, the project and its repositories, the agents it can give work to, and the thread so far. */
+      /** The coordinator's brief: its role, the project and its repositories, how it picks models for work, and the thread so far. */
       const coordinatorBrief = (thread: CoordinatorThread) =>
         Effect.gen(function* () {
-          const agents = yield* Agents
           const repositories = thread.folder.repositories
           return [
-            `You are the coordinator of the project ${thread.projectName}, in Althar. You talk with the person about the project as a whole: you answer their questions about the code and the work, and you turn the changes they want into tasks. You never change anything yourself, not even a one-line fix: a change is always a task, which an agent, its lead, does in a worktree of its own.`,
+            `You are the coordinator of the project ${thread.projectName}, in Althar. You talk with the person about the project as a whole: you answer their questions about the code and the work, and you turn the changes they want into tasks. You never change anything yourself, not even a one-line fix: a change is always a task, which its lead, a model you pick, does in a worktree of its own.`,
             repositories.length === 0
               ? 'The project has no repositories yet.'
               : `Your working folder holds read-only copies of the project's repositories, fresh from their default branches:\n${repositories
@@ -1377,13 +1396,20 @@ export class Sessions extends Context.Service<
                   .join('\n')}\nRead and search them to answer questions and to plan. Anything you write there is thrown away.`,
             [
               "To get a change made, use Althar's tools:",
-              `- draft_task, with a title that says what should change, in a line, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
-              '- propose_plan, for the task you drafted: who implements it (its lead) and why, in a sentence, and who reviews it, or no review for something trivial. The reviewer only reads; the lead then settles what it finds. By default, review with an agent from a different provider. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
+              `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
+              '- list_models, for the models you can give work to now, with how each scores and whether a plan pays for it.',
+              '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
               '- list_tasks, read_task and read_thread, to see what is under way and how it went.',
               "- read_issue and find_issues, for the issues on the person's connected trackers and in the project's repository. When the person points at an issue, read it, and draft the task from it with its link or key as draft_task's issue.",
               "- message_lead, to pass something to a task's lead.",
             ].join('\n'),
-            `The agents you can give work to:\n${agents.list.map((entry) => `- ${entry.definition.id} (${entry.definition.name})`).join('\n')}`,
+            [
+              'How to pick a model for a step: call list_models first, and pick by what the step needs, not by who makes the model. Be impartial between makers; go by the scores and the work.',
+              '- A large, risky or open-ended change, or one that needs careful reasoning: one of the strongest models.',
+              '- A small, well-scoped change, such as a rename, a copy fix or a version bump: a quicker, cheaper model is enough.',
+              '- Prefer a model a plan pays for over one paid per use, when they would do the work as well.',
+              "- Review with a model from a different maker than the lead's, where one can be used.",
+            ].join('\n'),
             'Answer questions yourself; only changes become tasks. Keep your replies short: the person sees each task as a card, so say in a sentence what you planned, and not the plan itself again.',
             ...(yield* threadSoFar(thread.threadId)),
           ].join('\n\n')
@@ -1393,7 +1419,9 @@ export class Sessions extends Context.Service<
        * Hands the thread to another agent. The new agent is started first; only
        * once it is ready is the old one stopped, so a switch that fails leaves
        * the old agent working. The brief is written after the old one stops, so
-       * it holds everything the old one did.
+       * it holds everything the old one did. What the person said with the
+       * switch is queued once the old one has stopped, so it is the new one's
+       * first turn, after the brief, and never the old one's.
        */
       const switchAgent = (input: {
         readonly threadId: string
@@ -1403,6 +1431,7 @@ export class Sessions extends Context.Service<
         readonly said?: string
         readonly about?: 'limit' | 'stall'
         readonly accountId?: string
+        readonly message?: { readonly envelope: CommandEnvelope; readonly body: string }
       }) =>
         exclusive(
           input.threadId,
@@ -1417,7 +1446,7 @@ export class Sessions extends Context.Service<
               threadId: input.threadId,
               ...accountOf(input),
             })
-            const sessionId = yield* createSession(thread, entry.definition.id, account)
+            const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
             if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
             yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
@@ -1428,6 +1457,8 @@ export class Sessions extends Context.Service<
                 (from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`),
               ...(input.about === undefined ? {} : { about: input.about }),
             })
+            if (input.message !== undefined)
+              yield* send({ envelope: input.message.envelope, threadId: input.threadId, body: input.message.body })
             const brief = yield* briefFor(thread, { kind: 'takeover', from })
             return yield* activate(connected, { text: brief, closing: 'Carry on with the task from where it stands.' })
           }),

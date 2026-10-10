@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch } from './support'
+import { launch, openFirstProject } from './support'
 
 /*
  * Dictation with the real speech model, in the built app: a recording plays
@@ -38,8 +38,7 @@ test('writes down a real voice with the real model', async () => {
   symlinkSync(join(models ?? '', 'parakeet-tdt-0.6b-v3-int8'), join(home, 'profile', 'speech', 'parakeet-tdt-0.6b-v3-int8'))
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_MICROPHONE: '1' })
   try {
-    await chooseFolder(electronApp, meridian)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await openFirstProject(electronApp, page, meridian)
     // The recording, played into the microphone once, then silence: Chromium's own fake microphone only beeps.
     await page.evaluate(
       async (wav) => {

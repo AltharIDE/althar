@@ -3,9 +3,9 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 /*
  * The window's bridge to the main process, and nothing more: the port to the
  * runtime, handed on to the page, folders the person chose, by the picker or
- * a drop, each as a grant, the thread a notification they clicked opens,
- * the icon they gave the app, and where Althar shows at the edge of the
- * screen. The edge's own pages say through it where they draw, and what to
+ * a drop or among the repositories main found, each as a grant, the thread a notification they clicked opens,
+ * the icon they gave the app, the app's own preferences, and where Althar
+ * shows at the edge of the screen. The edge's own pages say through it where they draw, and what to
  * open in the window, and hear whether the pointer is on the island. And
  * dictation: where the speech model and the microphone stand, the model's
  * download, and what was said, sent to be written down. The page never sees or sends a
@@ -41,6 +41,8 @@ ipcRenderer.on('althar:dictation', (_event, message: unknown) => {
 })
 
 contextBridge.exposeInMainWorld('althar', {
+  // Which system it is, for the words the window uses: this Mac, this PC, this computer.
+  platform: process.platform,
   pickFolder: (purpose: 'project' | 'account' = 'project'): Promise<string | null> => ipcRenderer.invoke('althar:pick-folder', purpose),
   // Only a file the person dropped has a path; one the page made has none.
   grantDropped: (file: File): Promise<string | null> => {
@@ -49,6 +51,13 @@ contextBridge.exposeInMainWorld('althar', {
   },
   appIcon: (): Promise<string | null> => ipcRenderer.invoke('althar:app-icon'),
   setAppIcon: (icon: string): Promise<void> => ipcRenderer.invoke('althar:set-app-icon', icon),
+  preferences: (): Promise<unknown> => ipcRenderer.invoke('althar:preferences'),
+  setPreference: (key: string, value: unknown): Promise<unknown> => ipcRenderer.invoke('althar:set-preference', key, value),
+  sounds: (): Promise<ReadonlyArray<string>> => ipcRenderer.invoke('althar:sounds'),
+  editorPicture: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:editor-picture', id),
+  findRepositories: (): Promise<unknown> => ipcRenderer.invoke('althar:find-repositories'),
+  grantFound: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:grant-found', id),
+  playSound: (name: string): Promise<void> => ipcRenderer.invoke('althar:play-sound', name),
   edge: (): Promise<{ place: string; notch: boolean } | null> => ipcRenderer.invoke('althar:edge'),
   setEdge: (place: string): Promise<void> => ipcRenderer.invoke('althar:set-edge', place),
   edgeDrawn: (rect: { x: number; y: number; width: number; height: number }): void => ipcRenderer.send('althar:edge-drawn', rect),

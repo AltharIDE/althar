@@ -3,7 +3,8 @@ import { useState } from 'react'
 import type { AgentStatus, PlanStep, TaskEnd as End } from '@althar/contracts'
 import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@althar/ui'
 
-import { modelInfo, waitsWords } from '../../shared/agents'
+import { waitsWords } from '../../shared/agents'
+import { type NameModel, useModelNames } from '../../shared/modelNames'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
 import { stepIndex, stepNames, stepText } from '../../shared/steps'
@@ -64,18 +65,19 @@ const endOf = (end: TaskEnd): End => (end === TaskEnd.DraftPr ? 'draft' : end ==
 const fromOf = (card: TaskCardContent): IssueRefProps | undefined =>
   card.issue === null ? undefined : { mark: productBrand(card.issue.product), id: card.issue.key, linear: card.issue.product === 'linear' }
 
-/** The plan's steps as the kit shows them; the agent's id rides on the model's runtime. */
-const launchSteps = (plan: Plan, agentName: (id: string) => string): ReadonlyArray<LaunchStep> =>
+/** The plan's steps as the kit shows them, by model; the agent's id rides on the model's runtime. */
+const launchSteps = (plan: Plan, named: NameModel): ReadonlyArray<LaunchStep> =>
   plan.steps.map((step) => ({
     id: step.key,
     label: text.label[step.key],
-    agents: [modelInfo({ id: step.agentId, name: agentName(step.agentId) }, step.model)],
+    agents: [named(step.agentId, step.model)],
     ...(step.key === 'implement' && plan.reason !== null ? { why: plan.reason } : {}),
     optional: step.key === 'review',
     skipped: step.skipped,
   }))
 
 function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; actions: CardActions }) {
+  const named = useModelNames()
   // What the person changed shows at once; the runtime's copy replaces it when it comes back.
   const [shown, setShown] = useState<{ readonly from: Plan; readonly steps: ReadonlyArray<PlanStep>; readonly end: End | null }>({
     from: plan,
@@ -95,7 +97,7 @@ function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; 
       title={card.title}
       {...(from === undefined ? {} : { from })}
       project={actions.project}
-      steps={launchSteps({ ...plan, steps }, (id) => actions.agentName(id))}
+      steps={launchSteps({ ...plan, steps }, named)}
       onStepsChange={(next) =>
         change(steps.map((step) => ({ ...step, skipped: next.find((launch) => launch.id === step.key)?.skipped ?? step.skipped })))
       }
@@ -130,6 +132,7 @@ function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; 
 }
 
 export function Card({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
+  const named = useModelNames()
   if ((card.phase === 'planned' || card.phase === 'held') && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} />
   const steps = stepNames(card.plan?.steps ?? [])
@@ -154,7 +157,7 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
       at={status === TaskStatus.Done ? steps.length - 1 : at}
       {...(now === undefined ? {} : { now })}
       started={card.startedAt === null ? '' : ago(card.startedAt)}
-      lead={modelInfo({ id: card.lead ?? 'agent', name: actions.agentName(card.lead) }, null)}
+      lead={named(card.lead, card.leadModel)}
       {...(card.branch === null ? {} : { branch: card.branch })}
       {...(from === undefined ? {} : { from })}
       {...(card.change === null ? {} : { pr: `${card.change.short} ${card.change.prefix}${card.change.number}` })}

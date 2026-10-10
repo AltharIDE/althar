@@ -353,6 +353,14 @@ first prompt as far as it fits, most recent first, and the rest is readable
 through Althar's tools. No model is needed to switch, so a switch is
 immediate and works when the outgoing agent is out of usage.
 
+A switch the person makes happens when they next say something, not when
+they pick the other agent's model: picking only changes who the composer says
+will lead, and nothing that runs stops or starts. What they then send is the
+new lead's first turn, after its brief, and is never queued for the old one,
+which stops as the new one takes over. A model of the same agent is set at
+once, for the next turn, since that starts nothing. A switch Althar makes, at
+a usage limit or a stall, starts the new agent with "carry on" as before.
+
 This will be tuned. Candidates include a fresh take that leaves out the
 previous agent's reasoning (research in 2026 suggests a stronger model does
 better without a weaker model's trajectory), starting again from base rather

@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, test } from '@playwright/test'
+import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch, say, toConversation } from './support'
+import { launch, openFirstProject, say, toConversation } from './support'
 
 /*
  * The app as someone uses it: open a folder as a project, start a task, and
@@ -18,16 +18,28 @@ import { chooseFolder, launch, say, toConversation } from './support'
  * is pushed to it lands in a bare repository on disk.
  */
 
-test('opens a project, starts a task, and talks to its lead', async () => {
+test('makes the first project of a repository it found, starts a task, and talks to its lead', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
-  const repo = repository(home)
+  // Where people keep code: the first screen finds it there, with another worked on longer ago.
+  const projects = join(home, 'Projects')
+  mkdirSync(projects)
+  repository(projects, 'halyard')
+  repository(projects)
   const { electronApp, page } = await launch(home)
   try {
-    await chooseFolder(electronApp, repo)
     await expect(page.getByText('Fake')).toHaveCount(0)
-    await expect(page.getByText('Claude Code')).toBeVisible()
+    await expect(page.getByText('Claude Code').first()).toBeVisible()
+    const found = page.getByRole('list', { name: 'Repositories for the project' })
+    await expect(found.getByRole('listitem')).toHaveText([/meridian.*~\/Projects\/meridian/, /halyard/, /Add a folder/])
+    // Once the launch has played over it.
+    await page.waitForTimeout(2500)
     await page.screenshot({ path: 'test-results/start.png' })
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await found.getByRole('checkbox', { name: /meridian/ }).click()
+    await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('meridian')
+    await expect(found.getByRole('checkbox', { name: /meridian/ })).toBeChecked()
+    await page.waitForTimeout(800)
+    await page.screenshot({ path: 'test-results/start-forming.png' })
+    await page.getByRole('button', { name: /Make the project/ }).click()
 
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.screenshot({ path: 'test-results/project.png' })
@@ -35,7 +47,7 @@ test('opens a project, starts a task, and talks to its lead', async () => {
     await page.getByLabel('What should change').fill('Add a retry to the checkout call')
     // Its lead reports Implement done at once, with no review, so what follows is talking to it.
     await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
-    await expect(page.getByRole('button', { name: /^Review: Small · Codex/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Review: Small/ })).toBeVisible()
     await page.screenshot({ path: 'test-results/new-task.png', animations: 'disabled' })
     await page.getByRole('button', { name: /^Review:/ }).click()
     await page.getByRole('button', { name: 'No review' }).click()
@@ -45,10 +57,12 @@ test('opens a project, starts a task, and talks to its lead', async () => {
     // Its card shows in the Talk room, and opens the task.
     await page.getByRole('button', { name: /Open task/ }).click()
 
-    // Ready for you; it built nothing, so its conversation is all there is to see.
+    // Ready for you; it built nothing, and its Outputs say so, over Althar's light.
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
     await expect(page.getByText('Ready for you')).toBeVisible()
-    await expect(page.getByText('Nothing is built yet, so there is nothing else to look at.')).toBeVisible()
+    await page.keyboard.press('o')
+    await expect(page.getByRole('heading', { name: 'Nothing changed', level: 2 })).toBeVisible()
+    await page.keyboard.press('c')
     // The lead is briefed first, and reports its step; its summary is what shows, its work folded above it.
     await expect(page.getByText('Did the task.')).toBeVisible()
 
@@ -57,7 +71,7 @@ test('opens a project, starts a task, and talks to its lead', async () => {
 
     // The lead's model and how hard it thinks, from the composer: the agent offers them, and says when they change.
     await page.getByRole('button', { name: /^Lead:/ }).click()
-    await expect(page.getByRole('radio', { name: /Small · Claude Code/ })).toBeVisible()
+    await expect(page.getByRole('radio', { name: /^Claude Small ?, via Claude Code/ })).toBeVisible()
     await page.screenshot({ path: 'test-results/model-picker.png', animations: 'disabled' })
     await page.getByRole('radio', { name: 'High' }).click()
     await page.keyboard.press('Escape')
@@ -100,19 +114,37 @@ test('opens a project, starts a task, and talks to its lead', async () => {
     await expect(page.getByText('Write the test')).toBeVisible()
     await page.screenshot({ path: 'test-results/thread.png' })
 
-    // The runtime crashes: the app starts it again, the window reconnects, and the thread says what happened.
-    const killed = await electronApp.evaluate(({ app }) => {
-      const runtime = app.getAppMetrics().find((metric) => metric.type === 'Utility' && metric.name === 'Althar runtime')
-      if (runtime !== undefined) process.kill(runtime.pid, 'SIGKILL')
-      return runtime !== undefined
-    })
-    expect(killed).toBe(true)
-    await expect(page.getByText(/Althar restarted\. The lead stopped with it/)).toBeVisible({ timeout: 20_000 })
-    // Its run passed, so the task is still ready, with no lead running.
+    // The runtime crashes: the app starts it again and the window reconnects, with nothing in the thread about it.
+    const runtimePid = () =>
+      electronApp.evaluate(
+        ({ app }) => app.getAppMetrics().find((metric) => metric.type === 'Utility' && metric.name === 'Althar runtime')?.pid ?? null,
+      )
+    const killed = await runtimePid()
+    expect(killed).not.toBeNull()
+    // The window reloads once the new runtime is up: a mark left on this page goes with it.
+    await page.evaluate(() => Object.assign(window, { beforeCrash: true }))
+    await electronApp.evaluate((_electron, pid) => process.kill(pid, 'SIGKILL'), killed ?? 0)
+    await expect.poll(runtimePid, { timeout: 20_000 }).not.toBe(killed)
+    await expect.poll(() => page.evaluate(() => 'beforeCrash' in window), { timeout: 20_000 }).toBe(false)
+    // Its run passed, so the task is still ready, with no lead running and nothing in the thread about the restart.
     await expect(page.getByText('Ready for you', { exact: true })).toBeVisible()
-    // Nothing to press to start it: what the person says next starts it.
-    await expect(page.getByRole('textbox', { name: /^Tell .+ something$/ })).toBeVisible()
+    await expect(page.getByText(/Althar restarted/)).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Start the lead' })).toHaveCount(0)
+    // Nothing to press to start it, and nothing to stop: what the person says next reaches the new runtime and starts it.
+    // The menu has the task's folder too, where an editor is found (none on Linux, as CI runs), so it may be there either way.
+    const stop = async () => {
+      const more = page.getByRole('button', { name: 'More for this task' })
+      if ((await more.count()) === 0) return 0
+      await more.click()
+      await expect(page.getByRole('menu')).toBeVisible()
+      const count = await page.getByRole('menuitem', { name: /Stop the task/ }).count()
+      await page.keyboard.press('Escape')
+      await expect(page.getByRole('menu')).toHaveCount(0)
+      return count
+    }
+    expect(await stop()).toBe(0)
+    await say(page, 'hello')
+    await expect.poll(stop, { timeout: 20_000 }).toBe(1)
     await page.screenshot({ path: 'test-results/restarted.png' })
   } finally {
     await electronApp.close()
@@ -124,8 +156,7 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
   const repo = repository(home)
   const { electronApp, page } = await launch(home)
   try {
-    await chooseFolder(electronApp, repo)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
@@ -172,13 +203,13 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
   execFileSync('git', ['remote', 'add', 'origin', 'https://github.test/meridian/api.git'], { cwd: repo })
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_REMOTE: remote })
   try {
-    await chooseFolder(electronApp, repo)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
-    // Its remote is on GitHub, which isn't connected yet: tasks would end on their branch.
-    await expect(page.getByText("Althar isn't connected to GitHub, so tasks here end on their branch.")).toBeVisible()
-    await page.getByRole('button', { name: 'Connect GitHub' }).click()
+    // Its remote is on GitHub, which isn't connected yet: nothing says so up front, and the project's menu connects it.
+    await expect(page.getByText(/isn't connected to GitHub/)).toHaveCount(0)
+    await page.getByRole('button', { name: 'meridian options' }).click()
+    await page.getByRole('menuitem', { name: 'Connect GitHub' }).click()
 
     // GitHub has no sign-in of Althar's in this build, so it takes a token.
     const services = page.getByRole('list', { name: 'Code hosts and trackers' })
@@ -266,9 +297,57 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
  */
 declare global {
   // What the stubbed notifications caught, in the main process.
-  var shown: Array<{ title: string; body: string }> | undefined
+  var shown: Array<{ title: string; body: string; silent: boolean }> | undefined
   var clickLast: (() => void) | undefined
   var badge: number | undefined
+  // The holds keeping the Mac awake, by id, while they are held.
+  var awake: Set<number> | undefined
+  var onBattery: boolean | undefined
+}
+
+/** Catches notifications, the Dock's count and keeping the Mac awake, in the main process, with the person in another app. */
+const catchWhatReachesThem = (electronApp: ElectronApplication) =>
+  electronApp.evaluate(({ app, BrowserWindow, Notification, powerMonitor, powerSaveBlocker }) => {
+    globalThis.shown = []
+    globalThis.awake = new Set()
+    // Wherever the tests run: not every desktop shows notifications or a count on its launcher.
+    Notification.isSupported = () => true
+    app.setBadgeCount = (count?: number) => {
+      globalThis.badge = count
+      return true
+    }
+    Notification.prototype.show = function (this: Electron.Notification) {
+      globalThis.shown?.push({ title: this.title, body: this.body, silent: this.silent })
+      globalThis.clickLast = () => this.emit('click')
+    }
+    // Plugged in, until a test says otherwise.
+    globalThis.onBattery = false
+    powerMonitor.isOnBatteryPower = () => globalThis.onBattery === true
+    let next = 1000
+    powerSaveBlocker.start = (type) => {
+      if (type !== 'prevent-app-suspension') throw new Error(`Held the wrong way: ${type}`)
+      globalThis.awake?.add(next)
+      return next++
+    }
+    powerSaveBlocker.stop = (id) => {
+      globalThis.awake?.delete(id)
+      return true
+    }
+    // The person is in another app.
+    BrowserWindow.getFocusedWindow = () => null
+  })
+
+/** Where the system carries an app's count, as Settings names it: the Dock, Linux's launcher. */
+const COUNT = process.platform === 'darwin' ? 'Count them on the Dock icon' : 'Count them on the launcher icon'
+
+/** Plans a task with no review, as the person would, and starts it. */
+const startTask = async (page: Page, title: string, lead: string) => {
+  await page.getByRole('button', { name: 'New task' }).click()
+  await page.getByLabel('What should change').fill(title)
+  await page.getByLabel('Anything the lead should know').fill(lead)
+  await page.getByRole('button', { name: /^Review:/ }).click()
+  await page.getByRole('button', { name: 'No review' }).click()
+  await page.getByRole('button', { name: 'Start the task' }).click()
 }
 
 test('notifies the person of a ready task while they look elsewhere, counts it on the Dock, and opens it on a click', async () => {
@@ -276,23 +355,8 @@ test('notifies the person of a ready task while they look elsewhere, counts it o
   const repo = repository(home)
   const { electronApp, page } = await launch(home)
   try {
-    await chooseFolder(electronApp, repo)
-    await electronApp.evaluate(({ app, BrowserWindow, Notification }) => {
-      globalThis.shown = []
-      // Wherever the tests run: not every desktop shows notifications or a count on its launcher.
-      Notification.isSupported = () => true
-      app.setBadgeCount = (count?: number) => {
-        globalThis.badge = count
-        return true
-      }
-      Notification.prototype.show = function (this: Electron.Notification) {
-        globalThis.shown?.push({ title: this.title, body: this.body })
-        globalThis.clickLast = () => this.emit('click')
-      }
-      // The person is in another app.
-      BrowserWindow.getFocusedWindow = () => null
-    })
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await catchWhatReachesThem(electronApp)
+    await openFirstProject(electronApp, page, repo)
     await page.getByRole('button', { name: 'New task' }).click()
     await page.getByLabel('What should change').fill('Add a retry to the checkout call')
     await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
@@ -303,12 +367,90 @@ test('notifies the person of a ready task while they look elsewhere, counts it o
 
     await expect
       .poll(() => electronApp.evaluate(() => globalThis.shown))
-      .toEqual([{ title: 'Add a retry to the checkout call', body: 'Ready: Did the task.' }])
+      .toEqual([{ title: 'Add a retry to the checkout call', body: 'Ready: Did the task.', silent: true }])
     await expect.poll(() => electronApp.evaluate(() => globalThis.badge)).toBe(1)
 
     // Clicked, it opens the task.
     await electronApp.evaluate(() => globalThis.clickLast?.())
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('tells only what the person keeps on, keeps the Mac awake while work runs, and keeps both across a restart', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const repo = repository(home)
+  const kept = () => readFileSync(join(home, 'profile', 'desktop.json'), 'utf8')
+  const first = await launch(home)
+  try {
+    const { electronApp, page } = first
+    await catchWhatReachesThem(electronApp)
+    await openFirstProject(electronApp, page, repo)
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+
+    // While a task runs, the Mac is held awake, once; stopped, nothing runs and it is let go.
+    await startTask(page, 'Keep the session alive', '[lead:wait]')
+    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    const holds = () => electronApp.evaluate(() => globalThis.awake?.size)
+    await expect.poll(holds).toBe(1)
+    // On battery it lets go, unless asked to hold then too; plugged in again, it holds again.
+    const power = (onBattery: boolean) =>
+      electronApp.evaluate(({ powerMonitor }, now) => {
+        globalThis.onBattery = now
+        powerMonitor.emit(now ? 'on-battery' : 'on-ac')
+      }, onBattery)
+    await power(true)
+    await expect.poll(holds).toBe(0)
+    await power(false)
+    await expect.poll(holds).toBe(1)
+    await page.getByRole('button', { name: /Open task/ }).click()
+    await page.getByRole('button', { name: 'More for this task' }).click()
+    await page.getByRole('menuitem', { name: /Stop the task/ }).click()
+    await expect.poll(holds, { timeout: 15_000 }).toBe(0)
+
+    // From the home's Settings: no notification for a ready task, and no count on the Dock.
+    await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
+    await page.keyboard.press('Meta+,')
+    const settings = page.getByRole('dialog', { name: 'Settings' })
+    await settings.getByRole('button', { name: /^Notifications/ }).click()
+    await settings.getByRole('switch', { name: 'A task is ready for you' }).click()
+    await settings.getByRole('switch', { name: COUNT }).click()
+    await expect.poll(kept).toContain('"notifyReady": false')
+    await expect.poll(kept).toContain('"badge": false')
+    await page.screenshot({ path: 'test-results/settings-notifications.png', animations: 'disabled' })
+  } finally {
+    await first.electronApp.close()
+  }
+
+  // Opened again, Althar has them as they were left.
+  const { electronApp, page } = await launch(home)
+  try {
+    await catchWhatReachesThem(electronApp)
+    const tabs = page.getByRole('navigation', { name: 'Projects' })
+    await tabs.getByRole('button', { name: /^Home/ }).click()
+    await page.keyboard.press('Meta+,')
+    const settings = page.getByRole('dialog', { name: 'Settings' })
+    await expect(settings.getByRole('switch', { name: 'Keep awake' })).toHaveAttribute('aria-checked', 'true')
+    await settings.getByRole('button', { name: /^Notifications/ }).click()
+    await expect(settings.getByRole('switch', { name: 'A task is ready for you' })).toHaveAttribute('aria-checked', 'false')
+    await expect(settings.getByRole('switch', { name: COUNT })).toHaveAttribute('aria-checked', 'false')
+    await expect(settings.getByRole('switch', { name: 'A call waits on you' })).toHaveAttribute('aria-checked', 'true')
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Escape')
+    await expect(settings).toHaveCount(0)
+
+    // A task ready while the person is elsewhere: it waits, but nothing says so outside the window.
+    await page
+      .getByRole('complementary', { name: 'Projects' })
+      .getByRole('button', { name: /meridian/ })
+      .click()
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await startTask(page, 'Add a retry to the checkout call', '[lead:finish]')
+    await expect(page.getByText('Ready', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => electronApp.evaluate(() => globalThis.badge)).toBe(0)
+    await page.waitForTimeout(1_000)
+    expect(await electronApp.evaluate(() => globalThis.shown)).toEqual([])
   } finally {
     await electronApp.close()
   }

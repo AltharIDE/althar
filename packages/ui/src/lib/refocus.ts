@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 
 /**
  * For a button that something replaces while it is open, like a note form
- * in place of Send back: when `open` turns false and focus went with what
+ * in place of Ask for changes: when `open` turns false and focus went with what
  * closed (it is on the page's body), focus goes back to the button. A
  * keyboard user carries on from where they were, and whatever listens for
  * keys inside the surrounding panel still hears them.

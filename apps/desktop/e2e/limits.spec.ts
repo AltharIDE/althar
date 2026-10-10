@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch } from './support'
+import { launch, openFirstProject } from './support'
 
 /*
  * An agent out of usage, as the person sees it. The fake agents are out as
@@ -19,8 +19,7 @@ const startTask = async (out: string) => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_OUT: out })
-  await chooseFolder(electronApp, repo)
-  await page.getByRole('button', { name: /Open a folder/ }).click()
+  await openFirstProject(electronApp, page, repo)
   await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
   await page.getByRole('button', { name: 'New task' }).click()
   await page.getByLabel('What should change').fill('Add a retry to the checkout call')

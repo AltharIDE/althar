@@ -14,6 +14,7 @@ export const launch = async (home: string, env: Record<string, string> = {}) => 
       ALTHAR_PROFILE: join(home, 'profile'),
       ALTHAR_WORKTREES: join(home, 'worktrees'),
       ALTHAR_FAKE_AGENTS: '1',
+      ALTHAR_CODE_HOME: home,
       ...env,
     },
   })
@@ -26,8 +27,17 @@ export const chooseFolder = (electronApp: ElectronApplication, path: string) =>
     dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [chosen] })) as typeof dialog.showOpenDialog
   }, path)
 
+/** Makes the first project of the folder at `path`, added from the first screen as the person would. */
+export const openFirstProject = async (electronApp: ElectronApplication, page: Page, path: string) => {
+  await chooseFolder(electronApp, path)
+  await page.getByRole('button', { name: /Add a folder/ }).click()
+  await page.getByRole('button', { name: /Make the project/ }).click()
+}
+
 export const say = async (page: Page, words: string) => {
   const box = page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })
+  // A click waits until the window takes input, as it doesn't while the launch plays over it; typing alone wouldn't.
+  await box.click()
   await box.fill(words)
   await box.press('Enter')
 }

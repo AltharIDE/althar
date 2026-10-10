@@ -1,0 +1,15 @@
+/* Where to read until the docs are here: three ways, between hairlines. */
+.page { background: var(--n-2); }
+.ways { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: var(--max); margin: 0 auto; padding: 72px var(--gut) 120px; list-style: none; }
+.ways li + li { box-shadow: inset 1px 0 0 var(--line-2); }
+.ways a { display: grid; gap: 6px; padding: 22px 28px; border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); color: var(--t-1); text-decoration: none; transition: background 200ms ease; }
+.ways a:hover { background: var(--n-1); }
+.ways b { font-family: 'Inter Display', var(--display); font-size: 24px; font-weight: 650; letter-spacing: -0.03em; }
+.ways span { font-size: 15px; color: var(--t-2); }
+
+@media (max-width: 760px) {
+  .ways { grid-template-columns: 1fr; padding-top: 48px; }
+  .ways li + li { box-shadow: none; }
+  .ways li + li a { border-top: 0; }
+  .ways a { padding: 20px 4px; }
+}

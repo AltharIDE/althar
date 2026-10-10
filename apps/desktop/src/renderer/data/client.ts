@@ -1,6 +1,8 @@
 import {
+  type AccountSignInState,
   type AccountStatus,
   type AgentModels,
+  type AppSettings,
   type FoundAccount,
   type ProjectRulesView,
   Api,
@@ -89,7 +91,8 @@ export interface Client {
   /** The person left the home: what the loop does from now on is new to them. */
   readonly leftHome: () => Promise<void>
   readonly startSession: (input: Start) => Promise<string>
-  readonly switchAgent: (input: Start) => Promise<string>
+  /** Hands the thread to another agent; with `body`, what the person said, its first turn after the brief. */
+  readonly switchAgent: (input: Start & { readonly body?: string }) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
   /** How hard the thread's agent thinks, as the agent names it. */
   readonly setEffort: (input: { readonly threadId: string; readonly effort: string }) => Promise<void>
@@ -97,6 +100,12 @@ export interface Client {
   readonly getModels: () => Promise<ReadonlyArray<AgentModels>>
   /** The person's default effort for one of an agent's models: every session on it starts there. */
   readonly setDefaultEffort: (input: { readonly agentId: string; readonly model: string; readonly effort: string }) => Promise<void>
+  /** Switches one of an agent's models off, or on again (ADR-015). */
+  readonly setModelBlocked: (input: { readonly agentId: string; readonly model: string; readonly blocked: boolean }) => Promise<void>
+  /** The person's settings for the app as a whole. */
+  readonly getSettings: () => Promise<AppSettings>
+  /** Althar as co-author of the commits and pull requests it sends, or not. */
+  readonly setCoAuthor: (on: boolean) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
   readonly stopSession: (threadId: string) => Promise<void>
   readonly send: (input: {
@@ -173,6 +182,14 @@ export interface Client {
   readonly findAccounts: (agentId: string) => Promise<ReadonlyArray<FoundAccount>>
   /** Opens the agent's own sign-in for the account in Terminal: the line it runs, and whether it could. */
   readonly signInAccount: (accountId: string) => Promise<{ readonly line: string; readonly opened: boolean }>
+  /** Signs an account in inside Althar, this way; its id, to ask how it stands. */
+  readonly startAccountSignIn: (
+    accountId: string,
+    way: 'browser' | 'device',
+  ) => Promise<{ readonly flowId: string; readonly state: AccountSignInState }>
+  readonly getAccountSignIn: (flowId: string) => Promise<AccountSignInState>
+  readonly pasteAccountSignInCode: (flowId: string, code: string) => Promise<void>
+  readonly cancelAccountSignIn: (flowId: string) => Promise<void>
   /** The person's open issues, for a project. */
   readonly listIssues: (projectId: string) => Promise<IssueList>
   /** Marks a task's draft pull request ready for review: in a task of several repositories, the one at `url`. */
@@ -183,6 +200,21 @@ export interface Client {
   readonly merge: (taskId: string, head: string, url?: string) => Promise<void>
   /** Merges a task without a pull request into its repositories' default branches on this Mac, up to the commit the person saw in each. */
   readonly mergeHere: (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) => Promise<void>
+  /** Pushes the default branches the task merged into here to their remotes, with the person's own git sign-in. */
+  readonly pushHere: (taskId: string) => Promise<void>
+  /** Pushes the task's branch to its repositories' remotes, up to the commit the person saw in each, with their own git sign-in. */
+  readonly pushBranch: (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) => Promise<void>
+  /** The editors on this Mac a task's files open in. */
+  readonly listEditors: () => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>
+  /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
+  readonly installAgent: (agentId: string) => Promise<void>
+  /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
+  readonly openInEditor: (input: {
+    readonly taskId: string
+    readonly editor: string
+    readonly path?: string
+    readonly line?: number
+  }) => Promise<boolean>
   /** Pushes the task's branch to its pull request, up to the commit the person saw; in a task of several repositories, the one at `url`. */
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
   /** Asks a task's pull request for news now. */
@@ -275,6 +307,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setEffort: (input) => command((commandId) => api.SetEffort({ commandId, ...input })),
     getModels: () => settle(api.GetModels({})),
     setDefaultEffort: (input) => command((commandId) => api.SetDefaultEffort({ commandId, ...input })),
+    setModelBlocked: (input) => command((commandId) => api.SetModelBlocked({ commandId, ...input })),
+    getSettings: () => settle(api.GetSettings({})),
+    setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     stopSession: (threadId) => command((commandId) => api.StopSession({ commandId, threadId })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
@@ -309,11 +344,20 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     orderAccounts: (agentId, accountIds) => command((commandId) => api.OrderAccounts({ commandId, agentId, accountIds })),
     findAccounts: (agentId) => settle(api.FindAccounts({ agentId })).then((list) => list.found),
     signInAccount: (accountId) => command((commandId) => api.SignInAccount({ commandId, accountId })),
+    startAccountSignIn: (accountId, way) => command((commandId) => api.StartAccountSignIn({ commandId, accountId, way })),
+    getAccountSignIn: (flowId) => settle(api.GetAccountSignIn({ flowId })),
+    pasteAccountSignInCode: (flowId, code) => command((commandId) => api.PasteAccountSignInCode({ commandId, flowId, code })),
+    cancelAccountSignIn: (flowId) => command((commandId) => api.CancelAccountSignIn({ commandId, flowId })),
     listIssues: (projectId) => settle(api.ListIssues({ projectId })),
     markReady: (taskId, url) => command((commandId) => api.MarkReady({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
     openChange: (taskId) => command((commandId) => api.OpenChange({ commandId, taskId })),
     merge: (taskId, head, url) => command((commandId) => api.Merge({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     mergeHere: (taskId, heads) => command((commandId) => api.MergeHere({ commandId, taskId, heads })),
+    pushHere: (taskId) => command((commandId) => api.PushHere({ commandId, taskId })),
+    pushBranch: (taskId, heads) => command((commandId) => api.PushBranch({ commandId, taskId, heads })),
+    listEditors: () => settle(api.ListEditors({})),
+    openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
+    installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),

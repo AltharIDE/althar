@@ -14,7 +14,8 @@ import {
   WorkCard,
 } from '@althar/ui'
 
-import { modelInfo, waitsWords } from '../../shared/agents'
+import { waitsWords } from '../../shared/agents'
+import { useModelNames } from '../../shared/modelNames'
 import { kindWords } from '../../shared/calls'
 import { productBrand, productName } from '../../shared/products'
 import { ago, clock, running } from '../../shared/time'
@@ -84,7 +85,8 @@ export function BoardView({
   onOpen: (threadId: string) => void
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
-  const lead = (task: BoardTask) => modelInfo({ id: task.lead ?? 'agent', name: name(task.lead) }, null)
+  const named = useModelNames()
+  const lead = (task: BoardTask) => named(task.lead, task.leadModel)
 
   return (
     <Board label={text.label}>

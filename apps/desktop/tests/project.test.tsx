@@ -43,6 +43,7 @@ const session = {
   agentName: 'Claude Code',
   state: 'active',
   model: null,
+  account: null,
   effort: null,
   models: [],
   turnRunning: false,
@@ -243,10 +244,10 @@ describe('the Talk room', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
     await userEvent.click(await screen.findByRole('radio', { name: 'High' }))
     await userEvent.keyboard('{Escape}')
-    await use('Coordinator: Claude Code default High', 'Opus')
+    await use('Coordinator: Claude Code default High', 'Claude Opus')
     // Sonnet has no High: it starts at its own.
-    await use('Coordinator: Opus High', 'Sonnet')
-    expect(await screen.findByRole('button', { name: 'Coordinator: Sonnet Medium' })).toBeTruthy()
+    await use('Coordinator: Claude Opus High', 'Claude Sonnet')
+    expect(await screen.findByRole('button', { name: 'Coordinator: Claude Sonnet Medium' })).toBeTruthy()
     await userEvent.type(screen.getByRole('textbox', { name: 'Tell the coordinator something' }), 'Hello{Enter}')
     await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code', model: 'sonnet' }))
   })
@@ -285,11 +286,15 @@ describe('the Talk room', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
     await userEvent.click(await screen.findByRole('radio', { name: 'High' }))
     await waitFor(() => expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'thc', effort: 'high' }))
-    // At work, another agent takes over only once the person says.
-    await userEvent.click(screen.getByRole('radio', { name: /gpt-5\.2-codexhands the conversation to Codex/ }))
-    expect(screen.getByText('Codex takes over from a brief; Claude Code’s turn stops.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Hand it over' }))
-    await waitFor(() => expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'codex', model: 'gpt-5.2-codex' }))
+    // At work, another agent takes over only with what the person says next.
+    await userEvent.click(screen.getByRole('radio', { name: /gpt-5\.2-codex, via Codexhands the conversation to Codex/ }))
+    await userEvent.keyboard('{Escape}')
+    expect(await screen.findByText(/gpt-5\.2-codex takes over from Claude Code default when you send\./)).toBeTruthy()
+    expect(client.switchAgent).not.toHaveBeenCalled()
+    await userEvent.type(busy, 'Plan it{Enter}')
+    await waitFor(() =>
+      expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'codex', model: 'gpt-5.2-codex', body: 'Plan it' }),
+    )
   })
 
   it('takes back what waits its turn: Edit puts it back in the composer, and one the coordinator has already says so', async () => {
@@ -481,7 +486,7 @@ describe('what can go wrong', () => {
       status: vi.fn(async () => ({ ...status, agents: agents.map((agent) => ({ ...agent, signIn: 'signed_out' as const })) })),
     })
     withServices(<Project />, client)
-    expect(await screen.findByText('No agent is signed in. Sign one in with its own tool, then come back.')).toBeTruthy()
+    expect(await screen.findByText('No agent is signed in. Sign one in from Settings, then come back.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Coordinator:/ })).toBeNull()
   })
 
@@ -512,5 +517,16 @@ describe('what can go wrong', () => {
     expect(await screen.findByText("That plan isn't there any more.")).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Show' }))
     expect(await screen.findByText('Gone.')).toBeTruthy()
+  })
+})
+
+describe('a send to the coordinator that fails', () => {
+  it('takes its copy out of the conversation again, and says why', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    vi.mocked(client.send).mockRejectedValueOnce(new ApiError({ reason: 'NotFound', message: 'The project went away.' }))
+    withServices(<Project />, client)
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Tell the coordinator something' }), 'Plan it{Enter}')
+    expect(await screen.findByText('The project went away.')).toBeTruthy()
+    expect(screen.queryByText('Plan it')).toBeNull()
   })
 })

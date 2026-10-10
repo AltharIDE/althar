@@ -839,7 +839,11 @@ export class Runs extends Context.Service<
           // Handed to another agent, or its account out of usage, the round starts afresh, on another account where it is.
           const spent = Option.isSome(running) && Option.isSome(yield* limits.outAccount(running.value.accountId))
           if (Option.isSome(running) && (spent || running.value.agentId !== step.agentId)) yield* Effect.ignore(sessions.stop(threadId))
-          const live = Option.filter(running, (session) => !spent && session.agentId === step.agentId)
+          const onIt = Option.filter(running, (session) => !spent && session.agentId === step.agentId)
+          // Kept for another round, the reviewer is on the model its step names; one that won't move starts afresh.
+          const kept = Option.isSome(onIt) && (yield* onModel(threadId, onIt.value.sessionId, step.model))
+          if (Option.isSome(onIt) && !kept) yield* Effect.ignore(sessions.stop(threadId))
+          const live = kept ? onIt : Option.none()
           const sessionId = Option.isSome(live)
             ? live.value.sessionId
             : yield* sessions.start({
@@ -898,6 +902,29 @@ export class Runs extends Context.Service<
       const settling = (findings: ReadonlyArray<Finding & { readonly id: string }>) =>
         `The review found:\n\n${findingsText(findings)}\n\nSettle each: fix what holds, and set aside what doesn't, with a reason. Then call finish_step with a summary, and in \`findings\` what became of each, by its id: fixed, or set_aside with the reason.`
 
+      /**
+       * Whether a session kept for a step is on the model the step asks for,
+       * put there where it was on another of its agent's. One the agent won't
+       * move isn't kept: the step starts afresh on its model instead.
+       */
+      const onModel = (threadId: string, sessionId: string, model: string | null | undefined) =>
+        Effect.gen(function* () {
+          if (model == null) return true
+          const sql = yield* SqlClient.SqlClient
+          const [on] = yield* sql<{ model: string | null }>`SELECT model FROM provider_sessions WHERE id = ${sessionId}`
+          if (on?.model === model) return true
+          const moved = yield* sessions.setModel({ threadId, model }).pipe(
+            Effect.as(true),
+            Effect.catchCause((cause) =>
+              Effect.as(Effect.logWarning('A kept session wouldn’t move to its step’s model; starting afresh', cause), false),
+            ),
+          )
+          if (!moved) return false
+          // Moved, it is on what the agent says it took, which may not be what was asked for.
+          const [now] = yield* sql<{ model: string | null }>`SELECT model FROM provider_sessions WHERE id = ${sessionId}`
+          return now?.model === model
+        })
+
       /** The lead's session: the one running, or the plan's lead (or another the person picked) started. */
       const leadOn = (run: RunRow, agentId?: string, model?: string | null, said?: string) =>
         Effect.gen(function* () {
@@ -906,7 +933,12 @@ export class Runs extends Context.Service<
           const live = yield* sessions.running(run.threadId)
           // One on an account that is out of usage hands over, to the same agent's next account where it has one (ADR-012).
           const spent = Option.isSome(live) && Option.isSome(yield* limits.outAccount(live.value.accountId))
-          if (Option.isSome(live) && !spent && (agentId === undefined || live.value.agentId === agentId)) return live.value.sessionId
+          if (Option.isSome(live) && !spent && (agentId === undefined || live.value.agentId === agentId)) {
+            // Kept, it moves to a model asked for now; the plan's, or one the person set on it since, stays. One that won't move starts afresh.
+            if (yield* onModel(run.threadId, live.value.sessionId, model)) return live.value.sessionId
+            yield* Effect.ignore(sessions.stop(run.threadId))
+            return yield* sessions.start({ threadId: run.threadId, agentId: live.value.agentId, ...(model == null ? {} : { model }) })
+          }
           if (Option.isSome(live))
             return yield* sessions.switchAgent({
               threadId: run.threadId,

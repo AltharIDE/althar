@@ -11,7 +11,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { type AgentEntry, Agents } from './Config'
 import { UnknownAgent } from './errors'
 import { Instance } from './Instance'
-import { defaultEffortsOf, setDefaultEffort } from './preferences'
+import { blockedModelsOf, defaultEffortsOf, setDefaultEffort, setModelBlocked } from './preferences'
 import { change, timestamp } from './records'
 import { SignIns } from './SignIns'
 
@@ -39,6 +39,8 @@ export interface AgentModels {
   readonly effort: string | null
   /** The person's default effort for each model they set one for. */
   readonly defaults: ReadonlyArray<{ readonly model: string; readonly effort: string }>
+  /** The models the person switched off, by id (ADR-015). */
+  readonly blocked: ReadonlyArray<string>
   /** Being asked now, for an agent not seen before. */
   readonly probing: boolean
 }
@@ -56,7 +58,7 @@ export interface OfferedModel {
 }
 
 /** What an agent's settings say it offers, and what it is on. */
-type Offered = Omit<AgentModels, 'probing' | 'defaults'>
+type Offered = Omit<AgentModels, 'probing' | 'defaults' | 'blocked'>
 
 /** How long starting an agent to ask it its settings may take. */
 const PROBE_TIMEOUT = Duration.seconds(30)
@@ -161,6 +163,14 @@ export class Models extends Context.Service<
       readonly model: string
       readonly effort: string
     }): Effect.Effect<void, SqlError.SqlError | UnknownAgent>
+    /** Switches one of an agent's models off, or on again (ADR-015). */
+    setModelBlocked(input: {
+      readonly agentId: string
+      readonly model: string
+      readonly blocked: boolean
+    }): Effect.Effect<void, SqlError.SqlError | UnknownAgent>
+    /** Forgets what asking an agent found, as when it is newly installed: it is asked again, and an asking still under way counts for nothing. */
+    forget(agentId: string): Effect.Effect<void>
   }
 >()('@althar/runtime/Models') {
   static readonly layer: Layer.Layer<Models, never, Store> = Layer.effect(
@@ -176,13 +186,15 @@ export class Models extends Context.Service<
       /* What asking each agent found this launch; an agent being asked has no entry yet. */
       const probed = new Map<string, Offered | null>()
       const probing = new Set<string>()
+      /* How often each agent's findings were forgotten: an asking begun before the last time counts for nothing. */
+      const forgotten = new Map<string, number>()
 
       /**
        * Starts the agent in an empty folder, read-only, to read its settings,
        * and stops it. Its process is recorded before it is spawned, as any
        * agent's is, so one a crash leaves behind is stopped at the next launch.
        */
-      const probe = (entry: AgentEntry) =>
+      const probe = (entry: AgentEntry, asOf = forgotten.get(entry.definition.id) ?? 0) =>
         Effect.acquireUseRelease(
           Effect.sync(() => mkdtempSync(join(tmpdir(), 'althar-models-'))),
           (folder) =>
@@ -241,14 +253,16 @@ export class Models extends Context.Service<
           (folder) => Effect.sync(() => rmSync(folder, { recursive: true, force: true })),
         ).pipe(
           Effect.orElseSucceed(() => null),
-          Effect.tap((found) => Effect.sync(() => probed.set(entry.definition.id, found))),
-          Effect.ensuring(Effect.sync(() => probing.delete(entry.definition.id))),
+          Effect.tap((found) => Effect.sync(() => current(entry, asOf) && probed.set(entry.definition.id, found))),
+          Effect.ensuring(Effect.sync(() => current(entry, asOf) && probing.delete(entry.definition.id))),
         )
+      const current = (entry: AgentEntry, asOf: number) => (forgotten.get(entry.definition.id) ?? 0) === asOf
 
       const of = (entry: AgentEntry) =>
         Effect.gen(function* () {
           const { definition } = entry
           const defaults = yield* defaultEffortsOf(definition.id)
+          const blocked = yield* blockedModelsOf(definition.id)
           // Its settings as the session started; what it is on now, as the person last set it.
           const [latest] = yield* sql<{ config: string; model: string | null; effort: string | null }>`
             SELECT config, model, effort FROM provider_sessions WHERE agent_id = ${definition.id} AND config IS NOT NULL
@@ -258,14 +272,14 @@ export class Models extends Context.Service<
           const now = latest === undefined ? {} : { model: latest.model, effort: latest.effort }
           // What it said when asked this launch is newer than any session: a model it offers since then is there.
           const asked = probed.get(definition.id)
-          if (asked !== undefined) return { ...(asked ?? seen), ...now, defaults, probing: false }
+          if (asked !== undefined) return { ...(asked ?? seen), ...now, defaults, blocked, probing: false }
           // Not asked yet this launch: asked now, in the background, if it is signed in; its latest session says until then.
           if (!probing.has(definition.id) && (yield* signIns.of(definition.id)) !== 'signed_out') {
             probing.add(definition.id)
             yield* Effect.forkIn(probe(entry), scope)
-            return { ...seen, ...now, defaults, probing: true }
+            return { ...seen, ...now, defaults, blocked, probing: true }
           }
-          return { ...seen, ...now, defaults, probing: probing.has(definition.id) }
+          return { ...seen, ...now, defaults, blocked, probing: probing.has(definition.id) }
         })
 
       return Models.of({
@@ -275,6 +289,17 @@ export class Models extends Context.Service<
             const entry = yield* agents.get(input.agentId)
             yield* setDefaultEffort(entry.definition.id, input.model, input.effort)
           }).pipe(Effect.provide(context)),
+        setModelBlocked: (input) =>
+          Effect.gen(function* () {
+            const entry = yield* agents.get(input.agentId)
+            yield* setModelBlocked(entry.definition.id, input.model, input.blocked)
+          }).pipe(Effect.provide(context)),
+        forget: (agentId) =>
+          Effect.sync(() => {
+            forgotten.set(agentId, (forgotten.get(agentId) ?? 0) + 1)
+            probed.delete(agentId)
+            probing.delete(agentId)
+          }),
       })
     }),
   )

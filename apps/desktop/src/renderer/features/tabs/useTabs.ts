@@ -26,6 +26,8 @@ export interface TabsModel {
   readonly current: string | null
   /** What waits on the person across every project. */
   readonly yours: number
+  /** There is no project at all yet, as read: the first screen has the whole window. */
+  readonly none: boolean
   readonly select: (id: string | null) => void
   readonly close: (id: string) => void
   readonly open: (id: string) => void
@@ -112,6 +114,7 @@ export const useTabs = (): TabsModel => {
     others: (projects ?? []).filter((project) => !open.includes(project.id)).map(tabOf),
     current,
     yours: (projects ?? []).reduce((sum, project) => sum + yoursIn(project), 0),
+    none: projects !== null && projects.length === 0,
     select: (id) => go(id, places),
     close: (id) => {
       store.change(closed(id))

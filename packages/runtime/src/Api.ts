@@ -1,5 +1,7 @@
-import { realpathSync } from 'node:fs'
-import { sep } from 'node:path'
+import { agentVersion } from '@althar/provider-adapters'
+import { lstatSync, realpathSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep } from 'node:path'
 
 import {
   type AccountStatus,
@@ -19,10 +21,12 @@ import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
+import { AccountSignIns } from './AccountSignIns'
 import { Changes } from './Changes'
 import { NotFound } from './errors'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
+import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
 import { Folders } from './Folders'
 import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
@@ -32,6 +36,7 @@ import { Limits } from './Limits'
 import { Live } from './Live'
 import { accountsOf, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from './Policies'
 import { Models } from './Models'
+import { Installs } from './Installs'
 import { Permissions } from './Permissions'
 import { Projects } from './Projects'
 import { Nudges } from './Nudges'
@@ -68,6 +73,39 @@ const realpathOf = (path: string) => {
   }
 }
 
+/** Whether something is at a path, a link to nothing included. */
+const isThere = (path: string) => {
+  try {
+    lstatSync(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Where a path really is, links followed: for one not there yet, its nearest
+ * folder that is, and the rest after it. A link to nothing is nowhere: the
+ * empty path, which is inside no folder.
+ */
+const realOf = (path: string): string => {
+  let at = path
+  const rest: string[] = []
+  while (!isThere(at) && dirname(at) !== at) {
+    rest.unshift(basename(at))
+    at = dirname(at)
+  }
+  try {
+    return join(realpathSync(at), ...rest)
+  } catch {
+    return ''
+  }
+}
+/** What the person asked for, as a task they made says it: what they wrote, or, from an issue, which the thread shows, what they added to it. */
+const requestOf = (title: string, description: string | undefined, issue: string | undefined): { readonly request?: string } => {
+  const words = issue === undefined ? [title, description ?? ''].filter((part) => part.trim() !== '').join('\n\n') : (description ?? '')
+  return words.trim() === '' ? {} : { request: words }
+}
 export const handlers = Api.toLayer(
   Effect.gen(function* () {
     const context = yield* Effect.context<Instance | Crypto.Crypto>()
@@ -80,7 +118,9 @@ export const handlers = Api.toLayer(
     const signIns = yield* SignIns
     const accounts = yield* Accounts
     const limits = yield* Limits
+    const installs = yield* Installs
     const models = yield* Models
+    const accountSignIns = yield* AccountSignIns
     const policies = yield* Policies
     const plans = yield* Plans
     const runs = yield* Runs
@@ -199,17 +239,30 @@ export const handlers = Api.toLayer(
         } satisfies AccountStatus
       })
 
+    /* Each agent's version, asked of its CLI once a launch. */
+    const versions = new Map<string, string | null>()
+    const versionOf = (entry: AgentEntry) =>
+      versions.has(entry.definition.id)
+        ? Effect.succeed(versions.get(entry.definition.id) ?? null)
+        : agentVersion(entry.definition).pipe(Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))))
+
     /* An agent, with its accounts: each check starts the agent's own status command, in the account's home. */
     const signIn = (entry: AgentEntry, recheck: boolean) =>
       Effect.gen(function* () {
         const statuses = yield* Effect.forEach(yield* accounts.of(entry.definition.id), (account) => accountStatus(account, recheck), {
           concurrency: 'unbounded',
         })
+        const install = yield* installs.state(entry.definition)
         return {
           id: entry.definition.id,
           name: entry.definition.name,
+          installed: entry.definition.cli === undefined || install.located !== null,
+          kept: install.located?.whose === 'althar',
+          download: install.downloadable && install.size !== null ? { size: install.size, installing: install.installing } : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
+          version: yield* versionOf(entry),
+          ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
         } satisfies AgentStatus
       })
@@ -399,6 +452,7 @@ export const handlers = Api.toLayer(
               ...(description === undefined ? {} : { description }),
               ...(from === undefined ? {} : { issueKey: from.key }),
               ...(repositories === undefined ? {} : { repositories }),
+              ...requestOf(title, description, issue),
             })
             if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
             return yield* queries.task(created.taskId)
@@ -429,15 +483,34 @@ export const handlers = Api.toLayer(
             sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
           ),
         ),
-      SwitchAgent: ({ commandId, threadId, agentId, model, effort }) =>
+      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body }) =>
         once(
           commandId,
           api(
-            sessions.switchAgent({
-              threadId,
-              agentId,
-              ...(model === undefined ? {} : { model }),
-              ...(effort === undefined ? {} : { effort }),
+            Effect.gen(function* () {
+              // What the person said with it is said to the thread, under a command of its own.
+              const message =
+                body === undefined
+                  ? undefined
+                  : {
+                      // Its own command id, made from the switch's, so a retry of the switch is a retry of it too.
+                      envelope: yield* envelope(
+                        'thread.send',
+                        { threadId, body, disposition: 'after_current' },
+                        `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
+                      ),
+                      body,
+                    }
+              const sessionId = yield* sessions.switchAgent({
+                threadId,
+                agentId,
+                ...(model === undefined ? {} : { model }),
+                ...(effort === undefined ? {} : { effort }),
+                ...(message === undefined ? {} : { message }),
+              })
+              // Links in what the person said unfurl on their message, as when it is sent on its own.
+              if (message !== undefined) yield* Effect.forkDetach(issues.unfurlInput(message.envelope.commandId))
+              return sessionId
             }),
           ),
         ),
@@ -446,6 +519,13 @@ export const handlers = Api.toLayer(
       GetModels: () => api(models.catalog),
       SetDefaultEffort: ({ commandId, agentId, model, effort }) =>
         once(commandId, api(models.setDefaultEffort({ agentId, model, effort }))),
+      SetModelBlocked: ({ commandId, agentId, model, blocked }) =>
+        once(commandId, api(models.setModelBlocked({ agentId, model, blocked }))),
+      GetSettings: () =>
+        api(Effect.map(coAuthorOn, (on) => ({ coAuthor: { on, line: coAuthorLine } }))).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+        ),
+      SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       Interrupt: ({ commandId, threadId }) => once(commandId, api(sessions.interrupt(threadId))),
       StopSession: ({ commandId, threadId }) => once(commandId, api(sessions.stop(threadId))),
       Send: ({ commandId, threadId, body, disposition }) =>
@@ -487,6 +567,7 @@ export const handlers = Api.toLayer(
                 draft: true,
                 ...(from === undefined ? {} : { issueKey: from.key }),
                 ...(repositories === undefined ? {} : { repositories }),
+                ...requestOf(title, description, issue),
               })
               if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
               // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
@@ -617,6 +698,10 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      StartAccountSignIn: ({ commandId, accountId, way }) => once(commandId, api(accountSignIns.start({ accountId, way }))),
+      GetAccountSignIn: ({ flowId }) => accountSignIns.get(flowId),
+      PasteAccountSignInCode: ({ commandId, flowId, code }) => once(commandId, api(accountSignIns.paste(flowId, code))),
+      CancelAccountSignIn: ({ commandId, flowId }) => once(commandId, api(accountSignIns.cancel(flowId))),
       GetProjectRules: ({ projectId }) =>
         api(
           Effect.gen(function* () {
@@ -668,11 +753,51 @@ export const handlers = Api.toLayer(
       Merge: ({ commandId, taskId, head, url }) => once(commandId, api(pullRequests.merge(taskId, head, url))),
       MergeHere: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.mergeHere(taskId, heads)))),
       Push: ({ commandId, taskId, head, url }) => once(commandId, api(Effect.asVoid(pullRequests.push(taskId, head, url)))),
+      PushHere: ({ commandId, taskId }) => once(commandId, api(Effect.asVoid(pullRequests.pushHere(taskId)))),
+      PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
+      ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
+      // Done once the copy is ready; its version and its models are asked again, as it is a new one.
+      InstallAgent: ({ agentId }) =>
+        api(
+          Effect.gen(function* () {
+            const entry = yield* agents.get(agentId)
+            yield* installs.install(entry.definition)
+            versions.delete(agentId)
+            yield* models.forget(agentId)
+          }),
+        ),
+      OpenInEditor: ({ taskId, editor, path, line }) =>
+        api(
+          Effect.gen(function* () {
+            const open = config.editors?.open
+            if (open === undefined) return false
+            // The task's folder: its worktree, or with several the folder that holds them, which its changes' paths start from.
+            const worktrees = yield* sql<{ path: string }>`
+              SELECT path FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} ORDER BY created_at, rowid`
+            const [first] = worktrees
+            if (first === undefined) return yield* new NotFound({ kind: 'task worktree', id: taskId })
+            const folder = yield* Effect.sync(() => realOf(worktrees.length > 1 ? dirname(first.path) : first.path))
+            // A path from the task's changes, never one that leaves its folder, by `..` or by a link.
+            const file = path === undefined ? null : yield* Effect.sync(() => realOf(resolve(folder, path)))
+            if (file !== null && !isInside(folder, file)) return false
+            return yield* open(editor, folder, file, line ?? null)
+          }),
+        ),
       RefreshTask: ({ taskId }) => pullRequests.refresh(taskId),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
     })
   }),
 )
+
+/** Whether a file is in a folder, as this system writes paths (`C:\\…` on Windows): not the folder itself, nor out of it by `..`. */
+export const isInside = (
+  folder: string,
+  file: string,
+  paths: Pick<typeof posix, 'relative' | 'isAbsolute' | 'sep'> = { relative, isAbsolute, sep },
+) => {
+  const within = paths.relative(folder, file)
+  return within !== '' && within !== '..' && !within.startsWith(`..${paths.sep}`) && !paths.isAbsolute(within)
+}
 
 /** The runtime's services: the store, this launch, and everything the API calls. Built once per launch. */
 export const services = (options: Runtime.RuntimeLayerOptions) =>

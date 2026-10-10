@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 
-import { linksIn, parseLink, parseRemote } from '../src/links'
+import { HOSTED, linksIn, newPullRequestLink, parseLink, parseRemote } from '../src/links'
 
 describe('a git remote', () => {
   it.each([
@@ -132,5 +132,39 @@ describe('links in text', () => {
     expect(
       linksIn('See https://linear.app/m/issue/MER-1/x, and (https://github.com/m/a/pull/2). Again: https://linear.app/m/issue/MER-1/x'),
     ).toEqual(['https://linear.app/m/issue/MER-1/x', 'https://github.com/m/a/pull/2'])
+  })
+})
+
+describe('a new pull request’s page', () => {
+  it('is where each host opens one from a branch into its base, from the remote it went to', () => {
+    expect(newPullRequestLink('git@github.com:meridian/api.git', 'althar/add-retry', 'main', HOSTED)).toBe(
+      'https://github.com/meridian/api/compare/main...althar/add-retry?expand=1',
+    )
+    expect(newPullRequestLink('https://gitlab.com/team/sub/api.git', 'althar/add-retry', 'main', HOSTED)).toBe(
+      'https://gitlab.com/team/sub/api/-/merge_requests/new?merge_request%5Bsource_branch%5D=althar%2Fadd-retry&merge_request%5Btarget_branch%5D=main',
+    )
+    expect(newPullRequestLink('git@bitbucket.org:team/api.git', 'fix', 'develop', HOSTED)).toBe(
+      'https://bitbucket.org/team/api/pull-requests/new?source=fix&dest=develop',
+    )
+    // A team's own, by its name.
+    expect(newPullRequestLink('ssh://git@gitlab.acme.dev:2222/web/app.git', 'fix', 'main', HOSTED)).toMatch(
+      /^https:\/\/gitlab\.acme\.dev\/web\/app\/-\/merge_requests\/new\?/,
+    )
+    expect(newPullRequestLink('https://codeberg.org/me/tool.git', 'fix', 'main', HOSTED)).toBe(
+      'https://codeberg.org/me/tool/compare/main...fix',
+    )
+    expect(newPullRequestLink('https://gitea.home.lan/me/tool.git', 'fix', 'main', HOSTED)).toBe(
+      'https://gitea.home.lan/me/tool/compare/main...fix',
+    )
+    // A web remote keeps its scheme and port; SSH's port is git's, not the site's.
+    expect(newPullRequestLink('http://gitlab.acme.dev:8080/group/api.git', 'fix', 'main', HOSTED)).toMatch(
+      /^http:\/\/gitlab\.acme\.dev:8080\/group\/api\/-\/merge_requests\/new\?/,
+    )
+    expect(newPullRequestLink('https://gitea.home.lan:3000/me/tool.git', 'fix', 'main', HOSTED)).toBe(
+      'https://gitea.home.lan:3000/me/tool/compare/main...fix',
+    )
+    // One that can't be told, or no host at all.
+    expect(newPullRequestLink('git@git.example.org:me/tool.git', 'fix', 'main', HOSTED)).toBeNull()
+    expect(newPullRequestLink('/srv/git/tool.git', 'fix', 'main', HOSTED)).toBeNull()
   })
 })

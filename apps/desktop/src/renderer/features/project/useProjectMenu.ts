@@ -84,15 +84,25 @@ export const useProjectMenu = (projectId: string, onRemoved: () => void): Projec
     [client, doing, projectId],
   )
 
-  // Removed from another window, or by this one: once listed and then gone, the window goes where `onRemoved` says.
+  useWhenRemoved(projectId, onRemoved)
+
+  return { project, dialog, ask, close, busy, error, rename, remove }
+}
+
+/**
+ * Removed from another window, or by this one: once listed and then gone, the
+ * window goes where `onRemoved` says, from the project or one of its tasks.
+ */
+export const useWhenRemoved = (projectId: string | undefined, onRemoved: () => void) => {
+  const { client } = useServices()
+  const listed = useQuery(reads(client).projects()).data
+  const there = projectId !== undefined && (listed?.projects.some((each) => each.id === projectId) ?? false)
   const seen = useRef(false)
   useEffect(() => {
-    if (project !== null) seen.current = true
+    if (there) seen.current = true
     else if (seen.current && listed !== undefined) {
       seen.current = false
       onRemoved()
     }
-  }, [project, listed, onRemoved])
-
-  return { project, dialog, ask, close, busy, error, rename, remove }
+  }, [there, listed, onRemoved])
 }
