@@ -7,3 +7,16 @@
   font: 11px var(--mono);
   color: var(--t-3);
 }
+/* the document, still being read */
+.reading {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 620px;
+}
+/* what the document says of itself in its place: nothing in it, or it couldn't be read */
+.said {
+  margin: 0;
+  font-size: 13px;
+  color: var(--t-3);
+}

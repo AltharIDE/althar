@@ -12,9 +12,16 @@ import s from './ThreadFrame.module.css'
  */
 export function ThreadFrame({ children, term = 'paper' }: { children: ReactNode; term?: 'paper' | 'dark' }) {
   const [doc, setDoc] = useState<DocRef | null>(null)
-  const [image, setImage] = useState<ImageRef | null>(null)
+  const [images, setImages] = useState<{ readonly set: readonly ImageRef[]; readonly at: number } | null>(null)
   const [step, setStep] = useState<StepRef | null>(null)
-  const shell = useMemo<ThreadShell>(() => ({ openDoc: setDoc, openImage: setImage, openStep: setStep }), [])
+  const shell = useMemo<ThreadShell>(
+    () => ({
+      openDoc: setDoc,
+      openImage: (image, set = [image]) => setImages({ set, at: Math.max(set.indexOf(image), 0) }),
+      openStep: setStep,
+    }),
+    [],
+  )
   return (
     <ThreadShellProvider value={shell}>
       <div className={doc ? `${s.frame} ${s.withPanel}` : s.frame} data-term={term}>
@@ -24,7 +31,7 @@ export function ThreadFrame({ children, term = 'paper' }: { children: ReactNode;
         </div>
         {doc && <DocPanel doc={doc} onClose={() => setDoc(null)} />}
       </div>
-      {image && <Lightbox image={image} onClose={() => setImage(null)} />}
+      {images && <Lightbox images={images.set} defaultIndex={images.at} onClose={() => setImages(null)} />}
     </ThreadShellProvider>
   )
 }

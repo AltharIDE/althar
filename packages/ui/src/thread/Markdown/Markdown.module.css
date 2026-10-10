@@ -86,23 +86,6 @@
   border: 0;
   border-top: 1px solid var(--line);
 }
-.tableWrap {
-  overflow-x: auto;
-}
-.md table {
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.md th,
-.md td {
-  padding: 5px 10px 5px 0;
-  border-bottom: 1px solid var(--line);
-  text-align: left;
-}
-.md th {
-  font-weight: 600;
-  color: var(--t-1);
-}
 
 .panel {
   max-width: 620px;
