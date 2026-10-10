@@ -122,6 +122,8 @@ export const words = (
         return 'An agent is already working on this task.'
       case 'NoSession':
         return 'No agent is working on this task.'
+      case 'InstallFailed':
+        return text(error, 'summary')
       case 'SessionFailed': {
         const summary = text(error, 'summary')
         return `${agentName(text(error, 'agentId'))} couldn't start.${summary === '' ? '' : ` ${summary}`}`

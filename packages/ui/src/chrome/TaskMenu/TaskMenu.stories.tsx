@@ -8,7 +8,7 @@ import { TaskMenu } from './TaskMenu'
 const meta = {
   title: 'Chrome/TaskMenu',
   component: TaskMenu,
-  args: { status: TaskStatus.Running, onStop: fn(), onResume: fn(), onAbandon: fn(), onReopen: fn() },
+  args: { status: TaskStatus.Running, onOpen: fn(), editor: 'Cursor', onStop: fn(), onResume: fn(), onAbandon: fn(), onReopen: fn() },
   decorators: [
     (Story, { parameters }) =>
       parameters.pseudo ? (
@@ -29,7 +29,18 @@ export const Stopped: Story = { args: { status: TaskStatus.Stopped, defaultOpen:
 /** Settled: reopen it. */
 export const Settled: Story = { args: { status: TaskStatus.Done, defaultOpen: true } }
 /** With nothing it can do, there is no menu at all. */
-export const NothingToDo: Story = { args: { status: TaskStatus.Done, onReopen: undefined } }
+export const NothingToDo: Story = { args: { status: TaskStatus.Done, onReopen: undefined, onOpen: undefined } }
+
+/** Its folder opens in the editor its files open in, wherever the task stands. */
+export const OpeningTheFolder: Story = {
+  args: { status: TaskStatus.Done, onReopen: undefined, editor: 'Zed' },
+  play: async ({ args, canvasElement }) => {
+    const page = within(document.body)
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'More for this task' }))
+    await userEvent.click(await page.findByRole('menuitem', { name: /Open in Zed/ }))
+    await expect(args.onOpen).toHaveBeenCalledOnce()
+  },
+}
 
 export const Stopping: Story = {
   play: async ({ args, canvasElement }) => {

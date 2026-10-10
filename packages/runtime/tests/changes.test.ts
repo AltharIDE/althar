@@ -10,6 +10,7 @@ import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
+import { coAuthorLine, setCoAuthor } from '../src/credit'
 import { ChangedSinceSeen } from '../src/errors'
 import { words } from '../src/words'
 import { Connections } from '../src/Connections'
@@ -73,6 +74,9 @@ describe('a task that ends in a pull request', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
+    // The fake lead commits as the person, as agents do: Althar credits only the person's own commits.
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:answer] [review:pass]')
@@ -95,8 +99,10 @@ describe('a task that ends in a pull request', () => {
       assert.isTrue(opened?.draft)
       assert.include(opened?.body, 'Did the task.')
       assert.include(opened?.body, 'Passed after one round of review.')
-      // What it pushed is what the lead committed; Althar commits nothing of its own.
+      // What it pushed is what the lead committed; Althar commits nothing of its own, and is its co-author.
       assert.strictEqual(git(bare, 'log', '-1', '--format=%an %s', 'althar/add-a-retry'), 'Fake Change it')
+      assert.strictEqual(git(bare, 'log', '-1', '--format=%B', 'althar/add-a-retry'), `Change it\n\n${coAuthorLine}`)
+      assert.include(opened?.body, 'Opened by Althar.')
       assert.include(git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry'), 'change.txt')
 
       const threadId = ready?.threadId ?? ''
@@ -356,6 +362,8 @@ describe('a task that ends in a pull request', () => {
       const plans = yield* Plans
       const instance = yield* Instance
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      // Althar's credit turned off: what it pushes is the lead's commit as made.
+      yield* setCoAuthor(false)
       const created = yield* projects.createTask({
         envelope: yield* Runtime.envelope('task.create', {}),
         projectId: project.projectId,
@@ -378,6 +386,7 @@ describe('a task that ends in a pull request', () => {
       const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       assert.lengthOf(github.changes, 0)
       assert.include(git(bare, 'ls-tree', '--name-only', created.branch), 'change.txt')
+      assert.strictEqual(git(bare, 'log', '-1', '--format=%B', created.branch), 'Change it')
       const published = (yield* items(ready?.threadId ?? '')).find((item) => item.kind === 'step_result' && item.content.step === 'publish')
       assert.strictEqual(published?.content.summary, `Pushed ${created.branch}.`)
     }).pipe(Effect.provide(runtimeWith({ github })))

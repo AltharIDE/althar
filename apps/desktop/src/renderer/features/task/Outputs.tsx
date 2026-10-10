@@ -6,6 +6,7 @@ import { checkOf } from '../../shared/checks'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
 import s from './Task.module.css'
+import { device } from '../../shared/device'
 
 /*
  * A task's outputs: what it changed, as one change set, for deciding whether
@@ -43,7 +44,7 @@ export const text = {
     const remotes = [...new Set(merged.flatMap((one) => (one.remote === null ? [] : [one.remote.slice(0, one.remote.indexOf('/'))])))].join(
       ' and ',
     )
-    return remotes === '' ? `Merged into ${into} on this Mac.` : `Merged into ${into}, and pushed to ${remotes}.`
+    return remotes === '' ? `Merged into ${into} on ${device.this}.` : `Merged into ${into}, and pushed to ${remotes}.`
   },
   repositories: (n: number) => (n === 1 ? 'Repository' : 'Repositories'),
   /** Merged here: whether its remote has it yet. */
@@ -52,8 +53,8 @@ export const text = {
     const names = [...new Set(merged.flatMap((one) => (one.remote === null ? [] : [one.remote.slice(0, one.remote.indexOf('/'))])))]
     const remotes = names.join(' and ')
     if (merged.some((one) => one.ahead > 0))
-      return `Into ${into} on this Mac. ${remotes} ${names.length > 1 ? 'don’t' : 'doesn’t'} have it yet.`
-    if (merged.every((one) => one.remote === null)) return `Into ${into} on this Mac. It has no remote to push to.`
+      return `Into ${into} on ${device.this}. ${remotes} ${names.length > 1 ? 'don’t' : 'doesn’t'} have it yet.`
+    if (merged.every((one) => one.remote === null)) return `Into ${into} on ${device.this}. It has no remote to push to.`
     return `Into ${into}, and pushed to ${remotes}.`
   },
   pushHere: (merged: ReadonlyArray<TaskRepositoryMerged>) => {

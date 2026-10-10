@@ -22,9 +22,10 @@ import { useModelNames } from '../../shared/modelNames'
 import { productBrand, productName } from '../../shared/products'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { trackOf } from '../board/BoardView'
+import type { EdgeGlance } from '../settings/EdgePicture'
 import { SettingsPanel } from '../settings/SettingsPanel'
 import type { StartModel } from '../start/useStart'
-import { kindWords } from '../../shared/calls'
+import { callKindOf, kindWords } from '../../shared/calls'
 import { text as stuckText } from '../task/StuckCall'
 import s from './Home.module.css'
 import type { HomeModel } from './useHome'
@@ -152,6 +153,40 @@ export function HomeView({
   const ready = tasks.filter((task) => task.phase === 'ready')
   const calls = (home?.calls ?? []).filter((call) => !answered.some((one) => one.id === call.id))
   const waiting = calls.length + ready.length
+
+  // What waits and runs now, for Settings' pictures of the edge of the screen: calls first, then ready work, then what runs.
+  const glance: EdgeGlance = {
+    waiting,
+    running: underway,
+    lines: [
+      ...calls.flatMap((call) => {
+        const project = refs.get(call.projectId)
+        return project === undefined
+          ? []
+          : [
+              {
+                id: call.id,
+                status: TaskStatus.Yours,
+                project,
+                title: call.stuck === null ? call.title : call.taskTitle,
+                kind: callKindOf(call),
+              },
+            ]
+      }),
+      ...ready.flatMap((task) => {
+        const project = refs.get(task.projectId)
+        return project === undefined
+          ? []
+          : [{ id: task.taskId, status: TaskStatus.Yours, project, title: task.title, kind: kindWords.ready }]
+      }),
+      ...working.flatMap((task) => {
+        const project = refs.get(task.projectId)
+        return project === undefined || task.phase !== 'running'
+          ? []
+          : [{ id: task.taskId, status: TaskStatus.Running, project, title: task.title }]
+      }),
+    ].slice(0, 3),
+  }
 
   const openFolder = () => void start.openFolder().then((opened) => opened !== null && onProject(opened.id))
   // ⌘N opens a folder, and ⌘, opens and closes settings. ⌘ and a number belongs to the window's tabs.
@@ -356,7 +391,7 @@ export function HomeView({
                 else if (first !== undefined) onTask(first.threadId)
               }}
             />
-            <SettingsPanel start={start} open={settings} onOpenChange={setSettings} />
+            <SettingsPanel start={start} open={settings} onOpenChange={setSettings} glance={glance} />
           </>
         }
       >

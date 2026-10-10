@@ -47,6 +47,10 @@ export interface StartModel {
   readonly cancelForming: () => void
   /** Asks each agent again how its accounts are signed in. */
   readonly recheck: () => Promise<void>
+  /** Downloads an agent Althar can fetch, then asks the agents again; its row says it downloads meanwhile. */
+  readonly install: (agentId: string) => Promise<void>
+  /** Why each agent's last download didn't finish, by its id. */
+  readonly installFailed: Readonly<Record<string, string>>
   /** When the agents were last read, as a time: a read that found nothing changed moves it on too. */
   readonly checkedAt: number
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
@@ -76,6 +80,7 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
   const [forming, setForming] = useState<Forming | null>(null)
   const [creating, setCreating] = useState(false)
   const [unremoved, setUnremoved] = useState<string | null>(null)
+  const [installFailed, setInstallFailed] = useState<Readonly<Record<string, string>>>({})
 
   /** The agents again: checked afresh after a sign-in, as the runtime last knew them after anything else. */
   const reloadStatus = useCallback(
@@ -235,6 +240,21 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
     creating,
     cancelForming: () => setForming(null),
     recheck: recheckNow,
+    install: async (agentId) => {
+      setInstallFailed((now) => Object.fromEntries(Object.entries(now).filter(([id]) => id !== agentId)))
+      // The runtime says it downloads as soon as it starts, so the row changes at once; that read is waited for before the
+      // last one, so it can never land after it and say the agent still downloads.
+      const done = client.installAgent(agentId)
+      const first = reloadStatus(false)
+      try {
+        await done
+      } catch (failure) {
+        setInstallFailed((now) => ({ ...now, [agentId]: messageOf(failure) }))
+      }
+      await first
+      await reloadStatus(true)
+    },
+    installFailed,
     checkedAt: statusRead.dataUpdatedAt,
     renameAccount: (accountId, name) => changing(() => client.renameAccount(accountId, name)),
     moveAccount,

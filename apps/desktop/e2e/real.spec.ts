@@ -26,14 +26,15 @@ test('a real agent leads a task and answers', async () => {
   const { ALTHAR_FAKE_AGENTS: _, ...env } = process.env
   const app = await electron.launch({
     args: [join(import.meta.dirname, '..')],
-    env: { ...env, ALTHAR_PROFILE: join(home, 'profile'), ALTHAR_WORKTREES: join(home, 'worktrees') },
+    env: { ...env, ALTHAR_PROFILE: join(home, 'profile'), ALTHAR_WORKTREES: join(home, 'worktrees'), ALTHAR_CODE_HOME: home },
   })
   try {
     await app.evaluate(({ dialog }, chosen) => {
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [chosen] })) as typeof dialog.showOpenDialog
     }, repo)
     const page = await app.firstWindow()
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await page.getByRole('button', { name: /Add a folder/ }).click()
+    await page.getByRole('button', { name: /Make the project/ }).click()
     await page.getByRole('button', { name: 'New task' }).click()
     await page.getByLabel('What should change').fill('Say hello')
     await page

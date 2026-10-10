@@ -90,6 +90,8 @@ describe('what Althar writes about a pull request', () => {
 
   it('describes it from what the steps reported', () => {
     assert.strictEqual(bodyOf({ lead: null, review: null, findings: [], issue: null }), '<sub>Opened by Althar.</sub>')
+    // Althar's credit turned off, it doesn't sign the description either.
+    assert.strictEqual(bodyOf({ lead: 'Adds a retry.', review: null, findings: [], issue: null, credit: false }), 'Adds a retry.')
     assert.strictEqual(
       bodyOf({ lead: '', review: { rounds: 0, verdict: null }, findings: [], issue: { key: '#12', url: 'u', sameHost: true } }),
       'Issue: #12\n\n<sub>Opened by Althar.</sub>',

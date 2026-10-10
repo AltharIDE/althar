@@ -319,3 +319,6 @@ export const CODEX_MODELS: SwitchedModel[] = [
   { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex' },
   { id: 'gpt-5-mini', name: 'GPT-5 mini' },
 ]
+
+/** The line each commit gets while Althar is co-author: its GitHub account's private address, so GitHub shows its picture. */
+export const CO_AUTHOR_TRAILER = 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>'

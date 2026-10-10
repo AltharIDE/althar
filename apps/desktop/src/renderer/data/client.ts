@@ -2,6 +2,7 @@ import {
   type AccountSignInState,
   type AccountStatus,
   type AgentModels,
+  type AppSettings,
   type FoundAccount,
   type ProjectRulesView,
   Api,
@@ -101,6 +102,10 @@ export interface Client {
   readonly setDefaultEffort: (input: { readonly agentId: string; readonly model: string; readonly effort: string }) => Promise<void>
   /** Switches one of an agent's models off, or on again (ADR-015). */
   readonly setModelBlocked: (input: { readonly agentId: string; readonly model: string; readonly blocked: boolean }) => Promise<void>
+  /** The person's settings for the app as a whole. */
+  readonly getSettings: () => Promise<AppSettings>
+  /** Althar as co-author of the commits and pull requests it sends, or not. */
+  readonly setCoAuthor: (on: boolean) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
   readonly stopSession: (threadId: string) => Promise<void>
   readonly send: (input: {
@@ -199,6 +204,8 @@ export interface Client {
   readonly pushBranch: (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) => Promise<void>
   /** The editors on this Mac a task's files open in. */
   readonly listEditors: () => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>
+  /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
+  readonly installAgent: (agentId: string) => Promise<void>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
   readonly openInEditor: (input: {
     readonly taskId: string
@@ -299,6 +306,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getModels: () => settle(api.GetModels({})),
     setDefaultEffort: (input) => command((commandId) => api.SetDefaultEffort({ commandId, ...input })),
     setModelBlocked: (input) => command((commandId) => api.SetModelBlocked({ commandId, ...input })),
+    getSettings: () => settle(api.GetSettings({})),
+    setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     stopSession: (threadId) => command((commandId) => api.StopSession({ commandId, threadId })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
@@ -345,6 +354,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     pushBranch: (taskId, heads) => command((commandId) => api.PushBranch({ commandId, taskId, heads })),
     listEditors: () => settle(api.ListEditors({})),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
+    installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),

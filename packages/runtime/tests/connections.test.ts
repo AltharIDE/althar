@@ -482,7 +482,7 @@ describe('the agents', () => {
         GIT_CONFIG_VALUE_0: '',
         GIT_TERMINAL_PROMPT: '0',
       })
-    }).pipe(Effect.provide(Agents.registry)),
+    }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
   )
 
   it.effect('run without the MCP servers the person set up for Codex, in the account’s home or the repository', () =>
@@ -495,7 +495,7 @@ describe('the agents', () => {
       const env = transport?._tag === 'Process' ? (transport.spec.env ?? {}) : {}
       assert.deepStrictEqual(JSON.parse(env.CODEX_CONFIG ?? '{}'), { 'mcp_servers.github.enabled': false })
       assert.strictEqual(env.CODEX_HOME, home)
-    }).pipe(Effect.provide(Agents.registry)),
+    }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
   )
 
   it('leave git with no credential helper to ask, whatever the person set', () => {

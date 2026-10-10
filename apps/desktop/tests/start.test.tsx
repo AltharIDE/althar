@@ -15,7 +15,7 @@ import { SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
 import { runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
-import { agents, changed, fakeClient, fakeHost, home, project, streamed, usual } from './fixtures'
+import { agents, changed, fakeClient, fakeHost, home, project, streamed, usual, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
@@ -584,43 +584,179 @@ describe('the start', () => {
     expect(client.openProject).toHaveBeenCalledWith('grant_picked')
   })
 
-  it('shows the first screen when there is no project, and what went wrong', async () => {
-    const failure = new ApiError({ reason: 'NotARepository', message: 'That folder is not in a git repository.' })
+  it('offers to download an agent that isn’t on this Mac, says it downloads, and why it didn’t finish', async () => {
+    let installing = false
+    let finish: () => void = () => {}
     const { client } = fakeClient({
       listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      status: vi.fn(async () => ({
+        apiVersion: 1,
+        appVersion: '0.0.0',
+        agents: withoutOpenCode.map((agent) => (agent.id === 'opencode' ? { ...agent, download: { size: '45 MB', installing } } : agent)),
+      })),
+      // The download runs until the test lets it end, so its row is seen downloading however slow the machine.
+      installAgent: vi.fn(async () => {
+        installing = true
+        await new Promise<void>((resolve) => (finish = resolve))
+        installing = false
+        throw new ApiError({ reason: 'InstallFailed', message: 'GitHub couldn’t be reached to find OpenCode.' })
+      }),
+    })
+    withServices(<Start onProject={vi.fn()} />, client, fakeHost())
+    expect(await screen.findByText('Not installed on this Mac')).toBeTruthy()
+    expect(screen.getByText(/latest release from GitHub, about 45 MB/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Download' }))
+    expect(client.installAgent).toHaveBeenCalledWith('opencode')
+    expect(await screen.findByText('Downloading OpenCode, about 45 MB, and checking it')).toBeTruthy()
+    finish()
+    expect((await screen.findByRole('alert')).textContent).toBe('GitHub couldn’t be reached to find OpenCode.')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+  })
+
+  it('offers the repositories found where people keep code, and makes the first project of those ticked', async () => {
+    const onProject = vi.fn()
+    const findRepositories = vi.fn(async () => ({
+      lookedIn: ['~/Projects', '~/code'],
+      repositories: [
+        { id: 'r1', name: 'meridian', where: '~/Projects/meridian', branch: 'main', worked: Date.now() - 2 * 3600_000 },
+        { id: 'r2', name: 'halyard', where: '~/code/halyard', branch: null, worked: 0 },
+      ],
+    }))
+    const root = (grant: string) => (grant === 'grant_r1' ? '/Users/me/Projects/meridian' : '/Users/me/code/halyard')
+    const readFolder = vi.fn(async (grant: string) => ({
+      kind: 'repository' as const,
+      name: grant,
+      repositories: [{ path: root(grant), folder: null, name: grant, branch: 'main', remote: null }],
+      project: null,
+    }))
+    const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })), readFolder })
+    const host = fakeHost({ findRepositories })
+    withServices(<Start onProject={onProject} />, client, host)
+    const found = await screen.findByRole('list', { name: 'Repositories for the project' })
+    expect(screen.getByText('in ~/Projects, ~/code')).toBeTruthy()
+    expect(
+      within(found)
+        .getByRole('checkbox', { name: /meridian/ })
+        .closest('label')?.textContent,
+    ).toBe('meridian~/Projects/meridianmain · 2h ago')
+    expect(
+      within(found)
+        .getByRole('checkbox', { name: /halyard/ })
+        .closest('label')?.textContent,
+    ).toBe('halyard~/code/halyard')
+    // Nothing is granted until the project is made.
+    await userEvent.click(within(found).getByRole('checkbox', { name: /halyard/ }))
+    await userEvent.click(within(found).getByRole('checkbox', { name: /meridian/ }))
+    const name = screen.getByRole('textbox', { name: 'Project name' })
+    expect((name as HTMLInputElement).value).toBe('halyard')
+    expect(host.grantFound).not.toHaveBeenCalled()
+    await userEvent.clear(name)
+    await userEvent.type(name, 'Halyard')
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
+    await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
+    expect(host.grantFound).toHaveBeenCalledWith('r2')
+    expect(host.grantFound).toHaveBeenCalledWith('r1')
+    expect(client.openProject).toHaveBeenCalledWith('grant_r2', {
+      name: 'Halyard',
+      repositories: [
+        { grant: 'grant_r2', path: '/Users/me/code/halyard' },
+        { grant: 'grant_r1', path: '/Users/me/Projects/meridian' },
+      ],
+    })
+  })
+
+  it('adds a folder from anywhere, picked, by ⌘N or dropped, each of several repositories ticked, and opens one alone as itself', async () => {
+    const onProject = vi.fn()
+    const found = (name: string, at: string) => ({ path: `${at}/${name}`, folder: null, name, branch: 'main', remote: null })
+    const readFolder = vi.fn(async (grant: string) =>
+      grant === 'grant_picked'
+        ? { kind: 'folder' as const, name: 'work', repositories: [found('api', '/w'), found('web', '/w')], project: null }
+        : {
+            kind: 'inside' as const,
+            name: 'docs',
+            repositories: [{ path: '/m/mono', folder: 'docs', name: 'mono', branch: 'main', remote: null }],
+            project: null,
+          },
+    )
+    const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })), readFolder })
+    const host = fakeHost()
+    withServices(<Start onProject={onProject} />, client, host)
+    await userEvent.click(await screen.findByRole('button', { name: /Add a folder/ }))
+    const list = screen.getByRole('list', { name: 'Repositories for the project' })
+    expect(within(list).getByRole('checkbox', { name: /api/ }).getAttribute('aria-checked')).toBe('true')
+    expect(within(list).getByRole('checkbox', { name: /web/ }).getAttribute('aria-checked')).toBe('true')
+    expect((screen.getByRole('textbox', { name: 'Project name' }) as HTMLInputElement).value).toBe('api')
+    // Picked again, nothing new is listed twice.
+    fireEvent.keyDown(window, { key: 'n', metaKey: true })
+    await waitFor(() => expect(host.pickFolder).toHaveBeenCalledTimes(2))
+    expect(within(list).getAllByRole('checkbox', { name: /api/ })).toHaveLength(1)
+    await userEvent.click(within(list).getByRole('checkbox', { name: /api/ }))
+    await userEvent.click(within(list).getByRole('checkbox', { name: /web/ }))
+
+    // A folder inside a repository, dropped: alone, it opens as the folder it is.
+    // Dropped anywhere on the screen: on the list, here.
+    fireEvent.drop(list, { dataTransfer: { types: ['Files'], files: [new File([], 'docs')] } })
+    expect(await within(list).findByRole('checkbox', { name: /docs.*~?\/m\/mono\/docs/ })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
+    expect(client.openProject).toHaveBeenCalledWith('grant_dropped', { name: 'docs' })
+  })
+
+  it('says what went wrong making the first project, and when nothing was found or the runtime can’t answer', async () => {
+    const readFolder = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: 'folder' as const, name: 'empty', repositories: [], project: null })
+      .mockRejectedValueOnce(new ApiError({ reason: 'NotFound', message: 'That folder isn’t there any more.' }))
+    const failure = new ApiError({ reason: 'GitFailed', message: 'Git couldn’t read it.' })
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      readFolder,
       openProject: vi.fn(async () => Promise.reject(failure)),
     })
-    const host = fakeHost({ grantDropped: vi.fn(async () => null) })
+    const host = fakeHost({
+      findRepositories: vi.fn(async () => ({
+        lookedIn: [],
+        repositories: [{ id: 'r1', name: 'gone', where: '~/gone', branch: null, worked: 0 }],
+      })),
+      grantFound: vi.fn(async () => null),
+      grantDropped: vi.fn(async () => null),
+    })
     const onProject = vi.fn()
-    const view = withServices(<Start onProject={onProject} />, client, host)
-    await screen.findByText('Your first project')
-    await userEvent.click(screen.getByRole('button', { name: /Open a folder/ }))
-    await screen.findByText('That folder is not in a git repository.')
-    // ⌘N opens a folder here too.
-    fireEvent.keyDown(window, { key: 'n', metaKey: true })
-    await waitFor(() => expect(client.openProject).toHaveBeenCalledTimes(2))
-    // Something dropped that is not a file on disk opens nothing.
-    fireEvent.dragOver(view.container.firstElementChild as Element)
-    fireEvent.drop(view.container.firstElementChild as Element, { dataTransfer: { files: [new File([], 'x')] } })
-    await waitFor(() => expect(host.grantDropped).toHaveBeenCalled())
-    expect(client.openProject).toHaveBeenCalledTimes(2)
+    withServices(<Start onProject={onProject} />, client, host)
+    await screen.findByRole('heading', { name: 'Where should they work?' })
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
+    expect(await screen.findByText('Tick a repository for the project first.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /Add a folder/ }))
+    expect(await screen.findByText('There’s no git repository in empty.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /Add a folder/ }))
+    expect(await screen.findByText('That folder isn’t there any more.')).toBeTruthy()
+    const list = screen.getByRole('list', { name: 'Repositories for the project' })
+    fireEvent.drop(list, { dataTransfer: { types: ['Files'], files: [new File([], 'notes.txt')] } })
+    expect(await screen.findByText('notes.txt isn’t a folder on this computer.')).toBeTruthy()
+    // One found but no longer granted says so.
+    await userEvent.click(screen.getByRole('checkbox', { name: /gone/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    expect(await screen.findByText('Althar couldn’t open gone. Add it with Add a folder.')).toBeTruthy()
+    expect(client.openProject).not.toHaveBeenCalled()
     expect(onProject).not.toHaveBeenCalled()
   })
 
-  it('opens nothing when the picker is cancelled, and says when the runtime cannot answer', async () => {
+  it('offers no repositories when none were found or the look failed, and says when the runtime cannot answer', async () => {
     const { client } = fakeClient({
       listProjects: vi.fn(async () => Promise.reject(new Error('The runtime stopped'))),
       status: vi.fn(async () => Promise.reject(new Error('The runtime stopped'))),
     })
-    const host = fakeHost({ pickFolder: vi.fn(async () => null) })
+    const host = fakeHost({ pickFolder: vi.fn(async () => null), findRepositories: vi.fn(async () => Promise.reject(new Error('EACCES'))) })
     withServices(<Start onProject={vi.fn()} />, client, host)
     await screen.findAllByText("Althar's runtime didn't answer. If it keeps happening, restart Althar.")
-    await userEvent.click(screen.getByRole('button', { name: /Open a folder/ }))
-    expect(client.openProject).not.toHaveBeenCalled()
+    expect(await screen.findByRole('heading', { name: 'Where is your code?' })).toBeTruthy()
+    expect(screen.getByText('None found in the usual places.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /Add a folder/ }))
+    expect(client.readFolder).not.toHaveBeenCalled()
   })
 
   it('says how each agent is signed in', () => {
-    expect(agents.map(runtimeEntry).map((entry) => [entry.state, 'account' in entry])).toEqual([
+    expect(agents.map((agent) => runtimeEntry(agent)).map((entry) => [entry.state, 'account' in entry])).toEqual([
       [RuntimeState.Ready, false],
       [RuntimeState.Ready, true],
       [RuntimeState.SignedOut, false],

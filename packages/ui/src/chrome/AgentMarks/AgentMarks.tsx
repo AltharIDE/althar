@@ -29,6 +29,7 @@ export const agentMarksText: AgentMarksText = {
     [RuntimeState.SigningIn]: 'signing in',
     [RuntimeState.SignedOut]: 'signed out',
     [RuntimeState.Missing]: 'not installed',
+    [RuntimeState.Installing]: 'downloading',
     [RuntimeState.Outdated]: 'needs an update',
   },
   out: (back) => (back ? `out until ${back}` : 'out of usage'),
@@ -58,6 +59,7 @@ function say(agent: AgentMark, t: AgentMarksText): { words: string; shown: boole
     case RuntimeState.Checking:
     case RuntimeState.SigningIn:
     case RuntimeState.Missing:
+    case RuntimeState.Installing:
     case RuntimeState.Outdated:
       return { words: t.state[agent.state], shown: true }
     default:

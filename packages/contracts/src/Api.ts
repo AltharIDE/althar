@@ -65,6 +65,12 @@ export const AgentStatus = Schema.Struct({
   ways: Schema.Array(Schema.Literals(['browser', 'device'])),
   /** Its accounts, in the person's order. */
   accounts: Schema.Array(AccountStatus),
+  /** Its command is on this device, the person's or the copy Althar downloaded; an agent that ships with Althar always is. */
+  installed: Schema.Boolean,
+  /** It runs from the copy Althar downloaded, as the person has none of their own. */
+  kept: Schema.Boolean,
+  /** Althar can download it for the person, about this big; null where it can't. `installing` while it does. */
+  download: Schema.NullOr(Schema.Struct({ size: Schema.String, installing: Schema.Boolean })),
 })
 export type AgentStatus = typeof AgentStatus.Type
 
@@ -126,6 +132,13 @@ export const AgentModels = Schema.Struct({
   probing: Schema.Boolean,
 })
 export type AgentModels = typeof AgentModels.Type
+
+/** The person's settings for the app as a whole. */
+export const AppSettings = Schema.Struct({
+  /** Althar as co-author of what it sends to a code host, on unless turned off; `line` is the trailer each commit gets. */
+  coAuthor: Schema.Struct({ on: Schema.Boolean, line: Schema.String }),
+})
+export type AppSettings = typeof AppSettings.Type
 
 export const Status = Schema.Struct({
   apiVersion: Schema.Number,
@@ -1183,6 +1196,9 @@ export const Api = RpcGroup.make(
   command('SetDefaultEffort', { agentId: Schema.String, model: Schema.String, effort: Schema.String }, Schema.Void),
   /** Switches one of an agent's models off, or on again: one switched off is never planned, and no picker offers it. */
   command('SetModelBlocked', { agentId: Schema.String, model: Schema.String, blocked: Schema.Boolean }, Schema.Void),
+  call('GetSettings', {}, AppSettings),
+  /** Turns Althar's co-authoring of commits and pull requests on or off; the agents' own credit lines go either way. */
+  command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
   command('Send', { threadId: Schema.String, body: Schema.String, disposition: Disposition }, Schema.Void),
@@ -1322,6 +1338,8 @@ export const Api = RpcGroup.make(
   ),
   /** The editors on this device a task's files open in, by the name people know them. */
   call('ListEditors', {}, Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
+  /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */
+  command('InstallAgent', { agentId: Schema.String }, Schema.Void),
   /** Opens a task's folder in an editor, at one of its files and a line where given; whether it could. The path is the task's, as its changes list it. */
   command(
     'OpenInEditor',

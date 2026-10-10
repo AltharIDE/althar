@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch } from './support'
+import { chooseFolder, launch, openFirstProject } from './support'
 
 /*
  * The home, once there are projects: what waits on you, what is in progress, and what
@@ -34,8 +34,7 @@ test('comes back to what runs and what waits across projects, with the projects 
   const tabs = page.getByRole('navigation', { name: 'Projects' })
   try {
     // A task that keeps working in one project.
-    await chooseFolder(electronApp, meridian)
-    await page.getByRole('button', { name: /Open a folder/ }).click()
+    await openFirstProject(electronApp, page, meridian)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await startTask(page, LONG, '[lead:wait]')
     await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()

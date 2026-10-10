@@ -6,6 +6,7 @@ import { shortFolder } from '../../shared/folders'
 import { PartPending, pendingText } from '../../shared/Pending'
 import s from './Repositories.module.css'
 import type { RepositoriesModel } from './useRepositories'
+import { device } from '../../shared/device'
 
 /*
  * A project's repositories: each one's place, branch and remote, its role,
@@ -16,7 +17,7 @@ import type { RepositoriesModel } from './useRepositories'
 export const text = {
   back: 'Back to the project',
   /** One not on this Mac. */
-  elsewhere: 'Not on this Mac',
+  elsewhere: `Not on ${device.this}`,
 }
 
 const ROLES: Readonly<Record<ProjectRepository['role'], RepositoryRole>> = {

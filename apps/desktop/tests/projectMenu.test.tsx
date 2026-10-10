@@ -104,7 +104,8 @@ describe('a project’s menu', () => {
     await waitFor(() => expect(client.removeProject).toHaveBeenCalledWith('p1'))
     await waitFor(() => expect(router.state.location.pathname).toBe('/'))
     expect(await screen.findByText('The home')).toBeTruthy()
-    expect(tabNamed('meridian')).toBeNull()
+    // It was the only one: with no project the window has no tabs, as before the first.
+    await waitFor(() => expect(screen.queryByRole('navigation', { name: 'Projects' })).toBeNull())
   })
 
   it('goes home when another window removes the project, from one of its tasks too', async () => {

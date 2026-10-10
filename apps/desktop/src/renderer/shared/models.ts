@@ -12,6 +12,7 @@ import {
 import { Brand, Lab, labBrand, type ModelInfo, type RuntimeInfo } from '@althar/ui'
 
 import type { Client, Start } from '../data/client'
+import { device } from './device'
 
 /*
  * The models every agent offers, as the kit's pickers take them: one list,
@@ -86,7 +87,7 @@ export const text = {
   via: (model: string, by: string) => `${model} · ${by}`,
   /** Effort levels the agents write as one word. */
   efforts: { xhigh: 'Extra high' } as Readonly<Record<string, string>>,
-  how: { signed_in: 'signed in', unknown: 'this Mac', signed_out: 'signed out' } satisfies Record<AgentStatus['signIn'], string>,
+  how: { signed_in: 'signed in', unknown: device.this, signed_out: 'signed out' } satisfies Record<AgentStatus['signIn'], string>,
 }
 
 export interface Catalog {

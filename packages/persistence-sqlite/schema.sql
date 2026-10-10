@@ -977,3 +977,17 @@ CREATE TABLE model_blocks (
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   PRIMARY KEY (agent_id, model)
 ) STRICT;
+
+CREATE TABLE settings (
+  key TEXT PRIMARY KEY NOT NULL,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+) STRICT;
+
+CREATE TABLE credited_commits (
+  original TEXT PRIMARY KEY NOT NULL,
+  credited TEXT NOT NULL,
+  made_at TEXT NOT NULL CHECK (made_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+) STRICT;
+
+CREATE INDEX credited_commits_by_credited ON credited_commits (credited);

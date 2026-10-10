@@ -26,6 +26,7 @@ import { Changes } from './Changes'
 import { NotFound } from './errors'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
+import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
 import { Folders } from './Folders'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
@@ -34,6 +35,7 @@ import { Limits } from './Limits'
 import { Live } from './Live'
 import { accountsOf, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from './Policies'
 import { Models } from './Models'
+import { Installs } from './Installs'
 import { Permissions } from './Permissions'
 import { Projects } from './Projects'
 import { Nudges } from './Nudges'
@@ -115,6 +117,7 @@ export const handlers = Api.toLayer(
     const signIns = yield* SignIns
     const accounts = yield* Accounts
     const limits = yield* Limits
+    const installs = yield* Installs
     const models = yield* Models
     const accountSignIns = yield* AccountSignIns
     const policies = yield* Policies
@@ -248,9 +251,13 @@ export const handlers = Api.toLayer(
         const statuses = yield* Effect.forEach(yield* accounts.of(entry.definition.id), (account) => accountStatus(account, recheck), {
           concurrency: 'unbounded',
         })
+        const install = yield* installs.state(entry.definition)
         return {
           id: entry.definition.id,
           name: entry.definition.name,
+          installed: entry.definition.cli === undefined || install.located !== null,
+          kept: install.located?.whose === 'althar',
+          download: install.downloadable && install.size !== null ? { size: install.size, installing: install.installing } : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
           version: yield* versionOf(entry),
@@ -513,6 +520,11 @@ export const handlers = Api.toLayer(
         once(commandId, api(models.setDefaultEffort({ agentId, model, effort }))),
       SetModelBlocked: ({ commandId, agentId, model, blocked }) =>
         once(commandId, api(models.setModelBlocked({ agentId, model, blocked }))),
+      GetSettings: () =>
+        api(Effect.map(coAuthorOn, (on) => ({ coAuthor: { on, line: coAuthorLine } }))).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+        ),
+      SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       Interrupt: ({ commandId, threadId }) => once(commandId, api(sessions.interrupt(threadId))),
       StopSession: ({ commandId, threadId }) => once(commandId, api(sessions.stop(threadId))),
       Send: ({ commandId, threadId, body, disposition }) =>
@@ -731,6 +743,15 @@ export const handlers = Api.toLayer(
       PushHere: ({ commandId, taskId }) => once(commandId, api(Effect.asVoid(pullRequests.pushHere(taskId)))),
       PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
+      // Done once the copy is ready; its version is asked again, as it is a new one.
+      InstallAgent: ({ agentId }) =>
+        api(
+          Effect.gen(function* () {
+            const entry = yield* agents.get(agentId)
+            yield* installs.install(entry.definition)
+            versions.delete(agentId)
+          }),
+        ),
       OpenInEditor: ({ taskId, editor, path, line }) =>
         api(
           Effect.gen(function* () {

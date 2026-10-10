@@ -11,7 +11,7 @@ export { AcceptedInput, type Disposition, promptFor, Sessions } from './Sessions
 export { connection, handlers, serve, services } from './Api'
 export { Folders } from './Folders'
 export { Queries, type ThreadChange } from './Queries'
-export { type NudgeEvent, Nudges } from './Nudges'
+export { type NudgeEvent, type NudgeKind, Nudges } from './Nudges'
 export { agentSaid, summarize, words } from './words'
 export { Changes, type ChangeSummary, type Published } from './Changes'
 export { Connectors } from './Config'
@@ -23,3 +23,4 @@ export { factFor, factsIn, type ModelFact, ModelFacts, type ModelFactsOptions } 
 export { Limits, type Out } from './Limits'
 export { Policies, type ProjectRules, type UsageLimit } from './Policies'
 export { databaseIn, defaultProfile, defaultWorktrees } from './locations'
+export { InstallFailed, Installs } from './Installs'
