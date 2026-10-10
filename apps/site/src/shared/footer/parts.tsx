@@ -1,8 +1,8 @@
 import { Logo } from '@althar/ui'
 import { type RefObject, useEffect, useState } from 'react'
 
-import { LINKS } from '../../../content/facts'
-import { cx } from '../../../lib/cx'
+import { LINKS } from '../../content/facts'
+import { cx } from '../../lib/cx'
 import s from './parts.module.css'
 
 /** The footer's links, in two short groups. */

@@ -5,8 +5,9 @@ import { useState } from 'react'
 import { LINKS } from '../content/facts'
 import { KIND_WORD, SHIFTS, ShiftKind, type Shift } from '../content/shifts'
 import { cx } from '../lib/cx'
-import { Bar } from '../shared/Bar'
-import { Close } from '../shared/Close'
+import { Footer } from '../shared/footer/Footer'
+import { Lit } from '../shared/Lit'
+import { Nav } from '../shared/Nav'
 import { byMonth, countByKind, daysCovered, newestFirst, onlyKind, shortDate } from './group'
 import s from './Shifts.module.css'
 
@@ -111,27 +112,23 @@ export function Shifts() {
 
   return (
     <div className={s.page}>
-      <Bar tone="paper" base="/" current="shifts" />
+      <Nav />
       <main id="main" tabIndex={-1}>
-        <header className={s.head}>
-          <div className={s.wrap}>
-            <p className={s.kicker}>
-              <i aria-hidden="true" />
-              Shifts{newest && ` · updated ${shortDate(newest.date)} 2026`}
-            </p>
-            <h1 className={s.h1}>
-              <span className={s.dim}>The ground keeps moving.</span>
-              <span>
+        <Lit
+          kicker={<>Shifts{newest && ` · updated ${shortDate(newest.date)} 2026`}</>}
+          title={
+            <>
+              The ground keeps moving.{' '}
+              <b>
                 {SHIFTS.length} shifts in {daysCovered(SHIFTS)} days.
-              </span>
-            </h1>
-            <p className={s.lead}>
-              New models, new limits, new owners, new terms. This is the running list of what changed for people who code with agents, since
-              August. Each one is a reason not to tie your work to a single agent.
-            </p>
-            <Strip shifts={SHIFTS} />
-          </div>
-        </header>
+              </b>
+            </>
+          }
+          lead="New models, new limits, new owners, new terms: what changed for people who code with agents, since August. Each one is a reason not to tie your work to a single agent."
+        />
+        <div className={s.wrap}>
+          <Strip shifts={SHIFTS} />
+        </div>
 
         <section className={s.list} aria-label="Every shift">
           <div className={s.wrap}>
@@ -166,7 +163,7 @@ export function Shifts() {
           </div>
         </section>
       </main>
-      <Close />
+      <Footer />
     </div>
   )
 }

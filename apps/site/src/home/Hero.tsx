@@ -1,11 +1,9 @@
 import {
   BORE,
   clamp,
-  type Column,
   COLUMNS,
   DOTS,
   drawGrain,
-  jitter,
   PARTICLES,
   particleAt,
   PICTURE,
@@ -19,6 +17,7 @@ import { type ReactNode, useEffect, useLayoutEffect, useRef } from 'react'
 import { HERO } from '../content/home'
 import { cx } from '../lib/cx'
 import { Bar } from '../shared/Bar'
+import { drawColumn, heightOf, STOPS, tonesOf } from '../shared/light'
 import { Get } from '../shared/Close'
 import { addDisplay } from './display'
 import s from './Hero.module.css'
@@ -47,56 +46,6 @@ const OPEN = 1900
 const REGION = { x: 1, y: 4.5, width: 22, height: 30 }
 /** The bar's height: the light stops short of it. */
 const BAR = 64
-
-type Tones = readonly [string, string, string]
-
-/**
- * The light's colours, bottom to top, by how far a column is from the middle,
- * graded as the app's light is (foundations/Light): cobalt in the middle,
- * brighter blues either side of it, then sky, pale, and warm at the edges.
- * Across the heart, where the words stand, every blue stays deep enough
- * most of the way up that white reads on it. `heart` is how wide that is,
- * 0 to 1.
- */
-const tonesOf = (d: number, heart: number): Tones => {
-  const u = d / heart
-  if (u < 0.34) return ['#2b3bff', '#3042ff', '#6372ff']
-  if (u < 0.68) return ['#2f4cff', '#3d60ff', '#8ea6ff']
-  if (u < 1) return ['#3860ff', '#4c78ff', '#adc4ff']
-  if (d < heart + 0.16) return ['#4f8cff', '#86b6ff', '#d6e8ff']
-  if (d < 0.86) return ['#9fc6ff', '#d4e6ff', '#f3f7ff']
-  return ['#ffb995', '#ffd8c0', '#fff3ea']
-}
-
-/** How tall a column stands, as a share of the page: flat across the heart, then falling away, an arch. */
-const heightOf = (column: Column, heart: number) =>
-  (0.2 + 0.46 * Math.exp(-(Math.max(0, column.d - heart * 0.74) ** 2) * 7)) * (0.94 + 0.06 * jitter(column.i))
-
-/** Where a column's colours change, up its height: strong to 55%, its high tone at 90%, gone at its top. */
-const STOPS = [0.55, 0.9, 1] as const
-
-/** A column drawn once, soft already, as the launch draws its own (foundations/Light), in this light's colours. */
-const drawColumn = (context: CanvasRenderingContext2D, tones: Tones) => {
-  const { width, height, column: inner, blur } = PICTURE
-  const left = (width - inner) / 2
-  const cap = height * 0.22
-  const fill = context.createLinearGradient(0, height, 0, 0)
-  fill.addColorStop(0, tones[0])
-  fill.addColorStop(STOPS[0], tones[1])
-  fill.addColorStop(STOPS[1], tones[2])
-  fill.addColorStop(STOPS[2], 'rgba(255, 255, 255, 0)')
-  context.clearRect(0, 0, width, height)
-  context.filter = `blur(${blur}px)`
-  context.fillStyle = fill
-  context.beginPath()
-  // Past the bottom, so the blur doesn't lift it off the floor; round at the top.
-  context.moveTo(left, height + blur * 3)
-  context.lineTo(left, cap)
-  context.ellipse(left + inner / 2, cap, inner / 2, cap, 0, Math.PI, 0)
-  context.lineTo(left + inner, height + blur * 3)
-  context.closePath()
-  context.fill()
-}
 
 const still = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(window.location.search).has('t')
 
@@ -171,7 +120,7 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
   const turned = useRef(-1e9)
   const clock = useRef(0)
   /** The light's heart: wider on a phone, to hold the words, with sky and warmth still at its sides. */
-  const heart = typeof window !== 'undefined' && window.innerWidth < 700 ? 0.76 : 0.5
+  const heart = typeof window !== 'undefined' && window.innerWidth < 700 ? 0.7 : 0.46
 
   useLayoutEffect(() => {
     const live = (root.current && getComputedStyle(root.current).getPropertyValue('--live').trim()) || undefined

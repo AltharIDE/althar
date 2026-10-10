@@ -2,29 +2,13 @@
    section rules, and the homepage's rails for every figure. */
 
 .page { background: var(--n-2); color: var(--t-1); overflow-x: clip; }
-/* The top bar stays put. A hairline draws in once the page has moved. */
-.pin {
-  position: sticky;
-  top: 0;
-  z-index: 30;
-  background: color-mix(in srgb, var(--n-2) 92%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  transition: box-shadow var(--fast) var(--ease);
-}
-.pin[data-scrolled] { box-shadow: inset 0 -1px 0 var(--line-3); }
 .page :focus-visible { outline: 2px solid var(--live); outline-offset: 3px; }
 
 /* One sheet: the contents and the reading column share an edge, so the title
    sits on the same line as the sections instead of in an empty field. */
-.sheet { display: grid; grid-template-columns: 220px minmax(0, 680px); justify-content: center; column-gap: clamp(48px, 7vw, 96px); row-gap: 28px; max-width: var(--max); margin: 0 auto; padding: 36px var(--gut) 120px; }
-.meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 28px; padding-bottom: 14px; border-bottom: 1px solid var(--line-2); font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
-.kicker { display: flex; align-items: center; gap: 8px; color: var(--t-1); }
-.kicker i { width: 8px; height: 8px; flex: none; border-radius: 2px; background: var(--live); }
-.draft { margin-left: auto; }
+.sheet { display: grid; grid-template-columns: 220px minmax(0, 680px); justify-content: center; column-gap: clamp(48px, 7vw, 96px); row-gap: 28px; max-width: var(--max); margin: 0 auto; padding: 72px var(--gut) 120px; }
 .head { margin-bottom: 24px; }
-.h1 { font-size: clamp(42px, 4.6vw, 64px); line-height: 1.02; letter-spacing: -0.045em; font-weight: 700; text-wrap: balance; }
-.lede { margin-top: 12px; font-size: 16.5px; line-height: 1.5; color: var(--t-2); }
+.lede { margin-top: 0; font-size: 16.5px; line-height: 1.5; color: var(--t-2); }
 .openClaim { margin-top: 12px; }
 .openClaim .claim { margin: 0; padding: 0; box-shadow: none; font-size: 18px; line-height: 1.45; letter-spacing: -0.02em; color: var(--t-1); }
 
@@ -178,7 +162,6 @@
   .cols { columns: 1; }
 }
 @media (max-width: 640px) {
-  .draft { margin-left: 0; flex-basis: 100%; }
   .lede { font-size: 16px; }
   .openClaim .claim { font-size: 17px; }
   .h2 { font-size: 30px; }
