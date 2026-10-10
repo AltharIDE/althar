@@ -1,5 +1,5 @@
 import type { FieldAnswer, QuestionField } from '@althar/contracts'
-import type { NeedOption, QuestionAnswer, QuestionPart } from '@althar/ui'
+import type { QuestionAnswer, QuestionPart } from '@althar/ui'
 
 /*
  * An agent's question (DEV-13) between the runtime's terms and the kit's: its
@@ -14,7 +14,7 @@ export const questionText = {
     task: 'The task stopped.',
   },
   answer: 'Answer',
-  /** Under a question's options in a list: the others asked with it. */
+  /** Under a question in a list: the others asked with it. */
   more: (n: number) => (n === 1 ? 'and 1 more question' : `and ${n} more questions`),
 }
 
@@ -54,16 +54,6 @@ export const pickedOf = (answers: Readonly<Record<string, FieldAnswer>>): Questi
     ]),
   )
 
-/**
- * The question as a list shows it: the options of what it asks first, each
- * with what it means, and how many more questions wait with it.
- */
-export const lineOf = (question: {
-  readonly fields: ReadonlyArray<QuestionField>
-}): { readonly options: ReadonlyArray<NeedOption>; readonly more?: string } => {
-  const [first, ...rest] = question.fields
-  return {
-    options: (first?.options ?? []).map((option) => ({ label: option.label, ...(option.note === undefined ? {} : { note: option.note }) })),
-    ...(rest.length === 0 ? {} : { more: questionText.more(rest.length) }),
-  }
-}
+/** Under a question's line in a list, where it asks several at once: how many more wait with the first. */
+export const moreOf = (question: { readonly fields: ReadonlyArray<QuestionField> }): string | undefined =>
+  question.fields.length > 1 ? questionText.more(question.fields.length - 1) : undefined

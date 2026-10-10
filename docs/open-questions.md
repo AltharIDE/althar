@@ -16,10 +16,10 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
   to the agent on the thread next ([ADR-021](decisions/021-a-question-outlives-its-session.md)).
 - [x] **Which steps may ask.** The lead and the coordinator; a reviewer is
   given no way to (ADR-021).
-- [ ] **Answering from the home or the edge.** Today a question's line opens
-  the task, where it is answered. A single question with a few short options
-  could be answered on its line, as a permission is. Leaning: yes, for one
-  question with up to three options; anything else opens the task.
+- [x] **Answering from the home or the edge.** Not on its line: the home
+  stays calm, a question's line says what it asks and Answer takes the person
+  to it in the task, its first choice focused so a key picks and Enter
+  answers (settled with the person, 10 October).
 - [ ] **Codex and OpenCode ask in words.** Codex offers request_user_input
   only in its Plan mode; told to use it in the default mode, it once ended
   its turn with nothing said. OpenCode keeps its question tool off over ACP.

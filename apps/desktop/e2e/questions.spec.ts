@@ -5,15 +5,16 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, toConversation } from './support'
+import { launch, openFirstProject } from './support'
 
 /*
  * An agent's question (DEV-13), as the person meets it: a task's lead asks
  * which database to use, and its step waits on the person. The question is
- * on the home, with its options. Althar's runtime goes down and comes back
- * in the middle, and the question is still there. Answered in the task,
- * where it was asked, the lead is started again with the answer and carries
- * its step on. The lead is the fake agent, which asks for `[lead:ask]` and
+ * on the home, calm: what it asks, and Answer. Althar's runtime goes down
+ * and comes back in the middle, and the question is still there. Answer
+ * takes the person to it in the task, where it is answered from the
+ * keyboard; the lead is started again with the answer and carries its step
+ * on. The lead is the fake agent, which asks for `[lead:ask]` and
  * reports its step for `[lead:finish]`.
  */
 
@@ -35,18 +36,18 @@ test('asks the person a question on the home, keeps it across a restart, and car
     await page.getByRole('button', { name: 'No review' }).click()
     await page.getByRole('button', { name: 'Start the task' }).click()
 
-    // On the home, the question waits on the person, with what it asks and its options.
+    // On the home, the question waits on the person, calm: what it asks, and Answer. Its options are where it is answered.
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
     const needs = page.getByRole('region', { name: /needs? you/ })
     const asked = needs.getByRole('article', { name: 'Which database should the cache use?' })
     await expect(asked).toBeVisible({ timeout: 20_000 })
     await expect(asked.getByText('Question', { exact: true })).toBeVisible()
-    // Each option with what it means, numbered as where it is answered.
-    await expect(asked.getByRole('listitem')).toHaveText([
-      /^1Postgres What production already runs/,
-      /^2SQLite One file beside the service/,
-    ])
-    if (shots) await page.screenshot({ path: join(shots, 'app-home-question.png') })
+    await expect(asked.getByText('Postgres')).toHaveCount(0)
+    if (shots) {
+      // Once the list has come in.
+      await page.waitForTimeout(800)
+      await page.screenshot({ path: join(shots, 'app-home-question.png') })
+    }
 
     // The runtime goes down in the middle, and comes back: the question still waits.
     const runtimePid = () =>
@@ -62,15 +63,17 @@ test('asks the person a question on the home, keeps it across a restart, and car
     await expect(asked).toBeVisible({ timeout: 20_000 })
     await expect(needs.getByText('Stuck', { exact: true })).toHaveCount(0)
 
-    // Answered where it was asked: the lead starts again with the answer, and carries its step on.
+    // Answer takes the person to the question, its first choice in hand: a key picks, and Enter answers. The lead starts
+    // again with the answer, and carries its step on.
     await asked.getByRole('button', { name: 'Answer' }).click()
-    await toConversation(page)
     await expect(page.getByText('Needs your answer')).toBeVisible()
     await expect(page.getByText('Needs you', { exact: true })).toBeVisible()
-    if (shots) await page.screenshot({ path: join(shots, 'app-thread-question.png') })
+    await expect(page.getByRole('radio', { name: 'Postgres' })).toBeFocused()
     await expect(page.getByRole('radio', { name: 'SQLite' })).toHaveAccessibleDescription(/One file beside the service/)
-    await page.getByRole('radio', { name: 'SQLite' }).click()
-    await page.getByRole('button', { name: /^Answer/ }).click()
+    if (shots) await page.screenshot({ path: join(shots, 'app-thread-question.png') })
+    await page.keyboard.press('2')
+    await expect(page.getByRole('radio', { name: 'SQLite' })).toBeChecked()
+    await page.keyboard.press('Enter')
     await expect(page.getByText('Ready for you', { exact: true })).toBeVisible({ timeout: 20_000 })
     await expect(page.getByText('Needs your answer')).toHaveCount(0)
     if (shots) await page.screenshot({ path: join(shots, 'app-thread-question-answered.png') })

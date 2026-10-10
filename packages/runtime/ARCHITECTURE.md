@@ -119,4 +119,4 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 - **Nothing in the artifact store is swept yet.** Files whose rows went, and old pictures and output, stay until mark-and-sweep from the references is built (07); retention per kind is an open question.
 - **Sessions are not loaded after a restart;** a lost session stays lost, and the person starts a new one.
 - **Raw protocol capture** is not written to its bounded file yet.
-- **Questions are answered where they were asked only.** The home, the edge and the board list them and open the task, or the coordinator's conversation; none answers in place.
+- **Questions are answered where they were asked only.** The home, the edge and the board list them and take the person to the task, or the coordinator's conversation; none answers in place, by choice: the home stays calm.

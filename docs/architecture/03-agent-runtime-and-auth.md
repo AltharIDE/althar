@@ -825,8 +825,9 @@ the rules keep for them does ([ADR-021](../decisions/021-a-question-outlives-its
 
 - It is a call (an attention request of the kind `question`) and an item of
   its thread, shown where it was asked, in place of the agent's tool call for
-  it. The home, the edge and the board list it, a coordinator's question
-  under its project; it is answered in the thread.
+  it, each option with what it means. The home, the edge and the board list
+  it, a coordinator's question under its project; it is answered in the
+  thread, where Answer on the home takes the person.
 - While the agent that asked waits, the answer goes straight back to it, in
   its own fields.
 - It is the thread's, not the session's. If the session goes first (Althar

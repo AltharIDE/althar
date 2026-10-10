@@ -35,12 +35,6 @@ export interface NeedAnswer {
   denied?: boolean
 }
 
-/** One of a question's options, as a line lists it: what it is, and what it means. */
-export interface NeedOption {
-  label: string
-  note?: string
-}
-
 export interface NeedLineText {
   /** Read before the task's number. */
   task: string
@@ -61,10 +55,6 @@ export type NeedLineProps = RootProps<
     command?: string
     /** Otherwise, a few words to answer by: the change and its checks, the choices, why it stalled. */
     brief?: ReactNode
-    /** A question's options, numbered as they are where it is answered, each with what it means; in place of a brief. */
-    options?: readonly NeedOption[]
-    /** Under the options, quieter: what else it asks, such as one more question. */
-    more?: string
     /** Its answers: Buttons, the one that matters most in violet. */
     actions?: ReactNode
     /** Answered: what was said, in place of its answers, and the line quiet. Its kind says which way (Allowed, Denied). */
@@ -92,8 +82,6 @@ export function NeedLine({
   title,
   command,
   brief,
-  options,
-  more,
   actions,
   answer,
   focusOnMount = false,
@@ -126,7 +114,7 @@ export function NeedLine({
       aria-labelledby={titleId}
       aria-describedby={answer === undefined ? undefined : `${kindId} ${saidId}`}
       tabIndex={focusOnMount ? -1 : undefined}
-      className={cx(s.line, answer !== undefined && s.settled, className)}
+      className={cx(s.line, command === undefined && brief === undefined && s.alone, answer !== undefined && s.settled, className)}
       {...rest}
     >
       <span className={s.kind} id={kindId}>
@@ -142,31 +130,8 @@ export function NeedLine({
             title
           )}
         </Heading>
-        {options !== undefined && options.length > 0 ? (
-          <div className={s.choices}>
-            <ol className={s.options}>
-              {options.map((option, i) => (
-                <li key={`${i}-${option.label}`} className={s.option}>
-                  <span className={s.key} aria-hidden="true">
-                    {i + 1}
-                  </span>
-                  <span className={s.says}>
-                    <span className={s.label}>{option.label}</span>
-                    {option.note !== undefined && option.note !== '' && (
-                      <>
-                        {/* read out between them, and the gap shows */} <span className={s.optionNote}>{option.note}</span>
-                      </>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ol>
-            {more !== undefined && <p className={s.brief}>{more}</p>}
-          </div>
-        ) : (
-          (command !== undefined || brief !== undefined) && (
-            <p className={s.brief}>{command !== undefined ? <Code className={s.command}>{command}</Code> : brief}</p>
-          )
+        {(command !== undefined || brief !== undefined) && (
+          <p className={s.brief}>{command !== undefined ? <Code className={s.command}>{command}</Code> : brief}</p>
         )}
       </div>
       <span className={s.whose}>

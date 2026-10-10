@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react'
 
 import type { HomeCall, HomeTask } from '@althar/contracts'
-import { Button, type EdgeWork, NeedLine, type NeedOption, type ProjectRef } from '@althar/ui'
+import { Button, type EdgeWork, NeedLine, type ProjectRef } from '@althar/ui'
 
 import { kindWords, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
-import { lineOf as questionLine } from '../../shared/questions'
+import { moreOf as questionMore } from '../../shared/questions'
 import { text as stuckText } from '../task/StuckCall'
 
 /*
@@ -58,9 +58,6 @@ export interface Need {
   readonly command?: string
   /** Otherwise, what to answer by: why it stalled, or the change and its checks. */
   readonly brief?: string
-  /** A question's options, each with what it means, and how many more questions wait with it. */
-  readonly options?: ReadonlyArray<NeedOption>
-  readonly more?: string
   /** A permission, which is answered in place. */
   readonly permission?: HomeCall
   /** Answered here: which way, what was said, and where it was kept or what to do instead. */
@@ -159,7 +156,9 @@ export const needsOf = ({
       ]
     const stuck = call.stuck
     // An agent's question is answered where it was asked: its line says what it asks, and opens it there.
+    // A question's line stays calm: what it asks first, and Answer takes the person to it, where its options are.
     if (call.kind === 'question') {
+      const more = call.question === undefined ? undefined : questionMore(call.question)
       return [
         {
           id: call.id,
@@ -167,7 +166,7 @@ export const needsOf = ({
           kind: kindWords.question,
           project,
           title: call.title,
-          ...(call.question === undefined ? {} : questionLine(call.question)),
+          ...(more === undefined ? {} : { brief: more }),
         },
       ]
     }
@@ -242,8 +241,6 @@ export function needLineOf(
       title={need.title}
       {...(need.command === undefined ? {} : { command: need.command })}
       {...(need.brief === undefined ? {} : { brief: need.brief })}
-      {...(need.options === undefined ? {} : { options: need.options })}
-      {...(need.more === undefined ? {} : { more: need.more })}
       onOpen={open}
       actions={
         permission === undefined ? (

@@ -26,6 +26,18 @@ const SAID_SEVERAL: QuestionAnswer = {
 /** One question, each option with a note on what it implies. */
 export const Asks: Story = {}
 
+/** Brought here to answer it, from the home: its first choice has focus, so a key picks and Enter answers. */
+export const BroughtHere: Story = {
+  args: { focusOnMount: true },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await waitFor(() => expect(c.getAllByRole('radio')[0]).toHaveFocus())
+    await userEvent.keyboard('2')
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onAnswer).toHaveBeenCalledTimes(1)
+  },
+}
+
 /** Keys pick within the question; Answer folds it to what was said, and focus goes to that line. */
 export const AnsweringWithKeys: Story = {
   play: async ({ args, canvasElement }) => {

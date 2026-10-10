@@ -9,7 +9,7 @@ import { callCardOf } from '../src/renderer/features/board/BoardView'
 import { needLineOf, needsOf } from '../src/renderer/features/home/needs'
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
-import { answersOf, lineOf, partsOf, pickedOf } from '../src/renderer/shared/questions'
+import { answersOf, moreOf, partsOf, pickedOf } from '../src/renderer/shared/questions'
 import { blocksOf } from '../src/renderer/shared/thread'
 import { fakeClient, items, snapshot } from './fixtures'
 import { withServices } from './render'
@@ -47,6 +47,8 @@ const checks: QuestionField = {
   multiple: true,
   required: false,
 }
+
+const file = { path: 'src/cache.ts', from: null, status: 'modified' as const, add: 4, del: 1, binary: false, uncommitted: false }
 
 const call = {
   id: 'q1',
@@ -95,12 +97,9 @@ describe('an agent’s question', () => {
       database: { optionIds: ['sqlite'] },
       checks: { optionIds: [], words: 'all' },
     })
-    expect(lineOf({ fields: [database] })).toEqual({
-      options: [{ label: 'Postgres', note: 'what production runs' }, { label: 'SQLite' }],
-    })
-    expect(lineOf({ fields: [database, checks, checks] }).more).toBe('and 2 more questions')
-    expect(lineOf({ fields: [database, checks] }).more).toBe('and 1 more question')
-    expect(lineOf({ fields: [] })).toEqual({ options: [] })
+    expect(moreOf({ fields: [database] })).toBeUndefined()
+    expect(moreOf({ fields: [database, checks] })).toBe('and 1 more question')
+    expect(moreOf({ fields: [database, checks, checks] })).toBe('and 2 more questions')
   })
 
   it('stands on its own in the thread, between the turns before and after it', () => {
@@ -110,6 +109,19 @@ describe('an agent’s question', () => {
       () => 'now',
     )
     expect(blocks.map((block) => block.kind)).toEqual(['turn', 'question', 'turn'])
+  })
+
+  it('opens its task on the conversation, with the question to hand, though the task is ready with outputs', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => {
+        const base = asking()
+        return { ...base, task: { ...base.task, phase: 'ready' as const, files: [file], commits: 1 } }
+      }),
+    })
+    withServices(<Task />, client)
+    const postgres = await screen.findByRole('radio', { name: 'Postgres' })
+    await waitFor(() => expect(document.activeElement).toBe(postgres))
+    expect(screen.getByRole<HTMLInputElement>('radio', { name: /Conversation/ }).getAttribute('aria-checked') ?? 'true').toBe('true')
   })
 
   it('is answered where it was asked, and not as a permission', async () => {
@@ -163,11 +175,15 @@ describe('an agent’s question', () => {
     const project: ProjectRef = { seed: 'p1', name: 'Meridian', ink: ProjectInk.Rose }
     const home: HomeCall = { ...call, projectId: 'p1', taskId: 't1', threadId: 'th1', taskTitle: 'Add a cache', taskSlug: 'add-a-cache' }
     const [need] = needsOf({ calls: [home], ready: [], refs: new Map([['p1', project]]), agentName: (id) => id ?? '' })
-    expect(need).toMatchObject({
-      kind: 'Question',
-      title: database.question,
-      options: [{ label: 'Postgres', note: 'what production runs' }, { label: 'SQLite' }],
+    // Calm: what it asks, and Answer; its options are where it is answered.
+    expect(need).toEqual({ id: 'q1', threadId: 'th1', kind: 'Question', project, title: database.question })
+    const [several] = needsOf({
+      calls: [{ ...home, question: { message: 'A few things.', fields: [database, checks] } }],
+      ready: [],
+      refs: new Map([['p1', project]]),
+      agentName: (id) => id ?? '',
     })
+    expect(several?.brief).toBe('and 1 more question')
     const onOpen = vi.fn()
     if (need === undefined) throw new Error('no line')
     render(<>{needLineOf(need, { onOpen, onAnswer: vi.fn() })}</>)

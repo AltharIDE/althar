@@ -1,4 +1,4 @@
-import { type ReactNode, useId, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
 import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
@@ -119,6 +119,11 @@ export type QuestionProps = RootProps<
     onUndo?: (answer: QuestionAnswer) => void
     /** Picked or written before the person touches it, by question: a draft, not an answer. */
     defaultPick?: QuestionAnswer
+    /**
+     * The person was brought here to answer it: once shown, it comes into
+     * view and its first question takes focus, so keys pick at once.
+     */
+    focusOnMount?: boolean
     text?: Partial<QuestionText>
   }
 >
@@ -193,6 +198,7 @@ export function Question({
   withdrawn,
   onUndo,
   defaultPick,
+  focusOnMount = false,
   text,
   className,
   ...rest
@@ -215,6 +221,24 @@ export function Question({
 
   const several = parts.length > 1
   const focusLine = answeredHere || focusIn
+
+  // Brought here to answer it: into view, and its first question's first choice (or field) focused. Once, as it is first shown.
+  const broughtHere = useRef(focusOnMount)
+  useEffect(() => {
+    if (!broughtHere.current) return
+    broughtHere.current = false
+    let live = true
+    // Just after the commit, as AskAnswered focuses, so focus never lands inside React's flush.
+    queueMicrotask(() => {
+      const first = form.current?.querySelector<HTMLInputElement>('input')
+      if (!live || first == null) return
+      first.focus({ preventScroll: true })
+      first.closest('form')?.scrollIntoView?.({ block: 'center' })
+    })
+    return () => {
+      live = false
+    }
+  }, [])
 
   if (answer) {
     return (

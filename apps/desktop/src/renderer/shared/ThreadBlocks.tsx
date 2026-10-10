@@ -319,9 +319,12 @@ function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: s
 function QuestionView({
   question,
   onAnswer,
+  focus = false,
 }: {
   question: QuestionContent
   onAnswer?: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
+  /** The person was brought here to answer it. */
+  focus?: boolean
 }) {
   const [sent, setSent] = useState<QuestionAnswer | null>(null)
   const [answering, setAnswering] = useState(false)
@@ -335,6 +338,7 @@ function QuestionView({
     <Question
       parts={parts}
       {...title}
+      focusOnMount={focus}
       answer={question.state === 'answered' ? answer : sent}
       answering={answering}
       {...(error === null ? {} : { error })}
@@ -365,6 +369,7 @@ export function ThreadBlocks({
   queued,
   onPassOn,
   onAnswerQuestion,
+  focusQuestion,
   project,
 }: {
   blocks: ReadonlyArray<Block>
@@ -382,6 +387,8 @@ export function ThreadBlocks({
   onPassOn?: (words: string) => void
   /** Answers an agent's question; what went wrong, in words, or null. Without it, a question can't be answered here. */
   onAnswerQuestion?: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
+  /** The question waiting as the thread opened, by its call: the person was brought here to answer it, so it takes focus. */
+  focusQuestion?: string
   /** Draws a task's card, in the coordinator's thread. */
   card?: (card: TaskCardContent) => ReactNode
   /** What a message still waiting says: who reads it next. */
@@ -433,6 +440,7 @@ export function ThreadBlocks({
           <QuestionView
             key={block.id}
             question={block.question}
+            focus={block.question.attentionId === focusQuestion}
             {...(onAnswerQuestion === undefined ? {} : { onAnswer: onAnswerQuestion })}
           />
         )

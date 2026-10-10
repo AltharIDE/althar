@@ -78,7 +78,6 @@ const lines = (
       kind={QUESTION.kind}
       project={QUESTION.project}
       title={QUESTION.title}
-      options={QUESTION.options}
       onOpen={fn()}
       actions={
         <Button size="small" variant="signal">
@@ -118,7 +117,7 @@ export const EveryKind: Story = { render: () => <NeedList style={{ maxWidth: 820
 /** Narrow, whose it is goes under the title. */
 export const Narrow: Story = { render: () => <NeedList style={{ maxWidth: 480 }}>{lines}</NeedList> }
 
-/* ---- an agent's question: its options to answer by, and Answer opens the task to answer it there ---- */
+/* ---- an agent's question: what it asks, and Answer opens the task to answer it there ---- */
 
 const question = (props: Partial<Parameters<typeof NeedLine>[0]> = {}) => (
   <NeedLine
@@ -126,7 +125,6 @@ const question = (props: Partial<Parameters<typeof NeedLine>[0]> = {}) => (
     project={QUESTION.project}
     task={QUESTION.task}
     title={QUESTION.title}
-    options={QUESTION.options}
     onOpen={fn()}
     actions={
       <Button size="small" variant="signal">
@@ -137,35 +135,23 @@ const question = (props: Partial<Parameters<typeof NeedLine>[0]> = {}) => (
   />
 )
 
-/** A question an agent asks: what it asks, its options numbered as where it is answered, each with what it means, and Answer. */
+/** A question an agent asks, kept calm: what it asks, and Answer, which takes the person to it. Its options are where it is answered. */
 export const Question: Story = {
   render: () => <NeedList style={{ maxWidth: 760 }}>{question()}</NeedList>,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('heading', { name: QUESTION.title })).toBeInTheDocument()
-    const options = c.getAllByRole('listitem')
-    await expect(options.map((option) => option.textContent)).toEqual(
-      QUESTION.options.map((option, i) => `${i + 1}${option.label} ${option.note}`),
-    )
+    await expect(c.queryByText(QUESTION.options[0]?.label ?? '')).not.toBeInTheDocument()
     await expect(c.getByRole('button', { name: 'Answer' })).toBeInTheDocument()
   },
 }
 
-/** Several questions at once: the first, its options, and how many more wait in the task. */
+/** Several questions at once: the first, and how many more wait with it. */
 export const QuestionsSeveral: Story = {
-  render: () => <NeedList style={{ maxWidth: 760 }}>{question({ more: 'and 2 more questions' })}</NeedList>,
+  render: () => <NeedList style={{ maxWidth: 760 }}>{question({ brief: 'and 2 more questions' })}</NeedList>,
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByText('and 2 more questions')).toBeInTheDocument()
   },
-}
-
-/** Options the agent didn't explain: just what each is. */
-export const QuestionBareOptions: Story = {
-  render: () => (
-    <NeedList style={{ maxWidth: 760 }}>
-      {question({ options: QUESTION.options.map(({ label }) => ({ label })), title: 'Which region should the queue run in?' })}
-    </NeedList>
-  ),
 }
 
 /** Answered: its kind grey, and what was said where Answer was. */
@@ -179,7 +165,7 @@ export const QuestionAnswered: Story = {
   },
 }
 
-/** At the edge's width, asking and answered: the title the whole width, the options beside Answer. */
+/** At the edge's width, asking and answered: the title the whole width, Answer beside it. */
 export const QuestionAtTheEdge: Story = {
   render: () => (
     <NeedList style={{ width: 360 }} bare>
@@ -299,7 +285,7 @@ export const AllStates: Story = {
           ),
         },
         { state: 'question', node: <NeedList style={{ width: 760 }}>{question()}</NeedList> },
-        { state: 'questions, several', node: <NeedList style={{ width: 760 }}>{question({ more: 'and 2 more questions' })}</NeedList> },
+        { state: 'questions, several', node: <NeedList style={{ width: 760 }}>{question({ brief: 'and 2 more questions' })}</NeedList> },
         {
           state: 'question, answered',
           node: <NeedList style={{ width: 760 }}>{question({ kind: 'Answered', answer: { said: 'Postgres, beside refunds' } })}</NeedList>,
