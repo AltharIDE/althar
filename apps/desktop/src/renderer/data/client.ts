@@ -117,7 +117,19 @@ export interface Client {
   /** Althar as co-author of the commits and pull requests it sends, or not. */
   readonly setCoAuthor: (on: boolean) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
-  readonly stopSession: (threadId: string) => Promise<void>
+  /** Stops a task: every agent on it, and the step it was on waits until it is resumed. */
+  readonly stopTask: (taskId: string) => Promise<void>
+  /** Carries a stopped task on from the step it was on: with its last lead, or the agent picked. */
+  readonly resumeTask: (input: {
+    readonly taskId: string
+    readonly agentId?: string
+    readonly model?: string | null
+    readonly effort?: string | null
+  }) => Promise<void>
+  /** Settles a task without its change; its worktree and branch stay. */
+  readonly abandonTask: (taskId: string) => Promise<void>
+  /** Opens an abandoned task again, on its worktree and branch. */
+  readonly reopenTask: (taskId: string) => Promise<void>
   readonly send: (input: {
     readonly threadId: string
     readonly body: string
@@ -330,7 +342,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getSettings: () => settle(api.GetSettings({})),
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
-    stopSession: (threadId) => command((commandId) => api.StopSession({ commandId, threadId })),
+    stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
+    resumeTask: (input) => command((commandId) => api.ResumeTask({ commandId, ...input })),
+    abandonTask: (taskId) => command((commandId) => api.AbandonTask({ commandId, taskId })),
+    reopenTask: (taskId) => command((commandId) => api.ReopenTask({ commandId, taskId })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),

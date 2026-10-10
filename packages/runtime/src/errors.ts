@@ -161,3 +161,14 @@ export class DocumentRefused extends Schema.TaggedError<DocumentRefused>()('Docu
   path: Schema.String,
   reason: Schema.Literals(['not_markdown', 'outside', 'too_large']),
 }) {}
+
+/**
+ * A task that can't take that turn in its course: a merged task is done for
+ * good, so it is never abandoned or reopened; one whose worktree went with
+ * its branch can't be reopened on it; and an abandoned one has no agent on
+ * it until it is reopened.
+ */
+export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
+  taskId: Schema.String,
+  why: Schema.Literals(['merged', 'branch_gone', 'abandoned']),
+}) {}

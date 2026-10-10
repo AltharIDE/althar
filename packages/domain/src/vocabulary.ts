@@ -34,7 +34,7 @@ export type TaskState = typeof TaskState.Type
 export const PlanState = Schema.Literals(['proposed', 'accepted', 'replaced', 'declined'])
 export type PlanState = typeof PlanState.Type
 
-/** A run's logical state. `suspended` is Stopped on screen; `cancelled` is Abandon. */
+/** A run's logical state. `suspended` is Stopped on screen, and what an abandoned task's run was on stays suspended, for reopening. */
 export const RunState = Schema.Literals(['admitted', 'running', 'suspended', 'succeeded', 'failed', 'cancelled'])
 export type RunState = typeof RunState.Type
 

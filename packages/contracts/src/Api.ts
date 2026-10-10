@@ -699,6 +699,15 @@ export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting
 export type TaskPhase = typeof TaskPhase.Type
 
 /**
+ * What the person can do to a task as a whole, where it stands now, as its
+ * menu offers it (docs/architecture/05, "Task and run lifecycle"): start its
+ * plan now, stop it, resume what stopping cut short, abandon it, or reopen
+ * it once abandoned. A merged task has none.
+ */
+export const TaskAction = Schema.Literals(['start', 'stop', 'resume', 'abandon', 'reopen'])
+export type TaskAction = typeof TaskAction.Type
+
+/**
  * A task as its card shows it, in the coordinator's thread and on the board:
  * where it stands, its plan, the issue it came from, its pull request, the
  * step it is on, what its lead last reported, who leads it.
@@ -980,6 +989,10 @@ export const ThreadSnapshot = Schema.Struct({
     here: Schema.Array(TaskRepositoryHere),
     /** Those it merged here: into which branch, the remote that branch follows (none for a repository without one), and how many commits that remote doesn't have yet. */
     merged: Schema.Array(TaskRepositoryMerged),
+    /** What the person can do to it as a whole now, in its menu's order. */
+    actions: Schema.Array(TaskAction),
+    /** Its plan still waiting to start, by id, for starting it now; null once started, or where it has none. */
+    planId: Schema.NullOr(Schema.String),
   }),
   session: Schema.NullOr(SessionSummary),
   attention: Schema.Array(AttentionRequest),
@@ -1327,6 +1340,28 @@ export const Api = RpcGroup.make(
   command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
+  /** Stops a task: every agent on it stops, and the step it was on waits until the person resumes it. */
+  command('StopTask', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Carries a stopped task on from the step it was on: with its last lead,
+   * or the agent and model given. What the person said before it waits in
+   * its thread and is the lead's first word.
+   */
+  command(
+    'ResumeTask',
+    {
+      taskId: Schema.String,
+      agentId: Schema.optional(Schema.String),
+      /** Its model and effort: the agent's own where null or left out. */
+      model: Schema.optional(Schema.NullOr(Schema.String)),
+      effort: Schema.optional(Schema.NullOr(Schema.String)),
+    },
+    Schema.Void,
+  ),
+  /** Settles a task without its change: its agents stop and its plan doesn't start; its worktree and branch stay as they are. */
+  command('AbandonTask', { taskId: Schema.String }, Schema.Void),
+  /** Opens an abandoned task again, on the same worktree and branch; nothing runs until the person says so. Never a merged one. */
+  command('ReopenTask', { taskId: Schema.String }, Schema.Void),
   command('Send', { threadId: Schema.String, body: Schema.String, disposition: Disposition }, Schema.Void),
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
   command('TakeBack', { itemId: Schema.String }, Schema.Void),

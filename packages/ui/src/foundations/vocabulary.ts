@@ -196,6 +196,16 @@ export enum TaskStatus {
   Stopped = 'stopped',
 }
 
+/** What a task has going, for what stops when it is abandoned. */
+export enum TaskActivity {
+  /** Agents are on it, or its run waits on a step. */
+  Working = 'working',
+  /** Its plan waits to start. */
+  Planned = 'planned',
+  /** Nothing runs or waits to start. */
+  Still = 'still',
+}
+
 /** What a task does with its work when it is done. */
 export enum TaskEnd {
   DraftPr = 'draft',

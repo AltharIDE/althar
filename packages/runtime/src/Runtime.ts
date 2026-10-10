@@ -18,6 +18,7 @@ import { Projects } from './Projects'
 import { Coordinator } from './Coordinator'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
+import { Tasks } from './Tasks'
 import { Secrets } from './Secrets'
 import { Sessions } from './Sessions'
 import { Limits } from './Limits'
@@ -67,8 +68,8 @@ export const layer = (options: RuntimeLayerOptions) => {
   const core = Layer.mergeAll(Projects.layer, Sessions.layer).pipe(Layer.provideMerge(Permissions.layer.pipe(Layer.provideMerge(judging))))
   // A task's pull request and issue, through the person's connections to code hosts and trackers.
   const linked = Layer.mergeAll(Changes.layer, Issues.layer).pipe(Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(core))))
-  // Runs drive a task's steps; plans start runs when their time comes; the coordinator plans tasks and passes messages on.
-  const work = Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))
+  // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
+  const work = Tasks.layer.pipe(Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))))
   // The models each agent offers, read from its sessions, or asked of it once.
   const known = Models.layer.pipe(Layer.provideMerge(work))
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).
