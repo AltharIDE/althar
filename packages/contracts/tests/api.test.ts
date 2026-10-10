@@ -257,6 +257,7 @@ describe('the API', () => {
               GetProjectRules: () => Effect.die('unused'),
               GetVocabulary: () => Effect.die('unused'),
               RenameProject: () => Effect.die('unused'),
+              SetProjectInk: () => Effect.die('unused'),
               RemoveProject: () => Effect.die('unused'),
               GetRepositories: () => Effect.die('unused'),
               AddRepositories: () => Effect.die('unused'),

@@ -147,7 +147,7 @@ export const Status = Schema.Struct({
 })
 export type Status = typeof Status.Type
 
-/** A project's ink: the colour its mark is drawn in, chosen when it was made and kept. */
+/** A project's ink: the colour its mark is drawn in, chosen when it was made and kept until the person picks another. */
 export const ProjectInk = Schema.Literals(['clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber'])
 export type ProjectInk = typeof ProjectInk.Type
 
@@ -1216,6 +1216,8 @@ export const Api = RpcGroup.make(
   ),
   /** Renames a project. Its mark, and the folders its tasks' worktrees are in, stay as they are. */
   command('RenameProject', { projectId: Schema.String, name: Schema.String }, Schema.Void),
+  /** Draws a project's mark in another ink, wherever it shows. The drawing, which comes from its id, stays. */
+  command('SetProjectInk', { projectId: Schema.String, ink: ProjectInk }, Schema.Void),
   /**
    * Removes a project from Althar: its agents stop, its plans don't start and
    * its runs end. Its folders, its tasks' worktrees and their branches stay.

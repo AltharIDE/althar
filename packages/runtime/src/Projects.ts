@@ -151,8 +151,8 @@ export type CreatedTask = typeof CreatedTask.Type
 /**
  * A new project's ink, the colour its mark is drawn in: the first, from where
  * its id points, that no other project has, while one is free. It is chosen
- * once, when the project is made, and kept: worked out again, it would change
- * as other projects come and go.
+ * once, when the project is made, and kept until the person picks another:
+ * worked out again, it would change as other projects come and go.
  */
 export const inkFor = (seed: string, taken: ReadonlyArray<string>): ProjectInk => {
   const inks = ProjectInk.literals
@@ -300,6 +300,8 @@ export class Projects extends Context.Service<
     repositories(projectId: string): Effect.Effect<ReadonlyArray<ProjectRepository>, NotFound | Failure>
     /** Renames a project. Its slug, and so its worktrees' folders, stay as they were made; its mark stays too. */
     rename(projectId: string, name: string, commandId?: CommandId): Effect.Effect<void, NotFound | ProjectRefused | Failure>
+    /** Draws a project's mark in another ink, as the person picked. Another project may have the same one. */
+    setInk(projectId: string, ink: ProjectInk, commandId?: CommandId): Effect.Effect<void, NotFound | Failure>
     /**
      * Adds the repositories at a folder to a project, as opening it would find
      * them: the repository it is or is in, whole, or those directly inside it.
@@ -770,6 +772,27 @@ export class Projects extends Context.Service<
           )
         })
 
+      const setInk = (projectId: string, ink: ProjectInk, commandId?: CommandId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const project = yield* projectOf(projectId)
+              const revision = yield* change('projects', project.id, { ink })
+              yield* fact({
+                projectId: project.id,
+                aggregateType: 'project',
+                aggregateId: project.id,
+                revision,
+                type: 'project.ink_set',
+                payload: { ink },
+                actorId: instance.personId,
+                ...(commandId === undefined ? {} : { commandId }),
+              })
+            }),
+          )
+        })
+
       const addRepositories = (projectId: string, path: string, commandId?: CommandId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -968,6 +991,7 @@ export class Projects extends Context.Service<
         createTask: (input) => run(createTask(input)),
         repositories: (projectId) => run(repositories(projectId)),
         rename: (projectId, name, commandId) => run(rename(projectId, name, commandId)),
+        setInk: (projectId, ink, commandId) => run(setInk(projectId, ink, commandId)),
         addRepositories: (projectId, path, commandId) => run(addRepositories(projectId, real(path), commandId)),
         leaveOut: (projectId, repositoryId, commandId) => run(leaveOut(projectId, repositoryId, commandId)),
         setRepository: (input) => run(setRepository(input)),

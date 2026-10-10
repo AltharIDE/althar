@@ -9,7 +9,7 @@ import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type W
 import { AgentExited, AgentRequestFailed, AgentStartFailed, OptionUnavailable, TurnInProgress } from '@althar/provider-adapters'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Cause, Context, Duration, Effect, Fiber, Layer, Stream } from 'effect'
+import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
 import { connection, isInside, services } from '../src/Api'
@@ -906,7 +906,7 @@ describe('editors, through the API', () => {
 })
 
 describe('a project’s menu, through the API', () => {
-  it.live('renames a project, and adds, leaves out and changes its repositories', () =>
+  it.live('renames a project, draws it in another ink, and adds, leaves out and changes its repositories', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
@@ -921,6 +921,25 @@ describe('a project’s menu, through the API', () => {
         assert.strictEqual(
           (yield* Effect.flip(client.RenameProject({ commandId: commandId(), projectId: project.id, name: ' ' }))).message,
           'Give the project a name.',
+        )
+
+        // Its mark is drawn in the ink the person picks, which stays; the drawing, from its id, is the same.
+        const other = named?.ink === 'rose' ? 'umber' : 'rose'
+        const { cursor } = yield* client.ListProjects()
+        yield* client.SetProjectInk({ commandId: commandId(), projectId: project.id, ink: other })
+        const inked = (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)
+        assert.deepStrictEqual([inked?.ink, inked?.name], [other, 'Refunds v2'])
+        // Every window hears the project changed, and reads it again.
+        const heard = yield* Stream.runHead(
+          Stream.filter(client.Watch({ since: cursor }), (event) => event._tag === 'Changed' && event.aggregateType === 'project'),
+        )
+        assert.deepStrictEqual(
+          Option.map(heard, (event) => (event._tag === 'Changed' ? [event.aggregateId, event.projectId] : [])),
+          Option.some([project.id, project.id]),
+        )
+        assert.strictEqual(
+          (yield* Effect.flip(client.SetProjectInk({ commandId: commandId(), projectId: 'project_gone', ink: 'teal' }))).message,
+          "That project isn't there any more.",
         )
 
         // Each repository has a role, suggested by its name, which the person can change.
