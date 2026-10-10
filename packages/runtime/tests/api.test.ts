@@ -141,7 +141,8 @@ describe('the API', () => {
           Stream.runCollect(
             Stream.take(
               Stream.filter(client.Watch({}), (event) => event._tag === 'Output' && event.threadId === task.threadId),
-              2,
+              // At most one every 50 ms: a command that ends sooner may stream once, and the rest is read from what was kept.
+              1,
             ),
           ),
         )
