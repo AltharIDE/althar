@@ -9,17 +9,20 @@ import { launch, openFirstProject, say, startTask } from './support'
 
 /*
  * A project's rules (ADR-013), as the person changes them: from the
- * project's title bar, each change kept at once, there again when they
+ * project's settings, each change kept at once, there again when they
  * come back.
  */
 
-/** The project's rules, from its bar's menu. */
+/** The project's rules, from its settings. */
 const openRules = async (page: Page) => {
-  await page.getByRole('button', { name: 'More for this project' }).click()
-  await page.getByRole('menuitem', { name: 'Project rules' }).click()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page
+    .getByRole('dialog', { name: /’s settings$/ })
+    .getByRole('button', { name: /^Rules/ })
+    .click()
 }
 
-test('changes a project’s rules from its title bar, and keeps them', async () => {
+test('changes a project’s rules from its settings, and keeps them', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   const { electronApp, page } = await launch(home)

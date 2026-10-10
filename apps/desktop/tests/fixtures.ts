@@ -584,6 +584,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     connectToken: vi.fn(async () => connectionList.connections[0] ?? githubConnection),
     disconnect: vi.fn(async () => {}),
     renameProject: vi.fn(async () => {}),
+    setProjectInk: vi.fn(async () => {}),
     removeProject: vi.fn(async () => {}),
     getRepositories: vi.fn(async () => repositories),
     addRepositories: vi.fn(async () => {}),

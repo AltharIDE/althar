@@ -192,12 +192,16 @@ Tasks, evidence, and decisions remain readable when a source is unavailable.
 
 ### Changing a project after it is made
 
-A project's menu renames it, opens its repositories and its rules, and removes
-it. Each change is recorded as a fact of the project, so every window reads
-the project again.
+A project's settings, opened from the top of its screen, rename it and change
+the ink its mark is drawn in, open its repositories and its rules, connect
+its code host, and remove it. Each change is recorded as a fact of the
+project, so every window reads the project again.
 
 - **Renaming** changes its name only. Its slug, and so the folders its tasks'
   worktrees are in, stays, and so does its mark, drawn from its id.
+- **Its ink** is picked for it when it is made, the first no other project
+  has, and kept; the person can pick another of the eight, even one another
+  project has. The drawing, from its id, stays.
 - **Adding** a folder binds the repositories at it, as opening it would find
   them: the one it is or is in, whole, or those directly inside it. One left
   out before comes back with its role and slug.

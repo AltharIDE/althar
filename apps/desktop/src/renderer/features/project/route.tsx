@@ -10,7 +10,7 @@ import { useLastRoom } from '../tabs/TabsFrame'
 import { useConnections } from '../connections/useConnections'
 import { ProjectView } from './ProjectView'
 import { useProject } from './useProject'
-import { useProjectMenu } from './useProjectMenu'
+import { useProjectSettings } from './useProjectSettings'
 
 function Project() {
   const { projectId } = projectRoute.useParams()
@@ -20,7 +20,7 @@ function Project() {
   const [last, keepRoom] = useLastRoom(projectId)
   const opening = room ?? last
   // Removed, the project is gone: back to the home.
-  const menu = useProjectMenu(projectId, () => void navigate({ to: '/' }))
+  const settings = useProjectSettings(projectId, () => void navigate({ to: '/' }))
   return (
     <ProjectView
       {...(opening === null ? {} : { room: opening })}
@@ -29,8 +29,8 @@ function Project() {
       board={useBoard(projectId)}
       connections={useConnections()}
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
-      menu={{
-        model: menu,
+      settings={{
+        model: settings,
         onRepositories: () => void navigate({ to: '/projects/$projectId/repositories', params: { projectId } }),
         onRules: () => void navigate({ to: '/projects/$projectId/rules', params: { projectId } }),
       }}
@@ -61,6 +61,7 @@ export const projectRoute = createRoute({
       cache.fetchQuery(read.coordinator(projectId)),
       cache.fetchQuery(read.board(projectId)),
       cache.fetchQuery(read.rules(projectId)),
+      cache.fetchQuery(read.repositories(projectId)),
       cache.fetchQuery(read.status()),
       cache.fetchQuery(read.connections()),
     )

@@ -14,12 +14,11 @@ import {
   ThreadMeasure,
   ThreadShellProvider,
   ThreadSkeleton,
-  ProjectHead,
+  ProjectFront,
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
 import { useDictation } from '../../shared/dictation/useDictation'
-import { shortFolder } from '../../shared/folders'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
@@ -36,20 +35,23 @@ import type { BoardModel } from '../board/useBoard'
 import { ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
 import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
-import { ProjectDialogs, ProjectMenu, type ProjectMenuActions } from './ProjectMenu'
+import { lastSettledOf, partsOf, tasksOf, trackerOf } from './front'
 import { nextRoom, ProjectBar } from './ProjectBar'
+import { inkOf, ProjectSettings } from './ProjectSettings'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
+import type { ProjectSettingsModel } from './useProjectSettings'
 
 /*
- * A project: the conversation with its coordinator, the board of its work,
- * or both side by side, the conversation as wide as the person drags it (b
- * steps through them). The coordinator answers questions itself and turns
- * changes into tasks: there is no task to start without it. Connecting the
- * code host, from the menu, opens over whichever view is shown. What you
- * open from the board opens its task. The bar says how much is
- * running and how much needs you: pointed at, what it is; clicked, the
- * first of it.
+ * A project: its front page across the top, then the conversation with its
+ * coordinator, the board of its work, or both side by side, the conversation
+ * as wide as the person drags it (b steps through them). The front page says
+ * how the project stands (what needs you: pointed at, what it is; clicked,
+ * the first of it), what it is made of, and opens its settings. The
+ * coordinator answers questions itself and turns changes into tasks: there
+ * is no task to start without it. Connecting the code host, from the
+ * settings, opens over whichever view is shown. What you open from the board
+ * opens its task.
  */
 
 export const text = {
@@ -75,15 +77,6 @@ export const text = {
   boardReading: 'Reading the board',
   done: 'Done',
   width: 'Width of the conversation',
-  /** Where a project of several repositories is: how many, and their names. */
-  repositories: (names: ReadonlyArray<string>) => `${names.length} repositories · ${names.join(', ')}`,
-}
-
-/** Where a project is, as its head says: its folder, with the home folder as ~, or its repositories where it has several. */
-export const whereOf = (project: { readonly repository: string | null; readonly repositories: ReadonlyArray<string> } | null) => {
-  if (project === null) return undefined
-  if (project.repositories.length > 1) return text.repositories(project.repositories)
-  return project.repository === null ? undefined : shortFolder(project.repository)
 }
 
 /** How wide the conversation is beside the board, as the person last dragged it: this window's own, kept across launches. */
@@ -119,12 +112,19 @@ const useBothWidth = () => {
   return { width: Math.min(width, max), min: WIDTH.min, max, set: setWidth, keep, reset: () => keep(WIDTH.start) }
 }
 
+/** The project's settings, and where they open. */
+export interface ProjectSettingsActions {
+  readonly model: ProjectSettingsModel
+  readonly onRepositories: () => void
+  readonly onRules: () => void
+}
+
 export function ProjectView({
   model,
   board,
   connections,
   onTask,
-  menu,
+  settings,
   room: opening = Room.Talk,
   onRoomChange,
 }: {
@@ -132,8 +132,8 @@ export function ProjectView({
   board: BoardModel
   connections: ConnectionsModel
   onTask: (threadId: string) => void
-  /** The project's menu: rename, its repositories, its rules, remove; without it, none. */
-  menu?: ProjectMenuActions
+  /** The project's settings: its name and colour, its repositories, its rules, removing it; without them, no way to them. */
+  settings?: ProjectSettingsActions
   /** The view it opens on: the one a task's bar chose, or the one the person was last on. */
   room?: Room
   /** The view it is on, each time it changes, to be opened on again. */
@@ -167,7 +167,7 @@ export function ProjectView({
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
-  // The code hosts and trackers, opened from the menu to connect the project's host.
+  // The code hosts and trackers, opened from the settings to connect the project's host or tracker.
   const [connecting, setConnecting] = useState(false)
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts.
   const now = useNow((model.coordinator?.session?.turnRunning ?? false) || (lanes?.next.some((task) => task.phase === 'planned') ?? false))
@@ -279,30 +279,50 @@ export function ProjectView({
     if (first !== null) onTask(first)
   }
 
+  // The front page: its name and ink as the person last chose them, how it stands, and what it is made of.
+  const projectId = model.project?.id ?? coordinator?.project.id ?? ''
+  const kept = settings?.model
+  const repositories =
+    model.repositories ?? model.project?.repositories.map((repository) => ({ id: repository, name: repository, remote: null })) ?? []
+  const tracker = lanes === null ? null : trackerOf(tasksOf(lanes), connections.list)
+  const last = lanes === null ? undefined : lastSettledOf(lanes, new Date(now))
+  const front = (
+    <ProjectFront
+      name={kept?.name ?? name}
+      seed={projectId}
+      ink={inkOf(kept?.ink ?? model.project?.ink ?? 'clay')}
+      yours={yours}
+      {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask), inProgress: lanes.running.length })}
+      onYours={openYours}
+      {...(last === undefined ? {} : { last })}
+      parts={partsOf({ repositories, host, list: connections.list, tracker })}
+      {...(settings === undefined
+        ? {}
+        : {
+            settings: (
+              <ProjectSettings
+                model={settings.model}
+                seed={projectId}
+                repositories={model.repositories ?? []}
+                connections={connections.list}
+                host={host}
+                tracker={tracker}
+                onRepositories={settings.onRepositories}
+                onRules={settings.onRules}
+                onConnect={() => setConnecting(true)}
+              />
+            ),
+          })}
+    />
+  )
+
   return (
     <div className={s.window}>
-      <ProjectBar
-        room={room}
-        onRoom={setRoom}
-        yours={lanes === null ? null : yours}
-        {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask) })}
-        onYours={openYours}
-        {...(menu === undefined
-          ? {}
-          : {
-              menu: (
-                <ProjectMenu
-                  {...menu}
-                  // Pushing needs no connection, so connecting the host waits in the menu until it's wanted.
-                  {...(host === null || host.connected ? {} : { connect: { host: host.name, onConnect: () => setConnecting(true) } })}
-                />
-              ),
-            })}
-      />
+      <ProjectBar room={room} onRoom={setRoom} />
+      {front}
       <div className={room === Room.Both ? `${s.rooms} ${s.both}` : s.rooms}>
         {talking && (
           <div className={s.talk} style={room === Room.Both ? ({ '--talk-width': `${both.width}px` } as CSSProperties) : undefined}>
-            <ProjectHead title={name} meta={whereOf(model.project)} side={room === Room.Both} />
             {coordinator === null ? (
               model.error === null ? (
                 <div className={s.reading}>
@@ -374,7 +394,6 @@ export function ProjectView({
           </div>
         )}
       </div>
-      {menu && <ProjectDialogs model={menu.model} />}
       {connecting && (
         <Dialog
           title={connectionsText.label}

@@ -106,7 +106,16 @@ describe('the Talk room', () => {
     const { client, watching } = fakeClient({ getCoordinator: vi.fn(async () => talk()) })
     withServices(<Project onTask={onTask} />, client)
     await screen.findByRole('heading', { name: 'meridian', level: 1 })
-    expect(screen.getByText('/code/meridian')).toBeTruthy()
+    // Its front page says what it is made of, never where it is on this Mac.
+    const made = await screen.findByRole('list', { name: 'Made of' })
+    await waitFor(() =>
+      expect(
+        within(made)
+          .getAllByRole('listitem')
+          .map((part) => part.textContent),
+      ).toEqual(['meridian-api', 'meridian-web']),
+    )
+    expect(screen.queryByText(/\/code\/meridian/)).toBeNull()
     expect(screen.getByText('The call has no retry. I planned a task.')).toBeTruthy()
     expect(screen.queryByText('checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /^Worked for/ })).toBeTruthy()

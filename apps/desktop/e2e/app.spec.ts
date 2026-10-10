@@ -201,10 +201,13 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
-    // Its remote is on GitHub, which isn't connected yet: nothing says so up front, and the project's menu connects it.
+    // Its remote is on GitHub, which isn't connected yet: nothing says so up front, and the project's settings connect it.
     await expect(page.getByText(/isn't connected to GitHub/)).toHaveCount(0)
-    await page.getByRole('button', { name: 'More for this project' }).click()
-    await page.getByRole('menuitem', { name: 'Connect GitHub' }).click()
+    await expect(page.getByRole('list', { name: 'Made of' }).getByRole('listitem')).toHaveText(['meridian'])
+    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    const github = page.getByRole('dialog', { name: 'meridian’s settings' }).getByRole('button', { name: /^GitHub/ })
+    await expect(github).toContainText('Not connected')
+    await github.click()
 
     // GitHub has no sign-in of Althar's in this build, so it takes a token. The code hosts and trackers open over the project.
     const connecting = page.getByRole('dialog', { name: 'Code hosts and trackers' })

@@ -8,14 +8,16 @@ import { repository } from '../tests/repository'
 import { chooseFolder, launch, openFirstProject } from './support'
 
 /*
- * A project after it is made, from its bar's menu: renamed, a repository
- * added and left out, and removed from Althar, each showing in the tabs and
- * the home at once, with the person's folders left exactly as they were.
+ * A project after it is made, from the settings on its front page: renamed
+ * and drawn in another ink in place, a repository added and left out, and
+ * removed from Althar, each showing in the tabs and the home at once, with
+ * the person's folders left exactly as they were.
  */
 
-const menu = async (page: Page, item: string | RegExp) => {
-  await page.getByRole('button', { name: 'More for this project' }).click()
-  await page.getByRole('menuitem', { name: item }).click()
+/** The project's settings, from the button on its front page. */
+const settings = async (page: Page, project: string) => {
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  return page.getByRole('dialog', { name: `${project}’s settings` })
 }
 
 /** Every file under a folder with what it holds: how the person left it. */
@@ -38,17 +40,37 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     const before = [asLeft(meridian), asLeft(web)]
 
-    // Renamed: the head and the tab say it at once.
-    await menu(page, 'Rename')
-    const rename = page.getByRole('dialog', { name: 'Rename the project' })
-    await rename.getByRole('textbox', { name: 'Name' }).fill('Refunds v2')
+    // Its front page says what it is made of, and never where it is.
+    await expect(page.getByRole('list', { name: 'Made of' }).getByRole('listitem')).toHaveText(['meridian'])
+    await expect(page.getByText(meridian)).toHaveCount(0)
+
+    // Renamed in place: the front page and the tab say it at once.
+    let panel = await settings(page, 'meridian')
+    await panel.getByRole('button', { name: /^Name and colour/ }).click()
+    await panel.getByRole('textbox', { name: 'Name' }).fill('Refunds v2')
     await page.screenshot({ path: 'test-results/project-rename.png', animations: 'disabled' })
-    await rename.getByRole('textbox', { name: 'Name' }).press('Enter')
+    await panel.getByRole('textbox', { name: 'Name' }).press('Enter')
     await expect(page.getByRole('heading', { name: 'Refunds v2', level: 1 })).toBeVisible()
     await expect(tabs.getByRole('button', { name: /^Refunds v2/ })).toBeVisible()
+    // The settings are named for it too.
+    panel = page.getByRole('dialog', { name: 'Refunds v2’s settings' })
+
+    // Drawn in another ink: the front page's wash takes it, and it is kept.
+    await panel.getByRole('radio', { name: /^Rose/ }).click()
+    await expect(panel.getByRole('radio', { name: /^Rose/ })).toBeChecked()
+    await expect(page.locator('header', { has: page.getByRole('heading', { name: 'Refunds v2', level: 1 }) })).toHaveAttribute(
+      'style',
+      /--project-rose/,
+    )
+    // Escape steps back to all of them, then closes the settings.
+    await page.keyboard.press('Escape')
+    await expect(panel.getByRole('button', { name: /^Name and colour/ })).toContainText('Rose')
+    await page.keyboard.press('Escape')
+    await expect(panel).toBeHidden()
 
     // A repository added, with its role; then left out again.
-    await menu(page, /Repositories/)
+    panel = await settings(page, 'Refunds v2')
+    await panel.getByRole('button', { name: /^Repositories/ }).click()
     await expect(page.getByRole('heading', { name: 'Repositories' })).toBeVisible()
     await chooseFolder(electronApp, web)
     await page.getByRole('button', { name: 'Add a folder' }).click()
@@ -68,7 +90,7 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await tabs.getByRole('button', { name: /^Refunds v2/ }).click()
 
     // Removed: it says what happens first, then the window goes home, without its tab.
-    await menu(page, 'Remove from Althar')
+    await (await settings(page, 'Refunds v2')).getByRole('button', { name: 'Remove from Althar' }).click()
     const remove = page.getByRole('dialog', { name: 'Remove Refunds v2 from Althar?' })
     await expect(remove.getByText(/Nothing in its folders changes/)).toBeVisible()
     await page.screenshot({ path: 'test-results/project-remove.png', animations: 'disabled' })

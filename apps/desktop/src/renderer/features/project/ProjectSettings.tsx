@@ -1,0 +1,216 @@
+import { useState } from 'react'
+
+import type { ConnectionList, Product, ProjectRepository, ProjectSummary } from '@althar/contracts'
+import {
+  Button,
+  ControlCenter,
+  ControlDetail,
+  ControlFoot,
+  ControlGrid,
+  ControlMarks,
+  ControlModule,
+  ControlSheet,
+  ControlWords,
+  ProjectIdentity,
+  ProjectInk,
+  projectIdentityText,
+  ProjectMark,
+  RemoveProject,
+} from '@althar/ui'
+
+import { shortFolder } from '../../shared/folders'
+import { productBrand, productName } from '../../shared/products'
+import { type Host, hostMarksOf, rulesLineOf, text as frontText } from './front'
+import type { ProjectSettingsModel } from './useProjectSettings'
+
+/*
+ * A project's settings, from the Settings button at the top right of its
+ * screen: the kit's Control Center, as the app's own Settings are, over
+ * whichever view is shown. A module for its name and colour opens out, to
+ * change them in place; the others say where each thing stands and open
+ * where it is changed: its repositories, its rules, and connecting the code
+ * host and tracker it is on. Removing it from Althar is at the foot, and asks
+ * first. Nothing in it says what is running.
+ */
+
+export const text = {
+  settings: 'Settings',
+  label: (project: string) => `${project}’s settings`,
+  identity: 'Name and colour',
+  repositories: 'Repositories',
+  rules: 'Rules',
+  connectedAs: (login: string) => `Connected as ${login}`,
+  notConnected: 'Not connected',
+  connect: 'Connect',
+  remove: 'Remove from Althar',
+}
+
+/** The runtime's name for each of the kit's inks. */
+const INK: Readonly<Record<ProjectInk, ProjectSummary['ink']>> = {
+  [ProjectInk.Clay]: 'clay',
+  [ProjectInk.Ochre]: 'ochre',
+  [ProjectInk.Olive]: 'olive',
+  [ProjectInk.Moss]: 'moss',
+  [ProjectInk.Teal]: 'teal',
+  [ProjectInk.Slate]: 'slate',
+  [ProjectInk.Rose]: 'rose',
+  [ProjectInk.Umber]: 'umber',
+}
+
+/** A project's ink as the kit has it. */
+export const inkOf = (ink: ProjectSummary['ink']): ProjectInk =>
+  Object.values(ProjectInk).find((one) => INK[one] === ink) ?? ProjectInk.Clay
+
+export interface ProjectSettingsProps {
+  model: ProjectSettingsModel
+  /** What its mark is drawn from: its id. */
+  seed: string
+  /** Its repositories, each with its remote. */
+  repositories: ReadonlyArray<ProjectRepository>
+  /** The code hosts and trackers connected, and those Althar knows. */
+  connections: ConnectionList | null
+  /** The code host its repositories are on, as its coordinator's thread says. */
+  host: Host | null
+  /** The tracker its tasks name, where they name one. */
+  tracker: { readonly product: Product; readonly key: string } | null
+  onRepositories: () => void
+  onRules: () => void
+  /** Opens the code hosts and trackers, to connect one. */
+  onConnect: () => void
+}
+
+/** The settings' button and what it opens; the removal's question, once asked. */
+export function ProjectSettings({
+  model,
+  seed,
+  repositories,
+  connections: list,
+  host,
+  tracker,
+  onRepositories,
+  onRules,
+  onConnect,
+}: ProjectSettingsProps) {
+  const [open, setOpen] = useState(false)
+  const [showing, setShowing] = useState<'all' | 'identity'>('all')
+  const name = model.name ?? ''
+  const ink = inkOf(model.ink ?? 'clay')
+  const taken: Partial<Record<ProjectInk, string>> = {}
+  for (const one of Object.values(ProjectInk)) {
+    const whose = model.taken[INK[one]]
+    if (whose !== undefined) taken[one] = whose
+  }
+  const rules = model.rules === null ? null : rulesLineOf(model.rules)
+  /** Who Althar is connected as on a product, if it is. */
+  const loginOf = (product: Product) =>
+    list?.connections.find((connection) => connection.product === product && connection.state === 'ready')?.account.login ?? null
+  const hostLogin = host === null ? null : loginOf(host.product)
+  const trackerLogin = tracker === null ? null : loginOf(tracker.product)
+  // Each opened from the panel goes over the screen on its own.
+  const leave = (then: () => void) => () => {
+    setOpen(false)
+    then()
+  }
+
+  return (
+    <>
+      <ControlCenter
+        trigger={
+          <Button size="small" variant="quiet" icon="gear">
+            {text.settings}
+          </Button>
+        }
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next)
+          if (next) setShowing('all')
+        }}
+        onEscapeKeyDown={(event) => {
+          // Escape steps back out of an opened module before it closes the panel, once a field has had its own.
+          if (event.defaultPrevented || showing === 'all') return
+          event.preventDefault()
+          setShowing('all')
+        }}
+        text={{ label: text.label(name) }}
+      >
+        {showing === 'all' ? (
+          <>
+            <ControlGrid>
+              <ControlModule title={text.identity} onClick={() => setShowing('identity')}>
+                <ControlWords mark={<ProjectMark seed={seed} ink={ink} size={30} />} title={name} line={projectIdentityText.inks[ink]} />
+              </ControlModule>
+              <ControlModule
+                title={text.repositories}
+                aside={String(repositories.length)}
+                span={host === null && tracker === null ? 4 : 2}
+                onClick={leave(onRepositories)}
+              >
+                <ControlMarks marks={hostMarksOf(repositories, host, list)} />
+              </ControlModule>
+              {host !== null && (
+                <ControlModule
+                  title={host.name}
+                  span={2}
+                  {...(hostLogin === null ? { aside: text.connect } : {})}
+                  onClick={leave(onConnect)}
+                >
+                  <ControlWords
+                    brand={productBrand(host.product)}
+                    title={hostLogin === null ? text.notConnected : text.connectedAs(hostLogin)}
+                  />
+                </ControlModule>
+              )}
+              {tracker !== null && (
+                <ControlModule
+                  title={productName(tracker.product)}
+                  span={host === null ? 2 : 4}
+                  {...(trackerLogin === null ? { aside: text.connect } : {})}
+                  onClick={leave(onConnect)}
+                >
+                  <ControlWords
+                    brand={productBrand(tracker.product)}
+                    title={trackerLogin === null ? text.notConnected : text.connectedAs(trackerLogin)}
+                    line={frontText.issues(tracker.key)}
+                  />
+                </ControlModule>
+              )}
+              <ControlModule title={text.rules} onClick={leave(onRules)}>
+                {rules !== null && <ControlWords title={rules.policy} line={rules.asks} />}
+              </ControlModule>
+            </ControlGrid>
+            <ControlFoot>
+              <Button size="small" variant="danger" icon="close" onClick={leave(model.askRemove)}>
+                {text.remove}
+              </Button>
+            </ControlFoot>
+          </>
+        ) : (
+          <ControlDetail title={text.identity} onBack={() => setShowing('all')}>
+            <ControlSheet>
+              <ProjectIdentity
+                name={name}
+                seed={seed}
+                ink={ink}
+                taken={taken}
+                onRename={model.rename}
+                onInk={(next) => model.setInk(INK[next])}
+                {...(model.failed === null ? {} : { error: model.failed })}
+              />
+            </ControlSheet>
+          </ControlDetail>
+        )}
+      </ControlCenter>
+      {model.removing && model.project !== null && (
+        <RemoveProject
+          project={model.project.name}
+          working={model.project.working}
+          worktrees={model.project.worktrees === null ? null : shortFolder(model.project.worktrees)}
+          busy={model.busy}
+          {...(model.error === null ? {} : { error: model.error })}
+          onRemove={() => void model.remove()}
+          onClose={model.closeRemove}
+        />
+      )}
+    </>
+  )
+}

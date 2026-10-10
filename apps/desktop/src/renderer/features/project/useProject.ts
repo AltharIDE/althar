@@ -6,6 +6,7 @@ import {
   type CoordinatorSnapshot,
   PAGE,
   type PlanStep,
+  type ProjectRepository,
   type ProjectSummary,
   type TaskEnd,
   type ThreadItem,
@@ -36,6 +37,8 @@ const GATHER = 25
 
 export interface ProjectModel {
   readonly project: ProjectSummary | null
+  /** Its repositories as this Mac has them, each with its remote: what its front page says it is made of. */
+  readonly repositories: ReadonlyArray<ProjectRepository> | null
   /** The coordinator's thread: its head and the items read so far, oldest first. */
   readonly coordinator: CoordinatorSnapshot | null
   /** Text still streaming, by thread item. */
@@ -75,6 +78,7 @@ export const useProject = (projectId: string): ProjectModel => {
   const read = reads(client)
   const listed = useQuery(read.projects())
   const project = listed.data?.projects.find((candidate) => candidate.id === projectId) ?? null
+  const repositories = useQuery(read.repositories(projectId)).data ?? null
   const thread = useQuery(read.coordinator(projectId))
   const coordinator = thread.data ?? null
   const status = useQuery(read.status()).data
@@ -235,6 +239,7 @@ export const useProject = (projectId: string): ProjectModel => {
 
   return {
     project,
+    repositories,
     coordinator,
     streaming,
     outputs,
