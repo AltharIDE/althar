@@ -79,6 +79,8 @@ export interface ProjectModel {
   readonly handOver: (choice: Choice, body: string) => Promise<void>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
+  /** Lets a held plan count down again. */
+  readonly unholdPlan: (planId: string) => Promise<void>
   readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
   /** Plans and starts a task; the task, or null when it couldn't. */
   readonly startTask: (input: NewTask) => Promise<TaskSummary | null>
@@ -345,6 +347,7 @@ export const useProject = (projectId: string): ProjectModel => {
       ),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
+    unholdPlan: (planId) => act(() => client.unholdPlan(planId)),
     changePlan: (planId, steps, end) => act(() => client.changePlan(planId, steps, end)),
     startTask,
     listIssues,

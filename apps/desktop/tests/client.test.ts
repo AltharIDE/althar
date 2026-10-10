@@ -104,7 +104,13 @@ describe('the client', () => {
     expect(offered.find((agent) => agent.agentId === 'claude-code')).toMatchObject({ model: 'large', effort: 'high' })
     await client.interrupt(task.threadId)
     await client.switchAgent({ threadId: task.threadId, agentId: 'codex', model: 'small', effort: 'low' })
-    await client.stopSession(task.threadId)
+    // Stopped as a task: every agent on it stops, and nothing is left to stop.
+    await client.stopTask(task.id)
+    expect((await client.getThread(task.threadId, { limit: 0 })).session).toBeNull()
+    await client.abandonTask(task.id)
+    expect((await client.getThread(task.threadId, { limit: 0 })).task.actions).toEqual(['reopen'])
+    await client.reopenTask(task.id)
+    expect((await client.getThread(task.threadId, { limit: 0 })).task.actions).toEqual(['abandon'])
     unwatch()
     await client.close()
   })
@@ -139,6 +145,11 @@ describe('the client', () => {
     )
     const card = planned.items.find((item) => item.kind === 'task')
     const planId = card?.kind === 'task' ? (card.content.plan?.id ?? '') : ''
+    await client.holdPlan(planId)
+    // Let go, it counts down again; held again, it waits.
+    await client.unholdPlan(planId)
+    const counting = await client.getThreadItem(coordinator.threadId, card?.id ?? '')
+    expect(counting.kind === 'task' && counting.content.phase).toBe('planned')
     await client.holdPlan(planId)
     await client.changePlan(planId, [{ key: 'implement', agentId: 'codex', model: null, skipped: false }])
     const held = await client.getThreadItem(coordinator.threadId, card?.id ?? '')
@@ -220,6 +231,10 @@ describe('the client', () => {
             return refuse()
           },
           StopSession: () => Effect.die('unused'),
+          StopTask: () => Effect.die('unused'),
+          ResumeTask: () => Effect.die('unused'),
+          AbandonTask: () => Effect.die('unused'),
+          ReopenTask: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
           TakeBack: () => Effect.die('unused'),
           Answer: () => Effect.die('unused'),
@@ -227,6 +242,7 @@ describe('the client', () => {
           StartTask: () => Effect.die('unused'),
           StartPlan: () => Effect.die('unused'),
           HoldPlan: () => Effect.die('unused'),
+          UnholdPlan: () => Effect.die('unused'),
           ChangePlan: () => Effect.die('unused'),
           AnswerStuck: () => Effect.die('unused'),
           ListConnections: () => Effect.die('unused'),

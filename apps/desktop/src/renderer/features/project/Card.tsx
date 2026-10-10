@@ -15,8 +15,8 @@ import type { TaskCardContent } from '../../shared/thread'
  * A task's card in the Talk room. Before it starts, its plan: who does each
  * step, on which model and how hard it thinks, why the coordinator chose the
  * lead, and the time it starts on its own, which the runtime keeps. You can
- * change who does a step, skip the review, hold it, or start it now. Once it
- * starts, where it stands, and a way in.
+ * change who does a step, skip the review, hold it and let it count down
+ * again, or start it now. Once it starts, where it stands, and a way in.
  */
 
 /** How long a plan waits before it starts on its own: the runtime's countdown. */
@@ -51,6 +51,8 @@ export interface CardActions {
   readonly agentName: (id: string | null) => string
   readonly onStart: (planId: string) => void
   readonly onHold: (planId: string) => void
+  /** Lets a held plan count down again, from the start. */
+  readonly onUnhold: (planId: string) => void
   readonly onChange: (planId: string, steps: ReadonlyArray<PlanStep>, end?: End | null) => void
   readonly onOpen: (threadId: string) => void
 }
@@ -119,9 +121,8 @@ function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; 
       wait={COUNTDOWN}
       {...(plan.startsAt === null ? {} : { startsAt: Date.parse(plan.startsAt) })}
       held={card.phase === 'held'}
-      onHeldChange={(held) => {
-        if (held) actions.onHold(plan.id)
-      }}
+      // Held, it waits; let go, the runtime counts its whole wait again and starts it when that ends.
+      onHeldChange={(held) => (held ? actions.onHold(plan.id) : actions.onUnhold(plan.id))}
       // Where the repository's host isn't connected, the task ends on its branch, and there is no ending to pick.
       {...(end === null ? { hideEnd: true } : { end: ENDS[end], onEndChange: (next: TaskEnd) => change(steps, endOf(next)) })}
       // A draft pull request is where tasks end until projects have rules for it, so no rule is named.

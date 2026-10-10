@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 
-import type { ThreadSnapshot } from '@althar/contracts'
+import type { TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
+  AbandonTask,
   ChangeView,
   BackCrumb,
   ChromeButton,
@@ -10,6 +11,7 @@ import {
   type FileView,
   Composer,
   Issue,
+  TaskActivity,
   LinkButton,
   type ModelInfo,
   TaskFace,
@@ -35,6 +37,7 @@ import { type Choice, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { stepNames, stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
+import { shortFolder } from '../../shared/folders'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { PermissionCall } from './PermissionCall'
@@ -86,6 +89,7 @@ export const text = {
   needsYou: 'Needs you',
   ready: 'Ready for you',
   done: 'Done',
+  abandoned: 'Abandoned',
   idle: 'Idle',
   stopped: 'Stopped',
   faces: { talk: 'Conversation', out: 'Outputs' } satisfies Record<Face, string>,
@@ -96,6 +100,7 @@ export const text = {
     waiting: (took: string) => `waiting · ${took}`,
     ready: (ago: string) => `ready · ${ago}`,
     done: (ago: string) => `done · ${ago}`,
+    abandoned: (ago: string) => `abandoned · ${ago}`,
     stopped: (ago: string) => `stopped · ${ago}`,
   },
   dismiss: 'Dismiss',
@@ -123,7 +128,8 @@ export const statusOf = (
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
   // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
   if (phase === 'ready') return { status: TaskStatus.Yours, state: text.ready }
-  if (phase === 'settled') return { status: TaskStatus.Done, state: text.done }
+  // Abandoned, it says so in place of where it stood, as stopped does.
+  if (phase === 'settled') return { status: TaskStatus.Done, state: snapshot.task.state === 'abandoned' ? text.abandoned : text.done }
   // On a step another agent takes, a review, while its lead waits.
   if (phase === 'running' && doing !== undefined) return { status: TaskStatus.Running, state: doing }
   if (snapshot.session === null) return { status: TaskStatus.Stopped, state: text.stopped }
@@ -159,7 +165,10 @@ export const sinceOf = (snapshot: ThreadSnapshot, now: string): string | null =>
   const [call] = snapshot.attention
   if (call !== undefined) return text.since.waiting(running(call.createdAt, now))
   if (waits !== null) return null
-  if (phase === 'settled') return settledAt === null ? null : text.since.done(ago(settledAt, new Date(now)))
+  if (phase === 'settled')
+    return settledAt === null
+      ? null
+      : (snapshot.task.state === 'abandoned' ? text.since.abandoned : text.since.done)(ago(settledAt, new Date(now)))
   if (phase === 'ready') {
     const reported = snapshot.items.findLast((item) => item.kind === 'step_result')
     return reported === undefined ? null : text.since.ready(ago(reported.createdAt, new Date(now)))
@@ -211,6 +220,8 @@ export function TaskView({
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
   const [connecting, setConnecting] = useState(false)
+  // Abandoning it asks first, saying what happens to its worktree and branch.
+  const [abandoning, setAbandoning] = useState(false)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
   const [face, setFace] = useState<Face | null>(null)
   // Ready, or merged here with its remote still to have it, it opens on what it made: there is something there to do.
@@ -250,7 +261,7 @@ export function TaskView({
     if ((showsTask && !was.task) || (showsOutputs && !was.outputs) || (showsChanges && !was.changes)) readFiles()
   }, [showsTask, showsOutputs, showsChanges, readFiles])
   // c and o switch the faces, and Escape goes back to the project: never while typing, or with something else open.
-  const open = changes.open
+  const open = changes.open || abandoning
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || typing(event) || open) return
@@ -339,6 +350,12 @@ export function TaskView({
   }
 
   const issue = snapshot.task.issue
+  // What it can do as a whole, where it stands, as the runtime says: each in its menu only when it applies.
+  const can = (action: TaskAction) => snapshot.task.actions.includes(action)
+  const { planId } = snapshot.task
+  // Its draft pull requests, marked ready from the menu too, while it is under way or ready.
+  const drafts = snapshot.task.phase === 'settled' ? [] : snapshot.task.changes.filter((one) => one.state === 'open' && one.draft)
+  const openChange = snapshot.task.changes.find((one) => one.state === 'open')
   // What it changed opens over the window; what else it can do is in its menu.
   const actions = (
     <>
@@ -352,8 +369,19 @@ export function TaskView({
         />
       )}
       <TaskMenu
-        status={status}
-        {...(session === null ? {} : { onStop: () => void model.stop() })}
+        {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
+        {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
+        {...(can('stop') ? { onStop: () => void model.stop() } : {})}
+        {...(can('resume') ? { onResume: () => void model.resume() } : {})}
+        {...(can('abandon')
+          ? {
+              onAbandon: () => {
+                model.dismissError()
+                setAbandoning(true)
+              },
+            }
+          : {})}
+        {...(can('reopen') ? { onReopen: () => void model.reopen() } : {})}
         // Its folder opens in the editor files open in, once it has a worktree.
         {...(snapshot.task.branch === null || editor === undefined
           ? {}
@@ -529,6 +557,20 @@ export function TaskView({
             )}
           </Thread>
         </TaskFace>
+      )}
+      {abandoning && (
+        <AbandonTask
+          activity={can('stop') ? TaskActivity.Working : can('start') ? TaskActivity.Planned : TaskActivity.Still}
+          worktree={snapshot.task.worktree === null ? null : shortFolder(snapshot.task.worktree)}
+          branch={snapshot.task.branch}
+          {...(openChange === undefined
+            ? {}
+            : { change: { name: `${openChange.short} ${openChange.prefix}${openChange.number}`, host: productName(openChange.product) } })}
+          busy={model.pending}
+          {...(model.error === null ? {} : { error: model.error })}
+          onAbandon={() => void model.abandon().then((abandoned) => abandoned && setAbandoning(false))}
+          onClose={() => setAbandoning(false)}
+        />
       )}
       {changes.open && (
         <ChangeView
