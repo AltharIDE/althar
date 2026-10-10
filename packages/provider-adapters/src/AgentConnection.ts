@@ -3,7 +3,15 @@ import type { ToolKind } from '@althar/domain'
 import { Cause, Data, DateTime, Deferred, Duration, Effect, Exit, Option, PubSub, Queue, Ref, Scope, Stream } from 'effect'
 
 import { AgentExited, AgentRequestFailed, type AgentStartFailed, OptionUnavailable, TurnInProgress } from './errors'
-import { type ConfigOption, normalize, normalizeOptions, normalizeUsage, type PermissionScope, type SessionEvent } from './events'
+import {
+  type ConfigOption,
+  normalize,
+  normalizeOptions,
+  normalizeUsage,
+  type PermissionScope,
+  type SessionEvent,
+  terminalOutputCapability,
+} from './events'
 import { type Classified, classify, structuredFailure, structuredFailureCapability } from './failures'
 import { type CapturedFrame, type OwnedProcess, type ProcessExit, spawnOwned, type StopReport } from './process'
 import type { LaunchSpec, PermissionMeanings } from './registry'
@@ -449,7 +457,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
     const init = yield* call('initialize', () =>
       connection.agent.request(acp.methods.agent.initialize, {
         protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: { elicitation: { form: {} }, _meta: structuredFailureCapability },
+        clientCapabilities: { elicitation: { form: {} }, _meta: { ...structuredFailureCapability, ...terminalOutputCapability } },
       }),
     )
     const capabilities = init.agentCapabilities ?? {}

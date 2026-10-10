@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, rmSync } from 'node:fs'
+import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import * as acp from '@agentclientprotocol/sdk'
@@ -62,7 +62,28 @@ export const scenarios = {
   settings: 'settings',
   /** The process exits mid-turn. Only when the agent runs as a process. */
   exit: 'exit',
+  /**
+   * What an agent hands back, in each agent's shape: a command's output
+   * streamed in chunks and its exit (Codex), a failing command's output
+   * whole at its end (Claude Code), output as the tool's own words, whole
+   * each time (OpenCode), a screenshot, a picture in a message, a markdown
+   * document it writes in its folder, a link to a file, and a message with
+   * a table in it.
+   */
+  handsBack: 'hands-back',
+  /** A command whose output streams until the turn is cancelled. */
+  streams: 'streams',
 } as const
+
+/** A 480 × 300 PNG of a page, as a screenshot tool hands it back. */
+export const SCREENSHOT_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAeAAAAEsCAIAAACUnPcNAAAEeElEQVR42u3cIQ4CQRBEUS7Xbu6vUAQHCgFBLRs0jiGpod/POwFkS23vYZMkRXbwE0iSgZYkGWhJMtCSJAMtSQZakmSgJUkGWpIMtCTJQEuSgZYkGWhJkoGWJAMtSTLQkmSgJUkGWpIMtCTJQEuSDLQkGWhJkoGWJAMtSTLQkiQDLUkGWpJkoCXpzwb6cb8BEMhAAxhoAAw0gIEGwEADGGgADDQABhrAQANgoAEMNAAGGgADDWCgATDQAAYaAAMNYKABMNAAGGgAAw2AgQYw0AAYaAAMNICBBsBAAxjoz86nIwC7xIHeJKl9BlqSDLSBliQDLUkG2kBLkoGWJANtoCXJQBtoSTLQkmSgDbQkNR3oqsFyPGmSgcZASwbaQGOgJQNtoA20ZKANNAZaMtDe4pAkAy1JBtpAS5KBliQDbaAlyUAbaEky0JJkoA20JBloSTLQBlqSDLQkGei4gQYgcaABmMtAAxhoAAw0gIEGwEADGGgADDQADlUA2h6qOPWWJN/ikCQDbaAlyUBLkoE20JJkoCXJQBtoSTLQBlqSDLQkGWgDLUl9B7pqsBxPmmSgMdCSgTbQGGjJQBtoAy0ZaAONgZYMtLc4JMlAS5KBNtCSZKAlyUAbaEky0AZakgy0JBloAy1JBlqSDLSBliQDLUkGOm6gAUgcaADmMtAABhoAAw1goAEw0AAGGgADDYBDFYC2hypOvSXJtzgkyUAbaEky0JJkoA20JBloSTLQBlqSDLSBliQDLUkG2kBLUt+Brhosx5MmGWgMtGSgDTQGWjLQBtpASwbaQGOgJQPtLQ5JMtCSZKANtCQZaEky0AZakgy0gZYkAy1JBtpAS5KBliQDbaAlyUBLkoGOG2gAEgcagLkMNICBBsBAAxhoAAw0gIEGwEAD4FAFoO2hilNvSfItDkky0AZakgy0JBloAy1JBlqSDLSBliQDbaAlyUBLkoE20JLUd6CrBsvxpEkGGgMtGWgDjYGWDLSBNtCSgTbQGGjJQHuLQ5IMtCQZaAMtSQZakgy0gZYkA22gJclAS5KBNtCSZKAlyUAbaEky0JJkoOMGGoDEgQZgLgMNYKABMNAABhoAAw1goAEw0AAYaAADDYCBBjDQABhoAAw0gIEGwEADGGgADDSAgf7G9fIEYGegAQy0gQYw0AAG2kADGGgAA22gAQy0gQYw0AAG2kADGGgAA22gAQy0vwTAQAMYaAMNYKABDLSBBjDQAAbaQAMYaAMNYKABDLSBBjDQAAbaQAMYaAMNYKABDLSBBjDQAAbaQAMYaAADbaABDLSBBjDQAAbaQAMYaAADbaABDDQAv2OgAQw0AAYawEADYKABDDQABhoAAw1goAEw0AAGGgADDYCBBjDQABhoAAMNgIEGMNAAGGgADDSAgQbAQAMYaAAMNAAGGsBAA2CgAQw0AAYawEADYKABMNAABhoAAw1goAEw0AAYaAADDYCBBjDQABhoAAPtJwAw0AAYaAADDYCBBjDQABhoAAw0gIEGwEADGGgADDQAby/e9HZPsgFukQAAAABJRU5ErkJggg=='
+
+/** The document `hands-back` writes, in the session's folder. */
+export const HANDED_DOCUMENT = {
+  path: 'docs/notes.md',
+  body: '# Notes\n\nRefunds share the partner budget.\n\n| Endpoint | Budget |\n| --- | --: |\n| charges | 600 |\n| refunds | shared |\n',
+}
 
 export const USAGE_LIMIT_MESSAGE = 'Claude AI usage limit reached|1759075200'
 
@@ -109,6 +130,8 @@ export interface FakeAgentOptions {
   readonly bare?: boolean
   /** Called when a session is closed with `session/close`. */
   readonly closed?: (sessionId: string) => void
+  /** Called with what the client says it can do, as it initializes. */
+  readonly initialized?: (capabilities: acp.ClientCapabilities | undefined) => void
   /** Leave a permission request open when the turn is cancelled, for Althar to answer. */
   readonly keepsRequests?: boolean
   /**
@@ -475,8 +498,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
 
   return acp
     .agent({ name: 'fake-agent' })
-    .onRequest(acp.methods.agent.initialize, () =>
-      options.bare === true
+    .onRequest(acp.methods.agent.initialize, ({ params }) => {
+      options.initialized?.(params.clientCapabilities ?? undefined)
+      return options.bare === true
         ? { protocolVersion: acp.PROTOCOL_VERSION }
         : {
             protocolVersion: acp.PROTOCOL_VERSION,
@@ -484,8 +508,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             authMethods: [],
             agentInfo: { name: 'fake-agent', version: '0.0.0' },
             _meta: { steering: { supported: true } },
-          },
-    )
+          }
+    })
     .onRequest(acp.methods.agent.session.new, ({ params }) => {
       created += 1
       const sessionId = `fake-${created}`
@@ -756,6 +780,138 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         case scenarios.settings:
           await say(`mode=${session.mode} model=${session.model} directories=${session.directories} mcp=${session.mcpServers}`)
           return ended()
+        case scenarios.handsBack: {
+          // Codex: a command's output in chunks as it runs, then its exit.
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'run-chunks',
+            title: 'npm test',
+            kind: 'execute',
+            status: 'in_progress',
+            rawInput: { command: 'npm test' },
+            content: [{ type: 'terminal', terminalId: 'run-chunks' }],
+            _meta: { terminal_info: { terminal_id: 'run-chunks', cwd: session.cwd } },
+          })
+          for (const data of [' ✓ charges/limit (14)\n', ' ✓ refunds/router (38)\n', ' 52 passed\n']) {
+            await pause(20)
+            await update({
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'run-chunks',
+              _meta: { terminal_output_delta: { terminal_id: 'run-chunks', data } },
+            })
+          }
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'run-chunks',
+            status: 'completed',
+            _meta: { terminal_exit: { terminal_id: 'run-chunks', exit_code: 0, signal: null } },
+          })
+          // Claude Code: a failing command's output whole when it ends.
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'run-whole',
+            title: 'npm run lint',
+            kind: 'execute',
+            status: 'pending',
+            rawInput: { command: 'npm run lint' },
+          })
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'run-whole',
+            _meta: { terminal_output_delta: { terminal_id: 'run-whole', data: 'src/a.ts\n  3:1  error  Unexpected any\n✗ 1 problem\n' } },
+          })
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'run-whole',
+            status: 'failed',
+            _meta: { terminal_exit: { terminal_id: 'run-whole', exit_code: 1, signal: null } },
+          })
+          // OpenCode: the output so far as the tool's own words, whole each time.
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'run-words',
+            title: 'git status --short',
+            kind: 'execute',
+            status: 'pending',
+            rawInput: { command: 'git status --short' },
+          })
+          for (const [status, text] of [
+            ['in_progress', ' M src/a.ts\n'],
+            ['completed', ' M src/a.ts\n?? docs/notes.md\n'],
+          ] as const)
+            await update({
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'run-words',
+              status,
+              content: [{ type: 'content', content: { type: 'text', text } }],
+            })
+          // A screenshot, from a browser tool.
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'shot',
+            title: 'mcp__playwright__browser_take_screenshot',
+            kind: 'other',
+            status: 'in_progress',
+          })
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'shot',
+            status: 'completed',
+            content: [
+              { type: 'content', content: { type: 'text', text: 'Took a screenshot of the page.' } },
+              { type: 'content', content: { type: 'image', data: SCREENSHOT_PNG, mimeType: 'image/png' } },
+            ],
+          })
+          // A markdown document it writes in its folder.
+          const document = join(session.cwd, HANDED_DOCUMENT.path)
+          mkdirSync(join(session.cwd, 'docs'), { recursive: true })
+          writeFileSync(document, HANDED_DOCUMENT.body)
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'write-doc',
+            title: `Write ${HANDED_DOCUMENT.path}`,
+            kind: 'edit',
+            status: 'completed',
+            rawInput: { file_path: document, content: HANDED_DOCUMENT.body },
+            locations: [{ path: document }],
+            content: [{ type: 'diff', path: document, oldText: null, newText: HANDED_DOCUMENT.body }],
+          })
+          // A file it points at, and a picture, in what it says.
+          writeFileSync(join(session.cwd, 'report.csv'), 'endpoint,budget\ncharges,600\nrefunds,shared\n')
+          await say('Here is what I found. ')
+          await update({
+            sessionUpdate: 'agent_message_chunk',
+            content: {
+              type: 'resource_link',
+              uri: `file://${join(session.cwd, 'report.csv')}`,
+              name: 'report.csv',
+              mimeType: 'text/csv',
+              size: 43,
+            },
+          })
+          await update({ sessionUpdate: 'agent_message_chunk', content: { type: 'image', data: SCREENSHOT_PNG, mimeType: 'image/png' } })
+          await say('\n\n| Endpoint | Budget |\n| --- | --: |\n| charges | 600 |\n| refunds | shared |\n')
+          return ended()
+        }
+        case scenarios.streams: {
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'run-long',
+            title: 'npm run dev',
+            kind: 'execute',
+            status: 'in_progress',
+            rawInput: { command: 'npm run dev' },
+          })
+          for (let line = 1; !session.cancelled && line < 500; line += 1) {
+            await update({
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'run-long',
+              _meta: { terminal_output_delta: { terminal_id: 'run-long', data: `ready in ${line} ms\n` } },
+            })
+            await pause(25)
+          }
+          return { stopReason: session.cancelled ? 'cancelled' : 'end_turn' }
+        }
         case scenarios.exit:
           await say('Exiting')
           options.exit?.()

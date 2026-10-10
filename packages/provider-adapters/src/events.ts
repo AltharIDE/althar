@@ -44,8 +44,54 @@ export interface ToolLocation {
   readonly line?: number
 }
 
+/**
+ * What a message or a tool's result carries beside its words, as the agent
+ * sent it: a picture, a file it points at, or a resource's contents. The
+ * runtime decides what of it to keep.
+ */
+export type Handed =
+  /** A picture, its bytes in base64 as ACP carries them, and where it came from, when the agent says. */
+  | { readonly _tag: 'Image'; readonly data: string; readonly mimeType: string; readonly uri?: string }
+  /** A file or a resource it points at, not its contents. */
+  | {
+      readonly _tag: 'Link'
+      readonly uri: string
+      readonly name: string
+      readonly title?: string
+      readonly mimeType?: string
+      readonly size?: number
+    }
+  /** A resource's contents: text, or bytes in base64. */
+  | { readonly _tag: 'Embedded'; readonly uri: string; readonly mimeType?: string; readonly text?: string; readonly blob?: string }
+
+/**
+ * What a tool call holds, as its content says: words (a result, or a
+ * command's output where the agent has no other way to send it), what it
+ * hands back, a file it changes, or the terminal its command runs in. A
+ * diff keeps its path, and whether the file is new, not its text.
+ */
+export type ToolContent =
+  | { readonly _tag: 'Text'; readonly text: string }
+  | Handed
+  | { readonly _tag: 'Diff'; readonly path: string; readonly created: boolean }
+  | { readonly _tag: 'Terminal'; readonly terminalId: string }
+
+/**
+ * A command's output as it comes, and how it ended: what Claude Code's and
+ * Codex's adapters send in a tool call's `_meta` (`terminal_output_delta`,
+ * `terminal_exit`) to a client that asks for it, as Althar does.
+ */
+export interface TerminalReport {
+  /** More of what it printed, after what came before. */
+  readonly output?: string
+  /** It ended: its exit code, or the signal that stopped it, where it says. */
+  readonly exit?: { readonly code: number | null; readonly signal: string | null }
+}
+
 export type SessionEvent =
   | { readonly _tag: 'AgentMessage'; readonly text: string; readonly messageId?: string }
+  /** Something in a message that isn't words: a picture, or a file it points at. */
+  | { readonly _tag: 'AgentContent'; readonly content: Handed; readonly messageId?: string }
   | { readonly _tag: 'AgentThought'; readonly text: string }
   | {
       readonly _tag: 'ToolCall'
@@ -56,6 +102,8 @@ export type SessionEvent =
       readonly rawInput?: unknown
       /** The files it touches, when it says. */
       readonly locations?: ReadonlyArray<ToolLocation>
+      readonly content?: ReadonlyArray<ToolContent>
+      readonly terminal?: TerminalReport
     }
   | {
       readonly _tag: 'ToolCallUpdate'
@@ -66,6 +114,9 @@ export type SessionEvent =
       readonly rawInput?: unknown
       readonly rawOutput?: unknown
       readonly locations?: ReadonlyArray<ToolLocation>
+      /** What it holds now, whole: each update that has content says all of it again. */
+      readonly content?: ReadonlyArray<ToolContent>
+      readonly terminal?: TerminalReport
     }
   | { readonly _tag: 'Plan'; readonly entries: ReadonlyArray<{ readonly content: string; readonly status: string }> }
   | {
@@ -119,6 +170,93 @@ const locationsOf = (locations: ReadonlyArray<acp.ToolCallLocation> | null | und
 
 const textOf = (content: acp.ContentBlock): string | undefined => (content.type === 'text' ? content.text : undefined)
 
+/** A resource's name, from the end of where it is. */
+const nameOf = (uri: string) =>
+  uri
+    .replace(/[?#].*$/, '')
+    .split('/')
+    .findLast((part) => part !== '') ?? uri
+
+/** What a content block carries beside words, or nothing for words and sound. */
+export const handedOf = (content: acp.ContentBlock): Handed | undefined => {
+  switch (content.type) {
+    case 'image':
+      // Claude Code sends a picture it only has the address of with no bytes: it is a link to it.
+      if (content.data === '')
+        return content.uri === null || content.uri === undefined || content.uri === ''
+          ? undefined
+          : { _tag: 'Link', uri: content.uri, name: nameOf(content.uri), ...defined('mimeType', content.mimeType || undefined) }
+      return { _tag: 'Image', data: content.data, mimeType: content.mimeType, ...defined('uri', content.uri) }
+    case 'resource_link':
+      return {
+        _tag: 'Link',
+        uri: content.uri,
+        name: content.name,
+        ...defined('title', content.title),
+        ...defined('mimeType', content.mimeType),
+        ...defined('size', content.size),
+      }
+    case 'resource': {
+      const resource = content.resource
+      return {
+        _tag: 'Embedded',
+        uri: resource.uri,
+        ...defined('mimeType', resource.mimeType),
+        ...('text' in resource ? { text: resource.text } : { blob: resource.blob }),
+      }
+    }
+    case 'text':
+    case 'audio':
+      return undefined
+  }
+}
+
+const toolContentOf = (content: ReadonlyArray<acp.ToolCallContent> | null | undefined): ReadonlyArray<ToolContent> | undefined =>
+  content === null || content === undefined
+    ? undefined
+    : content.flatMap((entry): ReadonlyArray<ToolContent> => {
+        switch (entry.type) {
+          case 'content': {
+            const text = textOf(entry.content)
+            if (text !== undefined) return [{ _tag: 'Text', text }]
+            const handed = handedOf(entry.content)
+            return handed === undefined ? [] : [handed]
+          }
+          case 'diff':
+            return [{ _tag: 'Diff', path: entry.path, created: entry.oldText === null || entry.oldText === undefined }]
+          case 'terminal':
+            return [{ _tag: 'Terminal', terminalId: entry.terminalId }]
+        }
+      })
+
+const recordOf = (value: unknown): Readonly<Record<string, unknown>> | undefined =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Readonly<Record<string, unknown>>) : undefined
+
+/**
+ * What a client puts in `clientCapabilities._meta` to hear a command's
+ * output: as chunks while it runs where the agent streams it (Codex), or
+ * whole when it ends (Claude Code), each with its exit code. Both adapters
+ * read Althar as a JetBrains AIR client (for structured failures), and send
+ * an AIR client no command output unless it asks for it this way.
+ */
+export const terminalOutputCapability = { terminal_output_delta: true }
+
+/** What a tool call's `_meta` says of its command's terminal, where it says anything. */
+export const terminalOf = (meta: unknown): TerminalReport | undefined => {
+  const fields = recordOf(meta)
+  const chunk = recordOf(fields?.terminal_output_delta) ?? recordOf(fields?.terminal_output)
+  const output = typeof chunk?.data === 'string' && chunk.data !== '' ? chunk.data : undefined
+  const ended = recordOf(fields?.terminal_exit)
+  const exit =
+    ended === undefined
+      ? undefined
+      : {
+          code: typeof ended.exit_code === 'number' ? ended.exit_code : null,
+          signal: typeof ended.signal === 'string' ? ended.signal : null,
+        }
+  return output === undefined && exit === undefined ? undefined : { ...defined('output', output), ...defined('exit', exit) }
+}
+
 export const normalizeOptions = (options: ReadonlyArray<acp.SessionConfigOption> | null | undefined): ReadonlyArray<ConfigOption> =>
   (options ?? []).map((option) => {
     const choices: Array<{ readonly value: string; readonly name: string; readonly description?: string }> = []
@@ -157,9 +295,11 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
   switch (update.sessionUpdate) {
     case 'agent_message_chunk': {
       const text = textOf(update.content)
-      return text === undefined
+      if (text !== undefined) return { _tag: 'AgentMessage', text, ...defined('messageId', update.messageId) }
+      const handed = handedOf(update.content)
+      return handed === undefined
         ? { _tag: 'Other', update: update.sessionUpdate, raw: update }
-        : { _tag: 'AgentMessage', text, ...defined('messageId', update.messageId) }
+        : { _tag: 'AgentContent', content: handed, ...defined('messageId', update.messageId) }
     }
     case 'agent_thought_chunk': {
       const text = textOf(update.content)
@@ -174,6 +314,8 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         status: update.status ?? 'pending',
         ...defined('rawInput', update.rawInput),
         ...defined('locations', locationsOf(update.locations)),
+        ...defined('content', toolContentOf(update.content)),
+        ...defined('terminal', terminalOf(update._meta)),
       }
     case 'tool_call_update':
       return {
@@ -184,6 +326,8 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('rawInput', update.rawInput),
         ...defined('rawOutput', update.rawOutput),
         ...defined('locations', locationsOf(update.locations)),
+        ...defined('content', toolContentOf(update.content)),
+        ...defined('terminal', terminalOf(update._meta)),
       }
     case 'plan':
       return { _tag: 'Plan', entries: update.entries.map((entry) => ({ content: entry.content, status: entry.status })) }
