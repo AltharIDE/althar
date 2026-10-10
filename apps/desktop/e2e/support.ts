@@ -6,6 +6,28 @@ import { _electron as electron, type ElectronApplication, type Page } from '@pla
 
 const app = join(import.meta.dirname, '..')
 
+/**
+ * Althar's own window. Not `firstWindow()`: where the edge is the menu bar
+ * (Linux), its sheet is a page of its own made as the app starts, and on a
+ * busy machine it can be the first to appear.
+ */
+export const mainWindow = async (electronApp: ElectronApplication): Promise<Page> => {
+  const isMain = (page: Page) => page.url().split(/[?#]/)[0]?.endsWith('/renderer/index.html') === true
+  const deadline = Date.now() + 30_000
+  for (;;) {
+    const found = electronApp.windows().find(isMain)
+    if (found !== undefined) return found
+    if (Date.now() > deadline)
+      throw new Error(
+        `Althar's window didn't open; open: ${electronApp
+          .windows()
+          .map((page) => page.url())
+          .join(', ')}`,
+      )
+    await electronApp.waitForEvent('window', { timeout: 1_000 }).catch(() => undefined)
+  }
+}
+
 export const launch = async (home: string, env: Record<string, string> = {}) => {
   const electronApp = await electron.launch({
     args: [app],
@@ -18,7 +40,7 @@ export const launch = async (home: string, env: Record<string, string> = {}) => 
       ...env,
     },
   })
-  return { electronApp, page: await electronApp.firstWindow() }
+  return { electronApp, page: await mainWindow(electronApp) }
 }
 
 /** Answers the folder picker with `path`, as if the person chose it. */

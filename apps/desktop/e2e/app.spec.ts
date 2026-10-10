@@ -125,7 +125,8 @@ test('makes the first project of a repository it found, starts a task, and talks
     await page.evaluate(() => Object.assign(window, { beforeCrash: true }))
     await electronApp.evaluate((_electron, pid) => process.kill(pid, 'SIGKILL'), killed ?? 0)
     await expect.poll(runtimePid, { timeout: 20_000 }).not.toBe(killed)
-    await expect.poll(() => page.evaluate(() => 'beforeCrash' in window), { timeout: 20_000 }).toBe(false)
+    // Asked mid-reload, the page has no context to answer from: still reloading.
+    await expect.poll(() => page.evaluate(() => 'beforeCrash' in window).catch(() => true), { timeout: 20_000 }).toBe(false)
     // Its run passed, so the task is still ready, with no lead running and nothing in the thread about the restart.
     await expect(page.getByText('Ready for you', { exact: true })).toBeVisible()
     await expect(page.getByText(/Althar restarted/)).toHaveCount(0)

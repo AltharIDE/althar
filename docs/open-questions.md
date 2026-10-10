@@ -9,6 +9,33 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## Dictation, 10 October
+
+- [x] **Where speech is turned into text.** On this machine only, with a
+  model downloaded on the first press; never a hosted service or the
+  person's own key (ADR-017).
+- [x] **Code words.** The project's names are spelt as its code spells
+  them, from what the runtime reads in git; biasing the model itself broke
+  more than it fixed (ADR-017).
+- [ ] **Names the model mishears as other words.** "Althar" comes out as
+  "Alpha", "Halyard" as "Halliod". Respelling only joins words into names.
+  A sound-alike match against the project's and people's names could catch
+  these, at the risk of changing real words.
+- [x] **Words as you speak.** Written down about once a second while the
+  person talks, settled at pauses, and all of it once more when they stop
+  (ADR-017). A streaming model stays a later option.
+- [ ] **Removing the model.** It stays in the profile once downloaded
+  (670 MB). Settings has no way to see or remove it yet. Leaning: a line
+  under a Dictation section, in the calm Settings style: its size, and
+  Remove.
+- [x] **A shortcut to dictate.** ⌘⇧D starts and stops it; held, letting go
+  stops it (ADR-017).
+- [ ] **Dictating from anywhere.** The shortcut works while Althar's window
+  is in front. A global one, from another app into a task, would need the
+  window to come forward first, or the island to take it.
+- [ ] **Windows on Arm.** sherpa-onnx has no prebuilt binary for it yet;
+  the microphone would not show there until it does.
+
 ## A project's menu, 8 October
 
 - [ ] **A project's intent.** The older Rooms prototype's project menu had

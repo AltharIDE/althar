@@ -444,3 +444,25 @@ export enum SignInWay {
   /** A folder the agent already signed in with: one an account switcher made, or one the person chooses. */
   Folder = 'folder',
 }
+
+/** What stands between pressing the microphone and dictating, the first time or when something is in the way. */
+export enum DictationSetup {
+  /** No speech model on this machine yet: it offers to download one. */
+  Offer = 'offer',
+  /** The system is asking whether Althar may use the microphone. */
+  Asking = 'asking',
+  /** The speech model is coming down. */
+  Downloading = 'downloading',
+  /** It has come down and is being checked and loaded. */
+  Preparing = 'preparing',
+  /** The download stopped partway; it carries on from there. */
+  Stopped = 'stopped',
+  /** There isn't room on the disk for the speech model. */
+  NoRoom = 'noRoom',
+  /** The microphone was refused; only the system's settings can change that. */
+  Denied = 'denied',
+  /** There is no microphone to listen with. */
+  NoMicrophone = 'noMicrophone',
+  /** What was said couldn't be written down; the recording is kept to try again. */
+  Failed = 'failed',
+}
