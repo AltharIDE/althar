@@ -143,15 +143,15 @@ export const findRepositories = async (places: ReadonlyArray<string>): Promise<F
 
 /**
  * The folder to grant for a repository found, if it is still the one found:
- * a folder, not a link put in its place since, at the same place on disk. A
- * grant goes to where it is on disk, so a link swapped in can't send it
- * anywhere else.
+ * at the same place on disk, links followed, and still a repository. A grant
+ * goes to where it is on disk, so a link put in its place since can't send
+ * it anywhere else.
  */
 export const stillFound = async (repository: Pick<FoundHere, 'path' | 'real'>): Promise<string | null> => {
-  const now = await lstat(repository.path).catch(() => null)
-  if (now?.isDirectory() !== true) return null
   const real = await realpath(repository.path).catch(() => null)
-  return real === repository.real ? real : null
+  if (real !== repository.real) return null
+  const git = await lstat(join(real, '.git')).catch(() => null)
+  return git?.isDirectory() === true ? real : null
 }
 
 /**

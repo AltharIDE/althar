@@ -652,6 +652,25 @@ describe('the start', () => {
     expect(opened).toHaveBeenCalledTimes(1)
   })
 
+  it('makes no project of a repository found that is now a folder of others', async () => {
+    const inner = { path: '/Users/me/Projects/meridian/inner', folder: null, name: 'inner', branch: 'main', remote: null }
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      readFolder: vi.fn(async () => ({ kind: 'folder' as const, name: 'meridian', repositories: [inner], project: null })),
+    })
+    const host = fakeHost({
+      findRepositories: vi.fn(async () => ({
+        lookedIn: ['~/Projects'],
+        repositories: [{ id: 'r1', name: 'meridian', where: '~/Projects/meridian', branch: 'main', worked: 0 }],
+      })),
+    })
+    withServices(<Start onProject={vi.fn()} />, client, host)
+    await userEvent.click(await screen.findByRole('checkbox', { name: /meridian/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    expect(await screen.findByText('meridian isn’t a git repository any more.')).toBeTruthy()
+    expect(client.openProject).not.toHaveBeenCalled()
+  })
+
   it('keeps focus in the project as its repositories are left out, then on the last one’s tick', async () => {
     const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
     const host = fakeHost({

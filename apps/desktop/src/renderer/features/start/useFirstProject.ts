@@ -159,7 +159,8 @@ export const useFirstProject = (): FirstProjectModel => {
           if (candidate.added !== null) return candidate.added
           const grant = candidate.found === null ? null : await host.grantFound(candidate.found)
           if (grant === null) throw new Unopened(`Althar couldn’t open ${candidate.name}. Add it with Add a folder.`)
-          const [root] = (await client.readFolder(grant)).repositories
+          const reading = await client.readFolder(grant)
+          const [root] = reading.kind === 'repository' ? reading.repositories : []
           if (root === undefined) throw new Unopened(`${candidate.name} isn’t a git repository any more.`)
           return { grant, path: root.path, alone: true, insideOf: null }
         }),

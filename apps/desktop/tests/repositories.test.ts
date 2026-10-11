@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, renameSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -99,5 +99,18 @@ describe('repositories where people keep code', () => {
     expect(await stillFound(found)).toBeNull()
     // Gone altogether.
     expect(await stillFound({ path: join(home, 'gone'), real: join(home, 'gone') })).toBeNull()
+  })
+
+  it('grants a place that is a link to a repository, as found, but not one that is no longer a repository', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'althar-found-'))
+    const meridian = repo(join(home, 'elsewhere', 'meridian'), 'main', 1)
+    symlinkSync(meridian, join(home, 'code'))
+    const [found] = (await findRepositories(placesFor(home, 'darwin'))).repositories
+    if (found === undefined) throw new Error('meridian wasn’t found')
+    expect(await stillFound(found)).toBe(realpathSync(meridian))
+    // Its .git gone, with a repository still inside it: not the repository found.
+    repo(join(meridian, 'inner'), 'main', 0)
+    rmSync(join(meridian, '.git'), { recursive: true })
+    expect(await stillFound(found)).toBeNull()
   })
 })
