@@ -5,7 +5,7 @@ import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
-import { dueForHandover, FRESH_ROOM, HANDOVER_AT, openTasks, RECENT_MESSAGES, roomFor } from '../src/handover'
+import { dueForHandover, FRESH_ROOM, HANDOVER_AT, handoverRecord, openTasks, RECENT_MESSAGES, roomFor } from '../src/handover'
 import { NOTES_KEPT } from '../src/notes'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -153,6 +153,7 @@ describe('when to hand the coordinator over', () => {
     assert.isTrue(roomFor('x'.repeat(4_000), { size: 200_000 }))
     assert.isFalse(roomFor('x'.repeat(320_000), { size: 200_000 }))
     assert.isTrue(roomFor('x'.repeat(10), null))
+    assert.isTrue(roomFor('x'.repeat(10), { size: 0 }))
   })
 })
 
@@ -260,6 +261,27 @@ describe('handing the coordinator to a fresh session', () => {
       assert.lengthOf(yield* sessionsOn(threadId), 1)
       assert.notDeepInclude(yield* notices(threadId), { source: 'runtime', severity: 'info', title: 'Started a fresh session.' })
     }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('leaves the old session carrying on when the fresh one can’t start, and the thread says so', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { threadId } = yield* opened
+      yield* say(threadId, 'hello')
+      const first = yield* answered(threadId, 1)
+      // Each of the fake's processes fails the first time it is put on the large model, as Claude Code does now and then.
+      yield* Effect.flip(sessions.setModel({ threadId, model: 'large' }))
+      yield* sessions.setModel({ threadId, model: 'large' })
+      yield* say(threadId, 'Fill up. [context:85]')
+      yield* until(notices(threadId), (said) => said.some((notice) => notice.title === "Fake claude-code couldn't start."))
+      // What the person says next goes to the session they had.
+      yield* say(threadId, 'And more.')
+      assert.strictEqual(yield* answered(threadId, 3), first)
+      assert.deepStrictEqual(
+        (yield* sessionsOn(threadId)).map((session) => session.state),
+        ['active', 'failed'],
+      )
+    }).pipe(Effect.provide(withQueries(undefined, { failsOnce: ['large'] }))),
   )
 
   it.live('hands over one whose agent says between turns that its context is filling', () =>
@@ -531,5 +553,109 @@ describe("a handover brief's open tasks", () => {
         "\n- draft-1: Draft 1. Planned, and counting down: it starts on its own unless the person holds or changes it. Led by large.\n- old-work: Old work. Open, with nothing running.\n  Waiting on the person: its pull request https://github.test/meridian/api/pull/12 is open, with 1 commit on the branch they haven't pushed to it.",
       )
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.minutes(5) }))),
+  )
+
+  it.live('says where each stands and what waits on the person, whatever it is', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, threadId, access } = yield* opened
+      // Three done by their leads, with no review: one ready, one whose run then stopped, and one at work again on another model.
+      for (const title of ['Ready one', 'Stopped one', 'Again one'])
+        yield* callTool(access, 'start_task', {
+          title,
+          description: 'Do it. [lead:finish]',
+          lead: { agent: 'claude-code', model: 'small' },
+        })
+      const [ready, stopped, again] = yield* until(
+        sql<{ slug: string; threadId: string; runId: string; taskId: string }>`
+          SELECT k.slug, t.id AS thread_id, r.id AS run_id, k.id AS task_id FROM tasks k
+          JOIN threads t ON t.task_id = k.id AND t.kind = 'task' JOIN runs r ON r.task_id = k.id
+          WHERE r.state = 'succeeded' ORDER BY k.created_at`,
+        (rows) => rows.length === 3,
+        Duration.seconds(20),
+      )
+      if (ready === undefined || stopped === undefined || again === undefined) return yield* Effect.die(new Error('Not done'))
+      yield* sql`UPDATE runs SET state = 'failed' WHERE id = ${stopped.runId}`
+      yield* sql`UPDATE provider_sessions SET model = 'large' WHERE thread_id = ${again.threadId}`
+
+      // On the stopped one: a permission, a step that can't go on, a question in a line, and a call of another kind.
+      const [lead] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${stopped.threadId} LIMIT 1`
+      const permissionId = `perm_${'1'.repeat(32)}`
+      yield* sql`INSERT INTO permission_requests ${sql.insert({
+        id: permissionId,
+        projectId,
+        providerSessionId: lead?.id ?? '',
+        toolCallId: 'call-1',
+        toolKind: 'execute',
+        title: 'Run npm install',
+        actionDigest: 'digest',
+        state: 'open',
+        receivedAt: '2026-10-11T00:00:00.000Z',
+      })}`
+      const call = (n: number, kind: string, payload: unknown) =>
+        sql`INSERT INTO attention_requests ${sql.insert({
+          id: `attn_${String(n).repeat(32)}`,
+          projectId,
+          taskId: stopped.taskId,
+          kind,
+          payload: JSON.stringify(payload),
+          state: 'open',
+          createdAt: `2026-10-11T00:00:0${n}.000Z`,
+          ...(kind === 'permission' ? { permissionRequestId: permissionId } : {}),
+        })}`
+      yield* call(1, 'permission', {})
+      yield* call(2, 'stuck', { step: 'implement', detail: 'The lead stopped without reporting' })
+      yield* call(3, 'question', { message: 'Which database?' })
+      yield* call(4, 'usage_limit', {})
+
+      // On the one at work again: a closed pull request, which waits on nobody, an open draft with nothing to push, and one Althar can't count for.
+      const [worktree] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${again.taskId}`
+      const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree?.path ?? '' })
+        .toString()
+        .trim()
+      const pull = (n: number, snapshot: Record<string, unknown>) =>
+        sql`INSERT INTO external_links ${sql.insert({
+          id: `xlink_${String(n).repeat(32)}`,
+          projectId,
+          taskId: again.taskId,
+          product: 'github',
+          kind: 'change',
+          externalId: String(n),
+          ref: `meridian/api#1${n}`,
+          key: `#1${n}`,
+          url: `https://github.test/meridian/api/pull/1${n}`,
+          snapshot: JSON.stringify({ number: 10 + n, url: `https://github.test/meridian/api/pull/1${n}`, ...snapshot }),
+          createdAt: `2026-10-11T00:00:0${n}.000Z`,
+          updatedAt: `2026-10-11T00:00:0${n}.000Z`,
+        })}`
+      yield* pull(1, { state: 'closed' })
+      yield* pull(2, { state: 'open', draft: true, headSha: head })
+      yield* pull(3, { state: 'open' })
+
+      const modelOf = (step: { readonly agentId: string; readonly model: string | null }) => step.model ?? step.agentId
+      const tasks = yield* openTasks(projectId, modelOf, (thread) => thread === again.threadId)
+      const lineOf = (slug: string) => tasks.text.slice(tasks.text.indexOf(`- ${slug}: `)).split('\n- ')[0] ?? ''
+      assert.strictEqual(
+        lineOf(ready.slug),
+        `- ${ready.slug}: Ready one. Ready: its steps are done. Plan: small leads, no review; it ends on its branch, with nothing sent to the host.\n  Waiting on the person: the change, to look over and accept.\n  Its lead last reported: Did the task.`,
+      )
+      assert.include(lineOf(stopped.slug), 'Stopped one. Stopped. Plan: ')
+      assert.include(
+        lineOf(stopped.slug),
+        "\n  Waiting on the person: a permission request: Run npm install; its implement step can't go on without them: The lead stopped without reporting; a question from its lead: Which database?; a call about usage limit.\n",
+      )
+      assert.include(lineOf(again.slug), 'Again one. Under way again, after its steps were done. Plan: ')
+      assert.include(lineOf(again.slug), ' Its lead now: large.')
+      assert.include(
+        lineOf(again.slug),
+        '\n  Waiting on the person: its pull request https://github.test/meridian/api/pull/12 (a draft) is open; its pull request https://github.test/meridian/api/pull/13 is open.',
+      )
+
+      // With nothing said yet and no notes, the brief says so.
+      const record = yield* handoverRecord({ projectId, threadId, modelOf, working: () => false })
+      assert.strictEqual(record.open, 3)
+      assert.include(record.sections, 'The conversation has no messages yet.')
+      assert.include(record.sections, 'The project has no notes yet.')
+    }).pipe(Effect.provide(withQueries())),
   )
 })
