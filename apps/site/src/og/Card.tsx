@@ -1,4 +1,4 @@
-import { Logo } from '@althar/ui'
+import { Logo, LOGO_SECTION } from '@althar/ui'
 import { useLayoutEffect, useRef } from 'react'
 
 import { drawLandscape, drawLight, lightOf } from '../shared/footer/engrave'
@@ -51,7 +51,7 @@ export function Card({ page }: { page: OgPage }) {
       if (!ground || !light) return
       ground.setTransform(dpr, 0, 0, dpr, 0, 0)
       light.setTransform(dpr, 0, 0, dpr, 0, 0)
-      const g = drawLandscape(ground, w, h, clear, getComputedStyle(el).backgroundColor)
+      const g = drawLandscape(ground, w, h, clear, getComputedStyle(el).backgroundColor, LOGO_SECTION)
       drawLight(light, g, lightOf(g), AT)
       el.dataset.ready = ''
     }

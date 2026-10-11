@@ -15,8 +15,9 @@
     "fix": "vp check --fix",
     "test": "vp test run",
     "test:coverage": "vp test run --coverage",
-    "test:e2e": "bun run build && playwright test",
-    "verify": "bun run check && bun run test:coverage && bun run test:e2e",
+    "test:e2e": "node scripts/e2e.ts",
+    "verify": "bun run check && bun run test:coverage",
+    "verify:all": "bun run verify && bun run test:e2e",
     "package": "bun run build:package && node scripts/package.ts",
     "release": "node scripts/release.ts"
   },

@@ -89,12 +89,15 @@ describe('what Althar writes about a pull request', () => {
   })
 
   it('describes it from what the steps reported', () => {
-    assert.strictEqual(bodyOf({ lead: null, review: null, findings: [], issue: null }), '<sub>Opened by Althar.</sub>')
+    assert.strictEqual(
+      bodyOf({ lead: null, review: null, findings: [], issue: null }),
+      '<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+    )
     // Althar's credit turned off, it doesn't sign the description either.
     assert.strictEqual(bodyOf({ lead: 'Adds a retry.', review: null, findings: [], issue: null, credit: false }), 'Adds a retry.')
     assert.strictEqual(
       bodyOf({ lead: '', review: { rounds: 0, verdict: null }, findings: [], issue: { key: '#12', url: 'u', sameHost: true } }),
-      'Issue: #12\n\n<sub>Opened by Althar.</sub>',
+      'Issue: #12\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
     )
     assert.strictEqual(
       bodyOf({
@@ -113,7 +116,7 @@ describe('what Althar writes about a pull request', () => {
         '### Review\n\nReviewed in 2 rounds.',
         '- Fixed: major `src/a.ts:3`: Never stops.\n- Set aside: nit `README.md`: Typo. (Intended.)\n- Open: minor: Name.\n- Set aside: minor: Odd.',
         'Issue: [MER-231](https://linear.app/m/issue/MER-231)',
-        '<sub>Opened by Althar.</sub>',
+        '<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
       ].join('\n\n'),
     )
     assert.include(

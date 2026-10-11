@@ -16,8 +16,10 @@ import s from './Running.module.css'
 
 export interface RunningProcess {
   id: string
-  /** What was run: bun dev. */
+  /** What was run, whole: cd /work/tree && bun dev 2>&1 | tail -20. Shown in full on hover. */
   command: string
+  /** The same at a glance, where it can be said shorter: bun dev. Without it, the command is shown. */
+  label?: string
   /** Where it answers, when it serves: localhost:5173. */
   url?: string
   /** How long it has run, or when it stopped: 12m. */
@@ -108,7 +110,9 @@ export function Running({ processes, onStop, onDismiss, onOutput, onOpenUrl, ope
           <span className={s.text}>
             <span className={s.k}>{live ? t.title : t.ran}</span>
             {one ? (
-              <code className={cx(s.name, s.mono)}>{one.command}</code>
+              <code className={cx(s.name, s.mono)} title={one.command}>
+                {one.label ?? one.command}
+              </code>
             ) : (
               <span className={s.name}>{t.count(live ? running.length : processes.length)}</span>
             )}
@@ -129,7 +133,9 @@ export function Running({ processes, onStop, onDismiss, onOutput, onOpenUrl, ope
             <span className={s.rowGlyph}>{p.exited === undefined ? <LiveDot /> : <Icon name="terminal" size={12} />}</span>
             <span className={s.rowMain}>
               <span className={s.rowTitle}>
-                <code className={s.command}>{p.command}</code>
+                <code className={s.command} title={p.command}>
+                  {p.label ?? p.command}
+                </code>
                 {p.url &&
                   (onOpenUrl ? (
                     <LinkButton className={s.url} aria-label={t.openLabel(p.url)} onClick={() => onOpenUrl(p.id)}>
@@ -158,17 +164,17 @@ export function Running({ processes, onStop, onDismiss, onOutput, onOpenUrl, ope
               </span>
             </span>
             {onOutput && (
-              <ActionButton size="small" aria-label={t.outputLabel(p.command)} onClick={() => onOutput(p.id)}>
+              <ActionButton size="small" aria-label={t.outputLabel(p.label ?? p.command)} onClick={() => onOutput(p.id)}>
                 {t.output}
               </ActionButton>
             )}
             {onStop && p.exited === undefined && (
-              <ActionButton size="small" aria-label={t.stopLabel(p.command)} onClick={() => onStop(p.id)}>
+              <ActionButton size="small" aria-label={t.stopLabel(p.label ?? p.command)} onClick={() => onStop(p.id)}>
                 {t.stop}
               </ActionButton>
             )}
             {onDismiss && p.exited !== undefined && (
-              <ActionButton size="small" aria-label={t.dismissLabel(p.command)} onClick={() => onDismiss(p.id)}>
+              <ActionButton size="small" aria-label={t.dismissLabel(p.label ?? p.command)} onClick={() => onDismiss(p.id)}>
                 {t.dismiss}
               </ActionButton>
             )}
