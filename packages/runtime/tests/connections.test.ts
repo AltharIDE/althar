@@ -60,6 +60,8 @@ const withGitHub = (
     readonly secrets?: Layer.Layer<Secrets>
     /** Real adapters for other products, offered with GitHub's. */
     readonly more?: ReadonlyArray<ProductInfo>
+    /** A command-line tool's sign-in, by tool and host. */
+    readonly cliToken?: (tool: 'gh' | 'glab', host: string) => Effect.Effect<string | null>
   } = {},
 ) =>
   Runtime.layer({
@@ -80,6 +82,7 @@ const withGitHub = (
         fetch,
         clientIds: { github: 'Iv1.althar', linear: 'lin-althar' },
         callbackPort: more.callbackPort ?? 0,
+        cliToken: more.cliToken ?? (() => Effect.succeed(null)),
       }),
     ),
   })
@@ -426,6 +429,7 @@ describe('a Jira Cloud site', () => {
               fetch: () => Promise.reject(new Error('No network in tests')),
               clientIds: {},
               callbackPort: 0,
+              cliToken: () => Effect.succeed(null),
             }),
           ),
         }),

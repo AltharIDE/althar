@@ -129,6 +129,12 @@ export interface Host {
   readonly openInWindow: (threadId?: string) => void
   /** Dictation; absent where a page can't dictate. */
   readonly dictation?: DictationHost
+  /**
+   * What is on the clipboard, only where it looks like a code host's or
+   * tracker's token (`main/clipboard`); null for anything else. Asked only
+   * while a step of connecting waits for a token, as the window comes back.
+   */
+  readonly clipboardToken: () => Promise<string | null>
 }
 
 export interface Services {

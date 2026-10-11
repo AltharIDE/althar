@@ -46,6 +46,7 @@ const on = (
 
 const GITLAB: ProductOption = {
   product: 'gitlab',
+  service: 'gitlab',
   name: 'GitLab',
   host: true,
   tracker: true,
@@ -53,7 +54,7 @@ const GITLAB: ProductOption = {
   selfHosted: true,
   browserSignIn: true,
   tokenNeeds: null,
-  tokenHelp: 'https://gitlab.com/-/user_settings/personal_access_tokens',
+  tokenPrefixes: ['glpat-'],
   tokenHelpForKey: null,
   keyChecks: [],
 }

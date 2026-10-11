@@ -375,9 +375,15 @@ export const ConnectionSummary = Schema.Struct({
 })
 export type ConnectionSummary = typeof ConnectionSummary.Type
 
+/** A service as a person connects it: a product's Cloud and Data Center editions are one service. */
+export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello'])
+export type Service = typeof Service.Type
+
 /** A product a person can connect, and how they sign in to it. */
 export const ProductOption = Schema.Struct({
   product: Product,
+  /** The service it is an edition of. */
+  service: Service,
   name: Schema.String,
   host: Schema.Boolean,
   tracker: Schema.Boolean,
@@ -389,8 +395,8 @@ export const ProductOption = Schema.Struct({
   browserSignIn: Schema.Boolean,
   /** What a pasted token goes with: the account's email, or the API key it was made for. */
   tokenNeeds: Schema.NullOr(Schema.Literals(['email', 'key'])),
-  /** Where the person makes a token, on the hosted service. */
-  tokenHelp: Schema.String,
+  /** What its tokens start with, to notice one on the clipboard; none where they have no mark of their own. */
+  tokenPrefixes: Schema.Array(Schema.String),
   /** Where a token is made for the API key the person typed, with `{key}` where it goes. */
   tokenHelpForKey: Schema.NullOr(Schema.String),
   /** What a typed API key is checked against before it is sent: the first pattern it matches says what is wrong with it. */
@@ -398,12 +404,123 @@ export const ProductOption = Schema.Struct({
 })
 export type ProductOption = typeof ProductOption.Type
 
+/** A project's repositories on an instance of a service, as their remotes name them. */
+export const ConnectPlace = Schema.Struct({
+  product: Product,
+  /** The instance: https://github.com, or a company's own server. */
+  webUrl: Schema.String,
+  project: Schema.String,
+  /** The remote that names it, as git calls it, where git was asked: origin. */
+  remote: Schema.NullOr(Schema.String),
+  /** The repositories' paths there: northwind/meridian-api. */
+  repositories: Schema.Array(Schema.String),
+})
+export type ConnectPlace = typeof ConnectPlace.Type
+
 export const ConnectionList = Schema.Struct({
   cursor: Cursor,
   connections: Schema.Array(ConnectionSummary),
   products: Schema.Array(ProductOption),
+  /** Where the projects' code is, on the hosted services and on servers already connected. */
+  places: Schema.Array(ConnectPlace),
 })
 export type ConnectionList = typeof ConnectionList.Type
+
+/** A command-line tool's sign-in on this device, which Althar can take a copy of: gh's or glab's. */
+export const CliSignIn = Schema.Struct({
+  product: Product,
+  webUrl: Schema.String,
+  tool: Schema.Literals(['gh', 'glab']),
+  /** Who it is signed in as there. */
+  account: Schema.String,
+  /** Its token's scopes, where the service says them. */
+  scopes: Schema.NullOr(Schema.Array(Schema.String)),
+})
+export type CliSignIn = typeof CliSignIn.Type
+
+/**
+ * What connecting a service starts from: where its code is in the person's
+ * projects (each server their remotes name asked what it is), the
+ * command-line sign-ins on this device, the email the projects commit with,
+ * and where a token is made on each instance, filled in for its places.
+ */
+export const ConnectGuide = Schema.Struct({
+  service: Service,
+  places: Schema.Array(ConnectPlace),
+  clis: Schema.Array(CliSignIn),
+  /** The email the projects' commits are made with, and the project whose git says it; null for git's own setting. */
+  email: Schema.NullOr(Schema.Struct({ address: Schema.String, project: Schema.NullOr(Schema.String) })),
+  tokenPages: Schema.Array(Schema.Struct({ product: Product, webUrl: Schema.String, url: Schema.String })),
+})
+export type ConnectGuide = typeof ConnectGuide.Type
+
+/** What answered at an address the person typed, and where a token is made there. */
+export const FoundServer = Schema.Struct({
+  product: Schema.NullOr(Product),
+  /** The address as a connection keeps it. */
+  webUrl: Schema.String,
+  /** Why nothing of the service's did: not an address, nothing answered, or something else did. */
+  reason: Schema.NullOr(Schema.Literals(['invalid', 'unreachable', 'other'])),
+  tokenPage: Schema.NullOr(Schema.String),
+})
+export type FoundServer = typeof FoundServer.Type
+
+/** What Althar needs of a connection, each a line of its check. */
+export const AccessNeed = Schema.Literals([
+  'server',
+  'site',
+  'key',
+  'account',
+  'reach',
+  'push',
+  'changes',
+  'checks',
+  'issues',
+  'read',
+  'comment',
+  'move',
+])
+export type AccessNeed = typeof AccessNeed.Type
+
+/** Why a line of a check isn't ok, with what it names and the page that puts it right, where there is one. */
+export const AccessReason = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('refused') }),
+  Schema.Struct({ kind: Schema.Literal('scope'), scope: Schema.String, url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('permission'), permission: Schema.String, url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('role'), role: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('unseen'), names: Schema.Array(Schema.String), url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('not_installed'), owner: Schema.String, url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('restricted'), owner: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('sso'), owner: Schema.String, url: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('no_check_runs'), url: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('unreadable') }),
+  Schema.Struct({ kind: Schema.Literal('failed'), message: Schema.String }),
+])
+export type AccessReason = typeof AccessReason.Type
+
+export const AccessLine = Schema.Struct({
+  need: AccessNeed,
+  state: Schema.Literals(['ok', 'no', 'unknown']),
+  /** What was found, in the service's words: a login, an owner, a role, a host. */
+  fact: Schema.NullOr(Schema.String),
+  /** How many, where the fact is a count: boards, teams, projects. */
+  count: Schema.NullOr(Schema.Number),
+  reason: Schema.NullOr(AccessReason),
+})
+export type AccessLine = typeof AccessLine.Type
+
+/** What a connection can do, as its service says, asked when it is made and whenever the person asks again. */
+export const ConnectionCheck = Schema.Struct({
+  connectionId: Schema.String,
+  lines: Schema.Array(AccessLine),
+  /** When its token runs out, where the service says. */
+  expiresAt: Schema.NullOr(Schema.String),
+  /** An app's sign-in that renews itself. */
+  renews: Schema.Boolean,
+  /** Where the person's tokens for it are listed, to change one. */
+  settings: Schema.String,
+})
+export type ConnectionCheck = typeof ConnectionCheck.Type
 
 /** A sign-in under way: a code to type on the service's page, or a page to approve in the browser. */
 export const SignInStart = Schema.Union([
@@ -1426,11 +1543,21 @@ export const Api = RpcGroup.make(
   /** The connections on this Mac, and the code hosts and trackers a person can connect. */
   Rpc.make('ListConnections', { success: ConnectionList, error: ApiError }),
   /** Starts the service's own sign-in: a code to type on its page, or a page to approve in the browser. */
-  command('StartSignIn', { product: Product, webUrl: Schema.optional(Schema.String) }, SignInStart),
+  command(
+    'StartSignIn',
+    // With a connection, the sign-in is to sign that one in again, and is taken only for its account.
+    { product: Product, webUrl: Schema.optional(Schema.String), connectionId: Schema.optional(Schema.String) },
+    SignInStart,
+  ),
   /** How a sign-in stands. */
   call('GetSignIn', { flowId: Schema.String }, SignInState),
   command('CancelSignIn', { flowId: Schema.String }, Schema.Void),
-  /** Connects with a token the person pasted, and what goes with it, all of which goes to the keychain. */
+  /**
+   * Connects with a token the person pasted, and what goes with it, all of
+   * which goes to the keychain. With a connection, it signs that one in again
+   * with a new token, keeping its address, email and key, for the account it
+   * was.
+   */
   command(
     'ConnectToken',
     {
@@ -1439,9 +1566,18 @@ export const Api = RpcGroup.make(
       user: Schema.optional(Schema.String),
       key: Schema.optional(Schema.String),
       token: Schema.String,
+      connectionId: Schema.optional(Schema.String),
     },
     ConnectionSummary,
   ),
+  /** What connecting a service starts from: where its code is, gh's or glab's sign-in, the email to go with a token, and the token pages. */
+  call('GetConnectGuide', { service: Service }, ConnectGuide),
+  /** Which of a service's products answers at an address, asked without signing in. */
+  call('FindServer', { service: Service, webUrl: Schema.String }, FoundServer),
+  /** Connects with gh's or glab's sign-in on this device: Althar keeps its own copy of the token, which agents never see. */
+  command('ConnectCli', { product: Product, webUrl: Schema.String, connectionId: Schema.optional(Schema.String) }, ConnectionSummary),
+  /** Asks the service what a connection can do. */
+  call('CheckConnection', { connectionId: Schema.String }, ConnectionCheck),
   command('Disconnect', { connectionId: Schema.String }, Schema.Void),
   /** The person's open issues on the connected trackers, and in the project's repository. */
   call('ListIssues', { projectId: Schema.String }, IssueList),

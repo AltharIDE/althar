@@ -199,62 +199,21 @@ export function useSourceMap(initial: readonly SourceEntry[]) {
 }
 
 /* The code hosts and trackers a person can connect: GitHub signs in in the browser; Linear, Trello and Jira take a token here. */
+/** The six services, as Settings lists them for Meridian on GitHub and Halyard on a company's GitLab. */
 export const SERVICES: ServiceOption[] = [
-  {
-    id: 'github',
-    name: 'GitHub',
-    brand: Brand.GitHub,
-    what: 'Pull requests and issues',
-    hostedUrl: 'https://github.com',
-    selfHosted: true,
-    browserSignIn: true,
-    tokenHelp: 'https://github.com/settings/personal-access-tokens/new',
-  },
-  {
-    id: 'linear',
-    name: 'Linear',
-    brand: Brand.Linear,
-    what: 'Issues',
-    hostedUrl: 'https://linear.app',
-    selfHosted: false,
-    browserSignIn: false,
-    tokenHelp: 'https://linear.app/settings/account/security',
-  },
-  {
-    id: 'trello',
-    name: 'Trello',
-    brand: Brand.Trello,
-    what: 'Issues',
-    hostedUrl: 'https://trello.com',
-    selfHosted: false,
-    browserSignIn: false,
-    tokenNeeds: 'key',
-    tokenHelp: 'https://trello.com/power-ups/admin',
-    tokenHelpForKey: 'https://trello.com/1/authorize?expiration=never&name=Althar&scope=read,write&response_type=token&key={key}',
-    keyChecks: [
-      { pattern: '^[0-9a-fA-F]{64}$', says: 'That’s the Power-Up’s secret; paste its API key' },
-      { pattern: '^(?![0-9a-fA-F]{32}$)', says: 'An API key is 32 characters' },
-    ],
-  },
-  {
-    id: 'jira_cloud',
-    name: 'Jira',
-    brand: Brand.Jira,
-    what: 'Issues',
-    hostedUrl: null,
-    selfHosted: false,
-    browserSignIn: false,
-    tokenNeeds: 'email',
-    tokenHelp: 'https://id.atlassian.com/manage-profile/security/api-tokens',
-    instanceExample: 'https://your-site.atlassian.net',
-  },
+  { id: 'github', name: 'GitHub', brand: Brand.GitHub, what: 'Meridian’s code is here', selfHosted: true },
+  { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab, what: 'Halyard’s code is on git.halyard.dev', selfHosted: true },
+  { id: 'bitbucket', name: 'Bitbucket', brand: Brand.Bitbucket, selfHosted: true },
+  { id: 'linear', name: 'Linear', brand: Brand.Linear },
+  { id: 'jira', name: 'Jira', brand: Brand.Jira, selfHosted: true },
+  { id: 'trello', name: 'Trello', brand: Brand.Trello },
 ]
 
-/* Signed in to GitHub twice, on github.com and a company's own server; Linear's token stopped working. */
+/** Signed in to GitHub, and to a company's own GitHub; Jira's token stopped working. */
 export const CONNECTED: ServiceConnection[] = [
   { id: 'conn_1', service: 'github', account: 'you' },
   { id: 'conn_2', service: 'github', account: 'you', instance: 'https://git.meridian.dev' },
-  { id: 'conn_3', service: 'linear', account: 'You', needsSignIn: true },
+  { id: 'conn_3', service: 'jira', account: 'you@meridian.dev', instance: 'https://meridian.atlassian.net', needsSignIn: true },
 ]
 
 /** Codex with five accounts: its usual folder, one Althar made, one codex-profiles made that is out of usage, one signed out, and a key, billed per use, last. */

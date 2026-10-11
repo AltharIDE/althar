@@ -15,8 +15,8 @@ import { launch, openFirstProject, say, startTask, toConversation } from './supp
  * ready. Every agent here is the scripted fake (ALTHAR_FAKE_AGENTS): what is
  * said to it picks what it does, and markers like `[coordinator:plan]` pick
  * the role it plays. GitHub is a fake too, at https://github.test, connected
- * with a pasted token; what is pushed to it lands in a bare repository on
- * disk.
+ * through its walk in with a pasted token; what is pushed to it lands in a
+ * bare repository on disk.
  */
 
 test('makes the first project of a repository it found, starts a task, and talks to its lead', async () => {
@@ -209,13 +209,25 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await expect(github).toContainText('Not connected')
     await github.click()
 
-    // GitHub has no sign-in of Althar's in this build, so it takes a token. The code hosts and trackers open over the project.
+    // GitHub has no sign-in of Althar's in this build: gh's, which is signed in to it here, or a token. The code hosts and trackers open over the project.
     const connecting = page.getByRole('dialog', { name: 'Code hosts and trackers' })
     const services = connecting.getByRole('list', { name: 'Code hosts' })
-    await services.getByRole('button', { name: 'Add a token' }).click()
-    await services.getByLabel('GitHub token').fill('github_pat_e2e')
+    await services.getByRole('button', { name: 'Connect' }).click()
+    const ways = connecting.getByRole('group', { name: 'Ways to connect GitHub' })
+    await expect(ways.getByRole('button', { name: /Use gh’s sign-in/ })).toBeVisible()
+    await page.screenshot({ path: 'test-results/connect-ways.png', animations: 'disabled' })
+    await ways.getByRole('button', { name: /Make a token/ }).click()
+    await expect(connecting.getByRole('heading', { name: 'Make a token on github.test' })).toBeVisible()
+    await connecting.getByRole('button', { name: 'Paste it myself' }).click()
+    await connecting.getByLabel('Paste it').fill('github_pat_e2e')
     await page.screenshot({ path: 'test-results/token.png', animations: 'disabled' })
-    await services.getByRole('button', { name: 'Save' }).click()
+    await connecting.getByRole('button', { name: 'Check' }).click()
+    // What it can do there, as GitHub says; then back to the list, connected.
+    await expect(connecting.getByRole('heading', { name: 'Connected as you' })).toBeVisible()
+    await expect(connecting.getByRole('list', { name: 'What GitHub lets Althar do' }).getByRole('listitem')).toHaveCount(6)
+    await page.screenshot({ path: 'test-results/connected-check.png', animations: 'disabled' })
+    // The card's Done, before the dialog's own.
+    await connecting.getByRole('button', { name: 'Done' }).first().click()
     await expect(services.getByText('Signed in as you')).toBeVisible()
     await expect(page.getByText(/isn't connected to/)).toHaveCount(0)
     await page.screenshot({ path: 'test-results/connected.png', animations: 'disabled' })

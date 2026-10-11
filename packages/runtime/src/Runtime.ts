@@ -56,7 +56,7 @@ export const layer = (options: RuntimeLayerOptions) => {
     // Agents Althar downloads at the person's asking, where it keeps them; the registry's point at them where the person has none.
     Layer.provideMerge(Installs.layer({ root: options.agentsRoot, fetch: options.fetch })),
     Layer.provideMerge(options.secrets ?? Secrets.none('Althar keeps sign-ins in the app; it can open them, and this can’t.')),
-    Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds, options.fetch)),
+    Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds, options.fetch, options.githubApp)),
   )
   // Each project's rules; each agent's accounts, whether each is signed in, and which are out of usage until their reset (ADR-012).
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.

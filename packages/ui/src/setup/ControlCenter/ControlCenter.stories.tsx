@@ -24,6 +24,7 @@ import { States } from '../../storybook/States'
 import { Accounts } from '../Accounts/Accounts'
 import { AgentTabList, AgentTabPanel, AgentTabs } from '../AgentTabs/AgentTabs'
 import { CoAuthor, CoAuthorFace } from '../CoAuthor/CoAuthor'
+import { ConnectCard, ConnectWays } from '../ConnectCard/ConnectCard'
 import { Connections } from '../Connections/Connections'
 import { EdgeMini } from '../EdgeMini/EdgeMini'
 import { ModelSwitches } from '../ModelSwitches/ModelSwitches'
@@ -162,9 +163,10 @@ const whereOn = (system: System, place: 'island' | 'menu'): Where => {
   }
 }
 
-type Open = 'all' | 'agents' | 'hosts' | 'coauthor' | 'edge' | 'icon' | 'awake'
+type Open = 'all' | 'agents' | 'hosts' | 'connect' | 'coauthor' | 'edge' | 'icon' | 'awake'
 
-const WIDTH: Partial<Record<Open, number>> = { agents: 720, hosts: 800, coauthor: 600, edge: 600 }
+/* How wide the panel is for each: 440 at rest, a card for a walk in, and opened out for what needs the room. */
+const WIDTH: Partial<Record<Open, number>> = { agents: 720, hosts: 800, connect: 480, coauthor: 600, edge: 600 }
 
 /* Settings as a consumer composes it: the modules sized by how much each matters, and each opened out in place. */
 function Settings({
@@ -192,10 +194,11 @@ function Settings({
       defaultOpen
       width={WIDTH[open] ?? 440}
       onEscapeKeyDown={(e) => {
-        // Escape steps back out of an opened module before it closes the panel.
+        // Escape steps back out of an opened module, or a walk in back to its list, before it closes the panel.
         if (open === 'all') return
         e.preventDefault()
-        back()
+        if (open === 'connect') setOpen('hosts')
+        else back()
       }}
       {...args}
     >
@@ -275,9 +278,9 @@ function Settings({
               label="Code hosts and trackers"
               services={SERVICES}
               connections={CONNECTED}
-              onSignIn={fn()}
-              onCancelSignIn={fn()}
-              onToken={fn()}
+              onConnect={() => setOpen('connect')}
+              onSignInAgain={fn()}
+              onAddServer={fn()}
               onDisconnect={fn()}
             />
           </ControlSheet>
@@ -328,6 +331,32 @@ function Settings({
                 ]}
               />
             )}
+          </ControlSheet>
+        </ControlDetail>
+      )}
+      {open === 'connect' && (
+        <ControlDetail
+          title="GitHub"
+          aside="For Meridian"
+          onBack={() => setOpen('hosts')}
+          text={{ back: 'Back to code hosts and trackers' }}
+        >
+          <ControlSheet>
+            <ConnectCard
+              brand={Brand.GitHub}
+              title="Connect GitHub"
+              line="For Meridian: northwind/meridian-api and northwind/meridian-web"
+              foot="Kept encrypted on this Mac. Agents never get it; they reach GitHub through Althar."
+            >
+              <ConnectWays
+                label="Ways to connect GitHub"
+                ways={[
+                  { id: 'gh', title: 'Use gh’s sign-in', line: 'Signed in as balazs on this Mac', icon: 'terminal' },
+                  { id: 'token', title: 'Make a token', line: 'On GitHub’s token page, opened filled in', icon: 'lock' },
+                ]}
+                onChoose={fn()}
+              />
+            </ConnectCard>
           </ControlSheet>
         </ControlDetail>
       )}
@@ -503,6 +532,25 @@ export const OnLinuxWithoutATray: Story = {
   },
 }
 
+/** Connect on a service narrows the panel from the code hosts' 800 to a sign-in card's 480; Escape goes back to the list, and again to all settings. */
+export const ConnectingAService: Story = {
+  render: (args) => <Settings start="hosts" onOpenChange={args.onOpenChange} />,
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body)
+    const panel = await page.findByRole('dialog', { name: 'Settings' })
+    const p = within(panel)
+    await expect(panel.style.width).toBe('800px')
+    const [github] = p.getAllByRole('button', { name: 'Connect' })
+    if (!github) throw new Error('no Connect')
+    await userEvent.click(github)
+    await expect(p.getByRole('heading', { name: 'Connect GitHub', level: 3 })).toBeInTheDocument()
+    await expect(panel.style.width).toBe('480px')
+    await userEvent.keyboard('{Escape}')
+    await expect(p.getByRole('heading', { name: 'Code hosts and trackers', level: 2 })).toBeInTheDocument()
+    await expect(panel.style.width).toBe('800px')
+  },
+}
+
 /** While something in it is under way, a press outside leaves it open. */
 export const Holding: Story = {
   args: { holding: true },
@@ -527,6 +575,7 @@ export const AllStates: Story = {
       size="wide"
       cells={[
         { state: 'open', node: <Settings /> },
+        { state: 'a card', node: <Settings start="connect" /> },
         {
           state: 'modules, not placed',
           node: frame(

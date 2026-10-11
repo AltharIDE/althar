@@ -8,6 +8,7 @@ import { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, isPreferenceKey } from './appPreferences'
 import { keepingAwake } from './awake'
+import { tokenIn } from './clipboard'
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
@@ -23,6 +24,7 @@ import { bundleOf } from '../runtime/editors'
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   MessageChannelMain,
@@ -448,6 +450,9 @@ ipcMain.handle('althar:editor-picture', async (_event, id: unknown) => {
 // The Mac's alert sounds a notification can play, and one played once, as Settings offers them.
 ipcMain.handle('althar:sounds', () => alertSounds())
 ipcMain.handle('althar:play-sound', (_event, name: unknown) => playSound(name, undefined, () => shell.beep()))
+
+// A token on the clipboard, while connecting a service waits for one; anything else stays on the clipboard alone.
+ipcMain.handle('althar:clipboard-token', async () => tokenIn(await clipboard.readText()))
 
 // Where Althar shows while the person is in another app, and what this computer has room for: a notch to choose the island by, a tray.
 ipcMain.handle('althar:edge', () => edge?.state() ?? null)

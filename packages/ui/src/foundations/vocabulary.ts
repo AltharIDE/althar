@@ -488,6 +488,18 @@ export enum SignInWay {
   Folder = 'folder',
 }
 
+/** Whether a connection can do something Althar needs of it, as its check found. */
+export enum CanState {
+  Can = 'can',
+  Cannot = 'cannot',
+  /** The service doesn't say, and only writing would tell. */
+  Unknown = 'unknown',
+  /** Being asked now. */
+  Checking = 'checking',
+  /** Not asked yet. */
+  Waiting = 'waiting',
+}
+
 /** What stands between pressing the microphone and dictating, the first time or when something is in the way. */
 export enum DictationSetup {
   /** No speech model on this machine yet: it offers to download one. */

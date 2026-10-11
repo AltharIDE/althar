@@ -35,6 +35,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'composer/ModelBrowser/ModelBrowser.tsx': 'the rail and a model’s row',
   'outputs/ChangeView/ChangeView.tsx': 'a file in the list of what changed',
   'screens/Start/Start.tsx': 'the ways to start, as large options',
+  'setup/ConnectCard/ConnectCard.tsx': 'the ways in to a service, as large options',
   /* a shape of its own */
   'composer/ContextRing/ContextRing.tsx': 'the ring',
   'composer/Composer/Composer.tsx': 'the dictation button, drawn as your voice',

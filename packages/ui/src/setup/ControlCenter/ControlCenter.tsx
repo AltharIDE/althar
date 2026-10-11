@@ -32,9 +32,10 @@ import s from './ControlCenter.module.css'
  * in a grid of columns and rows; what changes often is one press on a round
  * switch; what matters least is a quiet link in the foot. Any of them opens
  * out in place (ControlDetail) and steps back. The panel grows to fit what is
- * open in it, as wide as the consumer says. It is a Popover: Escape and a
- * press outside close it, unless it is `holding` something under way, like a
- * sign-in the person is finishing in their browser.
+ * open in it, as wide as the consumer says, down to a card for one thing done
+ * a step at a time. It is a Popover: Escape and a press outside close it,
+ * unless it is `holding` something under way, like a sign-in the person is
+ * finishing in their browser.
  *
  * Focus follows what is open: into an opened module's way back, and back to
  * the module or link it came from, so a keyboard carries on where it was.
@@ -54,7 +55,11 @@ export interface ControlCenterProps {
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
-  /** How wide it is, in px, for what is open in it: a part that needs the room opens it out. 440 at rest. */
+  /**
+   * How wide it is, in px, for what is open in it: 440 at rest; a card, a
+   * little wider at 480, for one thing done a step at a time; or opened out,
+   * for a part that needs the room.
+   */
   width?: number
   /** Something in it is under way: a press outside doesn't close it. Escape still does, through `onEscapeKeyDown`. */
   holding?: boolean
