@@ -3,8 +3,11 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /*
- * Cutting a release (ADR-023, Linear DEV-62), in two steps, each asked for
- * on its own:
+ * Cutting a release (ADR-023, Linear DEV-62 and DEV-81). Releases come from
+ * CI: .github/workflows/release.yml runs the first step below on a version
+ * tag, with the certificate and Apple's credentials from the release
+ * environment, and makes the draft itself. This script is also the way to
+ * cut one from a Mac when CI can't, in two steps, each asked for on its own:
  *
  *   bun run release            packages, signs, notarizes and staples where
  *                              the credentials are given, makes the dmg, the
@@ -19,6 +22,10 @@ import { join } from 'node:path'
  * published releases. Publishing asks for a clean tree at a commit on main
  * as GitHub has it, a Developer ID signature, and notarization (--unnotarized to go
  * without, for a build that would only open where Gatekeeper is told to).
+ *
+ * In CI (CI=true) the first step is the whole of it, and strict: anything
+ * but an app signed with a Developer ID, notarized, with its dmg stapled and
+ * both accepted by Gatekeeper, fails the run.
  */
 
 const REPOSITORY = 'AltharIDE/althar'
@@ -38,6 +45,7 @@ const notes = join(desktop, 'release-notes', `${version}.md`)
 const assets = [dmg, `${dmg}.blockmap`, zip, `${zip}.blockmap`, feed]
 
 const args = new Set(process.argv.slice(2))
+const ci = process.env.CI === 'true'
 const say = (line: string) => process.stdout.write(`${line}\n`)
 const fail = (why: string): never => {
   process.stderr.write(`\n${why}\n`)
@@ -72,11 +80,23 @@ const check = () => {
 if (!args.has('--publish')) {
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD')
   const dirty = git('status', '--porcelain') !== ''
-  if (branch !== 'main' || dirty)
+  if (!ci && (branch !== 'main' || dirty))
     say(`Packaging ${version} from ${branch}${dirty ? ', with changes not committed' : ''}: fine to try, not to publish.`)
   const packaged = spawnSync('bun', ['run', 'package'], { cwd: desktop, stdio: 'inherit' })
   if (packaged.status !== 0) fail('Packaging failed; see above.')
   check()
+  if (ci) {
+    const signedBy = signer()
+    if (!signedBy.startsWith('Developer ID Application:')) fail(`The app is signed by ${signedBy}, not a Developer ID.`)
+    if (!stapled()) fail('The dmg has no notarization ticket stapled to it.')
+    for (const [what, list] of [
+      ['app', ['-a', '-t', 'exec', app]],
+      ['dmg', ['-a', '-t', 'open', '--context', 'context:primary-signature', dmg]],
+    ] as const)
+      if (!run('spctl', list).ok) fail(`Gatekeeper refuses the ${what}.`)
+    say(`\nAlthar ${version}: signed by ${signedBy}, notarized, and accepted by Gatekeeper.`)
+    process.exit(0)
+  }
   say(`\nNext: open the dmg, smoke-test Althar ${version}, write ${notes} if it isn't there, then \`bun run release --publish\`.`)
   process.exit(0)
 }

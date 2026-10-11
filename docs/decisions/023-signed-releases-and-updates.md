@@ -4,7 +4,7 @@
 - **Date:** 2026-10-11
 - **Owner:** Repository maintainers
 - **Context:** Althar goes to its first testers on 11 October (DEV-12, DEV-47,
-  DEV-62). Until now `bun run package` made an app signed ad hoc, which opens
+  DEV-62, DEV-81). Until now `bun run package` made an app signed ad hoc, which opens
   only on the Mac that built it, and nothing could update it: every fix
   would mean each tester downloading and reinstalling a 370 MB dmg by hand.
   macOS refuses an app from the internet unless it is signed with a
@@ -44,14 +44,31 @@
   - **What a release holds.** For Apple silicon: a dmg to install from, a
     zip with `latest-mac.yml` for the updater, and their blockmaps for
     smaller downloads later.
-  - **One command makes a release, another publishes it as a draft.**
-    `bun run release` packages, signs, notarizes and checks; `bun run
-    release --publish` takes what it made, with the notes in
-    `apps/desktop/release-notes/<version>.md`, to a draft GitHub Release for
-    `v<version>`. A person publishes the draft after a smoke run of the dmg;
-    the tag is made then. Publishing asks for a Developer ID signature,
-    notarization (unless told `--unnotarized`), and a clean tree at a commit
-    on main as GitHub has it.
+  - **CI makes releases, from a version tag on main** (DEV-81).
+    `.github/workflows/release.yml` runs on a tag `v<version>` pushed on a
+    commit on main, or by hand from main, never on a pull request. It checks
+    the tag against `apps/desktop/package.json`'s version and that the notes
+    in `apps/desktop/release-notes/<version>.md` are written, then runs `bun
+    run release` on GitHub's Apple silicon runner (`macos-26`), which in CI
+    fails unless the app is signed with a Developer ID, notarized, stapled
+    and accepted by Gatekeeper. A last job puts every platform's files on
+    ONE draft GitHub Release for the tag, made or brought up to date; a
+    person publishes it after a smoke run of the dmg. It is the only
+    workflow that makes a desktop release: Linux and Windows are jobs in it,
+    each uploading its files for that last job, so nothing races it.
+  - **Secrets live in a `release` environment,** with required reviewers and
+    open only to `v*` tags (and main, for runs by hand): every job that uses
+    one waits for a person to approve the run. The certificate comes as
+    `CSC_LINK` (its `.p12`, base64) and `CSC_KEY_PASSWORD`, which
+    electron-builder puts in a keychain of its own, unlocked for codesign
+    alone and deleted after; Apple's key as `APPLE_API_KEY` (the `.p8`'s
+    contents, written to a file for the job), `APPLE_API_KEY_ID` and
+    `APPLE_API_ISSUER`.
+  - **A Mac makes one only when CI can't.** `bun run release` does the same
+    there, with the certificate in the login keychain, and `bun run release
+    --publish` takes what it made to the same draft. Publishing asks for a
+    Developer ID signature, notarization (unless told `--unnotarized`), and
+    a clean tree at a commit on main as GitHub has it.
   - **One update track, from GitHub Releases.** electron-updater reads
     `latest-mac.yml` from the latest published release and downloads the
     zip it names; Squirrel.Mac takes it only if it is signed as the running
@@ -96,14 +113,23 @@
   - A feed of our own, or channels (stable and beta), and an adapter track
     apart from the app: more to run before there is a reason. See
     **Revisit when**.
+  - Releasing from Balazs's Mac alone: no secrets in CI, but every release
+    needs that machine and its keychain, and nobody else can ship.
+  - Secrets in the repository rather than an environment: any workflow on
+    any branch could read them, with no one approving.
+  - Each platform publishing from its own workflow, as PR #78 began: those
+    would race to make the release, and publish it before the Mac's files
+    and a smoke run.
 - **Trade-off:**
   - `disable-library-validation` and `allow-unsigned-executable-memory`
     reach Electron's helpers too, since one file serves them all.
   - Electron's RunAsNode fuse stays on: the runtime starts the adapters on
     Althar's own binaries as Node (in a packaged app, on Althar Helper),
     with these entitlements. Settled separately, before launch.
-  - Signing needs the Developer ID's private key in the keychain of the Mac
-    that builds, and the keychain asks once before codesign may use it.
+  - The Developer ID's private key and Apple's API key sit in GitHub, behind
+    the environment's reviewers. Revoking either means a new secret.
+  - A Mac that releases needs the private key in its keychain, which asks
+    once before codesign may use it.
   - Apple silicon only; Intel, Windows and Linux follow with their packages.
   - No rollback: an update that breaks something is fixed by the next one.
     A migration in it can't be undone.

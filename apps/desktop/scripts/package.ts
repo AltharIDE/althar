@@ -26,10 +26,14 @@ import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
  * deepest first, with the hardened runtime and a secure timestamp: Althar's
  * binary with entitlements.mac.plist, everything else (Electron's helpers,
  * Claude Code's and Codex's binaries, the speech engine) with
- * entitlements.mac.inherit.plist. The identity is ALTHAR_MAC_IDENTITY, or
- * else Althar's Developer ID where this Mac's keychain has it; without it,
- * or with ALTHAR_MAC_IDENTITY=-, the app is signed ad hoc, still hardened,
- * and opens only on the Mac that built it.
+ * entitlements.mac.inherit.plist. The identity is ALTHAR_MAC_IDENTITY;
+ * else, given CSC_LINK and CSC_KEY_PASSWORD (the certificate and its key as
+ * a base64 .p12, as the release workflow gives them), the Developer ID
+ * electron-builder finds in the keychain of its own it makes of them; else
+ * Althar's Developer ID where this Mac's keychain has it. Without any, or
+ * with ALTHAR_MAC_IDENTITY=-, the app is signed ad hoc, still hardened, and
+ * opens only on the Mac that built it; in CI that, or a release without
+ * Apple's notary credentials, fails instead.
  */
 
 const desktop = join(import.meta.dirname, '..')
@@ -60,22 +64,31 @@ const BINARIES: Record<string, string> = {
   '@anthropic-ai/claude-agent-sdk': '@agentclientprotocol/claude-agent-acp',
 }
 
+/** In CI (GitHub Actions sets CI=true), a release is signed and notarized, or it fails. */
+const ci = process.env.CI === 'true'
+
 /**
- * Who signs: the identity asked for, else Althar's where the keychain has
- * it, else nobody in particular ('-', ad hoc). electron-builder takes a
- * certificate's name without its kind.
+ * Who signs: the identity asked for; else, given a certificate in CSC_LINK,
+ * whichever Developer ID electron-builder finds in the keychain it imports
+ * it into (undefined); else Althar's where this Mac's keychain has it; else
+ * nobody in particular ('-', ad hoc). electron-builder takes a certificate's
+ * name without its kind.
  */
-const signer = (): string => {
+const signer = (): string | undefined => {
   const asked = process.env.ALTHAR_MAC_IDENTITY?.trim()
   if (asked !== undefined && asked !== '') return asked.replace(/^Developer ID Application:\s*/, '')
+  if (process.env.CSC_LINK !== undefined && process.env.CSC_LINK !== '') return undefined
   const found = execFileSync('security', ['find-identity', '-v', '-p', 'codesigning'], { encoding: 'utf8' })
   if (found.includes(`Developer ID Application: ${ALTHAR_IDENTITY}`)) return ALTHAR_IDENTITY
+  if (ci) throw new Error('Nothing to sign with: in CI, give the Developer ID certificate as CSC_LINK and CSC_KEY_PASSWORD.')
   process.stdout.write(`This Mac's keychain has no Developer ID Application: ${ALTHAR_IDENTITY}, so the app is signed ad hoc.\n`)
   return '-'
 }
 const identity = signer()
 const adHoc = identity === '-'
+if (ci && adHoc) throw new Error('A release from CI is signed with a Developer ID, not ad hoc.')
 const auth = adHoc ? null : notaryAuth(process.env)
+if (ci && auth === null) throw new Error(NOT_NOTARIZING)
 if (!adHoc && auth === null) process.stdout.write(`${NOT_NOTARIZING}\n`)
 
 const require = createRequire(import.meta.url)
@@ -176,7 +189,8 @@ await build({
       ],
       icon: join(resources, 'icon.icns'),
       category: 'public.app-category.developer-tools',
-      identity,
+      // Left out, electron-builder finds the Developer ID in the keychain it made of CSC_LINK.
+      ...(identity === undefined ? {} : { identity }),
       hardenedRuntime: true,
       gatekeeperAssess: false,
       entitlements: mainEntitlements,
