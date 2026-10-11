@@ -3,8 +3,11 @@ import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { Logo } from '../../foundations/Logo/Logo'
+import { EdgeSpot } from '../../foundations/vocabulary'
 import { States } from '../../storybook/States'
+import { EdgeMini } from '../EdgeMini/EdgeMini'
 import {
+  EdgeHere,
   EdgePlaces,
   EdgeScene,
   KeepAwake,
@@ -114,7 +117,7 @@ function Places() {
   const [place, setPlace] = useState<'island' | 'menu'>('island')
   return (
     <EdgePlaces
-      label="While you’re in another app"
+      label="In other apps"
       value={place}
       onChange={(next) => {
         setPlace(next)
@@ -184,18 +187,44 @@ export const NotificationChoices: Story = {
   },
 }
 
-/** Where Althar shows in another app, each place as the screen would look. */
+/** Where Althar shows in another app, each place as the screen would look; arrows move between them. */
 export const WhereItShows: Story = {
-  decorators: [(Story) => <div style={{ width: 760 }}>{Story()}</div>],
+  decorators: [(Story) => <div style={{ width: 564 }}>{Story()}</div>],
   render: () => <Places />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
+    await expect(c.getByRole('radiogroup', { name: 'In other apps' })).toBeInTheDocument()
     await expect(c.getByRole('radio', { name: /Round the notch/ })).toBeChecked()
     await userEvent.click(c.getByRole('radio', { name: /In the menu bar/ }))
     await expect(onPlace).toHaveBeenCalledWith('menu')
     await expect(c.getByRole('radio', { name: /In the menu bar/ })).toBeChecked()
     await userEvent.click(c.getByRole('radio', { name: /Round the notch/ }))
     await expect(c.getByRole('radio', { name: /Round the notch/ })).toBeChecked()
+    // Its picture is beside its radio, never inside it.
+    await expect(
+      c
+        .getByRole('radio', { name: /Round the notch/ })
+        .closest('label')
+        ?.querySelector('[aria-hidden]:not([class*=radio])'),
+    ).toBeNull()
+  },
+}
+
+/** Where it shows with nothing to choose, as on Windows: the screen beside where, and what Windows may do with it. */
+export const NothingToChoose: Story = {
+  decorators: [(Story) => <div style={{ width: 564 }}>{Story()}</div>],
+  render: () => (
+    <EdgeHere
+      title="In the system tray"
+      note="Click Althar’s mark beside the clock to see what needs you and what runs."
+      why="Windows may tuck it under the ^ beside the clock. Drag it onto the taskbar to keep it in sight."
+      picture={<EdgeMini spot={EdgeSpot.WindowsTray} scale={2.6} />}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('In the system tray')).toBeInTheDocument()
+    await expect(c.queryByRole('radio')).toBeNull()
   },
 }
 
@@ -264,6 +293,38 @@ export const AllStates: Story = {
         },
         { state: 'the screen round the notch', node: <EdgeScene notch top={island} /> },
         { state: 'the screen with the menu bar', node: <EdgeScene menuItem={menuMark} sheet={sheet} /> },
+        { state: 'the screen, drawn small', node: <EdgeScene notch top={island} height={260} /> },
+        {
+          state: 'a Mac without a notch',
+          node: (
+            <EdgeHere
+              title="In the menu bar"
+              note="Click Althar’s mark to see what needs you and what runs."
+              why="This Mac’s screen has no notch, so Althar shows in the menu bar."
+              picture={<EdgeScene menuItem={menuMark} sheet={sheet} />}
+            />
+          ),
+        },
+        {
+          state: 'Linux, in the tray',
+          node: (
+            <EdgeHere
+              title="In the system tray"
+              note="Click Althar’s mark to see what needs you and what runs."
+              picture={<EdgeMini spot={EdgeSpot.LinuxTray} scale={2.6} />}
+            />
+          ),
+        },
+        {
+          state: 'Linux, no tray',
+          node: (
+            <EdgeHere
+              title="Only in Althar’s window"
+              note="This desktop has no system tray, so Althar shows only in its own window."
+              picture={<EdgeMini spot={EdgeSpot.WindowOnly} scale={2.6} />}
+            />
+          ),
+        },
       ]}
     />
   ),

@@ -1,4 +1,3 @@
-import { RadioGroup } from 'radix-ui'
 import { type CSSProperties, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
@@ -378,31 +377,63 @@ export interface EdgePlacesProps<V extends string> {
   className?: string
 }
 
-/** Where Althar shows while you are in another app, each place as the screen would look with it there. Radix's radio group: arrows move between them. */
+/**
+ * Where Althar shows while you are in another app, each place as the screen
+ * would look with it there. Each is a radio named by its words; pressing
+ * anywhere on its card chooses it, and arrows move between them, as the
+ * browser's own radios do. The picture sits beside the radio, not inside it,
+ * since what it draws may hold buttons of its own.
+ */
 export function EdgePlaces<V extends string>({ label, options, value, onChange, className }: EdgePlacesProps<V>) {
+  const name = useId()
   return (
-    <RadioGroup.Root
-      aria-label={label}
-      value={value ?? ''}
-      onValueChange={(next) => {
-        const picked = options.find((option) => option.value === next)
-        if (picked) onChange(picked.value)
-      }}
-      loop
-      className={cx(s.places, className)}
-    >
+    <div role="radiogroup" aria-label={label} className={cx(s.places, className)}>
       {options.map((option) => (
-        <RadioGroup.Item key={option.value} value={option.value} className={s.place}>
+        <div key={option.value} className={s.place}>
           {option.picture}
-          <span className={s.placeWords}>
+          <label className={s.placeWords}>
+            <input
+              type="radio"
+              name={name}
+              value={option.value}
+              checked={option.value === value}
+              onChange={() => onChange(option.value)}
+              className={s.input}
+            />
             <span className={s.placeTitle}>
               <span className={s.radio} aria-hidden="true" />
               {option.title}
             </span>
             {option.note !== undefined && <span className={s.placeNote}>{option.note}</span>}
-          </span>
-        </RadioGroup.Item>
+          </label>
+        </div>
       ))}
-    </RadioGroup.Root>
+    </div>
+  )
+}
+
+export interface EdgeHereProps {
+  /** Where it shows: In the system tray. */
+  title: string
+  /** How to reach what it shows. */
+  note?: string
+  /** Why it is there and not elsewhere, or what the system may do with it. */
+  why?: string
+  /** What the screen looks like with it there: an EdgeScene, or an EdgeMini, larger. */
+  picture: ReactNode
+  className?: string
+}
+
+/** Where Althar shows on a system that leaves nothing to choose: as the screen looks with it there, and where that is, in words. */
+export function EdgeHere({ title, note, why, picture, className }: EdgeHereProps) {
+  return (
+    <div className={cx(s.here, className)}>
+      <div className={s.herePicture}>{picture}</div>
+      <div className={s.hereWords}>
+        <span className={s.hereTitle}>{title}</span>
+        {note !== undefined && <span className={s.hereNote}>{note}</span>}
+        {why !== undefined && <span className={s.hereWhy}>{why}</span>}
+      </div>
+    </div>
   )
 }

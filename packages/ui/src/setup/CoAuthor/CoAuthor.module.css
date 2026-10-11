@@ -1,86 +1,164 @@
-/* The picture, the name over its line, the switch; what opens under it lines up with the words. */
+/* What it does, or the ask; the commit as the host shows it; and what goes out, under it. */
 .coAuthor {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
-  column-gap: 12px;
-  row-gap: 8px;
-  align-items: start;
+  gap: 14px;
 }
-.picture {
+.line {
+  margin: 0;
+  outline: none;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+
+/* turned off: the ask, set large over the commit */
+.ask {
   display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 2px 0 4px;
+  animation: arrive var(--slow) var(--ease-fold) both;
+}
+.big {
+  max-width: 22ch;
+  margin: 0;
+  font-size: 21px;
+  font-weight: 650;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+  color: var(--t-1);
+  text-wrap: balance;
+}
+.why {
+  max-width: 52ch;
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+
+/* a commit as GitHub shows it: its message, then who made it */
+.commit {
+  margin: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.message {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+}
+.subject {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.body {
+  font: 12px/1.55 var(--mono);
+  color: var(--t-2);
+  white-space: pre-line;
+}
+.trailer {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  font: 12px/1.5 var(--mono);
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--base) var(--ease);
+}
+/* off, the line is what would be added */
+.off .trailer {
+  color: var(--t-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-3);
+}
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px;
+  background: var(--n-1);
+  box-shadow: inset 0 1px var(--line);
+  font-size: 12px;
+  color: var(--t-3);
+}
+.who b {
+  font-weight: 600;
+  color: var(--t-1);
+}
+.sha {
+  margin-left: auto;
+  font: 11.5px var(--mono);
+  color: var(--t-3);
+}
+.after {
+  margin: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.sub {
+  font-size: 11px;
+  color: var(--t-2);
+}
+
+/* faces, round, Althar's over the person's edge */
+.faces {
+  display: inline-flex;
+  align-items: center;
+}
+.face {
+  display: grid;
+  flex: none;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  margin-top: 1px;
   overflow: hidden;
   border-radius: 99px;
-  background: var(--t-1);
-  color: var(--on-ink);
 }
-.picture > img {
+.face > img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.words {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
+.mark {
+  background: var(--t-1);
+  color: var(--on-ink);
 }
-.title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--t-1);
+.ghost {
+  box-sizing: border-box;
+  border: 1px dashed var(--line-3);
 }
-.line {
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--t-3);
+.person {
+  background: var(--n-3);
+  box-shadow: 0 0 0 1px var(--line-2);
+  fill: var(--t-3);
 }
-.switch {
-  margin-top: 4px;
+.althar {
+  margin-left: -6px;
+  box-shadow: 0 0 0 2px var(--paper);
+  transition: translate var(--base) var(--ease-fold);
 }
-.trailer,
-.ask {
-  grid-column: 2 / -1;
-  margin: 0;
-}
-.trailer {
-  display: block;
-  overflow-x: auto;
-  font-family: var(--mono);
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--t-2);
-  white-space: nowrap;
-  transition: opacity var(--base) var(--ease);
-}
-/* off, it is what would be added */
-.trailerOff {
-  opacity: 0.5;
-  text-decoration: line-through;
-  text-decoration-color: var(--line-2);
-}
-.ask {
-  max-width: 46ch;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--t-2);
-  animation: ask var(--base) var(--ease) both;
-}
-.again {
-  font-size: 12px;
+.off .althar {
+  translate: 5px 0;
+  box-shadow: none;
 }
 
-@keyframes ask {
+@keyframes arrive {
   from {
     opacity: 0;
-    translate: 0 -2px;
+    translate: 0 4px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .ask {
     animation: none;
+  }
+  .trailer,
+  .althar {
+    transition: none;
   }
 }

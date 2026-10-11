@@ -2,7 +2,6 @@
    is a Popover with its own look: the module's rules come after the
    Popover's, so they win at the same specificity. */
 .panel {
-  width: 440px;
   max-width: calc(100vw - 24px);
   overflow-x: hidden;
   border: 0;
@@ -13,9 +12,6 @@
   transform-origin: calc(100% - 24px) 0;
   transition: width var(--fold) var(--ease-fold);
   animation: open var(--slow) var(--ease-fold);
-}
-.wide {
-  width: 960px;
 }
 @keyframes open {
   from {
@@ -37,19 +33,16 @@
 /* ---- the modules ------------------------------------------------------------------- */
 .grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--columns, 4), minmax(0, 1fr));
+  grid-auto-rows: var(--row, auto);
   gap: 10px;
 }
-.span2 {
-  grid-column: span 2;
-}
-.span4 {
-  grid-column: span 4;
-}
 
-/* a module: a lighter sheet on the frosted one */
+/* a module: a lighter sheet on the frosted one, across the grid unless placed */
 .module {
+  grid-column: 1 / -1;
   min-width: 0;
+  min-height: 0;
   display: grid;
   gap: 10px;
   padding: 12px 14px 13px;
@@ -64,6 +57,9 @@
     background var(--fast) var(--ease),
     transform var(--base) var(--ease-fold);
 }
+.half {
+  grid-column: span 2;
+}
 button.module {
   cursor: pointer;
 }
@@ -73,6 +69,15 @@ button.module:hover {
 button.module:active {
   transform: scale(0.985);
 }
+
+/* one that opens out: its head at the top, what it shows spread down its height; narrow, its sides come in */
+.opens {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-inline: min(14px, 12%);
+}
 .head {
   display: flex;
   align-items: center;
@@ -81,14 +86,17 @@ button.module:active {
 }
 .title {
   flex: 1;
+  min-width: 0;
   font-size: 12px;
   font-weight: 600;
   color: var(--t-2);
 }
 .aside {
   font-size: 11.5px;
+  white-space: nowrap;
 }
 .chevron {
+  flex: none;
   opacity: 0.7;
 }
 
@@ -161,33 +169,11 @@ button.toggleWords {
 .flatChip {
   box-shadow: inset 0 0 0 1px var(--line);
 }
-.agents {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-.agent {
-  display: flex;
-  align-items: center;
-  gap: 9px;
+.line {
   min-width: 0;
-}
-.agentWords {
-  min-width: 0;
-  display: grid;
-  gap: 1px;
-}
-.agentName {
-  overflow: hidden;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--t-1);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agentLine {
   overflow: hidden;
   font-size: 11px;
+  line-height: 1.35;
   color: var(--t-3);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -204,10 +190,38 @@ button.toggleWords {
   background: var(--signal);
   vertical-align: middle;
 }
+/* the agents, one under another, spread down the module */
+.agents {
+  flex: 1;
+  display: grid;
+  align-content: space-evenly;
+  gap: 10px;
+}
+.agent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.agentWords {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.agentName {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .marks {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 7px 8px;
+  /* in the middle of what the module has to spare, between its head and its line */
+  margin-block: auto;
 }
 .mark {
   position: relative;
@@ -220,30 +234,50 @@ button.toggleWords {
   position: absolute;
   top: -2px;
   right: -2px;
-  width: 9px;
-  height: 9px;
+  width: 7px;
+  height: 7px;
   border-radius: 99px;
   background: var(--signal);
-  box-shadow: 0 0 0 2px var(--paper);
+  box-shadow: 0 0 0 1.5px var(--paper);
+}
+/* narrow, in a column of its own: the title wraps, the chevron gives way, a line runs on */
+@container (max-width: 140px) {
+  .title {
+    font-size: 11.5px;
+    line-height: 1.3;
+    text-wrap: balance;
+  }
+  .chevron {
+    display: none;
+  }
+  .line {
+    white-space: normal;
+  }
 }
 
-/* a module that is a picture, large */
+/* a module that is a picture, small, over its title and what it shows */
 .picture {
-  justify-items: center;
-  align-content: center;
-  gap: 2px;
-  padding: 14px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 12px 6px 11px;
+  text-align: center;
 }
 .pictureImage {
-  order: 1;
-  display: block;
-  width: 76px;
-  height: 76px;
-  margin-bottom: 6px;
-  filter: drop-shadow(0 4px 6px var(--shadow));
+  display: flex;
+  align-items: center;
+  height: 36px;
+  margin-bottom: 7px;
   animation: pop 360ms var(--ease-fold);
 }
-.pictureImage > img,
+.pictureImage > img {
+  display: block;
+  width: auto;
+  height: 100%;
+  filter: drop-shadow(0 1px 2px var(--shadow));
+}
 .dockIcon > img {
   display: block;
   width: 100%;
@@ -255,15 +289,16 @@ button.toggleWords {
     transform: scale(0.9);
   }
 }
-.pictureName {
-  order: 2;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--t-1);
-}
 .pictureTitle {
-  order: 3;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--t-1);
+  text-wrap: balance;
+}
+.pictureName {
   font-size: 11px;
+  line-height: 1.3;
   color: var(--t-3);
 }
 
@@ -361,6 +396,7 @@ button.toggleWords {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 32px;
   padding: 2px 2px 0;
 }
 .back {
@@ -377,6 +413,11 @@ button.toggleWords {
   font-weight: 650;
   letter-spacing: -0.01em;
   color: var(--t-1);
+}
+.beside {
+  display: flex;
+  min-width: 0;
+  margin-left: 10px;
 }
 .detailAside {
   margin-left: auto;
@@ -402,6 +443,53 @@ button.toggleWords {
   color: var(--t-3);
 }
 
+/* a setting at its smallest: a quiet link at the foot's end */
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: -4px -6px -4px auto;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--t-3);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.link:hover {
+  background: var(--sunk);
+  color: var(--t-1);
+}
+.linkPicture {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  transition:
+    opacity var(--base) var(--ease),
+    filter var(--base) var(--ease);
+}
+.linkPicture > * {
+  max-width: 100%;
+  max-height: 100%;
+}
+.faded {
+  opacity: 0.35;
+  filter: grayscale(1);
+}
+.linkOff {
+  opacity: 0.8;
+}
+.linkChevron {
+  margin-left: -2px;
+  opacity: 0.7;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .panel,
   .detail,
@@ -410,7 +498,8 @@ button.toggleWords {
     animation: none;
   }
   .panel,
-  .fit {
+  .fit,
+  .linkPicture {
     transition: none;
   }
 }

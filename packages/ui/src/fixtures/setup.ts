@@ -5,6 +5,7 @@ import { RuntimeState, SourceOrigin } from '../foundations/vocabulary'
 import type { SelectOption } from '../primitives/Select/Select'
 import type { AccountEntry, FoundFolder } from '../setup/Accounts/Accounts'
 import type { AgentTab } from '../setup/AgentTabs/AgentTabs'
+import type { CoAuthorCommit } from '../setup/CoAuthor/CoAuthor'
 import type { ServiceConnection, ServiceOption } from '../setup/Connections/Connections'
 import type { AgentGlance, MarkGlance } from '../setup/ControlCenter/ControlCenter'
 import type { SwitchedModel } from '../setup/ModelSwitches/ModelSwitches'
@@ -322,3 +323,11 @@ export const CODEX_MODELS: SwitchedModel[] = [
 
 /** The line each commit gets while Althar is co-author: its GitHub account's private address, so GitHub shows its picture. */
 export const CO_AUTHOR_TRAILER = 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>'
+
+/** A commit as it went to GitHub this afternoon, from Meridian's task, to show the line on. */
+export const CO_AUTHOR_COMMIT: CoAuthorCommit = {
+  subject: 'Retry the checkout call with backoff',
+  body: 'Wraps the upstream call in a jittered retry, three tries at most,\nand only for 502, 503 and timeouts.',
+  sha: '4e1c07a',
+  when: 'committed 12 minutes ago',
+}

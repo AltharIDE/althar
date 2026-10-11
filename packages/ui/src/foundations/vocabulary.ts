@@ -466,3 +466,19 @@ export enum DictationSetup {
   /** What was said couldn't be written down; the recording is kept to try again. */
   Failed = 'failed',
 }
+
+/** Where Althar shows while the person works in another app, as the system it runs on has room for it. */
+export enum EdgeSpot {
+  /** Round a Mac's notch, as an island. */
+  Island = 'island',
+  /** Its mark in the menu bar of a Mac with a notch, which it leaves alone. */
+  MenuBesideNotch = 'menuBesideNotch',
+  /** Its mark in the menu bar of a Mac without a notch. */
+  MenuBar = 'menuBar',
+  /** Its mark in Windows' system tray, beside the clock. */
+  WindowsTray = 'windowsTray',
+  /** Its mark in the tray at the end of a Linux desktop's top bar. */
+  LinuxTray = 'linuxTray',
+  /** Nowhere but its own window: a desktop with no tray. */
+  WindowOnly = 'windowOnly',
+}

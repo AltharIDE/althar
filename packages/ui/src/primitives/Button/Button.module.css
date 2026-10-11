@@ -77,6 +77,17 @@
   outline-offset: 2px;
 }
 
+.ink {
+  background: var(--t-1);
+  color: var(--on-ink);
+}
+.ink:active:not(:disabled, .busy) {
+  background: var(--t-2);
+}
+.ink:focus-visible {
+  outline-offset: 2px;
+}
+
 .quiet {
   background: transparent;
   color: var(--t-3);

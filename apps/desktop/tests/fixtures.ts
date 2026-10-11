@@ -661,7 +661,7 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   onOpen: vi.fn(() => () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),
-  edge: vi.fn(async () => ({ place: 'island', notch: true })),
+  edge: vi.fn(async () => ({ place: 'island', notch: true, platform: 'darwin', tray: true })),
   setEdge: vi.fn(async () => {}),
   edgeDrawn: vi.fn(),
   onEdgePointed: vi.fn(() => () => {}),
