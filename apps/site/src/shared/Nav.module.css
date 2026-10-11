@@ -13,7 +13,7 @@
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
   transition: width 520ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 520ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.islandWide { width: min(620px, calc(100vw - 24px)); border-radius: 0 0 26px 26px; }
+.islandWide { width: min(690px, calc(100vw - 24px)); border-radius: 0 0 26px 26px; }
 .islandBar { display: flex; align-items: center; height: 52px; padding: 0 10px 0 20px; white-space: nowrap; }
 /* The mark and the way in keep their size and stand at either end; the pages take what is between, down to nothing. */
 .islandMark { flex: none; display: inline-flex; align-items: center; gap: 8px; color: #fff; text-decoration: none; font-weight: 650; font-size: 15px; --logo-point: #9aa6ff; }

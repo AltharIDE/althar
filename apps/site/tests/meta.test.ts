@@ -21,7 +21,7 @@ describe('page meta', () => {
   const pages = Object.values(PAGE_META)
 
   it('has a page for the root and each route, keyed by its own path', () => {
-    expect(Object.keys(PAGE_META).sort()).toEqual(['/', '/docs', '/enterprise', '/shifts', '/thesis', '/wallpaper'])
+    expect(Object.keys(PAGE_META).sort()).toEqual(['/', '/about', '/docs', '/enterprise', '/shifts', '/thesis', '/wallpaper'])
     for (const [path, meta] of Object.entries(PAGE_META)) expect(meta.path).toBe(path)
   })
 
