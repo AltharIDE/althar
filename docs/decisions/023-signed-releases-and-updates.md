@@ -64,11 +64,10 @@
     alone and deleted after; Apple's key as `APPLE_API_KEY` (the `.p8`'s
     contents, written to a file for the job), `APPLE_API_KEY_ID` and
     `APPLE_API_ISSUER`.
-  - **A Mac makes one only when CI can't.** `bun run release` does the same
-    there, with the certificate in the login keychain, and `bun run release
-    --publish` takes what it made to the same draft. Publishing asks for a
-    Developer ID signature, notarization (unless told `--unnotarized`), and
-    a clean tree at a commit on main as GitHub has it.
+  - **Only CI publishes.** `bun run release` builds and checks a release
+    the same way on a Mac, for trying one before it is tagged; it doesn't
+    publish. If GitHub Actions is down, the files can go to a draft by hand
+    with `gh release create --draft`.
   - **One update track, from GitHub Releases.** electron-updater reads
     `latest-mac.yml` from the latest published release and downloads the
     zip it names; Squirrel.Mac takes it only if it is signed as the running

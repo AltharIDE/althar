@@ -159,7 +159,7 @@ const electronVersion = readFileSync(join(electron, 'dist', 'version'), 'utf8').
 
 await build({
   projectDir: stage,
-  // Packages are made here; they reach GitHub only through `bun run release --publish`, as a draft.
+  // Packages are made here; they reach GitHub only through the release workflow, as a draft.
   publish: 'never',
   config: {
     appId: 'dev.althar.app',
@@ -224,10 +224,4 @@ if (auth !== null) {
 const app = join(dist, process.arch === 'arm64' ? 'mac-arm64' : 'mac', `${own.productName}.app`)
 for (const path of [app, dmg, made('-mac.zip'), join(dist, 'latest-mac.yml')])
   if (!existsSync(path)) throw new Error(`The package is missing ${path}`)
-// What this was built from, for publishing to check against what it would publish.
-const git = (...list: ReadonlyArray<string>) => execFileSync('git', list, { cwd: desktop, encoding: 'utf8' }).trim()
-writeFileSync(
-  join(dist, 'build.json'),
-  `${JSON.stringify({ version: own.version, commit: git('rev-parse', 'HEAD'), dirty: git('status', '--porcelain') !== '' }, null, 2)}\n`,
-)
 process.stdout.write(`\n${app}\n${dmg}\n${made('-mac.zip')}\n${join(dist, 'latest-mac.yml')}\n`)

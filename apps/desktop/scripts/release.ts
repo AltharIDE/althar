@@ -6,32 +6,20 @@ import { basename, join } from 'node:path'
 import { mismatches } from './feed.ts'
 
 /*
- * Cutting a release (ADR-023, Linear DEV-62 and DEV-81). Releases come from
- * CI: .github/workflows/release.yml runs the first step below on a version
- * tag, with the certificate and Apple's credentials from the release
- * environment, and makes the draft itself. This script is also the way to
- * cut one from a Mac when CI can't, in two steps, each asked for on its own:
+ * Building a release (ADR-023, Linear DEV-62 and DEV-81). Releases are
+ * published from CI alone: .github/workflows/release.yml runs this on a
+ * version tag, with the certificate and Apple's credentials from the release
+ * environment, then makes the draft GitHub Release itself.
  *
- *   bun run release            packages, signs, notarizes and staples where
- *                              the credentials are given, makes the dmg, the
- *                              zip and latest-mac.yml in out/dist, and checks
- *                              them;
- *   bun run release --publish  takes those, as they are, to a draft GitHub
- *                              Release for v<version>, with the notes in
- *                              release-notes/<version>.md.
+ *   bun run release   packages, signs, notarizes and staples where the
+ *                     credentials are given, makes the dmg, the zip and
+ *                     latest-mac.yml in out/dist, and checks them: the feed
+ *                     against the packages, and the app inside the zip.
  *
- * Nothing reaches anyone until the draft is published on GitHub, after a
- * smoke run of the dmg: the updater and the site's Download read only
- * published releases. Publishing asks for a clean tree at a commit on main
- * as GitHub has it, a Developer ID signature, and notarization (--unnotarized to go
- * without, for a build that would only open where Gatekeeper is told to).
- *
- * In CI (CI=true) the first step is the whole of it, and strict: anything
- * but an app signed with a Developer ID, notarized, with its dmg stapled and
- * both accepted by Gatekeeper, fails the run.
+ * On a Mac it is for trying a release before tagging it. In CI (CI=true) it
+ * is strict: anything but an app signed with a Developer ID, notarized, with
+ * its dmg stapled and both accepted by Gatekeeper, fails the run.
  */
-
-const REPOSITORY = 'AltharIDE/althar'
 
 const desktop = join(import.meta.dirname, '..')
 const dist = join(desktop, 'out', 'dist')
@@ -39,16 +27,12 @@ const { productName, version } = JSON.parse(readFileSync(join(desktop, 'package.
   readonly productName: string
   readonly version: string
 }
-const tag = `v${version}`
 const app = join(dist, 'mac-arm64', `${productName}.app`)
 const dmg = join(dist, `${productName}-${version}-arm64.dmg`)
 const zip = join(dist, `${productName}-${version}-arm64-mac.zip`)
 const feed = join(dist, 'latest-mac.yml')
-const notes = join(desktop, 'release-notes', `${version}.md`)
-const built = join(dist, 'build.json')
 const assets = [dmg, `${dmg}.blockmap`, zip, `${zip}.blockmap`, feed]
 
-const args = new Set(process.argv.slice(2))
 const ci = process.env.CI === 'true'
 const say = (line: string) => process.stdout.write(`${line}\n`)
 const fail = (why: string): never => {
@@ -107,71 +91,20 @@ const check = () => {
   for (const path of assets) say(`  ${path}`)
 }
 
-if (!args.has('--publish')) {
-  const branch = git('rev-parse', '--abbrev-ref', 'HEAD')
-  const dirty = git('status', '--porcelain') !== ''
-  if (!ci && (branch !== 'main' || dirty))
-    say(`Packaging ${version} from ${branch}${dirty ? ', with changes not committed' : ''}: fine to try, not to publish.`)
-  const packaged = spawnSync('bun', ['run', 'package'], { cwd: desktop, stdio: 'inherit' })
-  if (packaged.status !== 0) fail('Packaging failed; see above.')
-  check()
-  if (ci) {
-    const signedBy = signer()
-    if (!signedBy.startsWith('Developer ID Application:')) fail(`The app is signed by ${signedBy}, not a Developer ID.`)
-    if (!stapled()) fail('The dmg has no notarization ticket stapled to it.')
-    for (const [what, list] of [
-      ['app', ['-a', '-t', 'exec', app]],
-      ['dmg', ['-a', '-t', 'open', '--context', 'context:primary-signature', dmg]],
-    ] as const)
-      if (!run('spctl', list).ok) fail(`Gatekeeper refuses the ${what}.`)
-    say(`\nAlthar ${version}: signed by ${signedBy}, notarized, and accepted by Gatekeeper.`)
-    process.exit(0)
-  }
-  say(`\nNext: open the dmg, smoke-test Althar ${version}, write ${notes} if it isn't there, then \`bun run release --publish\`.`)
-  process.exit(0)
-}
-
-// Publishing: what was made, as it is, to a draft release.
+const branch = git('rev-parse', '--abbrev-ref', 'HEAD')
+const dirty = git('status', '--porcelain') !== ''
+if (!ci && (branch !== 'main' || dirty)) say(`Packaging ${version} from ${branch}${dirty ? ', with changes not committed' : ''}, to try.`)
+const packaged = spawnSync('bun', ['run', 'package'], { cwd: desktop, stdio: 'inherit' })
+if (packaged.status !== 0) fail('Packaging failed; see above.')
 check()
-const signedBy = signer()
-if (!signedBy.startsWith('Developer ID Application:'))
-  fail(`The app is signed by ${signedBy}, not a Developer ID: macOS would refuse it anywhere else.`)
-if (!stapled() && !args.has('--unnotarized'))
-  fail(
-    'The dmg is not notarized, so macOS refuses it as it is downloaded. Notarize it (see the README), or pass --unnotarized to publish it anyway.',
-  )
-if (!existsSync(notes)) fail(`Write the release notes first, a few plain lines for testers: ${notes}`)
-if (git('status', '--porcelain') !== '') fail('The tree has changes not committed: publish what a commit holds.')
-const commit = git('rev-parse', 'HEAD')
-// What was built, from where: the packages in out/dist outlive a checkout, so they must be this commit's, made clean.
-if (!existsSync(built)) fail(`${built} is missing: package again with \`bun run release\`.`)
-const from = JSON.parse(readFileSync(built, 'utf8')) as { readonly version?: string; readonly commit?: string; readonly dirty?: boolean }
-if (from.version !== version || from.commit !== commit || from.dirty !== false)
-  fail(
-    `The packages were made from ${from.commit?.slice(0, 7) ?? 'an unknown commit'}${from.dirty === false ? '' : ' with changes not committed'}, not from ${commit.slice(0, 7)} as it is: package again here.`,
-  )
-if (!run('git', ['merge-base', '--is-ancestor', commit, 'origin/main']).ok)
-  fail(`${commit.slice(0, 7)} isn't on main as GitHub has it: publish from main, pushed.`)
-if (!run('gh', ['auth', 'status']).ok) fail('gh is not signed in: `gh auth login`.')
-if (run('gh', ['release', 'view', tag, '--repo', REPOSITORY]).ok) fail(`${REPOSITORY} already has a release ${tag}.`)
-
-execFileSync(
-  'gh',
-  [
-    'release',
-    'create',
-    tag,
-    '--repo',
-    REPOSITORY,
-    '--draft',
-    '--target',
-    commit,
-    '--title',
-    `${productName} ${version}`,
-    '--notes-file',
-    notes,
-    ...assets,
-  ],
-  { stdio: 'inherit' },
-)
-say(`\nA draft release ${tag} is on GitHub, at ${commit.slice(0, 7)}. Smoke-test its dmg, then publish it there: the tag is made then.`)
+if (ci) {
+  const signedBy = signer()
+  if (!signedBy.startsWith('Developer ID Application:')) fail(`The app is signed by ${signedBy}, not a Developer ID.`)
+  if (!stapled()) fail('The dmg has no notarization ticket stapled to it.')
+  for (const [what, list] of [
+    ['app', ['-a', '-t', 'exec', app]],
+    ['dmg', ['-a', '-t', 'open', '--context', 'context:primary-signature', dmg]],
+  ] as const)
+    if (!run('spctl', list).ok) fail(`Gatekeeper refuses the ${what}.`)
+  say(`\nAlthar ${version}: signed by ${signedBy}, notarized, and accepted by Gatekeeper.`)
+} else say(`\nOpen the dmg and try Althar ${version}. Releases are published from CI: tag v${version} on main (see the README).`)

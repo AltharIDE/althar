@@ -32,7 +32,7 @@ From `apps/desktop`:
 | `bun run build` | Builds the main process, the runtime, the preload and the window into `dist/` |
 | `bun run build:package` | The same, without the end-to-end tests' hooks, as a packaged app will be built |
 | `bun run package` | Builds that and packages it in `out/dist`: `mac-arm64/Althar.app`, with Cobalt as its icon, signed with Althar's Developer ID under the hardened runtime and notarized where the credentials are given; a dmg and a zip of it, about 370 MB each; and `latest-mac.yml`, the updater's feed. About 850 MB unpacked, most of it Claude Code's and Codex's own binaries, which the agent adapters bring |
-| `bun run release` | Packages, signs and notarizes a release, and checks it, as CI does on a version tag; `bun run release --publish` makes a draft GitHub Release of what it made, when CI can't. See below |
+| `bun run release` | Packages, signs and notarizes a release, and checks it, as CI does on a version tag. Releases are published from CI only. See below |
 | `bun run start` | Opens what was last built |
 | `bun run check` | Format, type-aware lint and type checks |
 | `bun run test` | The window's view models and views against a fake client, and its client against the real runtime |
@@ -42,7 +42,7 @@ From `apps/desktop`:
 
 ### The packaged app
 
-The app is for Apple silicon, for now. Releases are made by CI, from a version tag on main; a Mac makes one only when CI can't ([ADR-023](../../docs/decisions/023-signed-releases-and-updates.md)).
+The app is for Apple silicon, for now. Releases are made and published by CI alone, from a version tag on main ([ADR-023](../../docs/decisions/023-signed-releases-and-updates.md)).
 
 - **Signing.** `bun run package` signs every executable in the app on its own, deepest first, with the hardened runtime and a secure timestamp: Althar's binary with `resources/entitlements.mac.plist`, and everything else (Electron's helpers, Claude Code's and Codex's binaries, the speech engine) with `entitlements.mac.inherit.plist`. It signs with `ALTHAR_MAC_IDENTITY` where that names a certificate; else with the Developer ID in `CSC_LINK` and `CSC_KEY_PASSWORD` (the certificate and its key as a base64 `.p12`, as CI gives them: electron-builder puts them in a keychain of its own and deletes it after); else with Althar's Developer ID where this Mac's keychain has it. Without any, or with `ALTHAR_MAC_IDENTITY=-`, the app is signed ad hoc, still hardened, and opens only on the Mac that built it. In CI that fails instead. On a Mac, the first time codesign uses the key, macOS asks for the login password: choose Always Allow, or signing waits for an answer.
 - **Notarizing.** With Apple's credentials in the environment, the signed app is sent to Apple's notary service and stapled before the dmg and the zip are made of it, then the dmg is too. Every submission's log is kept in `out/notary/`; a rejected one names each file it found wrong. The credentials are an App Store Connect API key (`APPLE_API_KEY`, the path to its `.p8`, with `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`), or a profile notarytool keeps in the keychain (`APPLE_KEYCHAIN_PROFILE`). Without them nothing is notarized, macOS refuses the app on any other Mac, and in CI the run fails.
@@ -82,16 +82,15 @@ Also turn on **release immutability** (Settings → General → Releases): once 
 
 With `gh`, each is one command, for example `base64 -i cert.p12 | gh secret set CSC_LINK --env release --repo AltharIDE/althar`, or `gh secret set APPLE_API_KEY --env release --repo AltharIDE/althar < AuthKey_<id>.p8`.
 
-#### From a Mac, when CI can't
+#### Trying a release on a Mac
 
-With the certificate in the login keychain and Apple's credentials in the environment, from a clean `main`, pushed:
+Releases are published from CI only. To try one before tagging it, with the certificate in the login keychain and Apple's credentials in the environment:
 
 ```bash
 APPLE_API_KEY=~/keys/AuthKey_ABC123.p8 APPLE_API_KEY_ID=ABC123 APPLE_API_ISSUER=<issuer id> bun run release
-bun run release --publish
 ```
 
-The first makes and checks the release in `out/dist`; try its dmg before the second, which makes the same draft release CI would. `APPLE_KEYCHAIN_PROFILE=<profile>` does instead of the key, for a profile stored once with `xcrun notarytool store-credentials`. Publishing refuses a build that isn't signed with a Developer ID, or isn't notarized (`--unnotarized` to publish one anyway).
+It makes and checks the release in `out/dist`, as CI does; open its dmg to try it. `APPLE_KEYCHAIN_PROFILE=<profile>` does instead of the key, for a profile stored once with `xcrun notarytool store-credentials`. If GitHub Actions is down on a release day, the same files can go to a draft by hand: `gh release create v<version> --draft --title "Althar <version>" --notes-file release-notes/<version>.md` with the dmg, the zip, their blockmaps and `latest-mac.yml`.
 
 To run the end-to-end test against a real agent, signed in on this machine (it uses a little of its usage):
 
