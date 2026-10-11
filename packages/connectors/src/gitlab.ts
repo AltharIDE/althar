@@ -714,19 +714,19 @@ export const accessGitLab: Access = (input) =>
     if (reached.length > 0) lines.push(reachLine(reached, level === null ? null : roleOf(level)))
     const below: AccessReason | null = level !== null && level < DEVELOPER ? { kind: 'role', role: roleOf(level) } : null
 
+    // Without its scopes, what the token may do isn't known: only the account's role can say no.
+    // A missing scope is named as the one to make a token with: the least that does it.
+    const given = (need: AccessLine['need'], named: string, ...any: ReadonlyArray<string>) =>
+      scopes === null
+        ? line(need, 'unknown', { reason: { kind: 'unreadable' } })
+        : lacks(...any)
+          ? line(need, 'no', { reason: scope(named) })
+          : line(need, 'ok')
     lines.push(
-      below !== null
-        ? line('push', 'no', { reason: below })
-        : lacks('api', 'write_repository')
-          ? line('push', 'no', { reason: scope('api') })
-          : line('push', 'ok'),
-      below !== null
-        ? line('changes', 'no', { reason: below })
-        : lacks('api')
-          ? line('changes', 'no', { reason: scope('api') })
-          : line('changes', 'ok'),
-      lacks('api', 'read_api') ? line('checks', 'no', { reason: scope('read_api') }) : line('checks', 'ok'),
-      lacks('api') ? line('issues', 'no', { reason: scope('api') }) : line('issues', 'ok'),
+      below !== null ? line('push', 'no', { reason: below }) : given('push', 'api', 'api', 'write_repository'),
+      below !== null ? line('changes', 'no', { reason: below }) : given('changes', 'api', 'api'),
+      given('checks', 'read_api', 'api', 'read_api'),
+      given('issues', 'api', 'api'),
     )
 
     return { account: { id: String(user.id), login: user.username, name: user.name ?? null }, lines, ...token }

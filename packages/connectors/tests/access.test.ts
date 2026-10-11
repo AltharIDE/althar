@@ -450,10 +450,12 @@ describe('checking a GitLab connection', () => {
     }),
   )
 
-  it.effect('takes every scope as given where the token won’t say, and a token that never runs out as such', () =>
+  it.effect('says what a token may do isn’t known where it won’t say its scopes, and a token that never runs out as such', () =>
     Effect.gen(function* () {
+      // Without its scopes, what the token may do isn't known.
       const unsaid = yield* gitLab([gitLabUser]).check
-      assert.deepStrictEqual(states(unsaid), ['account ok', 'push ok', 'changes ok', 'checks ok', 'issues ok'])
+      assert.deepStrictEqual(states(unsaid), ['account ok', 'push unknown', 'changes unknown', 'checks unknown', 'issues unknown'])
+      assert.deepStrictEqual(unsaid.lines[1]?.reason, { kind: 'unreadable' })
       assert.isNull(unsaid.scopes)
       const forever = yield* gitLab([
         gitLabUser,

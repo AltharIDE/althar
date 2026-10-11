@@ -12,6 +12,14 @@ const page: Canned = { status: 404, text: '<!doctype html><title>Not found</titl
 
 const offline: Fetch = () => Promise.reject(new TypeError('fetch failed'))
 
+/** Jira's server info, as it always answers: where it lives, and its version. */
+const jira = (more: Record<string, unknown>) => ({
+  baseUrl: 'https://jira.northwind.dev',
+  version: '9.12.2',
+  versionNumbers: [9, 12, 2],
+  ...more,
+})
+
 describe('identifying a company’s own server', () => {
   it.effect('knows GitLab by the header it marks every answer with, a stranger’s included, or by its version', () =>
     Effect.gen(function* () {
@@ -78,27 +86,41 @@ describe('identifying a company’s own server', () => {
         [
           'GET',
           'https://northwind.atlassian.net/rest/api/2/serverInfo',
-          { json: { deploymentType: 'Cloud', baseUrl: 'https://northwind.atlassian.net' } },
+          { json: jira({ deploymentType: 'Cloud', baseUrl: 'https://northwind.atlassian.net' }) },
         ],
         [
           'GET',
           'https://jira.northwind.dev/rest/api/2/serverInfo',
-          { json: { deploymentType: 'Server', baseUrl: 'https://jira.northwind.dev/' } },
+          { json: jira({ deploymentType: 'Server', baseUrl: 'https://jira.northwind.dev/' }) },
         ],
         // A Jira under a path: the origin answers with a page, the path with Jira.
         ['GET', 'https://issues.northwind.dev/rest/api/2/serverInfo', page],
         [
           'GET',
           'https://issues.northwind.dev/jira/rest/api/2/serverInfo',
-          { json: { deploymentType: 'Server', baseUrl: 'https://issues.northwind.dev/jira' } },
+          { json: jira({ deploymentType: 'Server', baseUrl: 'https://issues.northwind.dev/jira' }) },
         ],
         // A custom domain whose Jira says it lives somewhere else: kept where it was asked.
         [
           'GET',
           'https://tickets.northwind.dev/rest/api/2/serverInfo',
-          { json: { deploymentType: 'Cloud', baseUrl: 'https://northwind.atlassian.net' } },
+          { json: jira({ deploymentType: 'Cloud', baseUrl: 'https://northwind.atlassian.net' }) },
         ],
-        ['GET', 'https://refused.northwind.dev/rest/api/2/serverInfo', { status: 403, json: { deploymentType: 'Server' } }],
+        // A Jira that says it lives at a host that only starts like the one asked, or with a password in it: kept where it was asked.
+        [
+          'GET',
+          'https://jira.halyard.dev/rest/api/2/serverInfo',
+          { json: jira({ deploymentType: 'Server', baseUrl: 'https://jira.halyard.dev.elsewhere.test' }) },
+        ],
+        [
+          'GET',
+          'https://desk.halyard.dev/rest/api/2/serverInfo',
+          { json: jira({ deploymentType: 'Server', baseUrl: 'https://someone:secret@desk.halyard.dev' }) },
+        ],
+        ['GET', 'https://refused.northwind.dev/rest/api/2/serverInfo', { status: 403, json: jira({ deploymentType: 'Server' }) }],
+        // Any other JSON isn't Jira.
+        ['GET', 'https://json.northwind.dev/rest/api/2/serverInfo', { json: { hello: 'world' } }],
+        ['GET', 'https://empty.northwind.dev/rest/api/2/serverInfo', { json: {} }],
       ])
       assert.deepStrictEqual(yield* identify(fetch, 'jira', 'https://northwind.atlassian.net/jira/your-work'), {
         product: 'jira_cloud',
@@ -120,7 +142,11 @@ describe('identifying a company’s own server', () => {
         webUrl: 'https://tickets.northwind.dev',
         reason: null,
       })
+      assert.strictEqual((yield* identify(fetch, 'jira', 'jira.halyard.dev')).webUrl, 'https://jira.halyard.dev')
+      assert.strictEqual((yield* identify(fetch, 'jira', 'desk.halyard.dev')).webUrl, 'https://desk.halyard.dev')
       assert.strictEqual((yield* identify(fetch, 'jira', 'refused.northwind.dev')).reason, 'other')
+      assert.strictEqual((yield* identify(fetch, 'jira', 'json.northwind.dev')).reason, 'other')
+      assert.strictEqual((yield* identify(fetch, 'jira', 'empty.northwind.dev')).reason, 'other')
     }),
   )
 

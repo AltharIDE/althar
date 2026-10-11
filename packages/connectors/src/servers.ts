@@ -68,7 +68,29 @@ const ask = (fetch: Fetch, url: string): Effect.Effect<Answer | null> =>
 const GitLabVersion = Schema.Struct({ version: Schema.String, revision: Schema.String })
 const BitbucketProperties = Schema.Struct({ displayName: Schema.String, version: Schema.String })
 const GitHubMeta = Schema.Struct({ installed_version: Schema.String })
-const JiraInfo = Schema.Struct({ deploymentType: Schema.optional(Schema.String), baseUrl: Schema.optional(Schema.String) })
+/* Jira's server info: always its address, its version and that version's numbers, which nothing else answers with together. */
+const JiraInfo = Schema.Struct({
+  baseUrl: Schema.String,
+  version: Schema.String,
+  versionNumbers: Schema.Array(Schema.Number),
+  deploymentType: Schema.optional(Schema.String),
+})
+
+/** Whether an address Jira says it lives at is the server asked: the same origin, at or under its path. */
+const sameServer = (said: string, base: string): boolean => {
+  try {
+    const at = new URL(said)
+    const asked = new URL(base)
+    return (
+      at.origin === asked.origin &&
+      at.username === '' &&
+      at.password === '' &&
+      `${at.pathname}/`.startsWith(`${asked.pathname.replace(/\/+$/, '')}/`)
+    )
+  } catch {
+    return false
+  }
+}
 
 const fits = <A>(schema: Schema.Codec<A, unknown>, json: unknown): A | undefined =>
   Option.getOrUndefined(Schema.decodeUnknownOption(schema)(json))
@@ -101,9 +123,9 @@ const answerAt = (fetch: Fetch, service: Service, base: string): Effect.Effect<{
         if (answer === null) return 'nothing'
         const info = answer.status === 200 ? fits(JiraInfo, answer.json) : undefined
         if (info === undefined) return null
-        // Jira says where it lives; kept only where that is the server asked, not somewhere it redirects people.
-        const said = info.baseUrl?.replace(/\/+$/, '')
-        const webUrl = said !== undefined && said.startsWith(new URL(base).origin) ? said : base
+        // Jira says where it lives; kept only where that is the server asked, never another host a token would go to.
+        const said = info.baseUrl.replace(/\/+$/, '')
+        const webUrl = sameServer(said, base) ? said : base
         return { product: info.deploymentType === 'Cloud' ? 'jira_cloud' : 'jira_dc', webUrl }
       }
       case 'linear':
