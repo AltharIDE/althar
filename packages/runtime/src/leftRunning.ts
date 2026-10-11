@@ -91,7 +91,7 @@ export const commandOfCall = (call: Readonly<Record<string, unknown>> | undefine
 /** What a client shows of one. */
 export type ShownLeftRunning = Pick<LeftRunning, 'id' | 'command' | 'url' | 'startedAt' | 'ended'> & {
   /** The command as it reads at a glance: without its `cd`, environment and output plumbing. */
-  readonly label: string
+  readonly label?: string
 }
 export const shownOf = (left: LeftRunning): ShownLeftRunning => ({
   id: left.id,
