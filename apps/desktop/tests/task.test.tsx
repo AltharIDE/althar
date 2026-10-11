@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -20,6 +20,11 @@ import { servicesFor, withServices } from './render'
 function Task({ onBack = vi.fn() }: { onBack?: () => void }) {
   return <TaskView model={useTask('th1')} onBack={onBack} />
 }
+
+/** A PNG's signature and header, 1 by 1: enough for the window to read it as one. */
+const PNG = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0,
+])
 
 const thread = (overrides: Partial<ThreadSnapshot> = {}) =>
   snapshot({
@@ -591,6 +596,87 @@ describe('a task', () => {
     await userEvent.type(busy, 'Stop, use the helper{Meta>}{Enter}{/Meta}')
     await waitFor(() =>
       expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Stop, use the helper', disposition: 'interrupt_and_continue' }),
+    )
+  })
+
+  it('sends images dropped on its composer with what the person says, and shows them in the thread at once', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'shot.png' })).toBeTruthy()
+    await userEvent.type(box, 'Look at this{Enter}')
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'th1',
+        body: 'Look at this',
+        disposition: 'after_current',
+        images: [{ data: Buffer.from(PNG).toString('base64'), name: 'shot.png' }],
+      }),
+    )
+    // Out of the composer, and on the message in the thread, drawn from its own bytes.
+    expect(screen.queryByRole('list', { name: /to send/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'View shot.png' })).toBeTruthy()
+    // Words sent on their own go as before.
+    await userEvent.type(box, 'And this{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenLastCalledWith({ threadId: 'th1', body: 'And this', disposition: 'after_current' }))
+  })
+
+  it('takes no images for a lead that doesn’t take them, and holds back those added before another was picked', async () => {
+    const base = thread()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({
+        ...base,
+        session: base.session === null ? null : { ...base.session, agentId: 'codex', agentName: 'Codex' },
+      })),
+    })
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell Codex something' })
+    await waitFor(() => expect(client.getModels).toHaveBeenCalled())
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await screen.findByText('Codex doesn’t take images, so they can’t be sent to it.')).toBeTruthy()
+    expect(screen.queryByRole('img', { name: 'shot.png' })).toBeNull()
+  })
+
+  it('holds a message back, saying why, when the agent picked to take over doesn’t take images', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'shot.png' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    await userEvent.keyboard('{Escape}')
+    expect(await screen.findByText('Codex doesn’t take images. Remove them to send this, or pick an agent that does.')).toBeTruthy()
+    await userEvent.type(box, 'Over to you{Enter}')
+    expect(client.switchAgent).not.toHaveBeenCalled()
+    expect((box as HTMLTextAreaElement).value).toBe('Over to you')
+    // Taken off, the message goes.
+    await userEvent.click(screen.getByRole('button', { name: 'Remove shot.png' }))
+    await userEvent.type(box, '{Enter}')
+    await waitFor(() =>
+      expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2-codex', body: 'Over to you' }),
+    )
+  })
+
+  it('puts a queued message back in the composer with its images, which go again by their digests', async () => {
+    const picture = { digest: 'f'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null }
+    const queued = items.you('Like this', { state: 'queued', interrupting: false }, [], [picture])
+    const { client } = fakeClient({ getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })) })
+    withServices(<Task />, client)
+    const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the lead' })
+    // The queue says what went with it.
+    expect(screen.getByText('1 image')).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    expect(await screen.findByRole('img', { name: 'shot.png' })).toHaveProperty('src', `althar-picture://shot/${'f'.repeat(64)}?w=1120`)
+    await userEvent.type(busy, ' too{Enter}')
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'th1',
+        body: 'Like this too',
+        disposition: 'after_current',
+        images: [{ digest: 'f'.repeat(64), name: 'shot.png' }],
+      }),
     )
   })
 

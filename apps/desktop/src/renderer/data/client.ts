@@ -37,6 +37,7 @@ import {
   type SignInStart,
   type SignInState,
   type Status,
+  type SentImage,
   type TaskEnd,
   type TaskList,
   type TaskSummary,
@@ -115,8 +116,8 @@ export interface Client {
   /** The person left the home: what the loop does from now on is new to them. */
   readonly leftHome: () => Promise<void>
   readonly startSession: (input: Start) => Promise<string>
-  /** Hands the thread to another agent; with `body`, what the person said, its first turn after the brief. */
-  readonly switchAgent: (input: Start & { readonly body?: string }) => Promise<string>
+  /** Hands the thread to another agent; with `body`, what the person said, and any images, its first turn after the brief. */
+  readonly switchAgent: (input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage> }) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
   /** How hard the thread's agent thinks, as the agent names it. */
   readonly setEffort: (input: { readonly threadId: string; readonly effort: string }) => Promise<void>
@@ -148,6 +149,8 @@ export interface Client {
     readonly threadId: string
     readonly body: string
     readonly disposition: 'after_current' | 'interrupt_and_continue'
+    /** Images sent with it, in order. */
+    readonly images?: ReadonlyArray<SentImage>
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>

@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -338,6 +338,27 @@ describe('the Talk room', () => {
     expect(await screen.findByRole('button', { name: 'Coordinator: Claude Sonnet Medium' })).toBeTruthy()
     await userEvent.type(screen.getByRole('textbox', { name: 'Tell the coordinator something' }), 'Hello{Enter}')
     await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code', model: 'sonnet' }))
+  })
+
+  it('sends images dropped on its composer with what the person says to it', async () => {
+    const { client } = fakeClient()
+    withServices(<Project />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 2,
+    ])
+    fireEvent.paste(box, { clipboardData: { files: [new File([png], '', { type: 'image/png' })], types: ['Files'] } })
+    expect(await screen.findByRole('img', { name: 'Pasted image' })).toBeTruthy()
+    await userEvent.type(box, 'This is the bug{Enter}')
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'thc',
+        body: 'This is the bug',
+        disposition: 'after_current',
+        images: [{ data: Buffer.from(png).toString('base64'), name: 'Pasted image' }],
+      }),
+    )
+    expect(screen.getByRole('button', { name: 'View Pasted image' })).toBeTruthy()
   })
 
   it("says when the agent it last ran on isn't signed in, and starts it on one that is", async () => {

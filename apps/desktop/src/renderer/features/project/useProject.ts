@@ -18,6 +18,7 @@ import { CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
 import type { OutputSoFar } from '../../shared/handed'
+import { type Outgoing, sentWith } from '../../shared/useImages'
 import { useOutputs } from '../../shared/useOutputs'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
@@ -54,9 +55,9 @@ export interface ProjectModel {
   readonly loadingEarlier: boolean
   readonly loadEarlier: () => Promise<void>
   /** Says something to the coordinator, which starts it on `agentId` if it isn't running. */
-  /** Tells the coordinator something; a coordinator not running starts as the person chose, when they did. */
-  readonly say: (body: string, choice: Choice | null) => Promise<void>
-  readonly sayNow: (body: string) => Promise<void>
+  /** Tells the coordinator something, with any images; a coordinator not running starts as the person chose, when they did. */
+  readonly say: (body: string, choice: Choice | null, images?: Outgoing) => Promise<void>
+  readonly sayNow: (body: string, images?: Outgoing) => Promise<void>
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
@@ -67,8 +68,8 @@ export interface ProjectModel {
   /** Moves the running coordinator to another agent. */
   /** Puts the coordinator on another model or effort, or another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
-  /** Hands the conversation to another agent with what the person says: its first turn, after its brief. */
-  readonly handOver: (choice: Choice, body: string) => Promise<void>
+  /** Hands the conversation to another agent with what the person says, and any images: its first turn, after its brief. */
+  readonly handOver: (choice: Choice, body: string, images?: Outgoing) => Promise<void>
   /** Answers the coordinator's question: what went wrong, in words, or null when it went through. */
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   readonly startPlan: (planId: string) => Promise<void>
@@ -223,19 +224,25 @@ export const useProject = (projectId: string): ProjectModel => {
     [readHead, fail],
   )
 
-  const send = (body: string, disposition: 'after_current' | 'interrupt_and_continue') =>
-    threadId === null ? Promise.resolve() : client.send({ threadId, body, disposition })
+  const send = (body: string, disposition: 'after_current' | 'interrupt_and_continue', images?: Outgoing) =>
+    threadId === null ? Promise.resolve() : client.send({ threadId, body, disposition, ...sentWith(images) })
 
   /** What the person says shows at once, as the window's copy until the store's arrives; gone again if it fails. */
   const shown = (
     text: string,
     disposition: 'after_current' | 'interrupt_and_continue',
     action: () => Promise<unknown>,
+    images: Outgoing | undefined,
     queued = disposition === 'interrupt_and_continue' || coordinator?.session?.turnRunning === true,
   ) => {
     let id = ''
     setCoordinator((current) => {
-      const next = sending(current.items, { text, queued, interrupting: disposition === 'interrupt_and_continue' })
+      const next = sending(current.items, {
+        text,
+        queued,
+        interrupting: disposition === 'interrupt_and_continue',
+        ...(images === undefined ? {} : { pictures: images.pictures }),
+      })
       id = next.id
       return { ...current, items: next.items }
     })
@@ -260,20 +267,25 @@ export const useProject = (projectId: string): ProjectModel => {
     pending,
     loadingEarlier,
     loadEarlier,
-    say: (body, choice) =>
-      shown(body, 'after_current', async () => {
-        // The runtime starts it as it ran last; anything else the person picked starts first.
-        const suggested = coordinator?.suggested
-        const same =
-          suggested != null &&
-          choice?.agentId === suggested.agentId &&
-          choice.model === suggested.model &&
-          choice.effort === suggested.effort
-        if (threadId !== null && coordinator?.session === null && choice !== null && !same)
-          await client.startSession(startOf(threadId, choice))
-        await send(body, 'after_current')
-      }),
-    sayNow: (body) => shown(body, 'interrupt_and_continue', () => send(body, 'interrupt_and_continue')),
+    say: (body, choice, images) =>
+      shown(
+        body,
+        'after_current',
+        async () => {
+          // The runtime starts it as it ran last; anything else the person picked starts first.
+          const suggested = coordinator?.suggested
+          const same =
+            suggested != null &&
+            choice?.agentId === suggested.agentId &&
+            choice.model === suggested.model &&
+            choice.effort === suggested.effort
+          if (threadId !== null && coordinator?.session === null && choice !== null && !same)
+            await client.startSession(startOf(threadId, choice))
+          await send(body, 'after_current', images)
+        },
+        images,
+      ),
+    sayNow: (body, images) => shown(body, 'interrupt_and_continue', () => send(body, 'interrupt_and_continue', images), images),
     takeBack: async (itemId) => {
       // What is still on its way has nothing to take back yet.
       if (isSending(itemId)) return false
@@ -297,13 +309,19 @@ export const useProject = (projectId: string): ProjectModel => {
         const session = coordinator?.session
         if (threadId !== null && session != null) await moveTo(client, threadId, runningOn(session), choice)
       }),
-    handOver: (choice, body) =>
+    handOver: (choice, body, images) =>
       shown(
         body,
         'after_current',
         async () => {
-          if (threadId !== null) await client.switchAgent({ ...startOf(threadId, choice), body })
+          if (threadId !== null)
+            await client.switchAgent({
+              ...startOf(threadId, choice),
+              body,
+              ...sentWith(images),
+            })
         },
+        images,
         false,
       ),
     answerQuestion: (attentionId, answers) =>
