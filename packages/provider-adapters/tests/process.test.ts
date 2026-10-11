@@ -115,6 +115,19 @@ describe('the process transport', () => {
     }),
   )
 
+  it.live('keeps what a process printed though it exited before it was read, every time', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        for (let n = 0; n < 20; n += 1) {
+          const owned = yield* spawnOwned({ command: '/bin/sh', args: ['-c', 'echo done; exit 3'] }, '/tmp')
+          assert.strictEqual((yield* Deferred.await(owned.exited)).code, 3)
+          const printed = yield* Effect.promise(() => new Response(owned.stdout).text())
+          assert.strictEqual(printed, 'done\n')
+        }
+      }),
+    ),
+  )
+
   it.live('fails to start a command that does not exist', () =>
     Effect.scoped(
       Effect.gen(function* () {

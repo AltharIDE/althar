@@ -339,6 +339,35 @@ describe('setting up a task’s worktree', () => {
     }).pipe(Effect.provide(runtime(undefined, undefined, { setups: { within: Duration.millis(500) } }))),
   )
 
+  it.live('says a setup Althar quit during was stopped, and sets the worktree up again before its lead next starts', () =>
+    Effect.gen(function* () {
+      const file = join(mkdtempSync(join(tmpdir(), 'althar-profile-')), 'althar.sqlite')
+      // The first time it waits a long while; the next, it is quick.
+      const slowOnce = 'if [ -f tried ]; then echo again; else touch tried; echo started; sleep 30; fi'
+      const first = yield* Effect.gen(function* () {
+        const { task } = yield* taskIn(repository(), slowOnce)
+        const [ran] = yield* until(setupProcesses, (rows) => rows[0]?.state === 'running')
+        return { task, pid: ran?.pid ?? 0 }
+      }).pipe(Effect.provide(runtime(file)))
+      // Althar quit: the setup's process group stopped with it.
+      yield* until(
+        Effect.sync(() => [alive(first.pid)]),
+        ([up]) => up === false,
+      )
+      yield* Effect.gen(function* () {
+        const [stopped] = yield* setupItems(first.task.threadId)
+        assert.deepInclude((stopped?.ended ?? {}) as object, { code: null, stopped: true })
+        const [workspace] = yield* workspacesOf(first.task.taskId)
+        assert.isNull(workspace?.setup)
+        // Its lead's first turn sets it up again first.
+        const brief = yield* lead(first.task.threadId)
+        assert.include(brief, `Althar set it up with \`${slowOnce}\`, and that went through`)
+        const [, again] = yield* setupItems(first.task.threadId)
+        assert.deepInclude((again?.ended ?? {}) as object, { code: 0, stopped: false })
+      }).pipe(Effect.provide(runtime(file)))
+    }),
+  )
+
   it.live('doesn’t set a worktree up again when its lead starts again, but does once the worktree is made again', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
