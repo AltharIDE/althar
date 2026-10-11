@@ -77,6 +77,10 @@ export interface ProjectModel {
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
+  /** Runs the project with no agent: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
+  readonly runProject: (taskId?: string | null) => Promise<void>
+  readonly stopLaunch: (id: string) => Promise<void>
+  readonly clearLaunch: (id: string) => Promise<void>
   /** Moves the running coordinator to another agent. */
   /** Puts the coordinator on another model or effort, or another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
@@ -173,6 +177,11 @@ export const useProject = (projectId: string): ProjectModel => {
   useWatch((event) => {
     // A command's output as far as it has come is useOutputs'; the coordinator leaves nothing running.
     if (event._tag === 'Output' || event._tag === 'Background') return
+    // Every run in the project, the tasks' too, whole each time, which the pill over the composer shows.
+    if (event._tag === 'Launches') {
+      if (event.projectId === projectId) setCoordinator((current) => ({ ...current, launches: event.launches }))
+      return
+    }
     if (event._tag === 'Streaming') {
       if (event.threadId !== threadId) return
       setStreaming((current) =>
@@ -344,6 +353,9 @@ export const useProject = (projectId: string): ProjectModel => {
       }
     },
     interrupt: () => act(async () => (threadId === null ? undefined : client.interrupt(threadId))),
+    runProject: (taskId = null) => act(() => client.runProject(projectId, taskId, threadId)),
+    stopLaunch: (id) => act(() => client.stopLaunch(id)),
+    clearLaunch: (id) => act(() => client.clearLaunch(id)),
     choose: (choice) =>
       act(async () => {
         const session = coordinator?.session

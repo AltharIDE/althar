@@ -28,6 +28,8 @@ See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
   something out, checking how something behaves. One lead it picks, no
   review, nothing outside the project when it is done, and no countdown
   (`start_task`);
+- runs the project for the person, with no agent, when they ask, and keeps how
+  it runs when Althar can't tell (ADR-023);
 - follows the work, and passes messages to a task's lead;
 - judges task permission requests when the project selects that mode, in a
   fresh read-only session using its agent and model, without delaying the
@@ -99,6 +101,8 @@ provisional.
 | `list_models` | The models it can use now, by maker, with their scores | Query |
 | `propose_plan` | Steps, a model per step, optional steps | Command |
 | `start_task` | Drafts a mini task and starts it at once: one lead, no review, nothing outside the project when it is done | Command |
+| `run_project` | Runs the project with no agent: the default branch in a copy of its own, or a task's worktree (ADR-023) | Command |
+| `set_run_command` | Keeps how the project runs, for Althar to run it; leads have it too (ADR-023) | Command |
 | `order_tasks` | Orders a batch | Command |
 | `message_lead` | Sends a message to a task's lead, queued or as an interrupt | Command |
 | `recommend_lead` | Records a lead recommendation and its reasons | Command |

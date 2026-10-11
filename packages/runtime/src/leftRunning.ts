@@ -35,13 +35,16 @@ const TAIL = 16_384
 const COLOURS = /\u001b\[[0-9;?]*[A-Za-z]/g
 const LOCAL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|[\w-]+\.localhost)(?::\d{2,5})?(?:\/[^\s'"`<>)\]]*)?/
 
+/** What a terminal shows, without its colours. */
+export const uncoloured = (text: string) => text.replace(COLOURS, '')
+
 /**
  * Where a command serves, as its output says: the first address on this
  * machine it prints, as a browser opens it. A server that prints none,
  * or holds its output back, never says.
  */
 export const servingAt = (output: string): string | null => {
-  const found = LOCAL.exec(output.replace(COLOURS, ''))?.[0]
+  const found = LOCAL.exec(uncoloured(output))?.[0]
   // Every address on this machine, as a browser can open it.
   return found === undefined ? null : found.replace(/\/\/(?:0\.0\.0\.0|\[::\])/, '//localhost').replace(/[.,;:]+$/, '')
 }

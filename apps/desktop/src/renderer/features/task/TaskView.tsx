@@ -47,7 +47,9 @@ import { documentVersions, editorPath, wholePath } from '../../shared/handed'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
-import { behindText, listeningOf, runningOf, useHeard } from './behind'
+import { runningOf } from '../../shared/running'
+import { RunOf } from '../../shared/RunOf'
+import { behindText, listeningOf, useHeard } from './behind'
 import { PermissionCalls } from './PermissionCall'
 import { StuckCall } from './StuckCall'
 import { ConnectPanel } from './ConnectPanel'
@@ -291,8 +293,8 @@ export function TaskView({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onBack, open])
-  // A running turn says how long it has worked so far, and a task under way how long it has run.
-  const now = useNow(ticking(model.snapshot))
+  // A running turn says how long it has worked so far, a task under way how long it has run, and a run of it how long it has been up.
+  const now = useNow(ticking(model.snapshot) || (model.snapshot?.task.launches.some((launch) => launch.ended === null) ?? false))
   // What its pull request says while the task is open shows on the pill over the composer for a moment.
   const heard = useHeard(model.snapshot?.items ?? null)
   const snapshot = model.snapshot
@@ -332,7 +334,10 @@ export function TaskView({
   const busy = session?.turnRunning ?? false
   const queue = queueShown(session, model.pending)
   const listening = listeningOf(snapshot)
-  const leftRunning = runningOf(session?.background ?? [], now)
+  // What its lead left running, and what Althar runs of it itself: one list, each stopped its own way.
+  const running = [...(session?.background ?? []), ...snapshot.task.launches]
+  const launched = new Set(snapshot.task.launches.map((launch) => launch.id))
+  const leftRunning = runningOf(running, now)
   const blocks = [
     // What the person asked for opens the thread, in their words, before anything the lead did.
     ...(snapshot.task.request === null || snapshot.earlier
@@ -421,6 +426,8 @@ export function TaskView({
         />
       )}
       <TaskMenu
+        // What it built runs with no agent, where its repository says how.
+        {...(snapshot.task.runCommand === null ? {} : { run: { command: snapshot.task.runCommand, onRun: () => void model.runProject() } })}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
         {...(can('stop') ? { onStop: () => void model.stop() } : {})}
@@ -471,11 +478,11 @@ export function TaskView({
               )}
               <Running
                 processes={leftRunning}
-                onStop={(id) => void model.stopBackground(id)}
-                onDismiss={(id) => void model.clearBackground(id)}
+                onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}
+                onDismiss={(id) => void (launched.has(id) ? model.clearLaunch(id) : model.clearBackground(id))}
                 // Where it answers opens in the person's browser.
                 onOpenUrl={(id) => {
-                  const url = session?.background.find((command) => command.id === id)?.url
+                  const url = running.find((command) => command.id === id)?.url
                   if (url != null) window.open(url, '_blank')
                 }}
               />
@@ -618,6 +625,9 @@ export function TaskView({
                 onPassOn={(words) => void model.send(words)}
                 onAnswerQuestion={model.answerQuestion}
                 {...(asking == null ? {} : { focusQuestion: asking })}
+                run={(run) => (
+                  <RunOf run={run} now={now} onStop={(id) => void model.stopLaunch(id)} onRunAgain={() => void model.runProject()} />
+                )}
               />
             </ThreadShellProvider>
             {snapshot.attention.map((request) =>

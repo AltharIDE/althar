@@ -822,6 +822,31 @@ export const TaskItem = Schema.Struct({
   content: TaskCard,
 })
 
+/**
+ * A run of the project Althar started itself (docs/decisions/022), in the
+ * thread it was asked for in: where it runs, the command, where it answers
+ * once it says, and how it ended. Althar posts it and keeps it current; it
+ * stays as a record once the run is over.
+ */
+export const RunItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('run'),
+  content: Schema.Struct({
+    launchId: Schema.String,
+    /** What it runs: the task's, or null for a copy of the default branch. */
+    taskId: Schema.NullOr(Schema.String),
+    /** Where it runs, in words: the task's title, or the default branch. */
+    where: Schema.String,
+    command: Schema.String,
+    url: Schema.NullOr(Schema.String),
+    startedAt: Schema.String,
+    /** It ended: by itself, with its exit code where known and its last line; or stopped. Null while it runs. */
+    ended: Schema.NullOr(
+      Schema.Struct({ at: Schema.String, code: Schema.NullOr(Schema.Number), stopped: Schema.Boolean, last: Schema.NullOr(Schema.String) }),
+    ),
+  }),
+})
+
 export const ThreadItem = Schema.Union([
   UserMessageItem,
   AgentTextItem,
@@ -832,6 +857,7 @@ export const ThreadItem = Schema.Union([
   TaskItem,
   ArrivalItem,
   QuestionItem,
+  RunItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -854,6 +880,19 @@ export const BackgroundCommand = Schema.Struct({
   ended: Schema.NullOr(Schema.Struct({ at: Schema.String, code: Schema.NullOr(Schema.Number) })),
 })
 export type BackgroundCommand = typeof BackgroundCommand.Type
+
+/**
+ * The project as Althar runs it itself, with no agent (docs/decisions/022):
+ * in a task's worktree, to see what it built, or, `taskId` null, in a copy of
+ * the default branch. It runs until the person stops it, or Althar quits.
+ */
+export const Launch = Schema.Struct({
+  ...BackgroundCommand.fields,
+  taskId: Schema.NullOr(Schema.String),
+  /** Where it runs, in words: the task's title, or the default branch. */
+  where: Schema.String,
+})
+export type Launch = typeof Launch.Type
 
 export const SessionSummary = Schema.Struct({
   id: Schema.String,
@@ -1105,6 +1144,10 @@ export const ThreadSnapshot = Schema.Struct({
     actions: Schema.Array(TaskAction),
     /** Its plan still waiting to start, by id, for starting it now; null once started, or where it has none. */
     planId: Schema.NullOr(Schema.String),
+    /** What running what it built would run, as its repository says or keeps: `bun run dev`; null where nothing says. */
+    runCommand: Schema.NullOr(Schema.String),
+    /** What Althar runs of it, in its worktree. */
+    launches: Schema.Array(Launch),
   }),
   session: Schema.NullOr(SessionSummary),
   attention: Schema.Array(AttentionRequest),
@@ -1242,6 +1285,10 @@ export const CoordinatorSnapshot = Schema.Struct({
   earlier: Schema.Boolean,
   /** Where the project's repository is hosted, when its remote says, and whether Althar is connected to it there. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
+  /** What running the project would run, as its repository says or keeps; null where nothing says. */
+  runCommand: Schema.NullOr(Schema.String),
+  /** What Althar runs of the project's default branch. */
+  launches: Schema.Array(Launch),
 })
 export type CoordinatorSnapshot = typeof CoordinatorSnapshot.Type
 
@@ -1278,6 +1325,8 @@ export const WatchEvent = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal('Context'), threadId: Schema.String, ...ContextUse.fields }),
   /** What the session on a thread has left running, whole each time it changes. */
   Schema.Struct({ _tag: Schema.Literal('Background'), threadId: Schema.String, background: Schema.Array(BackgroundCommand) }),
+  /** What Althar runs of a project itself, whole each time it changes. */
+  Schema.Struct({ _tag: Schema.Literal('Launches'), projectId: Schema.String, launches: Schema.Array(Launch) }),
   /** A command's output as far as it has come, while it runs: its last lines, whole each time, and how many came before them. */
   Schema.Struct({
     _tag: Schema.Literal('Output'),
@@ -1660,6 +1709,21 @@ export const Api = RpcGroup.make(
   command('StopBackground', { threadId: Schema.String, id: Schema.String }, Schema.Void),
   /** Clears one that ended by itself from the list. */
   command('ClearBackground', { threadId: Schema.String, id: Schema.String }, Schema.Void),
+  /** Runs the project with no agent: what the task built, in its worktree, or, with no task, a copy of the default branch. One already running there is the one returned. */
+  command(
+    'RunProject',
+    {
+      projectId: Schema.String,
+      taskId: Schema.NullOr(Schema.String),
+      /** The thread it was asked for in, where its card goes; null for none. */
+      threadId: Schema.NullOr(Schema.String),
+    },
+    Launch,
+  ),
+  /** Stops a run of the project; it goes from the list. */
+  command('StopLaunch', { id: Schema.String }, Schema.Void),
+  /** Clears a run that ended by itself from the list. */
+  command('ClearLaunch', { id: Schema.String }, Schema.Void),
   /** What changes after `since`, or from now without it. */
   Rpc.make('Watch', { payload: { since: Schema.optional(Cursor) }, success: WatchEvent, error: ApiError, stream: true }),
 )

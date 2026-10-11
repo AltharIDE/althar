@@ -34,7 +34,7 @@ import { useModelNames } from './modelNames'
 import { RuleReceipt } from './RuleReceipt'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
 import { answersOf, partsOf, pickedOf, questionText } from './questions'
-import type { ArrivalContent, Block, Part, QuestionContent, StepResult, TaskCardContent } from './thread'
+import type { ArrivalContent, Block, Part, QuestionContent, RunContent, StepResult, TaskCardContent } from './thread'
 import s from './ThreadBlocks.module.css'
 
 /*
@@ -369,6 +369,7 @@ export function ThreadBlocks({
   openFile,
   session,
   card,
+  run,
   queued,
   onPassOn,
   onAnswerQuestion,
@@ -394,6 +395,8 @@ export function ThreadBlocks({
   focusQuestion?: string
   /** Draws a task's card, in the coordinator's thread. */
   card?: (card: TaskCardContent) => ReactNode
+  /** Draws a run's card, in the thread it was asked for in. */
+  run?: (run: RunContent) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
 }) {
@@ -447,6 +450,8 @@ export function ThreadBlocks({
             {...(onAnswerQuestion === undefined ? {} : { onAnswer: onAnswerQuestion })}
           />
         )
+      case 'run':
+        return <Fragment key={block.id}>{run?.(block.run)}</Fragment>
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')

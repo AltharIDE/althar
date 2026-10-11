@@ -69,8 +69,18 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
 - [ ] **Turning one into a full task.** One that ends up changing things is
   on its branch. Whether the person, or the coordinator, can give it a review
   and a pull request after the fact.
-- [ ] **Running the project without an agent.** Althar could keep the
-  project's run command and start it itself, with no model (DEV-56).
+- [x] **Running the project without an agent.** Althar keeps how each
+  repository runs, works it out until then, and runs it itself (ADR-023).
+- [ ] **Several processes that run together.** A web app and its API, or a
+  server and a worker, are one command line today.
+- [ ] **Two runs on one port.** A task's run and the default branch's may
+  want the same port; the second says so in what it prints. Whether Althar
+  should give each its own port where the command takes one.
+- [ ] **A run per repository in a project of several.** The first that says
+  how it runs is run; others need naming, as the coordinator can.
+- [ ] **A picture of what a run shows.** The run card has the address, not
+  the page. Whether Althar should open it once it answers, take a picture,
+  and keep it on the card.
 
 ## Dictation, 10 October
 

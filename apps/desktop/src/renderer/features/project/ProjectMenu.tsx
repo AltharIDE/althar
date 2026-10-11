@@ -15,10 +15,13 @@ export interface ProjectMenuActions {
   readonly onRules: () => void
   /** The code host its repositories are on, while Althar isn't connected to it, and connecting it. */
   readonly connect?: { readonly host: string; readonly onConnect: () => void }
+  /** Running its default branch, with no agent, where its repository says how. */
+  readonly run?: { readonly command: string; readonly onRun: () => void }
 }
 
 /** What the kit's menu takes, from the model and the places it opens. */
-const itemsOf = ({ model, onRepositories, onRules, connect }: ProjectMenuActions) => ({
+const itemsOf = ({ model, onRepositories, onRules, connect, run }: ProjectMenuActions) => ({
+  ...(run === undefined ? {} : { run }),
   ...(model.project === null ? {} : { repositories: model.project.repositories.length }),
   onRename: () => model.ask('rename'),
   onRepositories,

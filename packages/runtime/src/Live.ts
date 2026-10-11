@@ -1,5 +1,6 @@
 import type { SessionEvent } from '@althar/provider-adapters'
 
+import type { ShownLaunch } from './Launches'
 import type { ShownLeftRunning } from './leftRunning'
 import { Context, Effect, Layer, PubSub, type Scope, Stream } from 'effect'
 
@@ -25,6 +26,8 @@ export type LiveEvent =
   | { readonly _tag: 'Output'; readonly threadId: string; readonly itemId: string; readonly text: string; readonly dropped: number }
   /** What the session on a thread has left running, whole each time it changes (leftRunning.ts). */
   | { readonly _tag: 'Background'; readonly threadId: string; readonly background: ReadonlyArray<ShownLeftRunning> }
+  /** What Althar runs of a project itself, whole each time it changes (Launches.ts). */
+  | { readonly _tag: 'Launches'; readonly projectId: string; readonly launches: ReadonlyArray<ShownLaunch> }
   | {
       readonly _tag: 'SessionStarted'
       readonly threadId: string

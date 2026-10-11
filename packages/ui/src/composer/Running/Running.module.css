@@ -73,3 +73,13 @@ span.url {
 .rowMeta {
   composes: rowMeta from '../Listening/Listening.module.css';
 }
+
+/* where it runs, kept to a line beside how long */
+.where {
+  display: inline-block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
