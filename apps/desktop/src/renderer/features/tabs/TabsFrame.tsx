@@ -75,7 +75,7 @@ export const useLastRoom = (projectId: string): readonly [Room | null, (room: Ro
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
   const update = useUpdate()
-  const load = useLoad()
+  const load = useLoad(!tabs.none)
   const [end, setEnd] = useState<HTMLElement | null>(null)
   const { select, current, newProject, none } = tabs
   const open = tabs.tabs.map((tab) => tab.id)

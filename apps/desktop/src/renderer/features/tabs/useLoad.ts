@@ -98,11 +98,12 @@ export interface LoadModel {
   readonly hide: () => void
 }
 
-export const useLoad = (): LoadModel => {
+/** `shown`: whether there is a bar to show it in; before there is any project, the first screen has none. */
+export const useLoad = (shown: boolean): LoadModel => {
   const { client } = useServices()
   const navigate = useNavigate()
   const { preferences, read, set } = usePreferences()
-  const on = read && preferences.showLoad
+  const on = shown && read && preferences.showLoad
   const reading = useQuery({
     queryKey: ['load'],
     queryFn: () => client.getLoad(),

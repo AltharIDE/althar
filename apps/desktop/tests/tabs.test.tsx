@@ -337,6 +337,13 @@ describe('how hard the Mac works, in the bar', () => {
     expect(client.getLoad).toHaveBeenCalledTimes(reads)
   })
 
+  it('isn’t read before there is a project, when the first screen has the window and no bar', async () => {
+    const { client } = windowAt('/', [])
+    await waitFor(() => expect(client.listProjects).toHaveBeenCalled())
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(client.getLoad).not.toHaveBeenCalled()
+  })
+
   it('is never read while it is off', async () => {
     const host = fakeHost()
     await host.setPreference('showLoad', false)
