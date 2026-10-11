@@ -359,8 +359,12 @@ export const transcript = (threadId: string, budget: number) =>
       const content = JSON.parse(item.content) as Record<string, unknown>
       const text = (key: string) => (typeof content[key] === 'string' ? (content[key] as string) : '')
       switch (item.kind) {
-        case 'user_message':
-          return [`[person] ${text('text')}`]
+        case 'user_message': {
+          // Images the person sent are said, though only the agent they went to saw them.
+          const pictures = Array.isArray(content['pictures']) ? content['pictures'].length : 0
+          const sent = pictures === 0 ? '' : ` [sent ${pictures === 1 ? 'an image' : `${pictures} images`}]`
+          return [`[person] ${text('text')}${sent}`]
+        }
         case 'agent_message':
           return [`[${item.agentId ?? 'agent'}] ${text('text')}`]
         case 'tool_call':

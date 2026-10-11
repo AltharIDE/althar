@@ -43,6 +43,8 @@ export interface AgentModels {
   readonly blocked: ReadonlyArray<string>
   /** Being asked now, for an agent not seen before. */
   readonly probing: boolean
+  /** It takes images in a message, as it said when last asked or started; null until it has said. */
+  readonly images: boolean | null
 }
 
 type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | SignIns
@@ -91,7 +93,7 @@ const effortsOn = (definition: AgentDefinition, options: ReadonlyArray<ConfigOpt
 }
 
 /** An agent's models, from its session's settings: the efforts of the one it is on, and what it is on. */
-export const modelsOf = (definition: AgentDefinition, options: ReadonlyArray<ConfigOption>): Offered => {
+export const modelsOf = (definition: AgentDefinition, options: ReadonlyArray<ConfigOption>, images: boolean | null = null): Offered => {
   const on = current(modelOption(definition, options))
   const { efforts } = effortsOn(definition, options)
   return {
@@ -106,6 +108,7 @@ export const modelsOf = (definition: AgentDefinition, options: ReadonlyArray<Con
     })),
     model: on,
     effort: current(effortOption(definition, options)),
+    images,
   }
 }
 
@@ -116,10 +119,10 @@ export const modelsOf = (definition: AgentDefinition, options: ReadonlyArray<Con
  * A model it can't be put on, or isn't put on in time, keeps what is known
  * of it.
  */
-const walk = (definition: AgentDefinition, session: AgentSession) =>
+const walk = (definition: AgentDefinition, session: AgentSession, images: boolean) =>
   Effect.gen(function* () {
     const first = yield* session.options
-    const offered = modelsOf(definition, first)
+    const offered = modelsOf(definition, first, images)
     // The model it is on has said already.
     const read = new Map(
       offered.models
@@ -149,6 +152,18 @@ const settingsIn = (config: string): ReadonlyArray<ConfigOption> => {
     return Array.isArray(options) ? (options as ReadonlyArray<ConfigOption>) : []
   } catch {
     return []
+  }
+}
+
+/** Whether a session's agent said it takes images, as its settings kept what it said of itself; null for one from before that was kept. */
+const imagesIn = (config: string): boolean | null => {
+  try {
+    const parsed: unknown = JSON.parse(config)
+    const agent = typeof parsed === 'object' && parsed !== null && 'agent' in parsed ? parsed.agent : undefined
+    const images = typeof agent === 'object' && agent !== null && 'images' in agent ? agent.images : undefined
+    return typeof images === 'boolean' ? images : null
+  } catch {
+    return null
   }
 }
 
@@ -217,7 +232,7 @@ export class Models extends Context.Service<
               const read = yield* Effect.exit(
                 Effect.scoped(
                   Effect.gen(function* () {
-                    const session = yield* Effect.gen(function* () {
+                    const { session, images } = yield* Effect.gen(function* () {
                       const connection = yield* connect({
                         transport,
                         // It is never prompted, so it has nothing to ask.
@@ -232,14 +247,15 @@ export class Models extends Context.Service<
                           environmentDigest: connection.process.environmentDigest,
                           state: 'running',
                         })
-                      return yield* connection.newSession({
+                      const session = yield* connection.newSession({
                         cwd: folder,
                         mode: definition.modes.reader,
                         modeOptionId: definition.options.mode,
                         ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta('reader') }),
                       })
+                      return { session, images: connection.info.images }
                     }).pipe(Effect.timeout(PROBE_TIMEOUT))
-                    return yield* walk(definition, session)
+                    return yield* walk(definition, session, images)
                   }),
                 ),
               )
@@ -268,7 +284,7 @@ export class Models extends Context.Service<
             SELECT config, model, effort FROM provider_sessions WHERE agent_id = ${definition.id} AND config IS NOT NULL
             ORDER BY started_at DESC LIMIT 1`
           const settings = latest === undefined ? [] : settingsIn(latest.config)
-          const seen = modelsOf(definition, settings)
+          const seen = modelsOf(definition, settings, latest === undefined ? null : imagesIn(latest.config))
           const now = latest === undefined ? {} : { model: latest.model, effort: latest.effort }
           // What it said when asked this launch is newer than any session: a model it offers since then is there.
           const asked = probed.get(definition.id)
