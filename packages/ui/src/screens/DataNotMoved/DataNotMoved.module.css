@@ -59,11 +59,12 @@
   border-top: 1px solid var(--line-2);
 }
 
+/* --t-2, not --t-3: on the page's paper, --t-3 falls just short of 4.5:1 at this size. */
 .label {
   margin: 0;
   font-size: 11.5px;
   font-weight: 500;
-  color: var(--t-3);
+  color: var(--t-2);
 }
 
 .path,
