@@ -155,7 +155,7 @@ export function StartView({
             onCancel={model.cancelForming}
             creating={model.creating}
             {...(model.error === null ? {} : { error: model.error })}
-            text={{ sources: text.forming.sources, foot: text.forming.foot, permission: rulesText.screen.permission }}
+            text={{ sources: text.forming.sources, foot: text.forming.foot, permission: rulesText.permission }}
           />
         </div>
       </div>

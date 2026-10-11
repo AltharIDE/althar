@@ -19,6 +19,15 @@ const openRules = async (page: Page) => {
   await page.getByRole('menuitem', { name: 'Project rules' }).click()
 }
 
+/** One sentence of the rules, by its word in the margin. */
+const sentence = (page: Page, label: string) => page.getByRole('listitem', { name: label })
+
+/** Opens a built-in word's menu and picks what it should be. */
+const choose = async (page: Page, word: string, option: string) => {
+  await page.getByRole('button', { name: word, exact: true }).click()
+  await page.getByRole('menuitemradio', { name: option }).click()
+}
+
 test('changes a project’s rules from its title bar, and keeps them', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
@@ -27,30 +36,36 @@ test('changes a project’s rules from its title bar, and keeps them', async () 
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await openRules(page)
-    await expect(page.getByRole('radio', { name: /Allow, except what you keep/ })).toBeChecked()
-    await page.getByRole('radio', { name: /The coordinator decides/ }).click()
+    await expect(page.getByRole('heading', { name: 'Rules', level: 1 })).toBeVisible()
+    await expect(sentence(page, 'The rest')).toContainText('Everything else: allowed. What Althar can’t read comes to you.')
+    await choose(page, 'allowed', 'The coordinator decides')
+    await expect(sentence(page, 'The rest')).toContainText('the coordinator decides. What it can’t settle')
     await page.screenshot({ path: 'test-results/rules-top.png', animations: 'disabled' })
 
-    const always = page.getByRole('group', { name: 'Always ask me' })
-    await expect(always.getByRole('checkbox', { name: 'Force pushes' })).toBeChecked()
-    await always.getByRole('checkbox', { name: 'Force pushes' }).click()
-    await page.getByRole('group', { name: 'Never' }).getByRole('checkbox', { name: 'Force pushes' }).click()
-    await page.getByRole('button', { name: 'Add a rule' }).first().click()
+    // A new project asks about every kind; force pushes move to Never, and only there.
+    await expect(sentence(page, 'Ask me').getByRole('button', { name: 'force pushing' })).toBeVisible()
+    await choose(page, 'force pushing', 'Never')
+    await expect(sentence(page, 'Never')).toContainText('Agents never force push.')
+    await expect(sentence(page, 'Ask me').getByRole('button', { name: 'force pushing' })).toHaveCount(0)
+
+    // A command, added where its sentence ends.
+    await page.getByRole('button', { name: 'Add a command to Ask me' }).click()
     await page.getByRole('textbox', { name: 'A command, as it starts' }).fill('terraform *')
-    await page.getByRole('button', { name: 'Add', exact: true }).click()
-    await expect(always.getByRole('checkbox', { name: 'Commands starting “terraform *”' })).toBeChecked()
-    await page.getByRole('radio', { name: /Push the branch only/ }).click()
+    await page.keyboard.press('Enter')
+    await expect(sentence(page, 'Ask me').getByText('terraform *', { exact: true })).toBeVisible()
+    await choose(page, 'a draft pull request', 'Push the branch only')
+    await expect(sentence(page, 'Finished')).toContainText('A finished task pushes its branch alone')
     await page.screenshot({ path: 'test-results/rules.png', animations: 'disabled', fullPage: true })
 
-    // Back to the project and in again: as it was left.
-    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    // Back to the project with Escape, and in again: as it was left.
+    await page.keyboard.press('Escape')
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await openRules(page)
-    await expect(page.getByRole('radio', { name: /The coordinator decides/ })).toBeChecked()
-    await expect(page.getByRole('group', { name: 'Always ask me' }).getByRole('checkbox', { name: 'Force pushes' })).not.toBeChecked()
-    await expect(page.getByRole('group', { name: 'Never' }).getByRole('checkbox', { name: 'Force pushes' })).toBeChecked()
-    await expect(page.getByRole('checkbox', { name: 'Commands starting “terraform *”' })).toBeChecked()
-    await expect(page.getByRole('radio', { name: /Push the branch only/ })).toBeChecked()
+    await expect(sentence(page, 'The rest')).toContainText('the coordinator decides')
+    await expect(sentence(page, 'Never').getByRole('button', { name: 'force push', exact: true })).toBeVisible()
+    await expect(sentence(page, 'Ask me').getByRole('button', { name: 'force pushing' })).toHaveCount(0)
+    await expect(sentence(page, 'Ask me').getByText('terraform *', { exact: true })).toBeVisible()
+    await expect(sentence(page, 'Finished')).toContainText('A finished task pushes its branch alone')
   } finally {
     await electronApp.close()
   }
@@ -62,7 +77,8 @@ test('the coordinator answers a task permission, leaves always-ask items to the 
   try {
     await openFirstProject(electronApp, page, repository(home))
     await openRules(page)
-    await page.getByRole('radio', { name: /The coordinator decides/ }).click()
+    await choose(page, 'allowed', 'The coordinator decides')
+    await expect(sentence(page, 'The rest')).toContainText('the coordinator decides')
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await startTask(page, 'Verify the checkout')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
