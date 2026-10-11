@@ -1014,6 +1014,7 @@ describe('how a command reads at a glance', () => {
     assert.strictEqual(shortCommand('printf "1">/tmp/log'), 'printf 1')
     assert.strictEqual(shortCommand('printf \\1>/tmp/log'), 'printf 1')
     assert.strictEqual(shortCommand('bun dev 12>/tmp/log'), 'bun dev')
+    assert.strictEqual(shortCommand('printf 1&>/tmp/log'), 'printf 1')
     assert.strictEqual(shortCommand('echo \\> x'), "echo '>' x")
   })
 

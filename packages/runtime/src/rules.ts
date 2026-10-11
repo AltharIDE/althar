@@ -400,7 +400,7 @@ const splitCommandLine = (text: string) => {
     const redirect = REDIRECTS.find((candidate) => rest.startsWith(candidate))
     if (redirect !== undefined) {
       // `1>file`: the descriptor belongs to the redirect, not to the arguments.
-      if (inWord && !literal && /^\d+$/.test(word) && redirect !== '<') {
+      if (inWord && !literal && /^\d+$/.test(word) && ['>', '>>', '2>'].includes(redirect)) {
         word = ''
         inWord = false
       }
