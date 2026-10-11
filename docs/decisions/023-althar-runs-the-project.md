@@ -23,10 +23,11 @@
     script, else its start or serve script, with the package manager its
     lockfile names; else a Procfile's web process; else a Makefile's dev,
     run or serve target. The setup: installing its package.json's packages,
-    with the package manager its lockfile names (`bun install
-    --frozen-lockfile`, `pnpm` and `yarn` the same, `npm ci`), whether or not
-    it says how it runs, and also where only a command is kept. Installing
-    never changes the lockfile.
+    or a monorepo's workspaces', with the package manager its lockfile names
+    (`bun install --frozen-lockfile`, `pnpm` and `yarn` the same, `npm ci`),
+    whether or not it says how it runs, and also where only a command is
+    kept; before a run, only where nothing is installed yet. Installing never
+    changes the lockfile.
   - **Althar sets up a task's worktree with it,** itself and outside any
     agent's sandbox, as the worktree is made, before its lead starts; the
     lead's sandbox stays as strict as it is. It runs once per worktree, kept
@@ -75,9 +76,10 @@
   - **A mini task whose lead runs it.** A model's turn for one command, and
     a sandbox in the way.
   - **Two setups, one for a run and one for a new worktree.** Both make a
-    fresh copy ready, and the worked-out one is guarded to install only
-    where nothing is, so one value does for both, and the coordinator keeps
-    one thing.
+    fresh copy ready, so one value does for both, and the coordinator keeps
+    one thing. Only the worked-out install differs: before a run it is
+    skipped where `node_modules` is there, and in a new worktree it always
+    runs, since the workspace keeps whether it did.
   - **Widening the lead's sandbox to the package manager's folders.** Every
     package manager has its own, and a lead could then write to a cache
     every other project shares.

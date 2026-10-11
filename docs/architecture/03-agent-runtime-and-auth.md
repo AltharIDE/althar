@@ -829,14 +829,19 @@ Conductor and Codex do, and the lead's sandbox stays as strict as it is
 
 - **What runs** is the setup kept for the repository (`set_run_command`'s
   `setup`, the same one a run of the project starts with), else the install
-  its lockfile names, guarded so it installs only where nothing is
-  installed: `bun install --frozen-lockfile`, `pnpm install
+  its lockfile names: `bun install --frozen-lockfile`, `pnpm install
   --frozen-lockfile`, `yarn install --frozen-lockfile`, `npm ci`. It never
-  changes the lockfile. A repository with no packages has nothing run.
+  changes the lockfile. Its packages are its package.json's own, or, at the
+  root of a monorepo, its workspaces' (or those a `pnpm-workspace.yaml`
+  names). A repository with no packages has nothing run. Before a run, the
+  install is skipped where `node_modules` is there; in a worktree it runs
+  whatever `node_modules` holds, since an install Althar quitting cut short
+  leaves one, and whether the worktree is set up is kept on its workspace.
 - **When:** as the task's worktrees are made (a draft's too, so it is ready
   by the time its plan starts), and again for a worktree a reopened task
-  puts back. How it went is kept on the workspace, so a lead that starts
-  again, or a task that resumes, doesn't set it up again.
+  puts back, as soon as it is back. How it went is kept on the workspace, so
+  a lead that starts again, or a task that resumes, doesn't set it up again,
+  and one Althar quit during is set up again before its lead's first turn.
 - **Where and how:** in the worktree (the folder in it the project is
   about, where there is one), in the person's login shell, interactive, so
   it finds their tools as their terminal would. It is Althar's own process

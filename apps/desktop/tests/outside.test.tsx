@@ -774,7 +774,7 @@ describe('running what a task built, with no agent', () => {
     current = { ...thread, items: [...thread.items, ended({})] }
     act(() => emit(changed('thread_item', setup.id)))
     expect(await screen.findByText('Installed dependencies in meridian')).toBeTruthy()
-    expect(screen.queryByText('test -d node_modules || bun install --frozen-lockfile')).toBeNull()
+    expect(screen.queryByText('bun install --frozen-lockfile')).toBeNull()
     // Failed, the end of what it printed stands under it, with how it ended; the lead hears of it.
     current = { ...thread, items: [...thread.items, ended({ code: 1, last: 'resolving\nerror: lockfile had changes' })] }
     act(() => emit(changed('thread_item', setup.id)))

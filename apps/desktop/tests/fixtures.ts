@@ -400,7 +400,7 @@ export const items = {
     kind: 'setup',
     content: {
       repository: 'meridian',
-      command: 'test -d node_modules || bun install --frozen-lockfile',
+      command: 'bun install --frozen-lockfile',
       kept: false,
       startedAt: NOW,
       ended: null,
