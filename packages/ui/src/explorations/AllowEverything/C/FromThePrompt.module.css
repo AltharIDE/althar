@@ -1,0 +1,16 @@
+.said {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-1);
+}
+.fixed {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.foot {
+  display: flex;
+  margin-top: 12px;
+}

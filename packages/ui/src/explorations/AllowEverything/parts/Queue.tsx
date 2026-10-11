@@ -13,7 +13,7 @@ import { ESCALATE, type PromptAnswer, type PromptCardProps, StackFrame } from '.
  * switch or a mode turned on while they waited (A, B, D). Then whatever
  * was still waiting folds into one quiet line saying what let it through,
  * which opens to each command. What went ahead stays gone if the switch is
- * turned off again: it has already run.
+ * turned off again, or the task asks again: it has already run.
  */
 
 export interface QueueText {
@@ -47,20 +47,30 @@ export interface QueueProps {
   card: (request: PermissionRequest, card: Pick<PromptCardProps, 'pos' | 'total' | 'onAnswer' | 'onAll' | 'phase'>) => ReactNode
   /** Let through from outside while they waited, by a switch or a mode. Null while they wait. */
   clearedBy?: ClearedBy | null
+  /** Start as if the card in front had been answered by stopping asking: the state after it. */
+  defaultEscalated?: boolean
   /** The card in front was answered by stopping asking on the task. */
   onEscalate?: () => void
-  /** Stopping asking taken back: what hadn't run yet waits again. */
-  onUndoEscalate?: () => void
+  /**
+   * Ask again on the task, from the line stopping asking left; given while
+   * the task still doesn't ask. What went ahead stays as it is: it ran.
+   */
+  onAskAgain?: () => void
   text?: Partial<QueueText>
 }
 
 const BEAT = 420
 const OUT = 220
 
-export function Queue({ items, project, card, clearedBy = null, onEscalate, onUndoEscalate, text }: QueueProps) {
+export function Queue({ items, project, card, clearedBy = null, defaultEscalated = false, onEscalate, onAskAgain, text }: QueueProps) {
   const t = { ...queueText, ...text }
-  const [answers, setAnswers] = useState<ReadonlyMap<string, PromptAnswer>>(new Map())
-  const [through, setThrough] = useState<{ ids: readonly string[]; by: ClearedBy } | null>(null)
+  const [first, ...rest] = items
+  const [answers, setAnswers] = useState<ReadonlyMap<string, PromptAnswer>>(
+    defaultEscalated && first !== undefined ? new Map([[first.id, { decision: ESCALATE, cmd: first.cmd }]]) : new Map(),
+  )
+  const [through, setThrough] = useState<{ ids: readonly string[]; by: ClearedBy } | null>(
+    defaultEscalated ? { ids: rest.map((it) => it.id), by: { why: t.escalatedRest, rule: t.escalatedRule } } : null,
+  )
   const [phase, setPhase] = useState<'beat' | 'out' | 'outNo' | null>(null)
   const timers = useRef<number[]>([])
   useEffect(() => () => timers.current.forEach((x) => window.clearTimeout(x)), [])
@@ -103,19 +113,7 @@ export function Queue({ items, project, card, clearedBy = null, onEscalate, onUn
     if (a === undefined) return []
     if (a.decision === ESCALATE)
       return [
-        <AskAnswered
-          key={it.id}
-          said={t.escalated}
-          undo={t.undo}
-          onUndo={
-            onUndoEscalate &&
-            (() => {
-              setAnswers(new Map())
-              setThrough(null)
-              onUndoEscalate()
-            })
-          }
-        >
+        <AskAnswered key={it.id} said={t.escalated} undo={t.undo} onUndo={onAskAgain}>
           <AskNote>{t.escalatedNote}</AskNote>
         </AskAnswered>,
       ]
