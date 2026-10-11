@@ -487,6 +487,8 @@ describe('a project, reaching outside', () => {
     expect(screen.queryByRole('dialog', { name: 'meridian’s settings' })).toBeNull()
     await userEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // Focus goes back to the button the settings opened from.
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Settings' })))
     // On the board too, where nothing of the conversation shows.
     await userEvent.click(screen.getByRole('radio', { name: 'Board' }))
     await connectFromSettings()

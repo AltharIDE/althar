@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import type { ConnectionList, ProjectRepository, ProjectSummary } from '@althar/contracts'
 import {
@@ -104,8 +104,10 @@ export function ProjectSettings({
   // Who Althar is connected as there: on that very server, not another of the same product.
   const hostLogin = host === null ? null : connectedAs(list, host.product, hostNameOf(host.webUrl))
   const trackerLogin = tracker === null ? null : connectedAs(list, tracker.product, tracker.at)
-  // Each opened from the panel goes over the screen on its own.
+  // Each opened from the panel goes over the screen on its own, and gives focus back to the button when it closes.
+  const button = useRef<HTMLButtonElement>(null)
   const leave = (then: () => void) => () => {
+    button.current?.focus()
     setOpen(false)
     then()
   }
@@ -114,7 +116,7 @@ export function ProjectSettings({
     <>
       <ControlCenter
         trigger={
-          <Button size="small" variant="quiet" icon="gear">
+          <Button ref={button} size="small" variant="quiet" icon="gear">
             {text.settings}
           </Button>
         }

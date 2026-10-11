@@ -1,5 +1,5 @@
 import { Dialog as D } from 'radix-ui'
-import type { FormEvent, ReactNode } from 'react'
+import { type FormEvent, type ReactNode, useState } from 'react'
 
 import { cx } from '../../lib/cx'
 import s from './Dialog.module.css'
@@ -7,9 +7,10 @@ import s from './Dialog.module.css'
 /*
  * A short modal question over the window: a title, a line or two on what
  * happens, what it needs, and its buttons, the one that does it last. Built
- * on Radix's dialog, which keeps focus inside, gives it back on closing, and
- * closes on Escape or a click outside. Mount it to open it. With `onSubmit`
- * it is a form: Enter in a field submits it.
+ * on Radix's dialog, which keeps focus inside and closes on Escape or a
+ * click outside. Mount it to open it; unmounted, it gives focus back to what
+ * had it as it opened, where that is still there. With `onSubmit` it is a
+ * form: Enter in a field submits it.
  */
 
 export interface DialogProps {
@@ -28,6 +29,8 @@ export interface DialogProps {
 }
 
 export function Dialog({ title, description, children, actions, onClose, onSubmit, width = 420, className }: DialogProps) {
+  // It has no trigger of Radix's to go back to: what had focus as it opened is where focus goes again.
+  const [opener] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null))
   const body = (
     <>
       <D.Title className={s.title}>{title}</D.Title>
@@ -49,6 +52,10 @@ export function Dialog({ title, description, children, actions, onClose, onSubmi
           className={cx('ch-root', s.dialog, className)}
           style={{ width: `min(${width}px, calc(100vw - 32px))` }}
           {...(description == null ? { 'aria-describedby': undefined } : {})}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            if (opener?.isConnected === true) opener.focus()
+          }}
           asChild={onSubmit !== undefined}
         >
           {onSubmit === undefined ? (
