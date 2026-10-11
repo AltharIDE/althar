@@ -37,8 +37,15 @@ From `apps/desktop`:
 | `bun run check` | Format, type-aware lint and type checks |
 | `bun run test` | The window's view models and views against a fake client, and its client against the real runtime |
 | `bun run test:coverage` | The same, with the coverage gate: 90% of lines and branches |
-| `bun run test:e2e` | Builds the app and drives it with Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; and, with the fake GitHub, connecting it and a task ending in a draft pull request |
-| `bun run verify` | Check, coverage and the end-to-end tests, as CI runs them |
+| `bun run test:e2e` | Builds the app and drives it with Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; and, with the fake GitHub, connecting it and a task ending in a draft pull request. Arguments go to Playwright: `bun run test:e2e e2e/home.spec.ts` runs one file |
+| `bun run verify` | Check and coverage |
+| `bun run verify:all` | Check, coverage and the end-to-end tests, as CI runs them |
+
+On a Mac, the end-to-end tests run quietly, so you can keep working while they run: the app never takes focus and has no Dock icon, its window and the island are see-through, and no notifications reach the system. At most three runs go at once on the computer, and one per worktree (`ALTHAR_E2E_SLOTS` changes how many); a waiting run says which ones it waits for. To watch the app as the tests drive it, run them in the foreground:
+
+```bash
+ALTHAR_E2E_FOREGROUND=1 bun run test:e2e
+```
 
 ### The packaged app
 

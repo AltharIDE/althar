@@ -31,6 +31,8 @@ export interface EdgeHost {
   readonly page: string
   /** resources/tray, the menu bar's pictures. */
   readonly pictures: string
+  /** The end-to-end tests' quiet run (main.ts): the island is drawn clear and never takes the pointer. */
+  readonly quiet?: boolean
 }
 
 /** The island's window: room for it open, and for a call said beside the notch. Clicks go through what it doesn't draw. */
@@ -144,6 +146,7 @@ export const startEdge = (host: EdgeHost): Edge => {
       enableLargerThanScreen: true,
     })
     made.setIgnoreMouseEvents(true, { forward: true })
+    if (host.quiet === true) made.setOpacity(0)
     // Over the menu bar and its items, under a menu that opens later.
     made.setAlwaysOnTop(true, 'pop-up-menu')
     made.once('ready-to-show', () => {
@@ -182,7 +185,7 @@ export const startEdge = (host: EdgeHost): Edge => {
 
   /* Clicks land on the island while the pointer is on what it draws, and go through elsewhere; the page hears which, to open and close. */
   const watch = setInterval(() => {
-    if (island === undefined || island.isDestroyed() || drawn === null || !island.isVisible()) return
+    if (island === undefined || island.isDestroyed() || drawn === null || !island.isVisible() || host.quiet === true) return
     // Against where the window is now, which a change of screens may have moved.
     const on = pointerOn(drawn, island.getBounds(), screen.getCursorScreenPoint())
     if (on === pointed) return
