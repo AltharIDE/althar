@@ -68,11 +68,31 @@ const manifestIn = (folder: string): Readonly<Record<string, unknown>> | undefin
 const managerOf = (folder: string, root: string) =>
   MANAGERS.find((one) => existsSync(join(folder, one.lockfile)) || existsSync(join(root, one.lockfile)))
 
-/** What installs a package.json's packages, where it has any and none are installed yet; null for nothing to install. */
-const installFor = (manifest: Readonly<Record<string, unknown>>, folder: string, root: string, platform: NodeJS.Platform) => {
-  const packages = [manifest.dependencies, manifest.devDependencies].some((field) => Object.keys(recordOf(field) ?? {}).length > 0)
-  return packages ? unlessInstalled(managerOf(folder, root)?.install ?? 'npm install --no-package-lock', platform) : null
+/** The workspaces a package.json names: npm's, Yarn's and Bun's list, or Yarn's `{ packages }`. */
+const workspacesOf = (manifest: Readonly<Record<string, unknown>>): ReadonlyArray<unknown> => {
+  const named = manifest.workspaces
+  return Array.isArray(named)
+    ? named
+    : Array.isArray(recordOf(named)?.packages)
+      ? (recordOf(named)?.packages as ReadonlyArray<unknown>)
+      : []
 }
+
+/**
+ * What installs a package.json's packages, where it has any: its own, or its
+ * workspaces' at the root of a monorepo (pnpm names those beside it). Null for
+ * nothing to install.
+ */
+const installFor = (manifest: Readonly<Record<string, unknown>>, folder: string, root: string) => {
+  const own = [manifest.dependencies, manifest.devDependencies, manifest.optionalDependencies].some(
+    (field) => Object.keys(recordOf(field) ?? {}).length > 0,
+  )
+  const workspaces = workspacesOf(manifest).length > 0 || existsSync(join(folder, 'pnpm-workspace.yaml'))
+  return own || workspaces ? (managerOf(folder, root)?.install ?? 'npm install --no-package-lock') : null
+}
+
+/** What installs a package.json's packages only where none are installed yet, as a run wants before it starts. */
+const guarded = (install: string | null, platform: NodeJS.Platform) => (install === null ? null : unlessInstalled(install, platform))
 
 /** The command a package.json runs with, and what installs its packages first. */
 const fromPackage = (folder: string, root: string, platform: NodeJS.Platform): RunCommand | null => {
@@ -81,7 +101,10 @@ const fromPackage = (folder: string, root: string, platform: NodeJS.Platform): R
   const scripts = recordOf(manifest.scripts) ?? {}
   const script = SCRIPTS.find((name) => typeof scripts[name] === 'string')
   if (script === undefined) return null
-  return { command: `${managerOf(folder, root)?.name ?? 'npm'} run ${script}`, setup: installFor(manifest, folder, root, platform) }
+  return {
+    command: `${managerOf(folder, root)?.name ?? 'npm'} run ${script}`,
+    setup: guarded(installFor(manifest, folder, root), platform),
+  }
 }
 
 /** A Procfile's web process, as Heroku and Foreman run it. */
@@ -102,14 +125,21 @@ export const runCommandIn = (folder: string, root: string = folder, platform: No
   fromPackage(folder, root, platform) ?? fromProcfile(folder) ?? fromMakefile(folder)
 
 /**
- * What makes a fresh copy of the repository in `folder` ready, as what is in
- * it says, whether or not it says how it runs: installing its package.json's
- * packages, with the package manager its lockfile names. Null for nothing.
+ * What installs the packages of the repository in `folder`, as what is in it
+ * says, whether or not it says how it runs: its package.json's, or its
+ * workspaces', with the package manager its lockfile names. Run as it is,
+ * whatever is installed already: a task's worktree, whose setup is kept on
+ * its workspace, isn't taken as set up for a `node_modules` an install cut
+ * short left. Null for nothing to install.
  */
-export const setupIn = (folder: string, root: string = folder, platform: NodeJS.Platform = process.platform): string | null => {
+export const installIn = (folder: string, root: string = folder): string | null => {
   const manifest = manifestIn(folder)
-  return manifest === undefined ? null : installFor(manifest, folder, root, platform)
+  return manifest === undefined ? null : installFor(manifest, folder, root)
 }
+
+/** What makes a fresh copy ready before a run, as what is in it says: its install, only where nothing is installed yet. Null for nothing. */
+export const setupIn = (folder: string, root: string = folder, platform: NodeJS.Platform = process.platform): string | null =>
+  guarded(installIn(folder, root), platform)
 
 /**
  * How a repository runs and is made ready: what is kept for it, and, for

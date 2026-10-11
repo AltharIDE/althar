@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -10,7 +10,7 @@ import { SqlClient } from 'effect/sql'
 import { Instance } from '../src/Instance'
 import { Launches } from '../src/Launches'
 import { Projects } from '../src/Projects'
-import { runOf, setupIn } from '../src/runCommand'
+import { installIn, runOf, setupIn } from '../src/runCommand'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { lastLinesOf, type SetUp, shellFor, toldOf } from '../src/Setups'
@@ -30,7 +30,8 @@ const git = (cwd: string, ...args: Array<string>) =>
     .toString()
     .trim()
 
-const INSTALL = 'test -d node_modules || bun install --frozen-lockfile'
+/** The install a worktree gets, as its lockfile names it: run as it is, since its workspace keeps whether it ran. */
+const INSTALL = 'bun install --frozen-lockfile'
 
 /** A repository whose package.json needs a package Bun installs from inside it, with no network: its lockfile says so. */
 const withPackages = () => {
@@ -58,6 +59,55 @@ const withPackages = () => {
   return path
 }
 
+/** A monorepo whose root names only its workspaces, one of which needs another: its lockfile says so, for Bun to install with no network. */
+const withWorkspaces = () => {
+  const path = repository()
+  mkdirSync(join(path, 'packages', 'greet'), { recursive: true })
+  mkdirSync(join(path, 'packages', 'app'), { recursive: true })
+  writeFileSync(join(path, 'packages', 'greet', 'package.json'), JSON.stringify({ name: 'greet', version: '1.0.0', main: 'index.js' }))
+  writeFileSync(join(path, 'packages', 'greet', 'index.js'), "module.exports = 'hello'\n")
+  writeFileSync(
+    join(path, 'packages', 'app', 'package.json'),
+    JSON.stringify({ name: 'app', version: '1.0.0', dependencies: { greet: 'workspace:*' } }),
+  )
+  writeFileSync(join(path, 'package.json'), JSON.stringify({ name: 'meridian', private: true, workspaces: ['packages/*'] }))
+  writeFileSync(
+    join(path, 'bun.lock'),
+    `${JSON.stringify(
+      {
+        lockfileVersion: 1,
+        configVersion: 1,
+        workspaces: {
+          '': { name: 'meridian' },
+          'packages/app': { name: 'app', version: '1.0.0', dependencies: { greet: 'workspace:*' } },
+          'packages/greet': { name: 'greet', version: '1.0.0' },
+        },
+        packages: { app: ['app@workspace:packages/app'], greet: ['greet@workspace:packages/greet'] },
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFileSync(join(path, '.gitignore'), 'node_modules\n')
+  git(path, 'add', '.')
+  git(path, 'commit', '-q', '-m', 'Workspaces')
+  return path
+}
+
+/** A folder holding a repository for each name, opened as one project of several. */
+const folderOf = (...names: ReadonlyArray<string>) => {
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+  for (const name of names) {
+    const path = join(folder, name)
+    mkdirSync(path)
+    git(path, 'init', '-q', '-b', 'main')
+    writeFileSync(join(path, 'README.md'), `# ${name}\n`)
+    git(path, 'add', '.')
+    git(path, 'commit', '-q', '-m', 'Start')
+  }
+  return folder
+}
+
 /** Opens a repository as a project, keeping a setup for it where one is given, and makes a task in it. */
 const taskIn = (path: string, setup?: string) =>
   Effect.gen(function* () {
@@ -81,7 +131,10 @@ const taskIn = (path: string, setup?: string) =>
 const workspacesOf = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{ path: string; setup: string | null }>`SELECT path, setup FROM workspaces WHERE task_id = ${taskId}`
+    const rows = yield* sql<{
+      path: string
+      setup: string | null
+    }>`SELECT path, setup FROM workspaces WHERE task_id = ${taskId} ORDER BY rowid`
     return rows.map((row) => ({ path: row.path, setup: row.setup === null ? null : (JSON.parse(row.setup) as SetUp) }))
   })
 
@@ -163,6 +216,29 @@ describe('what sets up a worktree', () => {
     const broken = folder()
     writeFileSync(join(broken, 'package.json'), '{ not json')
     assert.isNull(setupIn(broken))
+  })
+
+  it('installs a monorepo whose root names only its workspaces, as npm, Yarn, Bun and pnpm name them', () => {
+    const named = [{ workspaces: ['packages/*'] }, { workspaces: { packages: ['apps/*'] } }]
+    for (const fields of named) {
+      const root = folder()
+      manifest(root, { name: 'meridian', private: true, ...fields })
+      writeFileSync(join(root, 'yarn.lock'), '')
+      assert.strictEqual(installIn(root), 'yarn install --frozen-lockfile')
+    }
+    const pnpm = folder()
+    manifest(pnpm, { name: 'meridian', private: true })
+    writeFileSync(join(pnpm, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n")
+    writeFileSync(join(pnpm, 'pnpm-lock.yaml'), '')
+    assert.strictEqual(installIn(pnpm), 'pnpm install --frozen-lockfile')
+    // Before a run, only where nothing is installed yet; in a worktree, as it is.
+    assert.strictEqual(setupIn(pnpm, pnpm, 'darwin'), 'test -d node_modules || pnpm install --frozen-lockfile')
+    const none = folder()
+    manifest(none, { name: 'meridian', workspaces: [] })
+    assert.isNull(installIn(none))
+    const optional = folder()
+    manifest(optional, { optionalDependencies: { fsevents: '2' } })
+    assert.strictEqual(installIn(optional), 'npm install --no-package-lock')
   })
 
   it('is the setup kept for the repository, else the install it needs; one value, before a run and in a new worktree alike', () => {
@@ -257,6 +333,32 @@ describe('setting up a task’s worktree', () => {
       // The lead's first turn says so.
       const brief = yield* lead(task.threadId)
       assert.include(brief, `When the worktree was made, Althar set it up with \`${INSTALL}\`, and that went through`)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('installs a monorepo whose root names only its workspaces', () =>
+    Effect.gen(function* () {
+      const { task } = yield* taskIn(withWorkspaces())
+      const [workspace] = yield* setUp(task.taskId, Duration.seconds(60))
+      assert.deepInclude(workspace?.setup, { command: INSTALL, code: 0 })
+      assert.isTrue(existsSync(join(task.worktree, 'packages', 'app', 'node_modules', 'greet', 'index.js')))
+      assert.strictEqual(git(task.worktree, 'status', '--porcelain'), '')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('installs again where an install was cut short, though it left a node_modules', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { task } = yield* taskIn(withPackages())
+      yield* setUp(task.taskId, Duration.seconds(60))
+      // As Althar quitting while Bun installs leaves it: the folder made, the package not yet in it, and nothing kept.
+      rmSync(join(task.worktree, 'node_modules', 'greet'), { recursive: true, force: true })
+      assert.isTrue(existsSync(join(task.worktree, 'node_modules')))
+      yield* sql`UPDATE workspaces SET setup = NULL WHERE task_id = ${task.taskId}`
+      const brief = yield* lead(task.threadId)
+      assert.isTrue(existsSync(join(task.worktree, 'node_modules', 'greet', 'index.js')))
+      assert.include(brief, `Althar set it up with \`${INSTALL}\`, and that went through`)
+      assert.lengthOf(yield* setupItems(task.threadId), 2)
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -378,6 +480,47 @@ describe('setting up a task’s worktree', () => {
         assert.deepInclude((again?.ended ?? {}) as object, { code: 0, stopped: false })
       }).pipe(Effect.provide(runtime(file)))
     }),
+  )
+
+  it.live('sets up again each worktree a reopening put back, though another of the task’s couldn’t be, once that one can', () =>
+    Effect.gen(function* () {
+      const tasks = yield* Tasks
+      const projects = yield* Projects
+      const launches = yield* Launches
+      const personId = (yield* Instance).personId
+      const folder = folderOf('api', 'web')
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: folder })
+      for (const repository of ['api', 'web'])
+        yield* launches.keep({
+          projectId: project.projectId,
+          repository,
+          run: { command: 'node serve.js', setup: 'printf x >> setups.txt' },
+          actorId: personId,
+        })
+      const task = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Share the retry',
+        repositories: ['api', 'web'],
+      })
+      const [api, web] = yield* setUp(task.taskId)
+      const setups = (path: string | undefined) => readFileSync(join(path ?? '', 'setups.txt'), 'utf8')
+      assert.deepStrictEqual([setups(api?.path), setups(web?.path)], ['x', 'x'])
+      yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task.taskId })
+      // Both folders went, and web's branch too: reopening puts api back, then can't put web back.
+      for (const path of [api?.path, web?.path]) rmSync(path ?? '', { recursive: true, force: true })
+      git(join(folder, 'web'), 'worktree', 'prune')
+      git(join(folder, 'web'), 'branch', '-D', task.branch)
+      const refused = yield* Effect.flip(tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: task.taskId }))
+      assert.deepInclude(refused, { why: 'branch_gone' })
+      assert.isTrue(existsSync(api?.path ?? ''))
+      assert.isNull((yield* workspacesOf(task.taskId))[0]?.setup)
+      // The branch back, reopening puts web back too; api, there already, is still set up again.
+      git(join(folder, 'web'), 'branch', task.branch, 'main')
+      yield* tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: task.taskId })
+      yield* setUp(task.taskId)
+      assert.deepStrictEqual([setups(api?.path), setups(web?.path)], ['x', 'x'])
+    }).pipe(Effect.provide(runtime())),
   )
 
   it.live('doesn’t set a worktree up again when its lead starts again, but does once the worktree is made again', () =>

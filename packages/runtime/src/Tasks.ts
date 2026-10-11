@@ -325,34 +325,39 @@ export class Tasks extends Context.Service<
           const [project] = yield* sql<{ id: string }>`
             SELECT id FROM projects WHERE id = ${standing.projectId} AND archived_at IS NULL`
           if (project === undefined) return yield* new NotFound({ kind: 'project', id: standing.projectId })
-          // Its worktrees, each put back on its branch where its folder went: git runs before anything is written.
+          // Its worktrees, each put back on its branch where its folder went: git runs before the task is written.
           const worktrees = yield* sql<{ id: string; path: string; branch: string; repository: string }>`
             SELECT w.id, w.path, w.branch, l.path AS repository FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = w.binding_id AND l.device_id = ${instance.deviceId}
-            WHERE w.task_id = ${input.taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready'`
-          const restored: Array<string> = []
+            WHERE w.task_id = ${input.taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
+            ORDER BY b.created_at, b.rowid`
+          let restored = false
           for (const worktree of worktrees) {
             if (existsSync(worktree.path)) continue
             if (!(yield* branchExists(worktree.repository, worktree.branch)))
               return yield* new TaskRefused({ taskId: input.taskId, why: 'branch_gone' })
             yield* restoreWorktree(worktree.repository, worktree.path, worktree.branch)
-            restored.push(worktree.id)
-          }
-          const reopened = yield* sql.withTransaction(
-            Effect.gen(function* () {
-              // A worktree put back is a fresh one, with nothing installed: it is set up again.
-              for (const id of restored) {
-                const revision = yield* change('workspaces', id, { setup: null })
+            // Put back, it is a fresh one, with nothing installed: it is set up again. Said at once, so a later one that
+            // can't be put back doesn't leave this one taken for set up when the person tries again.
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('workspaces', worktree.id, { setup: null })
                 yield* fact({
                   projectId: standing.projectId,
                   aggregateType: 'workspace',
-                  aggregateId: id,
+                  aggregateId: worktree.id,
                   revision,
                   type: 'workspace.restored',
                   actorId: input.envelope.actorId,
                   commandId: input.envelope.commandId,
                 })
-              }
+              }),
+            )
+            restored = true
+          }
+          const reopened = yield* sql.withTransaction(
+            Effect.gen(function* () {
               // Read again where it is written: reopened meanwhile, the lifecycle refuses it.
               const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${input.taskId}`
               const now = yield* Schema.decodeUnknownEffect(TaskState)(task?.state)
@@ -390,7 +395,7 @@ export class Tasks extends Context.Service<
               held: true,
             })
           }
-          if (restored.length > 0) yield* setups.begin(input.taskId)
+          if (restored) yield* setups.begin(input.taskId)
           yield* touchCard(input.taskId)
         })
 

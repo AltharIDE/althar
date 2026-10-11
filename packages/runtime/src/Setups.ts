@@ -10,13 +10,14 @@ import { RuntimeConfig } from './Config'
 import { Instance } from './Instance'
 import { printedMore, uncoloured } from './leftRunning'
 import { change, fact, timestamp } from './records'
-import { setupIn } from './runCommand'
+import { installIn } from './runCommand'
 import { addItem, updateItem } from './threads'
 
 /*
  * A task's worktree set up by Althar itself, outside any agent's sandbox,
  * before its lead starts (ADR-023): the setup kept for its repository, else
- * the install its lockfile names, which never changes the lockfile. A lead in
+ * the install its lockfile names, run whatever `node_modules` holds, which
+ * never changes the lockfile. A lead in
  * a fresh worktree would otherwise install first, and its sandbox refuses the
  * package manager's cache and temporary folders outside the worktree.
  *
@@ -248,7 +249,8 @@ export class Setups extends Context.Service<
       const setUp = (unset: Unset) =>
         Effect.gen(function* () {
           const folder = unset.within === null ? unset.worktree : join(unset.worktree, unset.within)
-          const command = unset.kept ?? setupIn(folder, unset.worktree)
+          // The install itself, not one that skips a `node_modules` there already: one an install cut short left isn't set up.
+          const command = unset.kept ?? installIn(folder, unset.worktree)
           if (command === null) return yield* kept(unset, { at: yield* timestamp, command: null, code: null, timedOut: false, last: null })
           const shown: Shown = { repository: unset.name, command, kept: unset.kept !== null, startedAt: yield* timestamp, ended: null }
           const item = yield* addItem({ projectId: unset.projectId, threadId: unset.threadId }, 'setup', shown)
