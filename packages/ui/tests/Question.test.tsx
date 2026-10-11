@@ -198,7 +198,6 @@ describe('Question, the page stays put', () => {
   it('moves focus without scrolling the shell, answering or missing an answer, and leaves its scroll alone', async () => {
     const focus = vi.spyOn(HTMLElement.prototype, 'focus')
     const scroll = vi.fn()
-    Element.prototype.scrollIntoView = scroll
     const shell = document.createElement('div')
     document.body.append(shell)
     render(<Question parts={[DATABASE, WAITING]} focusOnMount />, { container: shell })
