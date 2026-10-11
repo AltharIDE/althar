@@ -216,8 +216,11 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
           `mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { ...IssueFields } } } ${IssueFields}`,
           { input: { teamId: team, title: issue.title, description: issue.body, ...(labelIds.length === 0 ? {} : { labelIds }) } },
         )
-        if (!issueCreate.success || issueCreate.issue == null)
+        if (!issueCreate.success)
           return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Linear did not file the issue' })
+        // Filed, by Linear's word, without saying which: an answer Althar can't read, never a refusal.
+        if (issueCreate.issue == null)
+          return yield* new ConnectorFailed({ product, reason: 'invalid_response', message: 'Linear filed the issue without saying which' })
         return issueOf(issueCreate.issue)
       }),
   }

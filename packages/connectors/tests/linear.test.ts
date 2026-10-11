@@ -308,6 +308,20 @@ describe('Linear', () => {
       const refused = yield* Effect.flip(tracker.create('team-mer', { title: 'A title', body: '', labels: [] }))
       assert.deepStrictEqual([refused.reason, refused.message], ['rejected', 'Linear did not file the issue'])
       assert.lengthOf(sent, 1)
+      // Filed by Linear's word, without saying which: unreadable, never refused; and an internal error mid-mutation is no refusal either.
+      const unsaid = linear([['POST', URL, { json: { data: { issueCreate: { success: true, issue: null } } } }]])
+      const lost = yield* Effect.flip(unsaid.tracker.create('team-mer', { title: 'A title', body: '', labels: [] }))
+      assert.deepStrictEqual([lost.reason, lost.message], ['invalid_response', 'Linear filed the issue without saying which'])
+      const omitted = linear([['POST', URL, { json: { data: { issueCreate: { success: true } } } }]])
+      assert.strictEqual(
+        (yield* Effect.flip(omitted.tracker.create('team-mer', { title: 'A title', body: '', labels: [] }))).reason,
+        'invalid_response',
+      )
+      const internal = linear([['POST', URL, { status: 500, json: { errors: [{ message: 'Internal error' }] } }]])
+      assert.strictEqual(
+        (yield* Effect.flip(internal.tracker.create('team-mer', { title: 'A title', body: '', labels: [] }))).reason,
+        'unreachable',
+      )
       assert.deepStrictEqual(variablesOf(sent[0]), { input: { teamId: 'team-mer', title: 'A title', description: '' } })
       // Labels asked for that the team has none of: the issue is filed with none.
       const bare = linear([

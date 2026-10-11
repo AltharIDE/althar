@@ -182,17 +182,21 @@ const GraphqlError = Schema.Struct({
 })
 
 /** Classifies a GraphQL `errors` entry: GitHub names a `type`, Linear an extension code. */
-const graphqlFailure = (product: Product, error: typeof GraphqlError.Type): ConnectorFailed => {
+const graphqlFailure = (product: Product, error: typeof GraphqlError.Type, status: number): ConnectorFailed => {
   const code = (error.type ?? error.extensions?.code ?? error.extensions?.type ?? '').toUpperCase()
-  const reason = /AUTHENTICATION|UNAUTHENTICATED/.test(code)
-    ? 'unauthorized'
-    : /RATE_?LIMIT/.test(code)
-      ? 'rate_limited'
-      : /FORBIDDEN/.test(code)
-        ? 'forbidden'
-        : /NOT_FOUND|ENTITY_NOT_FOUND/.test(code)
-          ? 'not_found'
-          : 'rejected'
+  // The service failing as it worked on it (a 5xx, an internal error) is no refusal: a mutation may have gone through.
+  const reason =
+    status >= 500 || /INTERNAL/.test(code)
+      ? 'unreachable'
+      : /AUTHENTICATION|UNAUTHENTICATED/.test(code)
+        ? 'unauthorized'
+        : /RATE_?LIMIT/.test(code)
+          ? 'rate_limited'
+          : /FORBIDDEN/.test(code)
+            ? 'forbidden'
+            : /NOT_FOUND|ENTITY_NOT_FOUND/.test(code)
+              ? 'not_found'
+              : 'rejected'
   return new ConnectorFailed({ product, reason, message: error.message.slice(0, MESSAGE_KEPT) })
 }
 
@@ -285,7 +289,7 @@ export const makeHttp = (options: HttpOptions): Http => {
           answer.body,
         ).pipe(Effect.catch(() => Effect.flatMap(success(answer), () => Effect.fail(invalid('The answer was not GraphQL')))))
         const first = envelope.errors?.[0]
-        if (first !== undefined) return yield* Effect.fail(graphqlFailure(product, first))
+        if (first !== undefined) return yield* Effect.fail(graphqlFailure(product, first, answer.status))
         yield* success(answer)
         return yield* Schema.decodeUnknownEffect(schema)(envelope.data ?? null).pipe(Effect.mapError((error) => invalid(error.message)))
       }),
