@@ -46,7 +46,7 @@ export const coAuthorText: CoAuthorText = {
   and: 'and',
   althar: 'Althar',
   opened: 'Pull requests end with',
-  openedBy: 'Opened by Althar.',
+  openedBy: 'Opened by',
   alone: 'Your commits and pull requests go out with only your name.',
 }
 
@@ -133,7 +133,14 @@ export function CoAuthor({ on, onChange, trailer, author, commit, picture, askin
       <p className={s.after}>
         {on ? (
           <>
-            {t.opened} <span className={s.sub}>{t.openedBy}</span>
+            {t.opened}{' '}
+            <span className={s.sub}>
+              {t.openedBy}{' '}
+              <a href="https://althar.ai" target="_blank" rel="noreferrer">
+                {t.althar}
+              </a>
+              .
+            </span>
           </>
         ) : (
           t.alone

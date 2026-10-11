@@ -43,6 +43,7 @@ export const On: Story = {
     await expect(within(commit).getByText(CO_AUTHOR_TRAILER)).toBeInTheDocument()
     await expect(commit).toHaveTextContent('dana-k and Althar committed 12 minutes ago')
     await expect(c.getByText(/Pull requests end with/)).toBeInTheDocument()
+    await expect(c.getByRole('link', { name: 'Althar' })).toHaveAttribute('href', 'https://althar.ai')
   },
 }
 

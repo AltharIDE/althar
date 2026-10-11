@@ -115,7 +115,7 @@ export const bodyOf = (input: {
   }
   if (input.issue !== null)
     parts.push(input.issue.sameHost ? `Issue: ${input.issue.key}` : `Issue: [${input.issue.key}](${input.issue.url})`)
-  if (input.credit !== false) parts.push('<sub>Opened by Althar.</sub>')
+  if (input.credit !== false) parts.push('<sub>Opened by [Althar](https://althar.ai).</sub>')
   return parts.join('\n\n')
 }
 

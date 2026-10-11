@@ -78,7 +78,7 @@ describe('a description in the repository’s template', () => {
   it('with no template, is what it always was', () => {
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template: null, written: null }),
-      'Did it.\n\n<sub>Opened by Althar.</sub>',
+      'Did it.\n\n<sub>Opened by [Althar](https://althar.ai).</sub>',
     )
   })
 
@@ -86,7 +86,7 @@ describe('a description in the repository’s template', () => {
     const fenced = '## Summary\n\n```sh\n# run the tests\nbun test\n```\n'
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template: fenced, written: '## Summary\n\nDid it.' }),
-      '## Summary\n\nDid it.\n\n<sub>Opened by Althar.</sub>',
+      '## Summary\n\nDid it.\n\n<sub>Opened by [Althar](https://althar.ai).</sub>',
     )
   })
 
@@ -94,23 +94,23 @@ describe('a description in the repository’s template', () => {
     const written = '## Summary\n\nDid it.\n\n## How to test\n\nRun it.\n\n## Checklist\n\n- [x] Tests pass\n'
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template, written }),
-      '## Summary\n\nDid it.\n\n## How to test\n\nRun it.\n\n## Checklist\n\n- [ ] Tests pass\n\n<sub>Opened by Althar.</sub>',
+      '## Summary\n\nDid it.\n\n## How to test\n\nRun it.\n\n## Checklist\n\n- [ ] Tests pass\n\n<sub>Opened by [Althar](https://althar.ai).</sub>',
     )
   })
 
   it('puts the summary in the template’s place for it where the lead’s drops a heading, or below where it has none', () => {
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template, written: 'Did it, my own way.' }),
-      '## Summary\n\n<!-- What and why. -->\n\nDid it.\n\n## How to test\n\n## Checklist\n\n- [ ] Tests pass\n\n<sub>Opened by Althar.</sub>',
+      '## Summary\n\n<!-- What and why. -->\n\nDid it.\n\n## How to test\n\n## Checklist\n\n- [ ] Tests pass\n\n<sub>Opened by [Althar](https://althar.ai).</sub>',
     )
     // `What type of change` is a checklist; the summary goes under Description.
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template: '## What type of change?\n\n- [ ] Fix\n\n## Description\n', written: null }),
-      '## What type of change?\n\n- [ ] Fix\n\n## Description\n\nDid it.\n\n<sub>Opened by Althar.</sub>',
+      '## What type of change?\n\n- [ ] Fix\n\n## Description\n\nDid it.\n\n<sub>Opened by [Althar](https://althar.ai).</sub>',
     )
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template: '## Checklist\n\n- [ ] Tests pass', written: null }),
-      '## Checklist\n\n- [ ] Tests pass\n\n### Summary\n\nDid it.\n\n<sub>Opened by Althar.</sub>',
+      '## Checklist\n\n- [ ] Tests pass\n\n### Summary\n\nDid it.\n\n<sub>Opened by [Althar](https://althar.ai).</sub>',
     )
   })
 })
