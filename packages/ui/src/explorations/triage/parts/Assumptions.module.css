@@ -1,0 +1,79 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 2px 10px;
+  padding: 7px 0;
+}
+.item + .item {
+  border-top: 1px solid var(--line);
+}
+.numbered .item {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+}
+.n {
+  padding-top: 1px;
+  font: 11px/18px var(--mono);
+  color: var(--t-3);
+  text-align: right;
+}
+.body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.says {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--t-1);
+  text-wrap: pretty;
+}
+.because {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.no {
+  margin-top: -2px;
+  color: var(--t-2);
+}
+/* what it assumed gives way to what you said */
+.corrected .says {
+  color: var(--t-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--t-3);
+}
+.you {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--t-1);
+}
+.you b {
+  font-weight: 600;
+}
+.form {
+  margin-top: 6px;
+}
+
+/* in a card on the board: smaller, and closer */
+.compact .item {
+  padding: 5px 0;
+}
+.compact .says,
+.compact .you {
+  font-size: 12px;
+  line-height: 1.4;
+}
+.compact .because {
+  font-size: 11.5px;
+}

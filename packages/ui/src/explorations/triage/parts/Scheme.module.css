@@ -1,0 +1,79 @@
+/* A sheet of the exploration in light or dark. Light is the kit's own paper. */
+.scheme {
+  padding: 24px;
+  border-radius: 14px;
+  background: var(--n-2);
+  color: var(--t-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+/*
+ * Dark, provisional. The kit has no dark theme yet, so this one is the
+ * exploration's: the terminal's sheets for surfaces, the island's cobalt and
+ * violet (a step lighter, as they are on ink), and ink that reads on them.
+ * Each meaning keeps its one colour. Everything inside reads the tokens, so
+ * the real components below take it as they are; only what opens in a
+ * portal (a tooltip, a menu) stays light.
+ */
+.dark {
+  color-scheme: dark;
+
+  --n-0: #0e0e11;
+  --n-1: #232328;
+  --n-2: #1a1a1e;
+  --n-3: #29292f;
+  --n-4: #33333a;
+  --n-5: #4a4a52;
+  --chrome: #151518;
+  --paper: #2b2b31;
+
+  --t-1: #f2f0ea;
+  --t-2: #c9c7c0;
+  --t-3: #9d9ba3;
+  --t-4: #6b6a71;
+
+  --line: rgba(255, 255, 255, 0.07);
+  --line-2: rgba(255, 255, 255, 0.11);
+  --line-3: rgba(255, 255, 255, 0.2);
+
+  --signal: #a77bff;
+  --signal-bright: #b994ff;
+  --signal-dim: rgba(167, 123, 255, 0.14);
+  --signal-line: rgba(167, 123, 255, 0.42);
+  --signal-hover: rgba(167, 123, 255, 0.22);
+  --signal-paper: #272035;
+  --signal-pressed: #9566f2;
+  --signal-peek: #31284a;
+  /* violet is light on ink, so what sits on it is dark */
+  --on-signal: #141417;
+
+  --live: #8a95ff;
+  --live-dim: rgba(138, 149, 255, 0.14);
+  --bot: var(--live);
+  --danger: #f08a78;
+  --danger-dim: rgba(240, 138, 120, 0.1);
+  --danger-hover: rgba(240, 138, 120, 0.16);
+  --ok: #6cc785;
+
+  --n-1-clear: rgba(35, 35, 40, 0);
+  --n-2-clear: rgba(26, 26, 30, 0);
+  --n-5-hover: #55555e;
+  --track: rgba(255, 255, 255, 0.1);
+  --track-done: rgba(255, 255, 255, 0.42);
+  --sunk: rgba(255, 255, 255, 0.04);
+  --add: rgba(108, 199, 133, 0.12);
+  --del: rgba(240, 138, 120, 0.1);
+  --shadow: rgba(0, 0, 0, 0.5);
+  --lift: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --lift-card: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --lift-2: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 10px -6px rgba(0, 0, 0, 0.5);
+  --lift-pop: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 24px -12px rgba(0, 0, 0, 0.6);
+  --you-bubble: rgba(255, 255, 255, 0.07);
+
+  /* ink fills are light here, so what sits on them is dark */
+  --on-ink: #141417;
+  --on-ink-2: #45454c;
+  --ink-hover: #dedcd5;
+  --ink-pressed: #ffffff;
+  --term-paper-ink: #e8e6df;
+}

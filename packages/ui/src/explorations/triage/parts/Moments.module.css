@@ -1,0 +1,71 @@
+.sheet {
+  display: grid;
+  gap: 0;
+}
+/* what each column is, once, over the first moment */
+.columns,
+.moment {
+  display: grid;
+  grid-template-columns: 180px 316px minmax(0, var(--measure));
+  gap: 28px;
+}
+.columns {
+  padding-bottom: 10px;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.moment {
+  align-items: start;
+  padding: 22px 0;
+  border-top: 1px solid var(--line-2);
+}
+.head {
+  display: grid;
+  gap: 6px;
+  position: sticky;
+  top: 12px;
+}
+.state {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.board {
+  display: grid;
+  gap: 10px;
+}
+/* a lane's name over the cards it holds, as the board says it */
+.lane {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 2px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.lane:not(:first-child) {
+  margin-top: 8px;
+}
+.you {
+  color: var(--signal);
+}
+.nothing {
+  margin: 0;
+  padding: 4px 2px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.thread {
+  min-width: 0;
+}

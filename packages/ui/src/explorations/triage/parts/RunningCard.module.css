@@ -1,0 +1,22 @@
+.line {
+  align-items: center;
+}
+/* the checkpoint isn't work in motion, so it is ink, not cobalt; nor does it wait on you, so it isn't violet */
+.now {
+  flex: none;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.glyph {
+  flex: none;
+  color: var(--t-3);
+}
+/* what can be pressed inside the card sits over its title's stretched button */
+.over {
+  position: relative;
+  z-index: 1;
+}
+.assumed {
+  margin-left: auto;
+  white-space: nowrap;
+}

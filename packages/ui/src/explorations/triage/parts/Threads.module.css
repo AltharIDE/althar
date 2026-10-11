@@ -1,0 +1,11 @@
+/* why it asks: said once, plainly, in the lead's own turn */
+.stakes {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.lead {
+  font-weight: 600;
+  color: var(--signal);
+}

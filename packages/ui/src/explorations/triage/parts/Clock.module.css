@@ -1,0 +1,37 @@
+.ring {
+  flex: none;
+  transform: rotate(-90deg);
+}
+.ring circle {
+  fill: none;
+  stroke-width: 2;
+}
+.ringBg {
+  stroke: var(--n-4);
+}
+.ringFg {
+  stroke: var(--t-2);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear;
+}
+.when {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-2);
+  white-space: nowrap;
+}
+.bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: calc(var(--left) * 100%);
+  background: var(--t-3);
+  transition: width 1s linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ringFg,
+  .bar {
+    transition: none;
+  }
+}
