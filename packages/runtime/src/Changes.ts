@@ -280,6 +280,8 @@ export class Changes extends Context.Service<
     ofTask(taskId: string): Effect.Effect<ReadonlyArray<ChangeSummary>, unknown>
     /** Asks the code host now, rather than at the next turn of listening. */
     refresh(taskId: string): Effect.Effect<void>
+    /** Stops listening to the task's pull request at this address, as the person says: nothing said there after arrives. */
+    stopListening(taskId: string, url: string): Effect.Effect<void, unknown>
     /** Does something with a task's pull request as one action: one at a time with replying, pushing, marking ready and merging. */
     exclusive<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
     /**
@@ -752,6 +754,28 @@ export class Changes extends Context.Service<
             change: { ...snapshot, linkId, product: host.product, listening: row?.listening === 1 },
             left,
           } as const
+        })
+
+      const stopListening = (taskId: string, url: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          for (const link of yield* linksOf(taskId)) {
+            if (link.listening !== 1 || (yield* decodeSnapshot(link.snapshot)).url !== url) continue
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('external_links', link.id, { listening: 0, updatedAt: yield* timestamp })
+                yield* fact({
+                  projectId: link.projectId,
+                  aggregateType: 'external_link',
+                  aggregateId: link.id,
+                  revision,
+                  type: 'external_link.stopped_listening',
+                  actorId: instance.personId,
+                })
+              }),
+            )
+            yield* touchCard(taskId)
+          }
         })
 
       /** Saves what was seen of a change, and tells the card. */
@@ -1583,6 +1607,7 @@ export class Changes extends Context.Service<
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),
+        stopListening: (taskId, url) => provide(locked(taskId)(stopListening(taskId, url))),
         // The person looking at the task counts as something happening on it.
         refresh: (taskId) =>
           Effect.andThen(

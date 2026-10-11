@@ -53,6 +53,16 @@ export const SeveralProcesses: Story = { args: { processes: [DEV, WATCH, STRIPE]
 /** One exited on its own: it stays, to say how, until it is dismissed or run again. Nothing is left running, so no dot. */
 export const Exited: Story = { args: { processes: [CRASHED] } }
 export const Open: Story = { args: { processes: [DEV, WATCH, STRIPE, CRASHED], defaultOpen: true } }
+/** One still running and one that exited: the pill names the one running, and says the other exited. */
+export const RunningAndExited: Story = {
+  args: { processes: [DEV, CRASHED] },
+  play: async ({ canvasElement }) => {
+    const pill = within(canvasElement).getByRole('button', { name: /Running/ })
+    await expect(pill).toHaveTextContent('Runningbun dev· localhost:5173· 1 exited')
+  },
+}
+/** Ended by itself, with no exit code to say: it ended, no more. */
+export const EndedUnknown: Story = { args: { processes: [{ ...CRASHED, exited: null }] } }
 /** Nothing running: nothing shows. */
 export const Empty: Story = { args: { processes: [] } }
 
@@ -91,6 +101,8 @@ export const AllStates: Story = {
         ...['rest', 'hover', 'focus', 'pressed'].map((state) => ({ state, node: <Running processes={[DEV]} /> })),
         { state: 'several', node: <Running processes={[DEV, WATCH, STRIPE]} /> },
         { state: 'exited', node: <Running processes={[CRASHED]} /> },
+        { state: 'running and exited', node: <Running processes={[DEV, CRASHED]} /> },
+        { state: 'ended, code unknown', node: <Running processes={[{ ...CRASHED, exited: null }]} /> },
       ]}
     />
   ),

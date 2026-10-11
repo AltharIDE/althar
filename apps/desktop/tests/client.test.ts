@@ -269,6 +269,9 @@ describe('the client', () => {
           SignInAccount: () => Effect.die('unused'),
           OpenChange: () => Effect.die('unused'),
           RefreshTask: () => Effect.die('unused'),
+          StopListening: () => Effect.die('unused'),
+          StopBackground: () => Effect.die('unused'),
+          ClearBackground: () => Effect.die('unused'),
           Watch: ({ since }) => {
             watches.push(since)
             return Stream.make({

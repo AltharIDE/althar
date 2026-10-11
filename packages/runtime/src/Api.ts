@@ -317,7 +317,9 @@ export const handlers = Api.toLayer(
                 ? Stream.make({ _tag: 'Output', threadId: event.threadId, itemId: event.itemId, text: event.text, dropped: event.dropped })
                 : event._tag === 'Agent' && event.event._tag === 'ContextUsage'
                   ? Stream.make({ _tag: 'Context', threadId: event.threadId, used: event.event.used, size: event.event.size })
-                  : Stream.empty,
+                  : event._tag === 'Background'
+                    ? Stream.make({ _tag: 'Background', threadId: event.threadId, background: event.background })
+                    : Stream.empty,
           ),
         ),
       ),
@@ -857,6 +859,9 @@ export const handlers = Api.toLayer(
           }),
         ),
       RefreshTask: ({ taskId }) => pullRequests.refresh(taskId),
+      StopListening: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.stopListening(taskId, url))),
+      StopBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.stopBackground(threadId, id))),
+      ClearBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.clearBackground(threadId, id))),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
     })
   }),

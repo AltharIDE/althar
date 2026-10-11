@@ -5,6 +5,8 @@ import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type Row
 import {
   type AgentConnection,
   type AgentDefinition,
+  type AgentExited,
+  type AgentRequestFailed,
   type AgentSession,
   connect,
   type ConfigOption,
@@ -42,7 +44,9 @@ import { withRole } from './roles'
 import { git } from './git'
 import { reviewCopyOf } from './reviewCopy'
 import { defaultEffortOf } from './preferences'
-import { addItem, type OutputSoFar, recorder, transcript } from './threads'
+import { addItem, type OutputSoFar, recorder, toolItem, transcript } from './threads'
+import { commandOfCall, exitCodeIn, type LeftRunning, printedMore, servingAt, type ShownLeftRunning, shownOf, tailOf } from './leftRunning'
+import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
 
@@ -184,7 +188,13 @@ interface Running {
   context: { readonly used: number; readonly size: number } | null
   /** What records its events now: its turn's, or the one between turns. */
   recording: { readonly outputOf: (itemId: string) => OutputSoFar | undefined } | undefined
+  /** What it left running in the background, in the order it started them (leftRunning.ts). */
+  readonly background: Map<string, LeftRunning>
 }
+
+/** How often, and for how long, what one left running is read for where it answers. */
+const SERVING_EVERY = Duration.millis(500)
+const SERVING_TRIES = 240
 
 /** Keeps what the agent last said of its context, from an event it streamed. */
 const heardContext = (running: Running, event: SessionEvent) => {
@@ -343,6 +353,10 @@ export class Sessions extends Context.Service<
     interrupt(threadId: string): Effect.Effect<void, NoSession>
     /** Stops the thread's session, after ending its turn. */
     stop(threadId: string): Effect.Effect<void, NoSession>
+    /** Stops a command the thread's session left running; it goes from the list. Nothing, where the session or the command is gone already. */
+    stopBackground(threadId: string, id: string): Effect.Effect<void, AgentRequestFailed | AgentExited>
+    /** Clears one that ended by itself from the list. */
+    clearBackground(threadId: string, id: string): Effect.Effect<void>
     /** The session running on a thread, if there is one. */
     running(threadId: string): Effect.Effect<
       Option.Option<{
@@ -356,6 +370,8 @@ export class Sessions extends Context.Service<
         readonly context: { readonly used: number; readonly size: number } | null
         /** It is being stopped: on its way out, not one to carry on with. */
         readonly stopping: boolean
+        /** What it left running in the background. */
+        readonly background: ReadonlyArray<ShownLeftRunning>
       }>
     >
     /** What a command on a thread has printed so far, while it runs: its last lines, and how many came before them. */
@@ -378,6 +394,92 @@ export class Sessions extends Context.Service<
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
+
+      /** Tells watching clients what a session has left running, whole. */
+      const toldBackground = (running: Running) =>
+        live.publish({ _tag: 'Background', threadId: running.thread.threadId, background: [...running.background.values()].map(shownOf) })
+
+      /** What one has printed: its file, where the agent says, else what came on its tool call. */
+      const printedBy = (left: LeftRunning) => (left.outputPath !== null ? tailOf(left.outputPath) : Effect.succeed(left.printed))
+
+      /** What its tool call printed before the agent said it left it running: in the turn still, or kept when the turn ended. */
+      const printedBefore = (running: Running, itemId: string | undefined) =>
+        itemId === undefined
+          ? Effect.succeed('')
+          : Option.match(Option.fromNullishOr(running.recording?.outputOf(itemId)), {
+              onSome: (soFar) => Effect.succeed(soFar.text),
+              onNone: () =>
+                outputText(running.thread.threadId, itemId).pipe(
+                  Effect.map((kept) => kept.text),
+                  Effect.orElseSucceed(() => ''),
+                ),
+            })
+
+      /** Reads what one prints, now and then, until it says where it answers, ends, or a couple of minutes go by. */
+      const watchServing = (running: Running, id: string) =>
+        Effect.gen(function* () {
+          for (let tries = 0; tries < SERVING_TRIES; tries += 1) {
+            const left = running.background.get(id)
+            if (left === undefined || left.ended !== null) return
+            const url = servingAt(yield* printedBy(left))
+            if (url !== null) {
+              left.url = url
+              return yield* toldBackground(running)
+            }
+            yield* Effect.sleep(SERVING_EVERY)
+          }
+        })
+
+      /** Keeps what the agent says of what it left running, from an event it streamed, in a turn or between. */
+      const heardBackground = (running: Running, event: SessionEvent) =>
+        run(
+          Effect.gen(function* () {
+            switch (event._tag) {
+              case 'BackgroundStarted': {
+                // The thread has its tool call already: the agent says what it left running once the call is made.
+                const item = event.toolCallId === undefined ? undefined : yield* toolItem(running.sessionId, event.toolCallId)
+                running.background.set(event.id, {
+                  id: event.id,
+                  command: commandOfCall(item?.content, event.name),
+                  toolCallId: event.toolCallId ?? null,
+                  outputPath: event.outputPath ?? null,
+                  printed: yield* printedBefore(running, item?.id),
+                  url: null,
+                  startedAt: yield* timestamp,
+                  ended: null,
+                })
+                yield* toldBackground(running)
+                yield* Effect.forkIn(watchServing(running, event.id), running.scope)
+                return
+              }
+              case 'ToolCallUpdate': {
+                const more = event.terminal?.output
+                if (more === undefined) return
+                for (const left of running.background.values())
+                  if (left.toolCallId === event.toolCallId) left.printed = printedMore(left.printed, more)
+                return
+              }
+              case 'BackgroundOutput': {
+                const left = running.background.get(event.id)
+                if (left !== undefined) left.outputPath = event.outputPath
+                return
+              }
+              case 'BackgroundEnded': {
+                const left = running.background.get(event.id)
+                if (left === undefined) return
+                // Stopped, it goes, whoever stopped it. Ended by itself, it stays, to say how.
+                if (event.end === 'stopped') running.background.delete(event.id)
+                else {
+                  const code = exitCodeIn(yield* printedBy(left)) ?? (event.end === 'completed' ? 0 : null)
+                  left.ended = { at: yield* timestamp, code }
+                }
+                return yield* toldBackground(running)
+              }
+              default:
+                return
+            }
+          }),
+        ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not keep what an agent left running', cause)))
 
       /** No agent starts, and nothing is said to one, in a project removed from Althar: a window that hadn't heard yet is told it's gone. */
       const inLiveProject = (threadId: string) =>
@@ -666,6 +768,7 @@ export class Sessions extends Context.Service<
               if (event._tag === 'TurnEnded') ended = event
               heardContext(running, event)
               yield* record(event)
+              yield* heardBackground(running, event)
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
               if (event._tag === 'AgentMessage' || event._tag === 'AgentThought' || event._tag === 'ToolCallUpdate') yield* stream
             }),
@@ -1063,6 +1166,7 @@ export class Sessions extends Context.Service<
             stopping: false,
             context: null,
             recording: undefined,
+            background: new Map(),
           }
           threads.set(thread.threadId, running)
           yield* Effect.forkIn(run(deliveries(running)), scope)
@@ -1075,9 +1179,12 @@ export class Sessions extends Context.Service<
               Stream.runForEach(agent.events, (event) =>
                 Effect.andThen(
                   Effect.andThen(
-                    Effect.sync(() => heardContext(running, event)),
-                    Effect.andThen(between.record(event), between.flush),
-                  ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
+                    Effect.andThen(
+                      Effect.sync(() => heardContext(running, event)),
+                      Effect.andThen(between.record(event), between.flush),
+                    ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
+                    heardBackground(running, event),
+                  ),
                   live.publish({ _tag: 'Agent', threadId: thread.threadId, event }),
                 ),
               ),
@@ -1576,7 +1683,25 @@ export class Sessions extends Context.Service<
                   pid: running.connection.process?.pid ?? null,
                   context: running.context,
                   stopping: running.stopping,
+                  background: [...running.background.values()].map(shownOf),
                 })
+          }),
+        stopBackground: (threadId, id) =>
+          Effect.gen(function* () {
+            const running = threads.get(threadId)
+            const left = running?.background.get(id)
+            if (running === undefined || left === undefined) return
+            // Ended by itself, there is nothing to stop. Gone already as the agent tells it, it goes from the list all the same.
+            if (left.ended === null) yield* running.agent.stopBackground(id)
+            running.background.delete(id)
+            yield* toldBackground(running)
+          }),
+        clearBackground: (threadId, id) =>
+          Effect.gen(function* () {
+            const running = threads.get(threadId)
+            if (running === undefined || running.background.get(id)?.ended == null) return
+            running.background.delete(id)
+            yield* toldBackground(running)
           }),
         outputSoFar: (threadId, itemId) => Effect.sync(() => Option.fromNullishOr(threads.get(threadId)?.recording?.outputOf(itemId))),
       })
