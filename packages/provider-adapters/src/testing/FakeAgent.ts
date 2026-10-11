@@ -410,7 +410,8 @@ const playStall = async (
  * Told what people said on its pull
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
- * publishes it. Asked to plan a change with a link in it, the coordinator
+ * publishes it. Asked to "push pls" once its pull request is open,
+ * `[lead:push]` commits what it has and asks the person to push it. Asked to plan a change with a link in it, the coordinator
  * drafts the task from that issue.
  */
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
@@ -497,6 +498,11 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         if (!/These aren.t committed/.test(answer)) return answer
         rmSync(join(session.cwd, 'scratch.log'))
         return await finish()
+      }
+      // Asked to push, it commits and asks the person to, as a lead does: it never pushes itself.
+      if (available.has('push_to_pull_request') && session.markers.has('[lead:push]') && /\bpush pls\b/i.test(text)) {
+        commitIn(session.cwd, 'pushed.txt', 'Tidy up before pushing')
+        return await call('push_to_pull_request', {})
       }
       // What people said on the task's pull request, and its checks.
       if (available.has('reply_on_pull_request') && session.markers.has('[lead:answer]') && / commented on /.test(text)) {

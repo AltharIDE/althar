@@ -382,6 +382,19 @@ export const transcript = (threadId: string, budget: number) =>
             return [line, `[person answered] ${answerWords(fields, answers).join(' / ')}`]
           return item.askedState === 'withdrawn' ? [line, '[not answered]'] : [line]
         }
+        case 'push_request': {
+          // What the lead asked the person to push, and how it stands: an agent that takes the thread over doesn't ask again for what went.
+          const count = typeof content['count'] === 'number' ? content['count'] : 0
+          const states: Readonly<Record<string, string>> = {
+            pushed: 'pushed',
+            replaced: 'asked again later',
+            closed: 'not pushed: the pull request closed',
+          }
+          const how = states[text('state')]
+          return [
+            `[the lead asked the person to push] ${count === 1 ? '1 commit' : `${count} commits`} to ${text('where')}: ${how ?? 'not pushed yet'}`,
+          ]
+        }
         default:
           return []
       }

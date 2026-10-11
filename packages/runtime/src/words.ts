@@ -191,7 +191,9 @@ export const words = (
       case 'AccountRefused':
         return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Althar can't add that account."
       case 'ChangedSinceSeen':
-        return 'The pull request changed since you looked at it. Have another look before you accept it.'
+        return text(error, 'what') === 'branch'
+          ? 'The branch changed since you looked at it, so nothing was pushed. Have another look at what would go up, then push.'
+          : 'The pull request changed since you looked at it. Have another look before you accept it.'
       case 'NotConnected':
         return `Althar isn't connected to ${productOf(text(error, 'product'))}. Connect it, then try again.`
       case 'NotAnIssue':

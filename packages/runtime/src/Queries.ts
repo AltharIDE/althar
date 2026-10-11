@@ -23,6 +23,7 @@ import {
   type DocumentText,
   FieldAnswer,
   type OutputText,
+  PushRequestItem,
   QuestionField,
   type ThreadItem,
   type ThreadSnapshot,
@@ -281,6 +282,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
 }
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
+const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
 const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
@@ -463,6 +465,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         },
       }
     }
+    case 'push_request':
+      // Althar writes it whole, as the contract has it; one that doesn't read so is left out.
+      return Option.match(decodePushRequest(content), {
+        onNone: () => undefined,
+        onSome: (asked): ThreadItem => ({ ...base, kind: 'push_request', content: asked }),
+      })
     default:
       return undefined
   }

@@ -159,9 +159,14 @@ export class NotAnIssue extends Schema.TaggedError<NotAnIssue>()('NotAnIssue', {
   what: Schema.String,
 }) {}
 
-/** The pull request moved on since the person looked: accepting it would merge what they didn't see. */
+/**
+ * The pull request moved on since the person looked: accepting it would merge
+ * what they didn't see. Or, for a push (`branch`), the commit they saw isn't
+ * on the task's branch any more: pushing would send what they didn't see.
+ */
 export class ChangedSinceSeen extends Schema.TaggedError<ChangedSinceSeen>()('ChangedSinceSeen', {
   taskId: Schema.String,
+  what: Schema.optional(Schema.Literal('branch')),
 }) {}
 
 /**
