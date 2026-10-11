@@ -20,7 +20,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `home` | Work across every project, as the home shows it: NeedLine, ProjectList, WorkTicks, SinceRow, HomeRest, ProjectWord; and what needs you at the edge of the screen: Island, EdgeSheet. |
 | `outputs` | What a task made: ChangeSet, ArtifactCard, ChangeView, and NoOutputs (where its lead has looked, before it has made anything). |
 | `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu, and the questions they ask first: RenameProject, RemoveProject, AbandonTask. |
-| `setup` | What comes before a project, what sets one up, and Settings: Runtimes, AgentInstall (an agent not on this device, and downloading it), SourceMap, Accounts and AccountSignIn, Connections, AgentTabs, ModelSwitches, ControlCenter, Preferences (the app's own: KeepAwake, OpenFilesIn, NotificationSettings, as rows of a SettingList that sit in any frame), and Conventions (NamingRule, TemplateSources). |
+| `setup` | What comes before a project, what sets one up, and Settings: Runtimes, AgentInstall (an agent not on this device, and downloading it), SourceMap, Accounts and AccountSignIn, Connections, ConnectCard and its parts (a walk in to a code host or tracker, as a sign-in card: the ways in, a step at a time, and what the connection can do), AgentTabs, ModelSwitches, ControlCenter (as wide as its modules, a card, or opened out), Preferences (the app's own: KeepAwake, OpenFilesIn, NotificationSettings, as rows of a SettingList that sit in any frame), and Conventions (NamingRule, TemplateSources). |
 | `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), Start (the first screen: the agents answering round the mark, and picking the first project's repositories), Home, NewProject, ProjectRules. |
 
 The rules between them:
@@ -132,7 +132,7 @@ Widgets with real behaviour are built on Radix primitives (`radix-ui`), styled t
 
 Plain semantic elements stay plain. A button is a `<button>`, and a list is a `<ul>`.
 
-**SidePanel** is not modal. It sits beside the thread or the board, takes focus when it opens, and gives it back when it closes.
+**SidePanel** is not modal. It sits beside the thread or the board, takes focus when it opens, and gives it back when it closes. One that steps through pages of its own, as a walk in does, has a way back first in its head.
 
 **Escape goes to the innermost thing first.** Radix hears Escape on the document before anything inside can stop it, so a Popover takes `onEscapeKeyDown` to let something inside go first, and a field marked `data-own-escape` gets the same without a handler. SidePanel hears Escape last.
 

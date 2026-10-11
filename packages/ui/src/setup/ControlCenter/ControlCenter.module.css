@@ -14,6 +14,9 @@
   transition: width var(--fold) var(--ease-fold);
   animation: open var(--slow) var(--ease-fold);
 }
+.card {
+  width: 480px;
+}
 .wide {
   width: 960px;
 }

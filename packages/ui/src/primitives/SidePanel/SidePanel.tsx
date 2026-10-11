@@ -8,18 +8,21 @@ import s from './SidePanel.module.css'
 
 /*
  * A panel beside the thread, not over it: a document at reading width, a
- * step's own thread. Focus moves to it when it opens. Escape closes it while
- * focus is inside it, after anything inside (a menu, a form) has had the
- * Escape first; focus then goes back to where it was.
+ * step's own thread, a walk in to a service. Focus moves to it when it opens.
+ * Escape closes it while focus is inside it, after anything inside (a menu,
+ * a form, a walk a step deep) has had the Escape first; focus then goes back
+ * to where it was. What steps through pages of its own has a way back in its
+ * head.
  */
 
 export interface SidePanelText {
   close: string
   /** The key that closes it, shown in Close's tooltip. */
   closeKey: string
+  back: string
 }
 
-export const sidePanelText: SidePanelText = { close: 'Close the panel', closeKey: 'esc' }
+export const sidePanelText: SidePanelText = { close: 'Close the panel', closeKey: 'esc', back: 'Back' }
 
 export type SidePanelProps = RootProps<
   'aside',
@@ -31,6 +34,8 @@ export type SidePanelProps = RootProps<
     /** Actions at the right of the head, before Close. */
     actions?: ReactNode
     onClose: () => void
+    /** A step back, for a panel that steps through pages of its own: a round chevron first in its head. */
+    onBack?: () => void
     /** What is under the head: a SidePanelBody, and anything around it. */
     children: ReactNode
     headClassName?: string
@@ -38,7 +43,19 @@ export type SidePanelProps = RootProps<
   }
 >
 
-export function SidePanel({ label, head, actions, onClose, children, className, headClassName, text, onKeyDown, ...rest }: SidePanelProps) {
+export function SidePanel({
+  label,
+  head,
+  actions,
+  onClose,
+  onBack,
+  children,
+  className,
+  headClassName,
+  text,
+  onKeyDown,
+  ...rest
+}: SidePanelProps) {
   const t = { ...sidePanelText, ...text }
   const panel = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -69,7 +86,8 @@ export function SidePanel({ label, head, actions, onClose, children, className, 
         onClose()
       }}
     >
-      <div className={cx(s.head, headClassName)}>
+      <div className={cx(s.head, onBack !== undefined && s.stepped, headClassName)}>
+        {onBack !== undefined && <IconButton icon="chevron" label={t.back} size="small" className={s.back} onClick={onBack} />}
         {head}
         <span className={s.actions}>
           {actions}

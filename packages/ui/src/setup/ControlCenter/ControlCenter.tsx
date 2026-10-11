@@ -50,8 +50,12 @@ export interface ControlCenterProps {
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
-  /** Opened out wide, for a part that needs the room. */
-  wide?: boolean
+  /**
+   * How wide it is: the modules' own width; a card, a little wider, for one
+   * thing done a step at a time; or opened out wide, for a part that needs
+   * the room.
+   */
+  width?: 'modules' | 'card' | 'wide'
   /** Something in it is under way: a press outside doesn't close it. Escape still does, through `onEscapeKeyDown`. */
   holding?: boolean
   /** Escape, before it closes: prevent the default to step back out of an opened module instead. */
@@ -67,7 +71,7 @@ export function ControlCenter({
   open,
   defaultOpen,
   onOpenChange,
-  wide = false,
+  width = 'modules',
   holding = false,
   onEscapeKeyDown,
   className,
@@ -87,7 +91,7 @@ export function ControlCenter({
       onOpenChange={onOpenChange}
       onEscapeKeyDown={onEscapeKeyDown}
       onInteractOutside={holding ? (e) => e.preventDefault() : undefined}
-      className={cx(s.panel, wide && s.wide, className)}
+      className={cx(s.panel, width === 'card' && s.card, width === 'wide' && s.wide, className)}
     >
       <Opened.Provider value={opened}>
         <Fit>{children}</Fit>

@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
 import { Logo } from '../../foundations/Logo/Logo'
 import {
@@ -20,6 +21,7 @@ import { States } from '../../storybook/States'
 import { Accounts } from '../Accounts/Accounts'
 import { AgentTabs } from '../AgentTabs/AgentTabs'
 import { CoAuthor } from '../CoAuthor/CoAuthor'
+import { ConnectCard, ConnectWays } from '../ConnectCard/ConnectCard'
 import { Connections } from '../Connections/Connections'
 import { ModelSwitches } from '../ModelSwitches/ModelSwitches'
 import {
@@ -63,7 +65,7 @@ const ICONS: ChoiceOption<Ground>[] = [
   { value: 'ink', title: 'Ink', picture: ground('var(--t-1)', '#f4f1e8') },
 ]
 
-type Open = 'all' | 'agents' | 'hosts' | 'icon' | 'awake'
+type Open = 'all' | 'agents' | 'hosts' | 'connect' | 'icon' | 'awake'
 
 /* Settings as a consumer composes it: the modules, and each opened out in place. */
 function Settings({ start = 'all', ...args }: Partial<ControlCenterProps> & { start?: Open }) {
@@ -78,12 +80,13 @@ function Settings({ start = 'all', ...args }: Partial<ControlCenterProps> & { st
     <ControlCenter
       trigger={<IconButton icon="gear" label="Settings" />}
       defaultOpen
-      wide={open === 'agents'}
+      width={open === 'agents' || open === 'hosts' ? 'wide' : open === 'connect' ? 'card' : 'modules'}
       onEscapeKeyDown={(e) => {
-        // Escape steps back out of an opened module before it closes the panel.
+        // Escape steps back out of an opened module, or a walk in back to its list, before it closes the panel.
         if (open === 'all') return
         e.preventDefault()
-        back()
+        if (open === 'connect') setOpen('hosts')
+        else back()
       }}
       {...args}
     >
@@ -132,14 +135,40 @@ function Settings({ start = 'all', ...args }: Partial<ControlCenterProps> & { st
               label="Code hosts and trackers"
               services={SERVICES}
               connections={CONNECTED}
-              onSignIn={fn()}
-              onCancelSignIn={fn()}
-              onToken={fn()}
+              onConnect={() => setOpen('connect')}
+              onSignInAgain={fn()}
+              onAddServer={fn()}
               onDisconnect={fn()}
             />
           </ControlSheet>
           <ControlSheet>
             <CoAuthor on={credit} onChange={setCredit} trailer={CO_AUTHOR_TRAILER} />
+          </ControlSheet>
+        </ControlDetail>
+      )}
+      {open === 'connect' && (
+        <ControlDetail
+          title="GitHub"
+          aside="For Meridian"
+          onBack={() => setOpen('hosts')}
+          text={{ back: 'Back to code hosts and trackers' }}
+        >
+          <ControlSheet>
+            <ConnectCard
+              brand={Brand.GitHub}
+              title="Connect GitHub"
+              line="For Meridian: northwind/meridian-api and northwind/meridian-web"
+              foot="Kept encrypted on this Mac. Agents never get it; they reach GitHub through Althar."
+            >
+              <ConnectWays
+                label="Ways to connect GitHub"
+                ways={[
+                  { id: 'gh', title: 'Use gh’s sign-in', line: 'Signed in as balazs on this Mac', icon: 'terminal' },
+                  { id: 'token', title: 'Make a token', line: 'On GitHub’s token page, opened filled in', icon: 'lock' },
+                ]}
+                onChoose={fn()}
+              />
+            </ConnectCard>
           </ControlSheet>
         </ControlDetail>
       )}
@@ -231,6 +260,22 @@ export const CodeHosts: Story = {
   },
 }
 
+/** Connect on a service narrows the panel to a sign-in card; Escape goes back to the list, and again to all settings. */
+export const ConnectingAService: Story = {
+  render: (args) => <Settings start="hosts" onOpenChange={args.onOpenChange} />,
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body)
+    const panel = await page.findByRole('dialog', { name: 'Settings' })
+    const p = within(panel)
+    const [github] = p.getAllByRole('button', { name: 'Connect' })
+    if (!github) throw new Error('no Connect')
+    await userEvent.click(github)
+    await expect(p.getByRole('heading', { name: 'Connect GitHub', level: 3 })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    await expect(p.getByRole('heading', { name: 'Code hosts and trackers', level: 2 })).toBeInTheDocument()
+  },
+}
+
 /** While something in it is under way, a press outside leaves it open. */
 export const Holding: Story = {
   args: { holding: true },
@@ -250,6 +295,7 @@ export const AllStates: Story = {
       size="wide"
       cells={[
         { state: 'open', node: <Settings /> },
+        { state: 'a card', node: <Settings start="connect" /> },
         {
           state: 'modules',
           node: (
