@@ -8,7 +8,8 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
  * shows at the edge of the screen. The edge's own pages say through it where they draw, and what to
  * open in the window, and hear whether the pointer is on the island. And
  * dictation: where the speech model and the microphone stand, the model's
- * download, and what was said, sent to be written down. The page never sees or sends a
+ * download, and what was said, sent to be written down. And a token on the
+ * clipboard, while connecting a service asks for one. The page never sees or sends a
  * path. It gets no Node, no file system, no shell.
  */
 
@@ -67,6 +68,8 @@ contextBridge.exposeInMainWorld('althar', {
   },
   edgeSize: (height: number): void => ipcRenderer.send('althar:edge-size', height),
   openInWindow: (threadId?: string): void => ipcRenderer.send('althar:edge-open', threadId ?? null),
+  // Only text that looks like a token; anything else the person copied never reaches the page.
+  clipboardToken: (): Promise<string | null> => ipcRenderer.invoke('althar:clipboard-token'),
   ...(SPEECH.has(`${process.platform}-${process.arch}`)
     ? {
         dictation: {

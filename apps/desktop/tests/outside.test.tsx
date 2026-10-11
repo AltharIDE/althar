@@ -16,7 +16,20 @@ import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { issuePriority, issueStatus, productBrand, productName } from '../src/renderer/shared/products'
 import { blocksOf } from '../src/renderer/shared/thread'
-import { card, change, changed, connectionList, coordinatorSnapshot, fakeClient, githubConnection, items, snapshot } from './fixtures'
+import {
+  card,
+  change,
+  changed,
+  connectionList,
+  coordinatorSnapshot,
+  fakeClient,
+  fakeHost,
+  GITHUB_TOKEN_PAGE,
+  githubCheck,
+  githubConnection,
+  items,
+  snapshot,
+} from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -30,114 +43,363 @@ function Connections() {
 }
 
 describe('connections', () => {
-  it('signs in by a code typed on the service’s page, and lists who it signed in as', async () => {
-    let state: 'waiting' | 'done' = 'waiting'
-    const { client, emit } = fakeClient({
-      getSignIn: vi.fn(async () => (state === 'waiting' ? { state } : { state, connectionId: 'conn1' })),
-    })
+  const connect = async (service: number) => {
+    const button = (await screen.findAllByRole('button', { name: 'Connect' }))[service]
+    if (button === undefined) throw new Error('no Connect')
+    await userEvent.click(button)
+  }
+
+  it('lists each service with where the projects’ code is, opens its ways in in place of the list, and disconnects', async () => {
+    const { client, emit } = fakeClient()
     withServices(<Connections />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
-    expect(client.startSignIn).toHaveBeenCalledWith('github')
-    expect(await screen.findByText('ABCD-1234')).toBeTruthy()
-    expect(screen.getByRole('link', { name: /Open github.com/ }).getAttribute('href')).toBe('https://github.com/login/device')
-    // Approved on GitHub: the sign-in ends, and the list is read again.
-    state = 'done'
+    expect(await screen.findByText('Not connected · meridian’s code is here')).toBeTruthy()
+    expect(screen.getByText('Not connected · Issues')).toBeTruthy()
+    await connect(0)
+    // gh is signed in on this Mac, so its sign-in is a way in, beside a token.
+    const ways = await screen.findByRole('group', { name: 'Ways to connect GitHub' })
+    expect(client.getConnectGuide).toHaveBeenCalledWith('github')
+    expect(within(ways).getByRole('button', { name: /Use gh’s sign-in\s*Signed in as you on this Mac/ })).toBeTruthy()
+    expect(within(ways).getByRole('button', { name: /Make a token\s*On GitHub’s token page, opened filled in/ })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Connect GitHub' })).toBeTruthy()
+    expect(screen.getByText('For meridian: northwind/meridian-api')).toBeTruthy()
+    expect(screen.getByText(/Kept encrypted on this Mac/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Back to code hosts and trackers' }))
+    expect(await screen.findByText('Not connected · meridian’s code is here')).toBeTruthy()
+
+    // Connected elsewhere: the list is read again, and says who; disconnecting takes it away.
     vi.mocked(client.listConnections).mockResolvedValue({ ...connectionList, connections: [githubConnection] })
-    await waitFor(() => expect(screen.getByText('Signed in as you')).toBeTruthy(), { timeout: 4000 })
-    expect(screen.queryByText('ABCD-1234')).toBeNull()
-    // A connection changing elsewhere reads the list again.
-    const reads = vi.mocked(client.listConnections).mock.calls.length
     emit(changed('connection', 'conn1', null, null))
-    await waitFor(() => expect(vi.mocked(client.listConnections).mock.calls.length).toBeGreaterThan(reads))
-    // Disconnecting takes it away.
+    expect(await screen.findByText('Signed in as you')).toBeTruthy()
     vi.mocked(client.listConnections).mockResolvedValue(connectionList)
     await userEvent.click(screen.getByRole('button', { name: 'Disconnect' }))
     expect(client.disconnect).toHaveBeenCalledWith('conn1')
     await waitFor(() => expect(screen.queryByText('Signed in as you')).toBeNull())
   })
 
-  it('opens the browser for a sign-in approved there; says how one ended; and cancels one', async () => {
+  it('makes a token on its page opened filled in, notices it on the clipboard as the window comes back, and says what it can do', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
-    const { client } = fakeClient({
-      startSignIn: vi.fn(async () => ({ flowId: 'flow2', kind: 'browser' as const, url: 'https://linear.app/oauth/authorize?x' })),
-      getSignIn: vi.fn(async () => ({ state: 'ended' as const, reason: 'denied' as const, message: 'Sign-in was declined.' })),
-    })
-    withServices(<Connections />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
-    expect(open).toHaveBeenCalledWith('https://linear.app/oauth/authorize?x', '_blank')
-    expect(await screen.findByText('Approve Althar on GitHub, in your browser.')).toBeTruthy()
-    expect(await screen.findByText('Sign-in was declined.', {}, { timeout: 4000 })).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(screen.queryByText('Sign-in was declined.')).toBeNull()
-    open.mockRestore()
+    const token = 'github_pat_11ABXDEFGHIJKLMNOPQRSTUVWX7Qx'
+    const host = fakeHost({ clipboardToken: vi.fn(async () => token) })
+    const { client } = fakeClient({ connectToken: vi.fn(async () => githubConnection) })
+    withServices(<Connections />, client, host)
+    await connect(0)
+    await userEvent.click(await screen.findByRole('button', { name: /Make a token/ }))
+    expect(screen.getByRole('heading', { name: 'Make a token on GitHub' })).toBeTruthy()
+    expect(screen.getByText('Step 1 of 3')).toBeTruthy()
+    expect(screen.getByText('It opens with the name, northwind as the owner, 90 days and the permissions set.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Open GitHub’s token page' }))
+    expect(open).toHaveBeenCalledWith(GITHUB_TOKEN_PAGE, '_blank')
+    await userEvent.click(screen.getByRole('button', { name: 'See the 6 permissions it sets' }))
+    expect(screen.getByText('Pull requests')).toBeTruthy()
+    expect(screen.getByText('Under Repository access, choose Only select repositories: meridian-api.')).toBeTruthy()
 
-    // One that can't start says why, where it would have shown.
-    vi.mocked(client.startSignIn).mockRejectedValueOnce(
-      new ApiError({ reason: 'SignInUnavailable', message: 'Use a token for GitHub here.' }),
-    )
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
-    expect(await screen.findByText('Use a token for GitHub here.')).toBeTruthy()
-    // Cancelling one under way tells the runtime.
-    vi.mocked(client.startSignIn).mockResolvedValueOnce({
-      flowId: 'flow3',
-      kind: 'device',
-      userCode: 'WXYZ-0000',
-      verificationUri: 'https://github.com/login/device',
-      expiresAt: '2026-10-01T10:00:00.000Z',
-    })
-    vi.mocked(client.getSignIn).mockResolvedValue({ state: 'waiting' })
-    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
-    await screen.findByText('WXYZ-0000')
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(client.cancelSignIn).toHaveBeenCalledWith('flow3')
+    // Back from GitHub with the token copied: the clipboard is read once, and offers it.
+    act(() => void window.dispatchEvent(new Event('focus')))
+    expect(await screen.findByText('A GitHub token is on your clipboard')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Paste the token' })).toBeTruthy()
+    expect(screen.getByText('github_pat_11ABX····7Qx')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Use it' }))
+    expect(client.connectToken).toHaveBeenCalledWith({ product: 'github', token, webUrl: 'https://github.com' })
+
+    // What it can do, as GitHub says.
+    expect(await screen.findByRole('heading', { name: 'Connected as you' })).toBeTruthy()
+    expect(client.checkConnection).toHaveBeenCalledWith('conn1')
+    const can = screen.getByRole('list', { name: 'What GitHub lets Althar do' })
+    expect(within(can).getByText('Reaches meridian-api').closest('li')?.textContent).toContain('northwind')
+    expect(within(can).getByText('Open, update and merge pull requests')).toBeTruthy()
+    expect(screen.getByText('The token runs out on 8 January 2027.')).toBeTruthy()
+    expect(screen.getByText('Connected')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(await screen.findByText('Not connected · meridian’s code is here')).toBeTruthy()
+    open.mockRestore()
   })
 
-  it('connects with a pasted token, and says when the service refuses it', async () => {
+  it('takes a token pasted by hand; says on the check when the service doesn’t take one; and how to give it what it lacks', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const lacking = {
+      ...githubCheck,
+      lines: githubCheck.lines.map((line) =>
+        line.need === 'changes'
+          ? {
+              ...line,
+              state: 'no' as const,
+              reason: {
+                kind: 'permission' as const,
+                permission: 'Pull requests',
+                url: 'https://github.com/settings/personal-access-tokens',
+              },
+            }
+          : line,
+      ),
+    }
     const { client } = fakeClient({
       connectToken: vi
         .fn()
-        .mockRejectedValueOnce(new ApiError({ reason: 'ConnectorFailed', message: 'Linear says that key isn’t valid.' }))
-        .mockResolvedValue({ ...githubConnection, id: 'conn2', product: 'linear', name: 'Linear' }),
+        .mockRejectedValueOnce(new ApiError({ reason: 'ConnectorFailed', message: 'GitHub no longer takes it.', why: 'unauthorized' }))
+        .mockRejectedValueOnce(new ApiError({ reason: 'ConnectorFailed', message: 'Althar couldn’t reach GitHub.', why: 'unreachable' }))
+        .mockResolvedValue(githubConnection),
+      checkConnection: vi.fn().mockResolvedValueOnce(lacking).mockResolvedValue(githubCheck),
     })
     withServices(<Connections />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Add a token' }))
-    await userEvent.type(screen.getByLabelText('Linear token'), 'wrong{Enter}')
-    expect(await screen.findByText('Linear says that key isn’t valid.')).toBeTruthy()
-    await userEvent.clear(screen.getByLabelText('Linear token'))
-    await userEvent.type(screen.getByLabelText('Linear token'), 'lin_api_ok{Enter}')
-    await waitFor(() => expect(screen.queryByLabelText('Linear token')).toBeNull())
-    expect(client.connectToken).toHaveBeenLastCalledWith({ product: 'linear', token: 'lin_api_ok' })
-    // A server of a company's own, by its address.
-    vi.mocked(client.listConnections).mockResolvedValue({ ...connectionList, connections: [githubConnection] })
-    await act(async () => void (await client.listConnections()))
+    await connect(0)
+    await userEvent.click(await screen.findByRole('button', { name: /Make a token/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Paste it myself' }))
+    const field = screen.getByLabelText('Paste it')
+    expect(field.getAttribute('type')).toBe('password')
+    await userEvent.click(screen.getByRole('button', { name: 'Check' }))
+    expect(screen.getByText('Paste the token first')).toBeTruthy()
+    await userEvent.type(field, 'github_pat_old{Enter}')
+
+    // Not taken: said on the check, where its account would be, with a new one made or another pasted.
+    expect(await screen.findByRole('heading', { name: 'GitHub didn’t take that token' })).toBeTruthy()
+    expect(screen.getByText('GitHub didn’t take this token: it may be mistyped, revoked or run out.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Paste another' }))
+    // Not reached: said under the field.
+    await userEvent.type(screen.getByLabelText('Paste it'), 'github_pat_new{Enter}')
+    expect(await screen.findByText('Althar couldn’t reach GitHub.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Check' }))
+
+    // Taken, but without one thing a task needs: said on its line, with how to change it.
+    expect(await screen.findByRole('heading', { name: 'This token can’t open pull requests' })).toBeTruthy()
+    expect(screen.getByText('Pull requests isn’t allowed on this token, so a task would end on its branch.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Change it on GitHub' }))
+    expect(open).toHaveBeenCalledWith('https://github.com/settings/personal-access-tokens', '_blank')
+    await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(await screen.findByRole('heading', { name: 'Connected as you' })).toBeTruthy()
+    expect(client.checkConnection).toHaveBeenCalledTimes(2)
+    // Escape-like: back from the check is the token again.
+    open.mockRestore()
   })
 
-  it('connects Trello with the API key its token was made for, offering a token for the key once it looks right', async () => {
+  it('takes gh’s sign-in, as gh has it', async () => {
+    const { client } = fakeClient()
+    withServices(<Connections />, client)
+    await connect(0)
+    await userEvent.click(await screen.findByRole('button', { name: /Use gh’s sign-in/ }))
+    expect(screen.getByRole('heading', { name: 'Use gh’s sign-in' })).toBeTruthy()
+    expect(screen.getByText('you on github.com')).toBeTruthy()
+    expect(screen.getByText('repo, workflow, read:org')).toBeTruthy()
+    expect(screen.getByText('Every repository you can, northwind’s included')).toBeTruthy()
+    vi.mocked(client.connectCli).mockRejectedValueOnce(
+      new ApiError({ reason: 'CliSignedOut', message: 'gh isn’t signed in to github.com on this Mac.' }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Use this sign-in' }))
+    expect(await screen.findByText('gh isn’t signed in to github.com on this Mac.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Use this sign-in' }))
+    expect(client.connectCli).toHaveBeenLastCalledWith('github', 'https://github.com')
+    expect(await screen.findByRole('heading', { name: 'Connected as you' })).toBeTruthy()
+    expect(screen.getByText('gh’s token; it runs out when gh’s does.')).toBeTruthy()
+    // Another way goes back to the ways.
+  })
+
+  it('connects a company’s own server by its address, asking what answers there', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const { client } = fakeClient({
+      findServer: vi.fn(async (_service, webUrl: string) =>
+        webUrl.includes('meridian')
+          ? {
+              product: 'github' as const,
+              webUrl: 'https://git.meridian.dev',
+              reason: null,
+              tokenPage: 'https://git.meridian.dev/settings/tokens/new',
+            }
+          : { product: null, webUrl, reason: 'other' as const, tokenPage: null },
+      ),
+    })
+    withServices(<Connections />, client)
+    await connect(0)
+    await userEvent.click(await screen.findByRole('button', { name: 'On a company’s own server' }))
+    expect(screen.getByRole('heading', { name: 'Your company’s GitHub' })).toBeTruthy()
+    const field = screen.getByLabelText('Server address')
+    await userEvent.type(field, 'git.example.com')
+    await userEvent.click(screen.getByRole('button', { name: 'Make a token' }))
+    expect(await screen.findByText('git.example.com isn’t a GitHub server')).toBeTruthy()
+    await userEvent.clear(field)
+    await userEvent.type(field, 'git.meridian.dev')
+    expect(await screen.findByText('GitHub Enterprise Server answers at git.meridian.dev', {}, { timeout: 3000 })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Make a token' }))
+    expect(screen.getByRole('heading', { name: 'Make a token on git.meridian.dev' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Open git.meridian.dev’s token page' }))
+    expect(open).toHaveBeenCalledWith('https://git.meridian.dev/settings/tokens/new', '_blank')
+    open.mockRestore()
+  })
+
+  it('signs a connection in again with a new token, keeping its site and email', async () => {
+    const jira = {
+      ...connectionList.products[1]!,
+      product: 'jira_cloud' as const,
+      service: 'jira' as const,
+      name: 'Jira',
+      hostedUrl: null,
+      tokenNeeds: 'email' as const,
+      tokenPrefixes: ['ATATT'],
+    }
+    const stopped = {
+      ...githubConnection,
+      id: 'conn9',
+      product: 'jira_cloud' as const,
+      name: 'Jira',
+      webUrl: 'https://northwind.atlassian.net',
+      account: { login: 'you@northwind.io', name: 'You' },
+      auth: 'token' as const,
+      state: 'reauth_required' as const,
+    }
+    const { client } = fakeClient({
+      listConnections: vi.fn(async () => ({ ...connectionList, products: [jira], connections: [stopped], places: [] })),
+      getConnectGuide: vi.fn(async () => ({
+        service: 'jira' as const,
+        places: [],
+        clis: [],
+        email: null,
+        tokenPages: [
+          {
+            product: 'jira_cloud' as const,
+            webUrl: 'https://northwind.atlassian.net',
+            url: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+          },
+        ],
+      })),
+      connectToken: vi.fn(async () => ({ ...stopped, state: 'ready' as const })),
+      checkConnection: vi.fn(async () => ({
+        connectionId: 'conn9',
+        lines: [
+          { need: 'site' as const, state: 'ok' as const, fact: 'northwind.atlassian.net', count: null, reason: null },
+          { need: 'account' as const, state: 'ok' as const, fact: 'you@northwind.io', count: null, reason: null },
+          { need: 'read' as const, state: 'ok' as const, fact: null, count: 4, reason: null },
+          { need: 'comment' as const, state: 'ok' as const, fact: null, count: null, reason: null },
+          { need: 'move' as const, state: 'ok' as const, fact: null, count: null, reason: null },
+        ],
+        expiresAt: null,
+        renews: false,
+        settings: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+      })),
+    })
+    withServices(<Connections />, client)
+    expect(await screen.findByText('Its sign-in stopped working')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    expect(await screen.findByRole('heading', { name: 'Make a new API token' })).toBeTruthy()
+    expect(screen.getByText('Its token stopped working. Tasks can’t reach it until it’s back.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Paste it myself' }))
+    expect(screen.getByRole('heading', { name: 'Paste the new token' })).toBeTruthy()
+    // The site and the email stay: only the token is asked for.
+    expect(screen.queryByLabelText('Your Atlassian account’s email')).toBeNull()
+    await userEvent.type(screen.getByLabelText('Paste it'), 'ATATTnew{Enter}')
+    expect(client.connectToken).toHaveBeenCalledWith({ product: 'jira_cloud', token: 'ATATTnew', connectionId: 'conn9' })
+    expect(await screen.findByRole('heading', { name: 'Jira is back' })).toBeTruthy()
+    expect(screen.getByText('4 projects')).toBeTruthy()
+  })
+
+  it('connects Trello with the Power-Up key its token is made for', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
     const trello = {
       ...connectionList.products[1]!,
       product: 'trello' as const,
+      service: 'trello' as const,
       name: 'Trello',
       hostedUrl: 'https://trello.com',
       tokenNeeds: 'key' as const,
-      tokenHelp: 'https://trello.com/power-ups/admin',
+      tokenPrefixes: ['ATTA'],
       tokenHelpForKey: 'https://trello.com/1/authorize?response_type=token&key={key}',
-      keyChecks: [{ pattern: '^(?![0-9a-f]{32}$)', says: 'An API key is 32 characters' }],
+      keyChecks: [
+        { pattern: '^[0-9a-f]{64}$', says: 'That’s the Power-Up’s secret; paste its API key' },
+        { pattern: '^(?![0-9a-f]{32}$)', says: 'An API key is 32 characters' },
+      ],
     }
     const key = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
-    const { client } = fakeClient({ listConnections: vi.fn(async () => ({ ...connectionList, products: [trello] })) })
+    const { client } = fakeClient({
+      listConnections: vi.fn(async () => ({ ...connectionList, products: [trello], places: [] })),
+      getConnectGuide: vi.fn(async () => ({
+        service: 'trello' as const,
+        places: [],
+        clis: [],
+        email: null,
+        tokenPages: [{ product: 'trello' as const, webUrl: 'https://trello.com', url: 'https://trello.com/power-ups/admin' }],
+      })),
+    })
     withServices(<Connections />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Add a token' }))
-    await userEvent.type(screen.getByLabelText('API key'), key.slice(0, 8))
-    await userEvent.type(screen.getByLabelText('Trello token'), 'ATTA0000{Enter}')
-    expect(await screen.findByText('An API key is 32 characters')).toBeTruthy()
-    expect(screen.queryByRole('link', { name: /Make a token for this key/ })).toBeNull()
-    await userEvent.type(screen.getByLabelText('API key'), key.slice(8))
-    expect(screen.getByRole('link', { name: /Make a token for this key/ }).getAttribute('href')).toBe(
-      `https://trello.com/1/authorize?response_type=token&key=${key}`,
-    )
-    await userEvent.type(screen.getByLabelText('Trello token'), '{Enter}')
-    await waitFor(() => expect(client.connectToken).toHaveBeenLastCalledWith({ product: 'trello', key, token: 'ATTA0000' }))
+    await connect(0)
+    // One way in: its first step at once, saying what it needs.
+    expect(await screen.findByRole('heading', { name: 'Make a Power-Up key on Trello' })).toBeTruthy()
+    expect(screen.getByText('A key of yours on Trello, then a token you allow for it')).toBeTruthy()
+    const field = screen.getByLabelText('Power-Up API key')
+    await userEvent.type(field, `${key}${key}{Enter}`)
+    expect(screen.getByText('That’s the Power-Up’s secret; paste its API key')).toBeTruthy()
+    await userEvent.clear(field)
+    await userEvent.type(field, `${key}{Enter}`)
+    expect(screen.getByRole('heading', { name: 'Allow Althar on Trello' })).toBeTruthy()
+    expect(screen.getByText('Made for your key ····8f90: Althar, read and write, no expiry.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Open Trello’s allow page' }))
+    expect(open).toHaveBeenCalledWith(`https://trello.com/1/authorize?response_type=token&key=${key}`, '_blank')
+    await userEvent.click(screen.getByRole('button', { name: 'Paste it myself' }))
+    await userEvent.type(screen.getByLabelText('Paste it'), 'ATTAtoken{Enter}')
+    expect(client.connectToken).toHaveBeenCalledWith({ product: 'trello', token: 'ATTAtoken', webUrl: 'https://trello.com', key })
+    open.mockRestore()
   })
+
+  it('signs in in the browser by a code, then lets GitHub’s app into the projects’ owner', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    let state: 'waiting' | 'done' = 'waiting'
+    const installing = {
+      ...githubCheck,
+      lines: githubCheck.lines.map((line) =>
+        line.need === 'reach'
+          ? {
+              ...line,
+              state: 'no' as const,
+              reason: { kind: 'not_installed' as const, owner: 'northwind', url: 'https://github.com/apps/althar/installations/new' },
+            }
+          : line,
+      ),
+    }
+    const { client } = fakeClient({
+      listConnections: vi.fn(async () => ({
+        ...connectionList,
+        products: connectionList.products.map((product) => (product.product === 'github' ? { ...product, browserSignIn: true } : product)),
+      })),
+      getSignIn: vi.fn(async () => (state === 'waiting' ? { state } : { state, connectionId: 'conn1' })),
+      checkConnection: vi.fn().mockResolvedValueOnce(installing).mockResolvedValue(githubCheck),
+    })
+    withServices(<Connections />, client)
+    await connect(0)
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Continue with GitHub\s*Approve in your browser, then let Althar into northwind/ }),
+    )
+    expect(client.startSignIn).toHaveBeenCalledWith('github', 'https://github.com')
+    expect(await screen.findByText('ABCD-1234')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Type this code on GitHub' })).toBeTruthy()
+    expect(open).toHaveBeenCalledWith('https://github.com/login/device', '_blank')
+    state = 'done'
+    expect(await screen.findByRole('heading', { name: 'Let Althar into northwind' }, { timeout: 4000 })).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Install Althar on northwind' }))
+    expect(open).toHaveBeenLastCalledWith('https://github.com/apps/althar/installations/new', '_blank')
+    // Asked again, a little apart, until it is let in.
+    expect(await screen.findByRole('heading', { name: 'Connected as you' }, { timeout: 6000 })).toBeTruthy()
+    open.mockRestore()
+  }, 15_000)
+
+  it('says how a browser sign-in ended, starts it again once, and cancels one left for another way', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const { client } = fakeClient({
+      listConnections: vi.fn(async () => ({
+        ...connectionList,
+        products: connectionList.products.map((product) => (product.product === 'github' ? { ...product, browserSignIn: true } : product)),
+      })),
+      getSignIn: vi.fn(async () => ({ state: 'ended' as const, reason: 'denied' as const, message: 'Sign-in was declined.' })),
+    })
+    withServices(<Connections />, client)
+    await connect(0)
+    await userEvent.click(await screen.findByRole('button', { name: /Continue with GitHub/ }))
+    expect(await screen.findByText('Sign-in was declined.', {}, { timeout: 4000 })).toBeTruthy()
+    vi.mocked(client.getSignIn).mockResolvedValue({ state: 'waiting' })
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('ABCD-1234')).toBeTruthy()
+    expect(client.startSignIn).toHaveBeenCalledTimes(2)
+    await userEvent.click(screen.getByRole('button', { name: 'Another way' }))
+    expect(await screen.findByRole('group', { name: 'Ways to connect GitHub' })).toBeTruthy()
+    expect(client.cancelSignIn).toHaveBeenCalledWith('flow1')
+    open.mockRestore()
+  }, 15_000)
 
   it('lists a connection on a company’s own server with its address, and one that needs signing in again', async () => {
     const { client } = fakeClient({
@@ -159,6 +421,9 @@ describe('connections', () => {
     withServices(<Connections />, client)
     expect(await screen.findByText(/git\.meridian\.dev/)).toBeTruthy()
     expect(screen.getByText('Its sign-in stopped working')).toBeTruthy()
+    // A connected service that runs on companies' own servers takes another, by its address.
+    await userEvent.click(screen.getByRole('button', { name: 'Add a server' }))
+    expect(await screen.findByLabelText('Server address')).toBeTruthy()
   })
 
   it('says when the list can’t be read', async () => {
@@ -630,27 +895,59 @@ describe('what reaching outside says, in every case', () => {
     ])
   })
 
-  it('offers each product as what it is for, with an address example where it needs one', () => {
+  it('lists each service once, Cloud and Data Center together, with where the projects’ code is or what it is for', () => {
     const list = {
       ...connectionList,
       products: [
         ...connectionList.products,
-        { ...connectionList.products[1]!, product: 'jira_cloud' as const, name: 'Jira', hostedUrl: null, tokenNeeds: 'email' as const },
+        {
+          ...connectionList.products[1]!,
+          product: 'jira_cloud' as const,
+          service: 'jira' as const,
+          name: 'Jira',
+          hostedUrl: null,
+          tokenNeeds: 'email' as const,
+        },
+        {
+          ...connectionList.products[1]!,
+          product: 'jira_dc' as const,
+          service: 'jira' as const,
+          name: 'Jira Data Center',
+          hostedUrl: null,
+          selfHosted: true,
+        },
         {
           ...connectionList.products[0]!,
           product: 'bitbucket_dc' as const,
+          service: 'bitbucket' as const,
           name: 'Bitbucket Data Center',
           tracker: false,
           hostedUrl: null,
         },
       ],
+      places: [
+        ...connectionList.places,
+        {
+          product: 'bitbucket_dc' as const,
+          webUrl: 'https://git.tessera.studio',
+          project: 'tessera',
+          remote: null,
+          repositories: ['TS/app'],
+        },
+      ],
       connections: [{ ...githubConnection, webUrl: 'https://git.meridian.dev' }],
     }
-    expect(servicesOf(list).map((service) => [service.id, service.what, service.instanceExample, service.tokenNeeds])).toEqual([
-      ['github', 'Pull requests and issues', undefined, undefined],
-      ['linear', 'Issues', undefined, undefined],
-      ['jira_cloud', 'Issues', 'https://your-site.atlassian.net', 'email'],
-      ['bitbucket_dc', 'Pull requests', undefined, undefined],
+    expect(servicesOf(list).map((service) => [service.id, service.name, service.what, service.selfHosted])).toEqual([
+      ['github', 'GitHub', 'meridian’s code is here', true],
+      ['bitbucket', 'Bitbucket', 'tessera’s code is on git.tessera.studio', true],
+      ['linear', 'Linear', 'Issues', undefined],
+      ['jira', 'Jira', 'Issues', true],
+    ])
+    expect(servicesOf(list, { what: false }).map((service) => service.what)).toEqual([
+      'meridian’s code is here',
+      'tessera’s code is on git.tessera.studio',
+      undefined,
+      undefined,
     ])
     expect(connectionsOf(list)).toEqual([{ id: 'conn1', service: 'github', account: 'you', instance: 'https://git.meridian.dev' }])
   })

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { AgentStatus, ConnectionList } from '@althar/contracts'
 import {
@@ -44,7 +44,9 @@ import { productBrand } from '../../shared/products'
 import { clock } from '../../shared/time'
 import { AgentAccounts } from '../accounts/AgentAccounts'
 import { type AccountSignInModel, useAccountSignIn } from '../accounts/useAccountSignIn'
-import { ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
+import { ConnectFlow, connectHead } from '../connections/ConnectFlow'
+import { type Connecting, ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
+import { type ConnectModel, useConnect } from '../connections/useConnect'
 import { type ConnectionsModel, useConnections } from '../connections/useConnections'
 import { StartError } from '../start/StartView'
 import { ModelsView } from './ModelsView'
@@ -63,7 +65,9 @@ import { type CoAuthorModel, useCoAuthor } from './useCoAuthor'
  * this Mac and a word on each, the code hosts and trackers, the app's icon,
  * and, on a Mac with a notch, where Althar shows while you're in another app.
  * Any opens out in place, the agents one at a time with their accounts, and
- * steps back. It is calm: nothing in it says what is running.
+ * steps back. Connecting a code host or tracker narrows the panel to a
+ * sign-in card, a step at a time, and comes back to the list connected. It
+ * is calm: nothing in it says what is running.
  */
 
 export const text = {
@@ -86,6 +90,7 @@ export const text = {
   edgeFailed: 'That couldn’t be kept. Try again.',
   coAuthorFailed: 'That couldn’t be kept. Try again.',
   version: (version: string) => `Althar ${version}`,
+  backToList: 'Back to code hosts and trackers',
   awake: 'Keep awake',
   awakeOn: 'While work runs',
   off: 'Off',
@@ -156,7 +161,7 @@ export const marksOf = (list: ConnectionList): ReadonlyArray<MarkGlance> => {
   return [...marks.values()]
 }
 
-type Showing = 'all' | 'agents' | 'connections' | 'icon' | 'edge' | 'mac' | 'notify'
+type Showing = 'all' | 'agents' | 'connections' | 'connect' | 'icon' | 'edge' | 'mac' | 'notify'
 
 export interface SettingsPanelProps {
   start: StartModel
@@ -214,6 +219,19 @@ export function SettingsView({
 }) {
   const [showing, setShowing] = useState<Showing>('all')
   const [agentId, setAgentId] = useState<string | null>(null)
+  // The walk in opened from the code hosts and trackers, and the one before it, so each starts afresh.
+  const [connecting, setConnecting] = useState<Connecting | null>(null)
+  const [walks, setWalks] = useState(0)
+  const connect = (next: Connecting) => {
+    setConnecting(next)
+    setWalks((n) => n + 1)
+    setShowing('connect')
+  }
+  const toList = () => {
+    setShowing('connections')
+    setConnecting(null)
+  }
+  const flow = useRef<ConnectModel | null>(null)
   const agents = start.status?.agents ?? []
   // The agent chosen, else the one signing in, else one that needs the person, else the first.
   const chosen =
@@ -261,13 +279,17 @@ export function SettingsView({
       trigger={<IconButton icon="gear" label={text.title} kbd={text.kbd} size="small" />}
       open={open}
       onOpenChange={onOpenChange}
-      wide={showing === 'agents' || showing === 'connections' || showing === 'edge'}
-      // A sign-in finishing in the browser or Terminal keeps it open when the person comes back to the window.
-      holding={accounts.signingIn !== null || connections.signingIn !== null}
+      width={showing === 'agents' || showing === 'connections' || showing === 'edge' ? 'wide' : showing === 'connect' ? 'card' : 'modules'}
+      // A sign-in finishing in the browser or Terminal, or a walk in to a code host, keeps it open when the person comes back to the window.
+      holding={accounts.signingIn !== null || showing === 'connect'}
       onEscapeKeyDown={(event) => {
-        // Escape steps back out of an opened module before it closes the panel.
+        // Escape steps back a step of a walk in, then out of an opened module, before it closes the panel.
         if (event.defaultPrevented || showing === 'all') return
         event.preventDefault()
+        if (showing === 'connect') {
+          if (flow.current?.back() !== true) toList()
+          return
+        }
         all()
       }}
       text={{ label: text.title }}
@@ -372,9 +394,13 @@ export function SettingsView({
         </ControlDetail>
       )}
       {showing === 'connections' && (
-        <ControlDetail title={connectionsText.label} onBack={all}>
+        <ControlDetail
+          title={connectionsText.label}
+          {...(list === null ? {} : { aside: text.connected(list.connections.length) })}
+          onBack={all}
+        >
           <ControlSheet>
-            <ConnectionsView model={connections} columns />
+            <ConnectionsView model={connections} columns onConnect={connect} />
           </ControlSheet>
           {coAuthor !== null && (
             <ControlSheet>
@@ -387,6 +413,16 @@ export function SettingsView({
             </ControlSheet>
           )}
         </ControlDetail>
+      )}
+      {showing === 'connect' && connecting !== null && (
+        <Connect
+          key={walks}
+          connecting={connecting}
+          onClose={toList}
+          onModel={(model) => {
+            flow.current = model
+          }}
+        />
       )}
       {showing === 'edge' && edge.place !== null && (
         <ControlDetail title={text.edge} onBack={all}>
@@ -486,5 +522,33 @@ export function SettingsView({
         </ControlDetail>
       )}
     </ControlCenter>
+  )
+}
+
+/** A walk in to a code host or tracker, opened out in the panel narrowed to a card: the service's own sub-page. */
+function Connect({
+  connecting,
+  onClose,
+  onModel,
+}: {
+  connecting: Connecting
+  onClose: () => void
+  /** The walk as it stands, for Escape to step it back. */
+  onModel: (model: ConnectModel) => void
+}) {
+  const model = useConnect({ ...connecting, onClose })
+  useEffect(() => onModel(model))
+  const head = connectHead(model)
+  return (
+    <ControlDetail
+      title={head.title}
+      {...(head.aside === undefined ? {} : { aside: head.aside })}
+      onBack={onClose}
+      text={{ back: text.backToList }}
+    >
+      <ControlSheet>
+        <ConnectFlow model={model} />
+      </ControlSheet>
+    </ControlDetail>
   )
 }

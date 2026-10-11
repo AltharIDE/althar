@@ -47,7 +47,8 @@ import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { PermissionCalls } from './PermissionCall'
 import { StuckCall } from './StuckCall'
-import { ConnectPanel } from './ConnectPanel'
+import { ConnectPanel } from '../connections/ConnectPanel'
+import { serviceOfProduct } from '../connections/ways'
 import { NoOutputsView } from './NoOutputsView'
 import { conflictsOf, hasOutputs, Outputs } from './Outputs'
 import s from './Task.module.css'
@@ -527,7 +528,9 @@ export function TaskView({
               send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
             }}
           />
-          {connecting && <ConnectPanel onClose={() => setConnecting(false)} />}
+          {connecting && snapshot.host !== null && (
+            <ConnectPanel service={serviceOfProduct(snapshot.host.product)} onClose={() => setConnecting(false)} />
+          )}
         </div>
       ) : (
         <TaskFace
