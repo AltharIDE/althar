@@ -200,6 +200,8 @@ interface SessionState {
   markers: Set<string>
   /** Markers it has played once already, such as `[lead:hang-once]`. */
   played: Set<string>
+  /** It was briefed as a project's coordinator: it plans what a lead's markers say, and plays none of them itself. */
+  coordinator: boolean
   /** Commands it has run with `run`, so each is a tool call of its own. */
   runs: number
 }
@@ -326,20 +328,6 @@ const commitIn = (cwd: string, file: string, message: string) => {
     execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd })
   git('add', '-A')
   git('commit', '-q', '-m', message)
-}
-
-/** Whether the session is a project's coordinator: Althar gave it the tools to draft tasks. */
-const coordinates = async (session: SessionState): Promise<boolean> => {
-  if (session.tools === undefined) return false
-  const client = new Client({ name: 'fake-agent', version: '1.0.0' })
-  const transport = new StreamableHTTPClientTransport(new URL(session.tools.url), { requestInit: { headers: session.tools.headers } })
-  // The SDK's transport types its optional fields loosely, which strict optional types reject.
-  await client.connect(transport as Parameters<typeof client.connect>[0])
-  try {
-    return (await client.listTools()).tools.some((tool) => tool.name === 'draft_task')
-  } finally {
-    await client.close()
-  }
 }
 
 const playRole = async (session: SessionState, text: string): Promise<string | undefined> => {
@@ -585,6 +573,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         })(),
         markers: new Set(),
         played: new Set(),
+        coordinator: false,
         runs: 0,
       }
       sessions.set(sessionId, session)
@@ -771,7 +760,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return ended()
       }
       // A lead that asks the person first, `[lead:ask]`, once: then it plays its part with the answer. The coordinator that plans it only passes the marker on.
-      if (text.includes('[lead:ask]') && !session.played.has('[lead:ask]') && !(await coordinates(session))) {
+      if (text.includes('You are the coordinator of the project')) session.coordinator = true
+      if (text.includes('[lead:ask]') && !session.played.has('[lead:ask]') && !session.coordinator) {
         session.played.add('[lead:ask]')
         await say(await askPerson('one'))
         if (session.cancelled) return { stopReason: 'cancelled' }
