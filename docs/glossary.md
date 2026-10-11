@@ -82,6 +82,14 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Allowed by the project's rules | a decision a rule made | The quiet line under a turn for what an allow rule let through, opening to each command and its rule. |
 | Settled | terminal states | Calls answered, changes accepted, tasks abandoned. |
 
+## Althar itself
+
+| On screen | In the model | What it is |
+|---|---|---|
+| Althar 0.1.1 is ready, Restart | an update Squirrel has in place (`main/updates.ts`) | A newer Althar, downloaded in the background, said in one quiet line in the window's bar and Settings' foot. Restart is there only while no work runs; otherwise the line says it installs when you quit. Checking and downloading never show. |
+| Check for Updates… | `checkNow` | In the app menu: looks now, and says in a dialog what it found. |
+| What's new | a release's notes | In Settings' foot, beside the version: that version's GitHub Release, in the browser. |
+
 ## Words the interface doesn't use
 
 Worker, session, run, attempt, node, graph patch, compensation, attention
