@@ -1,9 +1,7 @@
 import { type CSSProperties, useEffect, useState } from 'react'
 
 import {
-  Button,
   Composer,
-  Dialog,
   DictationTray,
   LinkButton,
   ResizeHandle,
@@ -33,7 +31,7 @@ import { BoardView } from '../board/BoardView'
 import { lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
 import type { BoardModel } from '../board/useBoard'
-import { ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
+import { ConnectDialog } from '../connections/ConnectDialog'
 import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
 import { ProjectDialogs, ProjectMenu, type ProjectMenuActions } from './ProjectMenu'
@@ -73,7 +71,6 @@ export const text = {
   dismiss: 'Dismiss',
   boardFailed: 'Althar couldn’t read the board.',
   boardReading: 'Reading the board',
-  done: 'Done',
   width: 'Width of the conversation',
   /** Where a project of several repositories is: how many, and their names. */
   repositories: (names: ReadonlyArray<string>) => `${names.length} repositories · ${names.join(', ')}`,
@@ -375,17 +372,7 @@ export function ProjectView({
         )}
       </div>
       {menu && <ProjectDialogs model={menu.model} />}
-      {connecting && (
-        <Dialog
-          title={connectionsText.label}
-          width={720}
-          className={s.connecting}
-          onClose={() => setConnecting(false)}
-          actions={<Button onClick={() => setConnecting(false)}>{text.done}</Button>}
-        >
-          <ConnectionsView model={connections} columns />
-        </Dialog>
-      )}
+      {connecting && <ConnectDialog model={connections} onClose={() => setConnecting(false)} />}
     </div>
   )
 }

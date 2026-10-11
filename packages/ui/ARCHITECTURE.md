@@ -20,8 +20,8 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `home` | Work across every project, as the home shows it: NeedLine, ProjectList, WorkTicks, SinceRow, HomeRest, ProjectWord; and what needs you at the edge of the screen: Island, EdgeSheet. |
 | `outputs` | What a task made: ChangeSet, ArtifactCard, ChangeView, and NoOutputs (where its lead has looked, before it has made anything). |
 | `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu, and the questions they ask first: RenameProject, RemoveProject, AbandonTask. |
-| `setup` | What comes before a project, what sets one up, and Settings: Runtimes, AgentInstall (an agent not on this device, and downloading it), SourceMap, Accounts and AccountSignIn, Connections, AgentTabs, ModelSwitches, ControlCenter, Preferences (the app's own: KeepAwake, OpenFilesIn, NotificationSettings, as rows of a SettingList that sit in any frame), and Conventions (NamingRule, TemplateSources). |
-| `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), Start (the first screen: the agents answering round the mark, and picking the first project's repositories), Home, NewProject (a project before it is made, in a tab of its own: its name and mark, its colour, its folders as read, what this computer has named like it, and what reading them found), ProjectRules. |
+| `setup` | What comes before a project, what sets one up, and Settings: Runtimes, AgentInstall (an agent not on this device, and downloading it), SourceMap, RepositoryMap (a project's folders wired to where their work goes), Accounts and AccountSignIn, Connections, AgentTabs, ModelSwitches, ControlCenter, Preferences (the app's own: KeepAwake, OpenFilesIn, NotificationSettings, as rows of a SettingList that sit in any frame), and Conventions (NamingRule, TemplateSources). |
+| `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), Start (the first screen: the agents answering round the mark, and picking the first project's repositories), Home, NewProject (a project before it is made, in a tab of its own: its name and mark, its colour, its folders as read, what this computer has named like it, and what reading them found), ProjectRules, ProjectRepositories. |
 
 The rules between them:
 
@@ -169,7 +169,7 @@ The helpers, in `src/lib`:
 - `useOnScreen`: a clock that runs only while someone can see it.
 - `useStickToBottom`: a thread that follows new content until you scroll away.
 - `useRefocus`: focus back on the button a form replaced, when the form closes.
-- `useDragOver`: folders held over a screen that takes them, Start's and NewProject's.
+- `useDragOver`: folders held over a part of the page and dropped on it, for the first screen, a new project and a project's repositories.
 - `safeHref`: the one test for whether an address becomes a link.
 
 ### Accessibility is part of the component

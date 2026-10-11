@@ -1,10 +1,9 @@
 import { type DragEvent, useRef, useState } from 'react'
 
 /**
- * Folders held over a screen that takes them: whether some are, with the
- * counting a drag's enters and leaves over its children need, and the
- * handlers for its root. Without `onDrop`, a drop does nothing and nothing
- * shows it would.
+ * Folders held over a part of the page, and dropped on it: whether some are
+ * held over it now, counting a drag's enters and leaves over what is inside,
+ * and the handlers to spread on it. Without `onDrop`, it takes no drops.
  */
 export function useDragOver(onDrop: ((files: readonly File[]) => void) | undefined) {
   const [over, setOver] = useState(false)

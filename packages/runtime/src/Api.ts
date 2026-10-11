@@ -38,7 +38,7 @@ import { accountsOf, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
-import { Projects } from './Projects'
+import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
 import { Queries } from './Queries'
 import { timestamp } from './records'
@@ -181,6 +181,29 @@ export const handlers = Api.toLayer(
       auth: info.auth,
       state: info.state,
     })
+
+    /**
+     * A repository as its page shows it: where its work goes, from its
+     * remote, with the code host Althar knows there and who it is signed in
+     * as; a host it doesn't know by its address alone.
+     */
+    const repositoryOf = ({ remote, ...repository }: ProjectRepository) =>
+      Effect.gen(function* () {
+        const place = remote === null ? null : yield* Effect.orElseSucceed(connections.placeOf(remote), () => null)
+        const path = place?.path.join('/')
+        const host =
+          place === null || path === undefined
+            ? null
+            : {
+                product: place.code?.product ?? null,
+                name: place.code?.name ?? place.host,
+                instance: place.code === null || place.code.hosted ? null : place.host,
+                path,
+                url: place.url,
+                account: place.connection === null ? null : { login: place.connection.account.login, state: place.connection.state },
+              }
+        return { ...repository, host }
+      })
 
     /** The issue a task comes from, read before the task is made, so its key can go in the task's branch. */
     const issueFor = (projectId: string, issue: string | undefined) =>
@@ -410,7 +433,8 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      GetRepositories: ({ projectId }) => api(Effect.map(projects.repositories(projectId), (list) => [...list])),
+      GetRepositories: ({ projectId }) =>
+        api(Effect.flatMap(projects.repositories(projectId), (list) => Effect.forEach(list, repositoryOf))),
       AddRepositories: ({ commandId, projectId, grant }) =>
         once(
           commandId,

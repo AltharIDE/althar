@@ -136,6 +136,52 @@ const BROWSER_WAIT = Duration.minutes(10)
 
 type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Secrets | Connectors
 
+/** Where a repository's remote is, as Althar reads it without asking the host. */
+export interface RemotePlace {
+  /** The host's name: github.com. */
+  readonly host: string
+  /** The repository's path there: under the instance's own path, where a code host is known. */
+  readonly path: ReadonlyArray<string>
+  /** The code host there, where Althar knows one: by its hosted service, or an instance the person connected; and whether it is the hosted service. */
+  readonly code: { readonly product: Product; readonly name: string; readonly hosted: boolean } | null
+  /** The repository's page there; null where no code host is known. */
+  readonly url: string | null
+  /** The connection to it there: one signed in, else one that needs signing in again; null where there is none. */
+  readonly connection: ConnectionInfo | null
+}
+
+/**
+ * A repository's path on its code host, and its page there. A remote repeats
+ * an instance's own path (a server at example.org/git), which the path is
+ * read under. Bitbucket Data Center's pages are a project's repository,
+ * whatever its remote says (`scm/prj/api` over HTTPS), or a person's own.
+ */
+export const pageOf = (product: Product, web: string, path: ReadonlyArray<string>) => {
+  const base = web.replace(/\/+$/, '')
+  let under: ReadonlyArray<string> = []
+  try {
+    under = new URL(base).pathname.split('/').filter((segment) => segment !== '')
+  } catch {
+    // A connection's address is checked when it is made; a hosted one is Althar's own.
+  }
+  const own = under.every((segment, at) => path[at]?.toLowerCase() === segment.toLowerCase()) ? path.slice(under.length) : path
+  if (product !== 'bitbucket_dc') return { path: own, url: `${base}/${own.join('/')}` }
+  const [key = '', slug = ''] = own[0]?.toLowerCase() === 'scm' ? own.slice(1) : own
+  return {
+    path: [key, slug],
+    url: key.startsWith('~') ? `${base}/users/${key.slice(1)}/repos/${slug}` : `${base}/projects/${key.toUpperCase()}/repos/${slug}`,
+  }
+}
+
+/** An address's host name, lowercase; null for one that isn't an address. */
+const hostnameOf = (url: string) => {
+  try {
+    return new URL(url).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
 export interface Adapters {
   readonly host?: CodeHost
   readonly tracker?: Tracker
@@ -169,6 +215,12 @@ export class Connections extends Context.Service<
     hostOf(
       remotes: ReadonlyArray<string>,
     ): Effect.Effect<{ readonly connectionId: string; readonly host: CodeHost; readonly path: ReadonlyArray<string> } | null, unknown>
+    /**
+     * Where a remote is: the host, the repository's path there, the code host
+     * Althar knows there, and the connection that reaches it, signed in or
+     * needing it again; null for a remote that names no host, such as a folder.
+     */
+    placeOf(remote: string): Effect.Effect<RemotePlace | null, unknown>
     /** What a link points at, and the connection that reaches it; null for a link no connection reaches. */
     resolve(link: string): Effect.Effect<({ readonly connectionId: string; readonly ref: LinkRef } & Adapters) | null, unknown>
     /** Every ready tracker: each connection's, for listing someone's issues. */
@@ -615,6 +667,32 @@ export class Connections extends Context.Service<
           return null
         })
 
+      const placeOf = (remote: string) =>
+        Effect.gen(function* () {
+          const ref = parseRemote(remote)
+          if (ref === null) return null
+          const here = (yield* rows).filter((row) => hostnameOf(row.webUrl) === ref.host && infoOf(row.product)?.host === true)
+          const row = here.find((candidate) => candidate.state === 'ready') ?? here[0]
+          const product = row?.product ?? hostedOf(connectors.products).get(ref.host)
+          const info = product === undefined ? undefined : infoOf(product)
+          const connection = row === undefined ? null : toInfo(row)
+          if (info === undefined || !info.host)
+            return { host: ref.host, path: ref.path, code: null, url: null, connection } satisfies RemotePlace
+          const hosted = info.hosted !== null && hostnameOf(info.hosted.webUrl) === ref.host
+          const page = pageOf(
+            info.product,
+            connection?.webUrl ?? (hosted ? info.hosted?.webUrl : undefined) ?? `https://${ref.host}`,
+            ref.path,
+          )
+          return {
+            host: ref.host,
+            path: page.path,
+            code: { product: info.product, name: info.name, hosted },
+            url: page.url,
+            connection,
+          } satisfies RemotePlace
+        })
+
       const resolve = (link: string) =>
         Effect.gen(function* () {
           const ref = parseLink(link, yield* knownHosts)
@@ -666,6 +744,7 @@ export class Connections extends Context.Service<
           ),
         adapters: (connectionId) => provide(Effect.map(rowOf(connectionId), (row) => ({ ...adaptersOf(row), info: toInfo(row) }))),
         hostOf: (remotes) => provide(hostOf(remotes)),
+        placeOf: (remote) => provide(placeOf(remote)),
         resolve: (link) => provide(resolve(link)),
         trackers: provide(
           Effect.map(rows, (all) =>
