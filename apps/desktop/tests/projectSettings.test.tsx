@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type ProjectSummary } from '@althar/contracts'
+import { ApiError, type ProjectSummary, type Service } from '@althar/contracts'
 
 import { ServicesProvider } from '../src/renderer/data/services'
 import { projectRoute } from '../src/renderer/features/project/route'
@@ -16,7 +16,7 @@ import { rulesRoute } from '../src/renderer/features/rules/route'
 import { useProjectSettings } from '../src/renderer/features/project/useProjectSettings'
 import { taskRoute } from '../src/renderer/features/task/route'
 import { rootRoute } from '../src/renderer/root'
-import { changed, fakeClient, fakeHost, project, repositories } from './fixtures'
+import { changed, connectionList, fakeClient, fakeHost, project, repositories } from './fixtures'
 import { servicesFor, withServices } from './render'
 
 /*
@@ -244,6 +244,37 @@ describe('a project’s name and colour, as they are kept', () => {
   })
 })
 
+/** GitLab offered too, which glab is signed in to here, with nothing of the projects' on it. */
+const gitlabToo: Parameters<typeof fakeClient>[0] = {
+  listConnections: vi.fn(async () => ({
+    ...connectionList,
+    products: [
+      ...connectionList.products,
+      {
+        product: 'gitlab' as const,
+        service: 'gitlab' as const,
+        name: 'GitLab',
+        host: true,
+        tracker: true,
+        hostedUrl: 'https://gitlab.com',
+        selfHosted: true,
+        browserSignIn: false,
+        tokenNeeds: null,
+        tokenPrefixes: ['glpat-'],
+        tokenHelpForKey: null,
+        keyChecks: [],
+      },
+    ],
+  })),
+  getConnectGuide: vi.fn(async (service: Service) => ({
+    service,
+    places: [],
+    clis: [{ product: 'gitlab' as const, webUrl: 'https://gitlab.com', tool: 'glab' as const, account: 'you', scopes: ['api'] }],
+    email: null,
+    tokenPages: [],
+  })),
+}
+
 function Repositories({ onBack = vi.fn() }: { onBack?: () => void }) {
   return <RepositoriesView model={useRepositories('p1')} connections={useConnections()} onBack={onBack} />
 }
@@ -320,20 +351,29 @@ describe('a project’s repositories', () => {
     added()
   })
 
-  it('opens a repository on its host, and connects one that isn’t, over the page', async () => {
+  it('opens a repository on its host, and walks in to one that isn’t connected, over the page', async () => {
     const opened = vi.spyOn(window, 'open').mockReturnValue(null)
-    const { client } = fakeClient()
+    const { client } = fakeClient(gitlabToo)
     withServices(<Repositories />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'More for meridian-api' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Open on GitHub' }))
     expect(opened).toHaveBeenCalledWith('https://github.com/meridian/api', '_blank')
     opened.mockRestore()
 
+    // GitLab's own walk, at its ways: glab's sign-in, or a token.
     const connect = screen.getByRole('button', { name: 'Connect GitLab' })
     await userEvent.click(connect)
-    const dialog = within(await screen.findByRole('dialog', { name: 'Code hosts and trackers' }))
-    expect(await dialog.findByRole('list', { name: 'Code hosts' })).toBeTruthy()
-    await userEvent.click(dialog.getByRole('button', { name: 'Done' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'GitLab' }))
+    expect(client.getConnectGuide).toHaveBeenCalledWith('gitlab')
+    const ways = await dialog.findByRole('group', { name: 'Ways to connect GitLab' })
+    expect(within(ways).getByRole('button', { name: /Use glab’s sign-in/ })).toBeTruthy()
+    expect(dialog.queryByRole('button', { name: 'Done' })).toBeNull()
+    // A step in and back, then Escape at its ways closes it.
+    await userEvent.click(within(ways).getByRole('button', { name: /Make a token/ }))
+    expect(dialog.getByRole('heading', { name: 'Make a token on gitlab.com' })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    expect(await dialog.findByRole('group', { name: 'Ways to connect GitLab' })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     // Focus comes back to where it was.
     await waitFor(() => expect(document.activeElement).toBe(connect))
@@ -386,9 +426,9 @@ describe('a project’s repositories', () => {
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('option', { name: 'Library' })).toBeNull())
     expect(onBack).not.toHaveBeenCalled()
-    // And the connections, over the page.
+    // And connecting, over the page.
     await userEvent.click(screen.getByRole('button', { name: 'Connect GitLab' }))
-    await screen.findByRole('dialog', { name: 'Code hosts and trackers' })
+    await screen.findByRole('dialog', { name: 'GitLab' })
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(onBack).not.toHaveBeenCalled()

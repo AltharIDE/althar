@@ -209,30 +209,35 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await expect(github).toContainText('Not connected')
     await github.click()
 
-    // GitHub has no sign-in of Althar's in this build: gh's, which is signed in to it here, or a token. The code hosts and trackers open over the project.
-    const connecting = page.getByRole('dialog', { name: 'Code hosts and trackers' })
-    const services = connecting.getByRole('list', { name: 'Code hosts' })
-    await services.getByRole('button', { name: 'Connect' }).click()
+    // GitHub's own walk opens over the project, at a sign-in card's width. GitHub has no sign-in of Althar's in this build: gh's,
+    // which is signed in to it here, or a token.
+    const connecting = page.getByRole('dialog', { name: 'GitHub' })
     const ways = connecting.getByRole('group', { name: 'Ways to connect GitHub' })
     await expect(ways.getByRole('button', { name: /Use gh’s sign-in/ })).toBeVisible()
+    await expect(connecting.getByRole('button', { name: 'Done' })).toHaveCount(0)
     await page.screenshot({ path: 'test-results/connect-ways.png', animations: 'disabled' })
     await ways.getByRole('button', { name: /Make a token/ }).click()
     await expect(connecting.getByRole('heading', { name: 'Make a token on github.test' })).toBeVisible()
+    // Its own way back steps it back a step.
+    await connecting.getByRole('button', { name: 'Back', exact: true }).click()
+    await ways.getByRole('button', { name: /Make a token/ }).click()
     await connecting.getByRole('button', { name: 'Paste it myself' }).click()
     await connecting.getByLabel('Paste it').fill('github_pat_e2e')
     await page.screenshot({ path: 'test-results/token.png', animations: 'disabled' })
     await connecting.getByRole('button', { name: 'Check' }).click()
-    // What it can do there, as GitHub says; then back to the list, connected.
+    // What it can do there, as GitHub says; one Done, the walk's own, closes it.
     await expect(connecting.getByRole('heading', { name: 'Connected as you' })).toBeVisible()
     await expect(connecting.getByRole('list', { name: 'What GitHub lets Althar do' }).getByRole('listitem')).toHaveCount(6)
     await page.screenshot({ path: 'test-results/connected-check.png', animations: 'disabled' })
-    // The card's Done, before the dialog's own.
-    await connecting.getByRole('button', { name: 'Done' }).first().click()
-    await expect(services.getByText('Signed in as you')).toBeVisible()
+    await connecting.getByRole('button', { name: 'Done' }).click()
+    await expect(connecting).toHaveCount(0)
     await expect(page.getByText(/isn't connected to/)).toHaveCount(0)
+    // The project's settings say who Althar is there.
+    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    await expect(github).toContainText('Connected as you')
     await page.screenshot({ path: 'test-results/connected.png', animations: 'disabled' })
     await page.keyboard.press('Escape')
-    await expect(connecting).toHaveCount(0)
+    await expect(github).toHaveCount(0)
 
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
     await box.fill('Add a retry to the checkout call. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')

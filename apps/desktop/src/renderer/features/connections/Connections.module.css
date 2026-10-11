@@ -75,7 +75,7 @@
   }
 }
 
-/* Opened over a project's view or its repositories: the services' two columns, with room to sign one in. */
+/* Opened over a project's view, its repositories or a new project: the services' two columns, or a walk in at a card's width. */
 .dialog {
   top: 10vh;
   max-height: 80vh;

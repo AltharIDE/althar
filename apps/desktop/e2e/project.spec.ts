@@ -88,14 +88,20 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     // Its own work stays here: it has no remote.
     await expect(page.getByRole('region', { name: 'No remote' }).getByText('meridian', { exact: true })).toBeVisible()
     await page.screenshot({ path: 'test-results/project-repositories.png', animations: 'disabled' })
+    // GitHub's own walk, over the page: a token, pasted, and what it can do. The fake GitHub has no meridian/web, which the check
+    // says; connected as it is, the walk closes.
     await github.getByRole('button', { name: 'Connect GitHub' }).click()
-    const connecting = page.getByRole('dialog', { name: 'Code hosts and trackers' })
-    const services = connecting.getByRole('list', { name: 'Code hosts' })
-    await services.getByRole('button', { name: 'Add a token' }).click()
-    await services.getByLabel('GitHub token').fill('github_pat_e2e')
-    await services.getByRole('button', { name: 'Save' }).click()
-    await expect(services.getByText('Signed in as you')).toBeVisible()
-    await page.keyboard.press('Escape')
+    const connecting = page.getByRole('dialog', { name: 'GitHub' })
+    await connecting
+      .getByRole('group', { name: 'Ways to connect GitHub' })
+      .getByRole('button', { name: /Make a token/ })
+      .click()
+    await connecting.getByRole('button', { name: 'Paste it myself' }).click()
+    await connecting.getByLabel('Paste it').fill('github_pat_e2e')
+    await connecting.getByRole('button', { name: 'Check' }).click()
+    await expect(connecting.getByRole('heading', { name: 'It doesn’t reach every repository' })).toBeVisible()
+    await expect(connecting.getByText('It doesn’t see meridian/web.')).toBeVisible()
+    await connecting.getByRole('button', { name: 'Connect as it is' }).click()
     await expect(connecting).toHaveCount(0)
     // The page hears it, and says who Althar is there.
     await expect(github.getByText('Connected as you')).toBeVisible()

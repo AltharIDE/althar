@@ -119,7 +119,7 @@ Widgets with real behaviour are built on Radix primitives (`radix-ui`), styled t
 | Popover | Popover, ControlCenter |
 | DropdownMenu | Menu, TaskMenu |
 | Tooltip | HoverCard, and Tooltip for a name or a shortcut that only shows on hover. Both open for keyboard focus too. |
-| Dialog | Dialog (a short question: RemoveProject, AbandonTask), ModelBrowser, Lightbox. The title sits in `VisuallyHidden` when it isn't shown. |
+| Dialog | Dialog (a short question: RemoveProject, AbandonTask; or pages of its own, with a way back before its title that Escape takes first), ModelBrowser, Lightbox. The title sits in `VisuallyHidden` when it isn't shown. |
 | (none) | SidePanel, which is ours: see below. |
 | Select | Select (`position="popper"`) |
 | RadioGroup | Segmented, Choices, ModelPick's list, ModelBrowser's filters, ProjectIdentity's inks |

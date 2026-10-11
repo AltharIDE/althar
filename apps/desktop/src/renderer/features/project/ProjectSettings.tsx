@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 
-import type { ConnectionList, ProjectRepository, ProjectSummary } from '@althar/contracts'
+import type { ConnectionList, Product, ProjectRepository, ProjectSummary } from '@althar/contracts'
 import {
   Button,
   ControlCenter,
@@ -80,8 +80,8 @@ export interface ProjectSettingsProps {
   tracker: Tracker | null
   onRepositories: () => void
   onRules: () => void
-  /** Opens the code hosts and trackers, to connect one. */
-  onConnect: () => void
+  /** Connects a code host or tracker, on the server by its host name: its walk in, or all of them where it is connected. */
+  onConnect: (product: Product, at: string | null) => void
 }
 
 /** The settings' button and what it opens; the removal's question, once asked. */
@@ -157,7 +157,7 @@ export function ProjectSettings({
                   title={host.name}
                   place={RIGHT}
                   {...(hostLogin === null ? { aside: text.connect } : {})}
-                  onClick={leave(onConnect)}
+                  onClick={leave(() => onConnect(host.product, hostNameOf(host.webUrl)))}
                 >
                   <ControlWords
                     brand={productBrand(host.product)}
@@ -170,7 +170,7 @@ export function ProjectSettings({
                   title={productName(tracker.product)}
                   {...(host === null ? { place: RIGHT } : {})}
                   {...(trackerLogin === null ? { aside: text.connect } : {})}
-                  onClick={leave(onConnect)}
+                  onClick={leave(() => onConnect(tracker.product, tracker.at))}
                 >
                   <ControlWords
                     brand={productBrand(tracker.product)}

@@ -15,7 +15,8 @@ import { hostOf, hostsCode, SERVICES, serviceBrand, serviceName, serviceOf } fro
  * kit: each service, who they are signed in as there, or the one press that
  * connects it. Connect, Sign in again and Add a server open the service's
  * walk in: where the host has a place for it (Settings narrows its panel to
- * the card), it opens there; otherwise here, in place of the list.
+ * the card, a dialog over a project holds it at the card's width), it opens
+ * there; otherwise here, in place of the list.
  */
 
 export const text = {

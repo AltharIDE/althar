@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type Product, type ThreadSnapshot } from '@althar/contracts'
+import { ApiError, type Product, type Service, type ThreadSnapshot } from '@althar/contracts'
 import { Brand, IssuePriority, IssueStatus } from '@althar/ui'
 
 import { useConnections } from '../src/renderer/features/connections/useConnections'
@@ -28,6 +28,7 @@ import {
   GITHUB_TOKEN_PAGE,
   githubCheck,
   githubConnection,
+  githubGuide,
   items,
   snapshot,
 } from './fixtures'
@@ -825,11 +826,12 @@ function Project() {
 }
 
 describe('a project, reaching outside', () => {
-  it('says nothing of an unconnected host up front, and connects it from the project’s settings, on any view', async () => {
+  it('says nothing of an unconnected host up front, and walks in to it from the project’s settings, on any view', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
         coordinatorSnapshot({ host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: false } }),
       ),
+      connectToken: vi.fn(async () => githubConnection),
     })
     withServices(<Project />, client)
     await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
@@ -844,18 +846,73 @@ describe('a project, reaching outside', () => {
       await userEvent.click(github)
     }
     await connectFromSettings()
-    const dialog = await screen.findByRole('dialog', { name: 'Code hosts and trackers' })
-    expect(within(dialog).getByText('GitHub')).toBeTruthy()
-    // The settings closed as it opened; only the code hosts are over the project.
+    // GitHub's own walk in, at a sign-in card's width; the settings closed as it opened, so only the walk is over the project.
+    const shown = await screen.findByRole('dialog', { name: 'GitHub' })
+    const dialog = within(shown)
     expect(screen.queryByRole('dialog', { name: 'meridian’s settings' })).toBeNull()
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    expect(await dialog.findByRole('group', { name: 'Ways to connect GitHub' })).toBeTruthy()
+    expect(shown.style.width).toMatch(/^min\(480px,/)
+    // Nothing to press Done on yet, and nothing to step back to.
+    expect(dialog.queryByRole('button', { name: 'Done' })).toBeNull()
+    expect(dialog.queryByRole('button', { name: 'Back' })).toBeNull()
+    // A step in, its way back steps it back, and so does Escape.
+    await userEvent.click(dialog.getByRole('button', { name: /Make a token/ }))
+    expect(dialog.getByRole('heading', { name: 'Make a token on GitHub' })).toBeTruthy()
+    await userEvent.click(dialog.getByRole('button', { name: 'Back' }))
+    expect(await dialog.findByRole('group', { name: 'Ways to connect GitHub' })).toBeTruthy()
+    await userEvent.click(dialog.getByRole('button', { name: /Make a token/ }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Paste it myself' }))
+    await userEvent.keyboard('{Escape}')
+    expect(dialog.getByRole('heading', { name: 'Make a token on GitHub' })).toBeTruthy()
+    await userEvent.click(dialog.getByRole('button', { name: 'Paste it myself' }))
+    await userEvent.type(dialog.getByLabelText('Paste it'), 'github_pat_e2e{Enter}')
+    expect(await dialog.findByRole('heading', { name: 'Connected as you' })).toBeTruthy()
+    // One Done, the walk's own: it closes the walk, and focus goes back to the button the settings opened from.
+    expect(dialog.getAllByRole('button', { name: 'Done' })).toHaveLength(1)
+    await userEvent.click(dialog.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    // Focus goes back to the button the settings opened from.
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Settings' })))
     // On the board too, where nothing of the conversation shows.
     await userEvent.click(screen.getByRole('radio', { name: 'Board' }))
     await connectFromSettings()
-    expect(await screen.findByRole('dialog', { name: 'Code hosts and trackers' })).toBeTruthy()
+    expect(await screen.findByRole('dialog', { name: 'GitHub' })).toBeTruthy()
+  })
+
+  it('opens all the code hosts and trackers for a host it is connected to, walks in to another in their place, and comes back to them', async () => {
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({ host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } }),
+      ),
+      listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection] })),
+      // Linear's walk starts from nothing of GitHub's.
+      getConnectGuide: vi.fn(async (service: Service) =>
+        service === 'github' ? githubGuide : { service, places: [], clis: [], email: null, tokenPages: [] },
+      ),
+    })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }))
+    const panel = within(await screen.findByRole('dialog', { name: 'meridian’s settings' }))
+    await userEvent.click(await panel.findByRole('button', { name: /^GitHub\s*Connected as you/ }))
+    const shown = await screen.findByRole('dialog', { name: 'Code hosts and trackers' })
+    const dialog = within(shown)
+    expect(await dialog.findByText('Signed in as you')).toBeTruthy()
+    expect(shown.style.width).toMatch(/^min\(720px,/)
+    // Linear's walk, in their place, straight to its one way's first step: the dialog's Done gives way to the walk's own, and its way back is to the list.
+    await userEvent.click(dialog.getByRole('button', { name: 'Connect' }))
+    expect(await screen.findByRole('dialog', { name: 'Linear' })).toBe(shown)
+    expect(shown.style.width).toMatch(/^min\(480px,/)
+    expect(await dialog.findByRole('heading', { name: 'Make a key in Linear', level: 3 })).toBeTruthy()
+    expect(dialog.queryByRole('button', { name: 'Done' })).toBeNull()
+    await userEvent.click(dialog.getByRole('button', { name: 'Back' }))
+    expect(await dialog.findByText('Signed in as you')).toBeTruthy()
+    expect(dialog.getAllByRole('button', { name: 'Done' })).toHaveLength(1)
+    // Escape steps out of a walk to the list, and only then closes it.
+    await userEvent.click(dialog.getByRole('button', { name: 'Connect' }))
+    await screen.findByRole('dialog', { name: 'Linear' })
+    await userEvent.keyboard('{Escape}')
+    expect(await screen.findByRole('dialog', { name: 'Code hosts and trackers' })).toBe(shown)
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
   it('shows each of a task’s pull requests by its repository, and acts on the one open', async () => {

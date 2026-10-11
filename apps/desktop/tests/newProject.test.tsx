@@ -135,8 +135,10 @@ describe('a new project', () => {
       expect(read.textContent).toContain(
         'northwind/ops is on GitLab, which isn’t connected. Its tasks push their branch; connected, they open merge requests.',
       )
+      // GitLab's own walk in, over the page.
       await userEvent.click(within(read).getByRole('button', { name: 'Connect GitLab' }))
-      const dialog = await screen.findByRole('dialog', { name: 'Code hosts and trackers' })
+      const dialog = await screen.findByRole('dialog', { name: 'GitLab' })
+      expect(await within(dialog).findByRole('heading', { name: 'Connect GitLab' })).toBeTruthy()
       // Escape closes what is open over the page, not the page.
       await userEvent.keyboard('{Escape}')
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())

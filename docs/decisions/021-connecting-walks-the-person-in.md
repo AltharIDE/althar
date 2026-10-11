@@ -15,8 +15,9 @@
   given their ids.
 - **Decision:**
   - **Connecting is a walk, one step at a time,** as a sign-in card:
-    Settings narrows its panel to it, and a project or task hosts it in a
-    side panel. First the ways in that can work here, each saying what it
+    Settings narrows its panel to it, a task hosts it in a side panel, and
+    a project's settings, its repositories and a new project in a dialog
+    at the card's width, on the one host asked for. First the ways in that can work here, each saying what it
     needs from the person; then each step of the one chosen; then what the
     connection can do. A way that can't work in this build is never shown.
   - **The ways in:**

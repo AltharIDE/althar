@@ -8,7 +8,7 @@ import { device } from '../../shared/device'
 import { shortFolder } from '../../shared/folders'
 import { PartPending, pendingText } from '../../shared/Pending'
 import { productBrand } from '../../shared/products'
-import { ConnectDialog } from '../connections/ConnectDialog'
+import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectDialog'
 import type { ConnectionsModel } from '../connections/useConnections'
 import s from './Repositories.module.css'
 import type { RepositoriesModel } from './useRepositories'
@@ -112,11 +112,12 @@ export function RepositoriesView({
   connections: ConnectionsModel
   onBack: () => void
 }) {
-  const [connecting, setConnecting] = useState(false)
+  // Connecting a host the work goes to: its walk in, or all of them where it is connected.
+  const [connecting, setConnecting] = useState<Opening | null>(null)
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       // A menu, a choice or the connections closing on Escape has it first, and says so.
-      if (event.key !== 'Escape' || event.defaultPrevented || connecting || typing(event.target)) return
+      if (event.key !== 'Escape' || event.defaultPrevented || connecting !== null || typing(event.target)) return
       event.preventDefault()
       onBack()
     }
@@ -156,13 +157,19 @@ export function RepositoriesView({
             onDrop={(files) => void model.addDropped(files)}
             // The window opens web pages in the person's browser.
             onOpen={(href) => void window.open(href, '_blank')}
-            onConnect={() => setConnecting(true)}
+            onConnect={(id) => {
+              const host = model.repositories
+                ?.flatMap((repository) => (repository.host === null ? [] : [repository.host]))
+                .find((one) => hostId(one) === id)
+              const product = host?.product ?? null
+              setConnecting(host === undefined || product === null ? 'all' : openingFor(connections.list, product, host.instance))
+            }}
             {...(model.error === null ? {} : { error: model.error })}
             mapText={text.map}
           />
         )}
       </main>
-      {connecting && <ConnectDialog model={connections} onClose={() => setConnecting(false)} />}
+      {connecting !== null && <ConnectDialog model={connections} opening={connecting} onClose={() => setConnecting(null)} />}
     </div>
   )
 }

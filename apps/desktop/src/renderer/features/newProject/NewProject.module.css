@@ -4,9 +4,3 @@
   min-height: 0;
   background: var(--n-2);
 }
-
-/* The code hosts and trackers, over the page, as a project's menu opens them. */
-.connecting {
-  top: 10vh;
-  max-height: 80vh;
-}

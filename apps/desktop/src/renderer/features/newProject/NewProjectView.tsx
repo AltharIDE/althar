@@ -1,10 +1,10 @@
 import { useState } from 'react'
 
-import { Button, Dialog } from '@althar/ui'
 import { NewProject } from '@althar/ui/screens'
 
 import { device, platform } from '../../shared/device'
-import { ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
+import { codeHostOf } from '../../shared/remotes'
+import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectDialog'
 import type { ConnectionsModel } from '../connections/useConnections'
 import s from './NewProject.module.css'
 import type { NewProjectModel } from './useNewProject'
@@ -12,13 +12,12 @@ import type { NewProjectModel } from './useNewProject'
 /*
  * A new project's tab: the kit's NewProject, the project as it takes shape,
  * named first and then given its folders. Connect, for a code host it
- * isn't connected to, opens the code hosts and trackers over it, as a
- * project's menu does. Made, the tab becomes the project's own; closed, or
- * left with Escape, nothing is made.
+ * isn't connected to, opens that host's walk in over it, as a project's
+ * settings do. Made, the tab becomes the project's own; closed, or left
+ * with Escape, nothing is made.
  */
 
 export const text = {
-  done: 'Done',
   /** The kit's words, with this computer's name and keys. */
   page: () => ({
     found: `On ${device.this}`,
@@ -41,7 +40,7 @@ export function NewProjectView({
   /** Escape: nothing is made, and the tab closes. */
   onClose: () => void
 }) {
-  const [connecting, setConnecting] = useState(false)
+  const [connecting, setConnecting] = useState<Opening | null>(null)
   const { draft } = model
   if (draft === null) return null
   return (
@@ -60,7 +59,11 @@ export function NewProjectView({
         found={model.found}
         onAdd={(id) => void model.add(id)}
         findings={model.findings}
-        onConnect={() => setConnecting(true)}
+        onConnect={(host) => {
+          // A finding is by its host's name, which the connections say the code host of.
+          const product = codeHostOf({ host, path: '' }, connections.list).product
+          setConnecting(product === null ? 'all' : openingFor(connections.list, product, host))
+        }}
         onCreate={() =>
           void model.create().then((made) => {
             if (made !== null) onCreated(made.id)
@@ -71,17 +74,7 @@ export function NewProjectView({
         {...(draft.error === null ? {} : { error: draft.error })}
         text={text.page()}
       />
-      {connecting && (
-        <Dialog
-          title={connectionsText.label}
-          width={720}
-          className={s.connecting}
-          onClose={() => setConnecting(false)}
-          actions={<Button onClick={() => setConnecting(false)}>{text.done}</Button>}
-        >
-          <ConnectionsView model={connections} columns />
-        </Dialog>
-      )}
+      {connecting !== null && <ConnectDialog model={connections} opening={connecting} onClose={() => setConnecting(null)} />}
     </div>
   )
 }

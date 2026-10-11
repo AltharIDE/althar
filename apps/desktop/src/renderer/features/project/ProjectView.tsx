@@ -31,7 +31,7 @@ import { BoardView } from '../board/BoardView'
 import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
 import type { BoardModel } from '../board/useBoard'
-import { ConnectDialog } from '../connections/ConnectDialog'
+import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectDialog'
 import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
 import { lastSettledOf, partsOf, tasksOf, trackerOf } from './front'
@@ -172,8 +172,8 @@ export function ProjectView({
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
-  // The code hosts and trackers, opened from the settings to connect the project's host or tracker.
-  const [connecting, setConnecting] = useState(false)
+  // Connecting, opened from the settings: the walk in to the project's host or tracker, or all of them where it is connected.
+  const [connecting, setConnecting] = useState<Opening | null>(null)
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts.
   const now = useNow((model.coordinator?.session?.turnRunning ?? false) || (lanes?.next.some((task) => task.phase === 'planned') ?? false))
   const coordinator = model.coordinator
@@ -311,7 +311,7 @@ export function ProjectView({
                 tracker={tracker}
                 onRepositories={settings.onRepositories}
                 onRules={settings.onRules}
-                onConnect={() => setConnecting(true)}
+                onConnect={(product, at) => setConnecting(openingFor(connections.list, product, at))}
               />
             ),
           })}
@@ -396,7 +396,7 @@ export function ProjectView({
           </div>
         )}
       </div>
-      {connecting && <ConnectDialog model={connections} onClose={() => setConnecting(false)} />}
+      {connecting !== null && <ConnectDialog model={connections} opening={connecting} onClose={() => setConnecting(null)} />}
     </div>
   )
 }

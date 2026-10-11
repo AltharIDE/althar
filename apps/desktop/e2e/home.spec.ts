@@ -103,6 +103,23 @@ test('comes back to what runs and what waits across projects, with the projects 
     await expect(credit).toHaveAttribute('aria-checked', 'true')
     await page.keyboard.press('Escape')
     await expect(settings.getByRole('button', { name: 'Co-author' })).toBeFocused()
+    // The code hosts and trackers open out wide, without co-author; Connect narrows the panel to a sign-in card, GitHub's walk
+    // in, and Escape steps back out of it to them, then to all of them.
+    const width = async () => Math.round((await settings.boundingBox())?.width ?? 0)
+    await settings.getByRole('button', { name: /^Code hosts and trackers/ }).click()
+    await expect(settings.getByRole('heading', { name: 'Code hosts and trackers', level: 2 })).toBeVisible()
+    await expect(settings.getByRole('switch', { name: 'Althar as co-author' })).toHaveCount(0)
+    await expect.poll(width).toBe(800)
+    await settings.getByRole('list', { name: 'Code hosts' }).getByRole('button', { name: 'Connect' }).click()
+    await expect(settings.getByRole('heading', { name: 'Connect GitHub', level: 3 })).toBeVisible()
+    await expect(settings.getByRole('group', { name: 'Ways to connect GitHub' })).toBeVisible()
+    await expect.poll(width).toBe(480)
+    await page.screenshot({ path: 'test-results/settings-connect.png', animations: 'disabled' })
+    await page.keyboard.press('Escape')
+    await expect(settings.getByRole('heading', { name: 'Code hosts and trackers', level: 2 })).toBeVisible()
+    await expect.poll(width).toBe(800)
+    await page.keyboard.press('Escape')
+    await expect(settings.getByRole('button', { name: /^Code hosts and trackers/ })).toBeFocused()
     // While the person is in another app, Althar shows round the notch, on a Mac that has one, or in the menu bar or the
     // system tray. Only with a notch is there a choice; elsewhere its page says where. The edge is a page of its own, with what
     // needs you and what runs.

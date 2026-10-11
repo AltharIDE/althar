@@ -57,8 +57,8 @@ export const remoteOf = (remote: string): RemoteRef | null => {
 /** The hosted services' own hosts, for when the connections aren't read. */
 const HOSTED: Readonly<Record<string, Product>> = { 'github.com': 'github', 'gitlab.com': 'gitlab', 'bitbucket.org': 'bitbucket_cloud' }
 
-/** A host's name, from an address; empty where it has none. */
-const hostnameOf = (url: string) => {
+/** A host's name, from an address, lower case, as a remote names it; empty where it has none. */
+export const hostnameOf = (url: string) => {
   try {
     return new URL(url).hostname.toLowerCase()
   } catch {
