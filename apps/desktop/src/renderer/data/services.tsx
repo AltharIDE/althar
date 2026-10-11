@@ -4,6 +4,7 @@ import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } 
 import type { WatchEvent } from '@althar/contracts'
 
 import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
+import type { UpdateGlance } from '../../main/updates'
 
 import type { Client } from './client'
 import type { Feed } from './feed'
@@ -56,6 +57,16 @@ export interface DictationHost {
   /** Opens the system's microphone privacy or sound settings; false where there are none to open. */
   readonly openSettings: (pane: 'privacy' | 'sound') => Promise<boolean>
   readonly onEvent: (listener: (event: unknown) => void) => () => void
+}
+
+/** Updates, through the main process (ADR-024): an update ready to install, and restarting into it. */
+export interface UpdateHost {
+  /** What the window shows of the update; null where the app doesn't update, as in development. */
+  readonly glance: () => Promise<UpdateGlance | null>
+  /** Restarts into the update, at the person's word; false where it won't, as while work runs. */
+  readonly restart: () => Promise<boolean>
+  /** Calls `listener` with the update as it changes, until the returned function is called. */
+  readonly onChange: (listener: (glance: unknown) => void) => () => void
 }
 
 /**
@@ -135,6 +146,8 @@ export interface Host {
    * while a step of connecting waits for a token, as the window comes back.
    */
   readonly clipboardToken: () => Promise<string | null>
+  /** Updates; absent where the page has no way to them, as the edge's. */
+  readonly update?: UpdateHost
 }
 
 export interface Services {

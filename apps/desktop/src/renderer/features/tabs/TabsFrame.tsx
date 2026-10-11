@@ -1,9 +1,10 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 
-import { ProjectTabs, type Room } from '@althar/ui'
+import { ProjectTabs, type Room, UpdateReady } from '@althar/ui'
 
 import { useServices } from '../../data/services'
+import { useUpdate } from '../../shared/useUpdate'
 import { tabsStoreOf } from './store'
 import { beside, byNumber } from './tabs'
 import s from './Tabs.module.css'
@@ -16,8 +17,9 @@ import { useTabs } from './useTabs'
  * as in a browser. ⌘N starts a new project in a tab of its own, as the +
  * does. The tabs are the window's one bar: a screen puts its own controls at
  * the bar's end with BarEnd, and its way back, where it has one, at the top
- * of its page. Before there is any project there are no tabs: the first
- * screen has the whole window.
+ * of its page. Before it, on every screen, a newer Althar ready to install
+ * says so in one quiet line. Before there is any project there are no tabs:
+ * the first screen has the whole window.
  */
 
 const VisitContext = createContext<(threadId: string, projectId: string) => void>(() => undefined)
@@ -70,6 +72,7 @@ export const useLastRoom = (projectId: string): readonly [Room | null, (room: Ro
 
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
+  const update = useUpdate()
   const [end, setEnd] = useState<HTMLElement | null>(null)
   const { select, current, newProject, none } = tabs
   const open = tabs.tabs.map((tab) => tab.id)
@@ -114,7 +117,12 @@ export function TabsFrame({ children }: { children: ReactNode }) {
                 onClose={tabs.close}
                 onOpen={tabs.open}
                 onNewProject={() => newProject()}
-                end={<div ref={setEnd} className={s.end} />}
+                end={
+                  <>
+                    {update.ready !== null && <UpdateReady {...update.ready} />}
+                    <div ref={setEnd} className={s.end} />
+                  </>
+                }
               />
             )}
             <div className={s.screen}>{children}</div>

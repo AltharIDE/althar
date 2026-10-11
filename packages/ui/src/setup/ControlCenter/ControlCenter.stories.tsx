@@ -22,6 +22,7 @@ import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Switch } from '../../primitives/Switch/Switch'
 import { States } from '../../storybook/States'
 import { Accounts } from '../Accounts/Accounts'
+import { AppVersion } from '../AppVersion/AppVersion'
 import { AgentTabList, AgentTabPanel, AgentTabs } from '../AgentTabs/AgentTabs'
 import { CoAuthor, CoAuthorFace } from '../CoAuthor/CoAuthor'
 import { ConnectCard, ConnectWays } from '../ConnectCard/ConnectCard'
@@ -247,7 +248,7 @@ function Settings({
             )}
           </ControlGrid>
           <ControlFoot>
-            <span>Althar 0.1.0</span>
+            <AppVersion version="0.1.0" notes="https://github.com/AltharIDE/althar/releases/tag/v0.1.0" />
             <ControlLink title="Co-author" picture={<CoAuthorFace size={16} />} off={!credit} onClick={() => setOpen('coauthor')} />
           </ControlFoot>
         </>

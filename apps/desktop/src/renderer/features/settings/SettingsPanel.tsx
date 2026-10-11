@@ -8,6 +8,7 @@ import {
   AgentTabList,
   AgentTabPanel,
   AgentTabs,
+  AppVersion,
   Choices,
   CoAuthor,
   type CoAuthorCommit,
@@ -39,16 +40,19 @@ import {
   OpenFilesIn,
   SettingList,
   Switch,
+  UpdateReady,
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
 import { agentLineOf, brandOf } from '../../shared/agents'
 import { appIcons } from '../../shared/appIcons'
 import { SYSTEM_SOUND } from '../../../main/notify'
+import { notesOf } from '../../../main/updates'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
 import { useEditorList, useEditorPictures } from '../../shared/OpenIn'
 import { useSounds } from '../../shared/useSounds'
+import { type UpdateModel, useUpdate } from '../../shared/useUpdate'
 import { type EdgeGlance, EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { productBrand, productName } from '../../shared/products'
@@ -77,7 +81,8 @@ import { type CoAuthorModel, useCoAuthor } from './useCoAuthor'
  * code hosts and trackers, tall, by their marks, with what needs the person;
  * and, small, where Althar shows while you're in another app, on every
  * system, and the app's icon where there is a Dock. Althar as co-author is
- * the least of them: a quiet link in the foot, beside the version. Any opens
+ * the least of them: a quiet link in the foot, beside which Althar this is,
+ * with its release notes, and a newer one ready to install. Any opens
  * out in place, as wide as it needs, and steps back to where it was.
  * Connecting a code host or tracker narrows the panel to a sign-in card, a
  * step at a time, and comes back to the list connected. It is calm: nothing
@@ -223,6 +228,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
       editors={useEditorList()}
       pictures={useEditorPictures()}
       sounds={useSounds()}
+      update={useUpdate()}
     />
   )
 }
@@ -238,6 +244,7 @@ export function SettingsView({
   editors,
   pictures,
   sounds,
+  update,
   glance,
   open,
   onOpenChange,
@@ -253,6 +260,8 @@ export function SettingsView({
   /** Each editor's icon by its id, as they come. */
   pictures: Readonly<Record<string, string>>
   sounds: { readonly list: ReadonlyArray<string>; readonly play: (sound: string) => void }
+  /** A newer Althar ready to install; none where left out. */
+  update?: UpdateModel
 }) {
   const [showing, setShowing] = useState<Showing>('all')
   const [agentId, setAgentId] = useState<string | null>(null)
@@ -404,7 +413,10 @@ export function SettingsView({
           </ControlGrid>
           {failed}
           <ControlFoot>
-            {start.status !== null && <span>{text.version(start.status.appVersion)}</span>}
+            {start.status !== null && (
+              <AppVersion version={start.status.appVersion} notes={notesOf(start.status.appVersion)} text={{ name: text.version }} />
+            )}
+            {update !== undefined && update.ready !== null && <UpdateReady {...update.ready} />}
             {coAuthor !== null && (
               <ControlLink
                 title={text.coAuthor}

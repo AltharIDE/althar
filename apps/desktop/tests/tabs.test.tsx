@@ -17,7 +17,8 @@ import { Room } from '@althar/ui'
 import { draftsOf } from '../src/renderer/features/newProject/draft'
 import { TabsFrame, useLastRoom, useNewTab, useVisit } from '../src/renderer/features/tabs/TabsFrame'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
-import { changed, fakeClient, project } from './fixtures'
+import type { Host } from '../src/renderer/data/services'
+import { changed, fakeClient, fakeHost, project } from './fixtures'
 import { withServices } from './render'
 
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', running: 0, working: 0, waiting: 0, ready: 0 }
@@ -76,14 +77,14 @@ const threadRoute = createRoute({ getParentRoute: () => rootRoute, path: '/threa
 let making = () => ''
 const newRoute = createRoute({ getParentRoute: () => rootRoute, path: '/new', component: () => <NewScreen projectId={() => making()} /> })
 
-const windowAt = (path: string, projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera]) => {
+const windowAt = (path: string, projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera], host: Host = fakeHost()) => {
   const router = createRouter({
     routeTree: rootRoute.addChildren([homeRoute, projectRoute, rulesRoute, threadRoute, newRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   const { client, emit } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects })) })
   making = () => draftsOf(client).get()?.id ?? ''
-  withServices(<RouterProvider router={router} />, client)
+  withServices(<RouterProvider router={router} />, client, host)
   const go = (to: string) => act(() => router.history.push(to))
   return { client, emit, go, router }
 }
@@ -268,6 +269,35 @@ describe('the window’s tabs', () => {
     expect(drafts.get()).toBeNull()
     expect(names()).toEqual(['Home, 2 calls wait on you', 'meridian, work running', 'tessera, 2 calls wait on you', 'Northwind'])
     expect(tab('Northwind').getAttribute('aria-current')).toBe('page')
+  })
+
+  it('say in the bar that a newer Althar is ready, with Restart only while no work runs', async () => {
+    let tell: (glance: unknown) => void = () => undefined
+    const restart = vi.fn(async () => true)
+    const host = fakeHost({
+      update: {
+        glance: vi.fn(async () => ({ ready: '0.1.1', working: true, restarting: false, failed: null })),
+        restart,
+        onChange: (listener) => {
+          tell = listener
+          return () => undefined
+        },
+      },
+    })
+    windowAt('/', [project], host)
+    const line = (await screen.findByText('Althar 0.1.1 is ready')).parentElement
+    if (line === null) throw new Error('The line has no parent')
+    expect(within(line).getByText('Installs when you quit')).toBeTruthy()
+    expect(within(line).queryByRole('button')).toBeNull()
+
+    act(() => tell({ ready: '0.1.1', working: false, restarting: false, failed: null }))
+    await userEvent.click(within(line).getByRole('button', { name: 'Restart' }))
+    expect(restart).toHaveBeenCalledOnce()
+    act(() => tell({ ready: '0.1.1', working: false, restarting: true, failed: null }))
+    expect(within(line).getByText('Restarting…')).toBeTruthy()
+    // Nothing ready, nothing said.
+    act(() => tell({ ready: null, working: false, restarting: false, failed: null }))
+    expect(screen.queryByText(/is ready/)).toBeNull()
   })
 })
 

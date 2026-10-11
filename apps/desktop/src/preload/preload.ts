@@ -8,8 +8,9 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
  * shows at the edge of the screen. The edge's own pages say through it where they draw, and what to
  * open in the window, and hear whether the pointer is on the island. And
  * dictation: where the speech model and the microphone stand, the model's
- * download, and what was said, sent to be written down. And a token on the
- * clipboard, while connecting a service asks for one. The page never sees or sends a
+ * download, and what was said, sent to be written down. A token on the
+ * clipboard, while connecting a service asks for one. And an update ready to
+ * install, and restarting into it. The page never sees or sends a
  * path. It gets no Node, no file system, no shell.
  */
 
@@ -39,6 +40,12 @@ const SPEECH = new Set(['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64'
 const dictating = new Set<(event: unknown) => void>()
 ipcRenderer.on('althar:dictation', (_event, message: unknown) => {
   for (const listener of dictating) listener(message)
+})
+
+/* An update ready to install, as the main process says it changes. */
+const updating = new Set<(glance: unknown) => void>()
+ipcRenderer.on('althar:update', (_event, glance: unknown) => {
+  for (const listener of updating) listener(glance)
 })
 
 contextBridge.exposeInMainWorld('althar', {
@@ -71,6 +78,14 @@ contextBridge.exposeInMainWorld('althar', {
   openInWindow: (threadId?: string): void => ipcRenderer.send('althar:edge-open', threadId ?? null),
   // Only text that looks like a token; anything else the person copied never reaches the page.
   clipboardToken: (): Promise<string | null> => ipcRenderer.invoke('althar:clipboard-token'),
+  update: {
+    glance: (): Promise<unknown> => ipcRenderer.invoke('althar:update'),
+    restart: (): Promise<boolean> => ipcRenderer.invoke('althar:update-restart'),
+    onChange: (listener: (glance: unknown) => void): (() => void) => {
+      updating.add(listener)
+      return () => void updating.delete(listener)
+    },
+  },
   ...(SPEECH.has(`${process.platform}-${process.arch}`)
     ? {
         dictation: {
