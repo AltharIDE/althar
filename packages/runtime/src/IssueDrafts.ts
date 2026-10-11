@@ -23,9 +23,11 @@ import { addItem, updateItem } from './threads'
  * The draft's row is what it is; its card's item carries the same, written
  * in the same transaction as each change, so a thread reads it as it reads
  * any item. Filing calls the tracker outside any transaction: the draft is
- * marked as being filed first, so a second press files nothing more, and one
- * Althar closed in the middle of is said to be uncertain, never filed again
- * unasked.
+ * marked as being filed first, so a second press files nothing more. Where
+ * the tracker may have taken it without Althar hearing so (its answer lost
+ * or unreadable, or Althar closed in the middle), the draft is uncertain,
+ * not unfiled: the card says to look on the tracker before filing it again,
+ * and it is never filed again unasked.
  */
 
 /** What the card shows of a draft: the item's content, and what the coordinator hears. */
@@ -79,6 +81,7 @@ interface Row {
   readonly threadId: string
   readonly connectionId: string
   readonly product: Product
+  readonly trackerName: string
   readonly container: string
   readonly containerName: string
   readonly title: string
@@ -96,7 +99,7 @@ const Labels = Schema.fromJsonString(Schema.Array(Schema.String))
 export const cardOf = (row: Row): DraftCard => ({
   draftId: row.id,
   product: row.product,
-  tracker: products[row.product].name,
+  tracker: row.trackerName,
   container: row.containerName,
   title: row.title,
   body: row.body,
@@ -124,9 +127,39 @@ const containerNamed = (containers: ReadonlyArray<Container>, typed: string) =>
   containers.find((container) => container.key !== null && same(container.key, typed)) ??
   containers.find((container) => same(container.name, typed))
 
-/** Whether a tracker is the one a person named: by its product (jira_cloud), its service (jira), or its name (Jira Data Center). */
-const trackerNamed = (product: Product, typed: string) =>
-  same(product, typed) || same(products[product].service, typed) || same(products[product].name, typed)
+/** A connection's host, or a typed one's: acme.atlassian.net from its address, or as typed. */
+const hostOf = (address: string) => {
+  try {
+    return new URL(/^[a-z]+:\/\//i.test(address) ? address : `https://${address}`).hostname.toLowerCase()
+  } catch {
+    return address.trim().toLowerCase()
+  }
+}
+
+/** A connected tracker a draft can go to, by the name it is told apart by. */
+interface Candidate {
+  readonly connectionId: string
+  readonly product: Product
+  readonly tracker: Tracker
+  /** Its product's name, and its site, or its site and account, where another connection would share the name: Jira (acme.atlassian.net). */
+  readonly label: string
+  readonly host: string
+  readonly login: string
+}
+
+/**
+ * Whether a tracker is the one a person named: by its product (jira_cloud),
+ * its service (jira), its name (Jira Data Center), the label it is told
+ * apart by, its site's address or host, its account, or its connection.
+ */
+const trackerNamed = (candidate: Candidate, typed: string) =>
+  same(candidate.product, typed) ||
+  same(products[candidate.product].service, typed) ||
+  same(products[candidate.product].name, typed) ||
+  same(candidate.label, typed) ||
+  same(candidate.connectionId, typed) ||
+  same(candidate.login, typed) ||
+  hostOf(typed) === candidate.host
 
 type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections
 
@@ -174,7 +207,7 @@ export class IssueDrafts extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [row] = yield* sql<Row>`
-            SELECT id, project_id, thread_id, connection_id, product, container, container_name, title, body, labels, state, error,
+            SELECT id, project_id, thread_id, connection_id, product, tracker_name, container, container_name, title, body, labels, state, error,
               issue_key, issue_url
             FROM issue_drafts WHERE id = ${draftId} AND project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
           return row === undefined ? yield* new NotFound({ kind: 'issue draft', id: draftId }) : row
@@ -241,48 +274,111 @@ export class IssueDrafts extends Context.Service<
             ORDER BY at DESC LIMIT 20`
         })
 
-      /** The tracker and container a draft goes to, from what was named and where the project's issues come from. */
+      /** Every ready tracker, each told apart from another of its name by its site, and its account where they share one. */
+      const candidates = Effect.gen(function* () {
+        const trackers = yield* connections.trackers
+        const infos = yield* connections.list
+        const known = trackers.map((one) => {
+          const info = infos.find((candidate) => candidate.id === one.connectionId)
+          return { ...one, name: products[one.product].name, host: hostOf(info?.webUrl ?? ''), login: info?.account.login ?? '' }
+        })
+        // In the order of their names, so choices read the same each time they are said.
+        const told = known.map((one): Candidate => {
+          const named = known.filter((other) => other.name === one.name)
+          const hosted = named.filter((other) => other.host === one.host)
+          return {
+            connectionId: one.connectionId,
+            product: one.product,
+            tracker: one.tracker,
+            host: one.host,
+            login: one.login,
+            label:
+              named.length === 1 ? one.name : hosted.length === 1 ? `${one.name} (${one.host})` : `${one.name} (${one.host}, ${one.login})`,
+          }
+        })
+        return told.toSorted((a, b) => a.label.localeCompare(b.label))
+      })
+
+      /**
+       * The tracker and container a draft goes to, from what was named and
+       * where the project's issues come from. A container named without a
+       * tracker, or with one several connections answer to, is looked for on
+       * each; found on more than one, which is asked, never guessed.
+       */
       const target = (projectId: string, named: { readonly tracker?: string; readonly container?: string }) =>
         Effect.gen(function* () {
-          const trackers = yield* connections.trackers
+          const trackers = yield* candidates
           const home = yield* projectRepository(projectId).pipe(Effect.orElseSucceed(() => null))
           const before = yield* usual(projectId)
-          const names = [...new Set(trackers.map((one) => products[one.product].name))]
+          const labels = trackers.map((one) => one.label)
           const typed = named.tracker?.trim() === '' ? undefined : named.tracker?.trim()
-
-          const chosen = ((): { readonly connectionId: string; readonly product: Product; readonly tracker: Tracker } | undefined => {
-            if (typed !== undefined) {
-              const matching = trackers.filter((one) => trackerNamed(one.product, typed))
-              // Of two connections to the same tracker, the one the project's repository or its issues are on.
-              return (
-                matching.find((one) => one.connectionId === home?.connectionId) ??
-                matching.find((one) => before.some((seen) => seen.connectionId === one.connectionId)) ??
-                matching[0]
-              )
-            }
-            const seen = before.flatMap((one) => trackers.filter((candidate) => candidate.connectionId === one.connectionId))[0]
-            return (
-              seen ?? trackers.find((one) => one.connectionId === home?.connectionId) ?? (trackers.length === 1 ? trackers[0] : undefined)
-            )
-          })()
-          if (chosen === undefined)
+          const wanted = named.container?.trim() === '' ? undefined : named.container?.trim()
+          const matching = typed === undefined ? trackers : trackers.filter((one) => trackerNamed(one, typed))
+          if (matching.length === 0)
             return yield* new IssueTargetNeeded({
-              reason: trackers.length === 0 ? 'no_tracker' : typed === undefined ? 'tracker_needed' : 'unknown_tracker',
+              reason: trackers.length === 0 ? 'no_tracker' : 'unknown_tracker',
               named: typed ?? null,
               tracker: null,
-              choices: names,
+              choices: labels,
             })
+          /** Of several, the one the project's issues come from, then the one its repository is on. */
+          const preferred = (among: ReadonlyArray<Candidate>) =>
+            before.flatMap((one) => among.filter((candidate) => candidate.connectionId === one.connectionId))[0] ??
+            among.find((one) => one.connectionId === home?.connectionId)
 
-          const containers = yield* chosen.tracker.containers()
-          const tracker = products[chosen.product].name
-          const choices = listed(containers.map(containerWords))
-          const wanted = named.container?.trim() === '' ? undefined : named.container?.trim()
           if (wanted !== undefined) {
-            const found = containerNamed(containers, wanted)
-            return found === undefined
-              ? yield* new IssueTargetNeeded({ reason: 'unknown_container', named: wanted, tracker, choices })
-              : { ...chosen, container: found }
+            // One tracker's failure to say stands where it is the only one asked; of several, those that answer are enough.
+            const asked = yield* Effect.forEach(
+              matching,
+              (candidate) =>
+                matching.length === 1
+                  ? Effect.map(candidate.tracker.containers(), (containers) => ({ candidate, containers }))
+                  : Effect.map(
+                      Effect.orElseSucceed(candidate.tracker.containers(), (): ReadonlyArray<Container> => []),
+                      (containers) => ({ candidate, containers }),
+                    ),
+              { concurrency: 4 },
+            )
+            const found = asked.flatMap(({ candidate, containers }) => {
+              const container = containerNamed(containers, wanted)
+              return container === undefined ? [] : [{ ...candidate, container }]
+            })
+            const [only] = found
+            if (only !== undefined && found.length === 1) return only
+            if (found.length > 1)
+              return yield* new IssueTargetNeeded({
+                reason: 'tracker_needed',
+                named: wanted,
+                tracker: null,
+                choices: found.map((one) => one.label),
+              })
+            const [single] = asked
+            return yield* new IssueTargetNeeded({
+              reason: 'unknown_container',
+              named: wanted,
+              tracker: asked.length === 1 && single !== undefined ? single.candidate.label : null,
+              choices: listed(
+                asked.flatMap(({ candidate, containers }) =>
+                  containers.map((container) =>
+                    asked.length === 1 ? containerWords(container) : `${candidate.label}: ${containerWords(container)}`,
+                  ),
+                ),
+              ),
+            })
           }
+
+          const chosen =
+            matching.length === 1
+              ? matching[0]
+              : (preferred(matching) ?? (typed === undefined && trackers.length === 1 ? trackers[0] : undefined))
+          if (chosen === undefined)
+            return yield* new IssueTargetNeeded({
+              reason: 'tracker_needed',
+              named: typed ?? null,
+              tracker: null,
+              choices: matching.map((one) => one.label),
+            })
+          const containers = yield* chosen.tracker.containers()
           const found =
             (home?.connectionId === chosen.connectionId ? containerNamed(containers, home.path.join('/')) : undefined) ??
             before
@@ -294,8 +390,8 @@ export class IssueDrafts extends Context.Service<
             ? yield* new IssueTargetNeeded({
                 reason: containers.length === 0 ? 'unknown_container' : 'container_needed',
                 named: null,
-                tracker,
-                choices,
+                tracker: chosen.label,
+                choices: listed(containers.map(containerWords)),
               })
             : { ...chosen, container: found }
         })
@@ -310,9 +406,12 @@ export class IssueDrafts extends Context.Service<
               ...(input.tracker === undefined ? {} : { tracker: input.tracker }),
               ...(input.container === undefined ? {} : { container: input.container }),
             })
-            // The same title waiting in the same thread is the same draft: an agent that calls again, unsure the first worked, gets the first.
+            // The same title for the same place, waiting in the same thread, is the same draft: an agent that calls again, unsure the
+            // first worked, gets the first.
             const [waiting] = yield* sql<{ id: string }>`
-              SELECT id FROM issue_drafts WHERE thread_id = ${input.threadId} AND state = 'pending' AND lower(title) = ${title.toLowerCase()}`
+              SELECT id FROM issue_drafts
+              WHERE thread_id = ${input.threadId} AND state = 'pending' AND lower(title) = ${title.toLowerCase()}
+                AND connection_id = ${where.connectionId} AND container = ${where.container.id}`
             if (waiting !== undefined) return cardOf(yield* load(waiting.id))
             const draftId = yield* newId(Ids.issueDraft)
             const labels = labelsOf(input.labels)
@@ -325,6 +424,7 @@ export class IssueDrafts extends Context.Service<
                   threadId: input.threadId,
                   connectionId: where.connectionId,
                   product: where.product,
+                  trackerName: where.label,
                   container: where.container.id,
                   containerName: where.container.name,
                   title,
@@ -341,7 +441,7 @@ export class IssueDrafts extends Context.Service<
                   aggregateId: draftId,
                   revision: 1,
                   type: 'issue_draft.drafted',
-                  payload: { product: where.product, container: where.container.name, title, labels },
+                  payload: { product: where.product, tracker: where.label, container: where.container.name, title, labels },
                   actorId: input.actorId,
                 })
                 yield* addItem({ projectId: input.projectId, threadId: input.threadId }, 'issue_draft', cardOf(yield* load(draftId)))
@@ -351,8 +451,8 @@ export class IssueDrafts extends Context.Service<
           }),
         )
 
-      /** Whether a draft can still change, or be filed: waiting on the person, or not filed the last time. */
-      const open = (row: Row) => row.state === 'pending' || row.state === 'failed'
+      /** Whether a draft can still change, or be filed: waiting on the person, not filed the last time, or perhaps filed, for the person to look. */
+      const open = (row: Row) => row.state === 'pending' || row.state === 'failed' || row.state === 'uncertain'
       const closed = (row: Row) => new DraftClosed({ draftId: row.id, state: row.state })
 
       const changeDraft: IssueDrafts['Service']['change'] = (draftId, next, actorId) =>
@@ -373,22 +473,36 @@ export class IssueDrafts extends Context.Service<
         )
 
       /** Why filing failed, in words the card shows. */
+      /**
+       * Whether a failure leaves the issue perhaps filed: the tracker didn't
+       * answer in time or at all, or answered with what Althar couldn't read,
+       * after it may have taken the request. A refusal it answered with (signed
+       * out, not allowed, not there, too many calls, the request as it stands)
+       * files nothing; nor does a connection that is gone. Anything else is
+       * taken to be uncertain, never confidently unfiled. A failure while the
+       * adapter was still looking things up before it asked to file is
+       * uncertain too, which costs the person a look and never a duplicate.
+       */
+      const uncertain = (error: unknown) =>
+        error instanceof ConnectorFailed
+          ? error.reason === 'unreachable' || error.reason === 'invalid_response'
+          : !(error instanceof NotFound)
+
       const failureWords = (error: unknown, tracker: string) => {
+        if (uncertain(error))
+          return `Its answer was lost, so Althar can’t tell whether ${tracker} filed it. Look on ${tracker} before you file it again.`
         if (error instanceof ConnectorFailed)
           switch (error.reason) {
             case 'unauthorized':
               return `${tracker} didn’t take Althar’s sign-in. Sign in again in Settings, then try again.`
             case 'forbidden':
               return `${tracker} says this account may not file issues there${error.message === '' ? '' : `: ${error.message}`}`
-            case 'unreachable':
-              return `${tracker} didn’t answer. Try again in a moment.`
             case 'rate_limited':
               return `${tracker} asks Althar to wait before trying again.`
             default:
               return error.message === '' ? `${tracker} refused it.` : error.message
           }
-        if (error instanceof NotFound) return `The connection to ${tracker} is gone. Connect it again, then try again.`
-        return `Althar couldn’t file it on ${tracker}.`
+        return `The connection to ${tracker} is gone. Connect it again, then try again.`
       }
 
       const file: IssueDrafts['Service']['file'] = (draftId, actorId) =>
@@ -397,7 +511,7 @@ export class IssueDrafts extends Context.Service<
             const marked = yield* transition(draftId, open, () => ({ state: 'filing', error: null }), 'issue_draft.filing', actorId)
             if (!marked.changed) return marked.row.state === 'filing' ? cardOf(marked.row) : yield* closed(marked.row)
             const row = marked.row
-            const tracker = products[row.product].name
+            const tracker = row.trackerName
             const made = yield* connections.adapters(row.connectionId).pipe(
               Effect.flatMap((adapters): Effect.Effect<Issue, unknown> =>
                 adapters.tracker === undefined
@@ -425,8 +539,8 @@ export class IssueDrafts extends Context.Service<
                       issueUrl: made.success.url,
                       decidedAt: at,
                     }
-                  : { state: 'failed', error: failureWords(made.failure, tracker) },
-              made._tag === 'Success' ? 'issue_draft.filed' : 'issue_draft.failed',
+                  : { state: uncertain(made.failure) ? 'uncertain' : 'failed', error: failureWords(made.failure, tracker) },
+              made._tag === 'Success' ? 'issue_draft.filed' : uncertain(made.failure) ? 'issue_draft.uncertain' : 'issue_draft.failed',
               actorId,
               (now) => (now.state === 'filed' ? { key: now.issueKey, url: now.issueUrl } : { error: now.error }),
             )
@@ -453,16 +567,16 @@ export class IssueDrafts extends Context.Service<
       yield* provide(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const stuck = yield* sql<{ id: string; product: Product }>`SELECT id, product FROM issue_drafts WHERE state = 'filing'`
+          const stuck = yield* sql<{ id: string; trackerName: string }>`SELECT id, tracker_name FROM issue_drafts WHERE state = 'filing'`
           for (const draft of stuck)
             yield* transition(
               draft.id,
               (row) => row.state === 'filing',
               () => ({
-                state: 'failed',
-                error: `Althar closed while filing this. Look on ${products[draft.product].name} for it before you file it again.`,
+                state: 'uncertain',
+                error: `Althar closed while filing this. Look on ${draft.trackerName} for it before you file it again.`,
               }),
-              'issue_draft.failed',
+              'issue_draft.uncertain',
               instance.systemId,
               (row) => ({ error: row.error }),
             )

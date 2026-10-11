@@ -3,12 +3,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { IssueDraftCard } from '@althar/contracts'
+import { products } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Connectors } from '../src/Config'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
@@ -212,9 +214,6 @@ describe('issue drafts', () => {
       assert.match(failed?.error ?? '', /^Linear says this account may not file issues there/)
       assert.lengthOf(linear.created, 0)
 
-      linear.failNext('create', 'unreachable')
-      yield* drafts.file(card?.draftId ?? '', instance.personId)
-      assert.match((yield* cardsOf(projectId))[0]?.error ?? '', /didn’t answer/)
       linear.failNext('create', 'rate_limited')
       yield* drafts.file(card?.draftId ?? '', instance.personId)
       assert.match((yield* cardsOf(projectId))[0]?.error ?? '', /asks Althar to wait/)
@@ -231,6 +230,33 @@ describe('issue drafts', () => {
         linear.created.map((issue) => issue.title),
         ['Retry webhooks with backoff'],
       )
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('are perhaps filed, not unfiled, when the tracker’s answer is lost or unreadable', () => {
+    const linear = linearWith(MERIDIAN)
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, access } = yield* project()
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+      yield* callTool(access, 'draft_issue', { title: 'Retry webhooks' })
+      const [card] = yield* cardsOf(projectId)
+      for (const reason of ['unreachable', 'invalid_response'] as const) {
+        linear.failNext('create', reason)
+        assert.strictEqual((yield* drafts.file(card?.draftId ?? '', instance.personId)).state, 'uncertain')
+        const [shown] = yield* cardsOf(projectId)
+        assert.strictEqual(shown?.state, 'uncertain')
+        assert.strictEqual(
+          shown?.error,
+          'Its answer was lost, so Althar can’t tell whether Linear filed it. Look on Linear before you file it again.',
+        )
+      }
+      // Once the person has looked, it can still be changed, discarded, or filed again; never on its own.
+      assert.lengthOf(linear.created, 0)
+      yield* drafts.change(card?.draftId ?? '', { title: 'Retry webhooks, again', body: '', labels: [] }, instance.personId)
+      assert.strictEqual((yield* drafts.file(card?.draftId ?? '', instance.personId)).state, 'filed')
+      assert.lengthOf(linear.created, 1)
     }).pipe(Effect.provide(withQueries({ linear })))
   })
 
@@ -307,6 +333,82 @@ describe('issue drafts', () => {
     }).pipe(Effect.provide(withQueries({ github, linear })))
   })
 
+  it.live('tell two connections of one tracker apart, by site, and keep a draft per place', () => {
+    // Two GitHub servers, each its own service: one has acme/tools, both have meridian/api.
+    const ours = makeFakeService({ pushUrl: () => '' })
+    ours.addRepository(['meridian', 'api'])
+    const theirs = makeFakeService({ pushUrl: () => '' })
+    theirs.addRepository(['meridian', 'api'])
+    theirs.addRepository(['acme', 'tools'])
+    const connectors = Layer.succeed(
+      Connectors,
+      Connectors.of({
+        products: [
+          {
+            ...products.github,
+            make: (options) => {
+              const service = options.webUrl.includes('ghe.test') ? theirs : ours
+              return { host: service, tracker: service }
+            },
+            access: ours.access,
+          },
+        ],
+        fetch: () => Promise.reject(new Error('No network in tests')),
+        clientIds: {},
+        callbackPort: 0,
+        cliToken: () => Effect.succeed(null),
+      }),
+    )
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      yield* connect('github', 'https://ghe.test')
+      const { projectId, access } = yield* project()
+      const trackerOf = (title: string) =>
+        Effect.map(cardsOf(projectId), (cards) => {
+          const card = cards.find((one) => one.title === title)
+          return `${card?.tracker ?? ''} / ${card?.container ?? ''}`
+        })
+      // Nothing to choose by: which is asked, by the names that tell them apart.
+      assert.strictEqual(
+        yield* callTool(access, 'draft_issue', { title: 'Anywhere' }),
+        'Say which tracker it goes on, as tracker: GitHub (ghe.test), GitHub (github.test).',
+      )
+      // A repository only one of them has goes there, and the card says which.
+      yield* callTool(access, 'draft_issue', { title: 'Tools', tracker: 'GitHub', container: 'acme/tools' })
+      assert.strictEqual(yield* trackerOf('Tools'), 'GitHub (ghe.test) / acme/tools')
+      yield* callTool(access, 'draft_issue', { title: 'Tools elsewhere', container: 'acme/tools' })
+      assert.strictEqual(yield* trackerOf('Tools elsewhere'), 'GitHub (ghe.test) / acme/tools')
+      // One both have is asked about, never guessed; named by site, it is clear.
+      assert.strictEqual(
+        yield* callTool(access, 'draft_issue', { title: 'Api', tracker: 'github', container: 'meridian/api' }),
+        'Say which tracker it goes on, as tracker: GitHub (ghe.test), GitHub (github.test).',
+      )
+      yield* callTool(access, 'draft_issue', { title: 'Api', tracker: 'https://ghe.test/', container: 'meridian/api' })
+      assert.strictEqual(yield* trackerOf('Api'), 'GitHub (ghe.test) / meridian/api')
+      // The same title for another place is another draft, not the first one again.
+      yield* callTool(access, 'draft_issue', { title: 'Api', tracker: 'GitHub (github.test)', container: 'meridian/api' })
+      const apis = (yield* cardsOf(projectId)).filter((card) => card.title === 'Api').map((card) => card.tracker)
+      assert.deepStrictEqual(apis, ['GitHub (ghe.test)', 'GitHub (github.test)'])
+      // For the same place, it is the first again.
+      yield* callTool(access, 'draft_issue', { title: 'api', tracker: 'ghe.test', container: 'meridian/api' })
+      assert.lengthOf(
+        (yield* cardsOf(projectId)).filter((card) => card.title.toLowerCase() === 'api'),
+        2,
+      )
+      // Nowhere by that name on either: what each has.
+      assert.strictEqual(
+        yield* callTool(access, 'draft_issue', { title: 'Lost', container: 'acme/lost' }),
+        'No connected tracker has anywhere called acme/lost for issues. They have: GitHub (ghe.test): meridian/api, GitHub (ghe.test): acme/tools, GitHub (github.test): meridian/api.',
+      )
+      // Filed, it is on the server it was drafted for.
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+      const tools = (yield* cardsOf(projectId)).find((card) => card.title === 'Tools')
+      yield* drafts.file(tools?.draftId ?? '', instance.personId)
+      assert.deepStrictEqual([theirs.created.map((issue) => issue.title), ours.created.length], [['Tools'], 0])
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors })))))
+  })
+
   it.live('say so when there is nowhere to draft one, or no single place to choose', () => {
     const linear = linearWith(MERIDIAN, PLATFORM)
     const trello = makeFakeService({ product: 'trello' })
@@ -364,6 +466,9 @@ describe('issue drafts', () => {
       const failing = yield* draftOf('Retry webhooks')
       linear.failNext('create', 'unreachable')
       yield* drafts.file(failing, instance.personId)
+      const refused = yield* draftOf('Refused')
+      linear.failNext('create', 'rejected')
+      yield* drafts.file(refused, instance.personId)
       // Left alone, a draft says nothing.
       yield* draftOf('Untouched')
 
@@ -380,7 +485,11 @@ describe('issue drafts', () => {
       )
       assert.include(
         news,
-        '- The issue “Retry webhooks” couldn’t be filed on Linear: Linear didn’t answer. Try again in a moment. The person can file it again from its card.',
+        '- The issue “Retry webhooks” may or may not be on Linear: Its answer was lost, so Althar can’t tell whether Linear filed it. Look on Linear before you file it again. The person decides once they have looked.',
+      )
+      assert.include(
+        news,
+        '- The issue “Refused” couldn’t be filed on Linear: The fake create failed (rejected) The person can file it again from its card.',
       )
       assert.notInclude(news, 'Untouched')
       assert.match(news, /Speak of these issues as they are now, not as you drafted them\.$/)
@@ -402,7 +511,7 @@ describe('issue drafts', () => {
       }).pipe(Effect.provide(withQueries({ linear }, database)))
       yield* Effect.gen(function* () {
         const [card] = yield* cardsOf(projectId)
-        assert.strictEqual(card?.state, 'failed')
+        assert.strictEqual(card?.state, 'uncertain')
         assert.strictEqual(card?.error, 'Althar closed while filing this. Look on Linear for it before you file it again.')
         assert.lengthOf(linear.created, 0)
       }).pipe(Effect.provide(withQueries({ linear }, database)))

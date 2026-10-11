@@ -30,6 +30,14 @@ describe('IssueDraft', () => {
     expect(onFile).toHaveBeenCalledTimes(1)
   })
 
+  it('says it may be on the tracker already when its answer was lost, and offers filing again', () => {
+    const onFile = vi.fn()
+    render(<IssueDraft {...pending} state={IssueDraftState.Uncertain} error="Look on Linear first." onFile={onFile} />)
+    expect(screen.getByText(/This may be on Linear already\. Look on Linear first\./)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'File again' }))
+    expect(onFile).toHaveBeenCalled()
+  })
+
   it('says it failed even without a reason', () => {
     render(<IssueDraft {...pending} state={IssueDraftState.Failed} />)
     expect(screen.getByText('Couldn’t file it on Linear.')).toBeInTheDocument()

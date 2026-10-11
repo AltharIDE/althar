@@ -59,6 +59,10 @@
   line-height: 1.5;
   color: var(--danger);
 }
+/* not a failure: it may have worked, and the person looks */
+.unsure {
+  color: var(--t-1);
+}
 
 .foot {
   display: flex;

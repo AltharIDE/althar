@@ -300,6 +300,8 @@ export enum IssueDraftState {
   Filing = 'filing',
   Filed = 'filed',
   Failed = 'failed',
+  /** Perhaps filed: the tracker's answer was lost, so it is looked at before filing it again. */
+  Uncertain = 'uncertain',
   Discarded = 'discarded',
 }
 

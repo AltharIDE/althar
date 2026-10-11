@@ -538,9 +538,11 @@ export class Coordinator extends Context.Service<
                     return Effect.fail(
                       new ToolRefused({
                         message:
-                          error.choices.length === 0
-                            ? `This account can't file issues anywhere on ${where}.`
-                            : `${where} has nowhere called ${error.named ?? ''} for issues. It has: ${choices}.`,
+                          error.tracker === null
+                            ? `No connected tracker has anywhere called ${error.named ?? ''} for issues. They have: ${choices}.`
+                            : error.choices.length === 0
+                              ? `This account can't file issues anywhere on ${where}.`
+                              : `${where} has nowhere called ${error.named ?? ''} for issues. It has: ${choices}.`,
                       }),
                     )
                 }
@@ -626,7 +628,11 @@ export class Coordinator extends Context.Service<
             properties: {
               title: { type: 'string' },
               description: { type: 'string', description: 'Markdown.' },
-              tracker: { type: 'string', description: 'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab.' },
+              tracker: {
+                type: 'string',
+                description:
+                  'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab; where two connections share a name, as Althar names them, or by site.',
+              },
               container: {
                 type: 'string',
                 description:

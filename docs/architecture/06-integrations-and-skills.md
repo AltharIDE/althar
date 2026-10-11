@@ -353,16 +353,32 @@ now. Nothing reaches the tracker on its word:
   issues already come from (the newest issue a task came from, or a draft
   filed), then its repository's issues, then the one tracker or container
   there is. Where none of that decides, the tool says what to name.
+- **Two connections of one tracker** (two Jira sites, two GitLab servers,
+  two accounts) are told apart by site, and by account where they share
+  one: `Jira (acme.atlassian.net)`. The coordinator names one so, or by its
+  site's address; a container named without a tracker, or with a name
+  several share, is looked for on each, and one found on more than one is
+  asked about, never guessed. The card names the tracker the same way.
+  Containers are read page by page, up to ten pages.
 - **Drafts are kept** (`issue_drafts`), so they outlast a restart. Filing
   marks the draft as being filed before the tracker is asked, in the same
   transaction that checks it is still open, so a second press files nothing
-  more; one Althar closed in the middle of is shown as not filed, with a word
-  to look on the tracker before filing it again, and is never filed again
-  unasked. A tracker that refuses leaves the card with its words, to file
-  again; one that needs signing in again isn't asked.
+  more. A tracker that refuses (signed out, not allowed, not there, too many
+  calls, the request as it stands) leaves the card not filed, with its
+  words, to file again; one that needs signing in again isn't asked. Where
+  it may have taken the issue without Althar hearing so (no answer in time,
+  one Althar couldn't read, or Althar closed in the middle), the draft is
+  uncertain, never confidently unfiled: the card says to look on the tracker
+  before filing it again, and it is never filed again unasked. An adapter
+  whose tracker took the issue succeeds, even where reading it back after
+  fails (Jira's and Trello's do): it falls back to what it knows, the key
+  and link included.
+- **The same title for the same place** in the same thread is the same
+  draft, for a coordinator unsure its first call worked; for another place,
+  it is another draft.
 - **The coordinator hears** what became of each draft the next time it
   speaks, as it hears of its plans: filed (with its key and link), changed,
-  discarded, or not filed and why. A filed issue's key reads through the
+  discarded, not filed and why, or perhaps filed. A filed issue's key reads through the
   connection that filed it, so a task drafted from it later links it as
   any task's issue is linked.
 

@@ -212,8 +212,13 @@ export type ConnectionState = typeof ConnectionState.Type
 export const ExternalKind = Schema.Literals(['issue', 'change'])
 export type ExternalKind = typeof ExternalKind.Type
 
-/** Where an issue the coordinator drafted stands: waiting on the person, being filed, filed, not filed for a reason the tracker gave, or discarded. */
-export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'discarded'])
+/**
+ * Where an issue the coordinator drafted stands: waiting on the person, being
+ * filed, filed, not filed for a reason the tracker gave, perhaps filed (its
+ * answer was lost, so the tracker is looked at before filing it again), or
+ * discarded.
+ */
+export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
 export type IssueDraftState = typeof IssueDraftState.Type
 
 /** What an artifact is, which decides how long it is kept: a command's output is a log, a picture an agent hands back an image. */

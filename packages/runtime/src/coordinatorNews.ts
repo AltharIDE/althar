@@ -1,4 +1,3 @@
-import { type Product, products } from '@althar/connectors'
 import { knownModelName } from '@althar/contracts'
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -138,8 +137,14 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
     return `Since you last spoke, in Althar:\n${[...lines, ...drafts].join('\n')}\n${close}`
   })
 
-/** The issue draft events the coordinator hears of: the person changed one, filed it, or discarded it; or filing it failed. */
-const DRAFTED = ['issue_draft.changed', 'issue_draft.filed', 'issue_draft.failed', 'issue_draft.discarded'] as const
+/** The issue draft events the coordinator hears of: the person changed one, filed it, or discarded it; or filing it failed, or may have. */
+const DRAFTED = [
+  'issue_draft.changed',
+  'issue_draft.filed',
+  'issue_draft.failed',
+  'issue_draft.uncertain',
+  'issue_draft.discarded',
+] as const
 
 /** What became of the issues the coordinator drafted, since a place in the ledger: a line for each, as it now stands. */
 const draftNews = (projectId: string, since: number) =>
@@ -157,17 +162,17 @@ const draftNews = (projectId: string, since: number) =>
         title: string
         state: string
         containerName: string
-        product: Product
+        trackerName: string
         issueKey: string | null
         issueUrl: string | null
         error: string | null
         drafted: string | null
       }>`
-        SELECT d.title, d.state, d.container_name, d.product, d.issue_key, d.issue_url, d.error,
+        SELECT d.title, d.state, d.container_name, d.tracker_name, d.issue_key, d.issue_url, d.error,
           (SELECT json_extract(payload, '$.title') FROM record_events WHERE aggregate_id = d.id AND type = 'issue_draft.drafted') AS drafted
         FROM issue_drafts d WHERE d.id = ${draftId}`
       if (draft === undefined) continue
-      const tracker = products[draft.product].name
+      const tracker = draft.trackerName
       // Changed by the person, it is told by what it says now, and what it said when drafted.
       const changed = mine.some((event) => event.type === 'issue_draft.changed' && event.actorId !== instance.coordinatorId)
       const was = changed && draft.drafted !== null && draft.drafted !== draft.title ? ` (you drafted it as “${draft.drafted}”)` : ''
@@ -180,6 +185,10 @@ const draftNews = (projectId: string, since: number) =>
       else if (draft.state === 'failed')
         lines.push(
           `- The issue “${draft.title}”${was} couldn’t be filed on ${tracker}: ${draft.error ?? ''} The person can file it again from its card.`,
+        )
+      else if (draft.state === 'uncertain')
+        lines.push(
+          `- The issue “${draft.title}”${was} may or may not be on ${tracker}: ${draft.error ?? ''} The person decides once they have looked.`,
         )
       else if (changed)
         lines.push(`- The person changed the issue you drafted${was}: it now reads “${draft.title}”, and waits on them to file it.`)

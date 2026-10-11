@@ -990,8 +990,8 @@ export const RunItem = Schema.Struct({
   }),
 })
 
-/** Where an issue the coordinator drafted stands: waiting on you, being filed, filed, not filed and why, or discarded. */
-export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'discarded'])
+/** Where an issue the coordinator drafted stands: waiting on you, being filed, filed, not filed and why, perhaps filed (its answer was lost), or discarded. */
+export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
 export type IssueDraftState = typeof IssueDraftState.Type
 
 /**
@@ -1003,7 +1003,7 @@ export type IssueDraftState = typeof IssueDraftState.Type
 export const IssueDraftCard = Schema.Struct({
   draftId: Schema.String,
   product: Product,
-  /** The tracker, by its product's name: Linear, Jira, GitHub. */
+  /** The tracker, by its product's name, and its site or account where another connection of the product would leave it unclear: Jira (acme.atlassian.net). */
   tracker: Schema.String,
   /** Where it goes there, by the tracker's name for it: a team, a project, a list on a board, a repository. */
   container: Schema.String,
@@ -1012,7 +1012,7 @@ export const IssueDraftCard = Schema.Struct({
   body: Schema.String,
   labels: Schema.Array(Schema.String),
   state: IssueDraftState,
-  /** Why it wasn't filed, while it stands failed: in the tracker's words, or Althar's. */
+  /** Why it wasn't filed, while it stands failed, or why it may have been, while uncertain: in the tracker's words, or Althar's. */
   error: Schema.NullOr(Schema.String),
   /** The issue, once filed: its key as the tracker shows it, and its link. */
   issue: Schema.NullOr(Schema.Struct({ key: Schema.String, url: Schema.String })),

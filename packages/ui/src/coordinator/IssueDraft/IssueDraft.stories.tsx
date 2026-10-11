@@ -59,6 +59,19 @@ export const Filing: Story = {
   },
 }
 
+/** Perhaps filed: the tracker's answer was lost, so the person looks there before filing it again. */
+export const Uncertain: Story = {
+  args: {
+    state: IssueDraftState.Uncertain,
+    error: 'Its answer was lost, so Althar can’t tell whether Linear filed it. Look on Linear before you file it again.',
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/This may be on Linear already\. Its answer was lost/)).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'File again' })).toBeInTheDocument()
+  },
+}
+
 /** The tracker turned it down: the card says why, and it can be filed again. */
 export const Failed: Story = {
   args: { state: IssueDraftState.Failed, error: 'Linear says the team Meridian no longer takes issues from this account.' },
@@ -260,6 +273,10 @@ export const AllStates: Story = {
         {
           state: 'failed',
           node: <IssueDraft {...args} state={IssueDraftState.Failed} error="Linear took too long to answer. Nothing was filed." />,
+        },
+        {
+          state: 'uncertain',
+          node: <IssueDraft {...args} state={IssueDraftState.Uncertain} error="Look on Linear before you file it again." />,
         },
         { state: 'filed', node: <IssueDraft {...args} state={IssueDraftState.Filed} issue={FILED_LINEAR} /> },
         { state: 'discarded', node: <IssueDraft {...args} state={IssueDraftState.Discarded} /> },

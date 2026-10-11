@@ -10,7 +10,8 @@ import type { IssueDraftContent } from '../../shared/thread'
  * An issue the coordinator drafted, in the Talk room: the tracker and where
  * it goes there, what it says, and where it stands. Nothing is filed until
  * the person files it here; they can change it first, or discard it. Once
- * filed, its key and its link; not filed, why, and filing it again.
+ * filed, its key and its link; not filed, why, and filing it again; perhaps
+ * filed, its answer lost, a word to look on the tracker before filing again.
  */
 
 export interface DraftActions {
@@ -28,6 +29,7 @@ const STATES: Readonly<Record<State, IssueDraftState>> = {
   filing: IssueDraftState.Filing,
   filed: IssueDraftState.Filed,
   failed: IssueDraftState.Failed,
+  uncertain: IssueDraftState.Uncertain,
   discarded: IssueDraftState.Discarded,
 }
 

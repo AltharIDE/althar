@@ -36,6 +36,8 @@ export interface IssueDraftText {
   filing: (source: string) => string
   /** Before why it wasn't filed. */
   failed: (source: string) => string
+  /** Before why it may be on the tracker already, its answer lost. */
+  uncertain: (source: string) => string
   discard: string
   edit: string
   file: string
@@ -66,6 +68,7 @@ export const issueDraftText: IssueDraftText = {
   note: 'Nothing is filed until you file it.',
   filing: (source) => `Filing on ${source}…`,
   failed: (source) => `Couldn’t file it on ${source}.`,
+  uncertain: (source) => `This may be on ${source} already.`,
   discard: 'Discard',
   edit: 'Edit',
   file: 'File issue',
@@ -104,11 +107,11 @@ export type IssueDraftProps = RootProps<
     bodyView?: ReactNode
     labels: readonly string[]
     state: IssueDraftState
-    /** Why it wasn't filed, while it stands failed. */
+    /** Why it wasn't filed, while it stands failed; or why it may have been, while uncertain. */
     error?: string
     /** The issue, once filed: its key, and its link. */
     issue?: { key: string; href: string }
-    /** File it, or file it again after it failed. */
+    /** File it, or file it again after it failed or may have. */
     onFile?: () => void
     /** Save what the person changed in the edit form. */
     onChange?: (edit: IssueDraftEdit) => void
@@ -193,6 +196,7 @@ export function IssueDraft({
     case IssueDraftState.Pending:
     case IssueDraftState.Filing:
     case IssueDraftState.Failed:
+    case IssueDraftState.Uncertain:
       return (
         <DraftCard
           root={{ ...rest, ref, className }}
@@ -219,6 +223,7 @@ function folds(state: IssueDraftState) {
     case IssueDraftState.Pending:
     case IssueDraftState.Filing:
     case IssueDraftState.Failed:
+    case IssueDraftState.Uncertain:
       return false
     default:
       return unreachable(state)
@@ -249,6 +254,7 @@ function DraftCard({ root, draft, state, onFile, onChange, onDiscard, saving, he
   const [all, setAll] = useState(false)
   const filing = state === IssueDraftState.Filing
   const failed = state === IssueDraftState.Failed
+  const unsure = state === IssueDraftState.Uncertain
   const open = editing && !filing
   /* saved: the form stays while the save is under way, and closes once it isn't */
   if (sent && !saving) {
@@ -311,6 +317,12 @@ function DraftCard({ root, draft, state, onFile, onChange, onDiscard, saving, he
                 {error && <> {error}</>}
               </p>
             )}
+            {unsure && (
+              <p className={cx(s.error, s.unsure)}>
+                {t.uncertain(source)}
+                {error && <> {error}</>}
+              </p>
+            )}
           </div>
           <div className={s.foot}>
             <span className={s.note}>{filing ? t.filing(source) : t.note}</span>
@@ -326,7 +338,7 @@ function DraftCard({ root, draft, state, onFile, onChange, onDiscard, saving, he
             )}
             {onFile && (
               <Button variant="signal" busy={filing} onClick={onFile}>
-                {failed ? t.fileAgain : t.file}
+                {failed || unsure ? t.fileAgain : t.file}
               </Button>
             )}
           </div>

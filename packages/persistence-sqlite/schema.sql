@@ -50,7 +50,7 @@
 -- external_kind: issue, change
 -- repository_role: service, frontend, infrastructure, library, docs, other
 -- change_target: upstream, fork
--- issue_draft_state: pending, filing, filed, failed, discarded
+-- issue_draft_state: pending, filing, filed, failed, uncertain, discarded
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -999,6 +999,7 @@ CREATE TABLE issue_drafts (
   thread_id TEXT NOT NULL,
   connection_id TEXT NOT NULL REFERENCES connections (id),
   product TEXT NOT NULL REFERENCES vocab_connection_product (word),
+  tracker_name TEXT NOT NULL,
   container TEXT NOT NULL,
   container_name TEXT NOT NULL,
   title TEXT NOT NULL,
@@ -1017,7 +1018,7 @@ CREATE TABLE issue_drafts (
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   UNIQUE (id, project_id),
   CHECK ((state = 'filed') = (issue_url IS NOT NULL AND issue_ref IS NOT NULL AND issue_key IS NOT NULL)),
-  CHECK ((state = 'failed') = (error IS NOT NULL))
+  CHECK ((state IN ('failed', 'uncertain')) = (error IS NOT NULL))
 ) STRICT;
 
 CREATE INDEX issue_drafts_by_project ON issue_drafts (project_id);
