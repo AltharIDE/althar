@@ -1272,7 +1272,7 @@ describe('a project, reaching outside', () => {
     })
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Push 1 commit' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Push 1 commit/ }))
     await waitFor(() => expect(push).toHaveBeenCalled())
     const here = screen.getByRole('button', { name: 'Push main to origin' }) as HTMLButtonElement
     expect(here.disabled).toBe(true)
