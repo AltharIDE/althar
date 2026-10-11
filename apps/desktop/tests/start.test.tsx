@@ -125,6 +125,20 @@ describe('accounts in settings', () => {
     LONG_FLOW,
   )
 
+  it('reports a problem from its foot: the panel closes and the dialog is asked for, where the app can report', async () => {
+    const { client } = fakeClient({ status: codexWith(usual('acc_usual', 'signed_in')).status })
+    const reportProblem = vi.fn()
+    const view = withServices(<Settings />, client, fakeHost({ reportProblem }))
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await userEvent.click(within(panel).getByRole('button', { name: 'Report a problem' }))
+    expect(reportProblem).toHaveBeenCalledWith({ kind: 'asked', from: 'settings' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull())
+    view.unmount()
+    // Where it can't, there is no link.
+    withServices(<Settings />, client)
+    expect(within(await screen.findByRole('dialog', { name: 'Settings' })).queryByRole('button', { name: 'Report a problem' })).toBeNull()
+  })
+
   it('signs in a new account the agent can’t tell is signed in, rather than taking it as signed in', async () => {
     const codex = codexWith(usual('acc_usual', 'signed_in'))
     const { client } = fakeClient({ status: codex.status })

@@ -90,12 +90,15 @@ export function StuckCall({
   agents,
   agentName,
   onAnswer,
+  onReport,
 }: {
   request: AttentionRequest
   stuck: StuckStep
   agents: ReadonlyArray<AgentStatus>
   agentName: (id: string | null) => string
   onAnswer: (attentionId: string, answer: StuckAnswer) => void
+  /** Report a problem about this step, with its task: Report this. Without it, none. */
+  onReport?: (step: string) => void
 }) {
   const named = useModelNames()
   const agent = agentName(stuck.agentId) || 'The agent'
@@ -132,6 +135,7 @@ export function StuckCall({
         tried={[]}
         onAgain={() => onAnswer(request.id, { kind: 'retry', agentId: 'althar' })}
         onAbandon={() => onAnswer(request.id, { kind: 'abandon' })}
+        {...(onReport === undefined ? {} : { onReport: () => onReport(text.step.publish) })}
         text={text.publish}
       />
     )
@@ -147,6 +151,7 @@ export function StuckCall({
         : {})}
       onRetry={(model) => onAnswer(request.id, { kind: 'retry', agentId: model.runtime })}
       onAbandon={() => onAnswer(request.id, { kind: 'abandon' })}
+      {...(onReport === undefined ? {} : { onReport: () => onReport(text.step[stuck.step]) })}
       {...(out
         ? { text: { again: text.out.again(agent), tryingAgain: text.out.tryingAgain(agent) } }
         : again !== undefined && !review

@@ -22,6 +22,7 @@ import {
   Icon,
   IconButton,
   KeepAwake,
+  LinkButton,
   type MarkGlance,
   EdgePlaces,
   NotificationSettings,
@@ -31,6 +32,7 @@ import {
   SettingList,
 } from '@althar/ui'
 
+import { useServices } from '../../data/services'
 import { agentLineOf, brandOf } from '../../shared/agents'
 import { appIcons } from '../../shared/appIcons'
 import { SYSTEM_SOUND } from '../../../main/notify'
@@ -86,6 +88,7 @@ export const text = {
   edgeFailed: 'That couldn’t be kept. Try again.',
   coAuthorFailed: 'That couldn’t be kept. Try again.',
   version: (version: string) => `Althar ${version}`,
+  report: 'Report a problem',
   awake: 'Keep awake',
   awakeOn: 'While work runs',
   off: 'Off',
@@ -169,9 +172,19 @@ export interface SettingsPanelProps {
 
 /** Settings from the home's bar, with what it shows read here. */
 export function SettingsPanel(props: SettingsPanelProps) {
+  const { reportProblem } = useServices().host
   return (
     <SettingsView
       {...props}
+      // Report a problem, from the panel's foot: the panel closes, and the dialog opens over the window.
+      {...(reportProblem === undefined
+        ? {}
+        : {
+            onReport: () => {
+              props.onOpenChange(false)
+              reportProblem({ kind: 'asked', from: 'settings' })
+            },
+          })}
       accounts={useAccountSignIn(props.start)}
       connections={useConnections()}
       appIcon={useAppIcon()}
@@ -199,7 +212,10 @@ export function SettingsView({
   glance,
   open,
   onOpenChange,
+  onReport,
 }: SettingsPanelProps & {
+  /** Report a problem; without it, no link in the foot. */
+  onReport?: () => void
   accounts: AccountSignInModel
   connections: ConnectionsModel
   appIcon: AppIconModel
@@ -329,9 +345,10 @@ export function SettingsView({
             )}
           </ControlGrid>
           {failed}
-          {start.status !== null && (
+          {(start.status !== null || onReport !== undefined) && (
             <ControlFoot>
-              <span>{text.version(start.status.appVersion)}</span>
+              {start.status !== null && <span>{text.version(start.status.appVersion)}</span>}
+              {onReport !== undefined && <LinkButton onClick={onReport}>{text.report}</LinkButton>}
             </ControlFoot>
           )}
         </>

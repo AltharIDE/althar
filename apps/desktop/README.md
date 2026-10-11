@@ -21,6 +21,10 @@ The app shares its profile and worktrees with the command-line client (`apps/cli
 | `ALTHAR_FAKE_AGENTS=1` | Off. Runs the scripted fake agent under Claude Code's and Codex's names, and a fake GitHub at `https://github.test`, keeping tokens in memory rather than the Keychain, for the end-to-end tests. Packaged builds leave it out |
 | `ALTHAR_FAKE_REMOTE` | None. With the fakes, the bare repository that pushes to the fake GitHub land in |
 | `ALTHAR_GITHUB_CLIENT_ID`, `ALTHAR_GITLAB_CLIENT_ID`, `ALTHAR_LINEAR_CLIENT_ID` | None. The public ids of Althar's apps on those services, for signing in through the browser; without one, the service takes a pasted token |
+| `ALTHAR_REPORT_URL` | What the build was given, else none. Where Report a problem posts: the reports Worker (`apps/report`), its address alone posting to `/reports`; `https:`, or a local `http:` for `wrangler dev`. Without one, a report is saved in Downloads as a zip and a message opens in the mail app. Set it when building (`ALTHAR_REPORT_URL=… bun run build:package`) to bake it in; set at run time, it wins |
+| `ALTHAR_REPORT_EMAIL` | `reports@althar.ai`. Where that message is addressed |
+
+The app keeps its logs in the system's place for them, `~/Library/Logs/Althar` on a Mac, and a `logs` folder in the window's own data folder on Windows and Linux (`@althar/desktop` in the system's app data), or in the profile's `logs` folder when `ALTHAR_PROFILE` is given: `main.log`, `runtime.log` and `agents.log`, each turned over at a megabyte or two and kept about a week. Help → Report a problem, the link at the foot of Settings and Report this on a stuck step open the report dialog.
 
 ## Work on it
 
@@ -35,7 +39,7 @@ From `apps/desktop`:
 | `bun run check` | Format, type-aware lint and type checks |
 | `bun run test` | The window's view models and views against a fake client, and its client against the real runtime |
 | `bun run test:coverage` | The same, with the coverage gate: 90% of lines and branches |
-| `bun run test:e2e` | Builds the app and drives it with Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; and, with the fake GitHub, connecting it and a task ending in a draft pull request |
+| `bun run test:e2e` | Builds the app and drives it with Playwright, with the fake agent: a project, a task, a thread, a call answered, and the runtime crashing and coming back; with the fake GitHub, connecting it and a task ending in a draft pull request; and the logs on disk and a report sent to a stand-in for the Worker |
 | `bun run verify` | Check, coverage and the end-to-end tests, as CI runs them |
 
 ### The packaged app: not done yet

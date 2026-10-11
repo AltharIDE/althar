@@ -226,7 +226,7 @@ Everything runs on your machine. The project's tasks, threads and history are ke
 ## Get started
 
 > [!NOTE]
-> **Early.** Althar runs on macOS, Windows and Linux, and is tested most on macOS. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues).
+> **Early.** Althar runs on macOS, Windows and Linux, and is tested most on macOS. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues), or, in the app, Help → Report a problem, which sends what happened with the app's logs, paths and repository names hidden.
 
 Sign in each agent you want to use with its own tool first:
 

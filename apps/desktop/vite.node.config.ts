@@ -12,7 +12,12 @@ import { defineConfig } from 'vite-plus'
  */
 export default defineConfig(({ mode }) => ({
   // A packaged build leaves out the end-to-end tests' hooks, such as the fake agents.
-  define: { __ALTHAR_TEST_HOOKS__: JSON.stringify(mode !== 'package') },
+  define: {
+    __ALTHAR_TEST_HOOKS__: JSON.stringify(mode !== 'package'),
+    // Where reports go (src/main/report): the Worker's address and the mail's, as the build is given them; the environment can say otherwise at run time.
+    __ALTHAR_REPORT_URL__: JSON.stringify(process.env.ALTHAR_REPORT_URL ?? ''),
+    __ALTHAR_REPORT_EMAIL__: JSON.stringify(process.env.ALTHAR_REPORT_EMAIL ?? 'reports@althar.ai'),
+  },
   build: {
     ssr: true,
     outDir: 'dist',

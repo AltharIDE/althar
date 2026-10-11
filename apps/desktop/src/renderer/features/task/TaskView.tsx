@@ -48,6 +48,8 @@ import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { PermissionCalls } from './PermissionCall'
 import { StuckCall } from './StuckCall'
 import { ConnectPanel } from './ConnectPanel'
+import { useServices } from '../../data/services'
+import { text as reportText } from '../report/reportWords'
 import { NoOutputsView } from './NoOutputsView'
 import { conflictsOf, hasOutputs, Outputs } from './Outputs'
 import s from './Task.module.css'
@@ -248,6 +250,8 @@ export function TaskView({
   const editor = editors.main
   // What the thread's parts open: a picture in the lightbox, a document beside the thread.
   const host = useThreadHost()
+  // Report this, on a stuck step: Report a problem, with this task (DEV-61).
+  const { reportProblem } = useServices().host
   const files = model.snapshot?.task.files ?? []
   // What it changed opens on the first file someone wrote, not a lockfile.
   const changes = useChanges(model.snapshot?.task.id ?? null, (files.find((file) => !isGenerated(file.path)) ?? files[0])?.path ?? null)
@@ -602,6 +606,18 @@ export function TaskView({
                   agents={model.agents}
                   agentName={agentName}
                   onAnswer={(attentionId, answer) => void model.answerStuck(attentionId, answer)}
+                  {...(reportProblem === undefined
+                    ? {}
+                    : {
+                        onReport: (step: string) =>
+                          reportProblem({
+                            kind: 'failed',
+                            taskId: snapshot.task.id,
+                            projectId: snapshot.project.id,
+                            threadId: snapshot.threadId,
+                            what: reportText.stuck(step),
+                          }),
+                      })}
                 />
               ) : null,
             )}
