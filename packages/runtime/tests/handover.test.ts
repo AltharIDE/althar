@@ -197,6 +197,18 @@ describe('handing the coordinator to a fresh session', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('leaves one whose first turn filled it as it is: a fresh one would start as full', () =>
+    Effect.gen(function* () {
+      const { threadId } = yield* opened
+      yield* say(threadId, 'A very long paste. [context:85]')
+      yield* answered(threadId, 1)
+      yield* say(threadId, 'And more. [context:90]')
+      yield* answered(threadId, 2)
+      yield* Effect.sleep('200 millis')
+      assert.lengthOf(yield* sessionsOn(threadId), 1)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('hands over one whose agent says between turns that its context is filling', () =>
     Effect.gen(function* () {
       const { threadId } = yield* opened

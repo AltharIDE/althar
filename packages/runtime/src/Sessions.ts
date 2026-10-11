@@ -197,6 +197,8 @@ interface Running {
   readonly background: Map<string, LeftRunning>
   /** A coordinator's handover to a fresh session (ADR-027): under way, it takes no more turns; failed, it carries on as it is. */
   handover: 'none' | 'under_way' | 'failed'
+  /** Whether its first turn already left its context past the handover threshold: a fresh session would start as full, so it isn't handed over. */
+  startedFull: boolean | undefined
 }
 
 /** How often, and for how long, what one left running is read for where it answers. */
@@ -611,7 +613,12 @@ export class Sessions extends Context.Service<
           // A coordinator handing its conversation over takes no more turns. One whose context is filling up hands it over now,
           // between turns, never in one: what waits goes to the fresh session (ADR-027).
           if (running.handover === 'under_way') return false
-          if (thread.role === 'coordinator' && running.handover === 'none' && dueForHandover(running.context)) {
+          if (
+            thread.role === 'coordinator' &&
+            running.handover === 'none' &&
+            running.startedFull !== true &&
+            dueForHandover(running.context)
+          ) {
             running.handover = 'under_way'
             yield* Effect.forkIn(run(handOver(running)), sessionsScope)
             return false
@@ -814,6 +821,7 @@ export class Sessions extends Context.Service<
           // What the turn left open is kept as far as it came: the message being written, and any command's output.
           yield* items.end.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the end of a message', cause)))
           running.turnRunning = false
+          running.startedFull ??= dueForHandover(running.context)
 
           const failure = Exit.isFailure(streamed) ? Cause.findErrorOption(streamed.cause) : Option.none()
           const errorClass = errorClassOf(failure, Exit.isFailure(streamed)) ?? ended?.failure?.failure
@@ -1206,6 +1214,7 @@ export class Sessions extends Context.Service<
             recording: undefined,
             background: new Map(),
             handover: 'none',
+            startedFull: undefined,
           }
           threads.set(thread.threadId, running)
           yield* Effect.forkIn(run(deliveries(running)), scope)
@@ -1232,6 +1241,7 @@ export class Sessions extends Context.Service<
                     event._tag === 'ContextUsage' &&
                     thread.role === 'coordinator' &&
                     !running.turnRunning &&
+                    running.startedFull !== true &&
                     dueForHandover(running.context)
                       ? Queue.offer(running.wake, undefined)
                       : Effect.void,

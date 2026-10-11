@@ -135,6 +135,30 @@ describe('the thread recorder', () => {
       )
     }).pipe(Effect.provide(runtime())),
   )
+  it.live('reads further back, only some kinds, at most so many lines, and names the agent as asked', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const writer = recorder(where)
+      for (const text of ['one', 'two', 'three']) {
+        yield* addItem(where, 'notice', { title: `noted ${text}` })
+        yield* writer.record({ _tag: 'AgentMessage', text: `said ${text}` })
+        yield* writer.record({ _tag: 'ToolCall', toolCallId: text, title: `Read ${text}`, kind: 'read', status: 'completed' })
+      }
+      yield* writer.flush
+      // The latest part, then the part before it, by the number the first read gave.
+      const latest = yield* transcript(where.threadId, 60)
+      assert.strictEqual(latest.text, '[codex] said three\n[tool] Read three (completed)')
+      const earlier = yield* transcript(where.threadId, 60, { before: latest.omitted })
+      assert.strictEqual(earlier.text, '[tool] Read two (completed)\n[note] noted three')
+      assert.strictEqual(earlier.omitted, latest.omitted - 2)
+      // Only some kinds, the last few lines, with the agent named as it is to whoever reads it.
+      const said = yield* transcript(where.threadId, 10_000, { kinds: ['notice', 'agent_message'], last: 3, agent: 'you' })
+      assert.deepStrictEqual(said, { text: '[you] said two\n[note] noted three\n[you] said three', omitted: 4 })
+      // A last line longer than the whole budget is kept as far as it fits.
+      yield* addItem(where, 'notice', { title: 'x'.repeat(100) })
+      assert.strictEqual((yield* transcript(where.threadId, 20)).text, `[note] ${'x'.repeat(13)} […]`)
+    }).pipe(Effect.provide(runtime())),
+  )
 })
 
 describe('long messages', () => {
