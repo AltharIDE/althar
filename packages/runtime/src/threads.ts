@@ -1,6 +1,6 @@
 import { Ids, newId, type ProjectId, type ThreadItemKind } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
-import type { Handed, SessionEvent } from '@althar/provider-adapters'
+import { answerWords, type FieldAnswer, type Handed, type QuestionField, type SessionEvent } from '@althar/provider-adapters'
 import { Clock, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -339,11 +339,20 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
 export const transcript = (threadId: string, budget: number) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const items = yield* sql<{ kind: ItemKind; content: string; agentId: string | null; task: string | null }>`
+    const items = yield* sql<{
+      kind: ItemKind
+      content: string
+      agentId: string | null
+      task: string | null
+      asked: string | null
+      askedState: string | null
+    }>`
       SELECT i.kind, i.content, s.agent_id,
-        (SELECT k.slug || ': ' || k.title FROM tasks k WHERE k.id = json_extract(i.content, '$.taskId')) AS task
+        (SELECT k.slug || ': ' || k.title FROM tasks k WHERE k.id = json_extract(i.content, '$.taskId')) AS task,
+        a.payload AS asked, a.state AS asked_state
       FROM thread_items i
       LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
+      LEFT JOIN attention_requests a ON i.kind = 'question' AND a.id = json_extract(i.content, '$.attentionId')
       WHERE i.thread_id = ${threadId} ORDER BY i.sequence`
     const lines = items.flatMap((item) => {
       const content = JSON.parse(item.content) as Record<string, unknown>
@@ -362,10 +371,15 @@ export const transcript = (threadId: string, budget: number) =>
         case 'task':
           return item.task === null ? [] : [`[task] ${item.task}`]
         case 'question': {
-          // What was asked of the person; its answer reaches the agent on its own, as a message from Althar.
-          const fields = Array.isArray(content['fields']) ? (content['fields'] as ReadonlyArray<Record<string, unknown>>) : []
-          const asked = fields.map((field) => (typeof field['question'] === 'string' ? field['question'] : '')).filter((q) => q !== '')
-          return [`[${item.agentId ?? 'agent'} asked the person] ${asked.length > 0 ? asked.join(' / ') : text('message')}`]
+          // What was asked of the person, and what they answered: an agent that takes the thread over knows both.
+          const fields = Array.isArray(content['fields']) ? (content['fields'] as ReadonlyArray<QuestionField>) : []
+          const asked = fields.map((field) => field.question).filter((question) => question !== '')
+          const line = `[${item.agentId ?? 'agent'} asked the person] ${asked.length > 0 ? asked.join(' / ') : text('message')}`
+          const answers =
+            item.asked === null ? undefined : (JSON.parse(item.asked) as { answers?: Readonly<Record<string, FieldAnswer>> }).answers
+          if (item.askedState === 'answered' && answers !== undefined)
+            return [line, `[person answered] ${answerWords(fields, answers).join(' / ')}`]
+          return item.askedState === 'withdrawn' ? [line, '[not answered]'] : [line]
         }
         default:
           return []

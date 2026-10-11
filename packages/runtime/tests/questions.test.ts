@@ -19,6 +19,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
+import { transcript } from '../src/threads'
 import { items, repository, runtime, task, turns, until } from './support'
 
 /*
@@ -148,6 +149,13 @@ describe('questions an agent asks the person', () => {
         },
       ])
       assert.deepStrictEqual((yield* Effect.orDie(queries.thread(created.threadId))).attention, [])
+      // An agent that takes the thread over reads the answer with the question.
+      const { text: record } = yield* transcript(created.threadId, 30_000)
+      assert.include(
+        record,
+        '[codex asked the person] Which database should the cache use? / Which checks should run before it lands?\n' +
+          '[person answered] Which database should the cache use? DuckDB / Which checks should run before it lands? Unit tests, Lint',
+      )
       // Answered once; again is too late.
       assert.instanceOf(yield* Effect.flip(answer(question.id, { question_0: { values: ['SQLite'] } })), AttentionClosed)
     }).pipe(Effect.provide(withQueries())),
@@ -300,7 +308,7 @@ describe('questions an agent asks the person', () => {
     }),
   )
 
-  it("from the coordinator wait in its conversation, and are on the home with its project's thread", () =>
+  it.live("from the coordinator wait in its conversation, and are on the home with its project's thread", () =>
     Effect.gen(function* () {
       const coordinator = yield* Coordinator
       const projects = yield* Projects
@@ -332,9 +340,10 @@ describe('questions an agent asks the person', () => {
       assert.lengthOf(shownThere, 1)
       assert.deepStrictEqual(yield* answer(question.id, { database: { values: ['postgres'] } }), { told: true })
       yield* until(replies(threadId), (said) => said.includes('answer={"database":"postgres"}'))
-    }).pipe(Effect.provide(withQueries())))
+    }).pipe(Effect.provide(withQueries())),
+  )
 
-  it("are withdrawn when their task is stopped, and every window hears it from the question's item", () =>
+  it.live("are withdrawn when their task is stopped, and every window hears it from the question's item", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const tasks = yield* Tasks
@@ -373,17 +382,33 @@ describe('questions an agent asks the person', () => {
       assert.strictEqual(stopped?.withdrawn, 'task')
       assert.isAbove(yield* heard(), before)
       assert.instanceOf(yield* Effect.flip(answer(question.id, { question_0: { values: ['Postgres'] } })), AttentionClosed)
-    }).pipe(Effect.provide(withQueries())))
+    }).pipe(Effect.provide(withQueries())),
+  )
 
-  it('take a number only as a number', () =>
+  it.live('are withdrawn when their task is stopped with no run, while its lead works on', () =>
+    Effect.gen(function* () {
+      const tasks = yield* Tasks
+      const { task: created } = yield* task()
+      yield* lead(created.threadId)
+      yield* say(created.threadId, scenarios.question)
+      const question = yield* openQuestion(created.threadId)
+      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: created.taskId })
+      const [stopped] = yield* until(shown(created.threadId), (rows) => rows[0]?.state === 'withdrawn')
+      assert.strictEqual(stopped?.withdrawn, 'task')
+      assert.instanceOf(yield* Effect.flip(answer(question.id, { database: { values: ['sqlite'] } })), AttentionClosed)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('take a number only as a number', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const instance = yield* Instance
       const { task: created } = yield* task()
       const [row] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${created.taskId}`
       const retries = { id: 'retries', question: 'How many retries?', type: 'number', options: [], multiple: false, required: true }
+      const retriesId = `attn_${'0'.repeat(32)}`
       yield* sql`INSERT INTO attention_requests ${sql.insert({
-        id: 'attn_retries',
+        id: retriesId,
         projectId: row?.projectId ?? '',
         taskId: created.taskId,
         kind: 'question',
@@ -399,10 +424,11 @@ describe('questions an agent asks the person', () => {
         state: 'open',
         createdAt: new Date().toISOString(),
       })}`
-      assert.instanceOf(yield* Effect.flip(answer('attn_retries', { retries: { values: [], words: 'three' } })), QuestionUnanswered)
-      const told = yield* answer('attn_retries', { retries: { values: [], words: '3' } })
+      assert.instanceOf(yield* Effect.flip(answer(retriesId, { retries: { values: [], words: 'three' } })), QuestionUnanswered)
+      const told = yield* answer(retriesId, { retries: { values: [], words: '3' } })
       assert.deepStrictEqual(told.told ? null : told.body.split('\n').slice(1), ['How many retries? 3'])
-    }).pipe(Effect.provide(withQueries())))
+    }).pipe(Effect.provide(withQueries())),
+  )
 
   it('say why they ask in a line: what the agent said just before, plain, and short', () => {
     const asked = ['Which database should the cache use?']

@@ -343,7 +343,9 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
     /**
      * Asks the person through the caller. The question is dropped, and
      * answered `cancel`, when the agent withdraws it or Althar cancels the
-     * turn, as a permission request is.
+     * turn, as a permission request is. The agent going is not the agent
+     * withdrawing it: the question still waits, and the caller lets it go
+     * when the session ends (ADR-021).
      */
     const askQuestion = (params: acp.CreateElicitationRequest, fromAgent: AbortSignal): Promise<acp.CreateElicitationResponse> => {
       const ask = options.onQuestion
@@ -362,9 +364,13 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       }
       const dropped = new AbortController()
       const drop = () => dropped.abort()
+      // The connection closing aborts every request still open on it, before the agent could say anything.
+      const withdrawn = () => {
+        if (!connection.signal.aborted) drop()
+      }
       const pending = sessionId === undefined ? undefined : waitingIn(sessionId)
       pending?.add(drop)
-      fromAgent.addEventListener('abort', drop, { once: true })
+      fromAgent.addEventListener('abort', withdrawn, { once: true })
       return Effect.runPromiseWith(context)(ask(question), { signal: dropped.signal })
         .then(
           (answer): acp.CreateElicitationResponse =>
@@ -377,7 +383,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         )
         .finally(() => {
           pending?.delete(drop)
-          fromAgent.removeEventListener('abort', drop)
+          fromAgent.removeEventListener('abort', withdrawn)
         })
     }
 

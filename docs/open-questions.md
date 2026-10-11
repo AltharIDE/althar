@@ -30,6 +30,11 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
 - [ ] **Writing while a question waits.** A message the person queues waits
   behind the question, since the turn is blocked on it. Should what they
   write answer it, in their own words?
+- [ ] **An answer whose agent has gone, when Althar stops in between.** The
+  answer is kept, then queued for the thread, then an agent is started for
+  it: three steps, not one. Althar going down between them leaves the
+  answer kept but untold until the person next writes in the thread.
+  Should the answer and its telling be one record that recovery picks up?
 
 ## Dictation, 10 October
 

@@ -210,3 +210,11 @@ export const saidOf = (field: QuestionField, said: FieldAnswer): string => {
   const words = said.words?.trim() ?? ''
   return [...labels, ...(words === '' ? [] : [words])].join(', ')
 }
+
+/** What the person said, question by question: for an agent told afterwards, and one that takes the thread over. */
+export const answerWords = (fields: ReadonlyArray<QuestionField>, answers: Readonly<Record<string, FieldAnswer>>) =>
+  fields.flatMap((field) => {
+    const said = answers[field.id]
+    const words = said === undefined ? '' : saidOf(field, said)
+    return [`${field.question} ${words === '' ? '(no answer)' : words}`]
+  })

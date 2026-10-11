@@ -4,9 +4,9 @@ import {
   type FieldAnswer,
   type Question,
   type QuestionAnswer,
+  answerWords,
   type QuestionField,
   questionContent,
-  saidOf,
   takesWords,
 } from '@althar/provider-adapters'
 import { Cause, Context, Crypto, Deferred, Effect, Layer, Schema } from 'effect'
@@ -125,14 +125,6 @@ export const reasonOf = (said: string | undefined, asked: ReadonlyArray<string>)
   const cut = why.slice(0, WHY_LENGTH - 1)
   return `${cut.slice(0, cut.lastIndexOf(' ') > 0 ? cut.lastIndexOf(' ') : cut.length)}…`
 }
-
-/** What the person said, question by question, for an agent told afterwards. */
-export const answerWords = (fields: ReadonlyArray<QuestionField>, answers: Readonly<Record<string, FieldAnswer>>) =>
-  fields.flatMap((field) => {
-    const said = answers[field.id]
-    const words = said === undefined ? '' : saidOf(field, said)
-    return [`${field.question} ${words === '' ? '(no answer)' : words}`]
-  })
 
 /**
  * A question's call changed (answered, withdrawn): its thread item, which
@@ -352,10 +344,12 @@ export class Questions extends Context.Service<
           const waiter = waiting.get(input.attentionId)
           waiting.delete(input.attentionId)
           yield* live.publish({ _tag: 'AttentionClosed', threadId: payload.threadId, attentionId: input.attentionId, outcome: 'answered' })
-          if (waiter !== undefined && !waiter.released) {
-            yield* Deferred.succeed(waiter.deferred, { action: 'accept', content: questionContent(waiter.question, answers) })
-            return { told: true } as const
-          }
+          // Told the agent waiting on it, unless its session went meanwhile.
+          const told =
+            waiter !== undefined &&
+            !waiter.released &&
+            (yield* Deferred.succeed(waiter.deferred, { action: 'accept', content: questionContent(waiter.question, answers) }))
+          if (told) return { told: true } as const
           return {
             told: false,
             threadId: payload.threadId,

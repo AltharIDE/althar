@@ -644,24 +644,30 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const answered = yield* questions.answer({
-                envelope: yield* envelope('attention.answer_question', { attentionId, answers }, commandId),
-                attentionId,
-                answers,
+              const answer = Effect.gen(function* () {
+                const answered = yield* questions.answer({
+                  envelope: yield* envelope('attention.answer_question', { attentionId, answers }, commandId),
+                  attentionId,
+                  answers,
+                })
+                if (answered.told) return
+                // The agent that asked has gone: the answer is told to the one on its thread next, started for it.
+                const tell = {
+                  envelope: yield* Effect.provideContext(
+                    Runtime.envelope('thread.send', { threadId: answered.threadId, answered: attentionId }),
+                    context,
+                  ),
+                  threadId: answered.threadId,
+                  body: answered.body,
+                }
+                const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${answered.threadId}`
+                if (thread?.kind === 'coordinator') yield* coordinator.say({ ...tell, disposition: 'after_current', quiet: true })
+                else yield* runs.answered(tell)
               })
-              if (answered.told) return
-              // The agent that asked has gone: the answer is told to the one on its thread next, started for it.
-              const tell = {
-                envelope: yield* Effect.provideContext(
-                  Runtime.envelope('thread.send', { threadId: answered.threadId, answered: attentionId }),
-                  context,
-                ),
-                threadId: answered.threadId,
-                body: answered.body,
-              }
-              const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${answered.threadId}`
-              if (thread?.kind === 'coordinator') yield* coordinator.say({ ...tell, disposition: 'after_current', quiet: true })
-              else yield* runs.answered(tell)
+              // A task's question is answered in the task's turn: stopping it comes first, and the question is withdrawn, or
+              // after, and the agent the answer started stops.
+              const [asked] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM attention_requests WHERE id = ${attentionId}`
+              yield* asked === undefined || asked.taskId === null ? answer : tasks.inTurn(asked.taskId, answer)
             }),
           ),
         ),

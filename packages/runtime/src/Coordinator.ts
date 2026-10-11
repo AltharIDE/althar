@@ -163,10 +163,12 @@ export class Coordinator extends Context.Service<
           const running = yield* sessions.running(input.threadId)
           if (Option.isNone(running)) {
             const pick = yield* suggested(row.projectId)
+            // What Althar tells it quietly (an answer to its question) waits for it, whether or not it can start now.
+            if (input.quiet === true) yield* sessions.send(input)
             if (pick === null || !pick.available)
               return yield* new CoordinatorUnavailable({ agentId: pick?.agentId ?? '', agentName: pick?.agentName ?? 'The agent' })
             // Queued first, so the coordinator's first turn is its brief with what the person said.
-            yield* sessions.send(input)
+            if (input.quiet !== true) yield* sessions.send(input)
             yield* sessions.start({
               threadId: input.threadId,
               agentId: pick.agentId,
