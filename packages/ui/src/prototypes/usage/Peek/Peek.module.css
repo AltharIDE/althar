@@ -1,0 +1,81 @@
+.readout {
+  display: inline-flex;
+  align-items: center;
+}
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 5px;
+  border-radius: var(--r);
+  transition: background var(--fast) var(--ease);
+}
+.button:hover {
+  background: var(--n-3);
+}
+.button:active,
+.button[aria-expanded='true'] {
+  background: var(--n-4);
+}
+
+.glyph rect {
+  fill: var(--n-4);
+  transition: fill var(--slow) var(--ease);
+}
+.glyph rect[data-lit] {
+  fill: var(--t-3);
+}
+.strained rect[data-lit] {
+  fill: var(--t-1);
+}
+
+.strain {
+  font-size: 11.5px;
+  color: var(--t-1);
+  white-space: nowrap;
+}
+.strain:not(:empty) {
+  margin-left: 4px;
+}
+
+/* ---- the peek ---- */
+.peek {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 12px 4px;
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: -4px;
+}
+.title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.load {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+/* the shares' rows reach the peek's edges, as the bar's preview rows do */
+.peek > section {
+  margin: 0 -6px;
+}
+.foot {
+  margin: -4px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button,
+  .glyph rect {
+    transition: none;
+  }
+}

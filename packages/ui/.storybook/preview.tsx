@@ -1,3 +1,5 @@
+// oxlint-disable-next-line typescript/triple-slash-reference -- the pre-commit hook checks staged files from the root, where env.d.ts is out of view
+/// <reference path="./env.d.ts" />
 import '@fontsource-variable/inter'
 import '@fontsource-variable/jetbrains-mono'
 import '../src/styles/global.css'
@@ -39,6 +41,20 @@ const preview: Preview = {
           ['Welcome', 'Opening', 'Start', 'NewProject', 'ProjectRules'],
           'Task',
           'Workbench',
+          /* explorations to pick a direction from: the comparison first, then each direction */
+          'Prototypes',
+          [
+            'System usage',
+            [
+              'Compare',
+              'A · Meter in the bar',
+              'B · Trace beside the work',
+              'C · Dial by the composer',
+              'D · Glyph and peek',
+              'E · Recommended',
+              'Turning it on and off',
+            ],
+          ],
         ],
       },
     },

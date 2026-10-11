@@ -2,7 +2,13 @@ import type { StorybookConfig } from '@storybook/react-vite'
 
 const config: StorybookConfig = {
   framework: '@storybook/react-vite',
-  stories: ['../src/Introduction.mdx', '../src/Principles.mdx', '../src/**/*.stories.tsx', '../workbench/**/*.stories.tsx'],
+  stories: [
+    '../src/Introduction.mdx',
+    '../src/Principles.mdx',
+    '../src/**/*.stories.tsx',
+    '../src/prototypes/**/*.mdx',
+    '../workbench/**/*.stories.tsx',
+  ],
   addons: ['@storybook/addon-a11y', '@storybook/addon-docs', 'storybook-addon-pseudo-states'],
   core: { disableTelemetry: true },
   staticDirs: [
