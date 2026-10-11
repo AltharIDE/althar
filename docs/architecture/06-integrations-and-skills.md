@@ -254,7 +254,9 @@ service's model.
   to (`push_to_pull_request`), which puts the commits that would go up in the
   thread, with Push. Pressing it pushes up to the head shown; the request
   then says it was pushed and the lead hears so. Where the branch changed
-  since, nothing is pushed, and the request shows the branch as it is now.
+  since, nothing is pushed, and the request shows the branch as it is now,
+  or why that can't go up: rewritten under what went up, or behind commits
+  pushed from elsewhere.
 - **Without a connection, the person pushes the task's branch with their own
   git** (ADR-016): to the remote that repository's work goes to (the one its
   default branch follows, else `origin`, else its only remote), under the

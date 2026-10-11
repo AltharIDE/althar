@@ -862,13 +862,21 @@ describe('a push the lead asks the person for', () => {
   /** The commit a branch is on in the remote's repository. */
   const remoteHead = (bare: string, branch: string) => git(bare, 'rev-parse', `refs/heads/${branch}`)
 
-  /** Althar's reading of the pull request, left behind: not asked again, with its head as it was at `head`. */
+  /**
+   * Althar's reading of the pull request, left behind: not asked again, with
+   * its head as it was at `head`. A reading a push asked for that is under
+   * way waits for the task's pull request as this does, and goes first.
+   */
   const staleReading = (taskId: string, head: string) =>
     Effect.gen(function* () {
       const changes = yield* Changes
       yield* changes.stopListening(taskId, (yield* changes.ofTask(taskId))[0]?.url ?? '')
+      yield* Effect.sleep(Duration.millis(300))
       const sql = yield* SqlClient.SqlClient
-      yield* sql`UPDATE external_links SET snapshot = json_set(snapshot, '$.headSha', ${head}) WHERE kind = 'change' AND task_id = ${taskId}`
+      yield* changes.exclusive(
+        taskId,
+        sql`UPDATE external_links SET snapshot = json_set(snapshot, '$.headSha', ${head}) WHERE kind = 'change' AND task_id = ${taskId}`,
+      )
     })
 
   /** Someone pushes to the pull request's branch from elsewhere: a commit the task's worktree doesn't have. */
