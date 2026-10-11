@@ -55,7 +55,15 @@ export interface RuntimeOptions {
   readonly stalls?: StallOptions
   /** Where what is known of models comes from (`ModelFacts.ts`); without it, nothing is fetched and nothing is known. */
   readonly modelFacts?: ModelFactsOptions
+  /**
+   * What each agent's process writes to stderr, as it comes, by agent and pid: the app keeps it in its log of agents. Without it,
+   * only the last few kilobytes are kept, for the error when an agent stops.
+   */
+  readonly agentStderr?: AgentStderr
 }
+
+/** Called with what an agent's process writes to stderr. */
+export type AgentStderr = (agentId: string, chunk: string, pid: number) => void
 
 /** Each is the default unless a test says otherwise. */
 export interface StallOptions {
@@ -118,16 +126,23 @@ export class Agents extends Context.Service<
    * are the MCP servers the person set up for an agent themselves, which
    * Codex and OpenCode would otherwise load beside Althar's (ownTools.ts).
    */
-  static readonly registry: Layer.Layer<Agents, never, Installs> = Layer.effect(
-    Agents,
-    Effect.gen(function* () {
-      const installs = yield* Installs
-      return Agents.fromRegistry((definition) => usingLocated(definition, () => installs.locate(definition)))
-    }),
-  )
+  static readonly registry = (stderr?: AgentStderr): Layer.Layer<Agents, never, Installs> =>
+    Layer.effect(
+      Agents,
+      Effect.gen(function* () {
+        const installs = yield* Installs
+        return Agents.fromRegistry((definition) => usingLocated(definition, () => installs.locate(definition)), stderr)
+      }),
+    )
 
-  /** The registry's agents, each as `located` points its commands: at the person's own, or the copy Althar downloaded. */
-  static readonly fromRegistry = (located: (definition: AgentDefinition) => AgentDefinition = (definition) => definition) => {
+  /**
+   * The registry's agents, each as `located` points its commands: at the person's own, or the copy Althar downloaded. What each
+   * process writes to stderr goes to `stderr`, where it is given.
+   */
+  static readonly fromRegistry = (
+    located: (definition: AgentDefinition) => AgentDefinition = (definition) => definition,
+    stderr?: AgentStderr,
+  ) => {
     const signedOut = mkdtempSync(join(tmpdir(), 'althar-no-sign-in-'))
     return Agents.from(
       Object.values(agents)
@@ -137,7 +152,12 @@ export class Agents extends Context.Service<
           transport: (cwd: string, env: Readonly<Record<string, string>> = {}) => {
             const spec = definition.launch(process.execPath)
             const own = definition.withoutOwnTools?.({ env: { ...process.env, ...env }, homeDir: homedir(), cwd }) ?? {}
-            return { _tag: 'Process' as const, spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...env } }, cwd }
+            return {
+              _tag: 'Process' as const,
+              spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...env } },
+              cwd,
+              ...(stderr === undefined ? {} : { stderr: (chunk: string, pid: number) => stderr(definition.id, chunk, pid) }),
+            }
           },
         })),
     )

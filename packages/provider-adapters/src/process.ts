@@ -86,6 +86,8 @@ export interface SpawnOptions {
   readonly grace?: Duration.Input
   /** Called with every chunk of the raw protocol, for the raw capture of docs/architecture/07. */
   readonly capture?: (frame: CapturedFrame) => void
+  /** Called with everything the process writes to stderr, as it comes and with its pid, for the app's log of agents. */
+  readonly stderr?: (chunk: string, pid: number) => void
 }
 
 const STDERR_KEPT = 8_192
@@ -165,7 +167,9 @@ export const spawnOwned = (
       })
       let stderr = ''
       child.stderr.on('data', (chunk: Buffer) => {
-        stderr = (stderr + chunk.toString()).slice(-STDERR_KEPT)
+        const text = chunk.toString()
+        stderr = (stderr + text).slice(-STDERR_KEPT)
+        options.stderr?.(text, child.pid ?? 0)
       })
       child.once('exit', (code, signal) => Deferred.doneUnsafe(exited, Effect.succeed({ code, signal })))
       const pid = yield* Effect.callback<number, AgentStartFailed>((resume) => {

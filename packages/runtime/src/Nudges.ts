@@ -1,6 +1,6 @@
 import type { StuckStep } from '@althar/contracts'
 import { Ledger } from '@althar/persistence-sqlite'
-import { Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect'
+import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
@@ -238,7 +238,12 @@ export class Nudges extends Context.Service<
           // Read again once the record next grows, when it couldn't be read.
           yield* Effect.forever(
             round.pipe(
-              Effect.catchCause((cause) => Effect.andThen(Effect.logWarning('Could not read what needs the person', cause), grown)),
+              // Stopping isn't a failure to read: an interrupt ends it, rather than leaving a warning in the log on every quit.
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.interrupt
+                  : Effect.andThen(Effect.logWarning('Could not read what needs the person', cause), grown),
+              ),
             ),
           )
         }),

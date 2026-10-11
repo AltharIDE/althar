@@ -154,6 +154,25 @@ describe('the process transport', () => {
     }),
   )
 
+  it.live('hands on what the process writes to stderr as it comes, with its pid, for the app’s log', () =>
+    Effect.gen(function* () {
+      const heard: Array<readonly [string, number]> = []
+      const scope = yield* Scope.make()
+      const owned = yield* Scope.provide(scope)(
+        spawnOwned({ command: '/bin/sh', args: ['-c', 'echo one >&2; echo two >&2'] }, '/tmp', {
+          stderr: (chunk, pid) => heard.push([chunk, pid]),
+        }),
+      )
+      yield* Deferred.await(owned.exited)
+      yield* Effect.sleep('50 millis')
+      yield* Scope.close(scope, Exit.void)
+      assert.strictEqual(heard.map(([chunk]) => chunk).join(''), 'one\ntwo\n')
+      assert.isTrue(heard.every(([, pid]) => pid === owned.pid))
+      // It is still kept for an error, too.
+      assert.strictEqual(owned.stderrTail(), 'one\ntwo\n')
+    }),
+  )
+
   it.live('has nothing to stop when the group has already gone', () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
