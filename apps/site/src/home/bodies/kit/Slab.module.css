@@ -3,7 +3,8 @@
 .toRight { --turn: -11deg; perspective-origin: 20% 40%; }
 .toLeft { --turn: 11deg; perspective-origin: 80% 40%; }
 .float { transform-style: preserve-3d; animation: float 9s ease-in-out infinite; }
-@keyframes float { 50% { translate: 0 -10px; } }
+/* A transform, not `translate`: the browser runs it off the main thread. */
+@keyframes float { 50% { transform: translateY(-10px); } }
 .slab {
   border-radius: 16px;
   background: var(--n-1);
