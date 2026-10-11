@@ -124,16 +124,24 @@ describe('backups', () => {
     ),
   )
 
-  it.effect('migrates nothing when the copy can’t be made', () =>
+  it.effect('migrates nothing when the copy can’t be made: no folder for it, or the copy itself stops', () =>
     withProfile(({ filename, backups }) =>
       Effect.gen(function* () {
         yield* open({ filename, migrations: previous }, Effect.void)
         // A file where the folder should be.
         writeFileSync(backups, '')
+        const noFolder = yield* Effect.flip(open({ filename, backups }, Effect.void))
+        assert.instanceOf(noFolder, Database.BackupFailed)
+        assert.strictEqual((noFolder as Database.BackupFailed).folder, backups)
+        assert.strictEqual((yield* open({ filename, migrations: previous }, inspect)).at, atPrevious)
 
-        const error = yield* Effect.flip(open({ filename, backups }, Effect.void))
-        assert.instanceOf(error, Database.BackupFailed)
-        assert.strictEqual((error as Database.BackupFailed).folder, backups)
+        // A folder where SQLite would write the copy, so the backup API stops.
+        rmSync(backups)
+        yield* TestClock.setTime(NOW)
+        mkdirSync(`${join(backups, backupName(atPrevious, '2026-10-11T10:32:48.123Z'))}.partial`, { recursive: true })
+        const copyStopped = yield* Effect.flip(open({ filename, backups }, Effect.void))
+        assert.instanceOf(copyStopped, Database.BackupFailed)
+        assert.deepStrictEqual(listBackups(backups), [])
         assert.strictEqual((yield* open({ filename, migrations: previous }, inspect)).at, atPrevious)
       }),
     ),
