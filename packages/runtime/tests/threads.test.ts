@@ -133,6 +133,23 @@ describe('the thread recorder', () => {
           '\n[review, pass] Holds.\n[task] retry-checkout: Retry checkout\n[agent] from nobody',
         ),
       )
+      // A push the lead asked for says how it stands, so the next lead doesn't ask again for what went.
+      const push = (count: number, state: string) =>
+        addItem({ projectId, threadId: where.threadId }, 'push_request', { where: 'PR #12', count, state })
+      yield* push(1, 'pushed')
+      yield* push(2, 'replaced')
+      yield* push(3, 'closed')
+      yield* push(4, 'open')
+      assert.isTrue(
+        (yield* transcript(where.threadId, 10_000)).text.endsWith(
+          [
+            '[the lead asked the person to push] 1 commit to PR #12: pushed',
+            '[the lead asked the person to push] 2 commits to PR #12: asked again later',
+            '[the lead asked the person to push] 3 commits to PR #12: not pushed: the pull request closed',
+            '[the lead asked the person to push] 4 commits to PR #12: not pushed yet',
+          ].join('\n'),
+        ),
+      )
     }).pipe(Effect.provide(runtime())),
   )
 })
