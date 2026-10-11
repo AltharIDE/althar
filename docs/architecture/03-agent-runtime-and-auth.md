@@ -538,7 +538,9 @@ Rules:
    structured `auth_required` response.
 3. Althar never reads, scrapes, copies, decrypts, exports, uploads, or
    synchronizes the CLI's credential cache.
-4. It never asks for a provider password or browser session cookie.
+4. It never asks for a provider password or browser session cookie, and
+   never takes a code a provider's sign-in page shows for its CLI: that code
+   goes into the CLI itself, in the person's terminal.
 5. Subscription-backed execution runs on the user's device and only where the
    provider's current documentation and terms permit that use.
 6. Althar cloud stores the fact that a device reports a capability, not the
@@ -591,9 +593,13 @@ What makes a home, per agent:
 **Adding an account.**
 - Althar makes a home under its own data folder, named by the account's
   id, so it never moves.
-- It opens the agent's own sign-in there, in a terminal, for the person:
-  `claude auth login`, `codex login`, `opencode auth login`, each with the
-  home in its environment.
+- It runs the agent's own sign-in there, with the home in its environment:
+  in the window where the agent lets Althar run it (Claude Code's browser
+  login, Codex's app-server), and otherwise, or as the person chooses, in a
+  terminal for the person: `claude auth login`, `codex login`,
+  `opencode auth login`. Where the browser can't reach back, Claude Code's
+  sign-in is in the terminal, so the code its page shows goes into Claude
+  Code itself.
 - What of the agent's usual folder isn't the account's own is linked into
   the home, again as each session starts (the registry's `shared`): the
   person's settings, instructions and skills, and for OpenCode, whose home is

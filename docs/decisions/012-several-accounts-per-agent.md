@@ -24,13 +24,18 @@
   - **Adding an account** makes a home and runs the agent's own sign-in in
     it. Where the agent lets it, Althar runs that login itself and shows its
     steps in the window: Claude Code's `claude auth login`, which opens the
-    browser and reads a code pasted back; Codex's app-server, which gives the
-    page to open, or a one-time code for another device, and says when it is
-    done and who as. Elsewhere, and always as a choice, the login opens in a
-    terminal for the person. Either way the agent keeps the credential; a
-    pasted code only passes through Althar to the agent, and Althar never
-    reads its credential store. Codex's login waits on one port, so an agent
-    signs in one account at a time.
+    browser and comes back to its own callback; Codex's app-server, which
+    gives the page to open, or a one-time code to type on OpenAI's page from
+    another device, and says when it is done and who as. Elsewhere, and
+    always as a choice, the login opens in a terminal for the person. Where
+    the browser can't reach back, Claude Code's page shows a code for Claude
+    Code itself, so that sign-in is in the terminal, in the account's home,
+    where the person pastes the code into Claude Code: the sign-in completes
+    in Anthropic's own flow, as Claude Code's terms ask. Althar never writes
+    to `claude auth login`'s input. Either way the agent keeps the
+    credential: nothing the person types to sign in passes through Althar,
+    and Althar never reads the agent's credential store. Codex's login waits
+    on one port, so an agent signs in one account at a time.
     A home Althar made holds that account's sign-in and the agent's own
     history. What of the agent's usual folder isn't the account's own is
     linked into it, again as each session starts, so every account works the
