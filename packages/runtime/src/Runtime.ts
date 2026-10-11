@@ -9,6 +9,7 @@ import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } fro
 import { Connections } from './Connections'
 import { Installs } from './Installs'
 import { Instance } from './Instance'
+import { IssueDrafts } from './IssueDrafts'
 import { Issues } from './Issues'
 import { Launches } from './Launches'
 import { Live } from './Live'
@@ -71,8 +72,10 @@ export const layer = (options: RuntimeLayerOptions) => {
   const core = Layer.mergeAll(Projects.layer, Sessions.layer, Launches.layer).pipe(
     Layer.provideMerge(Layer.mergeAll(Permissions.layer, Questions.layer).pipe(Layer.provideMerge(judging))),
   )
-  // A task's pull request and issue, through the person's connections to code hosts and trackers.
-  const linked = Layer.mergeAll(Changes.layer, Issues.layer).pipe(Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(core))))
+  // A task's pull request and issue, and the issues the coordinator drafts, through the person's connections to code hosts and trackers.
+  const linked = Layer.mergeAll(Changes.layer, Issues.layer, IssueDrafts.layer).pipe(
+    Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(core))),
+  )
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
   const work = Tasks.layer.pipe(Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))))
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).

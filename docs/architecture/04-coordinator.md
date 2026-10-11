@@ -98,6 +98,8 @@ provisional.
 | `read_thread` | Earlier turns of a task's thread or its own, by range | Read |
 | `read_change` | A task's diff and checks | Read |
 | `draft_task` | Creates a task in draft, with its repositories and intent: a title of a few words (at most 60 characters), and what the person last said to it kept as what they asked for, which the task's thread opens with and its lead reads | Command |
+| `read_issue`, `find_issues` | An issue on a connected tracker or in the project's repository, and the person's open ones | Read |
+| `draft_issue` | Drafts an issue on a connected tracker, as a card the person files, changes or discards; nothing is filed on its word ([06](06-integrations-and-skills.md#drafting-issues)) | Command |
 | `list_models` | The models it can use now, by maker, with their scores | Query |
 | `propose_plan` | Steps, a model per step, optional steps | Command |
 | `start_task` | Drafts a mini task and starts it at once: one lead, no review, nothing outside the project when it is done | Command |

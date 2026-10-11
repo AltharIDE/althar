@@ -8,6 +8,7 @@ import type {
   Check,
   CodeHost,
   Comment,
+  Container,
   Issue,
   Person,
   Product,
@@ -21,7 +22,9 @@ import type {
  * A code host and tracker that lives in memory, for tests and the desktop's
  * end-to-end suite, as the fake agent stands in for real agents. It keeps
  * repositories, changes, comments, reviews, checks and issues, and lets a
- * test act as other people on it: comment, review, run checks, merge. Its
+ * test act as other people on it: comment, review, run checks, merge. It
+ * files issues where it can (its repositories, and containers a test adds),
+ * and keeps every one it filed. Its
  * clock starts at a fixed time and moves a second per event, so cursors
  * behave as on a real service. Pushes go to whatever URL the test gives,
  * such as a bare repository on disk.
@@ -47,6 +50,13 @@ export interface FakeControls {
     readonly assigned?: boolean
   }): Issue
   /**
+   * A place issues can be filed, such as a Linear team (`{ id: 'team-1', key:
+   * 'MER', name: 'Meridian' }`). Its repositories are such places already, by
+   * their path. An issue filed in one is keyed by its key (MER-1), or else
+   * numbered in it (`team-1#1`).
+   */
+  addContainer(container: { readonly id: string; readonly key?: string | null; readonly name: string }): Container
+  /**
    * Someone comments on a change: in its conversation, or on a line. The
    * account's own login is the account; anyone else can write to the
    * repository unless `member` says not, as a passer-by on a public one.
@@ -68,6 +78,8 @@ export interface FakeControls {
   failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string, status?: number): void
   /** Every change opened, with every comment on it, Althar's included. */
   readonly changes: ReadonlyArray<ChangeRequest>
+  /** Every issue `create` filed, in order, as it was filed: labels and all, since the fake takes any label. */
+  readonly created: ReadonlyArray<Issue>
   commentsOn(number: number): ReadonlyArray<Comment>
   issueComments(ref: string): ReadonlyArray<string>
   linksOn(ref: string): ReadonlyArray<{ readonly url: string; readonly title: string }>
@@ -106,6 +118,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const assigned = new Set<string>()
   const issueComments = new Map<string, Array<string>>()
   const links = new Map<string, Array<{ readonly url: string; readonly title: string }>>()
+  const containers = new Map<string, Container>()
+  const created: Array<Issue> = []
   const failures = new Map<string, { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string; readonly status?: number }>()
   const calls: Array<string> = []
   let ids = 0
@@ -141,6 +155,14 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     changes[index] = { ...change, ...set, updatedAt: now() }
   }
   const person = (login: string, bot = false): Person => (login === me.login ? me : { id: `user-${login}`, login, name: login, bot })
+  /** Where issues can be filed: its repositories, by path, then the containers a test added. */
+  const filable = (): ReadonlyArray<Container> => [
+    ...[...repositories.values()].map((repository) => {
+      const path = repository.path.join('/')
+      return { id: path, key: path, name: path }
+    }),
+    ...containers.values(),
+  ]
 
   const service: FakeService = {
     product,
@@ -294,6 +316,26 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         links.set(issue.ref, [...(links.get(issue.ref) ?? []), link])
         return Effect.void
       }),
+    containers: () => Effect.andThen(called('containers'), () => Effect.succeed(filable())),
+    create: (id, draft) =>
+      Effect.andThen(called('create'), () => {
+        const container = filable().find((candidate) => candidate.id === id)
+        if (container === undefined) return Effect.fail(missing(`container ${id}`))
+        // A repository's issues are numbered `owner/repo#1`, a team's by its key (MER-1).
+        const refOf = (number: number) =>
+          repositories.has(id.toLowerCase()) || container.key === null ? `${id}#${number}` : `${container.key}-${number}`
+        let number = 1
+        while (issues.has(refOf(number))) number += 1
+        const ref = refOf(number)
+        const filed: Issue = {
+          ...service.addIssue({ ref, title: draft.title, body: draft.body, assigned: false }),
+          labels: [...draft.labels],
+          container: container.name,
+        }
+        issues.set(ref, filed)
+        created.push(filed)
+        return Effect.succeed(filed)
+      }),
     access: (input) =>
       called('access').pipe(
         Effect.map(() => {
@@ -362,6 +404,11 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       if (input.assigned !== false) assigned.add(input.ref)
       return issue
     },
+    addContainer: (input) => {
+      const container: Container = { id: input.id, key: input.key ?? null, name: input.name }
+      containers.set(container.id, container)
+      return container
+    },
     commentAs: (number, author, body, commentOptions = {}) => {
       const id = nextId()
       const comment: Comment = {
@@ -413,6 +460,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       }),
     get changes() {
       return [...changes]
+    },
+    get created() {
+      return [...created]
     },
     commentsOn: (number) => comments.get(number) ?? [],
     issueComments: (ref) => issueComments.get(ref) ?? [],

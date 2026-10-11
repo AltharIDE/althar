@@ -34,7 +34,7 @@ import { useModelNames } from './modelNames'
 import { RuleReceipt } from './RuleReceipt'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
 import { answersOf, partsOf, pickedOf, questionText } from './questions'
-import type { ArrivalContent, Block, Part, QuestionContent, RunContent, StepResult, TaskCardContent } from './thread'
+import type { ArrivalContent, Block, IssueDraftContent, Part, QuestionContent, RunContent, StepResult, TaskCardContent } from './thread'
 import s from './ThreadBlocks.module.css'
 
 /*
@@ -370,6 +370,7 @@ export function ThreadBlocks({
   session,
   card,
   run,
+  draft,
   queued,
   onPassOn,
   onAnswerQuestion,
@@ -397,6 +398,8 @@ export function ThreadBlocks({
   card?: (card: TaskCardContent) => ReactNode
   /** Draws a run's card, in the thread it was asked for in. */
   run?: (run: RunContent) => ReactNode
+  /** Draws an issue the coordinator drafted, in its thread. */
+  draft?: (draft: IssueDraftContent) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
 }) {
@@ -452,6 +455,8 @@ export function ThreadBlocks({
         )
       case 'run':
         return <Fragment key={block.id}>{run?.(block.run)}</Fragment>
+      case 'draft':
+        return <Fragment key={block.id}>{draft?.(block.draft)}</Fragment>
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')

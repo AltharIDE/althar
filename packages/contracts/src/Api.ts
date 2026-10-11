@@ -992,6 +992,41 @@ export const RunItem = Schema.Struct({
   }),
 })
 
+/** Where an issue the coordinator drafted stands: waiting on you, being filed, filed, not filed and why, perhaps filed (its answer was lost), or discarded. */
+export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
+export type IssueDraftState = typeof IssueDraftState.Type
+
+/**
+ * An issue the coordinator drafted on a connected tracker, in its thread
+ * (docs/architecture/06, "Drafting issues"): where it goes, what it says,
+ * and where it stands. Nothing is filed until the person files it here; they
+ * can change it first, or discard it. Althar posts it and keeps it current.
+ */
+export const IssueDraftCard = Schema.Struct({
+  draftId: Schema.String,
+  product: Product,
+  /** The tracker, by its product's name, and its site or account where another connection of the product would leave it unclear: Jira (acme.atlassian.net). */
+  tracker: Schema.String,
+  /** Where it goes there, by the tracker's name for it: a team, a project, a list on a board, a repository. */
+  container: Schema.String,
+  title: Schema.String,
+  /** Markdown. */
+  body: Schema.String,
+  labels: Schema.Array(Schema.String),
+  state: IssueDraftState,
+  /** Why it wasn't filed, while it stands failed, or why it may have been, while uncertain: in the tracker's words, or Althar's. */
+  error: Schema.NullOr(Schema.String),
+  /** The issue, once filed: its key as the tracker shows it, and its link. */
+  issue: Schema.NullOr(Schema.Struct({ key: Schema.String, url: Schema.String })),
+})
+export type IssueDraftCard = typeof IssueDraftCard.Type
+
+export const IssueDraftItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('issue_draft'),
+  content: IssueDraftCard,
+})
+
 export const ThreadItem = Schema.Union([
   UserMessageItem,
   AgentTextItem,
@@ -1003,6 +1038,7 @@ export const ThreadItem = Schema.Union([
   ArrivalItem,
   QuestionItem,
   RunItem,
+  IssueDraftItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -1628,6 +1664,16 @@ export const Api = RpcGroup.make(
     { planId: Schema.String, steps: Schema.Array(PlanStep), end: Schema.optional(Schema.NullOr(TaskEnd)) },
     Schema.Void,
   ),
+  /** Changes what an issue the coordinator drafted says, before it is filed. */
+  command(
+    'ChangeIssueDraft',
+    { draftId: Schema.String, title: Schema.String, body: Schema.String, labels: Schema.Array(Schema.String) },
+    Schema.Void,
+  ),
+  /** Files an issue the coordinator drafted, on its tracker; or one that wasn't filed, again. Its card says how it went. */
+  command('FileIssueDraft', { draftId: Schema.String }, Schema.Void),
+  /** Discards an issue the coordinator drafted: nothing is filed. */
+  command('DiscardIssueDraft', { draftId: Schema.String }, Schema.Void),
   command(
     'StartSession',
     { threadId: Schema.String, agentId: Schema.String, model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) },

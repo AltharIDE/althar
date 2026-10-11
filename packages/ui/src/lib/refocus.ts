@@ -1,19 +1,21 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 
 /**
  * For a button that something replaces while it is open, like a note form
  * in place of Ask for changes: when `open` turns false and focus went with what
  * closed (it is on the page's body), focus goes back to the button. A
  * keyboard user carries on from where they were, and whatever listens for
- * keys inside the surrounding panel still hears them.
+ * keys inside the surrounding panel still hears them. Give it `target` where
+ * the element's ref is kept elsewhere, as when it is shared with a consumer's.
  */
-export function useRefocus<T extends HTMLElement>(open: boolean) {
-  const ref = useRef<T>(null)
+export function useRefocus<T extends HTMLElement>(open: boolean, target?: RefObject<T | null>) {
+  const own = useRef<T>(null)
+  const ref = target ?? own
   const was = useRef(open)
   useEffect(() => {
     const lost = document.activeElement === null || document.activeElement === document.body
     if (was.current && !open && lost) ref.current?.focus()
     was.current = open
-  }, [open])
+  }, [open, ref])
   return ref
 }

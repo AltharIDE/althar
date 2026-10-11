@@ -46,6 +46,7 @@ import { Queries } from './Queries'
 import { timestamp } from './records'
 import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
+import { IssueDrafts } from './IssueDrafts'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
 import { Tasks } from './Tasks'
@@ -128,6 +129,7 @@ export const handlers = Api.toLayer(
     const accountSignIns = yield* AccountSignIns
     const policies = yield* Policies
     const plans = yield* Plans
+    const issueDrafts = yield* IssueDrafts
     const runs = yield* Runs
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
@@ -668,6 +670,10 @@ export const handlers = Api.toLayer(
       StartPlan: ({ commandId, planId }) => once(commandId, api(plans.start(planId, instance.personId))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
+      ChangeIssueDraft: ({ commandId, draftId, title, body, labels }) =>
+        once(commandId, api(issueDrafts.change(draftId, { title, body, labels }, instance.personId))),
+      FileIssueDraft: ({ commandId, draftId }) => once(commandId, api(Effect.asVoid(issueDrafts.file(draftId, instance.personId)))),
+      DiscardIssueDraft: ({ commandId, draftId }) => once(commandId, api(issueDrafts.discard(draftId, instance.personId))),
       AnswerStuck: ({ commandId, attentionId, answer }) =>
         once(
           commandId,
