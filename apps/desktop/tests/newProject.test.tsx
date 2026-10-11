@@ -2,11 +2,12 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type FolderReading, type FoundRepository, inkFor } from '@althar/contracts'
+import { ApiError, type FolderReading, type FoundRepository, inkFor, type ProjectSummary } from '@althar/contracts'
 
 import { newProjectId } from '../src/renderer/data/client'
+import { makeQueryClient } from '../src/renderer/data/reads'
 import type { FoundRepositories } from '../src/renderer/data/services'
-import { draftsOf } from '../src/renderer/features/newProject/draft'
+import { draftActions, draftsOf } from '../src/renderer/features/newProject/draft'
 import { NewProjectView } from '../src/renderer/features/newProject/NewProjectView'
 import { useNewProject } from '../src/renderer/features/newProject/useNewProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
@@ -261,6 +262,52 @@ describe('a new project', () => {
     expect(drafts.get()?.folders).toEqual([])
   })
 
+  it('keeps each folder to the draft it was added to, and waits for one still being granted before it is made', async () => {
+    let grant: (granted: string | null) => void = () => undefined
+    const grantDropped = vi.fn(() => new Promise<string | null>((resolve) => (grant = resolve)))
+    const { drafts, draft, client } = opened({}, { grantDropped })
+    act(() => drafts.change(draft.id, (now) => ({ ...now, name: 'Northwind' })))
+    const actions = draftActions({ client, host: fakeHost({ grantDropped }), cache: makeQueryClient() })
+    const dropped = actions.drop([new File([], 'ops')])
+    // Shown as being read at once, so it can't be made without it.
+    expect(drafts.get()?.reading).toHaveLength(1)
+    expect(await actions.create('clay')).toBeNull()
+    expect(client.openProject).not.toHaveBeenCalled()
+    // Closed and another started meanwhile: the grant lands on nothing.
+    act(() => drafts.end())
+    const next = act(() => drafts.start())
+    await act(async () => {
+      grant('grant_ops')
+      await dropped
+    })
+    expect(drafts.get()?.id).not.toBe(draft.id)
+    expect(drafts.get()?.folders).toEqual([])
+    expect(drafts.get()?.reading).toEqual([])
+    void next
+  })
+
+  it('opens nothing when its tab closed while it was being made', async () => {
+    let made: (summary: ProjectSummary) => void = () => undefined
+    const openProject = vi.fn(() => new Promise<ProjectSummary>((resolve) => (made = resolve)))
+    const { drafts, draft, client, onCreated } = opened({ openProject })
+    act(() =>
+      drafts.change(draft.id, (now) => ({
+        ...now,
+        name: 'Northwind',
+        folders: [
+          { path: OPS.path, grant: 'grant_ops', name: 'ops', where: '~/ops', branch: null, remote: null, project: null, found: null },
+        ],
+      })),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /Create Northwind/ }))
+    expect(client.openProject).toHaveBeenCalled()
+    // Being made, Escape doesn't leave it; closing its tab does.
+    await userEvent.keyboard('{Escape}')
+    act(() => drafts.end())
+    await act(async () => made({ ...project, id: draft.id }))
+    expect(onCreated).not.toHaveBeenCalled()
+  })
+
   it('is nothing once it is closed', () => {
     const { drafts, view } = opened()
     act(() => drafts.end())
@@ -287,6 +334,8 @@ describe('where code is hosted', () => {
     expect(remoteOf('file:///srv/git/a/b')).toBeNull()
     expect(remoteOf('https://exa mple')).toBeNull()
     expect(remoteOf('git@github.com:repo')).toBeNull()
+    // Escapes that don't read are kept as written.
+    expect(remoteOf('https://github.com/acme/app%ZZ.git')).toEqual({ host: 'github.com', path: 'acme/app%ZZ' })
   })
 
   it('knows the host as connected, as a hosted service, or by its name', () => {

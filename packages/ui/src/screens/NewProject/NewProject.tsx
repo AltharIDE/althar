@@ -228,6 +228,9 @@ export type NewProjectProps = RootProps<
 /** What is missing when Create is pressed. */
 type Missing = 'name' | 'folder' | null
 
+/** A list whose row went with the button focus was on: focus goes to the same place in it. */
+type Refocus = { readonly list: 'folders' | 'found'; readonly at: number }
+
 /** Something is open over the page, positioned by Radix or a dialog, which Escape closes first. */
 const overlaid = () => document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"]') !== null
 
@@ -261,6 +264,8 @@ export function NewProject({
   const nameField = useRef<HTMLInputElement>(null)
   const chooseButton = useRef<HTMLButtonElement>(null)
   const [missing, setMissing] = useState<Missing>(null)
+  const refocus = useRef<Refocus | null>(null)
+  const side = useRef<HTMLDivElement>(null)
   const { over, handlers } = useDragOver(onDrop)
   const named = name.trim()
   const read = folders.flatMap((folder) => (folder.reading === true ? [] : [folder]))
@@ -285,12 +290,23 @@ export function NewProject({
   // The tab opens to be named.
   useEffect(() => nameField.current?.focus(), [])
 
+  // A row added or left out takes its button with it: focus goes to the button now in its place, else to Choose a folder.
+  useEffect(() => {
+    const was = refocus.current
+    if (was === null) return
+    refocus.current = null
+    if (document.activeElement !== null && document.activeElement !== document.body) return
+    const buttons = side.current?.querySelectorAll<HTMLButtonElement>(`[data-refocus="${was.list}"]`) ?? []
+    ;(buttons[Math.min(was.at, buttons.length - 1)] ?? chooseButton.current)?.focus()
+  })
+
   // Escape makes nothing, and ⌘↵ makes it, from anywhere on the page; what is open over it, a tooltip too, hears Escape first.
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     onKeyDown?.(event)
     if (event.defaultPrevented) return
     if (event.key === 'Escape') {
-      if (overlaid() || (event.target instanceof Element && event.target.closest('[data-own-escape]') !== null)) return
+      // Once it is being made, there is nothing to leave.
+      if (creating || overlaid() || (event.target instanceof Element && event.target.closest('[data-own-escape]') !== null)) return
       event.preventDefault()
       onCancel()
     } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
@@ -367,7 +383,7 @@ export function NewProject({
       </section>
 
       <section className={s.side} aria-labelledby={ids.folders}>
-        <div className={s.sideInner}>
+        <div className={s.sideInner} ref={side}>
           <h2 id={ids.folders} className={s.title}>
             {t.folders}
           </h2>
@@ -375,8 +391,16 @@ export function NewProject({
           {folders.length === 0 || over ? <div className={cx(s.empty, over && s.dropping)}>{over ? t.over : t.noFolders}</div> : null}
           {folders.length > 0 && (
             <ul className={s.folders} aria-label={t.folders}>
-              {folders.map((folder) => (
-                <FolderRow key={folder.id} folder={folder} t={t} onRemove={onRemove} />
+              {folders.map((folder, at) => (
+                <FolderRow
+                  key={folder.id}
+                  folder={folder}
+                  t={t}
+                  onRemove={(id) => {
+                    refocus.current = { list: 'folders', at }
+                    onRemove(id)
+                  }}
+                />
               ))}
             </ul>
           )}
@@ -401,7 +425,16 @@ export function NewProject({
           {(findings.length > 0 || (found !== null && found.first.length + found.more.length > 0)) && (
             <div className={s.below}>
               {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}
-              {found !== null && <Found found={found} t={t} onAdd={onAdd} />}
+              {found !== null && (
+                <Found
+                  found={found}
+                  t={t}
+                  onAdd={(id, at) => {
+                    refocus.current = { list: 'found', at }
+                    onAdd(id)
+                  }}
+                />
+              )}
             </div>
           )}
         </div>
@@ -466,7 +499,7 @@ function FolderRow({ folder, t, onRemove }: { folder: NewProjectFolder; t: NewPr
           )}
         </span>
       </span>
-      <IconButton icon="close" size="small" label={t.leaveOut(folder.name)} onClick={() => onRemove(folder.id)} />
+      <IconButton icon="close" size="small" label={t.leaveOut(folder.name)} data-refocus="folders" onClick={() => onRemove(folder.id)} />
     </li>
   )
 }
@@ -537,7 +570,7 @@ const findingWords = (finding: NewProjectFinding, t: NewProjectText): ReactNode 
 }
 
 /** The repositories on this computer, those named like the project first; each added in one press. */
-function Found({ found, t, onAdd }: { found: NewProjectFound; t: NewProjectText; onAdd: (id: string) => void }) {
+function Found({ found, t, onAdd }: { found: NewProjectFound; t: NewProjectText; onAdd: (id: string, at: number) => void }) {
   const titleId = useId()
   const [all, setAll] = useState(false)
   const shown = all ? [...found.first, ...found.more] : found.first
@@ -548,7 +581,7 @@ function Found({ found, t, onAdd }: { found: NewProjectFound; t: NewProjectText;
         {found.like === null ? t.found : t.foundLike(found.like)}
       </h3>
       <ul className={s.foundRows}>
-        {shown.map((suggestion) => (
+        {shown.map((suggestion, row) => (
           <li key={suggestion.id} className={s.foundRow}>
             <span className={s.foundMain}>
               <span className={s.foundName}>{suggestion.name}</span>
@@ -558,7 +591,14 @@ function Found({ found, t, onAdd }: { found: NewProjectFound; t: NewProjectText;
               </span>
             </span>
             {suggestion.in === undefined ? (
-              <Button size="small" icon="plus" aria-label={t.addLabel(suggestion.name)} onClick={() => onAdd(suggestion.id)}>
+              <Button
+                size="small"
+                icon="plus"
+                aria-label={t.addLabel(suggestion.name)}
+                data-refocus="found"
+                // Where it is among the Add buttons: one in another project has none.
+                onClick={() => onAdd(suggestion.id, shown.slice(0, row).filter((before) => before.in === undefined).length)}
+              >
                 {t.add}
               </Button>
             ) : (

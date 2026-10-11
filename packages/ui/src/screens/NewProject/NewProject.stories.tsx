@@ -176,6 +176,27 @@ export const NamingThenAdding: Story = {
   },
 }
 
+/** Added by keyboard, a repository's row goes, and focus goes to the next Add; left out, to the next row's, and then to Choose a folder. Escape still leaves. */
+export const AddingByKeyboard: Story = {
+  render: (args) => <Forming name="Northwind" onCancel={args.onCancel} />,
+  args: { onCancel: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    c.getByRole('button', { name: 'Add northwind-app' }).focus()
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(c.getByRole('button', { name: 'Add northwind-api' })).toHaveFocus())
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(c.getByRole('button', { name: 'Add northwind-ops' })).toHaveFocus())
+    c.getByRole('button', { name: 'Leave out northwind-app' }).focus()
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(c.getByRole('button', { name: 'Leave out northwind-api' })).toHaveFocus())
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(c.getByRole('button', { name: 'Choose a folder…' })).toHaveFocus())
+    await userEvent.keyboard('{Escape}')
+    await expect(args.onCancel).toHaveBeenCalledOnce()
+  },
+}
+
 /** Create, pressed with something missing, says what, and goes to it: the name, then a folder. */
 export const Missing: Story = {
   render: (args) => <Forming onCreate={args.onCreate} />,
@@ -226,6 +247,16 @@ export const Dropping: Story = {
     await fireEvent.drop(title, { dataTransfer })
     await expect(args.onDrop).toHaveBeenCalledWith([file])
     await expect(c.getByText('No folders yet.')).toBeTruthy()
+  },
+}
+
+/** Being made, there is nothing to leave: Escape does nothing. */
+export const EscapeWhileCreating: Story = {
+  args: { folders: [APP], creating: true, onCancel: fn() },
+  play: async ({ args, canvasElement }) => {
+    await waitFor(() => expect(within(canvasElement).getByRole('textbox', { name: 'Name' })).toHaveFocus())
+    await userEvent.keyboard('{Escape}')
+    await expect(args.onCancel).not.toHaveBeenCalled()
   },
 }
 

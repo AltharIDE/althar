@@ -28,3 +28,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [018](018-allow-always-keeps-a-rule.md) | Allow always keeps a rule in the project |
 | [019](019-coordinator-judges-permissions.md) | The coordinator judges permission requests in fresh read-only sessions |
 | [020](020-what-agents-hand-back.md) | What agents hand back is kept in the artifact store, by digest |
+| [021](021-new-project-in-its-own-tab.md) | A new project is made in a tab of its own, under the id the window gave it |

@@ -130,30 +130,36 @@ export const draftsOf = (client: Client): DraftStore => {
 /** Tells each folder being read apart. */
 let reads = 0
 
-/** The draft's folders added and read, and the project made, through the runtime and the main process. */
+/**
+ * The draft's folders added and read, and the project made, through the
+ * runtime and the main process. Each change is to the draft it began on: a
+ * folder still being granted or read is shown as being read at once, so
+ * Create waits for it, and what ends after that draft closed changes nothing.
+ */
 export const draftActions = ({ client, host, cache }: { client: Client; host: Host; cache: QueryClient }): DraftActions => {
   const store = draftsOf(client)
-  /** A word on the draft open now. */
-  const say = (error: string) => {
-    const at = store.get()
-    if (at !== null) store.change(at.id, (now) => ({ ...now, error }))
+
+  /** Shows a folder as being read on the draft `id`, before it is granted; its key. */
+  const begin = (id: string, shown: Omit<Reading, 'key'>) => {
+    const key = `read-${(reads += 1)}`
+    store.change(id, (now) => ({ ...now, error: null, reading: [...now.reading, { key, ...shown }] }))
+    return key
   }
 
-  /** Reads a granted folder into the draft: its repository, or each one directly inside it. */
-  const read = async (grant: string, shown: Omit<Reading, 'key'> = {}) => {
-    const at = store.get()
-    if (at === null) return
-    const key = `read-${(reads += 1)}`
-    store.change(at.id, (now) => ({ ...now, error: null, reading: [...now.reading, { key, ...shown }] }))
-    const done = (next: (now: Draft) => Draft) =>
-      store.change(at.id, (now) => next({ ...now, reading: now.reading.filter((reading) => reading.key !== key) }))
+  /** It is read, or couldn't be: no longer shown as being read, and what came of it. */
+  const finish = (id: string, key: string, next: (now: Draft) => Draft = (now) => now) =>
+    store.change(id, (now) => next({ ...now, reading: now.reading.filter((reading) => reading.key !== key) }))
+
+  /** Reads a granted folder into the draft `id`: its repository, or each one directly inside it. */
+  const read = async (id: string, key: string, grant: string, shown: Omit<Reading, 'key'>) => {
     try {
       const reading = await client.readFolder(grant)
       // A folder inside a repository isn't one of a project's folders: the repository itself is what's added.
       const [inside] = reading.kind === 'inside' ? reading.repositories : []
       if (inside !== undefined)
-        return done((now) => ({ ...now, error: `That’s a folder inside ${inside.name}. Add ${inside.name} itself.` }))
-      if (reading.repositories.length === 0) return done((now) => ({ ...now, error: `There’s no git repository in ${reading.name}.` }))
+        return finish(id, key, (now) => ({ ...now, error: `That’s a folder inside ${inside.name}. Add ${inside.name} itself.` }))
+      if (reading.repositories.length === 0)
+        return finish(id, key, (now) => ({ ...now, error: `There’s no git repository in ${reading.name}.` }))
       const alone = reading.kind === 'repository'
       const known = alone ? (reading.project?.name ?? null) : null
       const added = reading.repositories.map((found): DraftFolder => ({
@@ -167,40 +173,39 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
         project: known,
         found: alone ? (shown.found ?? null) : null,
       }))
-      done((now) => ({ ...now, folders: [...now.folders, ...added.filter((one) => !now.folders.some((kept) => kept.path === one.path))] }))
+      finish(id, key, (now) => ({
+        ...now,
+        folders: [...now.folders, ...added.filter((one) => !now.folders.some((kept) => kept.path === one.path))],
+      }))
     } catch (failure) {
-      done((now) => ({ ...now, error: messageOf(failure) }))
+      finish(id, key, (now) => ({ ...now, error: messageOf(failure) }))
     }
+  }
+
+  /** Grants a folder, then reads it, shown as being read from the start. */
+  const add = async (grant: () => Promise<string | null>, shown: Omit<Reading, 'key'>, refused: string) => {
+    const at = store.get()
+    if (at === null) return
+    const key = begin(at.id, shown)
+    const granted = await grant()
+    if (granted === null) return finish(at.id, key, (now) => ({ ...now, error: refused }))
+    await read(at.id, key, granted, shown)
   }
 
   return {
     choose: async () => {
+      const at = store.get()
+      if (at === null) return
       const grants = await host.pickFolders()
-      await Promise.all(grants.map((grant) => read(grant)))
+      await Promise.all(grants.map((grant) => read(at.id, begin(at.id, {}), grant, {})))
     },
     drop: async (files) => {
       await Promise.all(
-        files.map(async (file) => {
-          const grant = await host.grantDropped(file)
-          if (grant === null) say(`${file.name} isn’t a folder on this computer.`)
-          else await read(grant, { name: file.name })
-        }),
+        files.map((file) => add(() => host.grantDropped(file), { name: file.name }, `${file.name} isn’t a folder on this computer.`)),
       )
     },
-    addFound: async (id, shown) => {
-      const at = store.get()
-      if (at === null) return
-      // Shown as being read at once, while main grants it.
-      const key = `grant-${id}`
-      store.change(at.id, (now) => ({ ...now, error: null, reading: [...now.reading, { key, ...shown, found: id }] }))
-      const grant = await host.grantFound(id)
-      store.change(at.id, (now) => ({
-        ...now,
-        reading: now.reading.filter((reading) => reading.key !== key),
-        ...(grant === null ? { error: `Althar couldn’t open ${shown.name}. Choose it with Choose a folder.` } : {}),
-      }))
-      if (grant !== null && store.get()?.id === at.id) await read(grant, { ...shown, found: id })
-    },
+    addFound: (id, shown) =>
+      add(() => host.grantFound(id), { ...shown, found: id }, `Althar couldn’t open ${shown.name}. Choose it with Choose a folder.`),
     create: async (ink) => {
       const at = store.get()
       const name = at?.name.trim() ?? ''
@@ -216,7 +221,8 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
         })
         // The projects read again, so the project is in them as its tab opens.
         await cache.refetchQueries({ queryKey: keys.projects }).catch(() => undefined)
-        return made
+        // Made after its tab closed, it is a project like any other: nothing opens on it.
+        return store.get()?.id === at.id ? made : null
       } catch (failure) {
         store.change(at.id, (now) => ({ ...now, creating: false, error: messageOf(failure) }))
         return null
