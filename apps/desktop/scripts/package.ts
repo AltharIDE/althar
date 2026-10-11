@@ -28,9 +28,10 @@ import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
  * Claude Code's and Codex's binaries, the speech engine) with
  * entitlements.mac.inherit.plist. The identity is ALTHAR_MAC_IDENTITY;
  * else, given CSC_LINK and CSC_KEY_PASSWORD (the certificate and its key as
- * a base64 .p12, as the release workflow gives them), the Developer ID
- * electron-builder finds in the keychain of its own it makes of them; else
- * Althar's Developer ID where this Mac's keychain has it. Without any, or
+ * a base64 .p12), the Developer ID electron-builder finds in the keychain of
+ * its own it makes of them; else Althar's Developer ID where a keychain has
+ * it: in CI, the keychain the release workflow made of the certificate
+ * (CSC_KEYCHAIN). Without any, or
  * with ALTHAR_MAC_IDENTITY=-, the app is signed ad hoc, still hardened, and
  * opens only on the Mac that built it; in CI that, or a release without
  * Apple's notary credentials, fails instead.
