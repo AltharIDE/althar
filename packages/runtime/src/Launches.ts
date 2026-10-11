@@ -49,6 +49,8 @@ interface Launch {
   readonly command: string
   readonly startedAt: string
   readonly scope: Scope.Closeable
+  /** Its process, the leader of its group. */
+  readonly pid: number
   /** Its card, in the thread it was asked for in; null where it was asked for in none. */
   card: string | null
   /** The end of what it printed, both streams. */
@@ -108,6 +110,8 @@ export class Launches extends Context.Service<
     clear(id: string): Effect.Effect<void>
     /** The project's runs, in the order they started. */
     ofProject(projectId: string): Effect.Effect<ReadonlyArray<ShownLaunch>>
+    /** Every run still running, by its process, in every project: for how hard each works (`MachineLoad.ts`). */
+    processes(): Effect.Effect<ReadonlyArray<{ readonly pid: number; readonly projectId: string; readonly taskId: string | null }>>
     /** What running would run, for the task or the default branch; null where no repository says how. */
     commandFor(projectId: string, taskId: string | null): Effect.Effect<string | null, unknown>
     /** Keeps how a repository runs, or, with null, goes back to working it out. Says which repository. */
@@ -355,6 +359,7 @@ export class Launches extends Context.Service<
               command: run.command,
               startedAt: yield* timestamp,
               scope,
+              pid: owned.pid,
               card: null,
               printed: '',
               url: null,
@@ -602,6 +607,12 @@ export class Launches extends Context.Service<
         stop,
         clear,
         ofProject: (projectId) => Effect.sync(() => ofProject(projectId)),
+        processes: () =>
+          Effect.sync(() =>
+            [...launches.values()].flatMap((launch) =>
+              launch.ended === null ? [{ pid: launch.pid, projectId: launch.projectId, taskId: launch.taskId }] : [],
+            ),
+          ),
         commandFor,
         keep,
       })
