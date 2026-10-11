@@ -199,6 +199,8 @@ export interface ChangeSetProps {
   }
   /** Accepting is under way: Accept shows it and ignores presses. */
   accepting?: boolean
+  /** Another action on the task is on its way: these wait, without looking busy. */
+  locked?: boolean
   /** The note is on its way to the lead: Ask for changes shows it and ignores presses. */
   sendingBack?: boolean
   /** Why the last answer did not go through, said in the foot. */
@@ -230,6 +232,7 @@ export function ChangeSet({
   pushing = false,
   remote,
   accepting = false,
+  locked = false,
   sendingBack = false,
   error,
   headingLevel = 2,
@@ -276,7 +279,13 @@ export function ChangeSet({
                 {!remote.pushed ? t.notOn(remote.name) : remote.ahead > 0 ? t.behindOn(remote.ahead, remote.name) : t.on(remote.name)}
               </span>
               {remote.onPush && (!remote.pushed || remote.ahead > 0) && (
-                <Button size="small" busy={remote.pushing ?? false} onClick={remote.onPush} aria-label={t.pushBranchLabel(remote.name)}>
+                <Button
+                  size="small"
+                  busy={remote.pushing ?? false}
+                  disabled={locked && !remote.pushing}
+                  onClick={remote.onPush}
+                  aria-label={t.pushBranchLabel(remote.name)}
+                >
                   {t.pushBranch}
                 </Button>
               )}
@@ -386,19 +395,19 @@ export function ChangeSet({
           ) : (
             <>
               {deciding && onAccept && (
-                <Button variant="signal" busy={accepting} onClick={onAccept}>
+                <Button variant="signal" busy={accepting} disabled={locked && !accepting} onClick={onAccept}>
                   {here ? t.mergeHere(base) : t.accept(prs.length)}
                 </Button>
               )}
               {deciding && onSendBack && (
-                <Button ref={back} busy={sendingBack} onClick={() => setSending(true)}>
+                <Button ref={back} busy={sendingBack} disabled={locked} onClick={() => setSending(true)}>
                   {t.sendBack}
                 </Button>
               )}
               {deciding && <span className={s.meta}>{here ? t.here : t.order(numbers)}</span>}
               {pushes && (
                 <>
-                  <Button variant="signal" busy={pushing} onClick={onPush}>
+                  <Button variant="signal" busy={pushing} disabled={locked && !pushing} onClick={onPush}>
                     {t.push(base)}
                   </Button>
                   <span className={s.meta}>{t.pushNote}</span>

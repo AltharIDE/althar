@@ -1,4 +1,5 @@
 import type { ChangeSummary, ChangedFile, TaskRepositoryMerged, ThreadSnapshot } from '@althar/contracts'
+import { doing, type Doing } from './actions'
 import { Button, type ChangeCheck, ChangeSet, ChangeState, CheckState, type ModelInfo, type PullRequest, ThreadMeasure } from '@althar/ui'
 
 import { type NameModel, useModelNames } from '../../shared/modelNames'
@@ -121,6 +122,7 @@ export function Outputs({
   snapshot,
   lead,
   pending,
+  doing: acting = null,
   error,
   onAccept,
   onMergeHere,
@@ -138,6 +140,8 @@ export function Outputs({
   snapshot: ThreadSnapshot
   lead: ModelInfo
   pending: boolean
+  /** Which action is on its way, where one is: only its button shows as working; the others wait. */
+  doing?: Doing | null
   error: string | null
   /** The files merging it here conflicts in, after a merge refused for that. */
   conflict?: string | null
@@ -215,7 +219,8 @@ export function Outputs({
               onReviewDiff={() => onOpenFile()}
               diffKey={text.diffKey}
               onOpenFile={onOpenFile}
-              accepting={pending}
+              accepting={acting === doing.accept}
+              locked={pending}
               {...(error === null ? {} : { error })}
               text={{
                 number: (n) => `${first.prefix}${n}`,
@@ -262,8 +267,9 @@ export function Outputs({
         onReviewDiff={() => onOpenFile()}
         diffKey={text.diffKey}
         onOpenFile={onOpenFile}
+        locked={pending}
         {...(task.merged.some((one) => one.ahead > 0 && one.remote !== null) && onPushHere !== undefined
-          ? { onPush: onPushHere, pushing: pending }
+          ? { onPush: onPushHere, pushing: acting === doing.pushHere }
           : {})}
         text={{ push: () => text.pushHere(task.merged), prs: text.repositories }}
         {...(error === null ? {} : { error })}
@@ -280,7 +286,7 @@ export function Outputs({
           pushed: remotes.every((one) => one.pushed),
           ahead: remotes.reduce((sum, one) => sum + one.ahead, 0),
           onPush: onPushBranch,
-          pushing: pending,
+          pushing: acting === doing.pushBranch,
         }
   const pushedSomewhere = remotes.some((one) => one.pushed)
 
@@ -309,7 +315,8 @@ export function Outputs({
         onReviewDiff={() => onOpenFile()}
         diffKey={text.diffKey}
         onOpenFile={onOpenFile}
-        accepting={pending}
+        accepting={acting === doing.mergeHere}
+        locked={pending}
         {...(first !== undefined
           ? {}
           : conflict !== null && onResolve !== undefined
@@ -357,17 +364,28 @@ export function Outputs({
         {(pushes.length > 0 || drafts.length > 0 || unpublished || first !== undefined) && (
           <div className={s.changeActions}>
             {pushes.map((one) => (
-              <Button key={`push-${one.url}`} variant="signal" busy={pending} onClick={() => onPush(one.localHead ?? '', one.url)}>
+              <Button
+                key={`push-${one.url}`}
+                variant="signal"
+                busy={acting === doing.push(one.url)}
+                disabled={pending && acting !== doing.push(one.url)}
+                onClick={() => onPush(one.localHead ?? '', one.url)}
+              >
                 {several ? text.pushTo(one.unpushed, nameOf(one.repository)) : text.push(one.unpushed)}
               </Button>
             ))}
             {drafts.map((one) => (
-              <Button key={`ready-${one.url}`} busy={pending} onClick={() => onMarkReady(one.url)}>
+              <Button
+                key={`ready-${one.url}`}
+                busy={acting === doing.markReady(one.url)}
+                disabled={pending && acting !== doing.markReady(one.url)}
+                onClick={() => onMarkReady(one.url)}
+              >
                 {several ? text.markReadyIn(nameOf(one.repository)) : text.markReady}
               </Button>
             ))}
             {unpublished && (
-              <Button busy={pending} onClick={onOpenChange}>
+              <Button busy={acting === doing.openChange} disabled={pending && acting !== doing.openChange} onClick={onOpenChange}>
                 {text.openChange}
               </Button>
             )}
