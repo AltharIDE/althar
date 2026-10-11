@@ -41,20 +41,6 @@ const preview: Preview = {
           ['Welcome', 'Opening', 'Start', 'NewProject', 'ProjectRules'],
           'Task',
           'Workbench',
-          /* explorations to pick a direction from: the comparison first, then each direction */
-          'Prototypes',
-          [
-            'System usage',
-            [
-              'Compare',
-              'A. Meter in the bar',
-              'B. Trace beside the work',
-              'C. Pie by the composer',
-              'D. Glyph and peek',
-              'E. Recommended',
-              'Turning it on and off',
-            ],
-          ],
         ],
       },
     },

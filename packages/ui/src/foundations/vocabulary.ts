@@ -547,3 +547,12 @@ export enum EdgeSpot {
   /** Nowhere but its own window: a desktop with no tray. */
   WindowOnly = 'windowOnly',
 }
+
+/** How hard the system works to find memory, as macOS says it: the honest sign memory is short, since a Mac keeps it full of cache on purpose. */
+export enum MemoryPressure {
+  Normal = 'normal',
+  /** It compresses memory to make room. */
+  Warning = 'warning',
+  /** It moves memory to disk, and everything runs slower. */
+  Critical = 'critical',
+}

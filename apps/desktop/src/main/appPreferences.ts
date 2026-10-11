@@ -5,8 +5,9 @@
  * key holds reads as where it starts. Settings reads and changes them
  * through the main process, which is where they take effect: keeping the
  * Mac awake while work runs, which notifications show, the Dock's count and
- * a sound. Which editor files open in is the window's to use. Nothing here
- * touches Node, so the window may read the defaults and keys too.
+ * a sound. Which editor files open in, and whether the bar shows how hard
+ * the computer works, are the window's to use. Nothing here touches Node, so
+ * the window may read the defaults and keys too.
  */
 
 interface Kind<T> {
@@ -45,6 +46,8 @@ export const PREFERENCES = {
   badge: onOff(true),
   /** The sound each notification plays, one of the Mac's alert sounds; none, silent. */
   sound,
+  /** How hard the computer works, and Althar's work's part, in the window's bar; read only while it shows. */
+  showLoad: onOff(true),
 } as const
 
 type Kinds = typeof PREFERENCES

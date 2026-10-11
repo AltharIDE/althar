@@ -182,7 +182,17 @@ describe('the API', () => {
 
   it('takes a load only as parts of the whole and bytes', () => {
     const load = { cpu: 0.5, memoryUsed: 8e9, memoryTotal: 16e9, pressure: null, shares: [], history: [] }
-    const share = { kind: 'task', projectId: 'p1', project: 'Meridian', taskId: 't1', title: 'Fix it', cpu: 0.2, memory: 1e9, processes: 3 }
+    const share = {
+      kind: 'task',
+      projectId: 'p1',
+      project: 'Meridian',
+      taskId: 't1',
+      threadId: 'th1',
+      title: 'Fix it',
+      cpu: 0.2,
+      memory: 1e9,
+      processes: 3,
+    }
     const decode = Schema.decodeUnknownSync(Load)
     assert.strictEqual(decode({ ...load, shares: [{ ...share, agent: { id: 'codex', name: 'Codex' } }] }).shares?.length, 1)
     assert.throws(() => decode({ ...load, cpu: 1.2 }))

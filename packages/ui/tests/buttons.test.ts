@@ -21,6 +21,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/ProjectList/ProjectList.tsx': 'a project’s row, which opens it; the quiet line, which folds',
   'chrome/ProjectTabs/ProjectTabs.tsx': 'a tab, whose shape joins the bar below it',
   'chrome/WorkStatus/WorkStatus.tsx': 'a row of what needs you, in the count’s preview',
+  'chrome/LoadMeter/LoadPeek.tsx': 'a piece of work’s row, which opens it',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',
@@ -38,6 +39,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'setup/ConnectCard/ConnectCard.tsx': 'the ways in to a service, as large options',
   /* a shape of its own */
   'composer/ContextRing/ContextRing.tsx': 'the ring',
+  'chrome/LoadMeter/LoadMeter.tsx': 'the meters, drawn in steps as the ring is drawn',
   'composer/Composer/Composer.tsx': 'the dictation button, drawn as your voice',
   'thread/Shots/Shots.tsx': 'a screenshot’s thumbnail',
   'thread/Inline/Inline.tsx': 'a reference or citation inside prose',
@@ -51,12 +53,6 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',
-  /* prototypes of a readout of the Mac's load: drawn shapes, as the context ring is */
-  'prototypes/usage/Meter/Meter.tsx': 'the meters, which swap for figures',
-  'prototypes/usage/Trace/Trace.tsx': 'the trace, a way to its detail',
-  'prototypes/usage/Pie/Pie.tsx': 'the pie, beside the context ring and sized like it',
-  'prototypes/usage/Peek/Peek.tsx': 'the gauge, which opens the peek',
-  'prototypes/usage/UsageDetail/UsageDetail.tsx': 'a task’s row in the peek, which opens it',
 }
 
 const sources = import.meta.glob<string>('../src/**/*.tsx', { query: '?raw', import: 'default', eager: true })

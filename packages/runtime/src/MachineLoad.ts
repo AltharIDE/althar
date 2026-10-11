@@ -43,6 +43,8 @@ interface Root {
   readonly projectId: string
   readonly project: string
   readonly taskId: string | null
+  /** The task's own thread, which opens it. */
+  readonly threadId: string | null
   readonly title: string | null
   /** The agent it runs, and whether it leads the task (its thread is the task's, not a step's); none for a run. */
   readonly agent: LoadShare['agent']
@@ -90,27 +92,35 @@ export class MachineLoad extends Context.Service<
           project: string
           kind: string
           taskId: string | null
+          threadId: string | null
           title: string | null
           agentId: string
         }>`
-          SELECT p.pid, p.project_id, j.name AS project, t.kind, t.task_id, k.title, s.agent_id
+          SELECT p.pid, p.project_id, j.name AS project, t.kind, t.task_id, h.id AS thread_id, k.title, s.agent_id
           FROM processes p
           JOIN provider_sessions s ON s.id = p.provider_session_id
           JOIN threads t ON t.id = s.thread_id
           JOIN projects j ON j.id = p.project_id
           LEFT JOIN tasks k ON k.id = t.task_id
+          LEFT JOIN threads h ON h.task_id = t.task_id AND h.kind = 'task'
           WHERE p.runtime_instance_id = ${instance.id} AND p.purpose = 'agent' AND p.state = 'running' AND p.pid IS NOT NULL
           ORDER BY p.launched_at, p.rowid`
         const runs = yield* Effect.forEach(yield* launches.processes(), (run) =>
           Effect.gen(function* () {
             const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${run.projectId}`
-            const [task] = run.taskId === null ? [] : yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${run.taskId}`
+            const [task] =
+              run.taskId === null
+                ? []
+                : yield* sql<{ title: string; threadId: string | null }>`
+                  SELECT k.title, h.id AS thread_id FROM tasks k LEFT JOIN threads h ON h.task_id = k.id AND h.kind = 'task'
+                  WHERE k.id = ${run.taskId}`
             return {
               pid: run.pid,
               kind: 'run' as const,
               projectId: run.projectId,
               project: project?.name ?? '',
               taskId: run.taskId,
+              threadId: task?.threadId ?? null,
               title: task?.title ?? null,
               agent: null,
               leads: false,
@@ -124,6 +134,7 @@ export class MachineLoad extends Context.Service<
             projectId: row.projectId,
             project: row.project,
             taskId: row.taskId,
+            threadId: row.threadId,
             title: row.title,
             agent,
             leads: row.kind === 'task',
@@ -155,6 +166,7 @@ export class MachineLoad extends Context.Service<
             projectId: root.projectId,
             project: root.project,
             taskId: root.taskId,
+            threadId: root.threadId,
             title: root.title,
             agent,
             cpu: clamp(its.cpu / capacity),

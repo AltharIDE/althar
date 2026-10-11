@@ -216,6 +216,7 @@ describe('the client', () => {
           PushHere: () => Effect.die('unused'),
           PushBranch: () => Effect.die('unused'),
           ListEditors: () => Effect.die('unused'),
+          GetLoad: () => Effect.die('unused'),
           InstallAgent: () => Effect.die('unused'),
           OpenInEditor: () => Effect.die('unused'),
           ListProjects: () => Effect.die('unused'),

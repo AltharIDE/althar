@@ -105,6 +105,7 @@ describe('this computer’s load', () => {
           projectId: project.projectId,
           project: project.name,
           taskId: created.taskId,
+          threadId: created.threadId,
           title: 'Retry checkout',
           agent,
           cpu: 0.1,
@@ -116,6 +117,7 @@ describe('this computer’s load', () => {
           projectId: runs.projectId,
           project: runs.name,
           taskId: null,
+          threadId: null,
           title: null,
           agent: null,
           cpu: 0.1,
@@ -127,6 +129,7 @@ describe('this computer’s load', () => {
           projectId: project.projectId,
           project: project.name,
           taskId: null,
+          threadId: null,
           title: null,
           agent,
           cpu: 0.025,
@@ -167,7 +170,16 @@ describe('this computer’s load', () => {
       world.lead = yield* pidOf(created.threadId)
       const [share, ...rest] = (yield* (yield* MachineLoad).now).shares ?? []
       assert.lengthOf(rest, 0)
-      assert.deepInclude(share, { kind: 'task', taskId: created.taskId, title: 'Retry checkout', cpu: 0.1, memory: 60 * MB, processes: 2 })
+      // The run, started before the lead, is opened by the task's thread all the same.
+      assert.deepInclude(share, {
+        kind: 'task',
+        taskId: created.taskId,
+        threadId: created.threadId,
+        title: 'Retry checkout',
+        cpu: 0.1,
+        memory: 60 * MB,
+        processes: 2,
+      })
       assert.deepStrictEqual(share?.agent, { id: 'process', name: 'Fake process' })
       yield* launches.stop(started.id)
     }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, settle: Duration.millis(1) } })))

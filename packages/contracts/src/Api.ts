@@ -1508,8 +1508,9 @@ export const LoadShare = Schema.Struct({
   projectId: Schema.String,
   /** The project's name. */
   project: Schema.String,
-  /** The task's id and title; null for a coordinator or the default branch. */
+  /** The task's id, its own thread, which opens it, and its title; null for a coordinator or the default branch. */
   taskId: Schema.NullOr(Schema.String),
+  threadId: Schema.NullOr(Schema.String),
   title: Schema.NullOr(Schema.String),
   /** The agent leading it; null for a run of the default branch, which has none. */
   agent: Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String })),
