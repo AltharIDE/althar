@@ -8,7 +8,7 @@ import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
-import { callKindOf } from '../../shared/calls'
+import { callKindOf, whereOf } from '../../shared/calls'
 import { checkOf } from '../../shared/checks'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
@@ -122,8 +122,9 @@ export function DockView({
   if (call !== undefined) {
     const stuck = call.stuck
     return (
-      <Dock label={label} name={callKindOf(call)} sub={`${call.taskTitle} · ${ago(call.createdAt, new Date(now))}`} call onClose={onClose}>
-        {stuck === null ? (
+      <Dock label={label} name={callKindOf(call)} sub={`${whereOf(call)} · ${ago(call.createdAt, new Date(now))}`} call onClose={onClose}>
+        {/* A question is answered where it was asked: the task opens to it. */}
+        {call.kind === 'question' ? null : stuck === null ? (
           <PermissionCall request={call} project={project} onAnswer={model.answer} />
         ) : (
           <StuckCall

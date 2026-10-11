@@ -1,4 +1,4 @@
-# ADR-021: A new project is made in a tab of its own, under the id the window gave it
+# ADR-022: A new project is made in a tab of its own, under the id the window gave it
 
 - **Status:** Accepted
 - **Date:** 2026-10-11

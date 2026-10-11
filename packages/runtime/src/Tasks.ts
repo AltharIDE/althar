@@ -10,6 +10,7 @@ import { NotFound, TaskRefused } from './errors'
 import { branchExists, restoreWorktree } from './git'
 import { Instance } from './Instance'
 import { Plans } from './Plans'
+import { touchQuestion } from './Questions'
 import { change, fact, timestamp } from './records'
 import { type Lead, PlanParameters, Runs } from './Runs'
 import { Sessions } from './Sessions'
@@ -121,6 +122,8 @@ export class Tasks extends Context.Service<
     abandon(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /** Opens an abandoned task again, on its worktree and branch. Refused for a merged task. */
     reopen(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
+    /** Does something in the task's turn: never beside its stopping, resuming, abandoning or reopening. */
+    inTurn<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
   }
 >()('@althar/runtime/Tasks') {
   static readonly layer: Layer.Layer<Tasks, never, Store> = Layer.effect(
@@ -138,12 +141,13 @@ export class Tasks extends Context.Service<
        * agents to go runs once they have.
        */
       const locks = new Map<string, Semaphore.Semaphore>()
-      const oneAtATime = <A, E>(taskId: string, effect: Effect.Effect<A, E, Store>) =>
+      const inTurn = <A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>) =>
         Effect.suspend(() => {
           const lock = locks.get(taskId) ?? Semaphore.makeUnsafe(1)
           locks.set(taskId, lock)
-          return provide(lock.withPermits(1)(effect))
+          return lock.withPermits(1)(effect)
         })
+      const oneAtATime = <A, E>(taskId: string, effect: Effect.Effect<A, E, Store>) => provide(inTurn(taskId, effect))
 
       /**
        * Every agent on the task stops: its lead's, and its steps', on the
@@ -159,15 +163,32 @@ export class Tasks extends Context.Service<
 
       /**
        * Suspends the task's run, if it runs: each attempt it was on is cut
-       * short, marked stopped, its run attempt interrupted, and the call a
-       * step waited on withdrawn. A run already suspended has whatever
-       * started since cut short too. Publishing Althar had begun on the host
-       * says what it did there when it ends, and the run waits all the same.
-       * Inside the caller's transaction.
+       * short, marked stopped, and its run attempt interrupted. The call a
+       * step waited on, and a question an agent asked, are withdrawn, run or
+       * no run. A run already suspended has whatever started since cut short
+       * too. Publishing Althar had begun on the host says what it did there
+       * when it ends, and the run waits all the same. Inside the caller's
+       * transaction.
        */
       const suspend = (taskId: string, envelope: CommandEnvelope, why: 'stopped' | 'abandoned') =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // Nothing runs, so no step waits on the person, and no agent's question does: an agent asking outside a run too.
+          const calls = yield* sql<{ id: string; projectId: ProjectId }>`
+            SELECT id, project_id FROM attention_requests WHERE task_id = ${taskId} AND kind IN ('stuck', 'question') AND state = 'open'`
+          for (const call of calls) {
+            const revision = yield* change('attention_requests', call.id, { state: 'withdrawn' })
+            yield* fact({
+              projectId: call.projectId,
+              aggregateType: 'attention_request',
+              aggregateId: call.id,
+              revision,
+              type: 'attention_request.withdrawn',
+              actorId: envelope.actorId,
+              commandId: envelope.commandId,
+            })
+            yield* touchQuestion(call.id)
+          }
           const [run] = yield* sql<{ id: string; projectId: ProjectId; state: string }>`
             SELECT id, project_id, state FROM runs WHERE task_id = ${taskId} AND state IN ('running', 'suspended')
             ORDER BY created_at DESC LIMIT 1`
@@ -192,21 +213,6 @@ export class Tasks extends Context.Service<
               revision,
               type: 'node_attempt.cancelled',
               payload: { stopped: true, why },
-              actorId: envelope.actorId,
-              commandId: envelope.commandId,
-            })
-          }
-          // Nothing runs, so no step waits on the person.
-          const calls = yield* sql<{ id: string }>`
-            SELECT id FROM attention_requests WHERE task_id = ${taskId} AND kind = 'stuck' AND state = 'open'`
-          for (const call of calls) {
-            const revision = yield* change('attention_requests', call.id, { state: 'withdrawn' })
-            yield* fact({
-              projectId: run.projectId,
-              aggregateType: 'attention_request',
-              aggregateId: call.id,
-              revision,
-              type: 'attention_request.withdrawn',
               actorId: envelope.actorId,
               commandId: envelope.commandId,
             })
@@ -287,6 +293,7 @@ export class Tasks extends Context.Service<
                   type: 'attention_request.withdrawn',
                   ...said,
                 })
+                yield* touchQuestion(call.id)
               }
               yield* suspend(input.taskId, input.envelope, 'abandoned')
               const revision = yield* change('tasks', input.taskId, { state, settledAt: at })
@@ -374,6 +381,7 @@ export class Tasks extends Context.Service<
         resume: (input) => oneAtATime(input.taskId, resume(input)),
         abandon: (input) => oneAtATime(input.taskId, abandon(input)),
         reopen: (input) => oneAtATime(input.taskId, reopen(input)),
+        inTurn,
       })
     }),
   )

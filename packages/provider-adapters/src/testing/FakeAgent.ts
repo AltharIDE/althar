@@ -48,8 +48,14 @@ export const scenarios = {
   fileEdit: 'file-edit',
   /** Like `fileEdit`, but it asks again every time the turn is resumed. */
   stubborn: 'stubborn',
-  /** Asks the person a question and repeats the answer. */
+  /** Asks the person a plain question, as an MCP server's form does, and repeats the answer. */
   question: 'question',
+  /**
+   * Asks as Claude Code's AskUserQuestion does: a tool call, then a form of
+   * two questions, the second with several picks, each with a field for the
+   * person's own words; repeats the answer.
+   */
+  questions: 'questions',
   /** Claude's structured report of an exhausted quota, then a normal end. */
   quota: 'quota',
   /** Claude's structured report of a full context. */
@@ -86,6 +92,9 @@ export const scenarios = {
 /** A 480 × 300 PNG of a page, as a screenshot tool hands it back. */
 export const SCREENSHOT_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAeAAAAEsCAIAAACUnPcNAAAEeElEQVR42u3cIQ4CQRBEUS7Xbu6vUAQHCgFBLRs0jiGpod/POwFkS23vYZMkRXbwE0iSgZYkGWhJMtCSJAMtSQZakmSgJUkGWpIMtCTJQEuSgZYkGWhJkoGWJAMtSTLQkmSgJUkGWpIMtCTJQEuSDLQkGWhJkoGWJAMtSTLQkiQDLUkGWpJkoCXpzwb6cb8BEMhAAxhoAAw0gIEGwEADGGgADDQABhrAQANgoAEMNAAGGgADDWCgATDQAAYaAAMNYKABMNAAGGgAAw2AgQYw0AAYaAAMNICBBsBAAxjoz86nIwC7xIHeJKl9BlqSDLSBliQDLUkG2kBLkoGWJANtoCXJQBtoSTLQkmSgDbQkNR3oqsFyPGmSgcZASwbaQGOgJQNtoA20ZKANNAZaMtDe4pAkAy1JBtpAS5KBliQDbaAlyUAbaEky0JJkoA20JBloSTLQBlqSDLQkGei4gQYgcaABmMtAAxhoAAw0gIEGwEADGGgADDQADlUA2h6qOPWWJN/ikCQDbaAlyUBLkoE20JJkoCXJQBtoSTLQBlqSDLQkGWgDLUl9B7pqsBxPmmSgMdCSgTbQGGjJQBtoAy0ZaAONgZYMtLc4JMlAS5KBNtCSZKAlyUAbaEky0AZakgy0JBloAy1JBlqSDLSBliQDLUkGOm6gAUgcaADmMtAABhoAAw1goAEw0AAGGgADDYBDFYC2hypOvSXJtzgkyUAbaEky0JJkoA20JBloSTLQBlqSDLSBliQDLUkG2kBLUt+Brhosx5MmGWgMtGSgDTQGWjLQBtpASwbaQGOgJQPtLQ5JMtCSZKANtCQZaEky0AZakgy0gZYkAy1JBtpAS5KBliQDbaAlyUBLkoGOG2gAEgcagLkMNICBBsBAAxhoAAw0gIEGwEAD4FAFoO2hilNvSfItDkky0AZakgy0JBloAy1JBlqSDLSBliQDbaAlyUBLkoE20JLUd6CrBsvxpEkGGgMtGWgDjYGWDLSBNtCSgTbQGGjJQHuLQ5IMtCQZaAMtSQZakgy0gZYkA22gJclAS5KBNtCSZKAlyUAbaEky0JJkoOMGGoDEgQZgLgMNYKABMNAABhoAAw1goAEw0AAYaAADDYCBBjDQABhoAAw0gIEGwEADGGgADDSAgf7G9fIEYGegAQy0gQYw0AAG2kADGGgAA22gAQy0gQYw0AAG2kADGGgAA22gAQy0vwTAQAMYaAMNYKABDLSBBjDQAAbaQAMYaAMNYKABDLSBBjDQAAbaQAMYaAMNYKABDLSBBjDQAAbaQAMYaAADbaABDLSBBjDQAAbaQAMYaAADbaABDDQAv2OgAQw0AAYawEADYKABDDQABhoAAw1goAEw0AAGGgADDYCBBjDQABhoAAMNgIEGMNAAGGgADDSAgQbAQAMYaAAMNAAGGsBAA2CgAQw0AAYawEADYKABMNAABhoAAw1goAEw0AAYaAADDYCBBjDQABhoAAPtJwAw0AAYaAADDYCBBjDQABhoAAw0gIEGwEADGGgADDQAby/e9HZPsgFukQAAAABJRU5ErkJggg=='
+
+/** What the fake agent says before it asks as Claude Code does: why it asks. */
+export const WHY = 'The rates change hourly, so a cache would save most of the calls to the provider.'
 
 /** The document `hands-back` writes, in the session's folder. */
 export const HANDED_DOCUMENT = {
@@ -634,6 +643,89 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
 
+      /**
+       * Asks the person: one plain question, as an MCP server's form asks it; or, as Claude Code asks,
+       * one or two in a form, each option with what it means. Cancelling the turn withdraws it.
+       */
+      const askPerson = async (form: 'plain' | 'one' | 'two'): Promise<string> => {
+        const database = {
+          type: 'string',
+          title: 'Database',
+          description: 'Which database should the cache use?',
+          oneOf: [
+            {
+              const: 'Postgres',
+              title: 'Postgres',
+              description: 'What production already runs: the cache is one more table, backed up with the rest.',
+            },
+            {
+              const: 'SQLite',
+              title: 'SQLite',
+              description: 'One file beside the service, with no server to run, but nothing shared between instances.',
+            },
+          ],
+        }
+        const checks = {
+          type: 'array',
+          title: 'Checks',
+          description: 'Which checks should run before it lands?',
+          items: {
+            anyOf: [
+              { const: 'Unit tests', title: 'Unit tests', description: 'Fast, and already run on every push.' },
+              { const: 'Lint', title: 'Lint', description: 'Catches what the type checker doesn’t, in seconds.' },
+              { const: 'End-to-end', title: 'End-to-end', description: 'Drives the app as a person would; takes a few minutes.' },
+            ],
+          },
+        }
+        const request: acp.CreateElicitationRequest =
+          form === 'plain'
+            ? {
+                sessionId: params.sessionId,
+                mode: 'form',
+                message: 'Which database?',
+                requestedSchema: {
+                  type: 'object',
+                  properties: { database: { type: 'string', enum: ['postgres', 'sqlite'] } },
+                  required: ['database'],
+                },
+              }
+            : {
+                sessionId: params.sessionId,
+                toolCallId: 'ask-1',
+                mode: 'form',
+                message: form === 'one' ? database.description : 'Please answer the following questions.',
+                requestedSchema: {
+                  type: 'object',
+                  properties: {
+                    question_0: database,
+                    question_0_custom: { type: 'string', title: 'Other' },
+                    ...(form === 'two' ? { question_1: checks, question_1_custom: { type: 'string', title: 'Other' } } : {}),
+                  },
+                } as acp.ElicitationSchema,
+              }
+        if (form !== 'plain') {
+          // What it says before asking: why, the way Claude Code does before AskUserQuestion.
+          await say(WHY)
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'ask-1',
+            title: 'Asking for your input',
+            kind: 'other',
+            status: 'pending',
+            rawInput: {},
+          })
+        }
+        const answer = await client
+          .request<acp.CreateElicitationResponse, acp.CreateElicitationRequest>(acp.methods.client.elicitation.create, request, {
+            cancellationSignal: (session.abort = new AbortController()).signal,
+          })
+          .catch((): acp.CreateElicitationResponse => ({ action: 'cancel' }))
+        session.abort = undefined
+        return answer.action === 'accept'
+          ? `answer=${JSON.stringify((answer as { readonly content?: unknown }).content)}`
+          : `answer=${answer.action}`
+      }
+
       if (text.startsWith('You are the project coordinator, judging one permission request')) {
         const reply =
           options.judgment === undefined
@@ -654,6 +746,21 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         await update({ sessionUpdate: 'usage_update', used: 100, size: 10000, cost: { amount: 0.002, currency: 'USD' } })
         await say(reply)
         return ended({ inputTokens: 100, outputTokens: 20, totalTokens: 120 })
+      }
+
+      // An answer to a question asked before, told in a later turn, as after a restart: said, then the role played on.
+      const told = /The person answered[^\n]*\n([\s\S]*)$/.exec(text)
+      if (told?.[1] !== undefined) {
+        await say(`told=${told[1].trim().split('\n').join(' | ')}`)
+        const after = await playRole(session, text)
+        if (after !== undefined) await say(after)
+        return ended()
+      }
+      // A lead that asks the person first, `[lead:ask]`, once: then it plays its part with the answer.
+      if (text.includes('[lead:ask]') && !session.played.has('[lead:ask]')) {
+        session.played.add('[lead:ask]')
+        await say(await askPerson('one'))
+        if (session.cancelled) return { stopReason: 'cancelled' }
       }
 
       // A lead that stalls or loops, where a marker says so.
@@ -704,26 +811,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           if (scenario === scenarios.deniedThenWait) while (!session.cancelled) await pause(10)
           return session.cancelled || chosen === 'cancel' || chosen === 'cancelled' ? { stopReason: 'cancelled' } : ended()
         }
-        case scenarios.question: {
-          const answer = await client.request<acp.CreateElicitationResponse, acp.CreateElicitationRequest>(
-            acp.methods.client.elicitation.create,
-            {
-              sessionId: params.sessionId,
-              mode: 'form',
-              message: 'Which database?',
-              requestedSchema: {
-                type: 'object',
-                properties: { database: { type: 'string', enum: ['postgres', 'sqlite'] } },
-                required: ['database'],
-              },
-            },
-          )
-          await say(
-            answer.action === 'accept'
-              ? `answer=${JSON.stringify((answer as { readonly content?: unknown }).content)}`
-              : `answer=${answer.action}`,
-          )
-          return ended()
+        case scenarios.question:
+        case scenarios.questions: {
+          await say(await askPerson(scenario === scenarios.questions ? 'two' : 'plain'))
+          return session.cancelled ? { stopReason: 'cancelled' } : ended()
         }
         case scenarios.quota:
           await update({

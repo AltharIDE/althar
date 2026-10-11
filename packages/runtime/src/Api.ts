@@ -38,6 +38,7 @@ import { accountsOf, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
+import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
 import { Queries } from './Queries'
@@ -113,6 +114,7 @@ export const handlers = Api.toLayer(
     const projects = yield* Projects
     const sessions = yield* Sessions
     const permissions = yield* Permissions
+    const questions = yield* Questions
     const queries = yield* Queries
     const folders = yield* Folders
     const live = yield* Live
@@ -670,6 +672,38 @@ export const handlers = Api.toLayer(
                 attentionId,
                 answer,
               })
+            }),
+          ),
+        ),
+      AnswerQuestion: ({ commandId, attentionId, answers }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const answer = Effect.gen(function* () {
+                const answered = yield* questions.answer({
+                  envelope: yield* envelope('attention.answer_question', { attentionId, answers }, commandId),
+                  attentionId,
+                  answers,
+                })
+                if (answered.told) return
+                // The agent that asked has gone: the answer is told to the one on its thread next, started for it.
+                const tell = {
+                  envelope: yield* Effect.provideContext(
+                    Runtime.envelope('thread.send', { threadId: answered.threadId, answered: attentionId }),
+                    context,
+                  ),
+                  threadId: answered.threadId,
+                  body: answered.body,
+                }
+                const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${answered.threadId}`
+                if (thread?.kind === 'coordinator') yield* coordinator.say({ ...tell, disposition: 'after_current', quiet: true })
+                else yield* runs.answered(tell)
+              })
+              // A task's question is answered in the task's turn: stopping it comes first, and the question is withdrawn, or
+              // after, and the agent the answer started stops.
+              const [asked] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM attention_requests WHERE id = ${attentionId}`
+              yield* asked === undefined || asked.taskId === null ? answer : tasks.inTurn(asked.taskId, answer)
             }),
           ),
         ),

@@ -232,12 +232,18 @@ export function TaskView({
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
   const [face, setFace] = useState<Face | null>(null)
   // Ready, or merged here with its remote still to have it, it opens on what it made: there is something there to do.
-  if (face === null && model.snapshot !== null)
+  // An agent's question waiting comes first: it opens on the conversation, where it is answered.
+  const [asking, setAsking] = useState<string | null | undefined>(undefined)
+  if (face === null && model.snapshot !== null) {
+    const question = model.snapshot.attention.find((call) => call.kind === 'question')
+    setAsking(question?.id ?? null)
     setFace(
-      (model.snapshot.task.phase === 'ready' && hasOutputs(model.snapshot)) || model.snapshot.task.merged.some((one) => one.ahead > 0)
+      question === undefined &&
+        ((model.snapshot.task.phase === 'ready' && hasOutputs(model.snapshot)) || model.snapshot.task.merged.some((one) => one.ahead > 0))
         ? 'out'
         : 'talk',
     )
+  }
   const named = useModelNames()
   const editors = useEditors(model.snapshot?.task.id ?? '')
   const editor = editors.main
@@ -586,6 +592,8 @@ export function TaskView({
                 session={session}
                 project={snapshot.project.name}
                 onPassOn={(words) => void model.send(words)}
+                onAnswerQuestion={model.answerQuestion}
+                {...(asking == null ? {} : { focusQuestion: asking })}
               />
             </ThreadShellProvider>
             {snapshot.attention.map((request) =>
@@ -601,7 +609,7 @@ export function TaskView({
               ) : null,
             )}
             <PermissionCalls
-              requests={snapshot.attention.filter((request) => request.kind === 'permission' || request.stuck === null)}
+              requests={snapshot.attention.filter((request) => request.kind === 'permission')}
               project={snapshot.project.name}
               onAnswer={model.answer}
             />

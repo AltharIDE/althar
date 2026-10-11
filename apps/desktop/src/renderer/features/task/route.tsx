@@ -1,4 +1,6 @@
-import { createRoute, useNavigate } from '@tanstack/react-router'
+import { createRoute, redirect, useNavigate } from '@tanstack/react-router'
+
+import { Room } from '@althar/ui'
 
 import { reads } from '../../data/reads'
 import { rootRoute } from '../../root'
@@ -36,6 +38,13 @@ export const taskRoute = createRoute({
   component: Task,
   pendingComponent: ThreadPending,
   remountDeps: ({ params }) => params.threadId,
+  // A coordinator's thread, as a question it asks opens from the home, a notification or the edge, is its project's conversation.
+  beforeLoad: async ({ context: { client, cache }, params: { threadId } }) => {
+    const listed = await cache.fetchQuery(reads(client).projects()).catch(() => null)
+    const project = listed?.projects.find((one) => one.coordinatorThreadId === threadId)
+    if (project !== undefined)
+      throw redirect({ to: '/projects/$projectId', params: { projectId: project.id }, search: { room: Room.Talk } })
+  },
   // The thread and the agents, so it shows whole from the first frame.
   loader: async ({ context: { client, cache }, params: { threadId } }) => {
     const read = reads(client)

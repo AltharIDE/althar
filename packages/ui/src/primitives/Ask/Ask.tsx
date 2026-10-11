@@ -23,8 +23,8 @@ export type AskCardProps = RootProps<
     kickerId?: string
     /** Who asks, at the right of the head. */
     who?: ReactNode
-    /** What it asks for, in a sentence. */
-    what: ReactNode
+    /** What it asks for, in a sentence. Left out where what follows says it, as several questions do. */
+    what?: ReactNode
     children?: ReactNode
   }
 >
@@ -39,7 +39,7 @@ export function AskCard({ icon, kicker, kickerId, who, what, children, className
         </span>
         {who && <span className={s.who}>{who}</span>}
       </div>
-      <p className={s.what}>{what}</p>
+      {what !== undefined && <p className={s.what}>{what}</p>}
       {children}
     </div>
   )
@@ -57,6 +57,8 @@ export type AskAnsweredProps = RootProps<
     denied?: boolean
     /** What was said, first and weighted. */
     said: ReactNode
+    /** What was said can run long, as someone's own words do: it wraps, rather than pushing what follows off the line. */
+    wrap?: boolean
     /** What follows it, quieter: a scope, a note, who answered. */
     children?: ReactNode
     /** Take the answer back. Without it, no Undo: an answer someone else gave, or one already acted on, stays. */
@@ -75,6 +77,7 @@ export type AskAnsweredProps = RootProps<
 export function AskAnswered({
   denied = false,
   said,
+  wrap = false,
   children,
   onUndo,
   undo = 'Undo',
@@ -97,7 +100,7 @@ export function AskAnswered({
     }
   }, [focusOnMount])
   return (
-    <div ref={line} className={cx(s.answered, className)} tabIndex={focusOnMount ? -1 : undefined} {...rest}>
+    <div ref={line} className={cx(s.answered, wrap && s.wrap, className)} tabIndex={focusOnMount ? -1 : undefined} {...rest}>
       <Icon name={denied ? 'close' : 'check'} size={11} />
       <span className={s.said}>{said}</span>
       {children}

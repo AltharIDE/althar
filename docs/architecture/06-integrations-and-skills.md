@@ -354,7 +354,7 @@ whether it gives a token without one:
 A pasted token is the fallback everywhere, including for an organisation
 that won't install the GitHub App.
 
-Connecting is a walk, one step at a time (ADR-022). It offers only the ways
+Connecting is a walk, one step at a time (ADR-023). It offers only the ways
 that work on this device: the service's own browser sign-in where Althar's
 app is set up for it; gh's or glab's sign-in where the tool is signed in to
 that instance, whose token the runtime copies to its own keychain, out of

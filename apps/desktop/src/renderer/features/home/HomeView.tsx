@@ -13,6 +13,7 @@ import type { StartModel } from '../start/useStart'
 import s from './Home.module.css'
 import type { HomeModel } from './useHome'
 import { type AnsweredCall, needLineOf, needsOf, needText, workOf } from './needs'
+import { useModelNames } from '../../shared/modelNames'
 
 /*
  * The window you come back to, once there are projects: the kit's Home.
@@ -115,6 +116,7 @@ export function HomeView({
   const [answered, setAnswered] = useState<ReadonlyArray<AnsweredCall>>([])
   const [settings, setSettings] = useState(false)
   const agents = start.status?.agents ?? []
+  const named = useModelNames()
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
 
   const projects = home?.projects ?? []
@@ -128,7 +130,14 @@ export function HomeView({
   const working = tasks.filter((task) => task.phase !== 'ready' && !carded.has(task.threadId))
   const waiting = calls.length + ready.length
 
-  const needs = needsOf({ calls: home?.calls ?? [], answered, ready, refs, agentName: name })
+  const needs = needsOf({
+    calls: home?.calls ?? [],
+    answered,
+    ready,
+    refs,
+    agentName: name,
+    modelName: (agentId, model) => named(agentId, model).name,
+  })
   // What waits now, and how much is in progress, for Settings' pictures of the edge of the screen.
   const glance: EdgeGlance = { waiting, needs: needs.filter((need) => need.answer === undefined).slice(0, 3), work: workOf(working) }
 

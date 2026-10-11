@@ -1,7 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { ApiError, type AgentStatus, type AlwaysScope, PAGE, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
+import {
+  ApiError,
+  type AgentStatus,
+  type AlwaysScope,
+  type FieldAnswer,
+  PAGE,
+  type ThreadItem,
+  type ThreadSnapshot,
+} from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -81,6 +89,8 @@ export interface TaskModel {
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string, always?: AlwaysScope) => Promise<boolean>
   /** Answers a step that needs the person. */
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
+  /** Answers an agent's question: what went wrong, in words, or null when it went through. */
+  readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   /** Marks the task's draft pull request ready for review: the one at `url`, in a task of several. */
   readonly markReady: (url?: string) => Promise<void>
   /** Marks each of these draft pull requests ready for review, in turn: as its menu does, for all of them. */
@@ -357,6 +367,11 @@ export const useTask = (threadId: string): TaskModel => {
       return through
     },
     answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
+    answerQuestion: (attentionId, answers) =>
+      client.answerQuestion({ attentionId, answers }).then(
+        () => null,
+        (failure: unknown) => messageOf(failure),
+      ),
     markReady: (url) => act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id, url))),
     markAllReady: (urls) =>
       onTask(async (taskId) => {

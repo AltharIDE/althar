@@ -186,6 +186,8 @@ export const ProjectSummary = Schema.Struct({
   rotateAccounts: Schema.Boolean,
   /** The accounts each agent may use here, by agent; null for every one. */
   onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+  /** The thread of its conversation with the coordinator: what opens a call of the coordinator's there. */
+  coordinatorThreadId: Schema.optional(Schema.NullOr(Schema.String)),
 })
 export type ProjectSummary = typeof ProjectSummary.Type
 
@@ -743,6 +745,8 @@ export const ToolCallItem = Schema.Struct({
     locations: Schema.Array(ToolLocation),
     /** Refused when it asked: by the rules, the lead or the person. */
     declined: Schema.Boolean,
+    /** The agent asking the person something: its question stands in the thread in its place. */
+    asks: Schema.optional(Schema.Boolean),
     /** Let through without asking by the project's allow rules, the first that did (ADR-018); absent otherwise. */
     allowedBy: Schema.optional(AllowedBy),
     ...handedFields,
@@ -756,6 +760,60 @@ export const PlanItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('plan'),
   content: Schema.Struct({ entries: Schema.Array(Schema.Struct({ content: Schema.String, status: Schema.String })) }),
+})
+
+/** One option of something an agent asks, by the value it wants back. */
+export const QuestionChoice = Schema.Struct({
+  value: Schema.String,
+  label: Schema.String,
+  /** What the agent says it implies. */
+  note: Schema.optional(Schema.String),
+})
+export type QuestionChoice = typeof QuestionChoice.Type
+
+/** One thing an agent asks the person, as a field of its form. */
+export const QuestionField = Schema.Struct({
+  id: Schema.String,
+  question: Schema.String,
+  /** A short name the agent gave it: "Database". */
+  header: Schema.optional(Schema.String),
+  /** A choice of the agent's options, words, a number, or yes or no. */
+  type: Schema.Literals(['choice', 'text', 'number', 'boolean']),
+  options: Schema.Array(QuestionChoice),
+  /** Several options may be picked. */
+  multiple: Schema.Boolean,
+  /** Where the agent takes an answer in the person's own words beside a choice. */
+  wordsField: Schema.optional(Schema.String),
+  required: Schema.Boolean,
+})
+export type QuestionField = typeof QuestionField.Type
+
+/** What the person said to one field: the options picked, by value, and any words of their own. */
+export const FieldAnswer = Schema.Struct({
+  values: Schema.Array(Schema.String),
+  words: Schema.optional(Schema.String),
+})
+export type FieldAnswer = typeof FieldAnswer.Type
+
+/**
+ * A question an agent asked the person, where it was asked: open until they
+ * answer it in place; then what they said. Withdrawn when the agent took it
+ * back or its turn was stopped (`turn`), or its task was stopped (`task`).
+ */
+export const QuestionItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('question'),
+  content: Schema.Struct({
+    attentionId: Schema.String,
+    /** What the agent said with it. */
+    message: Schema.String,
+    /** The agent's own tool call the question stands for; the thread shows the question in its place. */
+    toolCallId: Schema.NullOr(Schema.String),
+    fields: Schema.Array(QuestionField),
+    state: Schema.Literals(['open', 'answered', 'withdrawn']),
+    answers: Schema.NullOr(Schema.Record(Schema.String, FieldAnswer)),
+    withdrawn: Schema.NullOr(Schema.Literals(['turn', 'task'])),
+  }),
 })
 
 /** Something the agent or Althar notes: a warning from the agent, or a change of scene, such as another agent taking over. */
@@ -916,6 +974,7 @@ export const ThreadItem = Schema.Union([
   StepResultItem,
   TaskItem,
   ArrivalItem,
+  QuestionItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -994,10 +1053,10 @@ export const StuckStep = Schema.Struct({
 })
 export type StuckStep = typeof StuckStep.Type
 
-/** A call waiting on the person: a permission the rules keep for them, or a step that needs them. */
+/** A call waiting on the person: a permission the rules keep for them, a step that needs them, or an agent's question. */
 export const AttentionRequest = Schema.Struct({
   id: Schema.String,
-  kind: Schema.Literals(['permission', 'stuck']),
+  kind: Schema.Literals(['permission', 'stuck', 'question']),
   /** What the agent wants to do, as it put it. */
   title: Schema.String,
   /** Why it waits for the person: the rule that keeps it for them. */
@@ -1005,6 +1064,17 @@ export const AttentionRequest = Schema.Struct({
   command: Schema.NullOr(Schema.String),
   /** For a step that needs the person: which, and why. */
   stuck: Schema.NullOr(StuckStep),
+  /** For an agent's question: what it asks, field by field; it is answered in the thread, where it was asked. */
+  question: Schema.optional(
+    Schema.Struct({
+      message: Schema.String,
+      fields: Schema.Array(QuestionField),
+      /** Why it asks, in a line: what the agent said just before. */
+      why: Schema.optional(Schema.String),
+      /** Who asks: the agent and model of the session that asked. */
+      askedBy: Schema.optional(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String) })),
+    }),
+  ),
   /**
    * For a permission: what an "always" answer would keep in the project's
    * rules (ADR-018), and the scopes Allow always and Deny always each hold
@@ -1186,10 +1256,11 @@ export type BoardTask = typeof BoardTask.Type
 /** A call that waits on the person, with the task it holds. */
 export const BoardCall = Schema.Struct({
   ...AttentionRequest.fields,
-  taskId: Schema.String,
+  /** The task it waits in; null for a question the coordinator asks, which waits in its conversation. */
+  taskId: Schema.NullOr(Schema.String),
   threadId: Schema.String,
-  taskTitle: Schema.String,
-  taskSlug: Schema.String,
+  taskTitle: Schema.NullOr(Schema.String),
+  taskSlug: Schema.NullOr(Schema.String),
 })
 export type BoardCall = typeof BoardCall.Type
 
@@ -1564,6 +1635,8 @@ export const Api = RpcGroup.make(
     },
     Schema.Void,
   ),
+  /** The person's answer to an agent's question, field by field: the options picked, and any words of their own. */
+  command('AnswerQuestion', { attentionId: Schema.String, answers: Schema.Record(Schema.String, FieldAnswer) }, Schema.Void),
   /** The person's answer to a permission; with `always`, it is also kept in the project's rules by that scope, one of those offered. */
   command(
     'Answer',

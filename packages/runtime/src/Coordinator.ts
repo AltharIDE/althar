@@ -110,6 +110,8 @@ export class Coordinator extends Context.Service<
       readonly threadId: string
       readonly body: string
       readonly disposition: Disposition
+      /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */
+      readonly quiet?: boolean
     }): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Coordinator') {
@@ -150,6 +152,7 @@ export class Coordinator extends Context.Service<
         readonly threadId: string
         readonly body: string
         readonly disposition: Disposition
+        readonly quiet?: boolean
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -160,10 +163,12 @@ export class Coordinator extends Context.Service<
           const running = yield* sessions.running(input.threadId)
           if (Option.isNone(running)) {
             const pick = yield* suggested(row.projectId)
+            // What Althar tells it quietly (an answer to its question) waits for it, whether or not it can start now.
+            if (input.quiet === true) yield* sessions.send(input)
             if (pick === null || !pick.available)
               return yield* new CoordinatorUnavailable({ agentId: pick?.agentId ?? '', agentName: pick?.agentName ?? 'The agent' })
             // Queued first, so the coordinator's first turn is its brief with what the person said.
-            yield* sessions.send({ envelope: input.envelope, threadId: input.threadId, body: input.body, disposition: input.disposition })
+            if (input.quiet !== true) yield* sessions.send(input)
             yield* sessions.start({
               threadId: input.threadId,
               agentId: pick.agentId,
@@ -172,7 +177,7 @@ export class Coordinator extends Context.Service<
             })
             return
           }
-          yield* sessions.send({ envelope: input.envelope, threadId: input.threadId, body: input.body, disposition: input.disposition })
+          yield* sessions.send(input)
         })
 
       /* ---- The coordinator's tools ---- */

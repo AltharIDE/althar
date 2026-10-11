@@ -153,6 +153,8 @@ export const words = (
         return "The project's rules changed meanwhile, so that change wasn't made. They're shown as they are now: make it again if it's still wanted."
       case 'AlwaysNotOffered':
         return "That can't be kept as a rule for this request. Answer it once instead."
+      case 'QuestionUnanswered':
+        return 'Answer each question: pick an option, or write your own.'
       case 'NothingToWaitFor':
         return "The agent didn't say when its limit resets, so there's no time to wait for. Pick another model, or try it again."
       case 'AlreadyDelivered':
@@ -284,6 +286,7 @@ export const expected = new Set([
   'NoSession',
   'AttentionClosed',
   'AlwaysNotOffered',
+  'QuestionUnanswered',
   'NothingToWaitFor',
   'RuleOnAnotherList',
   'RulesChanged',

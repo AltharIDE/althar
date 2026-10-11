@@ -9,6 +9,33 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## Questions agents ask, 10 October
+
+- [x] **What a question waits on.** The thread, not the session: it outlives
+  a restart, the agent going and a switch of agent, and its answer is told
+  to the agent on the thread next ([ADR-021](decisions/021-a-question-outlives-its-session.md)).
+- [x] **Which steps may ask.** The lead and the coordinator; a reviewer is
+  given no way to (ADR-021).
+- [x] **Answering from the home or the edge.** Not on its line: the home
+  stays calm, a question's line says what it asks and Answer takes the person
+  to it in the task, its first choice focused so a key picks and Enter
+  answers (settled with the person, 10 October).
+- [ ] **Codex and OpenCode ask in words.** Codex offers request_user_input
+  only in its Plan mode; told to use it in the default mode, it once ended
+  its turn with nothing said. OpenCode keeps its question tool off over ACP.
+  A lead that asks in words ends its turn, is reminded to report, and then
+  its step needs the person. Should Althar turn Codex's tool on
+  (`tools.experimental_request_user_input`), or read a question out of a
+  lead's last words?
+- [ ] **Writing while a question waits.** A message the person queues waits
+  behind the question, since the turn is blocked on it. Should what they
+  write answer it, in their own words?
+- [ ] **An answer whose agent has gone, when Althar stops in between.** The
+  answer is kept, then queued for the thread, then an agent is started for
+  it: three steps, not one. Althar going down between them leaves the
+  answer kept but untold until the person next writes in the thread.
+  Should the answer and its telling be one record that recovery picks up?
+
 ## Dictation, 10 October
 
 - [x] **Where speech is turned into text.** On this machine only, with a

@@ -21,7 +21,9 @@ import {
   type TaskList,
   type TaskSummary,
   type DocumentText,
+  FieldAnswer,
   type OutputText,
+  QuestionField,
   type ThreadItem,
   type ThreadSnapshot,
 } from '@althar/contracts'
@@ -29,6 +31,7 @@ import { Context, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Agents, RuntimeConfig } from './Config'
+import { questionTitle } from './Questions'
 import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
@@ -100,7 +103,7 @@ export const parse = (json: string | null): unknown => {
   }
 }
 
-const field = (value: unknown, key: string): unknown =>
+export const field = (value: unknown, key: string): unknown =>
   typeof value === 'object' && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined
 
 export const text = (value: unknown, key: string): string => {
@@ -120,7 +123,31 @@ interface ItemRow {
   readonly decision: string | null
   /** For a tool call the project's allow rules let through: the rules, as the decision keeps them (ADR-018). */
   readonly rule?: string | null
+  /** For a question: its call's state and payload, where its answer is. */
+  readonly questionState?: string | null
+  readonly questionPayload?: string | null
+  /** For a tool call: the agent asking the person something, which its question stands for. */
+  readonly asks?: number | null
   readonly createdAt: string
+}
+
+const decodeFields = Schema.decodeUnknownOption(Schema.Array(QuestionField))
+const decodeAnswers = Schema.decodeUnknownOption(Schema.Record(Schema.String, FieldAnswer))
+
+/** An agent's question as its call keeps it: what it asks, and once answered, what was said. */
+const questionOf = (payload: unknown) => ({
+  message: text(payload, 'message'),
+  fields: Option.getOrElse(decodeFields(field(payload, 'fields')), () => []),
+})
+
+/** An agent's question as a call shows it: what it asks, why, and who asks. */
+const askedOf = (payload: unknown, asker: { readonly agentId?: string | null; readonly model?: string | null }) => {
+  const why = text(payload, 'why')
+  return {
+    ...questionOf(payload),
+    ...(why === '' ? {} : { why }),
+    ...(asker.agentId == null ? {} : { askedBy: { agentId: asker.agentId, model: asker.model ?? null } }),
+  }
 }
 
 const decodeAllowedBy = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(AllowedBy)))
@@ -178,15 +205,26 @@ const number = (value: unknown, key: string): number | null => {
 }
 
 /** A call that waits on the person, as a screen shows it: what was asked, why it waits, and, for a step that needs them, which and why. */
-const callOf = (request: { readonly id: string; readonly kind: string; readonly payload: string; readonly createdAt: string }) => {
+const callOf = (request: {
+  readonly id: string
+  readonly kind: string
+  readonly payload: string
+  readonly createdAt: string
+  /** For a question: the agent and model of the session that asked. */
+  readonly askerAgentId?: string | null
+  readonly askerModel?: string | null
+}) => {
   const payload = parse(request.payload)
   return {
     id: request.id,
-    kind: request.kind === 'stuck' ? ('stuck' as const) : ('permission' as const),
-    title: text(payload, 'title'),
+    kind: request.kind === 'stuck' ? ('stuck' as const) : request.kind === 'question' ? ('question' as const) : ('permission' as const),
+    title: request.kind === 'question' ? questionTitle(questionOf(payload)) : text(payload, 'title'),
     reason: text(payload, 'reason'),
     command: text(payload, 'command') || null,
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
+    ...(request.kind === 'question'
+      ? { question: askedOf(payload, { agentId: request.askerAgentId ?? null, model: request.askerModel ?? null }) }
+      : {}),
     // What an "always" would keep, for a permission that says (ADR-018); earlier ones don't.
     ...Option.match(decodeAlways(field(payload, 'always')), {
       onNone: () => ({}),
@@ -288,6 +326,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
             return path === '' ? [] : [{ path, ...(typeof line === 'number' ? { line } : {}) }]
           }),
           declined: row.decision === 'reject',
+          ...(row.asks === 1 ? { asks: true } : {}),
           ...(allowedBy === undefined ? {} : { allowedBy }),
           pictures: picturesOf(field(content, 'pictures')),
           files: filesOf(field(content, 'files')),
@@ -349,6 +388,23 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
             }
           }),
           agentId: agentId === '' ? null : agentId,
+        },
+      }
+    }
+    case 'question': {
+      const payload = parse(row.questionPayload ?? '{}')
+      const state = row.questionState === 'answered' ? 'answered' : row.questionState === 'open' ? 'open' : 'withdrawn'
+      const toolCallId = text(content, 'toolCallId')
+      return {
+        ...base,
+        kind: 'question',
+        content: {
+          attentionId: text(content, 'attentionId'),
+          ...questionOf(content),
+          toolCallId: toolCallId === '' ? null : toolCallId,
+          state,
+          answers: state === 'answered' ? Option.getOrNull(decodeAnswers(field(payload, 'answers'))) : null,
+          withdrawn: state === 'withdrawn' ? (text(payload, 'withdrawn') === 'turn' ? 'turn' : 'task') : null,
         },
       }
     }
@@ -482,7 +538,8 @@ export class Queries extends Context.Service<
                   WHERE e.run_id = r.id AND a.state = 'admitted')) AS ready,
             coalesce((SELECT json_extract(r.rules, '$.usageLimit') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 'move') AS usage_limit,
             coalesce((SELECT json_extract(r.rules, '$.accounts.rotate') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 0) AS rotate_accounts,
-            (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts
+            (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts,
+            (SELECT t.id FROM threads t WHERE t.project_id = p.id AND t.kind = 'coordinator' AND t.owner_actor_id = ${instance.personId}) AS coordinator_thread_id
           FROM projects p WHERE p.archived_at IS NULL ORDER BY p.created_at DESC, p.id DESC`
         return {
           cursor: at,
@@ -524,8 +581,15 @@ export class Queries extends Context.Service<
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,
               (SELECT d.rule FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
-                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS rule
+                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS rule,
+              q.state AS question_state, q.payload AS question_payload,
+              -- An agent's tool call that asks the person is the question it asks, which stands in its place.
+              (x.tool_call_id IS NOT NULL) AS asks
             FROM thread_items i
+            LEFT JOIN (SELECT provider_session_id, json_extract(content, '$.toolCallId') AS tool_call_id FROM thread_items
+              WHERE thread_id = ${threadId} AND kind = 'question') x
+              ON i.kind = 'tool_call' AND x.provider_session_id = i.provider_session_id AND x.tool_call_id = i.tool_call_id
+            LEFT JOIN attention_requests q ON i.kind = 'question' AND q.id = json_extract(i.content, '$.attentionId')
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id
             WHERE i.thread_id = ${threadId}
@@ -1126,22 +1190,35 @@ export class Queries extends Context.Service<
       const callsIn = (projectId: string | null) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          const where = projectId === null ? sql`p.archived_at IS NULL` : sql`a.project_id = ${projectId}`
+          // A task's calls, and the questions a project's coordinator asks in its conversation.
           const calls = yield* sql<{
             id: string
             kind: string
             payload: string
             createdAt: string
             projectId: string
-            taskId: string
+            taskId: string | null
             threadId: string
-            taskTitle: string
-            taskSlug: string
+            taskTitle: string | null
+            taskSlug: string | null
+            askerAgentId: string | null
+            askerModel: string | null
           }>`
-            SELECT a.id, a.kind, a.payload, a.created_at, a.project_id, k.id AS task_id, t.id AS thread_id, k.title AS task_title, k.slug AS task_slug
-            FROM attention_requests a JOIN tasks k ON k.id = a.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-            JOIN projects p ON p.id = a.project_id
-            WHERE ${projectId === null ? sql`p.archived_at IS NULL` : sql`a.project_id = ${projectId}`} AND a.state = 'open'
-            ORDER BY a.created_at, a.id`
+            SELECT id, kind, payload, created_at, project_id, task_id, thread_id, task_title, task_slug,
+              (SELECT agent_id FROM provider_sessions WHERE id = json_extract(payload, '$.sessionId')) AS asker_agent_id,
+              (SELECT model FROM provider_sessions WHERE id = json_extract(payload, '$.sessionId')) AS asker_model
+            FROM (
+              SELECT a.id, a.kind, a.payload, a.created_at, a.project_id, k.id AS task_id, t.id AS thread_id, k.title AS task_title, k.slug AS task_slug
+              FROM attention_requests a JOIN tasks k ON k.id = a.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+              JOIN projects p ON p.id = a.project_id
+              WHERE ${where} AND a.state = 'open'
+              UNION ALL
+              SELECT a.id, a.kind, a.payload, a.created_at, a.project_id, NULL, t.id, NULL, NULL
+              FROM attention_requests a JOIN threads t ON t.id = json_extract(a.payload, '$.threadId') AND t.kind = 'coordinator'
+              JOIN projects p ON p.id = a.project_id
+              WHERE ${where} AND a.state = 'open' AND a.task_id IS NULL AND a.kind = 'question')
+            ORDER BY created_at, id`
           return calls.map((call) => ({
             projectId: call.projectId,
             call: {
@@ -1325,8 +1402,17 @@ export class Queries extends Context.Service<
           if (head === undefined) return yield* new NotFound({ kind: 'task thread', id: threadId })
           // What the store says comes first, together, so it is as of the cursor; git after.
           const { items, earlier } = yield* pageOf(threadId, page)
-          const attention = yield* sql<{ id: string; kind: string; payload: string; createdAt: string }>`
-            SELECT id, kind, payload, created_at FROM attention_requests WHERE task_id = ${head.taskId} AND state = 'open' ORDER BY created_at`
+          const attention = yield* sql<{
+            id: string
+            kind: string
+            payload: string
+            createdAt: string
+            askerAgentId: string | null
+            askerModel: string | null
+          }>`
+            SELECT a.id, a.kind, a.payload, a.created_at, (SELECT agent_id FROM provider_sessions WHERE id = json_extract(a.payload, '$.sessionId')) AS asker_agent_id,
+              (SELECT model FROM provider_sessions WHERE id = json_extract(a.payload, '$.sessionId')) AS asker_model
+            FROM attention_requests a WHERE a.task_id = ${head.taskId} AND a.state = 'open' ORDER BY a.created_at`
           // Since when the step it is on has run, or been held.
           const [onStep] = yield* sql<{ admittedAt: string }>`
             SELECT a.admitted_at FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { CALLS, STUCK_CALL } from '../../fixtures/board'
+import { CALLS, QUESTION_CALL, STUCK_CALL } from '../../fixtures/board'
 import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
 import { CallCard } from './CallCard'
@@ -22,6 +22,8 @@ export const Decision: Story = {}
 export const Approval: Story = { args: APPROVAL }
 /** Holds no task: it says where it came from instead. */
 export const Contradiction: Story = { args: CONTRADICTION }
+/** An agent's question: its options listed as it asks them, and the way in says Answer. */
+export const Question: Story = { args: { ...QUESTION_CALL, text: { decide: 'Answer' } } }
 /** A task that couldn't finish: what went wrong, and no choices here; they are in the task. */
 export const Stuck: Story = { args: STUCK_CALL }
 /** Open beside the board. */
@@ -44,6 +46,7 @@ export const AllStates: Story = {
         { state: 'decision', node: <CallCard {...args} /> },
         { state: 'approval', node: <CallCard {...args} {...APPROVAL} /> },
         { state: 'from, not holding', node: <CallCard {...args} {...CONTRADICTION} /> },
+        { state: 'question', node: <CallCard {...args} {...Question.args} /> },
         { state: 'stuck, no choices', node: <CallCard {...args} {...STUCK_CALL} /> },
         { state: 'current', node: <CallCard {...args} current /> },
         { state: 'hover', node: <CallCard {...args} /> },
