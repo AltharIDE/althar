@@ -53,17 +53,6 @@
   font-weight: 600;
   color: var(--t-1);
 }
-.fixed {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0;
-  font-size: 12px;
-  color: var(--t-3);
-}
-.fixed svg {
-  color: var(--t-3);
-}
 @media (prefers-reduced-motion: reduce) {
   .sheet {
     transition: none;

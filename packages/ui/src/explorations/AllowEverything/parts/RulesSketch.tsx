@@ -95,7 +95,8 @@ export function RulesSketch({
     MERIDIAN_COMMANDS.filter((command) => command.place === place).map((command) => (
       <CommandToken key={command.id} pattern={command.pattern} match={command.match} />
     ))
-  const offOf = (part: RulePart) => (off[part] === undefined ? {} : { off: off[part] })
+  // A sentence that holds for nothing is quieter, its commands with it.
+  const offOf = (part: RulePart) => (off[part] === undefined ? {} : { off: off[part], className: s.quiet })
   return (
     <div className={cx(s.page, className)} {...rest}>
       <header className={s.head}>

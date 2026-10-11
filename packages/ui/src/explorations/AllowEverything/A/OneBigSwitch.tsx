@@ -2,7 +2,6 @@ import { useId } from 'react'
 
 import { ChromeButton } from '../../../chrome/ChromeButton/ChromeButton'
 import { taskMenuText } from '../../../chrome/TaskMenu/TaskMenu'
-import { Icon } from '../../../foundations/Icon/Icon'
 import { cx } from '../../../lib/cx'
 import { Menu, MenuCheckboxItem, MenuItem, MenuSeparator } from '../../../primitives/Menu/Menu'
 import { Switch } from '../../../primitives/Switch/Switch'
@@ -25,7 +24,6 @@ export interface BigSwitchText {
   neverHolds: string
   /** While Never is ignored too. */
   neverIgnored: string
-  fixed: string
 }
 
 export const bigSwitchText: BigSwitchText = {
@@ -34,8 +32,7 @@ export const bigSwitchText: BigSwitchText = {
   on: (project) => `Nothing in ${project} waits for you. Ask me, Go ahead and The rest aren’t in effect while this is on.`,
   ignoreNever: 'Ignore Never too',
   neverHolds: 'Never still holds: force pushes, aws s3 rm and doppler secrets are refused.',
-  neverIgnored: 'Nothing is refused. Force pushes, aws s3 rm and doppler secrets go ahead like the rest.',
-  fixed: 'Whatever this says, no agent reads your credentials or reaches the code host except through Althar.',
+  neverIgnored: 'Nothing is refused: force pushes, aws s3 rm and doppler secrets go ahead like the rest. Only Always, below, still holds.',
 }
 
 export interface BigSwitchProps {
@@ -47,7 +44,7 @@ export interface BigSwitchProps {
   text?: Partial<BigSwitchText>
 }
 
-/** The switch over the rules page, with Never's own under it while it is on. */
+/** The switch over the rules page, with Never's own under it while it is on. What Always says, just under it, holds whatever they say. */
 export function BigSwitch({ project, on, onChange, ignoreNever, onIgnoreNeverChange, text }: BigSwitchProps) {
   const t = { ...bigSwitchText, ...text }
   const title = useId()
@@ -81,10 +78,6 @@ export function BigSwitch({ project, on, onChange, ignoreNever, onIgnoreNeverCha
           <Switch checked={ignoreNever} onChange={onIgnoreNeverChange} labelledBy={neverTitle} describedBy={neverNote} />
         </div>
       )}
-      <p className={s.fixed}>
-        <Icon name="lock" size={12} />
-        {t.fixed}
-      </p>
     </section>
   )
 }

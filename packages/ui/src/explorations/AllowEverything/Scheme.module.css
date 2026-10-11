@@ -77,12 +77,14 @@
   color: var(--t-1);
 }
 
-/* a story's whole page in one scheme: the column it sits in */
+/* a story's whole canvas in one scheme, out to the edges the padded layout leaves */
 .page {
-  min-height: 100%;
-  padding: 1rem;
+  min-height: 100vh;
+  margin: -1rem;
+  padding: 2rem;
 }
 .fullscreen {
+  margin: 0;
   padding: 0;
 }
 

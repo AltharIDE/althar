@@ -135,7 +135,7 @@ function TaskA({
 const BoardA = () => <Lane label={WORDS.lane} mark={<Mark size="small" word={WORDS.mark} about={WORDS.markAbout} />} />
 
 const meta = {
-  title: 'Explorations/Allow everything/A · One big switch',
+  title: 'Explorations/Allow everything/A – One big switch',
   decorators: [schemeDecorator],
   args: schemeArgs,
   argTypes: schemeArgTypes,

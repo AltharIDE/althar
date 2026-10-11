@@ -1,0 +1,13 @@
+/* one task a line, in the sentence's size; the way back after it */
+.line {
+  display: block;
+}
+.key {
+  font: 500 0.8em var(--mono);
+  color: var(--t-3);
+}
+.back {
+  margin-left: 12px;
+  font-size: 13px;
+  vertical-align: 0.15em;
+}

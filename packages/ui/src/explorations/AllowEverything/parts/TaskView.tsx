@@ -18,7 +18,7 @@ export function TaskView({
   bar,
   children,
   above,
-  height = 640,
+  height = 760,
 }: {
   bar: ReactNode
   children?: ReactNode
