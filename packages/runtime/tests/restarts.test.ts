@@ -114,6 +114,46 @@ const sessionsOf = (threadId: string) =>
     return yield* sql<{ agentId: string }>`SELECT agent_id FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at, rowid`
   })
 
+/** A task whose review, on Codex, reviews until it is stopped, in the store at `file`: with its account out of usage until `out`, where given. */
+const reviewing = (file: string, out?: string) =>
+  Effect.gen(function* () {
+    const plans = yield* Plans
+    const projects = yield* Projects
+    const sql = yield* SqlClient.SqlClient
+    const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+    const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
+    const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
+    const created = yield* projects.createTask({
+      envelope: yield* Runtime.envelope('task.create', {}),
+      projectId: project.projectId,
+      title: 'Review after a restart',
+      description: '[lead:finish] [review:wait]',
+      draft: true,
+    })
+    const planId = yield* plans.propose({
+      projectId: project.projectId as Parameters<typeof plans.propose>[0]['projectId'],
+      taskId: created.taskId,
+      steps: [
+        { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+        { key: 'review', agentId: 'codex', model: null, skipped: false },
+      ],
+      reason: null,
+      actorId: actor,
+    })
+    yield* plans.start(planId, actor)
+    yield* until(review, (rows) => rows[0]?.state === 'running')
+    if (out !== undefined) yield* outOfUsage(yield* reviewThread(created.taskId), out)
+    return created
+  }).pipe(Effect.provide(runtime(file)))
+
+/** The task's review thread. */
+const reviewThread = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'step' AND node_key = 'review'`
+    return thread?.id ?? ''
+  })
+
 const store = () => join(mkdtempSync(join(tmpdir(), 'althar-restarts-')), 'althar.sqlite')
 
 describe('A step a restart stopped', () => {
@@ -141,40 +181,26 @@ describe('A step a restart stopped', () => {
   it.live('carries a review on as a new round attempt, on its reviewer', () =>
     Effect.gen(function* () {
       const file = store()
-      const task = yield* Effect.gen(function* () {
-        const plans = yield* Plans
-        const projects = yield* Projects
-        const sql = yield* SqlClient.SqlClient
-        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
-        const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
-        const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
-        const created = yield* projects.createTask({
-          envelope: yield* Runtime.envelope('task.create', {}),
-          projectId: project.projectId,
-          title: 'Review after a restart',
-          description: '[lead:finish] [review:wait]',
-          draft: true,
-        })
-        const planId = yield* plans.propose({
-          projectId: project.projectId as Parameters<typeof plans.propose>[0]['projectId'],
-          taskId: created.taskId,
-          steps: [
-            { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
-            { key: 'review', agentId: 'codex', model: null, skipped: false },
-          ],
-          reason: null,
-          actorId: actor,
-        })
-        yield* plans.start(planId, actor)
-        yield* until(review, (rows) => rows[0]?.state === 'running')
-        return created
-      }).pipe(Effect.provide(runtime(file)))
+      const task = yield* reviewing(file)
       yield* Effect.gen(function* () {
         const [stopped, again] = yield* until(review, (rows) => rows.length === 2 && rows[1]?.state === 'running')
         assert.strictEqual(stopped?.state, 'failed')
         assert.strictEqual(again?.agentId, 'codex')
         assert.deepStrictEqual(yield* callsOf(task.taskId), [])
         assert.strictEqual((yield* notices(task.threadId)).filter((notice) => notice.title === CARRIED).length, 1)
+      }).pipe(Effect.provide(runtime(file)))
+    }),
+  )
+
+  it.live('hands a review whose reviewer is out of usage to another, by itself', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const task = yield* reviewing(file, new Date(Date.now() + 60 * 60 * 1000).toISOString())
+      yield* Effect.gen(function* () {
+        const [stopped, again] = yield* until(review, (rows) => rows.length === 2 && rows[1]?.state === 'running')
+        assert.strictEqual(stopped?.state, 'failed')
+        assert.notStrictEqual(again?.agentId, 'codex')
+        assert.deepStrictEqual(yield* callsOf(task.taskId), [])
       }).pipe(Effect.provide(runtime(file)))
     }),
   )

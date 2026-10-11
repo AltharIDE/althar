@@ -1897,7 +1897,13 @@ export class Runs extends Context.Service<
               : sql.withTransaction(
                   Effect.gen(function* () {
                     const at = yield* timestamp
-                    const revision = yield* change('node_attempts', attempt.id, { state, output: JSON.stringify(output), endedAt: at })
+                    // One held for a limit and handed on ends with its hold.
+                    const revision = yield* change('node_attempts', attempt.id, {
+                      state,
+                      holdReason: null,
+                      output: JSON.stringify(output),
+                      endedAt: at,
+                    })
                     yield* change('nodes', attempt.nodeId, { state })
                     yield* fact({
                       projectId: current.projectId,
