@@ -5,22 +5,38 @@ import { dirname, join } from 'node:path'
 
 import { build } from 'electron-builder'
 
+import { refresh } from './feed.ts'
+import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
+
 /*
- * Packages the desktop app as Althar.app, from a build made with
- * `bun run build:package` (so without the end-to-end tests' hooks). The
- * bundles hold everything but the agent adapters, which run as processes of
- * their own and are found in node_modules, so the app is staged with the
- * bundles, the icons, the menu bar's pictures, and a flat install of the adapters and the speech engine alone, with the
- * packages that carry the agents' own binaries pinned to the versions the
- * workspace runs, so the app ships what dev and CI tested. Electron comes
- * from the copy already installed, at the version the app is tested on.
- * There is no Developer ID yet: the app is signed ad hoc, which runs on the
- * Mac that built it.
+ * Packages the desktop app from a build made with `bun run build:package`
+ * (so without the end-to-end tests' hooks): Althar.app, signed with
+ * Althar's Developer ID under the hardened runtime and notarized where the
+ * credentials are given, as a dmg to install from and a zip with
+ * latest-mac.yml for updates, in out/dist (ADR-023). The bundles hold
+ * everything but the agent adapters, which run as processes of their own and
+ * are found in node_modules, so the app is staged with the bundles, the
+ * icons, the menu bar's pictures, and a flat install of the adapters, the
+ * speech engine and the updater alone, with the packages that carry the agents' own binaries
+ * pinned to the versions the workspace runs, so the app ships what dev and
+ * CI tested. Electron comes from the copy already installed, at the version
+ * the app is tested on.
+ *
+ * Signing: electron-builder signs every executable in the app on its own,
+ * deepest first, with the hardened runtime and a secure timestamp: Althar's
+ * binary with entitlements.mac.plist, everything else (Electron's helpers,
+ * Claude Code's and Codex's binaries, the speech engine) with
+ * entitlements.mac.inherit.plist. The identity is ALTHAR_MAC_IDENTITY, or
+ * else Althar's Developer ID where this Mac's keychain has it; without it,
+ * or with ALTHAR_MAC_IDENTITY=-, the app is signed ad hoc, still hardened,
+ * and opens only on the Mac that built it.
  */
 
 const desktop = join(import.meta.dirname, '..')
 const out = join(desktop, 'out')
 const stage = join(out, 'stage')
+const dist = join(out, 'dist')
+const resources = join(desktop, 'resources')
 const own = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
   readonly productName: string
   readonly version: string
@@ -28,16 +44,39 @@ const own = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
   readonly dependencies: Record<string, string>
 }
 
+/** Althar's Developer ID Application certificate, by the name electron-builder finds it by. */
+const ALTHAR_IDENTITY = 'Balazs Otakomaiya (59A9XM7G7P)'
+/** Where updates come from: the repository's GitHub Releases (ADR-023). */
+const RELEASES = { provider: 'github', owner: 'AltharIDE', repo: 'althar' } as const
+
 /** The packages the runtime starts as processes, at the versions the app depends on. */
 const ADAPTERS = ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']
-/** Native addons the bundles load from node_modules: dictation's speech engine, with its binaries for this platform (ADR-017). */
-const NATIVE = ['sherpa-onnx-node']
+/** What the bundles load from node_modules: dictation's speech engine, with its binaries for this platform (ADR-017), and the updater (ADR-023). */
+const NATIVE = ['sherpa-onnx-node', 'electron-updater']
 
 /** The packages that carry the agents' binaries, by the adapter that brings each; their platform packages are pinned by them. */
 const BINARIES: Record<string, string> = {
   '@openai/codex': '@agentclientprotocol/codex-acp',
   '@anthropic-ai/claude-agent-sdk': '@agentclientprotocol/claude-agent-acp',
 }
+
+/**
+ * Who signs: the identity asked for, else Althar's where the keychain has
+ * it, else nobody in particular ('-', ad hoc). electron-builder takes a
+ * certificate's name without its kind.
+ */
+const signer = (): string => {
+  const asked = process.env.ALTHAR_MAC_IDENTITY?.trim()
+  if (asked !== undefined && asked !== '') return asked.replace(/^Developer ID Application:\s*/, '')
+  const found = execFileSync('security', ['find-identity', '-v', '-p', 'codesigning'], { encoding: 'utf8' })
+  if (found.includes(`Developer ID Application: ${ALTHAR_IDENTITY}`)) return ALTHAR_IDENTITY
+  process.stdout.write(`This Mac's keychain has no Developer ID Application: ${ALTHAR_IDENTITY}, so the app is signed ad hoc.\n`)
+  return '-'
+}
+const identity = signer()
+const adHoc = identity === '-'
+const auth = adHoc ? null : notaryAuth(process.env)
+if (!adHoc && auth === null) process.stdout.write(`${NOT_NOTARIZING}\n`)
 
 const require = createRequire(import.meta.url)
 const versionAt = (path: string) => (JSON.parse(readFileSync(path, 'utf8')) as { readonly version: string }).version
@@ -58,8 +97,8 @@ const pinned = Object.fromEntries(Object.entries(BINARIES).map(([name, adapter])
 rmSync(out, { recursive: true, force: true })
 mkdirSync(stage, { recursive: true })
 cpSync(join(desktop, 'dist'), join(stage, 'dist'), { recursive: true, filter: (path) => !path.endsWith('.map') })
-cpSync(join(desktop, 'resources', 'icons'), join(stage, 'resources', 'icons'), { recursive: true, filter: (path) => !path.endsWith('.md') })
-cpSync(join(desktop, 'resources', 'tray'), join(stage, 'resources', 'tray'), { recursive: true })
+cpSync(join(resources, 'icons'), join(stage, 'resources', 'icons'), { recursive: true, filter: (path) => !path.endsWith('.md') })
+cpSync(join(resources, 'tray'), join(stage, 'resources', 'tray'), { recursive: true })
 writeFileSync(
   join(stage, 'package.json'),
   `${JSON.stringify(
@@ -84,16 +123,36 @@ for (const [name, version] of Object.entries(pinned)) {
   if (staged !== version) throw new Error(`The package has ${name} ${staged}, but the workspace runs ${version}`)
 }
 
+/*
+ * Signed ad hoc, the binaries have no team for library validation to match,
+ * so Althar's own binary couldn't load Electron's framework: there, it may
+ * load what it likes, as electron-builder warns.
+ */
+const entitlements = join(resources, 'entitlements.mac.plist')
+const mainEntitlements = adHoc ? join(out, 'entitlements.adhoc.plist') : entitlements
+if (adHoc)
+  writeFileSync(
+    mainEntitlements,
+    readFileSync(entitlements, 'utf8').replace(
+      '</dict>',
+      '  <key>com.apple.security.cs.disable-library-validation</key>\n    <true/>\n  </dict>',
+    ),
+  )
+
 const electron = dirname(require.resolve('electron/package.json'))
+// Electron's own installer is idempotent: it fetches the binary where it is missing and leaves a complete install alone. It runs every time, because bun can install Electron without its postinstall, and a partial extraction can leave the metadata (path.txt, dist/version) without the executable.
+execFileSync(process.execPath, ['install.js'], { cwd: electron, stdio: 'inherit' })
 const electronVersion = readFileSync(join(electron, 'dist', 'version'), 'utf8').trim()
 
 await build({
   projectDir: stage,
+  // Packages are made here; they reach GitHub only through `bun run release --publish`, as a draft.
+  publish: 'never',
   config: {
     appId: 'dev.althar.app',
     productName: own.productName,
     copyright: 'Althar',
-    directories: { output: join(out, 'dist') },
+    directories: { output: dist },
     electronVersion,
     electronDist: join(electron, 'dist'),
     // Plain files: the adapters run their own binaries, which can't be started from inside an archive.
@@ -103,31 +162,50 @@ await build({
     /*
      * Nothing may steer Althar's binary through NODE_OPTIONS or the inspector:
      * the adapters use neither. Running as Node stays on, since that is how
-     * the runtime starts them (see the README's "The packaged app: not done yet").
+     * the runtime starts them (see the README's "The packaged app").
      */
     electronFuses: { enableNodeOptionsEnvironmentVariable: false, enableNodeCliInspectArguments: false },
     files: ['**/*'],
+    // The feed the app's updater reads (app-update.yml in the app), and what latest-mac.yml is written for.
+    publish: [RELEASES],
     mac: {
-      target: [{ target: 'dir' }],
-      icon: join(desktop, 'resources', 'icon.icns'),
+      // Apple silicon only, for now.
+      target: [
+        { target: 'dmg', arch: ['arm64'] },
+        { target: 'zip', arch: ['arm64'] },
+      ],
+      icon: join(resources, 'icon.icns'),
       category: 'public.app-category.developer-tools',
-      identity: null,
+      identity,
+      hardenedRuntime: true,
+      gatekeeperAssess: false,
+      entitlements: mainEntitlements,
+      entitlementsInherit: join(resources, 'entitlements.mac.inherit.plist'),
+      // Notarized here, by notarytool, so its log is kept (afterSign below).
+      notarize: false,
       // What macOS shows as it asks for the microphone, the first time someone dictates.
       extendInfo: {
         NSMicrophoneUsageDescription: 'Althar listens only while you dictate into a message, and turns what you say into text on this Mac.',
       },
     },
+    dmg: { sign: !adHoc },
+    // The signed app is notarized and stapled before the dmg and the zip are made of it, so both carry the ticket.
+    afterSign: (context) => {
+      if (auth === null) return
+      notarize(join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`), auth, join(out, 'notary'))
+    },
   },
 })
 
-// electron-builder names the folder for the architecture, but for Intel's.
-const app = join(out, 'dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', `${own.productName}.app`)
-// The microphone's entitlement, for when the app runs hardened: dictation records with it.
-execFileSync(
-  'codesign',
-  ['--force', '--deep', '--sign', '-', '--entitlements', join(desktop, 'resources', 'entitlements.mac.plist'), app],
-  {
-    stdio: 'inherit',
-  },
-)
-process.stdout.write(`\n${app}\n`)
+// The dmg is notarized too, so Gatekeeper accepts it as it is opened, and its size and digest in latest-mac.yml are written again.
+const made = (suffix: string) => join(dist, `${own.productName}-${own.version}-arm64${suffix}`)
+const dmg = made('.dmg')
+if (auth !== null) {
+  notarize(dmg, auth, join(out, 'notary'))
+  refresh(join(dist, 'latest-mac.yml'), dmg)
+}
+
+const app = join(dist, process.arch === 'arm64' ? 'mac-arm64' : 'mac', `${own.productName}.app`)
+for (const path of [app, dmg, made('-mac.zip'), join(dist, 'latest-mac.yml')])
+  if (!existsSync(path)) throw new Error(`The package is missing ${path}`)
+process.stdout.write(`\n${app}\n${dmg}\n${made('-mac.zip')}\n${join(dist, 'latest-mac.yml')}\n`)
