@@ -22,7 +22,7 @@ import type { Artifacts } from './Artifacts'
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
-import { dueForHandover, handoverRecord, notesSection } from './handover'
+import { dueForHandover, handoverRecord, notesSection, roomFor } from './handover'
 import { notesOf } from './notes'
 import {
   AlreadyDelivered,
@@ -195,10 +195,13 @@ interface Running {
   recording: { readonly outputOf: (itemId: string) => OutputSoFar | undefined } | undefined
   /** What it left running in the background, in the order it started them (leftRunning.ts). */
   readonly background: Map<string, LeftRunning>
-  /** A coordinator's handover to a fresh session (ADR-027): under way, it takes no more turns; failed, it carries on as it is. */
-  handover: 'none' | 'under_way' | 'failed'
-  /** Whether its first turn already left its context past the handover threshold: a fresh session would start as full, so it isn't handed over. */
-  startedFull: boolean | undefined
+  /**
+   * A coordinator's handover to a fresh session (ADR-027): under way, it
+   * takes no more turns; left, it carries on as it is, its agent compacting
+   * by itself, as one that couldn't start or that its brief would fill
+   * leaves it.
+   */
+  handover: 'none' | 'under_way' | 'left'
 }
 
 /** How often, and for how long, what one left running is read for where it answers. */
@@ -613,12 +616,7 @@ export class Sessions extends Context.Service<
           // A coordinator handing its conversation over takes no more turns. One whose context is filling up hands it over now,
           // between turns, never in one: what waits goes to the fresh session (ADR-027).
           if (running.handover === 'under_way') return false
-          if (
-            thread.role === 'coordinator' &&
-            running.handover === 'none' &&
-            running.startedFull !== true &&
-            dueForHandover(running.context)
-          ) {
+          if (thread.role === 'coordinator' && running.handover === 'none' && dueForHandover(running.context)) {
             running.handover = 'under_way'
             yield* Effect.forkIn(run(handOver(running)), sessionsScope)
             return false
@@ -821,7 +819,6 @@ export class Sessions extends Context.Service<
           // What the turn left open is kept as far as it came: the message being written, and any command's output.
           yield* items.end.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the end of a message', cause)))
           running.turnRunning = false
-          running.startedFull ??= dueForHandover(running.context)
 
           const failure = Exit.isFailure(streamed) ? Cause.findErrorOption(streamed.cause) : Option.none()
           const errorClass = errorClassOf(failure, Exit.isFailure(streamed)) ?? ended?.failure?.failure
@@ -1214,7 +1211,6 @@ export class Sessions extends Context.Service<
             recording: undefined,
             background: new Map(),
             handover: 'none',
-            startedFull: undefined,
           }
           threads.set(thread.threadId, running)
           yield* Effect.forkIn(run(deliveries(running)), scope)
@@ -1241,7 +1237,6 @@ export class Sessions extends Context.Service<
                     event._tag === 'ContextUsage' &&
                     thread.role === 'coordinator' &&
                     !running.turnRunning &&
-                    running.startedFull !== true &&
                     dueForHandover(running.context)
                       ? Queue.offer(running.wake, undefined)
                       : Effect.void,
@@ -1756,6 +1751,12 @@ export class Sessions extends Context.Service<
             const effort = session?.effort ?? undefined
             // Written first: the old session takes no more turns, so the record already holds everything it did.
             const brief = yield* handoverBrief(thread)
+            // A brief that would fill a fresh session as far would only be due again: the old one carries on as it is.
+            if (!roomFor(brief.text, previous.context)) {
+              yield* Effect.logWarning('The coordinator is left to compact by itself: its brief would fill a fresh session')
+              previous.handover = 'left'
+              return yield* Queue.offer(previous.wake, undefined)
+            }
             const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model)
             const connected = yield* connectSession(thread, sessionId, previous.entry, previous.account, model, effort)
             yield* stopRunning(previous, { state: 'superseded', by: sessionId })
@@ -1776,7 +1777,7 @@ export class Sessions extends Context.Service<
               // It carries on as it is, with what waited for it.
               Effect.suspend(() => {
                 if (threads.get(previous.thread.threadId) !== previous) return Effect.void
-                previous.handover = 'failed'
+                previous.handover = 'left'
                 return Queue.offer(previous.wake, undefined)
               }),
             ),

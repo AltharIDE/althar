@@ -24,13 +24,14 @@
     them; a line that it took over, and to read earlier details through
     `read_thread`, `read_task` or the code rather than guess; the project
     as `project_overview` gives it; the project's notes; every open task,
-    with where it stands, its plan and lead, and what waits on the person
-    (a call, a question its lead asked, an open pull request with commits
-    they haven't pushed, a change to look over), and what its lead last
-    reported; and the conversation's last twelve messages, word for word.
-    Each part is bounded, so the brief is too. Older conversation is read
-    through `read_thread`, which without a task reads the coordinator's own
-    conversation, a part at a time, back to its start.
+    none left out, with where it stands, who leads it, and what waits on the
+    person (a call, a question its lead asked, an open pull request with
+    commits they haven't pushed, a change to look over), the newest 25 also
+    with their plan and what their lead last reported; and the
+    conversation's last twelve messages, word for word. Each part is
+    bounded. Older conversation is read through `read_thread`, which without
+    a task reads the coordinator's own conversation, a part at a time, back
+    to its start; a message longer than a part comes in parts too.
   - **The person sees a quiet line** in the coordinator's thread ("Started
     a fresh session; picked up 3 open tasks.") and the whole conversation
     stays theirs to scroll: the thread is Althar's record, not the
@@ -41,6 +42,9 @@
     session's last turn is the fresh one's news, as for any turn.
   - **A handover that fails leaves the old session carrying on,** its agent
     compacting by itself as before, and isn't tried again for that session.
+    So does one whose brief would take 40% or more of a fresh session's
+    context (`FRESH_ROOM`, judged at about four characters a token): that
+    session would be due again at once, and the one after it.
   - **A project keeps notes:** short decisions the person made in
     conversation that the code doesn't show, a sentence each, at most 40.
     The coordinator keeps, lists and drops them with its tools (`keep_note`,
@@ -68,7 +72,8 @@
     `read_thread`, which the brief says to do, or missed.
   - **The threshold is a guess:** an agent that compacts below 80% does so
     first, as before. Agents that never say how full they are are never
-    handed over.
+    handed over, and nor is one whose brief would nearly fill it, as with a
+    model of a small context and a project of many open tasks.
   - **Notes are as good as the coordinator's judgment of what is a
     decision;** the person can drop one, but not yet add or edit one.
 - **Revisit when:**

@@ -283,13 +283,13 @@ export class Coordinator extends Context.Service<
             : record.text
         })
 
-      /** Keeps a decision the person made as one of the project's notes; the same words from the same session are the same note. */
+      /** Keeps a decision the person made as one of the project's notes; the same words as one kept now are that note. */
       const keep = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const { note } = yield* read(Noted, input)
-          const commandId = `cmd_${createHash('sha256').update(`${access.sessionId}\u0000note\u0000${note.trim().toLowerCase()}`).digest('hex').slice(0, 32)}`
           const kept = yield* keepNote({
-            envelope: yield* envelope('project.note.keep', { note: note.trim().toLowerCase() }, commandId, instance.coordinatorId),
+            // A command of its own each time: the same words kept already are found as the note they are, and kept again once dropped.
+            envelope: yield* envelope('project.note.keep', { note }, undefined, instance.coordinatorId),
             projectId: access.projectId as ProjectId,
             body: note,
           }).pipe(
@@ -314,9 +314,9 @@ export class Coordinator extends Context.Service<
       const drop = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const { id } = yield* read(Dropped, input)
-          const commandId = `cmd_${createHash('sha256').update(`${access.sessionId}\u0000drop\u0000${id}`).digest('hex').slice(0, 32)}`
           yield* dropNote({
-            envelope: yield* envelope('project.note.drop', { noteId: id }, commandId, instance.coordinatorId),
+            // Dropped already, a note stays dropped: dropping it again does nothing.
+            envelope: yield* envelope('project.note.drop', { noteId: id }, undefined, instance.coordinatorId),
             projectId: access.projectId,
             noteId: id,
           }).pipe(

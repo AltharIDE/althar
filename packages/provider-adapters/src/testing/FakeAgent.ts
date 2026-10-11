@@ -755,8 +755,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       session.cancelled = false
       const prompted = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
       // A prompt that ends `[context:85]` says its context is that full, in percent, before anything else; the rest plays as it
-      // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may.
-      const filled = /\s*\[context(-later)?:(\d+)\]$/.exec(prompted)
+      // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
+      // context that holds 4,000 tokens rather than CONTEXT_SIZE.
+      const filled = /\s*\[context(-later)?:(\d+)(?:\/(\d+))?\]$/.exec(prompted)
       const text = filled === null ? prompted : prompted.slice(0, filled.index)
       const out = options.outOfUsage
       if (out !== undefined && (out.until === undefined || Date.now() < out.until))
@@ -769,11 +770,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
       if (filled !== null) {
-        const usage = {
-          sessionUpdate: 'usage_update' as const,
-          used: Math.round((CONTEXT_SIZE * Number(filled[2])) / 100),
-          size: CONTEXT_SIZE,
-        }
+        const size = filled[3] === undefined ? CONTEXT_SIZE : Number(filled[3])
+        const usage = { sessionUpdate: 'usage_update' as const, used: Math.round((size * Number(filled[2])) / 100), size }
         if (filled[1] === undefined) await update(usage)
         else setTimeout(() => void update(usage), 300)
       }

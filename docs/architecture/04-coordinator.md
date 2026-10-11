@@ -146,13 +146,16 @@ conversation may not survive it. So Althar hands the coordinator over first
 - **On what.** The same agent, account, model and effort. The fresh session
   is started first, and the old one stopped as superseded by it; one that
   can't start leaves the old one carrying on, its agent compacting by itself.
+  So does a brief that would take 40% or more of a fresh session's context:
+  it would be due again at once.
 - **Its brief, from Althar's records rather than the raw thread:** its role,
   a line that it took over and should read earlier details with
   `read_thread`, `read_task` or the code rather than guess, the project as
   `project_overview` gives it, the notes, every open task (where it stands,
-  its plan and lead, what waits on the person, what its lead last reported),
-  and the conversation's last twelve messages, word for word. Each part is
-  bounded.
+  who leads it and what waits on the person; for the newest 25, its plan and
+  what its lead last reported too), and the conversation's last twelve
+  messages, word for word. Each part is bounded; a message longer than a
+  part comes in parts, so `read_thread` reaches all of it.
 - **What the person sees:** a quiet line in the thread, "Started a fresh
   session; picked up 3 open tasks." The thread is Althar's record, so the
   whole conversation stays there to scroll.

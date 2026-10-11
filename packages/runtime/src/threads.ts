@@ -336,11 +336,28 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   return { record, flush, end, current, outputsSoFar, outputOf }
 }
 
+/** Where a line longer than the budget is cut, so each part of it fits: `[…]` says it goes on. */
+const CUT = ' […]'
+const GOES_ON = '[…] '
+
+/** A line in parts that each fit the budget, marked where it was cut; one that fits as it is. */
+export const piecesOf = (line: string, budget: number): ReadonlyArray<string> => {
+  if (line.length <= budget) return [line]
+  const size = Math.max(1, budget - CUT.length - GOES_ON.length)
+  const pieces: Array<string> = []
+  for (let at = 0; at < line.length; at += size) {
+    const more = at + size < line.length
+    pieces.push(`${at === 0 ? '' : GOES_ON}${line.slice(at, at + size)}${more ? CUT : ''}`)
+  }
+  return pieces
+}
+
 /**
  * The thread as text, oldest first: what a new agent reads when it takes over
- * (ADR-005), its most recent part within the budget. `omitted` says how many
- * lines came before what is kept; read again with that as `before`, it gives
- * the ones before.
+ * (ADR-005), its most recent part within the budget. A line longer than the
+ * budget comes in parts (`piecesOf`), so none of it is out of reach.
+ * `omitted` says how many lines came before what is kept; read again with
+ * that as `before`, it gives the ones before.
  */
 export const transcript = (
   threadId: string,
@@ -407,16 +424,12 @@ export const transcript = (
       }
     })
     // The most recent part is kept; what doesn't fit is left out from the start.
-    const read = lines.slice(0, Math.max(0, Math.min(options.before ?? lines.length, lines.length)))
+    const pieces = lines.flatMap((line) => piecesOf(line, budget))
+    const read = pieces.slice(0, Math.max(0, Math.min(options.before ?? pieces.length, pieces.length)))
     const kept: Array<string> = []
     let used = 0
     for (const line of read.toReversed()) {
       if (kept.length === options.last) break
-      // A last line longer than the whole budget is kept as far as it fits, rather than leaving nothing.
-      if (kept.length === 0 && line.length > budget) {
-        kept.unshift(`${line.slice(0, budget)} […]`)
-        break
-      }
       if (used + line.length > budget) break
       kept.unshift(line)
       used += line.length + 1

@@ -5,7 +5,7 @@ import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
-import { dueForHandover, HANDOVER_AT, RECENT_MESSAGES } from '../src/handover'
+import { dueForHandover, FRESH_ROOM, HANDOVER_AT, openTasks, RECENT_MESSAGES, roomFor } from '../src/handover'
 import { NOTES_KEPT } from '../src/notes'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -106,6 +106,37 @@ const answered = (threadId: string, count: number) =>
     return yield* idleOn(threadId)
   })
 
+/** An open task with a pull request on the host, and this many commits on its branch the pull request doesn't have. */
+const withPullRequest = (projectId: string, title: string, commits: number) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const projects = yield* Projects
+    const made = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', { title }), projectId, title })
+    yield* sql`UPDATE tasks SET created_at = '2020-01-01T00:00:00.000Z' WHERE id = ${made.taskId}`
+    const [worktree] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${made.taskId}`
+    const git = (...args: Array<string>) =>
+      execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@althar.test', ...args], { cwd: worktree?.path ?? '' })
+        .toString()
+        .trim()
+    const pushed = git('rev-parse', 'HEAD')
+    for (let commit = 1; commit <= commits; commit += 1) git('commit', '-q', '--allow-empty', '-m', `Commit ${commit}`)
+    yield* sql`INSERT INTO external_links ${sql.insert({
+      id: `xlink_${'0'.repeat(32)}`,
+      projectId,
+      taskId: made.taskId,
+      product: 'github',
+      kind: 'change',
+      externalId: '12',
+      ref: 'meridian/api#12',
+      key: '#12',
+      url: 'https://github.test/meridian/api/pull/12',
+      snapshot: JSON.stringify({ state: 'open', number: 12, url: 'https://github.test/meridian/api/pull/12', headSha: pushed }),
+      createdAt: '2020-01-01T00:00:00.000Z',
+      updatedAt: '2020-01-01T00:00:00.000Z',
+    })}`
+    return made.taskId
+  })
+
 describe('when to hand the coordinator over', () => {
   it('is once its agent says its context is at the threshold or past it', () => {
     assert.strictEqual(HANDOVER_AT, 0.8)
@@ -114,6 +145,14 @@ describe('when to hand the coordinator over', () => {
     assert.isFalse(dueForHandover({ used: 159_999, size: 200_000 }))
     assert.isTrue(dueForHandover({ used: 160_000, size: 200_000 }))
     assert.isTrue(dueForHandover({ used: 199_000, size: 200_000 }))
+  })
+
+  it('is only to a fresh session its brief leaves room in', () => {
+    assert.strictEqual(FRESH_ROOM, 0.4)
+    // About four characters a token: 1,000 tokens of a 200,000-token context, or 80,000 of them.
+    assert.isTrue(roomFor('x'.repeat(4_000), { size: 200_000 }))
+    assert.isFalse(roomFor('x'.repeat(320_000), { size: 200_000 }))
+    assert.isTrue(roomFor('x'.repeat(10), null))
   })
 })
 
@@ -197,15 +236,29 @@ describe('handing the coordinator to a fresh session', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('leaves one whose first turn filled it as it is: a fresh one would start as full', () =>
+  it.live('hands over one whose first turn filled it: the fresh one starts from the records, not the whole thread', () =>
     Effect.gen(function* () {
       const { threadId } = yield* opened
       yield* say(threadId, 'A very long paste. [context:85]')
-      yield* answered(threadId, 1)
-      yield* say(threadId, 'And more. [context:90]')
+      const { fresh } = yield* handedOver(threadId)
+      yield* say(threadId, 'Go on.')
+      const turns = yield* until(prompts(threadId), (rows) => rows.some((row) => row.providerSessionId === fresh.id))
+      assert.include(turns.find((row) => row.providerSessionId === fresh.id)?.prompt, 'You are taking over this conversation')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('leaves one as it is where its brief would fill a fresh session as far, and carries on with it', () =>
+    Effect.gen(function* () {
+      const { threadId } = yield* opened
+      yield* say(threadId, 'hello')
+      const first = yield* answered(threadId, 1)
+      // A context of 4,000 tokens: the brief alone would take more of it than a fresh session should start with.
+      yield* say(threadId, 'Fill up. [context:85/4000]')
       yield* answered(threadId, 2)
-      yield* Effect.sleep('200 millis')
+      yield* say(threadId, 'And more.')
+      assert.strictEqual(yield* answered(threadId, 3), first)
       assert.lengthOf(yield* sessionsOn(threadId), 1)
+      assert.notDeepInclude(yield* notices(threadId), { source: 'runtime', severity: 'info', title: 'Started a fresh session.' })
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -417,6 +470,17 @@ describe("the coordinator's notes", () => {
       // Dropped twice, as an agent unsure the first worked would, it stays dropped.
       assert.strictEqual(yield* callTool(access, 'drop_note', { id }), `Dropped ${id}.`)
       assert.strictEqual(yield* callTool(access, 'list_notes'), 'The project has no notes yet.')
+      // Kept again in the same session once dropped, it is a note again, of its own.
+      const again = /^Kept as (note_[0-9a-f]{32})\.$/.exec(
+        yield* callTool(access, 'keep_note', { note: "Dependency setup runs outside the sandbox; don't widen the lead's sandbox." }),
+      )?.[1]
+      assert.isDefined(again)
+      assert.notStrictEqual(again, id)
+      assert.strictEqual(
+        yield* callTool(access, 'list_notes'),
+        `- ${again}: Dependency setup runs outside the sandbox; don't widen the lead's sandbox.`,
+      )
+      yield* callTool(access, 'drop_note', { id: again })
       for (let index = 1; index <= NOTES_KEPT; index += 1) yield* callTool(access, 'keep_note', { note: `Decision ${index}.` })
       assert.match(yield* callTool(access, 'keep_note', { note: 'One too many.' }), /^The project keeps 40 notes at most\./)
     }).pipe(Effect.provide(withQueries())),
@@ -439,5 +503,33 @@ describe("the coordinator's notes", () => {
       // And it is told to keep them.
       assert.include(first?.prompt, "- keep_note, list_notes and drop_note, for the project's notes:")
     }).pipe(Effect.provide(withQueries())),
+  )
+})
+
+describe("a handover brief's open tasks", () => {
+  it.live('holds every one, the newest in full and the rest in short, none without what waits on the person', () =>
+    Effect.gen(function* () {
+      const { projectId, access } = yield* opened
+      // The oldest, with a commit the person hasn't pushed to its pull request; then more drafts than are told in full.
+      yield* withPullRequest(projectId, 'Old work', 1)
+      for (let index = 1; index <= 26; index += 1) yield* callTool(access, 'draft_task', { title: `Draft ${index}` })
+      yield* callTool(access, 'propose_plan', { task: 'draft-1', lead: { agent: 'codex', model: 'large' } })
+      const tasks = yield* openTasks(
+        projectId,
+        (step) => step.model ?? step.agentId,
+        () => false,
+      )
+      assert.strictEqual(tasks.count, 27)
+      // Its head, then a line for each.
+      assert.lengthOf(tasks.text.split('\n- '), 28)
+      assert.match(
+        tasks.text,
+        /^Open tasks, newest first \(past the newest 25, each in short: read_task has the rest\):\n- draft-26: Draft 26\. Drafted, with no plan yet\.\n/,
+      )
+      assert.include(
+        tasks.text,
+        "\n- draft-1: Draft 1. Planned, and counting down: it starts on its own unless the person holds or changes it. Led by large.\n- old-work: Old work. Open, with nothing running.\n  Waiting on the person: its pull request https://github.test/meridian/api/pull/12 is open, with 1 commit on the branch they haven't pushed to it.",
+      )
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.minutes(5) }))),
   )
 })

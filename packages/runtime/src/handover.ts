@@ -32,12 +32,26 @@ export const HANDOVER_AT = 0.8
 export const dueForHandover = (context: { readonly used: number; readonly size: number } | null) =>
   context !== null && context.size > 0 && context.used >= context.size * HANDOVER_AT
 
+/** About how many characters a token holds, in the words and code a brief is written in: to judge a brief's size before an agent reads it. */
+const CHARS_PER_TOKEN = 4
+
+/** The most of a fresh session's context its brief may take: a session that would start fuller would soon be due again. */
+export const FRESH_ROOM = 0.4
+
+/**
+ * Whether a brief this long leaves a fresh session room in a context the
+ * size the session handed over says it has. One that doesn't isn't started:
+ * it would be due again at once, and again after it.
+ */
+export const roomFor = (brief: string, context: { readonly size: number } | null) =>
+  context === null || context.size <= 0 || brief.length / CHARS_PER_TOKEN < context.size * FRESH_ROOM
+
 /** How many of the conversation's last messages a handover brief carries word for word, and in how many characters at most. */
 export const RECENT_MESSAGES = 12
 const RECENT_BUDGET = 16_000
 
-/** How many open tasks a brief describes, newest first; list_tasks has the rest. */
-const TASKS_SHOWN = 25
+/** How many open tasks, newest first, a brief describes in full; each past them is a line: where it stands, who leads it, and what waits on the person. */
+const TASKS_IN_FULL = 25
 
 /** How much of a lead's last report, or of what a stuck step says, a brief carries. */
 const REPORT_LENGTH = 600
@@ -87,7 +101,7 @@ const callWords = (call: { readonly kind: string; readonly payload: string; read
     case 'question': {
       const fields = Array.isArray(payload.fields) ? (payload.fields as ReadonlyArray<{ readonly question?: string }>) : []
       const asked = fields.flatMap((field) => (field.question === undefined || field.question === '' ? [] : [field.question]))
-      return `a question from its lead: ${asked.length > 0 ? asked.join(' / ') : words('message')}`
+      return `a question from its lead: ${cut(asked.length > 0 ? asked.join(' / ') : words('message'), DETAIL_LENGTH)}`
     }
     case 'stuck': {
       const detail = words('detail')
@@ -100,9 +114,10 @@ const callWords = (call: { readonly kind: string; readonly payload: string; read
 
 /**
  * Every open task, newest first, as a brief describes it: where it stands,
- * who does it, and what waits on the person. Read from the records and the
- * task's worktree; `working` says whether an agent is at work on a thread
- * now. Its count is every open task, described or not.
+ * who does it, and what waits on the person, none left out. Past the newest
+ * TASKS_IN_FULL, each is shorter, without its plan or its lead's last report,
+ * which read_task gives. Read from the records and the task's worktree;
+ * `working` says whether an agent is at work on a thread now.
  */
 export const openTasks = (projectId: string, modelOf: ModelNamer, working: (threadId: string) => boolean) =>
   Effect.gen(function* () {
@@ -134,8 +149,9 @@ export const openTasks = (projectId: string, modelOf: ModelNamer, working: (thre
       LEFT JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
       WHERE k.project_id = ${projectId} AND k.state IN ('draft', 'open')
       ORDER BY k.created_at DESC, k.rowid DESC`
-    const described = yield* Effect.forEach(tasks.slice(0, TASKS_SHOWN), (task) =>
+    const described = yield* Effect.forEach(tasks, (task, index) =>
       Effect.gen(function* () {
+        const full = index < TASKS_IN_FULL
         const plan =
           task.parameters === null
             ? undefined
@@ -160,10 +176,13 @@ export const openTasks = (projectId: string, modelOf: ModelNamer, working: (thre
           (planned === undefined || planned.agentId !== task.lead || (task.leadModel !== null && planned.model !== task.leadModel))
             ? modelOf({ key: 'implement', agentId: task.lead, model: task.leadModel, skipped: false })
             : null
-        const who = [
-          ...(plan === undefined ? [] : [`Plan: ${teamOf(plan, modelOf)}; ${endWords(plan.end)}.`]),
-          ...(lead === null ? [] : [`Its lead now: ${lead}.`]),
-        ]
+        const who = full
+          ? [
+              ...(plan === undefined ? [] : [`Plan: ${teamOf(plan, modelOf)}; ${endWords(plan.end)}.`]),
+              ...(lead === null ? [] : [`Its lead now: ${lead}.`]),
+            ]
+          : // In short, only who leads it.
+            [lead ?? (planned === undefined ? null : modelOf(planned))].flatMap((name) => (name === null ? [] : [`Led by ${name}.`]))
 
         // What waits on the person: calls, a pull request with commits they haven't pushed, and a change ready to look over.
         const calls = yield* sql<{ kind: string; payload: string; title: string | null }>`
@@ -201,7 +220,9 @@ export const openTasks = (projectId: string, modelOf: ModelNamer, working: (thre
         const waits = [...calls.map(callWords), ...pulls.flat(), ...(ready ? ['the change, to look over and accept'] : [])]
 
         // What its lead said last, with anything it left open.
-        const [report] = yield* sql<{ content: string }>`
+        const [report] = !full
+          ? []
+          : yield* sql<{ content: string }>`
           SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result'
             AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
         const summary = report === undefined ? '' : ((JSON.parse(report.content) as { summary?: string }).summary ?? '').trim()
@@ -213,13 +234,12 @@ export const openTasks = (projectId: string, modelOf: ModelNamer, working: (thre
         ].join('\n')
       }),
     )
-    const more = tasks.length - described.length
     return {
       count: tasks.length,
       text:
         tasks.length === 0
           ? 'The project has no open tasks.'
-          : `Open tasks, newest first:\n${described.join('\n')}${more > 0 ? `\n(${more} more: list_tasks lists them.)` : ''}`,
+          : `Open tasks, newest first${tasks.length > TASKS_IN_FULL ? ` (past the newest ${TASKS_IN_FULL}, each in short: read_task has the rest)` : ''}:\n${described.join('\n')}`,
     }
   })
 

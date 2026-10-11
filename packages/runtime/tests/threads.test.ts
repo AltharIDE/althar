@@ -120,7 +120,9 @@ describe('the thread recorder', () => {
       assert.isTrue(whole.text.startsWith('[codex] echo: You are working on a task'))
       assert.isTrue(whole.text.endsWith('\n[codex] first\n[tool] Read README (completed)\n[note] Plain: with detail'))
       const tail = yield* transcript(where.threadId, 30)
-      assert.deepStrictEqual(tail, { text: '[note] Plain: with detail', omitted: 3 })
+      assert.strictEqual(tail.text, '[note] Plain: with detail')
+      // What came before is counted in parts: the brief's echo, longer than the budget, is several.
+      assert.isAbove(tail.omitted, 3)
       // Steps' results and task cards are written in a line each; a card for a task that's gone, not at all.
       const { projectId } = where
       const [task] = yield* (yield* SqlClient.SqlClient)<{ id: string }>`SELECT task_id AS id FROM threads WHERE id = ${where.threadId}`
@@ -154,9 +156,18 @@ describe('the thread recorder', () => {
       // Only some kinds, the last few lines, with the agent named as it is to whoever reads it.
       const said = yield* transcript(where.threadId, 10_000, { kinds: ['notice', 'agent_message'], last: 3, agent: 'you' })
       assert.deepStrictEqual(said, { text: '[you] said two\n[note] noted three\n[you] said three', omitted: 4 })
-      // A last line longer than the whole budget is kept as far as it fits.
-      yield* addItem(where, 'notice', { title: 'x'.repeat(100) })
-      assert.strictEqual((yield* transcript(where.threadId, 20)).text, `[note] ${'x'.repeat(13)} […]`)
+      // A line longer than the whole budget comes in parts, each read in turn, so all of it can be read back.
+      const long = `${'a'.repeat(50)} DECISION ${'b'.repeat(50)}`
+      yield* addItem(where, 'notice', { title: long })
+      const pages: Array<string> = []
+      let before: number | undefined
+      while (pages.length < 4) {
+        const page = yield* transcript(where.threadId, 40, before === undefined ? {} : { before })
+        pages.unshift(page.text)
+        before = page.omitted
+      }
+      assert.isTrue(pages.every((page) => page.length <= 40))
+      assert.strictEqual(pages.map((page) => page.replace(/^\[…\] /, '').replace(/ \[…\]$/, '')).join(''), `[note] ${long}`)
     }).pipe(Effect.provide(runtime())),
   )
 })
