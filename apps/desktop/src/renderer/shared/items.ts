@@ -64,7 +64,7 @@ export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: Readonl
 /**
  * An item that can't change any more: a tool call that completed or failed,
  * a message delivered (or never queued), a plan with every entry done, a
- * task settled, a question answered or withdrawn, a run ended. What an agent
+ * task settled, a question answered or withdrawn, a run or a setup ended. What an agent
  * said, a notice, a step's result and what arrived from outside are settled
  * once written.
  */
@@ -81,6 +81,7 @@ export const settled = (item: ThreadItem): boolean => {
     case 'question':
       return item.content.state !== 'open'
     case 'run':
+    case 'setup':
       return item.content.ended !== null
     case 'agent_message':
     case 'agent_thought':

@@ -36,6 +36,7 @@ import {
 } from './git'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
+import { Setups } from './Setups'
 
 /*
  * Projects and tasks (docs/architecture/01). Opening a folder makes it a
@@ -46,7 +47,8 @@ import { change, fact, timestamp } from './records'
  *
  * Git runs outside the store's transactions: the facts are read first, and a
  * task's worktree is added after the task is committed, its workspace marked
- * ready or failed once git has finished.
+ * ready or failed once git has finished. Once they are all there, Althar
+ * starts setting them up, before the task's lead starts (`Setups.ts`).
  */
 
 /** A repository found where a folder was opened: its root, the folder inside it the project is about, if any, and what it is. */
@@ -242,7 +244,7 @@ const prepareWorktree = (
     return { worktree, branch, baseRef, baseCommit, fetched }
   })
 
-type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | RuntimeConfig
+type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | RuntimeConfig | Setups
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
 
 export class Projects extends Context.Service<
@@ -675,6 +677,8 @@ export class Projects extends Context.Service<
             if (prepared._tag === 'Failure') return yield* Effect.failCause(prepared.cause)
             ready.push({ worktree: prepared.value.worktree, branch: prepared.value.branch })
           }
+          // Set up now, without waiting, so a draft's worktree is ready by the time its plan starts.
+          yield* (yield* Setups).begin(created.taskId)
           const [made] = ready
           return made === undefined ? created : { ...created, worktree: made.worktree, branch: made.branch }
         })

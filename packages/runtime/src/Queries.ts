@@ -463,6 +463,30 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         },
       }
     }
+    case 'setup': {
+      const ended = field(content, 'ended')
+      const code = field(ended, 'code')
+      return {
+        ...base,
+        kind: 'setup',
+        content: {
+          repository: text(content, 'repository'),
+          command: text(content, 'command'),
+          kept: field(content, 'kept') === true,
+          startedAt: text(content, 'startedAt'),
+          ended:
+            typeof ended === 'object' && ended !== null
+              ? {
+                  at: text(ended, 'at'),
+                  code: typeof code === 'number' ? code : null,
+                  timedOut: field(ended, 'timedOut') === true,
+                  stopped: field(ended, 'stopped') === true,
+                  last: text(ended, 'last') || null,
+                }
+              : null,
+        },
+      }
+    }
     default:
       return undefined
   }

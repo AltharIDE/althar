@@ -58,6 +58,15 @@ export interface RuntimeOptions {
   readonly stalls?: StallOptions
   /** Where what is known of models comes from (`ModelFacts.ts`); without it, nothing is fetched and nothing is known. */
   readonly modelFacts?: ModelFactsOptions
+  /** How a task's worktree is set up before its lead starts (`Setups.ts`). */
+  readonly setups?: SetupOptions
+}
+
+export interface SetupOptions {
+  /** How long a setup may run before it is stopped and counts as failed: ten minutes unless a test says otherwise. */
+  readonly within?: Duration.Duration
+  /** The shell it runs in, as a login shell: the person's own (`SHELL`) unless a test says otherwise. */
+  readonly shell?: string
 }
 
 /** Each is the default unless a test says otherwise. */
