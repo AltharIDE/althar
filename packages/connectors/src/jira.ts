@@ -1,10 +1,12 @@
 import { Effect, Schema } from 'effect'
 
+import { type Access, type AccessLine, type AccessNeed, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import type { ConnectorFailed } from './errors'
 import { makeHttp } from './http'
 import { AdfNode, adfOf, markdownOfAdf, markdownOfWiki, wikiOf } from './jiraText'
 import type { Account, Issue, Person, Priority, StatusCategory, Tracker } from './model'
+import { type Answer, answered, failedOf, probe, readAs, refusalOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
  * Jira, a tracker: Jira Cloud over version 3 of its REST API, and Jira Data
@@ -122,6 +124,12 @@ export const siteOf = (webUrl: string): string => {
   }
 }
 
+/** Who the credential signs in as: on Cloud by account id, and by email where Jira says it; on Data Center by user name. */
+const accountOf = (user: User): Account =>
+  'accountId' in user
+    ? { id: user.accountId, login: user.emailAddress ?? user.displayName ?? user.accountId, name: user.displayName ?? null }
+    : { id: user.key ?? user.name, login: user.name, name: user.displayName ?? null }
+
 /** A JQL string, quoted. */
 const quoted = (text: string) => `"${text.replace(/["\\]/g, '\\$&')}"`
 
@@ -202,10 +210,7 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
 
   const account: Effect.Effect<Account, ConnectorFailed> = Effect.map(
     call((root) => http.json(User, 'GET', `${root}/myself`)),
-    (user): Account =>
-      'accountId' in user
-        ? { id: user.accountId, login: user.emailAddress ?? user.displayName ?? user.accountId, name: user.displayName ?? null }
-        : { id: user.key ?? user.name, login: user.name, name: user.displayName ?? null },
+    accountOf,
   )
 
   return {
@@ -255,3 +260,74 @@ export const makeJiraCloud = (options: AdapterOptions): Tracker => makeJira('jir
 
 /** Jira Data Center, at an instance's address. */
 export const makeJiraDataCenter = (options: AdapterOptions): Tracker => makeJira('jira_dc', options)
+
+/*
+ * What a Jira connection can do: its site answers, who it signs in as, and
+ * whether the account may browse projects, transition issues and comment
+ * on them, in any project, as Jira's own permissions say. On Cloud, a token
+ * the site refuses is asked through Atlassian's gateway, as the adapter asks.
+ */
+
+const Permitted = Schema.Struct({
+  permissions: Schema.Record(Schema.String, Schema.Struct({ havePermission: Schema.Boolean })),
+})
+
+/** An account's email, which Data Center says too, and Cloud where the person's privacy allows. */
+const Email = Schema.Struct({ emailAddress: Schema.optional(Schema.NullOr(Schema.String)) })
+
+/** Cloud and Data Center alike, told apart by their API: version 3 on Cloud, version 2 on Data Center. */
+export const accessJira: Access = (input) =>
+  Effect.gen(function* () {
+    const cloud = /\/rest\/api\/3\/?$/.test(input.apiUrl)
+    const site = cloud ? siteOf(input.webUrl) : input.webUrl.replace(/\/+$/, '')
+    const api = input.apiUrl.replace(/\/+$/, '')
+    const ask = (url: string) => probe(input, url)
+
+    const atSite = yield* ask(`${api}/myself`)
+    const siteLine = serverLine('site', site, atSite)
+    if (atSite.status === 0) return stopped([siteLine])
+    // A token with scopes works only through the gateway, which the site's id names.
+    const gateway = (): Effect.Effect<{ readonly root: string; readonly me: Answer }> =>
+      Effect.gen(function* () {
+        const tenant = yield* ask(`${site}/_edge/tenant_info`)
+        const cloudId = answered(tenant) ? readAs(Schema.Struct({ cloudId: Schema.String }), tenant)?.cloudId : undefined
+        if (cloudId === undefined) return { root: api, me: atSite }
+        const root = `https://api.atlassian.com/ex/jira/${encodeURIComponent(cloudId)}/rest/api/3`
+        const there = yield* ask(`${root}/myself`)
+        return answered(there) ? { root, me: there } : { root: api, me: atSite }
+      })
+    const { root, me } = cloud && atSite.status === 401 ? yield* gateway() : { root: api, me: atSite }
+    if (!answered(me)) return stopped([siteLine, line('account', 'no', { reason: refusalOf(me) })])
+    const user = readAs(User, me)
+    if (user === undefined) return stopped([siteLine, line('account', 'no', { reason: UNREADABLE })])
+    const account = accountOf(user)
+
+    const permitted = yield* ask(`${root}/mypermissions?permissions=BROWSE_PROJECTS,TRANSITION_ISSUES,ADD_COMMENTS`)
+    const said = answered(permitted) ? readAs(Permitted, permitted) : undefined
+    const projects = yield* ask(cloud ? `${root}/project/search?maxResults=1` : `${root}/project`)
+    // How many projects it sees, where that is cheap to ask: Cloud counts them, Data Center lists them.
+    const count = !answered(projects)
+      ? null
+      : cloud
+        ? (readAs(Schema.Struct({ total: Schema.Number }), projects)?.total ?? null)
+        : (readAs(Schema.Array(Schema.Unknown), projects)?.length ?? null)
+    const allowed = (need: AccessNeed, permission: string, more: { readonly count?: number | null } = {}): AccessLine =>
+      said === undefined
+        ? line(need, 'no', { reason: answered(permitted) ? UNREADABLE : failedOf(permitted) })
+        : said.permissions[permission]?.havePermission === true
+          ? line(need, 'ok', more)
+          : line(need, 'no', { reason: { kind: 'role', role: null } })
+
+    return {
+      account,
+      lines: [
+        siteLine,
+        line('account', 'ok', { fact: readAs(Email, me)?.emailAddress ?? user.displayName ?? account.login }),
+        allowed('read', 'BROWSE_PROJECTS', { count }),
+        allowed('comment', 'ADD_COMMENTS'),
+        allowed('move', 'TRANSITION_ISSUES'),
+      ],
+      expiresAt: null,
+      scopes: null,
+    }
+  })

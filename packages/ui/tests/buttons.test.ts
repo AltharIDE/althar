@@ -35,6 +35,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'composer/ModelBrowser/ModelBrowser.tsx': 'the rail and a model’s row',
   'outputs/ChangeView/ChangeView.tsx': 'a file in the list of what changed',
   'screens/Start/Start.tsx': 'the ways to start, as large options',
+  'setup/ConnectCard/ConnectCard.tsx': 'the ways in to a service, as large options',
   /* a shape of its own */
   'composer/ContextRing/ContextRing.tsx': 'the ring',
   'composer/Composer/Composer.tsx': 'the dictation button, drawn as your voice',
@@ -42,6 +43,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Inline/Inline.tsx': 'a reference or citation inside prose',
   'thread/You/You.tsx': 'an attachment’s chip',
   'thread/Steer/Steer.tsx': 'a step’s name inside a sentence',
+  'setup/Charter/Charter.tsx': 'a built-in setting, as an underlined word inside a sentence',
   'thread/Furniture/Furniture.tsx': 'the floating jump to the latest',
   'composer/Listening/Listening.tsx': 'the listening pill, and stop on its sunk bar',
   'composer/Running/Running.tsx': 'the running pill, and its actions on the sunk bar',

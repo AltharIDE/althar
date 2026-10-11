@@ -1,0 +1,6 @@
+/* The page fills the tab; it scrolls in its halves, not as a whole. */
+.window {
+  height: 100%;
+  min-height: 0;
+  background: var(--n-2);
+}

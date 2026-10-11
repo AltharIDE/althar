@@ -1,5 +1,6 @@
 import { Effect } from 'effect'
 
+import { type Access, type AccessLine, line } from '../access'
 import { ConnectorFailed } from '../errors'
 import type {
   Account,
@@ -74,7 +75,12 @@ export interface FakeControls {
   readonly calls: ReadonlyArray<string>
 }
 
-export type FakeService = CodeHost & Tracker & FakeControls
+/**
+ * The fake, with what a connection to it can do: everything, on the
+ * repositories it has. `failNext('access', …)` makes the next check stop at
+ * its account: refused where the reason is `unauthorized`.
+ */
+export type FakeService = CodeHost & Tracker & FakeControls & { readonly access: Access }
 
 const START = Date.parse('2026-10-01T09:00:00.000Z')
 
@@ -283,6 +289,39 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         links.set(issue.ref, [...(links.get(issue.ref) ?? []), link])
         return Effect.void
       }),
+    access: (input) =>
+      called('access').pipe(
+        Effect.map(() => {
+          const unseen = input.repositories.filter((path) => !repositories.has(path.join('/').toLowerCase())).map((path) => path.join('/'))
+          const host = product !== 'linear' && product !== 'jira_cloud' && product !== 'jira_dc' && product !== 'trello'
+          const lines: ReadonlyArray<AccessLine> = [
+            line('account', 'ok', { fact: account.login }),
+            ...(input.repositories.length === 0
+              ? []
+              : [
+                  unseen.length === 0
+                    ? line('reach', 'ok', { fact: [...new Set(input.repositories.map((path) => path[0] ?? ''))].join(', ') })
+                    : line('reach', 'no', { reason: { kind: 'unseen', names: unseen, url: null } }),
+                ]),
+            ...(host
+              ? (['push', 'changes', 'checks', 'issues'] as const).map((need) => line(need, 'ok'))
+              : (['read', 'comment', 'move'] as const).map((need) => line(need, 'ok'))),
+          ]
+          return { account, lines, expiresAt: null, scopes: null }
+        }),
+        Effect.catch((error) =>
+          Effect.succeed({
+            account: null,
+            lines: [
+              line('account', 'no', {
+                reason: error.reason === 'unauthorized' ? { kind: 'refused' } : { kind: 'failed', message: error.message },
+              }),
+            ],
+            expiresAt: null,
+            scopes: null,
+          }),
+        ),
+      ),
 
     addRepository: (path, defaultBranch = 'main') => {
       const repository: Repository = {

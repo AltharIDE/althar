@@ -11,8 +11,9 @@ export interface ButtonProps extends ComponentProps<'button'> {
    * default: raised paper. signal: violet, and only for answering something
    * that waits on a person. quiet: text only, for the lesser choice beside another.
    * danger: raised paper in red words, for the one press that ends or throws something away.
+   * ink: solid ink, for the one press a page asks for where nothing waits on a person.
    */
-  variant?: 'default' | 'signal' | 'quiet' | 'danger'
+  variant?: 'default' | 'signal' | 'quiet' | 'danger' | 'ink'
   /** small: inside a row of a thread or a card, beside 11–12px text. */
   size?: 'medium' | 'small'
   icon?: IconName
@@ -54,10 +55,14 @@ export function Button({
       onClick={press}
       {...rest}
     >
-      {busy ? <Spinner size="small" tone={variant === 'signal' ? 'onFill' : 'live'} /> : icon && <Icon name={icon} size={12} />}
+      {busy ? (
+        <Spinner size="small" tone={variant === 'signal' || variant === 'ink' ? 'onFill' : 'live'} />
+      ) : (
+        icon && <Icon name={icon} size={12} />
+      )}
       <span>{children}</span>
       {trailingIcon && <Icon name={trailingIcon} size={size === 'small' ? 11 : 12} />}
-      {kbd && <Kbd onFill={variant === 'signal'}>{kbd}</Kbd>}
+      {kbd && <Kbd onFill={variant === 'signal' || variant === 'ink'}>{kbd}</Kbd>}
     </button>
   )
 }

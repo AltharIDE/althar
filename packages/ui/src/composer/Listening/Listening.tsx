@@ -105,7 +105,8 @@ export function Listening({ sources, heard, onStop, note, open, defaultOpen, onO
         className={s.pop}
         trigger={
           <button type="button" className={cx(s.pill, showing && s.heard)}>
-            <LiveDot ping urgent={!!showing} />
+            {/* Still while it only listens, as running work is; it rings for a moment when something arrives. */}
+            <LiveDot ping={!!showing} urgent={!!showing} />
             {showing ? (
               <span key={showing.key} className={cx(s.text, s.heardText)}>
                 {showing.text}

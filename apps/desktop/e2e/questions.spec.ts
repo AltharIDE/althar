@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject } from './support'
+import { launch, openFirstProject, startTask } from './support'
 
 /*
  * An agent's question (DEV-13), as the person meets it: a task's lead asks
@@ -29,12 +29,7 @@ test('asks the person a question on the home, keeps it across a restart, and car
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
     // A task whose lead asks first.
-    await page.getByRole('button', { name: 'New task' }).click()
-    await page.getByLabel('What should change').fill('Cache the rates')
-    await page.getByLabel('Anything the lead should know').fill('[lead:ask] [lead:finish]')
-    await page.getByRole('button', { name: /^Review:/ }).click()
-    await page.getByRole('button', { name: 'No review' }).click()
-    await page.getByRole('button', { name: 'Start the task' }).click()
+    await startTask(page, 'Cache the rates', '[lead:ask] [lead:finish]')
 
     // On the home, the question waits on the person, calm: what it asks, why, and Answer. Its options are where it is answered.
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()

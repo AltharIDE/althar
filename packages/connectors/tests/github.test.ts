@@ -309,6 +309,31 @@ describe('GitHub as a code host', () => {
     }),
   )
 
+  it.effect('reads a commit’s statuses alone where check runs are refused, as a fine-grained token’s are', () =>
+    Effect.gen(function* () {
+      const { host } = github([
+        [
+          'GET',
+          `${REPO}/commits/abc/check-runs?per_page=100`,
+          { status: 403, json: { message: 'Resource not accessible by personal access token' } },
+        ],
+        ['GET', `${REPO}/commits/abc/status`, { json: { statuses: [{ id: 3, context: 'ci/circle', state: 'success' }] } }],
+      ])
+      assert.deepStrictEqual(yield* host.checks(repository, 'abc'), [
+        { id: 'status:3', name: 'ci/circle', state: 'passed', url: null, summary: null },
+      ])
+      // Anything else that keeps check runs from being read still fails the checks.
+      const limited = github([
+        [
+          'GET',
+          `${REPO}/commits/abc/check-runs?per_page=100`,
+          { status: 403, headers: { 'x-ratelimit-remaining': '0' }, json: { message: 'API rate limit exceeded' } },
+        ],
+      ])
+      assert.strictEqual((yield* Effect.flip(limited.host.checks(repository, 'abc'))).reason, 'rate_limited')
+    }),
+  )
+
   it.effect('reads the end of a GitHub Actions job’s log, and nothing for other checks', () =>
     Effect.gen(function* () {
       const long = Array.from({ length: 400 }, (_, n) => `line ${n}`).join('\n')

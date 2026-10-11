@@ -8,22 +8,27 @@ import { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, isPreferenceKey } from './appPreferences'
 import { keepingAwake } from './awake'
+import { tokenIn } from './clipboard'
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
+import { setAppMenu } from './menu'
 import { dockCount, soundOf, tells } from './notify'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { type Resize, servePicture } from './pictures'
-import { findRepositories, forWindow, placesFor } from './repositories'
+import { findRepositories, foundIds, forWindow, placesFor, stillFound } from './repositories'
 import { alertSounds, playSound } from './sounds'
 import { failureForWindow, type StoreFailure, storeFailureOf } from './storeFailure'
+import { checkNow, startUpdates } from './updater'
+import type { UpdateGlance, Updates } from './updates'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
 import { bundleOf } from '../runtime/editors'
 
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   MessageChannelMain,
@@ -46,7 +51,7 @@ import {
  * runtime to stop its sessions before the app goes. Folders reach the runtime
  * from here, never from the window, which gets a grant for each: one the
  * person picked or dropped, or one of the repositories it found where people
- * keep code (repositories.ts), for the first screen to offer. It seals and
+ * keep code (repositories.ts), for the first screen and a new project to offer. It seals and
  * opens the runtime's secrets, such as a code host's token, with Electron's
  * safeStorage, whose key the keychain keeps for this app alone: the runtime
  * keeps them sealed and never holds the key. It gives the Dock the icon the
@@ -56,11 +61,15 @@ import {
  * (awake.ts), and which notifications show, with a sound or not, and the
  * Dock's count (notify.ts).
  * Dictation's microphone, model and speech process are in dictation.ts.
+ * A packaged app updates itself (updater.ts): it never restarts into an
+ * update while work runs, and only when the person asks, or as they quit.
  */
 
 const here = import.meta.dirname
 
 const SHUTDOWN_GRACE = 20_000
+/** How long focus settles, moving between Althar's windows, before the edge hears whether Althar is in front. */
+const FOCUS_SETTLE = 120
 /** Restarts allowed within a minute before a crashing runtime ends the app instead. */
 const RESTARTS_PER_MINUTE = 3
 
@@ -143,6 +152,9 @@ const awake = keepingAwake({
   onBattery: () => powerMonitor.isOnBatteryPower(),
 })
 
+/* Updates, in a packaged app only: its windows hear when one is ready to install. */
+let updates: Updates | undefined
+
 /* How many things wait, as the runtime last said, for the Dock's count as it is turned on and off. */
 let waiting = 0
 
@@ -189,7 +201,11 @@ const openThread = (threadId: string) => {
  * progress. And whether any work runs, to keep the Mac awake by.
  */
 const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
-  if (event._tag === 'Working' && typeof event.working === 'boolean') return awake.working(event.working)
+  if (event._tag === 'Working' && typeof event.working === 'boolean') {
+    // Nothing restarts into an update while work runs.
+    updates?.working(event.working)
+    return awake.working(event.working)
+  }
   if (event._tag === 'Waiting' && typeof event.count === 'number') {
     waiting = event.count
     edge?.waiting(event.count)
@@ -251,6 +267,7 @@ const startRuntime = () => {
     runtime = undefined
     // Nothing runs without the runtime; a new one says again.
     awake.working(false)
+    updates?.working(false)
     for (const [requestId, settle] of granting) {
       settle(null)
       granting.delete(requestId)
@@ -379,6 +396,16 @@ ipcMain.handle('althar:pick-folder', async (event, purpose: unknown) => {
   return path === undefined ? null : allowFolder(path)
 })
 
+// Folders for a new project, several at once: a grant for each, in the order chosen.
+ipcMain.handle('althar:pick-folders', async (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  const options = { properties: ['openDirectory' as const, 'multiSelections' as const], message: 'Choose the project’s folders' }
+  const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
+  if (result.canceled) return []
+  const grants = await Promise.all(result.filePaths.map(allowFolder))
+  return grants.filter((grant) => grant !== null)
+})
+
 // A folder dropped on the window, by the path the preload read from the drop: only a folder on disk gets a grant.
 ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   if (typeof path !== 'string' || path === '') return null
@@ -386,26 +413,22 @@ ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   return found?.isDirectory() === true ? allowFolder(path) : null
 })
 
-/* The repositories the first screen offers, by the id the window has for each: only these are granted by id. */
-const foundHere = new Map<string, string>()
+/* The repositories the first screen and a new project offer, by the id the window has for each: only these are granted by id. */
+const foundHere = foundIds()
 
-// The repositories where people keep code on this computer, for the first screen: each by an id, never by its path.
+// The repositories where people keep code on this computer, for the first screen and a new project: each by an id, never by its path.
 ipcMain.handle('althar:find-repositories', async () => {
   // The end-to-end tests give a home of their own, so what the tester keeps isn't offered.
   const home = process.env.ALTHAR_CODE_HOME || homedir()
   const found = await findRepositories(placesFor(home, process.platform))
-  foundHere.clear()
-  return forWindow(found, home, (path) => {
-    const id = randomUUID()
-    foundHere.set(id, path)
-    return id
-  })
+  return forWindow(found, home, foundHere.idOf)
 })
 
-// A grant for one of them, once the person ticks it and makes the project: one main found, and nothing else.
+// A grant for one of them, once the person ticks or adds it: one main found, still where it was found, and nothing else.
 ipcMain.handle('althar:grant-found', async (_event, id: unknown) => {
-  const path = typeof id === 'string' ? foundHere.get(id) : undefined
-  return path === undefined ? null : allowFolder(path)
+  const repository = typeof id === 'string' ? foundHere.found(id) : undefined
+  const path = repository === undefined ? null : await stillFound(repository)
+  return path === null ? null : allowFolder(path)
 })
 
 // Shows the copy of the store from before an update that couldn't move it, in the system's file manager.
@@ -452,7 +475,14 @@ ipcMain.handle('althar:editor-picture', async (_event, id: unknown) => {
 ipcMain.handle('althar:sounds', () => alertSounds())
 ipcMain.handle('althar:play-sound', (_event, name: unknown) => playSound(name, undefined, () => shell.beep()))
 
-// Where Althar shows while the person is in another app, and whether this Mac has a notch to choose the island by.
+// A token on the clipboard, while connecting a service waits for one; anything else stays on the clipboard alone.
+ipcMain.handle('althar:clipboard-token', async () => tokenIn(await clipboard.readText()))
+
+// An update ready to install, as a window shows it (null where the app doesn't update, as in development); and restarting into it, at the person's word, only while no work runs.
+ipcMain.handle('althar:update', () => updates?.glance() ?? null)
+ipcMain.handle('althar:update-restart', () => updates?.restart() ?? false)
+
+// Where Althar shows while the person is in another app, and what this computer has room for: a notch to choose the island by, a tray.
 ipcMain.handle('althar:edge', () => edge?.state() ?? null)
 ipcMain.handle('althar:set-edge', async (_event, place: unknown) => {
   if (!isEdgePlace(place)) throw new Error(`Althar can't show at ${String(place)}.`)
@@ -496,6 +526,13 @@ void app.whenReady().then(() => {
   // Linux may not say when the power source changes, so there it is looked at again each minute too.
   if (process.platform === 'linux') setInterval(awake.powerChanged, 60_000).unref()
   startRuntime()
+  // A packaged app looks for updates, and tells every window as one is ready.
+  if (app.isPackaged)
+    updates = startUpdates((glance: UpdateGlance) => {
+      for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('althar:update', glance)
+    })
+  const checking = updates
+  setAppMenu({ name: app.name, ...(checking === undefined ? {} : { checkForUpdates: () => void checkNow(checking) }) })
   openWindow()
   edge = startEdge({
     profile: () => locations().profile,
@@ -504,6 +541,19 @@ void app.whenReady().then(() => {
     page: join(here, '../renderer/edge.html'),
     pictures: join(here, '../../resources/tray'),
   })
+  // The edge is for while the person is in another app: it steps aside while one of Althar's windows has focus, on any screen.
+  // Moving between Althar's windows blurs one before the other has focus, so it settles first.
+  let focusing: ReturnType<typeof setTimeout> | undefined
+  const focusChanged = () => {
+    clearTimeout(focusing)
+    focusing = setTimeout(() => {
+      const focused = BrowserWindow.getFocusedWindow()
+      edge?.front(focused !== null && windows.has(focused))
+    }, FOCUS_SETTLE)
+  }
+  app.on('browser-window-focus', focusChanged)
+  app.on('browser-window-blur', focusChanged)
+  focusChanged()
   app.on('activate', () => {
     if (windows.size === 0) openWindow()
   })

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, toConversation } from './support'
+import { launch, openFirstProject, say, startTask, toConversation } from './support'
 
 /*
  * What an agent hands back, in a real window with the fake agent
@@ -24,12 +24,7 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
   try {
     await openFirstProject(electronApp, page, repository(projects))
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await page.getByRole('button', { name: 'New task' }).click()
-    await page.getByLabel('What should change').fill('Check the refunds page')
-    await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
-    await page.getByRole('button', { name: /^Review:/ }).click()
-    await page.getByRole('button', { name: 'No review' }).click()
-    await page.getByRole('button', { name: 'Start the task' }).click()
+    await startTask(page, 'Check the refunds page')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
     await toConversation(page)

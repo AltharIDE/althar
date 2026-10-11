@@ -44,13 +44,17 @@ export const running = (from: string, now: string): string => {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`
 }
 
-/** The time now, as an ISO string, again each second while `ticking`: for how long a running turn has worked. */
-export const useNow = (ticking: boolean): string => {
+/**
+ * The time now, as an ISO string, again each second while `ticking`: for how
+ * long a running turn has worked. `every` slows it, for what only says how
+ * many minutes or hours ago something was.
+ */
+export const useNow = (ticking: boolean, every = 1000): string => {
   const [now, setNow] = useState(() => new Date().toISOString())
   useEffect(() => {
     if (!ticking) return
-    const id = setInterval(() => setNow(new Date().toISOString()), 1000)
+    const id = setInterval(() => setNow(new Date().toISOString()), every)
     return () => clearInterval(id)
-  }, [ticking])
+  }, [ticking, every])
   return now
 }

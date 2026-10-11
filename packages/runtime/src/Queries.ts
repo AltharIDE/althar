@@ -40,6 +40,7 @@ import { documentText, outputText } from './reading'
 import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { Instance } from './Instance'
+import { Launches } from './Launches'
 import { commitsAhead, commitsOf, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
 import { commandIn } from './rules'
 import { Sessions } from './Sessions'
@@ -437,6 +438,31 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         },
       }
     }
+    case 'run': {
+      const ended = field(content, 'ended')
+      const code = field(ended, 'code')
+      return {
+        ...base,
+        kind: 'run',
+        content: {
+          launchId: text(content, 'launchId'),
+          taskId: text(content, 'taskId') || null,
+          where: text(content, 'where'),
+          command: text(content, 'command'),
+          url: text(content, 'url') || null,
+          startedAt: text(content, 'startedAt'),
+          ended:
+            typeof ended === 'object' && ended !== null
+              ? {
+                  at: text(ended, 'at'),
+                  code: typeof code === 'number' ? code : null,
+                  stopped: field(ended, 'stopped') === true,
+                  last: text(ended, 'last') || null,
+                }
+              : null,
+        },
+      }
+    }
     default:
       return undefined
   }
@@ -451,7 +477,7 @@ export interface ThreadChange {
   readonly threadId: string | null
 }
 
-type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig | Artifacts
+type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig | Artifacts | Launches
 
 export class Queries extends Context.Service<
   Queries,
@@ -492,6 +518,7 @@ export class Queries extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const config = yield* RuntimeConfig
+      const launches = yield* Launches
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const live = LIVE.map((state) => `'${state}'`).join(', ')
 
@@ -638,6 +665,7 @@ export class Queries extends Context.Service<
             models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
             turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
             context: Option.isSome(running) && running.value.sessionId === session.id ? running.value.context : null,
+            background: Option.isSome(running) && running.value.sessionId === session.id ? running.value.background : [],
           }
         })
 
@@ -1466,6 +1494,8 @@ export class Queries extends Context.Service<
               merged: said.merged,
               actions: [...actionsOf(standing)],
               planId: standing.planId,
+              runCommand: yield* launches.commandFor(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => null)),
+              launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
             },
             session,
             attention: attention.map(callOf),
@@ -1508,6 +1538,9 @@ export class Queries extends Context.Service<
             items,
             earlier,
             host,
+            runCommand: yield* launches.commandFor(projectId, null).pipe(Effect.orElseSucceed(() => null)),
+            // Every run in the project, the tasks' too: the coordinator's screen is the project's.
+            launches: yield* launches.ofProject(projectId),
           } satisfies CoordinatorSnapshot
         })
 

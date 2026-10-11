@@ -10,6 +10,7 @@ import { Connections } from './Connections'
 import { Installs } from './Installs'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
+import { Launches } from './Launches'
 import { Live } from './Live'
 import { Permissions } from './Permissions'
 import { Questions } from './Questions'
@@ -68,26 +69,25 @@ export const layer = (options: RuntimeLayerOptions) => {
     // Agents Althar downloads at the person's asking, where it keeps them; the registry's point at them where the person has none.
     Layer.provideMerge(Installs.layer({ root: options.agentsRoot, fetch: options.fetch })),
     Layer.provideMerge(options.secrets ?? Secrets.none('Althar keeps sign-ins in the app; it can open them, and this can’t.')),
-    Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds, options.fetch)),
+    Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds, options.fetch, options.githubApp)),
   )
   // Each project's rules; each agent's accounts, whether each is signed in, and which are out of usage until their reset (ADR-012).
-  const able = Limits.layer.pipe(
+  // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.
+  const able = Layer.mergeAll(Limits.layer, Models.layer).pipe(
     Layer.provideMerge(
       SignIns.layer.pipe(Layer.provideMerge(Accounts.layer.pipe(Layer.provideMerge(Policies.layer.pipe(Layer.provideMerge(base)))))),
     ),
   )
   const judging = PermissionJudge.layer.pipe(Layer.provideMerge(able))
-  const core = Layer.mergeAll(Projects.layer, Sessions.layer).pipe(
+  const core = Layer.mergeAll(Projects.layer, Sessions.layer, Launches.layer).pipe(
     Layer.provideMerge(Layer.mergeAll(Permissions.layer, Questions.layer).pipe(Layer.provideMerge(judging))),
   )
   // A task's pull request and issue, through the person's connections to code hosts and trackers.
   const linked = Layer.mergeAll(Changes.layer, Issues.layer).pipe(Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(core))))
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
   const work = Tasks.layer.pipe(Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))))
-  // The models each agent offers, read from its sessions, or asked of it once.
-  const known = Models.layer.pipe(Layer.provideMerge(work))
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).
-  const signing = AccountSignIns.layer.pipe(Layer.provideMerge(known))
+  const signing = AccountSignIns.layer.pipe(Layer.provideMerge(work))
   return Coordinator.layer.pipe(Layer.provideMerge(signing))
 }
 

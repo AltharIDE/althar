@@ -88,14 +88,14 @@ describe('Home', () => {
     expect(within(projects).getAllByText(/held|stopped/)).toHaveLength(1)
   })
 
-  it('offers to open a folder only when it can', () => {
-    const onOpenFolder = vi.fn()
-    const { unmount } = home({ onOpenFolder })
-    fireEvent.click(screen.getByRole('button', { name: /Open a folder/ }))
-    expect(onOpenFolder).toHaveBeenCalled()
+  it('offers to start a new project only when it can', () => {
+    const onNewProject = vi.fn()
+    const { unmount } = home({ onNewProject })
+    fireEvent.click(screen.getByRole('button', { name: /New project/ }))
+    expect(onNewProject).toHaveBeenCalled()
     unmount()
     home()
-    expect(screen.queryByRole('button', { name: /Open a folder/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /New project/ })).toBeNull()
   })
 
   it('folds what the loop did into one line, which opens to what it happened to', () => {

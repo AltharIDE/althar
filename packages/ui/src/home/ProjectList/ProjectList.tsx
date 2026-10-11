@@ -30,8 +30,8 @@ export const QUIET_FOLD = 8
 
 export interface ProjectListText {
   title: string
-  openFolder: string
-  openFolderKbd: string
+  newProject: string
+  newProjectKbd: string
   /** Read after a project's name. */
   yours: (n: number) => string
   held: (n: number) => string
@@ -44,8 +44,8 @@ export interface ProjectListText {
 
 export const projectListText: ProjectListText = {
   title: 'Projects',
-  openFolder: 'Open a folder',
-  openFolderKbd: '⌘N',
+  newProject: 'New project',
+  newProjectKbd: '⌘N',
   yours: (n) => (n === 1 ? '1 needs you' : `${n} need you`),
   held: (n) => `${n} held for a reset`,
   stopped: (n) => `${n} stopped`,
@@ -77,8 +77,8 @@ export type ProjectListProps = RootProps<
   {
     projects: readonly ProjectListItem[]
     onOpenProject?: (id: string) => void
-    /** Open a folder as a new project. Without it, no way to from here. */
-    onOpenFolder?: () => void
+    /** Start a new project, in a tab of its own. Without it, no way to from here. */
+    onNewProject?: () => void
     text?: Partial<ProjectListText>
   }
 >
@@ -95,7 +95,7 @@ const offOf = (tasks: readonly ProjectListTask[], t: ProjectListText) => {
     .join(' · ')
 }
 
-export function ProjectList({ projects, onOpenProject, onOpenFolder, className, text, ...rest }: ProjectListProps) {
+export function ProjectList({ projects, onOpenProject, onNewProject, className, text, ...rest }: ProjectListProps) {
   const t = { ...projectListText, ...text }
   const titleId = useId()
   const quietOf = (p: ProjectListItem) => p.yours === 0 && p.tasks.length === 0
@@ -111,8 +111,8 @@ export function ProjectList({ projects, onOpenProject, onOpenFolder, className, 
           {t.title}
         </Heading>
         <span className={s.count}>{projects.length}</span>
-        {onOpenFolder && (
-          <IconButton icon="plus" label={t.openFolder} kbd={t.openFolderKbd} size="small" className={s.add} onClick={onOpenFolder} />
+        {onNewProject && (
+          <IconButton icon="plus" label={t.newProject} kbd={t.newProjectKbd} size="small" className={s.add} onClick={onNewProject} />
         )}
       </header>
       <div className={s.scroll}>

@@ -106,6 +106,27 @@ describe('the printer', () => {
       agent({ _tag: 'ContextUsage', used: 1, size: 2 }),
       { _tag: 'TurnEnded', threadId: 't', turnId: 'u', state: 'failed', errorClass: 'usage_limit' },
       { _tag: 'TurnEnded', threadId: 'other', turnId: 'v', state: 'completed' },
+      { _tag: 'Background', threadId: 't', background: [{ id: 'b', command: 'bun dev', url: null, startedAt: 'x', ended: null }] },
+      {
+        _tag: 'Background',
+        threadId: 't',
+        background: [{ id: 'b', command: 'bun dev', url: 'http://localhost:5173/', startedAt: 'x', ended: null }],
+      },
+      {
+        _tag: 'Background',
+        threadId: 't',
+        background: [{ id: 'b', command: 'bun dev', url: 'http://localhost:5173/', startedAt: 'x', ended: null }],
+      },
+      {
+        _tag: 'Background',
+        threadId: 't',
+        background: [{ id: 'b', command: 'bun dev', url: 'http://localhost:5173/', startedAt: 'x', ended: { at: 'y', code: 1 } }],
+      },
+      {
+        _tag: 'Background',
+        threadId: 't',
+        background: [{ id: 'c', command: 'bun run seed', url: null, startedAt: 'x', ended: { at: 'y', code: null } }],
+      },
       { _tag: 'SessionEnded', threadId: 't', sessionId: 's', state: 'completed' },
     ]
     assert.strictEqual(
@@ -125,6 +146,9 @@ describe('the printer', () => {
         '  resumed after the rejection',
         '● The agent moved to its plan mode.',
         '— failed (usage_limit)',
+        '● bun dev answers at http://localhost:5173/',
+        '● bun dev exited 1',
+        '● bun run seed ended',
         '● The session ended: completed.',
         '',
       ].join('\n'),

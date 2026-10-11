@@ -81,7 +81,7 @@ const wordsOf = (said: unknown): string => {
 const NestedError = Schema.Struct({ message: Schema.String, detail: Schema.optional(Schema.Unknown) })
 
 /** What a service said went wrong, from its JSON body or a line of plain words (Trello's), or the status's own words. */
-const messageOf = (body: string, fallback: string): string => {
+export const messageOf = (body: string, fallback: string): string => {
   let json: unknown
   try {
     json = JSON.parse(body)

@@ -20,6 +20,7 @@ import { statements as taskRequests } from './0015_task_requests'
 import { statements as settings } from './0016_settings'
 import { statements as artifactImages } from './0017_artifact_images'
 import { statements as questions } from './0018_questions'
+import { statements as runCommands } from './0019_run_commands'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -57,6 +58,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0016_settings', statements: settings },
   { key: '0017_artifact_images', statements: artifactImages },
   { key: '0018_questions', statements: questions },
+  { key: '0019_run_commands', statements: runCommands },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

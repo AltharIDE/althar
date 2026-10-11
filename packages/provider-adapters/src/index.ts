@@ -1,4 +1,5 @@
 export * from './AgentConnection'
+export * from './background'
 export * from './errors'
 export * from './events'
 export * from './failures'

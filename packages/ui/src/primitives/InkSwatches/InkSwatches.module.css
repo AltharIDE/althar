@@ -1,0 +1,39 @@
+/* A row of the project inks; the chosen one ringed in ink, a hair off its edge. */
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 2px 0;
+}
+.swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: var(--swatch);
+  cursor: pointer;
+  transition:
+    transform var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+.swatch:hover {
+  transform: scale(1.08);
+}
+.swatch:active {
+  transform: scale(0.96);
+}
+.swatch[aria-checked='true'] {
+  box-shadow:
+    0 0 0 2px var(--n-1),
+    0 0 0 3.5px var(--t-1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .swatch {
+    transition: none;
+  }
+  .swatch:hover,
+  .swatch:active {
+    transform: none;
+  }
+}
