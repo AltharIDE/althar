@@ -783,8 +783,13 @@ So where an agent has a sandbox, it keeps commands inside the worktree:
   sandbox unless asked to. A lead's sandbox also lets commands bind and
   listen on localhost (`sandbox.network.allowLocalBinding`), so tests that
   start a server, and a prototype's throwaway showcase server that the person
-  opens from the Running pill, don't have to leave it. This widens nothing
-  else: no further egress and no further writable paths. Readers don't get it.
+  opens from the Running pill, don't have to leave it. The setting is broader
+  than listening (macOS, per Claude's sandbox docs): sandboxed commands can
+  also connect to any localhost port, including an unauthenticated local
+  service outside the sandbox such as a debugger or proxy, and can listen on
+  non-loopback addresses that other machines may reach. We accept that for
+  leads. It adds no hosts to the network allowlist and no writable paths, and
+  readers don't get it.
 - OpenCode has none yet. Wrapping it in the same sandbox-runtime Claude uses
   is next.
 
