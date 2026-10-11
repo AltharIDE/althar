@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, type ComponentType } from 'react'
 
 import { pageMeta, pathOf } from './content/pages'
 import { Docs } from './docs/Docs'
+import { FEEL_PAGES } from './feel/Feel'
 import { Home } from './home/Home'
 import { Pathname } from './lib/pathname'
 import { NotFound } from './notfound/NotFound'
@@ -21,6 +22,8 @@ const PAGES: Record<string, ComponentType> = {
   /** The earlier, enterprise-facing page: kept for the company version, linked from nowhere. */
   '/enterprise': EnterpriseHome,
   /** The link previews, drawn for scripts/og.ts to screenshot: in development only, and not in the build. */
+  /** Scrappy prototype: "feels so good" directions, dev only. */
+  ...(import.meta.env.DEV ? FEEL_PAGES : {}),
   ...(import.meta.env.DEV ? { '/og': lazy(() => import('./og/Og').then((m) => ({ default: m.Og }))) } : {}),
 }
 
