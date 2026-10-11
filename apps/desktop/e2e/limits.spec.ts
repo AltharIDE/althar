@@ -45,8 +45,11 @@ const startWhileOut = async (out: string, { asks = false }: { readonly asks?: bo
     .click()
   await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
   if (asks) {
-    await page.getByRole('button', { name: 'More for this project' }).click()
-    await page.getByRole('menuitem', { name: 'Project rules' }).click()
+    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    await page
+      .getByRole('dialog', { name: /’s settings$/ })
+      .getByRole('button', { name: /^Rules/ })
+      .click()
     await page.getByRole('button', { name: 'moves to the next agent free', exact: true }).click()
     await page.getByRole('menuitemradio', { name: 'Ask me' }).click()
     const limits = page.getByRole('listitem', { name: 'Limits' })

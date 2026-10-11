@@ -328,6 +328,20 @@ const commitIn = (cwd: string, file: string, message: string) => {
   git('commit', '-q', '-m', message)
 }
 
+/** Whether the session is a project's coordinator: Althar gave it the tools to draft tasks. */
+const coordinates = async (session: SessionState): Promise<boolean> => {
+  if (session.tools === undefined) return false
+  const client = new Client({ name: 'fake-agent', version: '1.0.0' })
+  const transport = new StreamableHTTPClientTransport(new URL(session.tools.url), { requestInit: { headers: session.tools.headers } })
+  // The SDK's transport types its optional fields loosely, which strict optional types reject.
+  await client.connect(transport as Parameters<typeof client.connect>[0])
+  try {
+    return (await client.listTools()).tools.some((tool) => tool.name === 'draft_task')
+  } finally {
+    await client.close()
+  }
+}
+
 const playRole = async (session: SessionState, text: string): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
   const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ')
@@ -756,8 +770,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (after !== undefined) await say(after)
         return ended()
       }
-      // A lead that asks the person first, `[lead:ask]`, once: then it plays its part with the answer.
-      if (text.includes('[lead:ask]') && !session.played.has('[lead:ask]')) {
+      // A lead that asks the person first, `[lead:ask]`, once: then it plays its part with the answer. The coordinator that plans it only passes the marker on.
+      if (text.includes('[lead:ask]') && !session.played.has('[lead:ask]') && !(await coordinates(session))) {
         session.played.add('[lead:ask]')
         await say(await askPerson('one'))
         if (session.cancelled) return { stopReason: 'cancelled' }
