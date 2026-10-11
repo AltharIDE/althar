@@ -195,6 +195,59 @@ describe('connections', () => {
     // Another way goes back to the ways.
   })
 
+  it('puts right what gh’s sign-in can’t do with a token for the same place, made or pasted', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const refused = {
+      ...githubCheck,
+      lines: githubCheck.lines.map((line) =>
+        line.need === 'account' ? { ...line, state: 'no' as const, fact: null, reason: { kind: 'refused' as const } } : line,
+      ),
+    }
+    const { client } = fakeClient({ checkConnection: vi.fn().mockResolvedValueOnce(refused).mockResolvedValue(githubCheck) })
+    withServices(<ConnectPanel service="github" onClose={vi.fn()} />, client)
+    const panel = await screen.findByRole('complementary', { name: 'Connect GitHub' })
+    await userEvent.click(await within(panel).findByRole('button', { name: /Use gh’s sign-in/ }))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Use this sign-in' }))
+
+    // GitHub no longer takes gh's token: another one pasted, on a token's own steps.
+    expect(await within(panel).findByRole('heading', { name: 'GitHub didn’t take that token' })).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Paste another' }))
+    expect(within(panel).getByLabelText('Paste it')).toBeTruthy()
+    // Back from there is where that token is made; back from that, gh's way again.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Back' }))
+    expect(within(panel).getByRole('heading', { name: 'Make a token on GitHub' })).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Paste it myself' }))
+    await userEvent.type(within(panel).getByLabelText('Paste it'), 'github_pat_new{Enter}')
+    expect(client.connectToken).toHaveBeenLastCalledWith({ product: 'github', token: 'github_pat_new', webUrl: 'https://github.com' })
+    expect(await within(panel).findByRole('heading', { name: 'Connected as you' })).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Back' }))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Back' }))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Back' }))
+    expect(within(panel).getByRole('heading', { name: 'Use gh’s sign-in' })).toBeTruthy()
+    open.mockRestore()
+  })
+
+  it('makes a new token for what gh’s sign-in can’t do, on the page for the same place', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const refused = {
+      ...githubCheck,
+      lines: githubCheck.lines.map((line) =>
+        line.need === 'account' ? { ...line, state: 'no' as const, fact: null, reason: { kind: 'refused' as const } } : line,
+      ),
+    }
+    const { client } = fakeClient({ checkConnection: vi.fn().mockResolvedValueOnce(refused).mockResolvedValue(githubCheck) })
+    withServices(<Connections />, client)
+    await connect(0)
+    await userEvent.click(await screen.findByRole('button', { name: /Use gh’s sign-in/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Use this sign-in' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Make a new one' }))
+    expect(open).toHaveBeenCalledWith(GITHUB_TOKEN_PAGE, '_blank')
+    await userEvent.type(screen.getByLabelText('Paste it'), 'github_pat_new{Enter}')
+    expect(client.connectToken).toHaveBeenLastCalledWith({ product: 'github', token: 'github_pat_new', webUrl: 'https://github.com' })
+    expect(await screen.findByRole('heading', { name: 'Connected as you' })).toBeTruthy()
+    open.mockRestore()
+  })
+
   it('connects a company’s own server by its address, asking what answers there', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
     const { client } = fakeClient({

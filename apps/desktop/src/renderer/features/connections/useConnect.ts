@@ -14,7 +14,7 @@ import {
 import { messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { type StepKind, type Way, waysOf } from './ways'
+import { type StepKind, tokenWay, type Way, waysOf } from './ways'
 
 /*
  * Connecting a service, a step at a time (docs/architecture/06, "Signing
@@ -168,16 +168,20 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
 
   /* ---- where the walk is ---- */
   const [chosen, setChosen] = useState<string | null>(server ? 'server' : null)
+  /* A token's way to the instance a way without one (gh's sign-in, the browser's) connected, taken to put right what that sign-in can't do. */
+  const [detour, setDetour] = useState<Way | null>(null)
   const [at, setAt] = useState(0)
   const way: Way | null =
-    chosen === 'server'
-      ? // Jira's own server is a site like any other.
-        (found.server ?? found.ways.find((candidate) => candidate.kind === 'site') ?? null)
-      : chosen !== null
-        ? (found.ways.find((candidate) => candidate.id === chosen) ?? null)
-        : !reading && found.ways.length === 1
-          ? (found.ways[0] ?? null)
-          : null
+    detour !== null
+      ? detour
+      : chosen === 'server'
+        ? // Jira's own server is a site like any other.
+          (found.server ?? found.ways.find((candidate) => candidate.kind === 'site') ?? null)
+        : chosen !== null
+          ? (found.ways.find((candidate) => candidate.id === chosen) ?? null)
+          : !reading && found.ways.length === 1
+            ? (found.ways[0] ?? null)
+            : null
   const step = way?.steps[at] ?? null
 
   /* ---- what each step holds ---- */
@@ -248,6 +252,7 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
     advance.current = false
     rounds.current += 1
     cancelFlow()
+    setDetour(null)
     setAt(0)
     setAddressState(emptyAddress)
     setKeyState({ value: '', error: null })
@@ -424,7 +429,21 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
     return () => window.removeEventListener('focus', look)
   }, [watching, host, prefixes, step, goTo])
 
-  const pasteMyself = useCallback(() => goTo('paste'), [goTo])
+  /*
+   * The paste step: this way's own; or, from a way without one (gh's
+   * sign-in, the browser's), a token's way to the same instance, which signs
+   * in in its place. A connection being signed in again stays the one.
+   */
+  const toPaste = useCallback(() => {
+    if (way === null) return
+    if (way.steps.includes('paste')) return goTo('paste')
+    if (instance === null) return
+    const next = tokenWay(instance.product, instance.webUrl, products)
+    reset()
+    setDetour(next)
+    setAt(next.steps.indexOf('paste'))
+  }, [goTo, instance, products, reset, way])
+  const pasteMyself = toPaste
   const open = useCallback((url: string) => void window.open(url, '_blank'), [])
   const openAndPaste = useCallback(
     (url: string) => {
@@ -432,9 +451,9 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
       setRefused(null)
       setCheck(null)
       setConnection(null)
-      goTo('paste')
+      toPaste()
     },
-    [goTo],
+    [toPaste],
   )
 
   /* ---- gh's or glab's sign-in ---- */
@@ -600,11 +619,16 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
       setAt(at - 1)
       return true
     }
+    // Back from a token's way taken in place of another's sign-in is that way again, from its start.
+    if (detour !== null) {
+      reset()
+      return true
+    }
     const choosing = chosen !== null && (found.ways.length > 1 || chosen === 'server') && !server
     if (!choosing) return false
     anotherWay()
     return true
-  }, [anotherWay, at, chosen, found.ways.length, server, step, way])
+  }, [anotherWay, at, chosen, detour, found.ways.length, reset, server, step, way])
 
   const done = useCallback(() => {
     void cache.refetchQueries({ queryKey: keys.connections })

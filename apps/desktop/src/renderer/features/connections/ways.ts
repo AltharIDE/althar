@@ -102,13 +102,7 @@ export const waysOf = (
     if (option?.browserSignIn === true && again.auth !== 'token' && again.webUrl === option.hostedUrl)
       ways.push(browserWay(option, again.webUrl))
     for (const cli of clis) if (cli.product === again.product && cli.webUrl === again.webUrl) ways.push(cliWay(cli))
-    ways.push({
-      id: `token ${again.product} ${again.webUrl}`,
-      kind: again.product === 'trello' ? 'key' : 'token',
-      product: again.product,
-      webUrl: again.webUrl,
-      steps: tokenSteps(again.product, products),
-    })
+    ways.push(tokenWay(again.product, again.webUrl, products))
     return { ways, server: null }
   }
 
@@ -149,6 +143,15 @@ export const waysOf = (
       : { id: `server ${own.product}`, kind: 'server' as const, product: own.product, webUrl: null, steps: serverSteps(own.product) }
   return { ways, server }
 }
+
+/** A token made for an instance already known: on its page, pasted here, and checked; the way to put right what another way's sign-in can't do. */
+export const tokenWay = (product: Product, webUrl: string, products: ReadonlyArray<ProductOption>): Way => ({
+  id: `token ${product} ${webUrl}`,
+  kind: product === 'trello' ? 'key' : 'token',
+  product,
+  webUrl,
+  steps: tokenSteps(product, products),
+})
 
 /** A token's steps: made on the service's page, pasted here, and checked. */
 const tokenSteps = (product: Product, products: ReadonlyArray<ProductOption>): ReadonlyArray<StepKind> =>
