@@ -9,9 +9,12 @@ export const kindWords = {
   permission: 'Permission',
   /** A call for a step that can't go on without the person. */
   stuck: 'Stuck',
+  /** A call for a step a usage limit stopped, which the person moves on or holds for the reset. */
+  limit: 'Out of usage',
   /** Work done, waiting to be accepted. */
   ready: 'Ready to accept',
 } as const
 
-/** A call's kind, in its word: stuck if it is about a step, else a permission. */
-export const callKindOf = (call: { readonly stuck: unknown }): string => (call.stuck === null ? kindWords.permission : kindWords.stuck)
+/** A call's kind, in its word: out of usage or stuck if it is about a step, else a permission. */
+export const callKindOf = (call: { readonly stuck: { readonly why: string } | null }): string =>
+  call.stuck === null ? kindWords.permission : call.stuck.why === 'usage_limit' ? kindWords.limit : kindWords.stuck

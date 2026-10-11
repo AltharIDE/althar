@@ -18,7 +18,8 @@ import { SignIns } from './SignIns'
  * without one, for an hour, when it is tried again; an agent is out when all
  * its accounts are. What the work does meanwhile is one of the project's
  * rules (Policies): move on (the default), to the agent's next account and
- * then the next free agent, or wait for the reset.
+ * then the next free agent; wait for the reset; or ask the person, with who
+ * could take it over.
  */
 
 /** How long an agent whose limit gave no reset time counts as out. */
@@ -98,6 +99,21 @@ export class Limits extends Context.Service<
      */
     free(besides: ReadonlyArray<string>, rather?: ReadonlyArray<string>, projectId?: string): Effect.Effect<string | undefined, Failure>
     /**
+     * Who could take over work a usage limit stopped, as the person picks
+     * (the project's rule asks): every account of every agent the project
+     * allows but the one out, in the agents' order and the person's, those
+     * the work would rather not go to (the other step's) last, each with the
+     * model it would run. Signed out, out of usage or paid per use, an
+     * account is still listed, as it stood: the window says which are free
+     * when it asks, and the person's choice may spend their money.
+     */
+    choices(input: {
+      readonly accountId: string | null
+      readonly projectId: string
+      readonly rather?: ReadonlyArray<string>
+      readonly planned?: { readonly agentId: string; readonly model: string | null }
+    }): Effect.Effect<ReadonlyArray<{ readonly agentId: string; readonly accountId: string; readonly model: string | null }>, Failure>
+    /**
      * The model an agent takes work over on: the one the plan named for it on
      * the step, else the last it ran in the project, else its own default.
      */
@@ -175,6 +191,19 @@ export class Limits extends Context.Service<
           return found
         })
 
+      const modelFor = (input: {
+        readonly agentId: string
+        readonly projectId: string
+        readonly planned?: { readonly agentId: string; readonly model: string | null }
+      }) =>
+        Effect.gen(function* () {
+          if (input.planned?.agentId === input.agentId && input.planned.model !== null) return input.planned.model
+          const [last] = yield* sql<{ model: string }>`
+            SELECT model FROM provider_sessions WHERE project_id = ${input.projectId} AND agent_id = ${input.agentId} AND model IS NOT NULL
+            ORDER BY started_at DESC LIMIT 1`
+          return last?.model ?? null
+        })
+
       const out = (agentId: string, projectId?: string) =>
         Effect.gen(function* () {
           const outs: Array<Out> = []
@@ -196,7 +225,11 @@ export class Limits extends Context.Service<
           ),
         pick: (input) =>
           Effect.gen(function* () {
-            if (input.accountId !== undefined) return yield* accounts.get(input.accountId)
+            // One given is the agent's own: another agent's would sign it in as someone else.
+            if (input.accountId !== undefined) {
+              const given = yield* accounts.get(input.accountId)
+              return given.agentId === input.agentId ? given : yield* new NotFound({ kind: 'account', id: input.accountId })
+            }
             const list = yield* allowed(input.agentId, input.projectId)
             const rotate = yield* rotating(input.projectId)
             // One it can run on: not signed out, and, where the project rotates, not out of usage.
@@ -230,14 +263,23 @@ export class Limits extends Context.Service<
             }
             return undefined
           }),
-        modelFor: (input) =>
+        choices: (input) =>
           Effect.gen(function* () {
-            if (input.planned?.agentId === input.agentId && input.planned.model !== null) return input.planned.model
-            const [last] = yield* sql<{ model: string }>`
-              SELECT model FROM provider_sessions WHERE project_id = ${input.projectId} AND agent_id = ${input.agentId} AND model IS NOT NULL
-              ORDER BY started_at DESC LIMIT 1`
-            return last?.model ?? null
+            const ids = agents.list.map((entry) => entry.definition.id)
+            const rather = input.rather ?? []
+            const found: Array<{ readonly agentId: string; readonly accountId: string; readonly model: string | null }> = []
+            for (const agentId of [...ids.filter((id) => !rather.includes(id)), ...ids.filter((id) => rather.includes(id))]) {
+              const model = yield* modelFor({
+                agentId,
+                projectId: input.projectId,
+                ...(input.planned === undefined ? {} : { planned: input.planned }),
+              })
+              for (const account of yield* allowed(agentId, input.projectId))
+                if (account.id !== input.accountId) found.push({ agentId, accountId: account.id, model })
+            }
+            return found
           }),
+        modelFor,
         named: (agentId, model, accountId = null) =>
           Effect.gen(function* () {
             const name = agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId

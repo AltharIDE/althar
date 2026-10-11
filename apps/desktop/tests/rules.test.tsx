@@ -363,11 +363,18 @@ describe('a project’s rules', () => {
     expect(screen.getAllByRole('menuitemradio').map((item) => item.textContent)).toEqual([
       expect.stringContaining('Move the work to the next agent free'),
       expect.stringContaining('Wait for the reset'),
+      expect.stringContaining('Ask me'),
     ])
     await userEvent.click(screen.getByRole('menuitemradio', { name: 'Wait for the reset' }))
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', usageLimit: 'wait' }))
     // No agent has more than one account here: the accounts aren't said.
     expect(says('Limits')).toBe('When an account runs out, the work waits for the reset.')
+    // Or the step waits for the person, who moves it or waits.
+    await choose(screen.getByRole('button', { name: 'waits for the reset' }), 'Ask me')
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', usageLimit: 'ask' }))
+    expect(says('Limits')).toBe(
+      'When an account runs out, the work waits for you to move it to a model that’s free, or to wait for the reset.',
+    )
   })
 
   it('offers the accounts of an agent with more than one: which run work here, and whether work goes on with the next', async () => {

@@ -2,7 +2,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type StuckStep, type ThreadSnapshot } from '@althar/contracts'
+import { type AgentStatus, ApiError, type LimitCall, type StuckStep, type ThreadSnapshot } from '@althar/contracts'
 import { TaskStatus } from '@althar/ui'
 
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
@@ -10,7 +10,7 @@ import { lookedOf, noOutputsOf, readsOf } from '../src/renderer/features/task/No
 import { conflictsOf } from '../src/renderer/features/task/Outputs'
 import { elapsedOf, sinceOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
-import { change, changed, fakeClient, items, models, snapshot, status, streamed } from './fixtures'
+import { agents, change, changed, fakeClient, items, models, snapshot, status, streamed, usual } from './fixtures'
 import type { ChangedFile } from '@althar/contracts'
 import { clock } from '../src/renderer/shared/time'
 import { reads } from '../src/renderer/data/reads'
@@ -1213,6 +1213,21 @@ describe('a task', () => {
       "Three rounds of review are done, and the lead's last changes haven't been reviewed. One finding is still open.",
       "Codex reached its usage limit and didn't say when it resets.",
     ])
+    const back = '2026-09-29T14:00:00.000Z'
+    expect(
+      stuckWords.what(
+        {
+          step: 'implement',
+          why: 'usage_limit',
+          detail: null,
+          agentId: null,
+          round: 0,
+          open: 0,
+          limit: { accountId: null, resetsAt: back, choices: [] },
+        },
+        'Codex',
+      ),
+    ).toBe(`Codex reached its usage limit, until ${clock(back)}.`)
     expect([at('stalled'), at('looping', 'npm test'), at('over_budget', '6 hours'), at('refused')]).toEqual([
       'Codex stopped showing any sign of work on this step.',
       'Codex kept running `npm test` to the same end.',
@@ -1273,6 +1288,131 @@ describe('a task', () => {
     await waitFor(() =>
       expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st9', answer: { kind: 'retry', agentId: 'codex' } }),
     )
+  })
+
+  it('asks with the models that could take over a step a usage limit stopped, and moves it, waits for the reset, or tries again', async () => {
+    const back = '2026-09-29T14:00:00.000Z'
+    const limited = (resetsAt: string | null) => ({
+      id: 'st10',
+      kind: 'stuck' as const,
+      title: 'Implement',
+      reason: '',
+      command: null,
+      createdAt: '2026-09-29T12:00:00.000Z',
+      stuck: {
+        step: 'implement' as const,
+        why: 'usage_limit' as const,
+        detail: null,
+        agentId: 'claude-code',
+        round: 0,
+        open: 0,
+        limit: {
+          accountId: 'acc_claude',
+          resetsAt,
+          choices: [
+            { agentId: 'claude-code', accountId: 'acc_work', model: 'opus' },
+            { agentId: 'codex', accountId: 'acc_codex', model: 'gpt-5.2' },
+            { agentId: 'opencode', accountId: 'acc_opencode', model: null },
+          ],
+        } satisfies LimitCall,
+      },
+    })
+    // As the accounts stand now: Claude Code's work account ran out since, Codex is paid per use, and OpenCode isn't signed in.
+    const now: ReadonlyArray<AgentStatus> = agents.map((agent) =>
+      agent.id === 'claude-code'
+        ? {
+            ...agent,
+            accounts: [
+              usual('acc_claude', 'signed_in'),
+              { ...usual('acc_work', 'signed_in'), name: 'work', outUntil: '2099-01-01T10:00:00.000Z' },
+            ],
+          }
+        : agent.id === 'codex'
+          ? { ...agent, accounts: [{ ...usual('acc_codex', 'signed_in'), paidBy: 'key' as const }] }
+          : agent,
+    )
+    // What the window first read of them is from before the work account ran out: the call reads them again.
+    const before = now.map((agent) =>
+      agent.id === 'claude-code' ? { ...agent, accounts: agent.accounts.map((account) => ({ ...account, outUntil: null })) } : agent,
+    )
+    const { client } = fakeClient({
+      status: vi
+        .fn()
+        .mockResolvedValueOnce({ ...status, agents: before })
+        .mockResolvedValue({ ...status, agents: now }),
+      getThread: vi.fn(async () => thread({ attention: [limited(back)] })),
+    })
+    const view = withServices(<Task />, client)
+    expect(await screen.findByText(`Claude Code (main) reached its usage limit, until ${clock(back)}.`)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
+    // The first free one is offered; the one out since is there but can't be picked, and one signed out isn't there at all.
+    await userEvent.click(await screen.findByRole('button', { name: 'Choose another model' }))
+    const menu = await screen.findByRole('menu')
+    const items = within(menu).getAllByRole('menuitemradio')
+    expect(items).toHaveLength(2)
+    expect(items[0]?.textContent).toContain('via Claude Code · work · out until')
+    expect(items[0]?.getAttribute('aria-disabled')).toBe('true')
+    expect(items[1]?.textContent).toContain('via Codex · paid per use')
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('button', { name: /^Continue with/ }))
+    await waitFor(() =>
+      expect(client.answerStuck).toHaveBeenCalledWith({
+        attentionId: 'st10',
+        answer: { kind: 'retry', agentId: 'codex', accountId: 'acc_codex', model: 'gpt-5.2' },
+      }),
+    )
+
+    // Waiting for the reset, where it is known.
+    view.unmount()
+    const waiting = withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: `Wait until ${clock(back)}` }))
+    await waitFor(() => expect(client.answerStuck).toHaveBeenLastCalledWith({ attentionId: 'st10', answer: { kind: 'wait' } }))
+
+    // With no reset known there is nothing to wait for: the agent can be tried again.
+    waiting.unmount()
+    vi.mocked(client.getThread).mockImplementation(async () => thread({ attention: [limited(null)] }))
+    withServices(<Task />, client)
+    expect(await screen.findByText("Claude Code (main) reached its usage limit and didn't say when it resets.")).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Wait until/ })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Try Claude Code (main) again' }))
+    await waitFor(() =>
+      expect(client.answerStuck).toHaveBeenLastCalledWith({ attentionId: 'st10', answer: { kind: 'retry', agentId: 'claude-code' } }),
+    )
+  })
+
+  it('reads the accounts again at the reset of one out of usage, so it can be picked then', async () => {
+    const until = new Date(Date.now() + 300).toISOString()
+    // Codex is out until a moment from now, as the runtime says each time it is asked.
+    const at = () =>
+      agents.map((agent) =>
+        agent.id === 'codex'
+          ? { ...agent, accounts: [{ ...usual('acc_codex', 'signed_in'), outUntil: Date.now() < Date.parse(until) ? until : null }] }
+          : agent,
+      )
+    const call = {
+      id: 'st11',
+      kind: 'stuck' as const,
+      title: 'Implement',
+      reason: '',
+      command: null,
+      createdAt: '2026-09-29T12:00:00.000Z',
+      stuck: {
+        step: 'implement' as const,
+        why: 'usage_limit' as const,
+        detail: null,
+        agentId: 'claude-code',
+        round: 0,
+        open: 0,
+        limit: { accountId: 'acc_claude', resetsAt: null, choices: [{ agentId: 'codex', accountId: 'acc_codex', model: null }] },
+      },
+    }
+    const { client } = fakeClient({
+      status: vi.fn(async () => ({ ...status, agents: at() })),
+      getThread: vi.fn(async () => thread({ attention: [call] })),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('No other model is free now.')).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /^Continue with/ }, { timeout: 4000 })).toBeTruthy()
   })
 
   it('starts the lead picked when the person says something to a task none is working on, with that as its first turn', async () => {
