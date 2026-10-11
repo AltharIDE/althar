@@ -175,6 +175,29 @@
   margin-right: 6px;
 }
 
+/* beside the microphone, narrow: which one it hears */
+.inputs {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 28px;
+  margin-left: -4px;
+  border-radius: 6px;
+  color: var(--t-3);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.inputs:hover {
+  background: var(--n-2);
+  color: var(--t-1);
+}
+.inputs[aria-expanded='true'] {
+  background: var(--n-4);
+  color: var(--t-1);
+}
+
 /* dictating is you talking, not a warning: ink, with your voice drawn as bars */
 .recButton {
   display: inline-flex;

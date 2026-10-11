@@ -5,6 +5,7 @@ import { type Dictation, type DictationState as TrayState, DictationSetup, type 
 import { reads } from '../../data/reads'
 import { type DictationEvent, type DictationHost, type DictationState, type DownloadStop, useServices } from '../../data/services'
 import { joined, live } from './live'
+import { chooseMicrophone, microphoneToUse, useChosenMicrophone, useMicrophones } from './microphones'
 import { type Record, type Recorded, record as recordMicrophone, type Recording } from './recorder'
 import { bytes, lengthOf, timeLeft, trayText } from './text'
 import { NO_VOCABULARY, respell, type Vocabulary, vocabularyOf } from './vocabulary'
@@ -18,6 +19,10 @@ import { NO_VOCABULARY, respell, type Vocabulary, vocabularyOf } from './vocabul
  * shows faint at the cursor as it is said (`live.ts`), and is written there
  * once it stops, with the project's own names spelt as its code spells them
  * (`vocabulary.ts`); never sent. Escape while listening throws it away.
+ *
+ * A menu beside the microphone chooses which one it hears (`microphones.ts`).
+ * Chosen while listening, it goes on from the new one, and what was said
+ * before stays.
  *
  * ⌘⇧D (Ctrl+Shift+D elsewhere) starts and stops it from anywhere in the
  * window; held down, letting go stops it. Where two composers dictate, the
@@ -136,6 +141,9 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
   const prepared = useRef(false)
   /* Download was pressed: once the model is here, it listens, if the tray is still open. */
   const listenWhenHere = useRef(false)
+  const chosen = useChosenMicrophone()
+  const { microphones, refresh: refreshMicrophones } = useMicrophones()
+  const input = microphoneToUse(chosen, microphones)
 
   const refresh = async () => {
     const state = await voice.state()
@@ -218,7 +226,7 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
       recording.current = await record((frame) => {
         setLevels((bars) => [...bars.slice(1 - BARS), frame.level])
         if (recording.current !== null) now.frame(frame, recording.current)
-      })
+      }, input)
     } catch (error) {
       setPhase('idle')
       const name = error instanceof DOMException ? error.name : ''
@@ -227,6 +235,8 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
       return
     }
     writer.current = now
+    // The system names its microphones once one may be used.
+    refreshMicrophones()
     setAt(inputRef.current?.selectionStart ?? inputRef.current?.value.length ?? 0)
     setInterim('')
     setSeconds(0)
@@ -258,6 +268,12 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
     setInterim('')
     setLevels((bars) => bars.map(() => 0))
     setPhase('idle')
+  }
+
+  /** The menu beside the microphone: kept for next time, and heard from now on where it is listening. */
+  const chooseInput = (id: string | null) => {
+    chooseMicrophone(id === null ? null : (microphones.find((m) => m.id === id) ?? null))
+    void recording.current?.use(id)
   }
 
   const startDownload = async (state: DictationState) => {
@@ -337,7 +353,8 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
   useEffect(() => {
     if (!listening) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
+      // Escape in the list of microphones closes the list, not what is being said.
+      if (event.key !== 'Escape' || (event.target instanceof Element && event.target.closest('[role="menu"]') !== null)) return
       event.preventDefault()
       event.stopPropagation()
       escape()
@@ -473,6 +490,9 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
       busy: phase === 'writing',
       expanded: shown !== null,
       ...(download !== null && shown === null ? { progress: download.got / download.size } : {}),
+      inputs: microphones,
+      input: microphones.some((m) => m.id === input) ? input : null,
+      onChooseInput: chooseInput,
       onStart: () => void press(),
       onStop: stop,
     },

@@ -1,11 +1,12 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { Composer, DictationTray } from '@althar/ui'
 
 import type { DictationHost, DictationState } from '../src/renderer/data/services'
+import { microphonesOf, microphoneToUse } from '../src/renderer/shared/dictation/microphones'
 import type { Frame, Record } from '../src/renderer/shared/dictation/recorder'
 import { bytes, lengthOf, timeLeft, trayText } from '../src/renderer/shared/dictation/text'
 import { useDictation } from '../src/renderer/shared/dictation/useDictation'
@@ -54,19 +55,20 @@ const fakeDictation = (initial: DictationState, overrides: Partial<DictationHost
 /** A microphone that hears `seconds` of something; `hear` plays it moments by hand. */
 const fakeRecord = (seconds = 2, fail?: DOMException) => {
   const cancel = vi.fn()
+  const use = vi.fn(async (_deviceId: string | null) => {})
   let onFrame: (frame: Frame) => void = () => {}
   const heard = () => ({ samples: new Float32Array(16_000 * seconds), sampleRate: 16_000 })
-  const record: Record = vi.fn(async (listener: (frame: Frame) => void) => {
+  const record = vi.fn<Record>(async (listener) => {
     if (fail !== undefined) throw fail
     onFrame = listener
     // Before the recording is handed over: heard by the bars, not by the writer.
     listener({ level: 0.5, rms: 0.1, end: 1024, rate: 16_000 })
-    return { peek: heard, stop: heard, cancel }
+    return { peek: heard, stop: heard, cancel, use }
   })
   /** A moment `at` seconds in: speech, or quiet. */
   const hear = (at: number, loud = true) =>
     act(() => onFrame({ level: loud ? 0.5 : 0, rms: loud ? 0.1 : 0.001, end: Math.round(at * 16_000), rate: 16_000 }))
-  return { record, cancel, hear }
+  return { record, cancel, use, hear }
 }
 
 function Harness({ record, onSubmit, initial = '' }: { record: Record; onSubmit?: (text: string) => void; initial?: string }) {
@@ -514,6 +516,160 @@ describe('the shortcut', () => {
     show(fakeDictation(state()).dictation, fakeRecord().record)
     await userEvent.hover(screen.getByRole('button', { name: 'Dictate' }))
     await waitFor(() => expect(document.body.textContent).toMatch(/⌘⇧D|Ctrl\+Shift\+D/))
+  })
+})
+
+/** The system's microphones, named or not as it names them; `change` plugs one in or pulls one out. */
+const fakeDevices = (devices: Array<{ deviceId: string; label: string }>) => {
+  let now = devices
+  const listeners = new Set<() => void>()
+  const list = () => now.map((device) => ({ kind: 'audioinput' as const, groupId: '', toJSON: () => ({}), ...device }))
+  Object.defineProperty(navigator, 'mediaDevices', {
+    value: {
+      enumerateDevices: vi.fn(async () => list()),
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    },
+    configurable: true,
+  })
+  const change = async (next: Array<{ deviceId: string; label: string }>) => {
+    now = next
+    await act(async () => listeners.forEach((listener) => listener()))
+  }
+  return { change }
+}
+
+const NAMED = [
+  { deviceId: 'default', label: 'Default - MacBook Pro Microphone' },
+  { deviceId: 'built-in', label: 'MacBook Pro Microphone' },
+  { deviceId: 'usb', label: 'Shure MV7' },
+]
+
+const microphoneMenu = async () => {
+  await userEvent.click(screen.getByRole('button', { name: 'Choose the microphone' }))
+  return screen.findByRole('menu', { name: 'Microphone' })
+}
+
+describe('choosing the microphone', () => {
+  const ready = () => fakeDictation(state({}, { ready: true, got: SIZE }))
+  afterEach(() => void Reflect.deleteProperty(navigator, 'mediaDevices'))
+
+  it('offers only the system’s default while the system names no microphone', async () => {
+    fakeDevices([{ deviceId: 'a', label: '' }])
+    show(ready().dictation, fakeRecord().record)
+    const menu = await microphoneMenu()
+    expect(
+      within(menu)
+        .getAllByRole('menuitemradio')
+        .map((item) => item.textContent),
+    ).toEqual(['System default'])
+    expect(within(menu).getByRole('menuitemradio', { name: 'System default' }).getAttribute('aria-checked')).toBe('true')
+    expect(within(menu).getByText(/Other microphones show here/)).toBeTruthy()
+  })
+
+  it('lists the microphones after the default, hears the chosen one, and keeps it for next time', async () => {
+    fakeDevices(NAMED)
+    const { record } = fakeRecord()
+    const { unmount } = show(ready().dictation, record)
+    const menu = await microphoneMenu()
+    // The system's own stand-in for its default isn't offered twice.
+    await waitFor(() =>
+      expect(
+        within(menu)
+          .getAllByRole('menuitemradio')
+          .map((item) => item.textContent),
+      ).toEqual(['System default', 'MacBook Pro Microphone', 'Shure MV7']),
+    )
+    await userEvent.click(within(menu).getByRole('menuitemradio', { name: 'Shure MV7' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    expect(record).toHaveBeenLastCalledWith(expect.any(Function), 'usb')
+    unmount()
+
+    // Another launch: the choice is still there.
+    const again = fakeRecord()
+    show(ready().dictation, again.record)
+    const next = await microphoneMenu()
+    await waitFor(() => expect(within(next).getByRole('menuitemradio', { name: 'Shure MV7' }).getAttribute('aria-checked')).toBe('true'))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    expect(again.record).toHaveBeenLastCalledWith(expect.any(Function), 'usb')
+  })
+
+  it('hears the default where the chosen microphone is gone, and the chosen one again when it is back', async () => {
+    const devices = fakeDevices(NAMED)
+    const { record } = fakeRecord()
+    show(ready().dictation, record)
+    await userEvent.click(within(await microphoneMenu()).getByRole('menuitemradio', { name: 'Shure MV7' }))
+    await devices.change(NAMED.slice(0, 2))
+    const menu = await microphoneMenu()
+    await waitFor(() =>
+      expect(within(menu).getByRole('menuitemradio', { name: 'System default' }).getAttribute('aria-checked')).toBe('true'),
+    )
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    expect(record).toHaveBeenLastCalledWith(expect.any(Function), null)
+    await userEvent.click(screen.getByRole('button', { name: /^Stop dictating/ }))
+    await screen.findByRole('button', { name: 'Dictate' })
+
+    // Plugged in again, under a new id: known by its name.
+    await devices.change([...NAMED.slice(0, 2), { deviceId: 'usb-2', label: 'Shure MV7' }])
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    expect(record).toHaveBeenLastCalledWith(expect.any(Function), 'usb-2')
+  })
+
+  it('goes on from another microphone chosen while listening, keeping what was said, and Escape there closes only the list', async () => {
+    fakeDevices(NAMED)
+    const host = ready()
+    const { record, use, cancel } = fakeRecord()
+    show(host.dictation, record)
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    expect(record).toHaveBeenLastCalledWith(expect.any(Function), null)
+
+    let menu = await microphoneMenu()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(menu.isConnected).toBe(false))
+    expect(cancel).not.toHaveBeenCalled()
+
+    menu = await microphoneMenu()
+    await userEvent.click(within(menu).getByRole('menuitemradio', { name: 'MacBook Pro Microphone' }))
+    expect(use).toHaveBeenCalledWith('built-in')
+    expect(record).toHaveBeenCalledTimes(1)
+    await userEvent.click(screen.getByRole('button', { name: /^Stop dictating/ }))
+    await waitFor(() => expect(field()).toHaveProperty('value', 'check the retry path'))
+    expect(host.dictation.transcribe).toHaveBeenCalledTimes(1)
+  })
+
+  it('still says there is no microphone when none can be had', async () => {
+    fakeDevices([])
+    show(ready().dictation, fakeRecord(2, new DOMException('none', 'NotFoundError')).record)
+    await userEvent.click(screen.getByRole('button', { name: 'Choose the microphone' }))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    expect(await screen.findByText('No microphone found')).toBeTruthy()
+  })
+
+  it('reads the system’s microphones, and which of them to hear', () => {
+    const named = microphonesOf([
+      ...NAMED.map((device) => ({ kind: 'audioinput' as const, ...device })),
+      { kind: 'audioinput', deviceId: 'communications', label: 'Communications - Headset' },
+      { kind: 'audiooutput', deviceId: 'speakers', label: 'Speakers' },
+      { kind: 'audioinput', deviceId: 'unnamed', label: '' },
+    ])
+    expect(named).toEqual([
+      { id: 'built-in', label: 'MacBook Pro Microphone' },
+      { id: 'usb', label: 'Shure MV7' },
+    ])
+    expect(microphoneToUse(null, named)).toBeNull()
+    expect(microphoneToUse({ id: 'usb', label: 'Shure MV7' }, named)).toBe('usb')
+    expect(microphoneToUse({ id: 'old', label: 'Shure MV7' }, named)).toBe('usb')
+    expect(microphoneToUse({ id: 'gone', label: 'Gone' }, named)).toBeNull()
+    // While the system names none, the chosen one is tried, and the recorder passes over it if it isn't there.
+    expect(microphoneToUse({ id: 'usb', label: 'Shure MV7' }, [])).toBe('usb')
   })
 })
 

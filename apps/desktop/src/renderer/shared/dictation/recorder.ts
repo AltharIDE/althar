@@ -5,6 +5,11 @@
  * What has been heard so far can be read while it goes on, to write down as
  * the person speaks. Nothing is written to disk, and nothing is kept once it
  * is written down or thrown away.
+ *
+ * It hears the microphone the person chose, or the system's default where
+ * they chose none or the one they chose is gone. Another can be chosen while
+ * it goes on: what was heard stays, and what follows comes from the new one.
+ * A microphone pulled out mid-way hands over to the default, and goes on.
  */
 
 export interface Recorded {
@@ -27,18 +32,38 @@ export interface Recording {
   readonly stop: () => Recorded
   /** Stops, and keeps nothing. */
   readonly cancel: () => void
+  /** Goes on from another microphone (null: the system's default), keeping what was heard. Where it can't be had, it goes on as it was. */
+  readonly use: (deviceId: string | null) => Promise<void>
 }
 
-/** Starts recording; `onFrame` hears each moment, about fifteen times a second. Rejects as getUserMedia does. */
-export type Record = (onFrame: (frame: Frame) => void) => Promise<Recording>
+/** Starts recording from `deviceId`, or the system's default; `onFrame` hears each moment, about fifteen times a second. Rejects as getUserMedia does. */
+export type Record = (onFrame: (frame: Frame) => void, deviceId?: string | null) => Promise<Recording>
 
 /* About 64 ms at 16 kHz: often enough for the bars to follow a voice. */
 const FRAME = 1024
 
-export const record: Record = async (onFrame) => {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-  })
+const AUDIO = { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+
+/* What getUserMedia says when the microphone asked for by id isn't there. */
+const isGone = (error: unknown) => {
+  const name = typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined
+  return name === 'OverconstrainedError' || name === 'NotFoundError'
+}
+
+/** The chosen microphone, or the system's default where none is chosen or it is gone. */
+const open = async (deviceId: string | null): Promise<MediaStream> => {
+  if (deviceId !== null) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: { ...AUDIO, deviceId: { exact: deviceId } } })
+    } catch (error) {
+      if (!isGone(error)) throw error
+    }
+  }
+  return navigator.mediaDevices.getUserMedia({ audio: AUDIO })
+}
+
+export const record: Record = async (onFrame, deviceId = null) => {
+  let stream = await open(deviceId)
   let context: AudioContext
   try {
     context = new AudioContext({ sampleRate: 16_000 })
@@ -46,7 +71,7 @@ export const record: Record = async (onFrame) => {
     // A system that can't resample to 16 kHz records at its own rate; the speech process resamples.
     context = new AudioContext()
   }
-  const source = context.createMediaStreamSource(stream)
+  let source = context.createMediaStreamSource(stream)
   // A ScriptProcessor rather than a worklet: the page's policy loads scripts from its own files only, and a worklet needs a module.
   const node = context.createScriptProcessor(FRAME, 1, 1)
   const chunks: Array<Float32Array> = []
@@ -63,6 +88,39 @@ export const record: Record = async (onFrame) => {
   }
   source.connect(node)
   node.connect(context.destination)
+  let ended = false
+  /* Each change of microphone has a number; one overtaken by a later one is let go. */
+  let changes = 0
+  const use = async (next: string | null) => {
+    if (ended) return
+    const change = ++changes
+    let fresh: MediaStream
+    try {
+      fresh = await open(next)
+    } catch {
+      return
+    }
+    if (ended || change !== changes) {
+      for (const track of fresh.getTracks()) track.stop()
+      return
+    }
+    const was = { stream, source }
+    stream = fresh
+    source = context.createMediaStreamSource(fresh)
+    source.connect(node)
+    was.source.disconnect()
+    for (const track of was.stream.getTracks()) track.stop()
+    watch(fresh, next)
+  }
+  /* A chosen microphone pulled out mid-way hands over to the default. */
+  const watch = (heard: MediaStream, chosen: string | null) => {
+    if (chosen === null) return
+    for (const track of heard.getTracks())
+      track.addEventListener?.('ended', () => {
+        if (stream === heard) void use(null)
+      })
+  }
+  watch(stream, deviceId)
   const from = (start: number) => {
     const samples = new Float32Array(Math.max(0, length - start))
     let at = 0
@@ -80,6 +138,7 @@ export const record: Record = async (onFrame) => {
     return { samples, sampleRate: context.sampleRate }
   }
   const end = () => {
+    ended = true
     node.onaudioprocess = null
     source.disconnect()
     node.disconnect()
@@ -93,5 +152,6 @@ export const record: Record = async (onFrame) => {
       return from(0)
     },
     cancel: end,
+    use,
   }
 }
