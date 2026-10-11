@@ -74,5 +74,5 @@ export const TEAM_LEAD = 'A small team, building in the open.'
 
 export const TEAM: readonly Person[] = [
   { name: 'Balázs Otakomaiya', signs: 'Balázs', does: 'Vision, design, product and code' },
-  { name: 'Benjamin Oláh', signs: 'Benji', does: 'Operations' },
+  { name: 'Benjamin Olah-Grosz', signs: 'Benji', does: 'Operations and marketing' },
 ]
