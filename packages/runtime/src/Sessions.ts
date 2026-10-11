@@ -19,7 +19,7 @@ import { type Account, Accounts } from './Accounts'
 import type { Artifacts } from './Artifacts'
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
-import { coordinatorNews } from './coordinatorNews'
+import { coordinatorNews, modelNamer } from './coordinatorNews'
 import {
   AlreadyDelivered,
   EffortUnchanged,
@@ -524,16 +524,16 @@ export class Sessions extends Context.Service<
               Effect.catchCause((cause) => Effect.logWarning('Could not refresh the coordinator folder', cause)),
             )
           const brief = running.brief
-          // What became of its plans since it last spoke, which only the cards show the person: read first, so it speaks of them as they are.
-          const news =
+          // The coordinator is told what became of its plans in its models' names, which are read first: asking an agent may take a while.
+          const named =
             thread.role === 'coordinator'
-              ? yield* coordinatorNews(thread.threadId, thread.projectId).pipe(
+              ? yield* modelNamer.pipe(
                   Effect.catchCause((cause) =>
-                    Effect.as(Effect.logWarning('Could not read what changed for the coordinator', cause), null),
+                    Effect.as(Effect.logWarning('Could not read the models to name for the coordinator', cause), null),
                   ),
                 )
               : null
-          const prompt = promptFor(inputs, brief, news)
+          let prompt = promptFor(inputs, brief)
           const turnId = yield* newId(Ids.turnDelivery)
           const [session] = yield* sql<{
             model: string | null
@@ -548,6 +548,15 @@ export class Sessions extends Context.Service<
                     id: string
                   }>`SELECT id FROM user_inputs WHERE state = 'queued' AND id IN ${sql.in(inputs.map((input) => input.id))}`
                   if (still.length < inputs.length) return yield* new TakenBack()
+                }
+                // What became of its plans since it last spoke, which only the cards show the person: read with the turn's record, so none falls between two turns.
+                if (thread.role === 'coordinator' && named !== null) {
+                  const news = yield* coordinatorNews(thread.threadId, thread.projectId, named).pipe(
+                    Effect.catchCause((cause) =>
+                      Effect.as(Effect.logWarning('Could not read what changed for the coordinator', cause), null),
+                    ),
+                  )
+                  prompt = promptFor(inputs, brief, news)
                 }
                 const at = yield* timestamp
                 yield* sql`INSERT INTO turn_deliveries ${sql.insert({

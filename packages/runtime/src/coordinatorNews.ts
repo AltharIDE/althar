@@ -14,6 +14,11 @@ import { PlanParameters, type PlanStep, type TaskEnd } from './Runs'
  * each plan and moved on; the card is the person's to change, and nothing
  * else tells it. Read before what the person says next, it speaks of each
  * plan as it now is, not as it proposed it.
+ *
+ * What it has been told is counted by the ledger's order, not by the clock:
+ * the news is everything after the record of the turn before, read in the
+ * same transaction that records this turn, so nothing lands between what it
+ * is told now and where the next turn's news starts.
  */
 
 /** The plan events the coordinator hears of, by what each did. */
@@ -33,29 +38,42 @@ const endWords = (end: TaskEnd | null | undefined) => {
   }
 }
 
-/** The coordinator's news since its last turn on the thread, or null with none: nothing changed, or it has never spoken. */
-export const coordinatorNews = (threadId: string, projectId: string) =>
+/** A step's model as people know it, from what its agent offers; its id where the agent doesn't say. */
+export type ModelNamer = (step: PlanStep) => string
+
+/** Names each step's model from every agent's models, as far as they are known: read before the turn is recorded, as asking an agent may take a while. */
+export const modelNamer = Effect.gen(function* () {
+  const agents = yield* Agents
+  const catalog = yield* (yield* Models).catalog
+  return (step: PlanStep) => {
+    const entry = agents.list.find((one) => one.definition.id === step.agentId)
+    const agent = { id: step.agentId, name: entry?.definition.name ?? step.agentId }
+    const model = catalog.find((one) => one.agentId === step.agentId)?.models.find((one) => one.id === step.model)
+    const name = model === undefined ? (step.model === null ? `${agent.name}'s default model` : step.model) : knownModelName(agent, model)
+    return step.effort === undefined || step.effort === null ? name : `${name} (effort ${step.effort})`
+  }
+})
+
+/**
+ * The coordinator's news since its last turn on the thread, or null with
+ * none: nothing changed, or it has never spoken. Read in the transaction
+ * that records the turn it goes with.
+ */
+export const coordinatorNews = (threadId: string, projectId: string, modelOf: ModelNamer) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const instance = yield* Instance
-    const [last] = yield* sql<{ at: string | null }>`SELECT max(requested_at) AS at FROM turn_deliveries WHERE thread_id = ${threadId}`
-    if (last?.at === null || last?.at === undefined) return null
+    // Where the turn before was recorded, in the ledger's order.
+    const [last] = yield* sql<{ sequence: number | null }>`
+      SELECT max(e.sequence) AS sequence FROM record_events e JOIN turn_deliveries d ON d.id = e.aggregate_id
+      WHERE e.aggregate_type = 'turn_delivery' AND e.type = 'turn_delivery.requested' AND d.thread_id = ${threadId}`
+    if (last?.sequence === null || last?.sequence === undefined) return null
     const events = yield* sql<{ planId: string; type: (typeof HEARD)[number]; actorId: string }>`
       SELECT aggregate_id AS plan_id, type, actor_id FROM record_events
-      WHERE project_id = ${projectId} AND aggregate_type = 'task_plan' AND occurred_at > ${last.at} AND type IN ${sql.in(HEARD)}
+      WHERE project_id = ${projectId} AND aggregate_type = 'task_plan' AND sequence > ${last.sequence} AND type IN ${sql.in(HEARD)}
       ORDER BY sequence`
     if (events.length === 0) return null
 
-    const agents = yield* Agents
-    const catalog = yield* (yield* Models).catalog
-    /** A step's model as people know it, from what its agent offers; its id where the agent doesn't say. */
-    const modelOf = (step: PlanStep) => {
-      const entry = agents.list.find((one) => one.definition.id === step.agentId)
-      const agent = { id: step.agentId, name: entry?.definition.name ?? step.agentId }
-      const model = catalog.find((one) => one.agentId === step.agentId)?.models.find((one) => one.id === step.model)
-      const name = model === undefined ? (step.model === null ? `${agent.name}'s default model` : step.model) : knownModelName(agent, model)
-      return step.effort === undefined || step.effort === null ? name : `${name} (effort ${step.effort})`
-    }
     const team = (parameters: PlanParameters) => {
       const lead = parameters.steps.find((step) => step.key === 'implement')
       const review = parameters.steps.find((step) => step.key === 'review')

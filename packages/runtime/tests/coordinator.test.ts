@@ -465,6 +465,38 @@ describe('the coordinator loop', () => {
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.seconds(30) }))),
   )
 
+  it.live('tells the coordinator of a change recorded after its last turn, by the record’s order, whatever its clock says', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const plans = yield* Plans
+      const { projectId, threadId } = yield* opened
+      const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
+      const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
+      yield* say(threadId, 'Something small. [coordinator:plan-no-review] [lead:finish]')
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards.length === 1)
+      const planId = card?.plan?.id ?? ''
+      yield* plans.hold(planId, actor)
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'held')
+      // Wait until its turn is over, so the change comes after it in the record.
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId} AND state IN ('pending', 'delivered')`,
+        (rows) => rows.length === 0,
+      )
+      yield* plans.change(planId, [{ key: 'implement', agentId: 'codex', model: 'large', skipped: false }], actor)
+      // Recorded after the turn, but stamped before it: as when a change lands while the turn is being recorded.
+      yield* sql`UPDATE record_events SET occurred_at = '2020-01-01T00:00:00.000Z' WHERE type IN ('task_plan.changed', 'task_plan.held')`
+      yield* say(threadId, 'Where is it?')
+      const [heard] = yield* until(
+        sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${threadId} AND prompt LIKE '%Where is it?%'`,
+        (rows) => rows.length === 1,
+      )
+      assert.match(
+        heard?.prompt ?? '',
+        /The person changed its plan: you proposed .+ leads, no review\. Now Large leads, no review\. The person is holding it/,
+      )
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.seconds(30) }))),
+  )
+
   it.live('holds what came due while Althar was closed', () =>
     Effect.gen(function* () {
       const file = join(mkdtempSync(join(tmpdir(), 'althar-plans-')), 'althar.sqlite')
