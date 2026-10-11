@@ -78,9 +78,9 @@ describe('settings on Linux', () => {
         edge: vi.fn(async () => ({ place: 'island', notch: false, platform: 'linux', tray })),
       })
     const first = withServices(<Settings />, fakeClient().client, linux(true))
-    expect(
-      await within(await screen.findByRole('dialog', { name: 'Settings' })).findByRole('button', { name: /^In other apps\s*System tray/ }),
-    ).toBeTruthy()
+    // A desktop may take the mark and not show it, which nothing tells Althar: the page says where it would be then.
+    const tray = await openModule(/^In other apps\s*System tray/)
+    expect(within(tray).getByText('Where the desktop has no tray, Althar shows only in its window.')).toBeTruthy()
     first.unmount()
     withServices(<Settings />, fakeClient().client, linux(false))
     const panel = await openModule(/^In other apps\s*No tray/)

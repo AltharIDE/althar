@@ -278,7 +278,8 @@ export const startEdge = (host: EdgeHost): Edge => {
         showTray()
         trayless = false
       } catch {
-        // Where the system has no menu bar to put it in (a desktop without a tray), there is no edge, and Settings says so.
+        // Where the system has no menu bar to put it in (a desktop without a tray), there is no edge, and Settings says so. A
+        // desktop may also take the mark without a tray to show it in, which Electron doesn't say; Settings mentions that too.
         trayless = true
       }
     }

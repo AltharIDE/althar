@@ -143,7 +143,11 @@ const whereOn = (system: System, place: 'island' | 'menu'): Where => {
       return {
         spot: EdgeSpot.LinuxTray,
         word: 'System tray',
-        page: { title: 'In the system tray', note: 'Click Althar’s mark to see what needs you and what runs.' },
+        page: {
+          title: 'In the system tray',
+          note: 'Click Althar’s mark to see what needs you and what runs.',
+          why: 'Where the desktop has no tray, Althar shows only in its window.',
+        },
       }
     case 'trayless':
       return {

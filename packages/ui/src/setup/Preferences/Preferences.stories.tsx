@@ -200,6 +200,16 @@ export const WhereItShows: Story = {
     await expect(c.getByRole('radio', { name: /In the menu bar/ })).toBeChecked()
     await userEvent.click(c.getByRole('radio', { name: /Round the notch/ }))
     await expect(c.getByRole('radio', { name: /Round the notch/ })).toBeChecked()
+    // Arrows move between them, choosing as they go, and back round from the last.
+    await userEvent.keyboard('{ArrowRight}')
+    await expect(c.getByRole('radio', { name: /In the menu bar/ })).toBeChecked()
+    await expect(c.getByRole('radio', { name: /In the menu bar/ })).toHaveFocus()
+    await userEvent.keyboard('{ArrowRight}')
+    await expect(c.getByRole('radio', { name: /Round the notch/ })).toBeChecked()
+    // Tab leaves the group rather than going through it.
+    await userEvent.tab()
+    await expect(c.getByRole('radio', { name: /In the menu bar/ })).not.toHaveFocus()
+    await expect(c.getByRole('radio', { name: /Round the notch/ })).not.toHaveFocus()
     // Its picture is beside its radio, never inside it.
     await expect(
       c
@@ -311,6 +321,7 @@ export const AllStates: Story = {
             <EdgeHere
               title="In the system tray"
               note="Click Althar’s mark to see what needs you and what runs."
+              why="Where the desktop has no tray, Althar shows only in its window."
               picture={<EdgeMini spot={EdgeSpot.LinuxTray} scale={2.6} />}
             />
           ),

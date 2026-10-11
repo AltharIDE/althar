@@ -71,7 +71,13 @@ export const edgeWords = (spot: EdgeSpot): EdgeWords => {
         why: 'Windows may tuck it under the ^ beside the clock. Drag it onto the taskbar to keep it in sight.',
       }
     case EdgeSpot.LinuxTray:
-      return { word: 'System tray', title: 'In the system tray', note: menuNote }
+      // A desktop may take the mark and not show it, which nothing tells Althar: said, in case.
+      return {
+        word: 'System tray',
+        title: 'In the system tray',
+        note: menuNote,
+        why: 'Where the desktop has no tray, Althar shows only in its window.',
+      }
     case EdgeSpot.WindowOnly:
       return {
         word: 'No tray',

@@ -30,6 +30,8 @@ export const useEdgePlace = (open = true): EdgePlaceModel => {
   const [place, setPlace] = useState<EdgePlace>('island')
   const [failed, setFailed] = useState(false)
   const made = useRef(0)
+  /** Choices not yet kept or refused: while any is, what the main process says is from before it. */
+  const pending = useRef(0)
   const kept = useRef<EdgePlace>('island')
   const asked = useRef(false)
 
@@ -43,8 +45,8 @@ export const useEdgePlace = (open = true): EdgePlaceModel => {
       (answer) => {
         if (!live || answer === null) return
         setRoom({ platform: answer.platform, notch: answer.notch, tray: answer.tray })
-        // A choice made while this was asked stands.
-        if (at !== made.current) return
+        // A choice made while this was asked, or still being kept, stands.
+        if (at !== made.current || pending.current > 0) return
         const read = isEdgePlace(answer.place) ? answer.place : 'island'
         kept.current = read
         setPlace(read)
@@ -58,13 +60,16 @@ export const useEdgePlace = (open = true): EdgePlaceModel => {
 
   const choose = (next: EdgePlace) => {
     const at = ++made.current
+    pending.current += 1
     setPlace(next)
     setFailed(false)
     host.setEdge(next).then(
       () => {
+        pending.current -= 1
         if (at === made.current) kept.current = next
       },
       () => {
+        pending.current -= 1
         if (at !== made.current) return
         setPlace(kept.current)
         setFailed(true)

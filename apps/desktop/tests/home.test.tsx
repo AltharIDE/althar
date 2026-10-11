@@ -766,6 +766,43 @@ describe('settings', () => {
     expect(await within(again).findByRole('button', { name: /^In other apps\s*Menu bar/ })).toBeTruthy()
   })
 
+  it('keeps a choice still being kept when it opens again and reads what was there before', async () => {
+    let kept = 'island'
+    let keep: () => void = () => undefined
+    const host = fakeHost({
+      edge: vi.fn(async () => ({ place: kept, notch: true, platform: 'darwin', tray: true })),
+      setEdge: vi.fn((place: string) => new Promise<void>((resolve) => (keep = () => ((kept = place), resolve())))),
+    })
+    function Reopening() {
+      const [open, setOpen] = useState(true)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open again
+          </button>
+          <SettingsPanel start={useStart()} open={open} onOpenChange={setOpen} />
+        </>
+      )
+    }
+    withServices(<Reopening />, fakeClient().client, host)
+    await openModule(/^In other apps\s*Round the notch/)
+    await userEvent.click(
+      within(await screen.findByRole('radiogroup', { name: 'In other apps' })).getByRole('radio', { name: /In the menu bar/ }),
+    )
+    // Closed and opened again before the main process has kept it: what it reads is from before, and the choice stands.
+    await userEvent.keyboard('{Escape}')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull())
+    await userEvent.click(screen.getByRole('button', { name: 'Open again' }))
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await waitFor(() => expect(host.edge).toHaveBeenCalledTimes(2))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(within(panel).getByRole('button', { name: /^In other apps\s*Menu bar/ })).toBeTruthy()
+    act(() => keep())
+    expect(kept).toBe('menu')
+    expect(within(panel).getByRole('button', { name: /^In other apps\s*Menu bar/ })).toBeTruthy()
+  })
+
   it('goes back to where it was when a choice can’t be kept', async () => {
     const host = fakeHost({
       edge: vi.fn(async () => ({ place: 'menu', notch: true, platform: 'darwin', tray: true })),
