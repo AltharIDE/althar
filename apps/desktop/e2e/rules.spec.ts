@@ -79,6 +79,8 @@ test('the coordinator answers a task permission, leaves always-ask items to the 
   const { electronApp, page } = await launch(home)
   try {
     await openFirstProject(electronApp, page, repository(home))
+    // On the project first: until it shows, Settings is the home's, Althar's own.
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await openRules(page)
     await choose(page, 'allowed', 'The coordinator decides')
     await expect(sentence(page, 'The rest')).toContainText('the coordinator decides')
