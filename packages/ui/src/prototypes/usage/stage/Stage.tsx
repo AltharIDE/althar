@@ -60,31 +60,51 @@ export interface BarHostProps {
   running: number
   /** The bar's next control after the readout, for focus to go to when the readout leaves. */
   nextRef?: Ref<HTMLButtonElement>
+  /** Only the readout and the work's status, for a page narrower than a window. */
+  bare?: boolean
 }
 
 /** A project window's bar, with a readout where the work's status starts. */
-export function BarHost({ readout, running, nextRef }: BarHostProps) {
+export function BarHost({ readout, running, nextRef, bare = false }: BarHostProps) {
   return (
     <TitleBar
-      lights="drawn"
+      lights={bare ? 'none' : 'drawn'}
       end={
         <>
           {readout}
           <WorkStatus running={running} yours={2} onYours={noop} />
-          <TitleBarRule />
-          <ChromeButton ref={nextRef} icon="knowledge" label="Knowledge" kbd="k" onClick={noop} />
-          <ChromeButton icon="artifact" label="Artifacts" kbd="a" onClick={noop} />
+          {!bare && (
+            <>
+              <TitleBarRule />
+              <ChromeButton ref={nextRef} icon="knowledge" label="Knowledge" kbd="k" onClick={noop} />
+              <ChromeButton icon="artifact" label="Artifacts" kbd="a" onClick={noop} />
+            </>
+          )}
         </>
       }
     >
-      <ProjectSwitcher current={MERIDIAN} projects={PROJECTS} onPick={noop} onRename={noop} onNew={noop} />
-      <RoomSwitch value={Room.Board} onChange={noop} />
+      {!bare && (
+        <>
+          <ProjectSwitcher current={MERIDIAN} projects={PROJECTS} onPick={noop} onRename={noop} onNew={noop} />
+          <RoomSwitch value={Room.Board} onChange={noop} />
+        </>
+      )}
     </TitleBar>
   )
 }
 
-/** A task's composer, with the dial (or nothing) before its context ring. */
-export function ComposerHost({ dial }: { dial?: ReactNode }) {
+/** For the comparison page: what it is given, on paper and on the dark stand-in, one over the other. */
+export function Specimen({ children }: { children: ReactNode }) {
+  return (
+    <div className={s.specimen}>
+      <Stage>{children}</Stage>
+      <Stage scheme="dark">{children}</Stage>
+    </div>
+  )
+}
+
+/** A task's composer, with the pie (or nothing) before its context ring. */
+export function ComposerHost({ pie }: { pie?: ReactNode }) {
   const [value, setValue] = useState('')
   const effort = effortFor(OPUS)
   return (
@@ -109,7 +129,7 @@ export function ComposerHost({ dial }: { dial?: ReactNode }) {
         }
         meter={
           <>
-            {dial}
+            {pie}
             <ContextRing used={122} total={OPUS.context ?? 200} model={OPUS} />
           </>
         }
@@ -175,6 +195,17 @@ export function useLive(every = 2000) {
 /** A sheet of Settings, as the Control Center opens one out. */
 export function Sheet({ children }: { children: ReactNode }) {
   return <div className={s.sheet}>{children}</div>
+}
+
+/** The live loop, on paper and on the dark stand-in, each its own region so two bars aren't two banners. */
+export function LivePair({ children }: { children: (usage: Usage, scheme: Scheme) => ReactNode }) {
+  const { ref, usage } = useLive()
+  return (
+    <div ref={ref} className={s.live}>
+      <section aria-label="Light">{children(usage, 'light')}</section>
+      <section aria-label="Dark">{children(usage, 'dark')}</section>
+    </div>
+  )
 }
 
 /** A story's frame: room around it, and a caption that says what to look at. */

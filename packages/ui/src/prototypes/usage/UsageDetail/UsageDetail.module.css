@@ -137,7 +137,7 @@
 .task {
   display: grid;
   grid-template-columns: 13px 1fr auto;
-  align-items: baseline;
+  align-items: start;
   column-gap: 8px;
   width: 100%;
   padding: 6px;
@@ -180,6 +180,19 @@
 .taskMeta {
   font-size: 11px;
   color: var(--t-3);
+}
+/* its CPU, and under it the memory it holds */
+.taskFigures {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+.taskMemory {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+  white-space: nowrap;
 }
 .none {
   margin: 0;

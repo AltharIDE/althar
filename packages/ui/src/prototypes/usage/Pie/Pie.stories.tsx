@@ -2,49 +2,39 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, screen, within } from 'storybook/test'
 
 import { BUSY, IDLE, MEMORY_TIGHT, NEAR_MAX, NOTHING_RUNNING, ONE_AGENT } from '../fixtures'
-import { ComposerHost, Frame, Pairs, pairsParameters, type Scheme, Stage, useLive } from '../stage/Stage'
+import { ComposerHost, Frame, LivePair, Pairs, pairsParameters, type Scheme, Stage } from '../stage/Stage'
 import type { Usage } from '../usage'
-import { Dial, type DialProps } from './Dial'
+import { Pie, type PieProps } from './Pie'
 
 /* The composer is task 418's: its share of each moment. */
 const own = (usage: Usage) => usage.shares.find((share) => share.id === '418')
 
-/* Task 418's composer, with the dial before the context ring. */
-function InComposer({ scheme, room, ...props }: DialProps & { scheme?: Scheme; room?: 'above' }) {
+/* Task 418's composer, with the pie before the context ring. */
+function InComposer({ scheme, room, ...props }: PieProps & { scheme?: Scheme; room?: 'above' }) {
   return (
     <Stage scheme={scheme} room={room}>
-      <ComposerHost dial={<Dial {...props} />} />
+      <ComposerHost pie={<Pie {...props} />} />
     </Stage>
   )
 }
 
-function LiveComposers() {
-  const { ref, usage } = useLive()
-  return (
-    <div ref={ref} style={{ display: 'grid', gap: 12 }}>
-      <InComposer usage={usage} task={own(usage)} />
-      <InComposer usage={usage} task={own(usage)} scheme="dark" />
-    </div>
-  )
-}
-
 const meta = {
-  title: 'Prototypes/System usage/C · Dial by the composer',
+  title: 'Prototypes/System usage/C. Pie by the composer',
   component: InComposer,
   args: { usage: BUSY, task: own(BUSY) },
 } satisfies Meta<typeof InComposer>
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The lead is thinking: one tick, if that. */
+/** The lead is thinking: the pie is empty. */
 export const Idle: Story = { args: { usage: IDLE, task: own(IDLE) } }
-/** This task is the only one, running its tests: its ticks are cobalt, from the top. */
+/** This task is the only one, running its tests: its slice is cobalt, from the top. */
 export const OneAgent: Story = { args: { usage: ONE_AGENT, task: own(ONE_AGENT) } }
-/** Four tasks: this one's two ticks in cobalt, the rest of the Mac's load in ink after them. */
+/** Four tasks: this one's slice in cobalt, the rest of the Mac's load in ink after it. */
 export const Busy: Story = {}
-/** Every tick lit, the ink at full strength. There's no room for a word by the composer; the detail says it. */
+/** The pie full, its ink at full strength. There's no room for a word by the composer; the detail says it. */
 export const NearMax: Story = { args: { usage: NEAR_MAX, task: own(NEAR_MAX) } }
-/** In the project's conversation there is no task: the dial is the Mac's alone, in ink. */
+/** In the project's conversation there is no task: the pie is the Mac's alone, in ink. */
 export const NoTask: Story = { args: { task: undefined } }
 
 /** Pointed at or focused: the Mac's figures, then this task's share. */
@@ -54,8 +44,10 @@ export const DetailNearMax: Story = { args: { usage: NEAR_MAX, task: own(NEAR_MA
 export const Dark: Story = { args: { scheme: 'dark' } }
 export const DetailDark: Story = { args: { scheme: 'dark', defaultOpen: true, room: 'above' } }
 
-/** The made-up loop, a sample every 2 seconds (every 6 with reduced motion). Twelve ticks change more often than five steps, less often than a line. */
-export const Live: Story = { render: () => <LiveComposers /> }
+/** The made-up loop, a sample every 2 seconds (every 6 with reduced motion). In fifths, it changes as seldom as A's steps. */
+export const Live: Story = {
+  render: () => <LivePair>{(usage, scheme) => <InComposer usage={usage} task={own(usage)} scheme={scheme} />}</LivePair>,
+}
 
 /** Off: the composer as it is today, the context ring alone. */
 export const Off: Story = {
@@ -83,15 +75,15 @@ export const AllStates: Story = {
   render: () => (
     <Pairs
       rows={[
-        { state: 'nothing running', node: <Dial usage={NOTHING_RUNNING} /> },
-        { state: 'idle', node: <Dial usage={IDLE} task={own(IDLE)} /> },
-        { state: 'one agent', node: <Dial usage={ONE_AGENT} task={own(ONE_AGENT)} /> },
-        { state: 'several', node: <Dial usage={BUSY} task={own(BUSY)} /> },
-        { state: 'memory tight', node: <Dial usage={MEMORY_TIGHT} task={own(MEMORY_TIGHT)} /> },
-        { state: 'near max', node: <Dial usage={NEAR_MAX} task={own(NEAR_MAX)} /> },
-        { state: 'no task', node: <Dial usage={BUSY} /> },
-        { state: 'hover', node: <Dial usage={BUSY} task={own(BUSY)} />, force: 'hover' },
-        { state: 'focus', node: <Dial usage={BUSY} task={own(BUSY)} />, force: 'focus' },
+        { state: 'nothing running', node: <Pie usage={NOTHING_RUNNING} /> },
+        { state: 'idle', node: <Pie usage={IDLE} task={own(IDLE)} /> },
+        { state: 'one agent', node: <Pie usage={ONE_AGENT} task={own(ONE_AGENT)} /> },
+        { state: 'several', node: <Pie usage={BUSY} task={own(BUSY)} /> },
+        { state: 'memory tight', node: <Pie usage={MEMORY_TIGHT} task={own(MEMORY_TIGHT)} /> },
+        { state: 'near max', node: <Pie usage={NEAR_MAX} task={own(NEAR_MAX)} /> },
+        { state: 'no task', node: <Pie usage={BUSY} /> },
+        { state: 'hover', node: <Pie usage={BUSY} task={own(BUSY)} />, force: 'hover' },
+        { state: 'focus', node: <Pie usage={BUSY} task={own(BUSY)} />, force: 'focus' },
       ]}
     />
   ),

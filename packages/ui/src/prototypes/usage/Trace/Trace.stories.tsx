@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, screen, within } from 'storybook/test'
 
 import { BUSY, IDLE, MEMORY_TIGHT, NEAR_MAX, NOTHING_RUNNING, ONE_AGENT } from '../fixtures'
-import { BarHost, Frame, Pairs, pairsParameters, runningIn, type Scheme, Stage, useLive } from '../stage/Stage'
+import { BarHost, Frame, LivePair, Pairs, pairsParameters, runningIn, type Scheme, Stage } from '../stage/Stage'
 import { Trace, type TraceProps } from './Trace'
 
 /* The bar of a project's window, with the trace where the work's status starts. */
@@ -14,18 +14,8 @@ function InBar({ scheme, room, ...props }: TraceProps & { scheme?: Scheme; room?
   )
 }
 
-function LiveBars() {
-  const { ref, usage } = useLive()
-  return (
-    <div ref={ref} style={{ display: 'grid', gap: 12 }}>
-      <InBar usage={usage} />
-      <InBar usage={usage} scheme="dark" />
-    </div>
-  )
-}
-
 const meta = {
-  title: 'Prototypes/System usage/B · Trace beside the work',
+  title: 'Prototypes/System usage/B. Trace beside the work',
   component: InBar,
   args: { usage: BUSY },
 } satisfies Meta<typeof InBar>
@@ -49,7 +39,7 @@ export const Dark: Story = { args: { scheme: 'dark' } }
 export const DetailDark: Story = { args: { scheme: 'dark', defaultOpen: true, room: 'below' } }
 
 /** The made-up loop, a point every 2 seconds (every 6 with reduced motion). The line moves with every point: judge whether that is calm enough beside your work. */
-export const Live: Story = { render: () => <LiveBars /> }
+export const Live: Story = { render: () => <LivePair>{(usage, scheme) => <InBar usage={usage} scheme={scheme} />}</LivePair> }
 
 /** Off: the bar as it is today. */
 export const Off: Story = {

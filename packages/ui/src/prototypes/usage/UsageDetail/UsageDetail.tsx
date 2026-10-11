@@ -172,9 +172,12 @@ function ShareRow({ share, t }: { share: UsageShare; t: UsageText }) {
       {share.mark !== undefined && <BrandMark brand={share.mark} size={13} className={s.mark} />}
       <span className={s.taskWords}>
         <span className={s.taskTitle}>{share.title}</span>
-        <span className={s.taskMeta}>{[share.project, share.agent, t.processes(share.processes), share.memory].join(' · ')}</span>
+        <span className={s.taskMeta}>{[share.project, share.agent, t.processes(share.processes)].join(' · ')}</span>
       </span>
-      <span className={s.figure}>{t.percent(percent(share.cpu))}</span>
+      <span className={s.taskFigures}>
+        <span className={s.figure}>{t.percent(percent(share.cpu))}</span>
+        <span className={s.taskMemory}>{share.memory}</span>
+      </span>
     </>
   )
 }

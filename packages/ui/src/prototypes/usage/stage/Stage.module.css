@@ -97,7 +97,7 @@
   font: 500 10.5px/1 var(--font-label);
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--t-3);
+  color: var(--t-2);
 }
 
 .sheet {
@@ -106,6 +106,41 @@
   border-radius: var(--r-lg);
   background: var(--n-1);
   box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.specimen {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 12px;
+}
+
+/* the comparison page's table, in the kit's type rather than the docs' */
+.table {
+  width: 100%;
+  margin: 16px 0;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-2);
+}
+.table th,
+.table td {
+  padding: 8px 10px 8px 0;
+  text-align: left;
+  vertical-align: top;
+  border-top: 1px solid var(--line);
+}
+.table thead th {
+  border-top: 0;
+  font: 500 10.5px/1 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.table tbody th {
+  font-weight: 600;
+  color: var(--t-1);
+  white-space: nowrap;
 }
 
 .frame {
@@ -118,5 +153,9 @@
   margin: 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--t-3);
+  color: var(--t-2);
+}
+.live {
+  display: grid;
+  gap: 12px;
 }

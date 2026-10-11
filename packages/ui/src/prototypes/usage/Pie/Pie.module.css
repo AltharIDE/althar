@@ -1,5 +1,5 @@
 /* the context ring's button, so the two sit as a pair */
-.dial {
+.pie {
   display: grid;
   place-items: center;
   width: 28px;
@@ -8,24 +8,21 @@
   cursor: default;
   transition: background var(--fast) var(--ease);
 }
-.dial:hover,
-.dial:focus-visible {
+.pie:hover,
+.pie:focus-visible {
   background: var(--n-2);
 }
-.glyph line {
-  stroke: var(--n-4);
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  transition: stroke var(--slow) var(--ease);
+.disc {
+  fill: var(--n-4);
 }
-.glyph line[data-lit='rest'] {
-  stroke: var(--t-3);
+.rest {
+  fill: var(--t-3);
 }
-.glyph line[data-lit='ours'] {
-  stroke: var(--live);
+.ours {
+  fill: var(--live);
 }
-.strained .glyph line[data-lit='rest'] {
-  stroke: var(--t-1);
+.strained .rest {
+  fill: var(--t-1);
 }
 
 .title {
@@ -58,14 +55,13 @@
   font-variant-numeric: tabular-nums;
   color: var(--t-2);
 }
-.rest {
+.restNote {
   font-size: 11.5px;
   color: var(--t-3);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dial,
-  .glyph line {
+  .pie {
     transition: none;
   }
 }

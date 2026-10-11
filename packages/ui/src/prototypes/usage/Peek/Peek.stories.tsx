@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { BUSY, IDLE, MEMORY_TIGHT, NEAR_MAX, NOTHING_RUNNING, ONE_AGENT } from '../fixtures'
-import { BarHost, Frame, Pairs, pairsParameters, runningIn, type Scheme, Stage, useLive } from '../stage/Stage'
+import { BarHost, Frame, LivePair, Pairs, pairsParameters, runningIn, type Scheme, Stage } from '../stage/Stage'
 import { PeekReadout, type PeekReadoutProps } from './Peek'
 
 /* The bar of a project's window, with the glyph where the work's status starts. */
@@ -12,16 +12,6 @@ function InBar({ scheme, room, ...props }: PeekReadoutProps & { scheme?: Scheme;
     <Stage scheme={scheme} room={room}>
       <BarHost running={runningIn(props.usage)} readout={<PeekReadout {...props} />} />
     </Stage>
-  )
-}
-
-function LiveBars() {
-  const { ref, usage } = useLive()
-  return (
-    <div ref={ref} style={{ display: 'grid', gap: 12 }}>
-      <InBar usage={usage} />
-      <InBar usage={usage} scheme="dark" />
-    </div>
   )
 }
 
@@ -40,20 +30,20 @@ function Hideable() {
 }
 
 const meta = {
-  title: 'Prototypes/System usage/D · Glyph and peek',
+  title: 'Prototypes/System usage/D. Glyph and peek',
   component: InBar,
   args: { usage: BUSY, onOpenTask: fn(), onHide: fn() },
 } satisfies Meta<typeof InBar>
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Quiet: one bar of three. It stays there through everything short of a build. */
+/** Quiet: the needle low. It stays there through everything short of a build. */
 export const Idle: Story = { args: { usage: IDLE } }
 /** A task running its tests is still quiet: one task seldom makes a Mac busy. */
 export const OneAgent: Story = { args: { usage: ONE_AGENT } }
-/** Busy: two bars. */
+/** Busy: the needle up. */
 export const Busy: Story = {}
-/** Full: three bars in full ink, and a word for what holds the Mac back. */
+/** Full: the needle high, in full ink, and a word for what holds the Mac back. */
 export const NearMax: Story = { args: { usage: NEAR_MAX } }
 
 /** A click opens the peek: the last two minutes, the figures, each task's share across every project, and a switch to take the glyph out of the bar. */
@@ -67,8 +57,8 @@ export const OpenNothingRunning: Story = { args: { usage: NOTHING_RUNNING, defau
 export const Dark: Story = { args: { scheme: 'dark' } }
 export const OpenDark: Story = { args: { scheme: 'dark', defaultOpen: true, room: 'below' } }
 
-/** The made-up loop, a sample every 2 seconds (every 6 with reduced motion). The glyph changes only at the build and the test suite. */
-export const Live: Story = { render: () => <LiveBars /> }
+/** The made-up loop, a sample every 2 seconds (every 6 with reduced motion). The gauge changes only at the build and the test suite. */
+export const Live: Story = { render: () => <LivePair>{(usage, scheme) => <InBar usage={usage} scheme={scheme} />}</LivePair> }
 
 /** Off: the bar as it is today. */
 export const Off: Story = {

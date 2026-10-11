@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, screen, userEvent, within } from 'storybook/test'
 
 import { BUSY, IDLE, MEMORY_TIGHT, NEAR_MAX, NOTHING_RUNNING, ONE_AGENT } from '../fixtures'
-import { BarHost, Pairs, pairsParameters, runningIn, type Scheme, Stage, useLive } from '../stage/Stage'
+import { BarHost, LivePair, Pairs, pairsParameters, runningIn, type Scheme, Stage } from '../stage/Stage'
 import { Recommended, type RecommendedProps } from './Recommended'
 
 /* The bar of a project's window, with the meter where the work's status starts. */
@@ -14,18 +14,8 @@ function InBar({ scheme, room, ...props }: RecommendedProps & { scheme?: Scheme;
   )
 }
 
-function LiveBars() {
-  const { ref, usage } = useLive()
-  return (
-    <div ref={ref} style={{ display: 'grid', gap: 12 }}>
-      <InBar usage={usage} />
-      <InBar usage={usage} scheme="dark" />
-    </div>
-  )
-}
-
 const meta = {
-  title: 'Prototypes/System usage/E · Recommended',
+  title: 'Prototypes/System usage/E. Recommended',
   component: InBar,
   args: { usage: BUSY, onOpenTask: fn(), onHide: fn() },
 } satisfies Meta<typeof InBar>
@@ -45,7 +35,7 @@ export const Dark: Story = { args: { scheme: 'dark' } }
 export const OpenDark: Story = { args: { scheme: 'dark', defaultOpen: true, room: 'below' } }
 
 /** The made-up loop, a sample every 2 seconds (every 6 with reduced motion). */
-export const Live: Story = { render: () => <LiveBars /> }
+export const Live: Story = { render: () => <LivePair>{(usage, scheme) => <InBar usage={usage} scheme={scheme} />}</LivePair> }
 
 /** The meter's name says its numbers; pressed, it opens the peek. */
 export const Opening: Story = {

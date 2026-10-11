@@ -51,6 +51,12 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',
+  /* prototypes of a readout of the Mac's load: drawn shapes, as the context ring is */
+  'prototypes/usage/Meter/Meter.tsx': 'the meters, which swap for figures',
+  'prototypes/usage/Trace/Trace.tsx': 'the trace, a way to its detail',
+  'prototypes/usage/Pie/Pie.tsx': 'the pie, beside the context ring and sized like it',
+  'prototypes/usage/Peek/Peek.tsx': 'the gauge, which opens the peek',
+  'prototypes/usage/UsageDetail/UsageDetail.tsx': 'a task’s row in the peek, which opens it',
 }
 
 const sources = import.meta.glob<string>('../src/**/*.tsx', { query: '?raw', import: 'default', eager: true })

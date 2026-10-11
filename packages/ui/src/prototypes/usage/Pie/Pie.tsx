@@ -3,18 +3,20 @@ import { HoverCard } from '../../../primitives/HoverCard/HoverCard'
 import { UsageFigures, usageText, type UsageText } from '../UsageDetail/UsageDetail'
 import { useOverlayScheme } from '../scheme'
 import { percent, steps, strainOf, type Usage, type UsageShare } from '../usage'
-import s from './Dial.module.css'
+import s from './Pie.module.css'
 
 /*
- * Direction C. A dial of twelve ticks in a task's composer, beside the
- * context ring: how hard the Mac works while you write to this task. Its
- * ticks light in cobalt for this task's agents and in ink for the rest, so
- * the question it answers is whether this task is the one spinning the
- * fans. Ticks, not an arc, so it can't be read as a second context ring.
+ * Direction C. A small pie in a task's composer, beside the context ring:
+ * how hard the Mac works while you write to this task. This task's agents
+ * are its cobalt slice, the rest of the Mac's load the ink after it, in
+ * fifths, so the question it answers is whether this task is the one
+ * spinning the fans. Filled, where the context ring is drawn in a line, so
+ * the two read apart. Drafts in twelve ticks and in five pieces of a ring
+ * both read as a spinner.
  */
 
-export interface DialText extends UsageText {
-  /** The dial's name, with its numbers; `task` is null where no task is given. */
+export interface PieText extends UsageText {
+  /** The pie's name, with its numbers; `task` is null where no task is given. */
   label: (cpu: number, task: number | null) => string
   thisTask: string
   /** This task's share, in a line. */
@@ -23,7 +25,7 @@ export interface DialText extends UsageText {
   rest: string
 }
 
-export const dialText: DialText = {
+export const pieText: PieText = {
   ...usageText,
   label: (cpu, task) => (task === null ? `This Mac: CPU ${cpu}%` : `This Mac: CPU ${cpu}%, this task ${task}%`),
   thisTask: 'This task',
@@ -31,44 +33,48 @@ export const dialText: DialText = {
   rest: 'The rest is other tasks and other apps.',
 }
 
-/** How many ticks the dial has. */
-export const TICKS = 12
+/** How many slices the pie is cut in. */
+export const SLICES = 5
+const R = 6.5
 
-const tick = (i: number) => {
-  const a = (i / TICKS) * 2 * Math.PI - Math.PI / 2
-  const at = (r: number) => [8 + Math.cos(a) * r, 8 + Math.sin(a) * r].map((n) => n.toFixed(2))
-  const [x1, y1] = at(4.4)
-  const [x2, y2] = at(6.9)
-  return { x1, y1, x2, y2 }
+/* A slice from one fifth to another, clockwise from the top. */
+function slice(from: number, to: number) {
+  const at = (n: number) => {
+    const a = (n / SLICES) * 2 * Math.PI - Math.PI / 2
+    return `${(8 + Math.cos(a) * R).toFixed(2)} ${(8 + Math.sin(a) * R).toFixed(2)}`
+  }
+  /* a whole pie is a circle: an arc can't end where it starts */
+  if (to - from >= SLICES) return `M8 ${8 - R}A${R} ${R} 0 1 1 7.99 ${8 - R}Z`
+  return `M8 8L${at(from)}A${R} ${R} 0 ${(to - from) / SLICES > 0.5 ? 1 : 0} 1 ${at(to)}Z`
 }
 
-/** The ticks, drawn: this task's part first, from the top, then the rest of the Mac. */
-export function DialGlyph({ cpu, task }: { cpu: number; task: number }) {
-  const lit = steps(cpu, TICKS)
-  const mine = Math.min(lit, steps(task, TICKS))
+/** The pie, drawn: this task's slice first, from the top, then the rest of the Mac. */
+export function PieGlyph({ cpu, task }: { cpu: number; task: number }) {
+  const lit = steps(cpu, SLICES)
+  const mine = Math.min(lit, steps(task, SLICES))
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" className={s.glyph} aria-hidden="true">
-      {Array.from({ length: TICKS }, (_, i) => (
-        <line key={i} {...tick(i)} data-lit={i < mine ? 'ours' : i < lit ? 'rest' : undefined} />
-      ))}
+      <circle cx="8" cy="8" r={R} className={s.disc} />
+      {lit > mine && <path d={slice(mine, lit)} className={s.rest} />}
+      {mine > 0 && <path d={slice(0, mine)} className={s.ours} />}
     </svg>
   )
 }
 
-export interface DialProps {
+export interface PieProps {
   usage: Usage
-  /** This task's share. Without it, the dial is the Mac's alone, in ink. */
+  /** This task's share. Without it, the pie is the Mac's alone, in ink. */
   task?: UsageShare
   /** Whether the detail shows, when the consumer holds it. */
   open?: boolean
   /** Show the detail from the start, as for a screenshot. */
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
-  text?: Partial<DialText>
+  text?: Partial<PieText>
 }
 
-export function Dial({ usage, task, open, defaultOpen, onOpenChange, text }: DialProps) {
-  const t = { ...dialText, ...text }
+export function Pie({ usage, task, open, defaultOpen, onOpenChange, text }: PieProps) {
+  const t = { ...pieText, ...text }
   const strain = strainOf(usage)
   const scheme = useOverlayScheme()
   return (
@@ -91,7 +97,7 @@ export function Dial({ usage, task, open, defaultOpen, onOpenChange, text }: Dia
                 {t.thisTask}
               </span>
               <span className={s.taskLine}>{t.taskLine(t.percent(percent(task.cpu)), task.memory, t.processes(task.processes))}</span>
-              <span className={s.rest}>{t.rest}</span>
+              <span className={s.restNote}>{t.rest}</span>
             </span>
           )}
         </>
@@ -99,10 +105,10 @@ export function Dial({ usage, task, open, defaultOpen, onOpenChange, text }: Dia
     >
       <button
         type="button"
-        className={cx(s.dial, strain !== null && s.strained)}
+        className={cx(s.pie, strain !== null && s.strained)}
         aria-label={t.label(percent(usage.cpu), task === undefined ? null : percent(task.cpu))}
       >
-        <DialGlyph cpu={usage.cpu} task={task?.cpu ?? 0} />
+        <PieGlyph cpu={usage.cpu} task={task?.cpu ?? 0} />
       </button>
     </HoverCard>
   )

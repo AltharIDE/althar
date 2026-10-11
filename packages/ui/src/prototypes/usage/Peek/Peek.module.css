@@ -20,14 +20,30 @@
   background: var(--n-4);
 }
 
-.glyph rect {
-  fill: var(--n-4);
-  transition: fill var(--slow) var(--ease);
+.glyph path {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
 }
-.glyph rect[data-lit] {
-  fill: var(--t-3);
+.track {
+  stroke: var(--n-4);
 }
-.strained rect[data-lit] {
+.lit {
+  stroke: var(--t-3);
+}
+.needle {
+  stroke: var(--t-2);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.hub {
+  fill: var(--t-2);
+}
+.strained .lit,
+.strained .needle {
+  stroke: var(--t-1);
+}
+.strained .hub {
   fill: var(--t-1);
 }
 
@@ -74,8 +90,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .button,
-  .glyph rect {
+  .button {
     transition: none;
   }
 }

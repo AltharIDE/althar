@@ -6,16 +6,18 @@ import { below, Heading, type HeadingLevel } from '../../../primitives/Heading/H
 import { Popover } from '../../../primitives/Popover/Popover'
 import { SettingSwitch } from '../../../setup/Preferences/Preferences'
 import { UsageFigures, UsageShares, UsageTrace, usageText, type UsageText } from '../UsageDetail/UsageDetail'
+import { arc } from '../arc'
 import { useOverlayScheme } from '../scheme'
 import { Load, loadOf, strainOf, type Usage } from '../usage'
 import s from './Peek.module.css'
 
 /*
- * Direction D. One small glyph in the bar, in three steps (quiet, busy,
+ * Direction D. One small gauge in the bar, in three steps (quiet, busy,
  * full), which changes a few times an hour rather than a few times a
- * minute. Everything else is a click away, in a peek: the last two
+ * minute: a speedometer, not three rising bars, which read as signal
+ * strength. Everything else is a click away, in a peek: the last two
  * minutes, the machine's figures, each running task's share across every
- * project, and a switch that takes the glyph out of the bar from there.
+ * project, and a switch that takes the gauge out of the bar from there.
  */
 
 export interface PeekText extends UsageText {
@@ -35,33 +37,41 @@ export const peekText: PeekText = {
   showNote: 'Settings brings it back.',
 }
 
-const BARS = [
-  { x: 2, h: 4.5 },
-  { x: 6.5, h: 8 },
-  { x: 11, h: 11.5 },
-]
+/* a speedometer's 240 degrees, lit from the left up to its needle */
+const HUB = { x: 8, y: 9.5 }
+const R = 6
+const SWEEP = { from: -120, to: 120 }
 
-function litOf(load: Load) {
+/** Where the needle points, in degrees from the top. */
+function angleOf(load: Load) {
   switch (load) {
     case Load.Quiet:
-      return 1
+      return -70
     case Load.Busy:
-      return 2
+      return 0
     case Load.Full:
-      return 3
+      return 70
     default:
       return unreachable(load)
   }
 }
 
-/** Three bars, lit to how loaded the Mac is. Under strain they go to full ink. */
+/** A gauge, its needle at how loaded the Mac is. Under strain it goes to full ink. */
 export function LoadGlyph({ load, strained = false }: { load: Load; strained?: boolean }) {
-  const lit = litOf(load)
+  const angle = angleOf(load)
+  const a = ((angle - 90) * Math.PI) / 180
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" className={cx(s.glyph, strained && s.strained)} aria-hidden="true">
-      {BARS.map((b, i) => (
-        <rect key={b.x} x={b.x} y={14 - b.h} width="3" height={b.h} rx="1" data-lit={i < lit ? '' : undefined} />
-      ))}
+      <path d={arc(HUB.x, HUB.y, R, SWEEP.from, SWEEP.to)} className={s.track} />
+      <path d={arc(HUB.x, HUB.y, R, SWEEP.from, angle)} className={s.lit} />
+      <line
+        x1={HUB.x}
+        y1={HUB.y}
+        x2={(HUB.x + Math.cos(a) * 4.2).toFixed(2)}
+        y2={(HUB.y + Math.sin(a) * 4.2).toFixed(2)}
+        className={s.needle}
+      />
+      <circle cx={HUB.x} cy={HUB.y} r="1.3" className={s.hub} />
     </svg>
   )
 }

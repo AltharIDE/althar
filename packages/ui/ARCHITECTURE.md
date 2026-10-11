@@ -29,6 +29,7 @@ The rules between them:
 - The nine middle layers don't import each other. Where one needs another's part inside it, it takes a slot and the consumer fills it: StepPanel's composer is a slot.
 - Nothing imports `screens`. It is exported on its own entry (see **Public API**).
 - `fixtures` and `storybook` serve stories, tests and the workbench. Nothing else in `src` imports them. `fixtures/models.ts` stands in for what a consumer owns: the demo models, runtimes, pins and default efforts.
+- `prototypes` holds design explorations to pick a direction from, each a set of stories with a page comparing them (`prototypes/usage`: a readout of the Mac's load). Like `screens`, a prototype may compose any layer, and nothing imports it; it is not exported. The direction picked moves into its layer as components, and the prototype goes.
 - A screen is made of the real components, not pictures of them. Content a screen ships with, like the welcome's demo project, lives beside it, not in `fixtures`.
 
 ## Principles
