@@ -2,9 +2,9 @@ import { Effect, Option, Schema } from 'effect'
 
 import { type Access, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
-import type { ConnectorFailed } from './errors'
+import { ConnectorFailed } from './errors'
 import { makeHttp } from './http'
-import type { Account, Issue, Priority, StatusCategory, Tracker } from './model'
+import type { Account, Container, Issue, Priority, StatusCategory, Tracker } from './model'
 import { type Answer, answered, probe, readAs, refusalOf, stopped, UNREADABLE, UNSAID } from './probe'
 
 /*
@@ -83,6 +83,21 @@ const issueOf = (issue: LinearIssue): Issue => {
 
 const Success = Schema.Struct({ success: Schema.Boolean })
 
+/** A team's labels and the workspace's, which any team's issue may take; a group only holds labels, and takes none itself. */
+const Labels = Schema.Struct({
+  issueLabels: Schema.Struct({
+    nodes: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, isGroup: Schema.optional(Schema.Boolean) })),
+  }),
+})
+
+/** The labels a name each matches, in any case, as Linear's own picker matches them: a name it has no label for is left off. */
+const labelIdsOf = (labels: typeof Labels.Type, names: ReadonlyArray<string>) => {
+  const byName = new Map<string, string>()
+  for (const label of labels.issueLabels.nodes)
+    if (label.isGroup !== true && !byName.has(label.name.toLowerCase())) byName.set(label.name.toLowerCase(), label.id)
+  return [...new Set(names.flatMap((name) => byName.get(name.trim().toLowerCase()) ?? []))]
+}
+
 /** A key as Linear writes it, however it was typed: mer-231 is MER-231. Anything else goes as it is. */
 const keyOf = (ref: string) => (/^[A-Z][A-Z0-9]*-\d+$/i.test(ref) ? ref.toUpperCase() : ref)
 
@@ -146,12 +161,50 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
           { issueId: issue.id, url: link.url, title: link.title },
         ),
       ),
+    // A team is where a Linear issue is filed.
+    containers: () =>
+      Effect.map(
+        http.graphql(
+          Schema.Struct({
+            teams: Schema.Struct({ nodes: Schema.Array(Schema.Struct({ id: Schema.String, key: Schema.String, name: Schema.String })) }),
+          }),
+          url,
+          'query { teams(first: 100) { nodes { id key name } } }',
+        ),
+        ({ teams }) => teams.nodes.map((team): Container => ({ id: team.id, key: team.key, name: team.name })),
+      ),
+    create: (team, issue) =>
+      Effect.gen(function* () {
+        // Linear takes labels by id, and makes none from a name: the team's and the workspace's are read only when some are asked for.
+        const labelIds =
+          issue.labels.length === 0
+            ? []
+            : labelIdsOf(
+                yield* http.graphql(
+                  Labels,
+                  url,
+                  'query($teamId: ID!) { issueLabels(first: 250, filter: { or: [{ team: { id: { eq: $teamId } } }, { team: { null: true } }] }) { nodes { id name isGroup } } }',
+                  { teamId: team },
+                ),
+                issue.labels,
+              )
+        const { issueCreate } = yield* http.graphql(
+          Schema.Struct({ issueCreate: Schema.Struct({ success: Schema.Boolean, issue: Schema.optional(Schema.NullOr(LinearIssue)) }) }),
+          url,
+          `mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { ...IssueFields } } } ${IssueFields}`,
+          { input: { teamId: team, title: issue.title, description: issue.body, ...(labelIds.length === 0 ? {} : { labelIds }) } },
+        )
+        if (!issueCreate.success || issueCreate.issue == null)
+          return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Linear did not file the issue' })
+        return issueOf(issueCreate.issue)
+      }),
   }
 }
 
 /*
  * What a Linear connection can do. Its sign-in asks to read and write, so a
- * token from it may comment and move issues; what a personal API key may do
+ * token from it may comment on issues, move them and file them (Linear's
+ * `write` covers `issues:create`); what a personal API key may do
  * isn't said, as keys can be limited where they are made.
  */
 

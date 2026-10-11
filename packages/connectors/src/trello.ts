@@ -4,7 +4,7 @@ import { type Access, type AccessLine, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { makeHttp } from './http'
-import type { Account, Issue, Person, StatusCategory, Tracker } from './model'
+import type { Account, Container, Issue, Person, StatusCategory, Tracker } from './model'
 import { answered, failedOf, probe, readAs, stopped, UNREADABLE, UNSAID } from './probe'
 
 /*
@@ -122,6 +122,9 @@ const Mine = Schema.Struct({
   boards: Schema.Array(Schema.Struct({ ...Board.fields, lists: Schema.Array(List) })),
 })
 
+/** A board's labels; one with only a colour has no name to match. */
+const BoardLabels = Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.optional(Schema.NullOr(Schema.String)) }))
+
 export const makeTrello = (options: AdapterOptions): Tracker => {
   const product = 'trello' as const
   const api = options.apiUrl.replace(/\/+$/, '')
@@ -134,21 +137,29 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
     (member) => ({ id: member.id, login: member.username, name: member.fullName ?? null }),
   )
 
+  /** Trello's ids and short links are letters and digits: anything else isn't one, and isn't put in a URL. */
+  const named = (id: string, what: string) =>
+    /^[A-Za-z0-9]+$/.test(id)
+      ? Effect.succeed(id)
+      : Effect.fail(new ConnectorFailed({ product, reason: 'not_found', message: `Not a Trello ${what}: ${id}` }))
+
+  const issue = (ref: string) =>
+    Effect.flatMap(named(ref, 'card'), (card) =>
+      Effect.map(
+        call(
+          Schema.Struct({ ...Card.fields, list: List, board: Board }),
+          'GET',
+          `${api}/cards/${card}?fields=${CARD_FIELDS}&members=true&member_fields=${MEMBER_FIELDS}&list=true&board=true&board_fields=name,closed`,
+        ),
+        (found) => issueOf(found, found.list, found.board),
+      ),
+    )
+
   return {
     product,
     capabilities: { links: true },
     account,
-    issue: (ref) =>
-      /^[A-Za-z0-9]+$/.test(ref)
-        ? Effect.map(
-            call(
-              Schema.Struct({ ...Card.fields, list: List, board: Board }),
-              'GET',
-              `${api}/cards/${ref}?fields=${CARD_FIELDS}&members=true&member_fields=${MEMBER_FIELDS}&list=true&board=true&board_fields=name,closed`,
-            ),
-            (card) => issueOf(card, card.list, card.board),
-          )
-        : Effect.fail(new ConnectorFailed({ product, reason: 'not_found', message: `Not a Trello card: ${ref}` })),
+    issue,
     // The cards the account is on, not archived, on an open board; those done or cancelled left out, as other trackers' are.
     mine: (options = {}) =>
       Effect.map(
@@ -186,6 +197,48 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
         )
         if (attached.some((attachment) => attachment.url === link.url)) return
         yield* call(Schema.Unknown, 'POST', `${api}/cards/${issue.id}/attachments`, { url: link.url, name: link.title })
+      }),
+    // A list is where a card is filed: every open list on the account's open boards, named with its board.
+    containers: () =>
+      Effect.map(
+        call(
+          Schema.Array(Schema.Struct({ ...Board.fields, lists: Schema.Array(List) })),
+          'GET',
+          `${api}/members/me/boards?filter=open&fields=name&lists=open`,
+        ),
+        (boards) =>
+          boards.flatMap((board) =>
+            board.lists
+              .filter((list) => list.closed !== true)
+              .map((list): Container => ({ id: list.id, key: null, name: `${board.name} / ${list.name}` })),
+          ),
+      ),
+    create: (container, draft) =>
+      Effect.gen(function* () {
+        const list = yield* named(container, 'list')
+        // A label belongs to a board, and a card takes it by id: the list's board's are read only when some are asked for.
+        const wanted = new Set(draft.labels.map((label) => label.trim().toLowerCase()).filter((label) => label !== ''))
+        const idLabels =
+          wanted.size === 0
+            ? []
+            : yield* Effect.gen(function* () {
+                const { idBoard } = yield* call(Schema.Struct({ idBoard: Schema.String }), 'GET', `${api}/lists/${list}?fields=idBoard`)
+                const labels = yield* call(BoardLabels, 'GET', `${api}/boards/${idBoard}/labels?fields=name`)
+                // A board may have two labels of a name, in two colours: the first is the one.
+                const byName = new Map<string, string>()
+                for (const label of labels) {
+                  const name = label.name?.trim().toLowerCase() ?? ''
+                  if (wanted.has(name) && !byName.has(name)) byName.set(name, label.id)
+                }
+                return [...byName.values()]
+              })
+        const card = yield* call(Schema.Struct({ shortLink: Schema.String }), 'POST', `${api}/cards`, {
+          idList: list,
+          name: draft.title,
+          desc: draft.body,
+          ...(idLabels.length === 0 ? {} : { idLabels: idLabels.join(',') }),
+        })
+        return yield* issue(card.shortLink)
       }),
   }
 }

@@ -12,6 +12,7 @@ import type {
   CheckState,
   CodeHost,
   Comment,
+  Container,
   Issue,
   Person,
   Repository,
@@ -215,6 +216,16 @@ const HEADERS = { accept: 'application/vnd.github+json', 'x-github-api-version':
 
 /** `owner/repo#12`: the ref GitHub's issues go by. */
 const issueRef = /^([^/\s]+)\/([^#\s]+)#(\d+)$/
+
+/** `owner/repo`: a repository, where an issue is filed. */
+const repositoryRef = /^([^/\s]+)\/([^/#\s]+)$/
+
+/** A repository the account is on, and whether an issue can be filed there. */
+const Listed = Schema.Struct({
+  full_name: Schema.String,
+  has_issues: Schema.optional(Schema.Boolean),
+  archived: Schema.optional(Schema.Boolean),
+})
 
 export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'github' as const
@@ -468,6 +479,27 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       }),
     // GitHub's issues have no links: the pull request's mention of the issue links the two.
     link: () => Effect.void,
+    // The repositories the account is on, last pushed to first; one archived, or with its issues turned off, takes none.
+    containers: () =>
+      Effect.map(http.json(Schema.Array(Listed), 'GET', `${api}/user/repos?per_page=100&sort=pushed`), (repositories) =>
+        repositories
+          .filter((repository) => repository.has_issues !== false && repository.archived !== true)
+          .map((repository): Container => ({ id: repository.full_name, key: repository.full_name, name: repository.full_name })),
+      ),
+    create: (container, issue) =>
+      Effect.gen(function* () {
+        const match = repositoryRef.exec(container)
+        if (match === null)
+          return yield* new ConnectorFailed({ product, reason: 'not_found', message: `Not a GitHub repository: ${container}` })
+        const [, owner = '', name = ''] = match
+        // GitHub sets labels only for someone who can push, and drops them silently for anyone else; it makes those the repository lacks.
+        const filed = yield* http.json(IssueAnswer, 'POST', `${repo([owner, name])}/issues`, {
+          title: issue.title,
+          body: issue.body,
+          ...(issue.labels.length === 0 ? {} : { labels: issue.labels }),
+        })
+        return issueOf(filed, owner, name)
+      }),
   }
 }
 

@@ -417,4 +417,95 @@ describe('Trello', () => {
       assert.strictEqual(tracker.product, 'trello')
     }),
   )
+  it.effect('lists the open lists on the account’s open boards, each named with its board', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = trello([
+        [
+          'GET',
+          `${API}/members/me/boards?filter=open&fields=name&lists=open`,
+          {
+            json: [
+              {
+                id: '4d5ea62fd76aa1136000000c',
+                name: 'Trello Development Roadmap',
+                lists: [
+                  { id: '5c4a1ec10405013c8a2fc48e', name: 'Live (Oct-Dec 2018)', closed: false },
+                  { id: '5c4a1ec10405013c8a2fc48f', name: 'Old', closed: true },
+                ],
+              },
+              { id: '4e6a8095efa69909ba007382', name: 'Welcome Board', lists: [{ id: '4e6a8095efa69909ba007387', name: 'Basics' }] },
+            ],
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* tracker.containers(), [
+        { id: '5c4a1ec10405013c8a2fc48e', key: null, name: 'Trello Development Roadmap / Live (Oct-Dec 2018)' },
+        { id: '4e6a8095efa69909ba007387', key: null, name: 'Welcome Board / Basics' },
+      ])
+      assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('files a card on a list, with its board’s labels by those names, in any case, and reads it back', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = trello([
+        [
+          'GET',
+          `${API}/lists/5c4a1ec10405013c8a2fc48e?fields=idBoard`,
+          { json: { id: '5c4a1ec10405013c8a2fc48e', idBoard: '4d5ea62fd76aa1136000000c' } },
+        ],
+        [
+          'GET',
+          `${API}/boards/4d5ea62fd76aa1136000000c/labels?fields=name`,
+          {
+            json: [
+              { id: 'label-mobile', name: 'Mobile' },
+              { id: 'label-mobile-again', name: 'mobile' },
+              { id: 'label-green', name: '' },
+              { id: 'label-blue', name: null },
+              { id: 'label-web', name: 'Web' },
+            ],
+          },
+        ],
+        ['POST', `${API}/cards`, { json: { id: '5c4a1edbee21d48246c126b2', shortLink: 'dRlAmgAi', name: 'iOS 12' } }],
+        ['GET', /\/cards\/dRlAmgAi\?/, { json: card() }],
+      ])
+      const filed = yield* tracker.create('5c4a1ec10405013c8a2fc48e', {
+        title: 'iOS 12',
+        body: 'Siri, **securely**.',
+        labels: ['MOBILE', 'Nonesuch', ' '],
+      })
+      assert.deepStrictEqual([filed.key, filed.labels], ['dRlAmgAi', ['Mobile']])
+      assert.deepStrictEqual(sent[2]?.body, {
+        idList: '5c4a1ec10405013c8a2fc48e',
+        name: 'iOS 12',
+        desc: 'Siri, **securely**.',
+        idLabels: 'label-mobile',
+      })
+      assert.lengthOf(sent, 4)
+    }),
+  )
+
+  it.effect('files a card without asking for labels when it has none, and says what it was given isn’t a list', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = trello([
+        ['GET', `${API}/lists/5c4a1ec10405013c8a2fc48e?fields=idBoard`, { json: { idBoard: '4d5ea62fd76aa1136000000c' } }],
+        ['GET', `${API}/boards/4d5ea62fd76aa1136000000c/labels?fields=name`, { json: [{ id: 'label-web', name: 'Web' }] }],
+        ['POST', `${API}/cards`, { json: { shortLink: 'dRlAmgAi' } }],
+        ['GET', /\/cards\/dRlAmgAi\?/, { json: card() }],
+      ])
+      yield* tracker.create('5c4a1ec10405013c8a2fc48e', { title: 'iOS 12', body: '', labels: [] })
+      assert.deepStrictEqual(
+        sent.map((request) => request.method),
+        ['POST', 'GET'],
+      )
+      assert.deepStrictEqual(sent[0]?.body, { idList: '5c4a1ec10405013c8a2fc48e', name: 'iOS 12', desc: '' })
+      // Labels the board has none of: no idLabels.
+      yield* tracker.create('5c4a1ec10405013c8a2fc48e', { title: 'iOS 12', body: '', labels: ['Mobile'] })
+      assert.deepStrictEqual(sent[4]?.body, { idList: '5c4a1ec10405013c8a2fc48e', name: 'iOS 12', desc: '' })
+      const notAList = yield* Effect.flip(tracker.create('../boards', { title: 'iOS 12', body: '', labels: [] }))
+      assert.deepStrictEqual([notAList.reason, notAList.message], ['not_found', 'Not a Trello list: ../boards'])
+      assert.lengthOf(sent, 6)
+    }),
+  )
 })

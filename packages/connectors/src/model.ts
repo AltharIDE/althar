@@ -229,6 +229,27 @@ export const Issue = Schema.Struct({
 })
 export type Issue = typeof Issue.Type
 
+/**
+ * Where an issue can be filed, by the tracker's name for it: a Linear team,
+ * a Jira project, a list on a Trello board, a repository.
+ */
+export const Container = Schema.Struct({
+  /** What `Tracker.create` takes: the tracker's own id for it. */
+  id: Schema.String,
+  /** A short name a person may type for it, where the tracker has one: a team's or a project's key (MER, PAY), a repository's path. */
+  key: Schema.NullOr(Schema.String),
+  /** Its name, as the tracker shows it: Meridian, Payments, `Roadmap / To do`, `acme/api`. */
+  name: Schema.String,
+})
+export type Container = typeof Container.Type
+
+/** An issue to file: its title, its body in Markdown, and the labels to put on it. */
+export interface NewIssue {
+  readonly title: string
+  readonly body: string
+  readonly labels: ReadonlyArray<string>
+}
+
 /** What a tracker can do beyond the model's floor. */
 export interface TrackerCapabilities {
   /** A link can be attached to an issue, as a pull request's is. */
@@ -247,4 +268,12 @@ export interface Tracker {
   comment(issue: Issue, body: string): Effect.Effect<void, ConnectorFailed>
   /** Attaches a link to an issue, where the tracker has links. */
   link(issue: Issue, link: { readonly url: string; readonly title: string }): Effect.Effect<void, ConnectorFailed>
+  /** Where the account can file issues, most recently active first where the tracker says. */
+  containers(): Effect.Effect<ReadonlyArray<Container>, ConnectorFailed>
+  /**
+   * Files an issue in a container, by its `Container.id`, because the person
+   * approved it: never on an agent's word. Labels the tracker can't take as
+   * they are (it has none by that name, and makes none) are left off.
+   */
+  create(container: string, issue: NewIssue): Effect.Effect<Issue, ConnectorFailed>
 }

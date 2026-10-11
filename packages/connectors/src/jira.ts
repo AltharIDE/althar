@@ -2,10 +2,10 @@ import { Effect, Schema } from 'effect'
 
 import { type Access, type AccessLine, type AccessNeed, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
-import type { ConnectorFailed } from './errors'
+import { ConnectorFailed } from './errors'
 import { makeHttp } from './http'
 import { AdfNode, adfOf, markdownOfAdf, markdownOfWiki, wikiOf } from './jiraText'
-import type { Account, Issue, Person, Priority, StatusCategory, Tracker } from './model'
+import type { Account, Container, Issue, Person, Priority, StatusCategory, Tracker } from './model'
 import { type Answer, answered, failedOf, probe, readAs, refusalOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
@@ -130,6 +130,21 @@ const accountOf = (user: User): Account =>
     ? { id: user.accountId, login: user.emailAddress ?? user.displayName ?? user.accountId, name: user.displayName ?? null }
     : { id: user.key ?? user.name, login: user.name, name: user.displayName ?? null }
 
+const Project = Schema.Struct({ id: Schema.String, key: Schema.String, name: Schema.String })
+
+/** A project's issue types, as each edition lists them: Cloud's under `issueTypes`, Data Center's under `values`, a page at a time. */
+const IssueType = Schema.Struct({ id: Schema.String, name: Schema.String, subtask: Schema.optional(Schema.Boolean) })
+const IssueTypes = Schema.Struct({ issueTypes: Schema.optional(Schema.Array(IssueType)), values: Schema.optional(Schema.Array(IssueType)) })
+
+/** The type an issue Althar files is: a Task where the project has one, or else its first that isn't a sub-task, which needs a parent. */
+const issueTypeOf = (types: typeof IssueTypes.Type) => {
+  const all = types.issueTypes ?? types.values ?? []
+  return all.find((type) => type.subtask !== true && /^task$/i.test(type.name)) ?? all.find((type) => type.subtask !== true)
+}
+
+/** A label as Jira can hold it: one word, so its spaces become hyphens. */
+export const jiraLabelOf = (label: string): string => label.trim().replace(/\s+/g, '-')
+
 /** A JQL string, quoted. */
 const quoted = (text: string) => `"${text.replace(/["\\]/g, '\\$&')}"`
 
@@ -213,16 +228,18 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
     accountOf,
   )
 
+  // A key as typed (proj-123) is the key: Jira's keys are upper case.
+  const issue = (ref: string) =>
+    Effect.map(
+      call((root) => http.json(IssueAnswer, 'GET', `${root}${issuePath(ref.trim().toUpperCase())}?fields=${FIELDS}`)),
+      issueOf,
+    )
+
   return {
     product,
     capabilities: { links: true },
     account,
-    // A key as typed (proj-123) is the key: Jira's keys are upper case.
-    issue: (ref) =>
-      Effect.map(
-        call((root) => http.json(IssueAnswer, 'GET', `${root}${issuePath(ref.trim().toUpperCase())}?fields=${FIELDS}`)),
-        issueOf,
-      ),
+    issue,
     mine: (options = {}) => {
       const jql = [
         'assignee = currentUser() AND statusCategory != Done',
@@ -252,6 +269,56 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
           }),
         ),
       ),
+    // A project, by its key, is where a Jira issue is filed: on Cloud, those with the latest issue first.
+    containers: () =>
+      Effect.map(
+        call((root) =>
+          cloud
+            ? Effect.map(
+                http.json(
+                  Schema.Struct({ values: Schema.Array(Project) }),
+                  'GET',
+                  `${root}/project/search?maxResults=100&orderBy=-lastIssueUpdatedTime`,
+                ),
+                ({ values }) => values,
+              )
+            : http.json(Schema.Array(Project), 'GET', `${root}/project`),
+        ),
+        (projects) => projects.map((project): Container => ({ id: project.key, key: project.key, name: project.name })),
+      ),
+    create: (project, draft) =>
+      Effect.gen(function* () {
+        const type = issueTypeOf(
+          yield* call((root) => http.json(IssueTypes, 'GET', `${root}/issue/createmeta/${encodeURIComponent(project)}/issuetypes`)),
+        )
+        if (type === undefined)
+          return yield* new ConnectorFailed({
+            product,
+            reason: 'rejected',
+            message: `The project ${project} has no type of issue Althar can file: sub-tasks need a parent`,
+          })
+        const labels = [...new Set(draft.labels.map(jiraLabelOf).filter((label) => label !== ''))]
+        const fields = {
+          project: { key: project },
+          issuetype: { id: type.id },
+          summary: draft.title,
+          ...(draft.body === '' ? {} : { description: cloud ? adfOf(draft.body) : wikiOf(draft.body) }),
+        }
+        const file = (withLabels: boolean) =>
+          call((root) =>
+            http.json(Schema.Struct({ id: Schema.String, key: Schema.String }), 'POST', `${root}/issue`, {
+              fields: withLabels && labels.length > 0 ? { ...fields, labels } : fields,
+            }),
+          )
+        // Jira makes any label it is given, but a project whose screen has no labels refuses them: the issue is filed without.
+        const filed = yield* file(true).pipe(
+          Effect.catchIf(
+            (error) => labels.length > 0 && error.reason === 'rejected' && /\blabels\b/i.test(error.message),
+            () => file(false),
+          ),
+        )
+        return yield* issue(filed.key)
+      }),
   }
 }
 

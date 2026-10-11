@@ -198,4 +198,100 @@ describe('Linear', () => {
       assert.strictEqual((yield* Effect.flip(tracker.issue('MER-1'))).reason, 'unauthorized')
     }),
   )
+  it.effect('lists the teams an issue can be filed in', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = linear([
+        [
+          'POST',
+          URL,
+          {
+            json: {
+              data: {
+                teams: {
+                  nodes: [
+                    { id: 'team-mer', key: 'MER', name: 'Meridian' },
+                    { id: 'team-pay', key: 'PAY', name: 'Payments' },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* tracker.containers(), [
+        { id: 'team-mer', key: 'MER', name: 'Meridian' },
+        { id: 'team-pay', key: 'PAY', name: 'Payments' },
+      ])
+      assert.include(JSON.stringify(sent[0]?.body), 'teams(first: 100)')
+    }),
+  )
+
+  it.effect('files an issue in a team, with the labels it has by those names, in any case', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = linear([
+        [
+          'POST',
+          URL,
+          (request) => ({
+            json: {
+              data: String((request.body as { query: string }).query).includes('issueLabels')
+                ? {
+                    issueLabels: {
+                      nodes: [
+                        { id: 'label-payments', name: 'Payments', isGroup: false },
+                        { id: 'label-payments-again', name: 'payments' },
+                        { id: 'label-area', name: 'Area', isGroup: true },
+                        { id: 'label-bug', name: 'Bug' },
+                      ],
+                    },
+                  }
+                : { issueCreate: { success: true, issue: issue({ assignee: null, labels: { nodes: [{ name: 'Payments' }] } }) } },
+            },
+          }),
+        ],
+      ])
+      const filed = yield* tracker.create('team-mer', {
+        title: 'Rate-limit refunds like charges',
+        body: 'Refunds skip the limiter.',
+        labels: ['payments', 'area', 'Nonesuch', 'PAYMENTS'],
+      })
+      assert.deepStrictEqual([filed.key, filed.labels, filed.assignees], ['MER-231', ['Payments'], []])
+      assert.deepStrictEqual(variablesOf(sent[0]), { teamId: 'team-mer' })
+      // A name with no label, or only a group's, is left off; a name asked twice is one label.
+      assert.deepStrictEqual(variablesOf(sent[1]), {
+        input: {
+          teamId: 'team-mer',
+          title: 'Rate-limit refunds like charges',
+          description: 'Refunds skip the limiter.',
+          labelIds: ['label-payments'],
+        },
+      })
+    }),
+  )
+
+  it.effect('files an issue without asking for labels when it has none, and says when Linear doesn’t file it', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = linear([['POST', URL, { json: { data: { issueCreate: { success: false, issue: null } } } }]])
+      const refused = yield* Effect.flip(tracker.create('team-mer', { title: 'A title', body: '', labels: [] }))
+      assert.deepStrictEqual([refused.reason, refused.message], ['rejected', 'Linear did not file the issue'])
+      assert.lengthOf(sent, 1)
+      assert.deepStrictEqual(variablesOf(sent[0]), { input: { teamId: 'team-mer', title: 'A title', description: '' } })
+      // Labels asked for that the team has none of: the issue is filed with none.
+      const bare = linear([
+        [
+          'POST',
+          URL,
+          (request) => ({
+            json: {
+              data: String((request.body as { query: string }).query).includes('issueLabels')
+                ? { issueLabels: { nodes: [] } }
+                : { issueCreate: { success: true, issue: issue() } },
+            },
+          }),
+        ],
+      ])
+      yield* bare.tracker.create('team-mer', { title: 'A title', body: '', labels: ['nonesuch'] })
+      assert.deepStrictEqual(variablesOf(bare.sent[1]), { input: { teamId: 'team-mer', title: 'A title', description: '' } })
+    }),
+  )
 })

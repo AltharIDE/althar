@@ -13,6 +13,7 @@ import type {
   CheckState,
   CodeHost,
   Comment,
+  Container,
   Issue,
   MergeMethod,
   Person,
@@ -613,6 +614,35 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       }),
     // GitLab's issues link only to issues: the merge request's "Closes #12" links the two.
     link: () => Effect.void,
+    // The projects the account is a member of, Guest or above (a Guest may open issues), not archived, with issues on; last active first.
+    containers: () =>
+      Effect.map(
+        http.json(
+          Schema.Array(Schema.Struct({ path_with_namespace: Schema.String, issues_enabled: Schema.optional(Schema.Boolean) })),
+          'GET',
+          `${api}/projects?membership=true&min_access_level=10&archived=false&with_issues_enabled=true&order_by=last_activity_at&per_page=100&simple=true`,
+        ),
+        (projects) =>
+          projects
+            .filter((found) => found.issues_enabled !== false)
+            .map((found): Container => ({
+              id: found.path_with_namespace,
+              key: found.path_with_namespace,
+              name: found.path_with_namespace,
+            })),
+      ),
+    create: (container, issue) =>
+      /^[^/\s#]+(\/[^/\s#]+)+$/.test(container)
+        ? Effect.map(
+            // GitLab makes a project label for any it lacks, so every label is sent as it is.
+            http.json(IssueAnswer, 'POST', `${project(container.split('/'))}/issues`, {
+              title: issue.title,
+              description: issue.body,
+              ...(issue.labels.length === 0 ? {} : { labels: issue.labels.join(',') }),
+            }),
+            (filed) => issueOf(filed, container),
+          )
+        : Effect.fail(new ConnectorFailed({ product, reason: 'not_found', message: `Not a GitLab project: ${container}` })),
   }
 }
 

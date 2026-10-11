@@ -588,4 +588,56 @@ describe('GitHub as a tracker', () => {
       assert.isFalse(host.capabilities.links)
     }),
   )
+  it.effect('lists the repositories it can file issues in, last pushed first, leaving out the archived and those without issues', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        [
+          'GET',
+          `${API}/user/repos?per_page=100&sort=pushed`,
+          {
+            json: [
+              { id: 7, full_name: 'meridian/api', has_issues: true, archived: false },
+              { id: 8, full_name: 'meridian/old', has_issues: true, archived: true },
+              { id: 9, full_name: 'meridian/docs', has_issues: false, archived: false },
+              { id: 10, full_name: 'you/dotfiles' },
+            ],
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* host.containers(), [
+        { id: 'meridian/api', key: 'meridian/api', name: 'meridian/api' },
+        { id: 'you/dotfiles', key: 'you/dotfiles', name: 'you/dotfiles' },
+      ])
+      assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('files an issue in a repository, with its labels as they are, or none', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        ['POST', `${REPO}/issues`, { status: 201, json: issue({ assignees: [], labels: [{ name: 'payments' }] }) }],
+      ])
+      const filed = yield* host.create('meridian/api', {
+        title: 'Refunds ignore the rate limit',
+        body: 'They should not.',
+        labels: ['payments'],
+      })
+      assert.deepStrictEqual([filed.ref, filed.labels, filed.container], ['meridian/api#12', ['payments'], 'meridian/api'])
+      assert.deepStrictEqual(sent[0]?.body, { title: 'Refunds ignore the rate limit', body: 'They should not.', labels: ['payments'] })
+      yield* host.create('meridian/api', { title: 'Refunds ignore the rate limit', body: '', labels: [] })
+      assert.deepStrictEqual(sent[1]?.body, { title: 'Refunds ignore the rate limit', body: '' })
+    }),
+  )
+
+  it.effect('says what it was given isn’t a repository, without asking', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([])
+      for (const container of ['meridian', 'meridian/api/web', 'meridian/api#12', 'MER'])
+        assert.deepStrictEqual(
+          (yield* Effect.flip(host.create(container, { title: 't', body: '', labels: [] }))).message,
+          `Not a GitHub repository: ${container}`,
+        )
+      assert.lengthOf(sent, 0)
+    }),
+  )
 })
