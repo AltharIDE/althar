@@ -24,4 +24,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0018_questions': 'f775a6417512859d6167b73c4df83d7d76a8c5ffaf338dfd83d1c0aad6d84dc0',
   '0019_run_commands': '1d99bf7dd390bcd630320a9e9aea75197fbc143257737bd8c197f2ee4ab32cbd',
   '0020_issue_drafts': '060cf883456f697c925ccc0befd5c87d1ce01901c5a2a4f87c65975aa6a1bd98',
+  '0021_connection_cli': '717940db14c40a4951ef3a7f43d753d8cf512d1bcb19ebd9d26313d8a0bebfbe',
 }

@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { Context, Effect, Layer, Schema } from 'effect'
+import { Context, Duration, Effect, Layer, Schedule, Schema } from 'effect'
 
 /*
  * Where Althar keeps a secret, such as a code host's token
@@ -15,12 +15,20 @@ import { Context, Effect, Layer, Schema } from 'effect'
  * The command-line client has no such key, so it keeps no secrets: the
  * connections it shares with the app stay the app's. Tests keep secrets in
  * memory.
+ *
+ * Under load a secret can fail to be kept or given back for a moment: the
+ * main process too busy to answer in time, the keychain slow to hand over its
+ * key, or the system out of open files. Each is tried again, a moment apart,
+ * before Althar says it couldn't.
  */
 
 /** Secrets couldn't be kept or given back. */
 export class SecretsUnavailable extends Schema.TaggedError<SecretsUnavailable>()('SecretsUnavailable', {
   reason: Schema.String,
 }) {}
+
+/** A secret that couldn't be kept or opened is tried this many times more, a moment apart, then twice that. */
+const AGAIN = { times: 2, schedule: Schedule.exponential(Duration.millis(200)) }
 
 /** What seals a secret so that only Althar can open it, and opens it again: in the app, its main process. */
 export interface Sealer {
@@ -75,30 +83,32 @@ export class Secrets extends Context.Service<
         Effect.try({ try: run, catch: (error) => new SecretsUnavailable({ reason: `Couldn't ${what}: ${String(error)}` }) })
       return Secrets.of({
         set: (name, value) =>
-          Effect.gen(function* () {
-            const path = yield* pathOf(name)
-            const sealed = yield* sealer.seal(value)
-            yield* attempt('keep the secret', () => {
-              mkdirSync(folder, { recursive: true, mode: 0o700 })
-              chmodSync(folder, 0o700)
-              const next = `${path}.next`
-              writeFileSync(next, sealed, { mode: 0o600 })
-              renameSync(next, path)
-            })
-          }),
+          Effect.flatMap(pathOf(name), (path) =>
+            Effect.gen(function* () {
+              const sealed = yield* sealer.seal(value)
+              yield* attempt('keep the secret', () => {
+                mkdirSync(folder, { recursive: true, mode: 0o700 })
+                chmodSync(folder, 0o700)
+                const next = `${path}.next`
+                writeFileSync(next, sealed, { mode: 0o600 })
+                renameSync(next, path)
+              })
+            }).pipe(Effect.retry(AGAIN)),
+          ),
         get: (name) =>
-          Effect.gen(function* () {
-            const path = yield* pathOf(name)
-            const sealed = yield* attempt('read the secret', () => {
-              try {
-                return readFileSync(path, 'utf8')
-              } catch (error) {
-                if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-                throw error
-              }
-            })
-            return sealed === null ? null : yield* sealer.open(sealed)
-          }),
+          Effect.flatMap(pathOf(name), (path) =>
+            Effect.gen(function* () {
+              const sealed = yield* attempt('read the secret', () => {
+                try {
+                  return readFileSync(path, 'utf8')
+                } catch (error) {
+                  if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+                  throw error
+                }
+              })
+              return sealed === null ? null : yield* sealer.open(sealed)
+            }).pipe(Effect.retry(AGAIN)),
+          ),
         remove: (name) => Effect.flatMap(pathOf(name), (path) => attempt('remove the secret', () => rmSync(path, { force: true }))),
       })
     })
