@@ -248,6 +248,59 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledWith('pln5')
   })
 
+  it('files, changes and discards an issue the coordinator drafted, and shows it filed or why it wasn’t', async () => {
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          items: [
+            items.draft(),
+            items.draft({ draftId: 'idraft_2', title: 'Flaky checkout test', state: 'failed', error: 'Linear didn’t answer.' }),
+            items.draft({
+              draftId: 'idraft_3',
+              title: 'Retry webhooks',
+              state: 'filed',
+              issue: { key: 'MER-240', url: 'https://linear.app/m/issue/MER-240' },
+            }),
+            items.draft({ draftId: 'idraft_4', title: 'Rename the env var', state: 'discarded' }),
+          ],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    const pending = (await screen.findByRole('heading', { name: 'Refunds skip the rate limiter' })).closest('article')
+    expect(pending).toBeTruthy()
+    const card = within(pending as HTMLElement)
+    expect(card.getByText('Issue draft · Linear · Meridian')).toBeTruthy()
+    // Its description is drawn as Markdown.
+    expect(card.getByText('refunds').tagName).toBe('STRONG')
+    expect(card.getByText('Labels: payments')).toBeTruthy()
+    await userEvent.click(card.getByRole('button', { name: 'File issue' }))
+    expect(client.fileIssueDraft).toHaveBeenCalledWith('idraft_1')
+    await userEvent.click(card.getByRole('button', { name: 'Edit' }))
+    const title = card.getByRole('textbox', { name: 'Title' })
+    await userEvent.clear(title)
+    await userEvent.type(title, 'Refunds bypass the limiter')
+    await userEvent.type(card.getByRole('textbox', { name: /Labels/ }), ', billing')
+    await userEvent.click(card.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.changeIssueDraft).toHaveBeenCalledWith('idraft_1', {
+        title: 'Refunds bypass the limiter',
+        body: 'Charges go through it; **refunds** don’t.',
+        labels: ['payments', 'billing'],
+      }),
+    )
+    await userEvent.click(card.getByRole('button', { name: 'Discard' }))
+    expect(client.discardIssueDraft).toHaveBeenCalledWith('idraft_1')
+
+    // Not filed: why, and filing it again.
+    expect(screen.getByText(/Couldn’t file it on Linear\. Linear didn’t answer\./)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'File again' }))
+    expect(client.fileIssueDraft).toHaveBeenCalledWith('idraft_2')
+    // Filed: its key, as a link to it; discarded: said so.
+    expect(screen.getByRole('link', { name: /MER-240/ }).getAttribute('href')).toBe('https://linear.app/m/issue/MER-240')
+    expect(screen.getByText('Issue draft discarded')).toBeTruthy()
+  })
+
   it('holds, changes and starts a plan before it starts on its own', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(card())] })) })
     withServices(<Project />, client)

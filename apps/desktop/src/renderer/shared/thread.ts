@@ -57,6 +57,7 @@ export type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
 export type ArrivalContent = Extract<ThreadItem, { kind: 'arrival' }>['content']
 export type QuestionContent = Extract<ThreadItem, { kind: 'question' }>['content']
 export type RunContent = Extract<ThreadItem, { kind: 'run' }>['content']
+export type IssueDraftContent = Extract<ThreadItem, { kind: 'issue_draft' }>['content']
 
 export type Block =
   | {
@@ -97,6 +98,8 @@ export type Block =
   | { readonly kind: 'question'; readonly id: string; readonly at: string; readonly question: QuestionContent }
   /** A run of the project Althar started, where it was asked for (ADR-023). */
   | { readonly kind: 'run'; readonly id: string; readonly run: RunContent }
+  /** An issue the coordinator drafted, filed only when the person says. */
+  | { readonly kind: 'draft'; readonly id: string; readonly draft: IssueDraftContent }
 
 /** ACP's tool kinds, as the kit's. */
 /** The notice earlier versions left in a thread when Althar restarted under its lead. */
@@ -394,6 +397,9 @@ export const blocksOf = (
         continue
       case 'run':
         blocks.push({ kind: 'run', id: item.id, run: item.content })
+        continue
+      case 'issue_draft':
+        blocks.push({ kind: 'draft', id: item.id, draft: item.content })
         continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
