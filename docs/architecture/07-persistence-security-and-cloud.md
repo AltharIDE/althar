@@ -240,7 +240,11 @@ provider or arbitrary build process without an OS/container isolation layer.
 
 Git hooks are disabled for Althar-owned automated operations unless a
 specific workflow grants them. Repository-local binaries and configuration are
-not trusted as runtime dependencies.
+not trusted as runtime dependencies. Two of Althar's own workflows do run
+repository code, outside any agent's sandbox: running the project when the
+person asks, and setting up each new task's worktree before its lead starts,
+which installs what its lockfile names, install scripts included
+([ADR-023](../decisions/023-althar-runs-the-project.md)).
 
 ### Provider, connector, MCP, and skill boundaries
 

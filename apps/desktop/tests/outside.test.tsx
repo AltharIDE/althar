@@ -750,6 +750,51 @@ describe('running what a task built, with no agent', () => {
     opened.mockRestore()
   })
 
+  it('shows Althar setting up the worktree before the lead starts: as it installs, once it has, and what it printed if it failed', async () => {
+    const thread = snapshot()
+    const setup = items.setup()
+    let current = { ...thread, items: [...thread.items, setup] }
+    const { client, emit } = fakeClient({
+      getThread: vi.fn(async () => current),
+      getThreadItem: vi.fn(async () => current.items.at(-1) as ThreadItem),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Installing dependencies in meridian…')).toBeTruthy()
+    type Setup = Extract<ThreadItem, { kind: 'setup' }>['content']
+    const ended = (over: Partial<NonNullable<Setup['ended']>>, more: Partial<Setup> = {}) =>
+      ({
+        ...setup,
+        content: {
+          ...(setup.content as Setup),
+          ...more,
+          ended: { at: NOW, code: 0, timedOut: false, stopped: false, last: null, ...over },
+        },
+      }) as ThreadItem
+    // Installed, it is a line across the thread, and no more.
+    current = { ...thread, items: [...thread.items, ended({})] }
+    act(() => emit(changed('thread_item', setup.id)))
+    expect(await screen.findByText('Installed dependencies in meridian')).toBeTruthy()
+    expect(screen.queryByText('test -d node_modules || bun install --frozen-lockfile')).toBeNull()
+    // Failed, the end of what it printed stands under it, with how it ended; the lead hears of it.
+    current = { ...thread, items: [...thread.items, ended({ code: 1, last: 'resolving\nerror: lockfile had changes' })] }
+    act(() => emit(changed('thread_item', setup.id)))
+    expect(await screen.findByText('Couldn’t install dependencies in meridian. The lead is told.')).toBeTruthy()
+    expect(screen.getByText('error: lockfile had changes')).toBeTruthy()
+    expect(screen.getByText('exit 1')).toBeTruthy()
+    // A setup kept for the repository, out of time: it says so.
+    current = {
+      ...thread,
+      items: [...thread.items, ended({ code: null, timedOut: true, last: 'waiting' }, { kept: true, command: 'make deps' })],
+    }
+    act(() => emit(changed('thread_item', setup.id)))
+    expect(await screen.findByText('Couldn’t set up meridian. The lead is told.')).toBeTruthy()
+    expect(screen.getByText('It took too long, and was stopped.')).toBeTruthy()
+    // Cut short as Althar quit, it says it runs again.
+    current = { ...thread, items: [...thread.items, ended({ code: null, stopped: true })] }
+    act(() => emit(changed('thread_item', setup.id)))
+    expect(await screen.findByText('Setting up meridian stopped as Althar quit. It runs again before the lead starts.')).toBeTruthy()
+  })
+
   it('offers no run where nothing says how it runs', async () => {
     const { client } = fakeClient()
     withServices(<Task />, client)
