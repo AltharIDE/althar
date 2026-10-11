@@ -17,7 +17,7 @@ import { dockCount, soundOf, tells } from './notify'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { type Resize, servePicture } from './pictures'
-import { findRepositories, forWindow, placesFor } from './repositories'
+import { findRepositories, foundIds, forWindow, placesFor, stillFound } from './repositories'
 import { alertSounds, playSound } from './sounds'
 import { checkNow, startUpdates } from './updater'
 import type { UpdateGlance, Updates } from './updates'
@@ -405,25 +405,21 @@ ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
 })
 
 /* The repositories the first screen and a new project offer, by the id the window has for each: only these are granted by id. */
-const foundHere = new Map<string, string>()
+const foundHere = foundIds()
 
 // The repositories where people keep code on this computer, for the first screen and a new project: each by an id, never by its path.
 ipcMain.handle('althar:find-repositories', async () => {
   // The end-to-end tests give a home of their own, so what the tester keeps isn't offered.
   const home = process.env.ALTHAR_CODE_HOME || homedir()
   const found = await findRepositories(placesFor(home, process.platform))
-  foundHere.clear()
-  return forWindow(found, home, (path) => {
-    const id = randomUUID()
-    foundHere.set(id, path)
-    return id
-  })
+  return forWindow(found, home, foundHere.idOf)
 })
 
-// A grant for one of them, once the person ticks or adds it: one main found, and nothing else.
+// A grant for one of them, once the person ticks or adds it: one main found, still where it was found, and nothing else.
 ipcMain.handle('althar:grant-found', async (_event, id: unknown) => {
-  const path = typeof id === 'string' ? foundHere.get(id) : undefined
-  return path === undefined ? null : allowFolder(path)
+  const repository = typeof id === 'string' ? foundHere.found(id) : undefined
+  const path = repository === undefined ? null : await stillFound(repository)
+  return path === null ? null : allowFolder(path)
 })
 
 // The icon the person chose, or null where there is no Dock to show one; and a new one, shown on the Dock, then kept. Anything else fails, and the window says so.

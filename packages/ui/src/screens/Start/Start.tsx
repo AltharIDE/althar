@@ -1,5 +1,5 @@
 import { Checkbox } from 'radix-ui'
-import { useId } from 'react'
+import { useEffect, useId, useRef } from 'react'
 
 import { HalftoneMark } from '../../foundations/HalftoneMark/HalftoneMark'
 import { Icon } from '../../foundations/Icon/Icon'
@@ -162,6 +162,18 @@ export function Start({
   const reposId = useId()
   const errorId = useId()
   const { over, handlers } = useDragOver(onDrop)
+  const page = useRef<HTMLDivElement>(null)
+  // A repository left out takes its × with it: focus goes to the × now in its place, else to the repository's own tick.
+  const refocus = useRef<{ readonly at: number; readonly id: string } | null>(null)
+  useEffect(() => {
+    const was = refocus.current
+    if (was === null) return
+    refocus.current = null
+    if (document.activeElement !== null && document.activeElement !== document.body) return
+    const buttons = page.current?.querySelectorAll<HTMLButtonElement>('[data-leave-out]') ?? []
+    const tick = [...(page.current?.querySelectorAll<HTMLButtonElement>('[data-pick]') ?? [])].find((one) => one.dataset.pick === was.id)
+    ;(buttons[Math.min(was.at, buttons.length - 1)] ?? tick)?.focus()
+  })
   const asking = runtimes === null
   const agents = runtimes ?? []
   // Round the mark, only the agents on this computer: one to download is in the rows alone.
@@ -172,7 +184,7 @@ export function Start({
   const title = asking ? t.looking : over ? t.over : repositories !== null && repositories.length === 0 ? t.nowhere : t.pick
 
   return (
-    <div className={cx(s.start, over && s.over, forming && s.forming, className)} {...handlers}>
+    <div ref={page} className={cx(s.start, over && s.over, forming && s.forming, className)} {...handlers}>
       <div className={s.field} aria-hidden="true">
         <div className={s.halo} />
         {/* Wider than the left half and fading before the sheet, so it never ends in an edge. */}
@@ -230,12 +242,21 @@ export function Start({
               />
               <div className={s.card}>
                 <ul className={s.chosen}>
-                  {chosen.map((r) => (
+                  {chosen.map((r, at) => (
                     <li key={r.id} className={s.chosenRepo}>
                       <Icon name="folder" size={13} className={s.chosenIcon} />
                       <span className={s.chosenName}>{r.name}</span>
                       <span className={s.chosenWhere}>{r.where}</span>
-                      <button type="button" className={s.leaveOut} aria-label={t.leaveOut(r.name)} onClick={() => onPick(r.id)}>
+                      <button
+                        type="button"
+                        className={s.leaveOut}
+                        aria-label={t.leaveOut(r.name)}
+                        data-leave-out=""
+                        onClick={() => {
+                          refocus.current = { at, id: r.id }
+                          onPick(r.id)
+                        }}
+                      >
                         <Icon name="close" size={11} />
                       </button>
                     </li>
@@ -296,7 +317,7 @@ export function Start({
                     <li key={r.id}>
                       {/* The whole row ticks it: a Radix checkbox, named by the row. */}
                       <label className={s.repo}>
-                        <Checkbox.Root checked={on} onCheckedChange={() => onPick(r.id)} className={s.tick}>
+                        <Checkbox.Root checked={on} onCheckedChange={() => onPick(r.id)} className={s.tick} data-pick={r.id}>
                           <Checkbox.Indicator className={s.tickMark}>
                             <Icon name="check" size={11} />
                           </Checkbox.Indicator>

@@ -116,6 +116,10 @@ export function StartView({
   return home()
 }
 
+/** Whether a key was typed into a form of its own, such as an account's key, or into a dialog or menu open over the screen. */
+const theirs = (target: EventTarget | null) =>
+  target instanceof Element && target.closest('form, [role="dialog"], [data-radix-popper-content-wrapper]') !== null
+
 /** The first screen: the agents answering, the repositories found, and the first project made of those ticked. */
 function First({
   model,
@@ -132,11 +136,12 @@ function First({
       if (made !== null) onProject(made.id)
     })
 
-  // ⌘N adds a folder, ⌘⏎ makes the project, as the screen says; Ctrl off a Mac.
+  // ⌘N adds a folder, ⌘⏎ makes the project, as the screen says; Ctrl off a Mac. Keys typed into an account's form, or into
+  // what is open over the screen, are theirs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const command = platform === 'darwin' ? event.metaKey : event.ctrlKey
-      if (!command || event.shiftKey || event.altKey) return
+      if (!command || event.shiftKey || event.altKey || event.defaultPrevented || theirs(event.target)) return
       if (event.key.toLowerCase() === 'n') {
         event.preventDefault()
         void project.add()

@@ -488,6 +488,11 @@ never under running work.
 
 ## Before a project: first run and sources
 
+- [ ] **Repositories found twice off a Mac.** The first screen and a new
+  project list each repository found once, by where it is on disk. On
+  Windows one folder has more than one name (its case, a drive's letter),
+  which that hasn't been tried against, so one may be listed twice. Left
+  until Althar runs on Windows (DEV-71).
 - [ ] **One way in, not two.** "Open a repository" and "New project" read as
   the same thing. Leaning, now in the kit and the prototype: one entrance,
   New project, which opens the folder picker (several folders, or cancel for

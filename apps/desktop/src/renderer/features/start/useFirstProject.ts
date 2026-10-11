@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
 import type { ProjectSummary } from '@althar/contracts'
 
@@ -14,7 +14,9 @@ import { factsOf, useFound } from '../../shared/found'
  * window, which of them are ticked, and the name. A repository found is
  * granted only when the project is made, and only the ones ticked; the
  * window never names a path. A folder added is read at once, and a folder
- * of several repositories adds each of them, ticked.
+ * of several repositories adds each of them, ticked. A folder inside a
+ * repository makes a project on its own only (ADR-025): with others, the
+ * repository itself is added.
  */
 
 /** A repository that could be in the first project. */
@@ -29,7 +31,13 @@ export interface Candidate {
   /** Main's id for it, to grant it by once the project is made; null for one added. */
   readonly found: string | null
   /** The grant of the folder it was added by, and its root as the runtime read it; null for one found. */
-  readonly added: { readonly grant: string; readonly path: string; readonly alone: boolean } | null
+  readonly added: {
+    readonly grant: string
+    readonly path: string
+    readonly alone: boolean
+    /** The repository's name, when it was added as a folder inside it, one package of a monorepo; null for the repository itself. */
+    readonly insideOf: string | null
+  } | null
 }
 
 export interface FirstProjectModel {
@@ -64,6 +72,8 @@ export const useFirstProject = (): FirstProjectModel => {
   const [named, setNamed] = useState<string | null>(null)
   const [making, setMaking] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Making, or made: a second ⌘⏎ before the screen goes makes nothing more.
+  const busy = useRef(false)
 
   const now = new Date()
   // A repository found and added too is listed once, as added: it has its grant already. The window knows a found one only by where it is.
@@ -103,7 +113,7 @@ export const useFirstProject = (): FirstProjectModel => {
           where: shortFolder(repository.folder === null ? repository.path : `${repository.path}/${repository.folder}`),
           facts: 'added',
           found: null,
-          added: { grant, path: repository.path, alone },
+          added: { grant, path: repository.path, alone, insideOf: alone && repository.folder !== null ? repository.name : null },
         }))
         if (more.length === 0) return setError(`There’s no git repository in ${reading.name}.`)
         setAdded((now) => [...more, ...now.filter((candidate) => !more.some((m) => m.id === candidate.id))])
@@ -129,10 +139,17 @@ export const useFirstProject = (): FirstProjectModel => {
   )
 
   const make = useCallback(async () => {
+    if (busy.current) return null
     if (chosen.length === 0) {
       setError('Tick a repository for the project first.')
       return null
     }
+    const [inside] = chosen.length > 1 ? chosen.flatMap(({ name, added }) => (added?.insideOf ? [{ name, of: added.insideOf }] : [])) : []
+    if (inside !== undefined) {
+      setError(`${inside.name} is a folder inside ${inside.of}: on its own it makes a project, but with others, add ${inside.of} itself.`)
+      return null
+    }
+    busy.current = true
     setError(null)
     setMaking(true)
     try {
@@ -142,9 +159,10 @@ export const useFirstProject = (): FirstProjectModel => {
           if (candidate.added !== null) return candidate.added
           const grant = candidate.found === null ? null : await host.grantFound(candidate.found)
           if (grant === null) throw new Unopened(`Althar couldn’t open ${candidate.name}. Add it with Add a folder.`)
-          const [root] = (await client.readFolder(grant)).repositories
+          const reading = await client.readFolder(grant)
+          const [root] = reading.kind === 'repository' ? reading.repositories : []
           if (root === undefined) throw new Unopened(`${candidate.name} isn’t a git repository any more.`)
-          return { grant, path: root.path, alone: true }
+          return { grant, path: root.path, alone: true, insideOf: null }
         }),
       )
       const [first] = repositories
@@ -161,6 +179,7 @@ export const useFirstProject = (): FirstProjectModel => {
       await cache.refetchQueries({ queryKey: keys.projects }).catch(() => undefined)
       return made
     } catch (failure) {
+      busy.current = false
       setError(failure instanceof Unopened ? failure.message : messageOf(failure))
       return null
     } finally {
