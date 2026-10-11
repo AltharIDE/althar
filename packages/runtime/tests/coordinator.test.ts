@@ -10,13 +10,16 @@ import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig, type StallOptions } from '../src/Config'
 import { Coordinator, CoordinatorUnavailable } from '../src/Coordinator'
+import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotFound } from '../src/errors'
+import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { Tasks } from '../src/Tasks'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { callTool, notices, repository, runtime, task as newTask, turns, until } from './support'
 
@@ -444,6 +447,56 @@ describe('the coordinator loop', () => {
       // With no review, the lead's summary makes it ready.
       const [ready] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.strictEqual(ready?.summary, 'Did the task.')
+
+      // The coordinator hears what became of its plan before the person's next words, once, and speaks of it as it is.
+      const told = (body: string) =>
+        until(
+          sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${threadId} AND prompt LIKE ${`%${body}%`}`,
+          (rows) => rows.length === 1,
+        )
+      yield* say(threadId, 'How did it go?')
+      const [heard] = yield* told('How did it go?')
+      assert.match(heard?.prompt ?? '', /^Since you last spoke, in Althar:\n- something-small \(Something small\): /)
+      assert.match(
+        heard?.prompt ?? '',
+        /The person changed its plan: you proposed .+ leads, no review\. Now Large leads, no review\. It has started\./,
+      )
+      assert.match(heard?.prompt ?? '', /\n\nHow did it go\?$/)
+      yield* say(threadId, 'Thanks.')
+      const [after] = yield* told('Thanks.')
+      assert.notInclude(after?.prompt, 'Since you last spoke')
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.seconds(30) }))),
+  )
+
+  it.live('tells the coordinator of a change recorded after its last turn, by the record’s order, whatever its clock says', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const plans = yield* Plans
+      const { projectId, threadId } = yield* opened
+      const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
+      const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
+      yield* say(threadId, 'Something small. [coordinator:plan-no-review] [lead:finish]')
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards.length === 1)
+      const planId = card?.plan?.id ?? ''
+      yield* plans.hold(planId, actor)
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'held')
+      // Wait until its turn is over, so the change comes after it in the record.
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId} AND state IN ('pending', 'delivered')`,
+        (rows) => rows.length === 0,
+      )
+      yield* plans.change(planId, [{ key: 'implement', agentId: 'codex', model: 'large', skipped: false }], actor)
+      // Recorded after the turn, but stamped before it: as when a change lands while the turn is being recorded.
+      yield* sql`UPDATE record_events SET occurred_at = '2020-01-01T00:00:00.000Z' WHERE type IN ('task_plan.changed', 'task_plan.held')`
+      yield* say(threadId, 'Where is it?')
+      const [heard] = yield* until(
+        sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${threadId} AND prompt LIKE '%Where is it?%'`,
+        (rows) => rows.length === 1,
+      )
+      assert.match(
+        heard?.prompt ?? '',
+        /The person changed its plan: you proposed .+ leads, no review\. Now Large leads, no review\. The person is holding it/,
+      )
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.seconds(30) }))),
   )
 
@@ -537,6 +590,123 @@ const answer = (
     const runs = yield* Runs
     yield* runs.answerStuck({ envelope: yield* Runtime.envelope('attention.answer', {}), attentionId, answer: reply })
   })
+
+describe('what the coordinator hears of its plans', () => {
+  it.live('says, once each, what the person changed, held, started or declined, and how each plan stands now', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const plans = yield* Plans
+      const projects = yield* Projects
+      const tasks = yield* Tasks
+      const instance = yield* Instance
+      const { projectId, threadId } = yield* opened
+      const person = instance.personId
+      const coordinator = instance.coordinatorId
+      // It has spoken once: what it hears is what came after.
+      yield* say(threadId, 'Hello.')
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId} AND state IN ('pending', 'delivered')`,
+        (rows) => rows.length === 0,
+      )
+      const draft = (title: string) =>
+        Effect.map(
+          Effect.flatMap(Runtime.envelope('task.create', { title }), (envelope) =>
+            projects.createTask({ envelope, projectId, title, draft: true }),
+          ),
+          (created) => created.taskId,
+        )
+      const propose = (taskId: string, input: Partial<Parameters<typeof plans.propose>[0]>) =>
+        plans.propose({
+          projectId: projectId as Parameters<typeof plans.propose>[0]['projectId'],
+          taskId,
+          steps: [{ key: 'implement', agentId: 'claude-code', model: 'small', effort: 'high', skipped: false }],
+          reason: null,
+          actorId: coordinator,
+          held: true,
+          ...input,
+        })
+
+      // Proposed by the coordinator with a review and a draft pull request; the person makes it Codex alone, ready for review, and holds it.
+      const retry = yield* draft('Retry the checkout call')
+      const retryPlan = yield* propose(retry, {
+        steps: [
+          { key: 'implement', agentId: 'claude-code', model: 'small', effort: 'high', skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: false },
+        ],
+        end: 'draft',
+      })
+      yield* plans.change(
+        retryPlan,
+        [
+          { key: 'implement', agentId: 'codex', model: 'large', skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        person,
+        'ready',
+      )
+      // The person's own plan, its branch pushed, changed to end on its branch, and started.
+      const docs = yield* draft('Fix the docs')
+      const docsPlan = yield* propose(docs, { actorId: person, end: 'none' })
+      yield* plans.change(docsPlan, [{ key: 'implement', agentId: 'claude-code', model: 'small', skipped: false }], person, null)
+      yield* plans.start(docsPlan, person)
+      // Declined, its task abandoned before it started.
+      const bump = yield* draft('Bump the SDK')
+      yield* propose(bump, {})
+      yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', { bump }), taskId: bump })
+      // Held, then proposed again: the plan it replaced says nothing.
+      const tidy = yield* draft('Tidy the logs')
+      const replaced = yield* propose(tidy, {})
+      yield* plans.change(replaced, [{ key: 'implement', agentId: 'codex', model: null, skipped: false }], person)
+      yield* propose(tidy, {})
+      // Waiting out its countdown: changed by the coordinator alone, nothing to say; by the person, a model its agent doesn't name, and no word of a hold.
+      const quiet = yield* draft('Quiet one')
+      const quietPlan = yield* propose(quiet, { held: false, startsIn: Duration.minutes(5) })
+      yield* plans.change(quietPlan, [{ key: 'implement', agentId: 'codex', model: 'large', skipped: false }], coordinator)
+      const counting = yield* draft('Counting down')
+      const countingPlan = yield* propose(counting, { held: false, startsIn: Duration.minutes(5) })
+      yield* plans.change(countingPlan, [{ key: 'implement', agentId: 'codex', model: 'mystery-9', skipped: false }], person)
+      // Started, then abandoned; and started, its work since merged.
+      const spike = yield* draft('Spike the cache')
+      const spikePlan = yield* propose(spike, {})
+      yield* plans.start(spikePlan, person)
+      yield* until(sql<{ id: string }>`SELECT id FROM runs WHERE plan_id = ${spikePlan}`, (rows) => rows.length === 1)
+      yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', { spike }), taskId: spike })
+      const merged = yield* draft('Ship the banner')
+      const mergedPlan = yield* propose(merged, {})
+      yield* plans.start(mergedPlan, person)
+      yield* sql`UPDATE tasks SET state = 'done' WHERE id = ${merged}`
+
+      const news = (yield* coordinatorNews(threadId, projectId, yield* modelNamer)) ?? ''
+      assert.match(news, /^Since you last spoke, in Althar:\n/)
+      assert.match(
+        news,
+        /- retry-the-checkout-call \(Retry the checkout call\): The person changed its plan: you proposed Claude Small \(effort high\) leads, .+ reviews, and it ends as a draft pull request\. Now Large leads, no review, and it ends as a pull request ready for review\. The person is holding it: it waits until they start it\./,
+      )
+      assert.match(
+        news,
+        /- fix-the-docs \(Fix the docs\): The person changed its plan: it was Claude Small \(effort high\) leads, no review, and it ends with its branch pushed\. Now Claude Small leads, no review, and it ends on its branch, with nothing sent to the host\. It has started\./,
+      )
+      assert.include(news, '- bump-the-sdk (Bump the SDK): It was declined: it won’t run.')
+      assert.notInclude(news, 'Tidy the logs')
+      assert.notInclude(news, 'Quiet one')
+      assert.match(
+        news,
+        /- counting-down \(Counting down\): The person changed its plan: you proposed .+\. Now mystery-9 leads, no review\.\n/,
+      )
+      assert.include(news, '- spike-the-cache (Spike the cache): It started, and the person abandoned it.')
+      assert.include(news, '- ship-the-banner (Ship the banner): It has started and is done.')
+      assert.match(news, /Speak of these plans as they are now, not as they were proposed\.$/)
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.seconds(30) }))),
+  )
+
+  it.live('has nothing to say before it has spoken, or when nothing changed', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened
+      const named = yield* modelNamer
+      assert.isNull(yield* coordinatorNews(threadId, projectId, named))
+    }).pipe(Effect.provide(withQueries())),
+  )
+})
 
 describe('a step that needs the person', () => {
   it.live('reminds a lead that ends its turn without reporting once, then needs the person, and carries on when told', () =>

@@ -1,5 +1,4 @@
 import { createRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect } from 'react'
 
 import { Room } from '@althar/ui'
 
@@ -29,16 +28,6 @@ function Start() {
   const navigate = useNavigate()
   const start = useStart()
   const accounts = useAccountSignIn(start)
-  // The window's tabs ask for a folder here: the picker opens once, and the address forgets it.
-  const { open } = startRoute.useSearch()
-  const { openFolder } = start
-  useEffect(() => {
-    if (open !== 'folder') return
-    void navigate({ to: '/', search: {}, replace: true })
-    void openFolder().then((opened) => {
-      if (opened !== null) void navigate({ to: '/projects/$projectId', params: { projectId: opened.id } })
-    })
-  }, [open, openFolder, navigate])
   return (
     <StartView
       model={start}
@@ -49,7 +38,7 @@ function Start() {
   )
 }
 
-/** Where the window starts: the first screen with no project yet, the home once there are. `open=folder` asks for a folder to open. */
+/** Where the window starts: the first screen with no project yet, the home once there are. */
 export const startRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
@@ -61,5 +50,4 @@ export const startRoute = createRoute({
     const [listed] = await Promise.allSettled([cache.fetchQuery(read.projects()), cache.fetchQuery(read.status())])
     if (listed.status === 'fulfilled' && listed.value.projects.length > 0) await cache.fetchQuery(read.home()).catch(() => undefined)
   },
-  validateSearch: (search: Record<string, unknown>): { readonly open?: 'folder' } => (search.open === 'folder' ? { open: 'folder' } : {}),
 })

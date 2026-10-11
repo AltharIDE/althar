@@ -1,4 +1,3 @@
-import { useQuery } from '@tanstack/react-query'
 import { useCallback, useState } from 'react'
 
 import type { ProjectSummary } from '@althar/contracts'
@@ -7,7 +6,7 @@ import { messageOf } from '../../data/client'
 import { keys } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { shortFolder } from '../../shared/folders'
-import { ago } from '../../shared/time'
+import { factsOf, useFound } from '../../shared/found'
 
 /*
  * The first screen's project, before there is one: the repositories main
@@ -57,15 +56,9 @@ export interface FirstProjectModel {
 /** A repository that couldn't be had as the project was made, in the screen's words. */
 class Unopened extends Error {}
 
-/** The repositories found, read once a window: the first screen shows them, and nothing else does. */
-const foundKey = ['found-repositories'] as const
-
-const factsOf = (branch: string | null, worked: number, now: Date) =>
-  [branch, worked > 0 ? ago(new Date(worked).toISOString(), now) : null].filter((part) => part !== null).join(' · ')
-
 export const useFirstProject = (): FirstProjectModel => {
   const { client, host, cache } = useServices()
-  const found = useQuery({ queryKey: foundKey, queryFn: () => host.findRepositories(), staleTime: Infinity })
+  const found = useFound()
   const [added, setAdded] = useState<ReadonlyArray<Candidate>>([])
   const [picked, setPicked] = useState<ReadonlyArray<string>>([])
   const [named, setNamed] = useState<string | null>(null)

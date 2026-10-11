@@ -14,7 +14,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProjectSummary } from '@althar/contracts'
 import { Room } from '@althar/ui'
 
-import { TabsFrame, useLastRoom, useVisit } from '../src/renderer/features/tabs/TabsFrame'
+import { draftsOf } from '../src/renderer/features/newProject/draft'
+import { TabsFrame, useLastRoom, useNewTab, useVisit } from '../src/renderer/features/tabs/TabsFrame'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
 import type { Host } from '../src/renderer/data/services'
 import { changed, fakeClient, fakeHost, project } from './fixtures'
@@ -47,6 +48,21 @@ function ProjectScreen() {
     </>
   )
 }
+/* A new project's screen: made, under the id it was drawn with, or closed. */
+function NewScreen({ projectId }: { projectId: () => string }) {
+  const tab = useNewTab()
+  return (
+    <>
+      <Where />
+      <button type="button" onClick={() => tab.made(projectId())}>
+        Made
+      </button>
+      <button type="button" onClick={tab.close}>
+        Escape
+      </button>
+    </>
+  )
+}
 const rootRoute = createRootRoute({
   component: () => (
     <TabsFrame>
@@ -58,13 +74,16 @@ const homeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', comp
 const projectRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects/$projectId', component: ProjectScreen })
 const rulesRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects/$projectId/rules', component: Where })
 const threadRoute = createRoute({ getParentRoute: () => rootRoute, path: '/threads/$threadId', component: Thread })
+let making = () => ''
+const newRoute = createRoute({ getParentRoute: () => rootRoute, path: '/new', component: () => <NewScreen projectId={() => making()} /> })
 
 const windowAt = (path: string, projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera], host: Host = fakeHost()) => {
   const router = createRouter({
-    routeTree: rootRoute.addChildren([homeRoute, projectRoute, rulesRoute, threadRoute]),
+    routeTree: rootRoute.addChildren([homeRoute, projectRoute, rulesRoute, threadRoute, newRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   const { client, emit } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects })) })
+  making = () => draftsOf(client).get()?.id ?? ''
   withServices(<RouterProvider router={router} />, client, host)
   const go = (to: string) => act(() => router.history.push(to))
   return { client, emit, go, router }
@@ -189,12 +208,67 @@ describe('the window’s tabs', () => {
     await waitFor(() => expect(screen.getByTestId('last').textContent).toBe('none'))
   })
 
-  it('offer a folder from the +, on the home', async () => {
-    const { router } = windowAt('/projects/p1', [project])
+  it('start a new project in a tab of its own, named as it is typed, and closed with nothing made', async () => {
+    const { client } = windowAt('/projects/p1', [project])
+    const drafts = draftsOf(client)
+    // No other project to open: the + is New project itself.
+    await waitFor(() => expect(names()).toEqual(['Home', 'meridian, work running']))
+    await userEvent.click(nav().getByRole('button', { name: 'New project' }))
+    await waitFor(() => expect(where()).toBe('/new'))
+    const id = drafts.get()?.id ?? ''
+    expect(id).toMatch(/^proj_[0-9a-f]{32}$/)
+    expect(names()).toEqual(['Home', 'meridian, work running', 'New project'])
+    expect(nav().getAllByRole('listitem').at(-1)?.querySelector('[aria-current="page"]')).not.toBeNull()
+    act(() => drafts.change(id, (now) => ({ ...now, name: '  Northwind ' })))
+    expect(names()).toEqual(['Home', 'meridian, work running', 'Northwind'])
+
+    // Away and back, it is the same; ⌘N goes to it rather than starting another.
+    await userEvent.click(tab('meridian'))
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    expect(tab('Northwind').getAttribute('aria-current')).toBeNull()
+    fireEvent.keyDown(window, { key: 'n', metaKey: true })
+    await waitFor(() => expect(where()).toBe('/new'))
+    expect(drafts.get()?.id).toBe(id)
+    expect(tab('Northwind').getAttribute('aria-current')).toBe('page')
+
+    // Closed, nothing is made, and the tab before it has the window.
+    await userEvent.click(nav().getByRole('button', { name: 'Close Northwind' }))
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    expect(drafts.get()).toBeNull()
+    expect(names()).toEqual(['Home', 'meridian, work running'])
+
+    // Closed from another tab, it goes at once; Escape on its page goes back as closing it does.
+    await userEvent.click(nav().getByRole('button', { name: 'New project' }))
+    await waitFor(() => expect(where()).toBe('/new'))
+    await userEvent.click(tab('meridian'))
+    await userEvent.click(nav().getByRole('button', { name: 'Close New project' }))
+    expect(drafts.get()).toBeNull()
+    await userEvent.click(nav().getByRole('button', { name: 'New project' }))
+    await waitFor(() => expect(where()).toBe('/new'))
+    await userEvent.click(screen.getByRole('button', { name: 'Escape' }))
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    expect(drafts.get()).toBeNull()
+  })
+
+  it('make the new project’s tab the project’s own, open on its conversation', async () => {
+    const { client, emit, router } = windowAt('/', [project, halyard, tessera])
+    const drafts = draftsOf(client)
+    // With other projects to open, New project is the + menu's last.
     await userEvent.click(await screen.findByRole('button', { name: 'Open a project' }))
-    await userEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Open a folder…' }))
-    expect(router.state.location.pathname).toBe('/')
-    expect(router.state.location.search).toEqual({ open: 'folder' })
+    await userEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: /New project/ }))
+    await waitFor(() => expect(where()).toBe('/new'))
+    const id = drafts.get()?.id ?? ''
+    act(() => drafts.change(id, (now) => ({ ...now, name: 'Northwind', ink: 'umber' })))
+    const northwind: ProjectSummary = { ...halyard, id, name: 'Northwind', slug: 'northwind', ink: 'umber' }
+    vi.mocked(client.listProjects).mockResolvedValue({ cursor: 4, projects: [project, halyard, tessera, northwind] })
+    emit(changed('project', id))
+    await waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(2))
+    await userEvent.click(screen.getByRole('button', { name: 'Made' }))
+    await waitFor(() => expect(where()).toBe(`/projects/${id}`))
+    expect(router.state.location.search).toEqual({ room: Room.Talk })
+    expect(drafts.get()).toBeNull()
+    expect(names()).toEqual(['Home, 2 calls wait on you', 'meridian, work running', 'tessera, 2 calls wait on you', 'Northwind'])
+    expect(tab('Northwind').getAttribute('aria-current')).toBe('page')
   })
 
   it('say in the bar that a newer Althar is ready, with Restart only while no work runs', async () => {
@@ -231,6 +305,7 @@ describe('working out the tabs', () => {
   it('reads where the window is from its address', () => {
     expect(whereOf('/')).toEqual({ kind: 'home' })
     expect(whereOf('/settings')).toEqual({ kind: 'home' })
+    expect(whereOf('/new')).toEqual({ kind: 'new' })
     expect(whereOf('/projects/p%201')).toEqual({ kind: 'project', projectId: 'p 1', place: { kind: 'project' } })
     expect(whereOf('/projects/p1/rules')).toEqual({ kind: 'project', projectId: 'p1', place: { kind: 'rules' } })
     expect(whereOf('/projects/p1/repositories')).toEqual({ kind: 'project', projectId: 'p1', place: { kind: 'repositories' } })

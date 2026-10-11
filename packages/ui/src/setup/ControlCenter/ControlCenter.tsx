@@ -1,8 +1,11 @@
 import {
   createContext,
+  type CSSProperties,
   type MouseEvent,
   type ReactElement,
   type ReactNode,
+  type Ref,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -25,15 +28,17 @@ import s from './ControlCenter.module.css'
 /*
  * Settings as a panel from the window's bar, the way the Mac's Control Center
  * opens from its menu bar, over whatever the person was looking at. Modules
- * say where each thing stands at a glance; what changes often is one press on
- * a round switch; any module opens out in place (ControlDetail) and steps
- * back. The panel grows to fit what is open in it, and opens out wide for a
- * part that needs the room. It is a Popover: Escape and a press outside close
- * it, unless it is `holding` something under way, like a sign-in the person
- * is finishing in their browser.
+ * say where each thing stands at a glance, each as large as it matters, set
+ * in a grid of columns and rows; what changes often is one press on a round
+ * switch; what matters least is a quiet link in the foot. Any of them opens
+ * out in place (ControlDetail) and steps back. The panel grows to fit what is
+ * open in it, as wide as the consumer says, down to a card for one thing done
+ * a step at a time. It is a Popover: Escape and a press outside close it,
+ * unless it is `holding` something under way, like a sign-in the person is
+ * finishing in their browser.
  *
  * Focus follows what is open: into an opened module's way back, and back to
- * the module it came from, so a keyboard carries on where it was.
+ * the module or link it came from, so a keyboard carries on where it was.
  */
 
 export interface ControlCenterText {
@@ -50,8 +55,12 @@ export interface ControlCenterProps {
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
-  /** Opened out wide, for a part that needs the room. */
-  wide?: boolean
+  /**
+   * How wide it is, in px, for what is open in it: 440 at rest; a card, a
+   * little wider at 480, for one thing done a step at a time; or opened out,
+   * for a part that needs the room.
+   */
+  width?: number
   /** Something in it is under way: a press outside doesn't close it. Escape still does, through `onEscapeKeyDown`. */
   holding?: boolean
   /** Escape, before it closes: prevent the default to step back out of an opened module instead. */
@@ -67,7 +76,7 @@ export function ControlCenter({
   open,
   defaultOpen,
   onOpenChange,
-  wide = false,
+  width = 440,
   holding = false,
   onEscapeKeyDown,
   className,
@@ -80,6 +89,7 @@ export function ControlCenter({
       trigger={trigger}
       label={t.label}
       align="end"
+      width={width}
       padded={false}
       initialFocus="panel"
       open={open}
@@ -87,7 +97,7 @@ export function ControlCenter({
       onOpenChange={onOpenChange}
       onEscapeKeyDown={onEscapeKeyDown}
       onInteractOutside={holding ? (e) => e.preventDefault() : undefined}
-      className={cx(s.panel, wide && s.wide, className)}
+      className={cx(s.panel, className)}
     >
       <Opened.Provider value={opened}>
         <Fit>{children}</Fit>
@@ -126,6 +136,27 @@ function useOpening(): Opening {
 /* Focus went with what was open, onto the page's body. */
 const focusLost = () => document.activeElement === null || document.activeElement === document.body
 
+/* Hands an element to the consumer's ref as well as a part's own. */
+const assign = <T,>(ref: Ref<T> | undefined, node: T | null) => {
+  if (typeof ref === 'function') ref(node)
+  else if (ref) ref.current = node
+}
+
+/* A part that opens out, remembered by its title: it marks itself as it opens, and takes focus again
+   as it comes back, when the person steps back to all of them and focus went with what was open. */
+function useRemembered<T extends HTMLElement>(title: string, forwarded?: Ref<T>) {
+  const opened = useContext(Opened)
+  const attach = useCallback(
+    (node: T | null) => {
+      assign(forwarded, node)
+      if (node !== null && opened?.take(title) && focusLost()) node.focus()
+    },
+    [opened, title, forwarded],
+  )
+  const mark = useCallback(() => opened?.mark(title), [opened, title])
+  return [attach, mark] as const
+}
+
 /* What is open, at its own height: the panel follows it, so it moves from one
    to the next rather than jumping. */
 function Fit({ children }: { children: ReactNode }) {
@@ -151,12 +182,39 @@ function Fit({ children }: { children: ReactNode }) {
 
 /* ---- the modules ------------------------------------------------------------------ */
 
-export type ControlGridProps = RootProps<'div', { children: ReactNode }>
+/** Where a part sits in a ControlGrid: the grid lines it runs between, across and down. */
+export interface ControlPlace {
+  /** Columns, from one line to another: [1, 3] is the first two. */
+  column: readonly [number, number]
+  /** Rows, likewise, in the grid's row unit. Without them, it takes the next row free. */
+  row?: readonly [number, number]
+}
 
-/** The modules, four columns across; a module spans two or all four. */
-export function ControlGrid({ children, className, ...rest }: ControlGridProps) {
+const placed = (place: ControlPlace | undefined, style?: CSSProperties): CSSProperties | undefined =>
+  place === undefined
+    ? style
+    : {
+        ...style,
+        gridColumn: `${place.column[0]} / ${place.column[1]}`,
+        ...(place.row === undefined ? {} : { gridRow: `${place.row[0]} / ${place.row[1]}` }),
+      }
+
+export type ControlGridProps = RootProps<
+  'div',
+  {
+    children: ReactNode
+    /** How many columns across. */
+    columns?: number
+    /** How tall a row is, in px, for parts placed by rows: a round switch is two of 28, a large module six. Without it, each row is as tall as what is in it. */
+    row?: number
+  }
+>
+
+/** The modules, in columns of equal width; each sits where its `place` says, a module across them all and a switch across half without one. */
+export function ControlGrid({ children, columns = 4, row, className, style, ...rest }: ControlGridProps) {
+  const grid = { ...style, '--columns': columns, ...(row === undefined ? {} : { '--row': `${row}px` }) } as CSSProperties
   return (
-    <div className={cx(s.grid, className)} {...rest}>
+    <div className={cx(s.grid, className)} style={grid} {...rest}>
       {children}
     </div>
   )
@@ -168,34 +226,41 @@ export type ControlModuleProps = RootProps<
     title: string
     /** Opens it out. */
     onClick: (event: MouseEvent<HTMLButtonElement>) => void
-    /** A word beside the title: 3 connected. */
+    /** A word beside the title: 7 accounts. */
     aside?: ReactNode
-    /** How many of the grid's four columns it spans. */
-    span?: 2 | 4
-    /** What it says at a glance: a ControlAgents, a ControlMarks, a picture. Nothing in it is pressable; the module is. */
+    /** Where it sits in the grid. Without it, across every column. */
+    place?: ControlPlace
+    /** What it says at a glance, spread down its height: a ControlAgents, a ControlMarks and a ControlLine. Nothing in it is pressable; the module is. */
     children?: ReactNode
   }
 >
 
-/** One module: a glance at where something stands, which opens out when pressed. */
-export function ControlModule({ title, aside, span = 4, onClick, children, className, type = 'button', ref, ...rest }: ControlModuleProps) {
-  const opened = useContext(Opened)
-  const self = useRef<HTMLButtonElement | null>(null)
-  // Back from being opened out: focus returns here.
-  useEffect(() => {
-    if (opened?.take(title) && focusLost()) self.current?.focus()
-  }, [opened, title])
+/**
+ * One module: a glance at where something stands, which opens out when
+ * pressed. Narrow, as a tall module in a column of its own, its title wraps
+ * and its chevron gives way.
+ */
+export function ControlModule({
+  title,
+  aside,
+  place,
+  onClick,
+  children,
+  className,
+  style,
+  type = 'button',
+  ref,
+  ...rest
+}: ControlModuleProps) {
+  const [attach, mark] = useRemembered<HTMLButtonElement>(title, ref)
   return (
     <button
       type={type}
-      ref={(node) => {
-        self.current = node
-        if (typeof ref === 'function') return ref(node)
-        if (ref) ref.current = node
-      }}
-      className={cx(s.module, span === 2 ? s.span2 : s.span4, className)}
+      ref={attach}
+      className={cx(s.module, s.opens, className)}
+      style={placed(place, style)}
       onClick={(event) => {
-        opened?.mark(title)
+        mark()
         onClick(event)
       }}
       {...rest}
@@ -220,17 +285,15 @@ export interface ControlToggleProps {
   glyph: ReactNode
   /** Opens it out, for the rest of its settings. Without it, the name is only text. */
   onOpen?: () => void
+  /** Where it sits in the grid. Without it, across two columns. */
+  place?: ControlPlace
   className?: string
 }
 
 /** A module with a round switch: the circle turns it on or off; the name opens it out. */
-export function ControlToggle({ title, line, on, onChange, glyph, onOpen, className }: ControlToggleProps) {
-  const opened = useContext(Opened)
-  const self = useRef<HTMLButtonElement | null>(null)
+export function ControlToggle({ title, line, on, onChange, glyph, onOpen, place, className }: ControlToggleProps) {
   // Back from its detail: focus returns to its words, as to a module.
-  useEffect(() => {
-    if (opened?.take(title) && focusLost()) self.current?.focus()
-  }, [opened, title])
+  const [attach, mark] = useRemembered<HTMLButtonElement>(title)
   const words = (
     <>
       <span className={s.toggleTitle}>{title}</span>
@@ -238,7 +301,7 @@ export function ControlToggle({ title, line, on, onChange, glyph, onOpen, classN
     </>
   )
   return (
-    <div className={cx(s.module, s.span2, s.toggle, className)}>
+    <div className={cx(s.module, s.half, s.toggle, className)} style={placed(place)}>
       <button
         type="button"
         role="switch"
@@ -252,10 +315,10 @@ export function ControlToggle({ title, line, on, onChange, glyph, onOpen, classN
       {onOpen ? (
         <button
           type="button"
-          ref={self}
+          ref={attach}
           className={s.toggleWords}
           onClick={() => {
-            opened?.mark(title)
+            mark()
             onOpen()
           }}
         >
@@ -270,25 +333,43 @@ export function ControlToggle({ title, line, on, onChange, glyph, onOpen, classN
 
 /* ---- what a module shows at a glance ----------------------------------------------- */
 
+export interface ControlLineText {
+  yours: string
+}
+
+export const controlLineText: ControlLineText = { yours: 'needs you' }
+
+export interface ControlLineProps {
+  /** quiet: it can't run for now, and comes back by itself. yours: only the person can fix it, in violet with a dot. */
+  tone?: 'quiet' | 'yours' | undefined
+  children: ReactNode
+  text?: Partial<ControlLineText>
+}
+
+/** Where something stands, in a word under its name: quiet, or violet with a dot where only the person can put it right. */
+export function ControlLine({ tone, children, text }: ControlLineProps) {
+  const t = { ...controlLineText, ...text }
+  return (
+    <span className={cx(s.line, tone === 'yours' && s.yoursLine)}>
+      {tone === 'yours' && <span className={s.dot} aria-hidden="true" />}
+      {children}
+      {tone === 'yours' && <VisuallyHidden>, {t.yours}</VisuallyHidden>}
+    </span>
+  )
+}
+
 export interface AgentGlance {
   id: string
   name: string
   brand?: Brand
-  /** One line: its model while all is well, or what is off. */
+  /** One line: how many accounts while all is well, or what is off. */
   line: string
   /** quiet: it can't run for now, and comes back by itself. yours: only the person can fix it. */
   tone?: 'quiet' | 'yours'
 }
 
-export interface ControlAgentsText {
-  yours: string
-}
-
-export const controlAgentsText: ControlAgentsText = { yours: 'needs you' }
-
-/** The agents, each with a word on where it stands: inside the Agents module. */
-export function ControlAgents({ agents, text }: { agents: readonly AgentGlance[]; text?: Partial<ControlAgentsText> }) {
-  const t = { ...controlAgentsText, ...text }
+/** The agents, one under another, each with a word on where it stands: inside the Agents module, spread down its height. */
+export function ControlAgents({ agents, text }: { agents: readonly AgentGlance[]; text?: Partial<ControlLineText> }) {
   return (
     <span className={s.agents}>
       {agents.map((agent) => (
@@ -296,11 +377,9 @@ export function ControlAgents({ agents, text }: { agents: readonly AgentGlance[]
           <BrandChip brand={agent.brand} size={30} className={s.flatChip} />
           <span className={s.agentWords}>
             <span className={s.agentName}>{agent.name}</span>
-            <span className={cx(s.agentLine, agent.tone === 'yours' && s.yoursLine)}>
-              {agent.tone === 'yours' && <span className={s.dot} aria-hidden="true" />}
+            <ControlLine tone={agent.tone} {...(text === undefined ? {} : { text })}>
               {agent.line}
-              {agent.tone === 'yours' && <VisuallyHidden>, {t.yours}</VisuallyHidden>}
-            </span>
+            </ControlLine>
           </span>
         </span>
       ))}
@@ -318,14 +397,14 @@ export interface MarkGlance {
   yours?: boolean
 }
 
-/** Marks in a row, faint for what isn't set up, a dot on what needs you: inside the code hosts module. */
-export function ControlMarks({ marks, text }: { marks: readonly MarkGlance[]; text?: Partial<ControlAgentsText> }) {
-  const t = { ...controlAgentsText, ...text }
+/** Marks, small, as many to a row as there is room for, faint for what isn't set up, a dot on what needs you: inside the code hosts module. */
+export function ControlMarks({ marks, text }: { marks: readonly MarkGlance[]; text?: Partial<ControlLineText> }) {
+  const t = { ...controlLineText, ...text }
   return (
     <span className={s.marks}>
       {marks.map((mark) => (
         <span key={mark.id} className={cx(s.mark, mark.faint && s.faint)}>
-          <BrandChip brand={mark.brand} size={30} className={s.flatChip} />
+          <BrandChip brand={mark.brand} size={24} className={s.flatChip} />
           <VisuallyHidden>
             {mark.name}
             {mark.yours && `, ${t.yours}`}
@@ -337,34 +416,69 @@ export function ControlMarks({ marks, text }: { marks: readonly MarkGlance[]; te
   )
 }
 
+export interface ControlWordsProps {
+  /** Where it stands, in a few words: Connected as balazs. */
+  title: ReactNode
+  /** A quieter line under it, which wraps: what always asks you. */
+  line?: ReactNode
+  /** The mark of the product it is about, before the words. */
+  brand?: Brand
+  /** Any other picture before the words, 30px square: a project's mark. */
+  mark?: ReactNode
+}
+
+/** Where something stands in words, with a quieter line under them: inside a module with nothing to count. */
+export function ControlWords({ title, line, brand, mark }: ControlWordsProps) {
+  return (
+    <span className={s.words}>
+      {brand !== undefined && <BrandChip brand={brand} size={30} className={s.flatChip} />}
+      {mark}
+      <span className={s.agentWords}>
+        <span className={s.wordsTitle}>{title}</span>
+        {line !== undefined && <span className={s.wordsLine}>{line}</span>}
+      </span>
+    </span>
+  )
+}
+
 export type ControlPictureProps = RootProps<
   'button',
   {
     title: string
-    /** What the picture is: Cobalt. It changes when the picture does. */
+    /** What the picture shows, under the title: Cobalt, Round the notch. It changes when the picture does. */
     name: string
-    /** The picture, large: the app's icon. */
+    /** The picture, small, at its own size and no taller than 36px: the app's icon, the edge of the screen. */
     picture: ReactNode
     /** Opens it out. */
     onClick: (event: MouseEvent<HTMLButtonElement>) => void
+    /** Where it sits in the grid. Without it, across two columns. */
+    place?: ControlPlace
   }
 >
 
-/** A module that is a picture: large, with its name under it, and a small pop when it changes. Opens out when pressed. */
-export function ControlPicture({ title, name, picture, onClick, className, type = 'button', ...rest }: ControlPictureProps) {
-  const opened = useContext(Opened)
-  const self = useRef<HTMLButtonElement>(null)
+/** A module that is a picture, small, over its title and what it shows, with a small pop when that changes. Opens out when pressed. */
+export function ControlPicture({
+  title,
+  name,
+  picture,
+  onClick,
+  place,
+  className,
+  style,
+  type = 'button',
+  ref,
+  ...rest
+}: ControlPictureProps) {
   // Back from what it opened, focus comes back to it, as to a module.
-  useEffect(() => {
-    if (opened?.take(title) && focusLost()) self.current?.focus()
-  }, [opened, title])
+  const [attach, mark] = useRemembered<HTMLButtonElement>(title, ref)
   return (
     <button
-      ref={self}
+      ref={attach}
       type={type}
-      className={cx(s.module, s.span2, s.picture, className)}
+      className={cx(s.module, s.half, s.picture, className)}
+      style={placed(place, style)}
       onClick={(event) => {
-        opened?.mark(title)
+        mark()
         onClick(event)
       }}
       {...rest}
@@ -427,8 +541,10 @@ export const controlDetailText: ControlDetailText = { back: 'Back to all setting
 
 export interface ControlDetailProps {
   title: string
-  /** A word at the head's end: 3 agents · 6 accounts. */
+  /** A word at the head's end: 3 agents · 6 accounts. Or a switch for the whole of it. */
   aside?: ReactNode
+  /** Beside the title, in the head: tabs for what it holds, one at a time. */
+  beside?: ReactNode
   onBack: () => void
   headingLevel?: HeadingLevel
   /** What it holds: ControlSheets, or a part that brings its own. */
@@ -438,7 +554,7 @@ export interface ControlDetailProps {
 }
 
 /** A module opened out in the panel, with a way back to all of them. */
-export function ControlDetail({ title, aside, onBack, headingLevel = 2, children, className, text }: ControlDetailProps) {
+export function ControlDetail({ title, aside, beside, onBack, headingLevel = 2, children, className, text }: ControlDetailProps) {
   const t = { ...controlDetailText, ...text }
   const heading = useRef<HTMLHeadingElement>(null)
   // Opened out from a module, which went with the focus: it lands on the title, so a screen reader says where it is.
@@ -452,6 +568,7 @@ export function ControlDetail({ title, aside, onBack, headingLevel = 2, children
         <Heading ref={heading} level={headingLevel} tabIndex={-1} className={s.detailTitle}>
           {title}
         </Heading>
+        {beside !== undefined && <span className={s.beside}>{beside}</span>}
         {aside !== undefined && <span className={s.detailAside}>{aside}</span>}
       </header>
       {children}
@@ -470,11 +587,64 @@ export function ControlSheet({ children, className, ...rest }: ControlSheetProps
   )
 }
 
-/** The panel's foot: the version, a quiet link. */
+/** The panel's foot: the version, and a setting that matters least as a quiet link at its end. */
 export function ControlFoot({ children, className, ...rest }: RootProps<'div', { children: ReactNode }>) {
   return (
     <div className={cx(s.foot, className)} {...rest}>
       {children}
     </div>
+  )
+}
+
+export interface ControlLinkText {
+  off: string
+}
+
+export const controlLinkText: ControlLinkText = { off: 'Off' }
+
+export type ControlLinkProps = RootProps<
+  'button',
+  {
+    title: string
+    /** A tiny picture before the name, 16px: whose face it puts on things. */
+    picture: ReactNode
+    /** Off: the picture fades and Off follows the name. */
+    off?: boolean
+    /** Opens it out. */
+    onClick: (event: MouseEvent<HTMLButtonElement>) => void
+    text?: Partial<ControlLinkText>
+  }
+>
+
+/** A setting at its smallest, in the panel's foot: its picture, tiny, and its name, which opens it out. */
+export function ControlLink({ title, picture, off = false, onClick, className, type = 'button', ref, text, ...rest }: ControlLinkProps) {
+  const t = { ...controlLinkText, ...text }
+  // Back from what it opened, focus comes back to it, as to a module.
+  const [attach, mark] = useRemembered<HTMLButtonElement>(title, ref)
+  return (
+    <button
+      ref={attach}
+      type={type}
+      className={cx(s.link, className)}
+      onClick={(event) => {
+        mark()
+        onClick(event)
+      }}
+      {...rest}
+    >
+      <span className={cx(s.linkPicture, off && s.faded)} aria-hidden="true">
+        {picture}
+      </span>
+      <span>
+        {title}
+        {off && (
+          <>
+            {' '}
+            <span className={s.linkOff}>{t.off}</span>
+          </>
+        )}
+      </span>
+      <Icon name="chevron" size={10} className={s.linkChevron} />
+    </button>
   )
 }

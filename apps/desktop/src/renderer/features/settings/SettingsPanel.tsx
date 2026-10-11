@@ -1,54 +1,67 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { AgentStatus, ConnectionList } from '@althar/contracts'
 import {
   type AgentGlance,
   type AgentTab,
   AgentInstall,
+  AgentTabList,
+  AgentTabPanel,
   AgentTabs,
   AppVersion,
   Choices,
   CoAuthor,
+  type CoAuthorCommit,
+  CoAuthorFace,
   ControlAgents,
   ControlCenter,
   ControlDetail,
   ControlFoot,
   ControlGrid,
+  ControlLine,
+  ControlLink,
   ControlMarks,
   ControlModule,
   ControlPicture,
   ControlSheet,
   ControlToggle,
   DockPreview,
+  EdgeHere,
+  EdgeMini,
+  EdgePlaces,
+  EdgeSpot,
   Icon,
   IconButton,
   KeepAwake,
   type MarkGlance,
-  EdgePlaces,
   NotificationSettings,
   NotificationSound,
   type NotifyChoices,
   OpenFilesIn,
   SettingList,
+  Switch,
   UpdateReady,
 } from '@althar/ui'
 
+import altharFace from '../../../../resources/faces/althar-ai.svg'
 import { agentLineOf, brandOf } from '../../shared/agents'
 import { appIcons } from '../../shared/appIcons'
 import { SYSTEM_SOUND } from '../../../main/notify'
 import { notesOf } from '../../../main/updates'
 import { device, platform } from '../../shared/device'
-import { edgePlaces } from '../../shared/edge'
+import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
 import { useEditorList, useEditorPictures } from '../../shared/OpenIn'
 import { useSounds } from '../../shared/useSounds'
 import { type UpdateModel, useUpdate } from '../../shared/useUpdate'
 import { type EdgeGlance, EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
-import { productBrand } from '../../shared/products'
+import { productBrand, productName } from '../../shared/products'
 import { clock } from '../../shared/time'
 import { AgentAccounts } from '../accounts/AgentAccounts'
 import { type AccountSignInModel, useAccountSignIn } from '../accounts/useAccountSignIn'
-import { ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
+import { ConnectFlow, connectHead } from '../connections/ConnectFlow'
+import { type Connecting, ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
+import { type ConnectModel, useConnect } from '../connections/useConnect'
 import { type ConnectionsModel, useConnections } from '../connections/useConnections'
 import { StartError } from '../start/StartView'
 import { ModelsView } from './ModelsView'
@@ -60,16 +73,20 @@ import { type CoAuthorModel, useCoAuthor } from './useCoAuthor'
 
 /*
  * Settings, as a panel from the home's bar, over the home: the kit's Control
- * Center. Round switches first, for keeping the Mac awake while work runs
- * and for notifications, each opening out to the rest of its settings: on
- * battery too and the editor files open in, and which notifications, the
- * Dock's count and a sound. Each module says at a glance where something stands: the agents on
- * this Mac and a word on each, the code hosts and trackers, the app's icon,
- * and, on a Mac with a notch, where Althar shows while you're in another app.
- * Any opens out in place, the agents one at a time with their accounts, and
- * steps back. It is calm: nothing in it says what is running. Its foot
- * says which Althar this is, with its release notes, and a newer one ready
- * to install.
+ * Center, each part as large as it matters. Round switches across the top,
+ * for keeping the Mac awake while work runs and for notifications, each
+ * opening out to the rest of its settings: on battery too and the editor
+ * files open in, and which notifications, the Dock's count and a sound.
+ * Under them the agents, large, each with a word on where it stands; the
+ * code hosts and trackers, tall, by their marks, with what needs the person;
+ * and, small, where Althar shows while you're in another app, on every
+ * system, and the app's icon where there is a Dock. Althar as co-author is
+ * the least of them: a quiet link in the foot, beside which Althar this is,
+ * with its release notes, and a newer one ready to install. Any opens
+ * out in place, as wide as it needs, and steps back to where it was.
+ * Connecting a code host or tracker narrows the panel to a sign-in card, a
+ * step at a time, and comes back to the list connected. It is calm: nothing
+ * in it says what is running.
  */
 
 export const text = {
@@ -87,11 +104,23 @@ export const text = {
   connected: (n: number) => `${n} connected`,
   icon: 'App icon',
   iconFailed: 'That icon couldn’t be kept. Try again.',
-  edge: 'While you’re in another app',
+  edge: 'In other apps',
   edgeNote: 'Where Althar shows what needs you, while you work in another app.',
   edgeFailed: 'That couldn’t be kept. Try again.',
+  coAuthor: 'Co-author',
+  coAuthorTitle: 'Althar as co-author',
   coAuthorFailed: 'That couldn’t be kept. Try again.',
+  /** Who the person is on the commit it is shown on, without a GitHub account connected. */
+  you: 'you',
+  /** A commit to show the co-author line on, as GitHub would. */
+  commit: {
+    subject: 'Retry the checkout call with backoff',
+    body: 'Wraps the upstream call in a jittered retry, three tries at most,\nand only for 502, 503 and timeouts.',
+    sha: '4e1c07a',
+    when: 'committed 12 minutes ago',
+  } satisfies CoAuthorCommit,
   version: (version: string) => `Althar ${version}`,
+  backToList: 'Back to code hosts and trackers',
   awake: 'Keep awake',
   awakeOn: 'While work runs',
   off: 'Off',
@@ -162,7 +191,19 @@ export const marksOf = (list: ConnectionList): ReadonlyArray<MarkGlance> => {
   return [...marks.values()]
 }
 
-type Showing = 'all' | 'agents' | 'connections' | 'icon' | 'edge' | 'mac' | 'notify'
+/** What the code hosts and trackers say under their marks: one that asks to be signed in again, else how many are connected. */
+export const hostsLineOf = (list: ConnectionList): { readonly line: string; readonly tone?: 'yours' } | null => {
+  const out = list.connections.filter((connection) => connection.state === 'reauth_required')
+  const [first] = out
+  if (first !== undefined)
+    return { line: out.length === 1 ? text.signedOut(productName(first.product)) : text.signedOut(String(out.length)), tone: 'yours' }
+  return list.connections.length === 0 ? null : { line: text.connected(list.connections.length) }
+}
+
+type Showing = 'all' | 'agents' | 'connections' | 'connect' | 'coauthor' | 'icon' | 'edge' | 'mac' | 'notify'
+
+/** How wide the panel is for what is open in it: the agents, the code hosts, co-author and the edge need the room; a walk in is a card. 440 at rest. */
+const WIDTHS: Partial<Record<Showing, number>> = { agents: 720, connections: 800, connect: 480, coauthor: 600, edge: 600 }
 
 export interface SettingsPanelProps {
   start: StartModel
@@ -181,7 +222,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
       accounts={useAccountSignIn(props.start)}
       connections={useConnections()}
       appIcon={useAppIcon()}
-      edge={useEdgePlace()}
+      edge={useEdgePlace(props.open)}
       coAuthor={useCoAuthor()}
       preferences={usePreferences()}
       editors={useEditorList()}
@@ -224,6 +265,19 @@ export function SettingsView({
 }) {
   const [showing, setShowing] = useState<Showing>('all')
   const [agentId, setAgentId] = useState<string | null>(null)
+  // The walk in opened from the code hosts and trackers, and the one before it, so each starts afresh.
+  const [connecting, setConnecting] = useState<Connecting | null>(null)
+  const [walks, setWalks] = useState(0)
+  const connect = (next: Connecting) => {
+    setConnecting(next)
+    setWalks((n) => n + 1)
+    setShowing('connect')
+  }
+  const toList = () => {
+    setShowing('connections')
+    setConnecting(null)
+  }
+  const flow = useRef<ConnectModel | null>(null)
   const agents = start.status?.agents ?? []
   // The agent chosen, else the one signing in, else one that needs the person, else the first.
   const chosen =
@@ -236,8 +290,7 @@ export function SettingsView({
     agents.reduce((n, agent) => n + agent.accounts.length, 0),
   )
   const icon = appIcons.find((one) => one.value === appIcon.icon)
-  // Only on a Mac whose screen has a notch is there anywhere to choose.
-  const place = edgePlaces.find((one) => one.value === edge.place)
+  const { spot } = edge
   const list = connections.list
   const all = () => setShowing('all')
   const { preferences, set } = kept
@@ -266,25 +319,36 @@ export function SettingsView({
     if (open) void recheck()
   }, [open, recheck])
 
+  const hosts = list === null ? null : hostsLineOf(list)
+  // The person, on the commit co-author is shown on, as GitHub names them.
+  const author = list?.connections.find((connection) => connection.product === 'github')?.account.login ?? text.you
+  const face = <img src={altharFace} alt="" />
+  const words = spot === null ? null : edgeWords(spot)
+
   return (
     <ControlCenter
       trigger={<IconButton icon="gear" label={text.title} kbd={text.kbd} size="small" />}
       open={open}
       onOpenChange={onOpenChange}
-      wide={showing === 'agents' || showing === 'connections' || showing === 'edge'}
-      // A sign-in finishing in the browser or Terminal keeps it open when the person comes back to the window.
-      holding={accounts.signingIn !== null || connections.signingIn !== null}
+      width={WIDTHS[showing] ?? 440}
+      // A sign-in finishing in the browser or Terminal, or a walk in to a code host, keeps it open when the person comes back to the window.
+      holding={accounts.signingIn !== null || showing === 'connect'}
       onEscapeKeyDown={(event) => {
-        // Escape steps back out of an opened module before it closes the panel.
+        // Escape steps back a step of a walk in, then out of an opened module, before it closes the panel.
         if (event.defaultPrevented || showing === 'all') return
         event.preventDefault()
+        if (showing === 'connect') {
+          if (flow.current?.back() !== true) toList()
+          return
+        }
         all()
       }}
       text={{ label: text.title }}
     >
       {showing === 'all' && (
         <>
-          <ControlGrid>
+          {/* Four columns, rows of 28px: a round switch is two rows, Agents and the code hosts six, a small square three. */}
+          <ControlGrid row={28}>
             <ControlToggle
               title={text.awake}
               line={preferences.keepAwake ? text.awakeOn : text.off}
@@ -292,6 +356,7 @@ export function SettingsView({
               onChange={(on) => set('keepAwake', on)}
               glyph={<Icon name="cup" size={16} />}
               onOpen={() => setShowing('mac')}
+              place={{ column: [1, 3], row: [1, 3] }}
             />
             <ControlToggle
               title={text.notify}
@@ -308,113 +373,179 @@ export function SettingsView({
               onChange={notifyAll}
               glyph={<Icon name="bell" size={16} />}
               onOpen={() => setShowing('notify')}
+              place={{ column: [3, 5], row: [1, 3] }}
             />
-            <ControlModule title={text.agents} aside={start.status === null ? undefined : counted} onClick={() => setShowing('agents')}>
+            <ControlModule
+              title={text.agents}
+              {...(start.status === null ? {} : { aside: text.accounts(agents.reduce((n, agent) => n + agent.accounts.length, 0)) })}
+              onClick={() => setShowing('agents')}
+              place={{ column: [1, 3], row: [3, 9] }}
+            >
               {start.status === null ? (
-                <span className={s.quiet}>{text.connecting}</span>
+                <span className={s.waiting}>{text.connecting}</span>
               ) : (
                 <ControlAgents agents={agents.map((agent) => agentGlanceOf(agent))} />
               )}
             </ControlModule>
-            <ControlModule
-              title={connectionsText.label}
-              span={icon === undefined ? 4 : 2}
-              {...(list === null || list.connections.length === 0 ? {} : { aside: text.connected(list.connections.length) })}
-              onClick={() => setShowing('connections')}
-            >
+            <ControlModule title={connectionsText.label} onClick={() => setShowing('connections')} place={{ column: [3, 4], row: [3, 9] }}>
               {list !== null && <ControlMarks marks={marksOf(list)} />}
+              {hosts !== null && <ControlLine tone={hosts.tone}>{hosts.line}</ControlLine>}
             </ControlModule>
+            {spot !== null && words !== null && (
+              <ControlPicture
+                title={text.edge}
+                name={words.word}
+                picture={<EdgeMini spot={spot} />}
+                onClick={() => setShowing('edge')}
+                // Above the icon where there is a Dock to show one in; the whole column where there isn't.
+                place={{ column: [4, 5], row: icon === undefined ? [3, 9] : [3, 6] }}
+              />
+            )}
             {icon !== undefined && (
               <ControlPicture
                 title={text.icon}
                 name={icon.title}
                 picture={<img src={icon.picture} alt="" />}
                 onClick={() => setShowing('icon')}
+                place={{ column: [4, 5], row: spot === null ? [3, 9] : [6, 9] }}
               />
-            )}
-            {place !== undefined && (
-              <ControlModule title={text.edge} aside={place.title} onClick={() => setShowing('edge')}>
-                <span className={s.quiet}>{place.note}</span>
-              </ControlModule>
             )}
           </ControlGrid>
           {failed}
-          {start.status !== null && (
-            <ControlFoot>
+          <ControlFoot>
+            {start.status !== null && (
               <AppVersion version={start.status.appVersion} notes={notesOf(start.status.appVersion)} text={{ name: text.version }} />
-              {update !== undefined && update.ready !== null && <UpdateReady {...update.ready} />}
-            </ControlFoot>
-          )}
+            )}
+            {update !== undefined && update.ready !== null && <UpdateReady {...update.ready} />}
+            {coAuthor !== null && (
+              <ControlLink
+                title={text.coAuthor}
+                picture={<CoAuthorFace picture={face} size={16} />}
+                off={!coAuthor.on}
+                onClick={() => setShowing('coauthor')}
+              />
+            )}
+          </ControlFoot>
         </>
       )}
-      {showing === 'agents' && (
-        <ControlDetail title={text.agents} {...(start.status === null ? {} : { aside: counted })} onBack={all}>
-          <StartError model={start} />
-          {chosen === undefined ? (
+      {showing === 'agents' &&
+        (chosen === undefined ? (
+          <ControlDetail title={text.agents} onBack={all}>
+            <StartError model={start} />
             <p className={s.quiet}>{text.connecting}</p>
-          ) : (
-            <AgentTabs
-              label={text.agents}
-              agents={agents.map(tabOf)}
-              value={chosen.id}
-              onValueChange={setAgentId}
-              aside={<ModelsView key={chosen.id} agent={chosen} />}
+          </ControlDetail>
+        ) : (
+          <AgentTabs value={chosen.id} onValueChange={setAgentId}>
+            <ControlDetail
+              title={text.agents}
+              aside={counted}
+              beside={<AgentTabList label={text.agents} agents={agents.map(tabOf)} />}
+              onBack={all}
             >
-              {chosen.installed && chosen.download?.installing !== true ? (
-                <AgentAccounts agent={chosen} start={start} signIn={accounts} />
-              ) : (
-                <AgentInstall
-                  name={chosen.name}
-                  text={{ missing: text.agentHere }}
-                  {...(brandOf(chosen.id) === undefined ? {} : { brand: brandOf(chosen.id) })}
-                  {...(chosen.download === null ? {} : { size: chosen.download.size })}
-                  state={
-                    chosen.download?.installing === true
-                      ? { kind: 'installing' }
-                      : start.installFailed[chosen.id] === undefined
-                        ? { kind: 'idle' }
-                        : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
-                  }
-                  onInstall={() => void start.install(chosen.id)}
-                />
-              )}
-            </AgentTabs>
-          )}
-        </ControlDetail>
-      )}
+              <StartError model={start} />
+              <AgentTabPanel agent={tabOf(chosen)} aside={<ModelsView key={chosen.id} agent={chosen} />}>
+                {chosen.installed && chosen.download?.installing !== true ? (
+                  <AgentAccounts agent={chosen} start={start} signIn={accounts} />
+                ) : (
+                  <AgentInstall
+                    name={chosen.name}
+                    text={{ missing: text.agentHere }}
+                    {...(brandOf(chosen.id) === undefined ? {} : { brand: brandOf(chosen.id) })}
+                    {...(chosen.download === null ? {} : { size: chosen.download.size })}
+                    state={
+                      chosen.download?.installing === true
+                        ? { kind: 'installing' }
+                        : start.installFailed[chosen.id] === undefined
+                          ? { kind: 'idle' }
+                          : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
+                    }
+                    onInstall={() => void start.install(chosen.id)}
+                  />
+                )}
+              </AgentTabPanel>
+            </ControlDetail>
+          </AgentTabs>
+        ))}
       {showing === 'connections' && (
-        <ControlDetail title={connectionsText.label} onBack={all}>
+        <ControlDetail
+          title={connectionsText.label}
+          {...(list === null || list.connections.length === 0 ? {} : { aside: text.connected(list.connections.length) })}
+          onBack={all}
+        >
           <ControlSheet>
-            <ConnectionsView model={connections} columns />
+            <ConnectionsView model={connections} columns onConnect={connect} />
           </ControlSheet>
-          {coAuthor !== null && (
-            <ControlSheet>
-              <CoAuthor on={coAuthor.on} onChange={coAuthor.set} trailer={coAuthor.line} />
-              {coAuthor.failed && (
-                <p role="alert" className={s.failed}>
-                  {text.coAuthorFailed}
-                </p>
-              )}
-            </ControlSheet>
-          )}
         </ControlDetail>
       )}
-      {showing === 'edge' && edge.place !== null && (
+      {showing === 'coauthor' && coAuthor !== null && (
+        <ControlDetail
+          title={text.coAuthorTitle}
+          aside={<Switch checked={coAuthor.on} onChange={coAuthor.set} label={text.coAuthorTitle} />}
+          onBack={all}
+        >
+          <ControlSheet className={s.coAuthor}>
+            <CoAuthor
+              on={coAuthor.on}
+              onChange={coAuthor.set}
+              trailer={coAuthor.line}
+              author={author}
+              commit={text.commit}
+              picture={face}
+            />
+            {coAuthor.failed && (
+              <p role="alert" className={s.failed}>
+                {text.coAuthorFailed}
+              </p>
+            )}
+          </ControlSheet>
+        </ControlDetail>
+      )}
+      {showing === 'connect' && connecting !== null && (
+        <Connect
+          key={walks}
+          connecting={connecting}
+          onClose={toList}
+          onModel={(model) => {
+            flow.current = model
+          }}
+        />
+      )}
+      {showing === 'edge' && spot !== null && words !== null && (
         <ControlDetail title={text.edge} onBack={all}>
           <ControlSheet>
-            <p className={s.quiet}>{shownGlance(glance) === EXAMPLE ? text.examples : text.edgeNote}</p>
-            <EdgePlaces
-              label={text.edge}
-              options={edgePlaces.map((one) => ({
-                value: one.value,
-                title: one.title,
-                note: one.note,
-                picture:
-                  one.value === 'island' ? <IslandPicture glance={shownGlance(glance)} /> : <MenuPicture glance={shownGlance(glance)} />,
-              }))}
-              value={edge.place}
-              onChange={edge.choose}
-            />
+            {choosing(spot) && edge.place !== null ? (
+              <>
+                <p className={s.quiet}>{shownGlance(glance) === EXAMPLE ? text.examples : text.edgeNote}</p>
+                <EdgePlaces
+                  label={text.edge}
+                  options={edgePlaces.map((one) => ({
+                    value: one.value,
+                    title: one.title,
+                    note: one.note,
+                    // Drawn small, so both fit beside each other.
+                    picture:
+                      one.value === 'island' ? (
+                        <IslandPicture glance={shownGlance(glance)} height={260} />
+                      ) : (
+                        <MenuPicture glance={shownGlance(glance)} height={260} />
+                      ),
+                  }))}
+                  value={edge.place}
+                  onChange={edge.choose}
+                />
+              </>
+            ) : (
+              <>
+                <p className={s.quiet}>{spot === EdgeSpot.MenuBar && shownGlance(glance) === EXAMPLE ? text.examples : text.edgeNote}</p>
+                <EdgeHere
+                  title={words.title}
+                  note={words.note}
+                  {...(words.why === undefined ? {} : { why: words.why })}
+                  // A Mac's menu bar as it would be, the sheet open; elsewhere the system's edge, larger.
+                  picture={spot === EdgeSpot.MenuBar ? <MenuPicture glance={shownGlance(glance)} /> : <EdgeMini spot={spot} scale={2.6} />}
+                />
+              </>
+            )}
             {edge.failed && (
               <p role="alert" className={s.failed}>
                 {text.edgeFailed}
@@ -497,5 +628,33 @@ export function SettingsView({
         </ControlDetail>
       )}
     </ControlCenter>
+  )
+}
+
+/** A walk in to a code host or tracker, opened out in the panel narrowed to a card: the service's own sub-page. */
+function Connect({
+  connecting,
+  onClose,
+  onModel,
+}: {
+  connecting: Connecting
+  onClose: () => void
+  /** The walk as it stands, for Escape to step it back. */
+  onModel: (model: ConnectModel) => void
+}) {
+  const model = useConnect({ ...connecting, onClose })
+  useEffect(() => onModel(model))
+  const head = connectHead(model)
+  return (
+    <ControlDetail
+      title={head.title}
+      {...(head.aside === undefined ? {} : { aside: head.aside })}
+      onBack={onClose}
+      text={{ back: text.backToList }}
+    >
+      <ControlSheet>
+        <ConnectFlow model={model} />
+      </ControlSheet>
+    </ControlDetail>
   )
 }

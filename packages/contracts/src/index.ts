@@ -1,4 +1,5 @@
 export * from './Api'
+export * from './inks'
 export * from './models'
 export * from './transport'
 export * from './names'

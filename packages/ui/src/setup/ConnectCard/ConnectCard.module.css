@@ -1,0 +1,161 @@
+/* The card: its head centred, the mark over one heading, and what the step asks under it. */
+.card {
+  display: grid;
+  gap: 20px;
+  padding: 14px 14px 10px;
+}
+.top {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.chipWrap {
+  position: relative;
+  display: inline-flex;
+  margin-bottom: 4px;
+}
+.chip {
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift);
+}
+.top:not(.stepped) .chipWrap {
+  margin-bottom: 12px;
+}
+/* connected: a tick on the mark */
+.tick {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 99px;
+  background: var(--ok);
+  box-shadow: 0 0 0 2px var(--paper);
+  color: var(--on-ink);
+  animation: tick var(--slow) var(--ease-fold);
+}
+@keyframes tick {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+.title {
+  margin: 0;
+  outline: none;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--t-1);
+}
+.line {
+  max-width: 360px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.body {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.foot {
+  margin: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+  text-align: center;
+}
+
+/* how far along: a short bar for each step, ink up to the one it is on */
+.pager {
+  display: inline-flex;
+  gap: 4px;
+  margin: 2px 0 4px;
+}
+.page {
+  width: 16px;
+  height: 3px;
+  border-radius: 99px;
+  background: var(--line-3);
+  transition:
+    width var(--base) var(--ease-fold),
+    background var(--base) var(--ease);
+}
+.past,
+.now {
+  background: var(--t-1);
+}
+.now {
+  width: 24px;
+}
+
+/* the ways in, as wide buttons */
+.ways {
+  display: grid;
+  gap: 8px;
+}
+.way {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 54px;
+  padding: 9px 14px;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift);
+  color: var(--t-1);
+  text-align: left;
+  transition:
+    box-shadow var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+.way:hover {
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift);
+}
+.way:active {
+  transform: translateY(0.5px);
+}
+.wayGlyph {
+  display: flex;
+  justify-content: center;
+  color: var(--t-1);
+}
+.wayWords {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.wayTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+.wayLine {
+  font-size: 12px;
+  color: var(--t-3);
+}
+.wayChevron {
+  color: var(--t-4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tick {
+    animation: none;
+  }
+  .page {
+    transition: none;
+  }
+}

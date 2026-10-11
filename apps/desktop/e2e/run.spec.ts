@@ -10,7 +10,7 @@ import { launch, openFirstProject } from './support'
 
 /*
  * The project run with no agent, in a real window (ADR-023): from the
- * project's menu, a copy of the default branch runs its dev script; its card
+ * project's front, a copy of the default branch runs its dev script; its card
  * in the coordinator's thread says where it answers, the pill over the
  * composer has it with where it runs, and the card stops it and runs it
  * again.
@@ -22,7 +22,7 @@ const SERVER = `require('node:http').createServer((_, res) => res.end('meridian'
 })
 `
 
-test('runs the default branch from the project’s menu, leaves its card in the thread, and stops and runs it again from there', async () => {
+test('runs the default branch from the project’s front, leaves its card in the thread, and stops and runs it again from there', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   writeFileSync(join(repo, 'package.json'), JSON.stringify({ name: 'meridian', private: true, scripts: { dev: 'node serve.js' } }, null, 2))
@@ -41,8 +41,7 @@ test('runs the default branch from the project’s menu, leaves its card in the 
     await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1440, 900))
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await page.getByRole('button', { name: 'More for this project' }).click()
-    await page.getByRole('menuitem', { name: 'Run npm run dev' }).click()
+    await page.getByRole('button', { name: 'Run npm run dev' }).click()
 
     // Its card, in the coordinator's thread: where it runs, the command, and where it answers once it says.
     const card = page.getByRole('article', { name: 'Run of main' })

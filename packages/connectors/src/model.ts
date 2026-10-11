@@ -16,6 +16,10 @@ import type { ConnectorFailed } from './errors'
 export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
 export type Product = typeof Product.Type
 
+/** A service as a person connects it: a product's Cloud and Data Center editions are one service. */
+export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello'])
+export type Service = typeof Service.Type
+
 /** Someone on the service: a person, or a bot such as CI. */
 export const Person = Schema.Struct({
   id: Schema.String,

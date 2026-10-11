@@ -7,7 +7,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { NotARepository, NotFound } from '../src/errors'
+import { NotARepository, NotFound, ProjectRefused } from '../src/errors'
 import { forkOf } from '../src/forks'
 import { Projects, roleFor, slugify } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
@@ -46,6 +46,43 @@ describe('projects', () => {
       const path = mkdtempSync(join(tmpdir(), 'althar-plain-'))
       const error = yield* Effect.flip(projects.open({ envelope: yield* Runtime.envelope('project.open', { path }), path }))
       assert.instanceOf(error, NotARepository)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('makes a project on purpose under the id and in the ink the window gave, where another has its folder too', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const sql = yield* SqlClient.SqlClient
+      const path = repository()
+      const other = repository()
+      const halyard = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', { path }), path })
+      const projectId = `proj_${'1'.repeat(32)}`
+      const made = yield* projects.open({
+        envelope: yield* Runtime.envelope('project.open', { path, projectId }),
+        path,
+        name: 'Northwind',
+        repositories: [path, other],
+        projectId,
+        ink: 'rose',
+      })
+      assert.strictEqual(made.projectId, projectId)
+      assert.notStrictEqual(made.projectId, halyard.projectId)
+      const [row] = yield* sql<{ name: string; ink: string }>`SELECT name, ink FROM projects WHERE id = ${projectId}`
+      assert.deepStrictEqual(row, { name: 'Northwind', ink: 'rose' })
+      const bound = yield* sql<{
+        path: string
+      }>`SELECT path FROM repository_locations WHERE project_id = ${projectId} ORDER BY created_at, rowid`
+      assert.strictEqual(bound.length, 2)
+      // The folder stays the project's that had it: opening it finds that one.
+      const again = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', { path }), path })
+      assert.strictEqual(again.projectId, halyard.projectId)
+
+      // An id taken is refused, not shared.
+      const refused = yield* Effect.flip(
+        projects.open({ envelope: yield* Runtime.envelope('project.open', { path: other, projectId }), path: other, projectId }),
+      )
+      assert.instanceOf(refused, ProjectRefused)
+      assert.strictEqual(refused instanceof ProjectRefused && refused.reason, 'id_taken')
     }).pipe(Effect.provide(runtime())),
   )
 

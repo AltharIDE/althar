@@ -3,7 +3,8 @@ import { basename, dirname, join, sep } from 'node:path'
 
 /*
  * The git repositories on this computer where people usually keep code, for
- * the first screen to offer before there is a project: ~/Projects,
+ * the first screen to offer before there is a project, and a new project
+ * after: ~/Projects,
  * ~/Developer, ~/code and the like, and a folder or two down in each. Only
  * read: names, the branch checked out, and when each was last worked on.
  * On a Mac it never looks in Documents, Desktop or Downloads, which the

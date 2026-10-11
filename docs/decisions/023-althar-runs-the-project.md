@@ -26,7 +26,7 @@
   - **Althar runs it,** with no agent: in a task's worktree, to see what the
     task built, or in a copy of the default branch of its own (beside the
     coordinator's, made fresh each time it starts, what git ignores kept).
-    The person starts it from the task's menu or the project's, and the
+    The person starts it from the task's menu or the project's front, and the
     coordinator with `run_project` when the person asks it to. A run already
     going in the same place is the one there is.
   - **Althar owns the process:** recorded as its own (purpose `run`), in a

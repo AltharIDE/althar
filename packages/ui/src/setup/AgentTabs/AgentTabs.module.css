@@ -1,32 +1,23 @@
-.tabs {
-  display: grid;
-  gap: 10px;
-}
-.row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+/* the tabs, small, in a row that wraps where there are many */
 .list {
   display: flex;
-  flex: 1;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 .tab {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  height: 42px;
-  padding: 0 14px 0 9px;
+  gap: 7px;
+  height: 30px;
+  padding: 0 11px 0 6px;
   border: 0;
-  border-radius: 12px;
-  background: var(--frost-faint);
-  box-shadow: var(--frost-ring);
+  border-radius: 9px;
+  background: transparent;
   color: var(--t-2);
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 550;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     background var(--fast) var(--ease),
@@ -48,6 +39,7 @@
 .dot {
   width: 6px;
   height: 6px;
+  margin-left: -1px;
   border-radius: 99px;
   background: var(--signal);
 }
@@ -56,8 +48,8 @@
 .panel {
   container-type: inline-size;
   display: grid;
-  gap: 18px;
-  padding: 20px 22px 22px;
+  gap: 14px;
+  padding: 16px 18px;
   border-radius: 15px;
   background: var(--frost-raised);
   box-shadow: var(--frost-ring);
@@ -74,20 +66,15 @@
 }
 .head {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  align-items: baseline;
+  gap: 9px;
   min-width: 0;
-}
-.words {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
 }
 .name {
   margin: 0;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 650;
-  letter-spacing: -0.012em;
+  letter-spacing: -0.01em;
   color: var(--t-1);
 }
 .line {
@@ -98,20 +85,20 @@
   white-space: nowrap;
 }
 
-/* its settings, and beside them what new work starts on */
+/* its settings, and beside them, narrower, what new work starts on */
 .body {
   display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
-  gap: 34px;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: 26px;
 }
 .main,
 .aside {
   min-width: 0;
 }
-@container (max-width: 640px) {
+@container (max-width: 520px) {
   .body {
     grid-template-columns: minmax(0, 1fr);
-    gap: 24px;
+    gap: 22px;
   }
 }
 

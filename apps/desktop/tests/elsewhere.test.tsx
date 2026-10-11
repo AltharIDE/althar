@@ -8,7 +8,11 @@ import { useStart } from '../src/renderer/features/start/useStart'
 import { fakeClient, fakeHost, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 
-/* Settings as Windows has it: a PC, no count on the app's icon, and the system's own sound rather than named ones. */
+/*
+ * Settings off a Mac: as Windows has it, a PC, no count on the app's icon,
+ * the system's own sound rather than named ones, and Althar in the system
+ * tray; and on Linux, in the tray where the desktop has one.
+ */
 
 vi.mock('../src/renderer/shared/device', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/renderer/shared/device')>()
@@ -47,5 +51,40 @@ describe('settings on Windows', () => {
     expect(host.playSound).toHaveBeenCalledWith('default')
     await userEvent.click(within(panel).getByRole('button', { name: 'Back to all settings' }))
     await waitFor(() => expect(within(panel).getByRole('button', { name: /^Notifications\s*With sound/ })).toBeTruthy())
+  })
+
+  it('says Althar is in the system tray, where Windows may tuck it away, with nothing to choose', async () => {
+    const host = fakeHost({
+      platform: 'win32',
+      appIcon: vi.fn(async () => null),
+      edge: vi.fn(async () => ({ place: 'island', notch: false, platform: 'win32', tray: true })),
+    })
+    withServices(<Settings />, fakeClient().client, host)
+    const panel = await openModule(/^In other apps\s*System tray/)
+    expect(within(panel).queryByRole('radiogroup')).toBeNull()
+    expect(within(panel).getByText('In the system tray')).toBeTruthy()
+    expect(
+      within(panel).getByText('Windows may tuck it under the ^ beside the clock. Drag it onto the taskbar to keep it in sight.'),
+    ).toBeTruthy()
+  })
+})
+
+describe('settings on Linux', () => {
+  it('says Althar is in the tray, or, on a desktop without one, only in its window', async () => {
+    const linux = (tray: boolean) =>
+      fakeHost({
+        platform: 'linux',
+        appIcon: vi.fn(async () => null),
+        edge: vi.fn(async () => ({ place: 'island', notch: false, platform: 'linux', tray })),
+      })
+    const first = withServices(<Settings />, fakeClient().client, linux(true))
+    // A desktop may take the mark and not show it, which nothing tells Althar: the page says where it would be then.
+    const tray = await openModule(/^In other apps\s*System tray/)
+    expect(within(tray).getByText('Where the desktop has no tray, Althar shows only in its window.')).toBeTruthy()
+    first.unmount()
+    withServices(<Settings />, fakeClient().client, linux(false))
+    const panel = await openModule(/^In other apps\s*No tray/)
+    expect(within(panel).getByText('Only in Althar’s window')).toBeTruthy()
+    expect(within(panel).getByText('This desktop has no system tray, so Althar shows only in its own window.')).toBeTruthy()
   })
 })

@@ -8,6 +8,7 @@ import { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, isPreferenceKey } from './appPreferences'
 import { keepingAwake } from './awake'
+import { tokenIn } from './clipboard'
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
@@ -26,6 +27,7 @@ import { bundleOf } from '../runtime/editors'
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   MessageChannelMain,
@@ -48,7 +50,7 @@ import {
  * runtime to stop its sessions before the app goes. Folders reach the runtime
  * from here, never from the window, which gets a grant for each: one the
  * person picked or dropped, or one of the repositories it found where people
- * keep code (repositories.ts), for the first screen to offer. It seals and
+ * keep code (repositories.ts), for the first screen and a new project to offer. It seals and
  * opens the runtime's secrets, such as a code host's token, with Electron's
  * safeStorage, whose key the keychain keeps for this app alone: the runtime
  * keeps them sealed and never holds the key. It gives the Dock the icon the
@@ -65,6 +67,8 @@ import {
 const here = import.meta.dirname
 
 const SHUTDOWN_GRACE = 20_000
+/** How long focus settles, moving between Althar's windows, before the edge hears whether Althar is in front. */
+const FOCUS_SETTLE = 120
 /** Restarts allowed within a minute before a crashing runtime ends the app instead. */
 const RESTARTS_PER_MINUTE = 3
 
@@ -383,6 +387,16 @@ ipcMain.handle('althar:pick-folder', async (event, purpose: unknown) => {
   return path === undefined ? null : allowFolder(path)
 })
 
+// Folders for a new project, several at once: a grant for each, in the order chosen.
+ipcMain.handle('althar:pick-folders', async (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  const options = { properties: ['openDirectory' as const, 'multiSelections' as const], message: 'Choose the project’s folders' }
+  const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
+  if (result.canceled) return []
+  const grants = await Promise.all(result.filePaths.map(allowFolder))
+  return grants.filter((grant) => grant !== null)
+})
+
 // A folder dropped on the window, by the path the preload read from the drop: only a folder on disk gets a grant.
 ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   if (typeof path !== 'string' || path === '') return null
@@ -390,10 +404,10 @@ ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   return found?.isDirectory() === true ? allowFolder(path) : null
 })
 
-/* The repositories the first screen offers, by the id the window has for each: only these are granted by id. */
+/* The repositories the first screen and a new project offer, by the id the window has for each: only these are granted by id. */
 const foundHere = new Map<string, string>()
 
-// The repositories where people keep code on this computer, for the first screen: each by an id, never by its path.
+// The repositories where people keep code on this computer, for the first screen and a new project: each by an id, never by its path.
 ipcMain.handle('althar:find-repositories', async () => {
   // The end-to-end tests give a home of their own, so what the tester keeps isn't offered.
   const home = process.env.ALTHAR_CODE_HOME || homedir()
@@ -406,7 +420,7 @@ ipcMain.handle('althar:find-repositories', async () => {
   })
 })
 
-// A grant for one of them, once the person ticks it and makes the project: one main found, and nothing else.
+// A grant for one of them, once the person ticks or adds it: one main found, and nothing else.
 ipcMain.handle('althar:grant-found', async (_event, id: unknown) => {
   const path = typeof id === 'string' ? foundHere.get(id) : undefined
   return path === undefined ? null : allowFolder(path)
@@ -450,11 +464,14 @@ ipcMain.handle('althar:editor-picture', async (_event, id: unknown) => {
 ipcMain.handle('althar:sounds', () => alertSounds())
 ipcMain.handle('althar:play-sound', (_event, name: unknown) => playSound(name, undefined, () => shell.beep()))
 
+// A token on the clipboard, while connecting a service waits for one; anything else stays on the clipboard alone.
+ipcMain.handle('althar:clipboard-token', async () => tokenIn(await clipboard.readText()))
+
 // An update ready to install, as a window shows it (null where the app doesn't update, as in development); and restarting into it, at the person's word, only while no work runs.
 ipcMain.handle('althar:update', () => updates?.glance() ?? null)
 ipcMain.handle('althar:update-restart', () => updates?.restart() ?? false)
 
-// Where Althar shows while the person is in another app, and whether this Mac has a notch to choose the island by.
+// Where Althar shows while the person is in another app, and what this computer has room for: a notch to choose the island by, a tray.
 ipcMain.handle('althar:edge', () => edge?.state() ?? null)
 ipcMain.handle('althar:set-edge', async (_event, place: unknown) => {
   if (!isEdgePlace(place)) throw new Error(`Althar can't show at ${String(place)}.`)
@@ -513,6 +530,19 @@ void app.whenReady().then(() => {
     page: join(here, '../renderer/edge.html'),
     pictures: join(here, '../../resources/tray'),
   })
+  // The edge is for while the person is in another app: it steps aside while one of Althar's windows has focus, on any screen.
+  // Moving between Althar's windows blurs one before the other has focus, so it settles first.
+  let focusing: ReturnType<typeof setTimeout> | undefined
+  const focusChanged = () => {
+    clearTimeout(focusing)
+    focusing = setTimeout(() => {
+      const focused = BrowserWindow.getFocusedWindow()
+      edge?.front(focused !== null && windows.has(focused))
+    }, FOCUS_SETTLE)
+  }
+  app.on('browser-window-focus', focusChanged)
+  app.on('browser-window-blur', focusChanged)
+  focusChanged()
   app.on('activate', () => {
     if (windows.size === 0) openWindow()
   })

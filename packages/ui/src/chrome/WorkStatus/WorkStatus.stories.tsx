@@ -71,6 +71,17 @@ export const ByKeyboard: Story = {
   },
 }
 
+/** Where the count starts a line, as on a project's front page, what it counts lines up with its start. */
+export const AtTheStart: Story = {
+  args: { running: 0, needs, align: 'start' },
+  play: async ({ canvasElement }) => {
+    const count = within(canvasElement).getByRole('button', { name: '4 need you' })
+    await userEvent.hover(count)
+    const list = await screen.findByRole('list', { name: 'What needs you' })
+    await expect(list.parentElement).toHaveAttribute('data-align', 'start')
+  },
+}
+
 /** On a task's screen, the task itself is listed, but isn't a way anywhere. */
 export const WithTheOneOnScreen: Story = {
   args: { needs: needs.map((need, index) => (index === 1 ? { ...need, here: true } : need)) },

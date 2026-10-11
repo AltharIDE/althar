@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject } from './support'
+import { launch, openFirstProject, planTask } from './support'
 
 /*
  * An agent out of usage, as the person sees it. The fake agents are out as
@@ -14,30 +14,54 @@ import { launch, openFirstProject } from './support'
  * told to wait, or to ask.
  */
 
-/** Opens a project, set to ask about usage limits where given, and starts a task led by Claude Code, without a review, whose lead reports at once. */
-const startTask = async (out: string, { asks = false }: { readonly asks?: boolean } = {}) => {
+/**
+ * Opens a project, set to ask about usage limits where given, and starts a
+ * task led by Claude Code, without a review, whose lead reports at once,
+ * with the agents out as `out` says. The coordinator that plans it runs on
+ * an agent too: out of usage, it would move on, or wait, itself, and Althar
+ * would know an agent is out before the task's lead tried it; with every
+ * agent out, it couldn't plan at all. So it plans the task while they all
+ * have usage, and the plan is held; Althar opened again with them out, the
+ * person starts it.
+ */
+const startWhileOut = async (out: string, { asks = false }: { readonly asks?: boolean } = {}) => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
+  const planning = await launch(home)
+  try {
+    await openFirstProject(planning.electronApp, planning.page, repo)
+    await expect(planning.page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await planTask(planning.page, 'Add a retry to the checkout call')
+    await planning.page.getByRole('button', { name: 'Hold' }).click()
+    await expect(planning.page.getByText('Held. Starts when you say')).toBeVisible()
+  } finally {
+    await planning.electronApp.close()
+  }
+  // Opened again on the home: its tab goes back to the project, where the plan waits.
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_OUT: out })
-  await openFirstProject(electronApp, page, repo)
+  await page
+    .getByRole('navigation', { name: 'Projects' })
+    .getByRole('button', { name: /^meridian/ })
+    .click()
   await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
   if (asks) {
-    await page.getByRole('button', { name: 'More for this project' }).click()
-    await page.getByRole('menuitem', { name: 'Project rules' }).click()
-    const limits = page.getByRole('radiogroup', { name: 'Usage limits' })
-    await limits.getByRole('radio', { name: /Ask me/ }).click()
-    await expect(limits.getByRole('radio', { name: /Ask me/ })).toBeChecked()
+    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    await page
+      .getByRole('dialog', { name: /’s settings$/ })
+      .getByRole('button', { name: /^Rules/ })
+      .click()
+    await page.getByRole('button', { name: 'moves to the next agent free', exact: true }).click()
+    await page.getByRole('menuitemradio', { name: 'Ask me' }).click()
+    const limits = page.getByRole('listitem', { name: 'Limits' })
+    await expect(limits).toContainText(
+      'When an account runs out, the work waits for you to move it to a model that’s free, or to wait for the reset.',
+    )
     await limits.scrollIntoViewIfNeeded()
     await page.screenshot({ path: 'test-results/limit-ask-rules.png', animations: 'disabled' })
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
   }
-  await page.getByRole('button', { name: 'New task' }).click()
-  await page.getByLabel('What should change').fill('Add a retry to the checkout call')
-  await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
-  await page.getByRole('button', { name: /^Review:/ }).click()
-  await page.getByRole('button', { name: 'No review' }).click()
-  await page.getByRole('button', { name: 'Start the task' }).click()
+  await page.getByRole('button', { name: 'Start', exact: true }).click()
   return { electronApp, page }
 }
 
@@ -48,7 +72,7 @@ const openTask = async (page: Page) => {
 }
 
 test('hands the task to the next free agent when its lead is out of usage', async () => {
-  const { electronApp, page } = await startTask('claude-code:3600')
+  const { electronApp, page } = await startWhileOut('claude-code:3600')
   try {
     // Codex took the step over and finished it.
     await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 15_000 })
@@ -63,7 +87,7 @@ test('hands the task to the next free agent when its lead is out of usage', asyn
 })
 
 test('waits for the reset where no other agent is free, and says so on its card, the board and the task', async () => {
-  const { electronApp, page } = await startTask('claude-code:3600,codex:3600')
+  const { electronApp, page } = await startWhileOut('claude-code:3600,codex:3600')
   try {
     // Althar learns an agent is out when it tries it: Claude Code first, then Codex, which it waits for.
     await expect(page.getByText(/^Waits for Codex, back at /)).toBeVisible({ timeout: 15_000 })
@@ -84,7 +108,7 @@ test('waits for the reset where no other agent is free, and says so on its card,
 })
 
 test('asks the person when the reset isn’t known and no other agent is free', async () => {
-  const { electronApp, page } = await startTask('claude-code,codex')
+  const { electronApp, page } = await startWhileOut('claude-code,codex')
   try {
     await expect(page.getByText('Needs you', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
     await openTask(page)
@@ -104,7 +128,7 @@ test('asks the person when the reset isn’t known and no other agent is free', 
 })
 
 test('asks the person where the project says to, on the home too, and moves the step to the model they pick', async () => {
-  const { electronApp, page } = await startTask('claude-code:3600', { asks: true })
+  const { electronApp, page } = await startWhileOut('claude-code:3600', { asks: true })
   try {
     await expect(page.getByText('Needs you', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
     // The home lists it, for a person who is elsewhere.

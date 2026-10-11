@@ -3,6 +3,8 @@ import type {
   AgentModels,
   AgentStatus,
   ChangeSummary,
+  ConnectGuide,
+  ConnectionCheck,
   ConnectionList,
   ConnectionSummary,
   CoordinatorSnapshot,
@@ -143,7 +145,7 @@ export const models: ReadonlyArray<AgentModels> = [
   { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], blocked: [], probing: true },
 ]
 
-/** A project's repositories as this Mac has them: one plain, one a fork. */
+/** A project's repositories as this Mac has them: one plain and one a fork, on GitHub as you, and one on GitLab, not connected. */
 export const repositories: ReadonlyArray<ProjectRepository> = [
   {
     id: 'repo_api',
@@ -151,7 +153,14 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     path: '/Users/me/code/meridian-api',
     folder: null,
     branch: 'main',
-    remote: 'git@github.com:meridian/api.git',
+    host: {
+      product: 'github',
+      name: 'GitHub',
+      instance: null,
+      path: 'meridian/api',
+      url: 'https://github.com/meridian/api',
+      account: { login: 'you', state: 'ready' },
+    },
     role: 'service',
     fork: null,
     tasks: 1,
@@ -162,9 +171,34 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     path: '/Users/me/code/meridian-web',
     folder: null,
     branch: 'main',
-    remote: 'git@github.com:you/meridian-web.git',
+    host: {
+      product: 'github',
+      name: 'GitHub',
+      instance: null,
+      path: 'you/meridian-web',
+      url: 'https://github.com/you/meridian-web',
+      account: { login: 'you', state: 'ready' },
+    },
     role: 'frontend',
     fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'fork' },
+    tasks: 0,
+  },
+  {
+    id: 'repo_infra',
+    name: 'meridian-infra',
+    path: '/Users/me/code/meridian-infra',
+    folder: null,
+    branch: 'trunk',
+    host: {
+      product: 'gitlab',
+      name: 'GitLab',
+      instance: null,
+      path: 'meridian-ops/infra',
+      url: 'https://gitlab.com/meridian-ops/infra',
+      account: null,
+    },
+    role: 'infrastructure',
+    fork: null,
     tasks: 0,
   },
 ]
@@ -517,26 +551,28 @@ export const githubConnection: ConnectionSummary = {
   state: 'ready',
 }
 
-/** What can be connected here, and what is: GitHub signs in in the browser, Linear takes a token; nothing connected yet. */
+/** What can be connected here, and what is: GitHub and Linear take a token; nothing connected yet; meridian's code is on GitHub. */
 export const connectionList: ConnectionList = {
   cursor: 2,
   connections: [],
   products: [
     {
       product: 'github',
+      service: 'github',
       name: 'GitHub',
       host: true,
       tracker: true,
       hostedUrl: 'https://github.com',
       selfHosted: true,
-      browserSignIn: true,
+      browserSignIn: false,
       tokenNeeds: null,
-      tokenHelp: 'https://github.com/settings/personal-access-tokens/new',
+      tokenPrefixes: ['github_pat_', 'ghp_'],
       tokenHelpForKey: null,
       keyChecks: [],
     },
     {
       product: 'linear',
+      service: 'linear',
       name: 'Linear',
       host: false,
       tracker: true,
@@ -544,11 +580,45 @@ export const connectionList: ConnectionList = {
       selfHosted: false,
       browserSignIn: false,
       tokenNeeds: null,
-      tokenHelp: 'https://linear.app/settings/account/security',
+      tokenPrefixes: ['lin_api_'],
       tokenHelpForKey: null,
       keyChecks: [],
     },
   ],
+  places: [
+    { product: 'github', webUrl: 'https://github.com', project: 'meridian', remote: null, repositories: ['northwind/meridian-api'] },
+  ],
+}
+
+/** Where a GitHub token is made for meridian, filled in. */
+export const GITHUB_TOKEN_PAGE =
+  'https://github.com/settings/personal-access-tokens/new?name=Althar+for+meridian&target_name=northwind&expires_in=90&contents=write'
+
+/** What connecting GitHub starts from: meridian's repository on it, and gh signed in to it as you. */
+export const githubGuide: ConnectGuide = {
+  service: 'github',
+  places: [
+    { product: 'github', webUrl: 'https://github.com', project: 'meridian', remote: 'origin', repositories: ['northwind/meridian-api'] },
+  ],
+  clis: [{ product: 'github', webUrl: 'https://github.com', tool: 'gh', account: 'you', scopes: ['repo', 'workflow', 'read:org'] }],
+  email: null,
+  tokenPages: [{ product: 'github', webUrl: 'https://github.com', url: GITHUB_TOKEN_PAGE }],
+}
+
+/** Everything a GitHub connection needs, which it can do; its token runs out on 8 January 2027. */
+export const githubCheck: ConnectionCheck = {
+  connectionId: 'conn1',
+  lines: [
+    { need: 'account', state: 'ok', fact: 'you', count: null, reason: null },
+    { need: 'reach', state: 'ok', fact: 'northwind', count: null, reason: null },
+    { need: 'push', state: 'ok', fact: null, count: null, reason: null },
+    { need: 'changes', state: 'ok', fact: null, count: null, reason: null },
+    { need: 'checks', state: 'ok', fact: null, count: null, reason: null },
+    { need: 'issues', state: 'ok', fact: null, count: null, reason: null },
+  ],
+  expiresAt: '2027-01-08T00:00:00.000Z',
+  renews: false,
+  settings: 'https://github.com/settings/personal-access-tokens',
 }
 
 /** A client whose every call resolves with the fixtures, and whose watch the test drives with `emit`. */
@@ -632,8 +702,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getSignIn: vi.fn(async () => ({ state: 'waiting' as const })),
     cancelSignIn: vi.fn(async () => {}),
     connectToken: vi.fn(async () => connectionList.connections[0] ?? githubConnection),
+    getConnectGuide: vi.fn(async () => githubGuide),
+    findServer: vi.fn(async (_service, webUrl: string) => ({ product: null, webUrl, reason: 'unreachable' as const, tokenPage: null })),
+    connectCli: vi.fn(async () => githubConnection),
+    checkConnection: vi.fn(async () => githubCheck),
     disconnect: vi.fn(async () => {}),
     renameProject: vi.fn(async () => {}),
+    setProjectInk: vi.fn(async () => {}),
     removeProject: vi.fn(async () => {}),
     getRepositories: vi.fn(async () => repositories),
     addRepositories: vi.fn(async () => {}),
@@ -719,18 +794,20 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   editorPicture: vi.fn(async (id: string) => `data:image/png;base64,${id}`),
   playSound: vi.fn(async () => {}),
   pickFolder: vi.fn(async () => 'grant_picked'),
+  pickFolders: vi.fn(async (): Promise<ReadonlyArray<string>> => ['grant_picked']),
   grantDropped: vi.fn(async () => 'grant_dropped'),
   findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
   grantFound: vi.fn(async (id: string) => `grant_${id}`),
   onOpen: vi.fn(() => () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),
-  edge: vi.fn(async () => ({ place: 'island', notch: true })),
+  edge: vi.fn(async () => ({ place: 'island', notch: true, platform: 'darwin', tray: true })),
   setEdge: vi.fn(async () => {}),
   edgeDrawn: vi.fn(),
   onEdgePointed: vi.fn(() => () => {}),
   edgeSize: vi.fn(),
   openInWindow: vi.fn(),
+  clipboardToken: vi.fn(async () => null),
   ...overrides,
 })
 
