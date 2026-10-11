@@ -16,6 +16,7 @@ import {
   ProjectInk,
   projectIdentityText,
   ProjectMark,
+  ProjectNotes,
   RemoveProject,
 } from '@althar/ui'
 
@@ -30,8 +31,9 @@ import type { ProjectSettingsModel } from './useProjectSettings'
  * whichever view is shown. A module for its name and colour opens out, to
  * change them in place; the others say where each thing stands and open
  * where it is changed: its repositories, its rules, and connecting the code
- * host and tracker it is on. Removing it from Althar is at the foot, and asks
- * first. Nothing in it says what is running.
+ * host and tracker it is on. The notes its coordinator keeps open out too,
+ * to read and drop one that no longer holds (ADR-027). Removing it from
+ * Althar is at the foot, and asks first. Nothing in it says what is running.
  */
 
 export const text = {
@@ -40,6 +42,8 @@ export const text = {
   identity: 'Name and colour',
   repositories: 'Repositories',
   rules: 'Rules',
+  notes: 'Notes',
+  noNotes: 'None yet',
   connectedAs: (login: string) => `Connected as ${login}`,
   notConnected: 'Not connected',
   connect: 'Connect',
@@ -97,7 +101,7 @@ export function ProjectSettings({
   onConnect,
 }: ProjectSettingsProps) {
   const [open, setOpen] = useState(false)
-  const [showing, setShowing] = useState<'all' | 'identity'>('all')
+  const [showing, setShowing] = useState<'all' | 'identity' | 'notes'>('all')
   const name = model.name ?? ''
   const ink = inkOf(model.ink ?? 'clay')
   const taken: Partial<Record<ProjectInk, string>> = {}
@@ -182,6 +186,15 @@ export function ProjectSettings({
               <ControlModule title={text.rules} onClick={leave(onRules)}>
                 {rules !== null && <ControlWords title={rules.policy} line={rules.asks} />}
               </ControlModule>
+              {model.notes !== null && (
+                <ControlModule
+                  title={text.notes}
+                  {...(model.notes.length === 0 ? {} : { aside: String(model.notes.length) })}
+                  onClick={() => setShowing('notes')}
+                >
+                  <ControlWords title={model.notes.at(-1)?.body ?? text.noNotes} />
+                </ControlModule>
+              )}
             </ControlGrid>
             <ControlFoot>
               <Button size="small" variant="danger" icon="close" onClick={leave(model.askRemove)}>
@@ -189,6 +202,16 @@ export function ProjectSettings({
               </Button>
             </ControlFoot>
           </>
+        ) : showing === 'notes' ? (
+          <ControlDetail title={text.notes} onBack={() => setShowing('all')}>
+            <ControlSheet>
+              <ProjectNotes
+                notes={model.notes ?? []}
+                onRemove={(id) => void model.dropNote(id)}
+                {...(model.noteFailed === null ? {} : { error: model.noteFailed })}
+              />
+            </ControlSheet>
+          </ControlDetail>
         ) : (
           <ControlDetail title={text.identity} onBack={() => setShowing('all')}>
             <ControlSheet>

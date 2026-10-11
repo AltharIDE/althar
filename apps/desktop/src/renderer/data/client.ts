@@ -6,6 +6,7 @@ import {
   type AppSettings,
   type FieldAnswer,
   type FoundAccount,
+  type ProjectNote,
   type ProjectRulesView,
   Api,
   ApiError,
@@ -222,6 +223,10 @@ export interface Client {
     readonly changeTarget?: ChangeTarget
   }) => Promise<void>
   readonly getProjectRules: (projectId: string) => Promise<ProjectRulesView>
+  /** A project's notes, oldest first: the decisions its coordinator keeps. */
+  readonly getProjectNotes: (projectId: string) => Promise<ReadonlyArray<ProjectNote>>
+  /** Drops one of a project's notes: no coordinator session starts with it again. */
+  readonly dropProjectNote: (projectId: string, noteId: string) => Promise<void>
   /** The names a project's code uses that have parts, most used first, for dictation to write as it does. */
   readonly getVocabulary: (projectId: string) => Promise<ReadonlyArray<string>>
   /** Changes what is given of a project's rules; the rules as they are after it. */
@@ -444,6 +449,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     leaveOutRepository: (projectId, repositoryId) => command((commandId) => api.LeaveOutRepository({ commandId, projectId, repositoryId })),
     setRepository: (input) => command((commandId) => api.SetRepository({ commandId, ...input })),
     getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),
+    getProjectNotes: (projectId) => settle(api.GetProjectNotes({ projectId })),
+    dropProjectNote: (projectId, noteId) => command((commandId) => api.DropProjectNote({ commandId, projectId, noteId })),
     getVocabulary: (projectId) => settle(api.GetVocabulary({ projectId })),
     setProjectRules: (input) => command((commandId) => api.SetProjectRules({ commandId, ...input })),
     addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),

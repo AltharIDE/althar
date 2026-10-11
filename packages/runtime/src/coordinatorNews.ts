@@ -24,7 +24,8 @@ import { PlanParameters, type PlanStep, type TaskEnd } from './Runs'
 /** The plan events the coordinator hears of, by what each did. */
 const HEARD = ['task_plan.changed', 'task_plan.held', 'task_plan.accepted', 'task_plan.declined'] as const
 
-const endWords = (end: TaskEnd | null | undefined) => {
+/** What a plan does when its steps are done, in words. */
+export const endWords = (end: TaskEnd | null | undefined) => {
   switch (end) {
     case 'draft':
       return 'it ends as a draft pull request'
@@ -54,6 +55,16 @@ export const modelNamer = Effect.gen(function* () {
   }
 })
 
+/** Who does a plan's steps, in words: its lead, and its reviewer or no review. */
+export const teamOf = (parameters: PlanParameters, modelOf: ModelNamer) => {
+  // Every plan has its lead; a review may be left out, or skipped.
+  const review = parameters.steps.find((step) => step.key === 'review' && !step.skipped)
+  return [
+    ...parameters.steps.filter((step) => step.key === 'implement').map((lead) => `${modelOf(lead)} leads`),
+    review === undefined ? 'no review' : `${modelOf(review)} reviews`,
+  ].join(', ')
+}
+
 /**
  * The coordinator's news since its last turn on the thread, or null with
  * none: nothing changed, or it has never spoken. Read in the transaction
@@ -74,14 +85,7 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       ORDER BY sequence`
     if (events.length === 0) return null
 
-    const team = (parameters: PlanParameters) => {
-      // Every plan has its lead; a review may be left out, or skipped.
-      const review = parameters.steps.find((step) => step.key === 'review' && !step.skipped)
-      return [
-        ...parameters.steps.filter((step) => step.key === 'implement').map((lead) => `${modelOf(lead)} leads`),
-        review === undefined ? 'no review' : `${modelOf(review)} reviews`,
-      ].join(', ')
-    }
+    const team = (parameters: PlanParameters) => teamOf(parameters, modelOf)
     const decode = Schema.decodeUnknownSync(Schema.fromJsonString(PlanParameters))
 
     const lines: Array<string> = []

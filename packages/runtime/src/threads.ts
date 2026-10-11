@@ -336,8 +336,26 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   return { record, flush, end, current, outputsSoFar, outputOf }
 }
 
-/** The thread as text, oldest first: what a new agent reads when it takes over (ADR-005). */
-export const transcript = (threadId: string, budget: number) =>
+/**
+ * The thread as text, oldest first: what a new agent reads when it takes over
+ * (ADR-005), its most recent part within the budget. `omitted` says how many
+ * lines came before what is kept; read again with that as `before`, it gives
+ * the ones before.
+ */
+export const transcript = (
+  threadId: string,
+  budget: number,
+  options: {
+    /** Only the lines before this one, counting from the first: an earlier part. */
+    readonly before?: number
+    /** Only items of these kinds. */
+    readonly kinds?: ReadonlyArray<ItemKind>
+    /** At most this many lines, the last. */
+    readonly last?: number
+    /** What the thread's agent is called, in place of its agent's id. */
+    readonly agent?: string
+  } = {},
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const items = yield* sql<{
@@ -356,13 +374,15 @@ export const transcript = (threadId: string, budget: number) =>
       LEFT JOIN attention_requests a ON i.kind = 'question' AND a.id = json_extract(i.content, '$.attentionId')
       WHERE i.thread_id = ${threadId} ORDER BY i.sequence`
     const lines = items.flatMap((item) => {
+      if (options.kinds !== undefined && !options.kinds.includes(item.kind)) return []
       const content = JSON.parse(item.content) as Record<string, unknown>
       const text = (key: string) => (typeof content[key] === 'string' ? (content[key] as string) : '')
+      const agent = options.agent ?? item.agentId ?? 'agent'
       switch (item.kind) {
         case 'user_message':
           return [`[person] ${text('text')}`]
         case 'agent_message':
-          return [`[${item.agentId ?? 'agent'}] ${text('text')}`]
+          return [`[${agent}] ${text('text')}`]
         case 'tool_call':
           return [`[tool] ${text('title')} (${text('status')})`]
         case 'notice':
@@ -375,7 +395,7 @@ export const transcript = (threadId: string, budget: number) =>
           // What was asked of the person, and what they answered: an agent that takes the thread over knows both.
           const fields = Array.isArray(content['fields']) ? (content['fields'] as ReadonlyArray<QuestionField>) : []
           const asked = fields.map((field) => field.question).filter((question) => question !== '')
-          const line = `[${item.agentId ?? 'agent'} asked the person] ${asked.length > 0 ? asked.join(' / ') : text('message')}`
+          const line = `[${agent} asked the person] ${asked.length > 0 ? asked.join(' / ') : text('message')}`
           const answers =
             item.asked === null ? undefined : (JSON.parse(item.asked) as { answers?: Readonly<Record<string, FieldAnswer>> }).answers
           if (item.askedState === 'answered' && answers !== undefined)
@@ -387,12 +407,19 @@ export const transcript = (threadId: string, budget: number) =>
       }
     })
     // The most recent part is kept; what doesn't fit is left out from the start.
+    const read = lines.slice(0, Math.max(0, Math.min(options.before ?? lines.length, lines.length)))
     const kept: Array<string> = []
     let used = 0
-    for (const line of lines.toReversed()) {
+    for (const line of read.toReversed()) {
+      if (kept.length === options.last) break
+      // A last line longer than the whole budget is kept as far as it fits, rather than leaving nothing.
+      if (kept.length === 0 && line.length > budget) {
+        kept.unshift(`${line.slice(0, budget)} […]`)
+        break
+      }
       if (used + line.length > budget) break
       kept.unshift(line)
       used += line.length + 1
     }
-    return { text: kept.join('\n'), omitted: lines.length - kept.length }
+    return { text: kept.join('\n'), omitted: read.length - kept.length }
   })

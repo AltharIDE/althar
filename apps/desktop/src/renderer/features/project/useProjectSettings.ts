@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { ProjectInk, ProjectRulesView, ProjectSummary } from '@althar/contracts'
+import type { ProjectInk, ProjectNote, ProjectRulesView, ProjectSummary } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -9,7 +9,8 @@ import { useServices } from '../../data/services'
 
 /*
  * A project's settings' view model: its name and ink, changed in place, its
- * rules in a line, and removing it. A new name or ink shows at once, and
+ * rules in a line, the notes its coordinator keeps, and removing it. A note
+ * dropped goes at once, and comes back, saying why, where it didn't go. A new name or ink shows at once, and
  * goes to the runtime one change after another; the tabs and the home hear
  * it through the change feed, and the projects are read again at once too,
  * so it shows everywhere before the feed is heard. One that didn't hold goes
@@ -28,6 +29,11 @@ export interface ProjectSettingsModel {
   /** Why the last new name or ink didn't hold. */
   readonly failed: string | null
   readonly rules: ProjectRulesView | null
+  /** The decisions its coordinator keeps, oldest first (ADR-027). */
+  readonly notes: ReadonlyArray<ProjectNote> | null
+  readonly dropNote: (noteId: string) => Promise<void>
+  /** Why the last note dropped is still there. */
+  readonly noteFailed: string | null
   /** Asking whether to remove it from Althar. */
   readonly removing: boolean
   readonly askRemove: () => void
@@ -52,6 +58,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   const listed = useQuery(read.projects()).data
   const project = listed?.projects.find((each) => each.id === projectId) ?? null
   const rules = useQuery(read.rules(projectId)).data ?? null
+  const notes = useQuery(read.notes(projectId)).data ?? null
 
   // What the person chose, shown until the runtime says the same or says no.
   const [chosen, setChosen] = useState<Chosen>({})
@@ -95,6 +102,21 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   const taken: Partial<Record<ProjectInk, string>> = {}
   for (const other of listed?.projects ?? []) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
 
+  const [noteFailed, setNoteFailed] = useState<string | null>(null)
+  const dropNote = useCallback(
+    async (noteId: string) => {
+      setNoteFailed(null)
+      cache.setQueryData<ReadonlyArray<ProjectNote>>(keys.notes(projectId), (was) => was?.filter((note) => note.id !== noteId))
+      try {
+        await client.dropProjectNote(projectId, noteId)
+      } catch (failure) {
+        setNoteFailed(messageOf(failure))
+      }
+      await cache.invalidateQueries({ queryKey: keys.notes(projectId) })
+    },
+    [cache, client, projectId],
+  )
+
   const [removing, setRemoving] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -132,6 +154,9 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     setInk,
     failed: failed?.message ?? null,
     rules,
+    notes,
+    dropNote,
+    noteFailed,
     removing,
     askRemove,
     closeRemove,

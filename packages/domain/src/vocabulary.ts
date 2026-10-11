@@ -256,5 +256,6 @@ export const AggregateType = Schema.Literals([
   'external_link',
   'policy',
   'agent_account',
+  'project_note',
 ])
 export type AggregateType = typeof AggregateType.Type
