@@ -64,6 +64,15 @@ const cards = (projectId: string) =>
     return snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : []))
   })
 
+/** Where the host reads the branch: where the bare repository has it, as a real one does. */
+const tipOf = (bare: string) => () => {
+  try {
+    return git(bare, 'rev-parse', 'althar/add-a-retry')
+  } catch {
+    return null
+  }
+}
+
 const git = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
 
 const arrivals = (threadId: string) =>
@@ -72,7 +81,8 @@ const arrivals = (threadId: string) =>
 describe('a task that ends in a pull request', () => {
   it.live('pushes its branch, opens a draft with what the steps reported, and listens to it until it merges', () => {
     const { working, bare } = hosted()
-    const github = makeFakeService({ pushUrl: () => bare })
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    const tip = tipOf(bare)
     github.addRepository(['meridian', 'api'])
     // The fake lead commits as the person, as agents do: Althar credits only the person's own commits.
     git(working, 'config', 'user.name', 'Fake')
@@ -572,8 +582,12 @@ describe('a task that ends in a pull request', () => {
 describe('a pull request, by the person and the lead', () => {
   it.live('is marked ready by the person, read and replied on by the lead, and pushed by the person as far as they saw', () => {
     const { working, bare } = hosted()
-    const github = makeFakeService({ pushUrl: () => bare })
+    const tip = tipOf(bare)
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tip })
     github.addRepository(['meridian', 'api'])
+    // Commits are the person's own, which is what Althar credits.
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const changes = yield* Changes
@@ -613,10 +627,7 @@ describe('a pull request, by the person and the lead', () => {
       const sql = yield* SqlClient.SqlClient
       const [workspace] = yield* sql<{ path: string; branch: string }>`SELECT path, branch FROM workspaces WHERE task_id = ${taskId}`
       // What the lead commits after waits for the person: the card says how many, and they push what they saw.
-      const commit = (message: string) =>
-        execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '--allow-empty', '-m', message], {
-          cwd: workspace?.path,
-        })
+      const commit = (message: string) => execFileSync('git', ['commit', '-q', '--allow-empty', '-m', message], { cwd: workspace?.path })
       commit('More')
       const [seen] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1)
       const head = seen?.change?.localHead ?? ''
@@ -628,13 +639,23 @@ describe('a pull request, by the person and the lead', () => {
       assert.notInclude(pushed, 'Later')
       // Only what came after is left to push.
       yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1 && all[0]?.change?.localHead !== head)
-      // Pushed, nothing is left to push at once, without the host's next look: crediting rewrote the commits it sent,
-      // and the branch moved onto them, so the count isn't off by those.
+      // The earlier push credited More and moved the branch onto it, Later on top: that is what is left, and it goes as it is.
+      assert.notStrictEqual(git(bare, 'rev-parse', workspace?.branch ?? ''), head)
+      yield* setCoAuthor(true)
       const [later] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1)
       yield* changes.push(taskId, later?.change?.localHead ?? '')
+      assert.strictEqual((yield* cards(projectId))[0]?.change?.unpushed, 0)
+      // A commit made after is credited as it goes: what is pushed isn't what was seen, and the branch moves onto it. Nothing is
+      // left to push at once, without the host's next look.
+      commit('Fresh')
+      const [fresh] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1)
+      const seenFresh = fresh?.change?.localHead ?? ''
+      yield* changes.push(taskId, seenFresh)
       const [afterCredited] = yield* cards(projectId)
       assert.strictEqual(afterCredited?.change?.unpushed, 0)
-      assert.strictEqual(afterCredited?.change?.localHead, git(workspace?.path ?? '', 'rev-parse', 'HEAD'))
+      assert.notStrictEqual(tip(), seenFresh)
+      assert.strictEqual(tip(), git(workspace?.path ?? '', 'rev-parse', 'HEAD'))
+      assert.strictEqual(afterCredited?.change?.localHead, tip())
       // The same where nothing is rewritten: the commit goes up as it is.
       yield* setCoAuthor(false)
       commit('Plain')
@@ -642,7 +663,10 @@ describe('a pull request, by the person and the lead', () => {
       yield* changes.push(taskId, plain?.change?.localHead ?? '')
       const [afterPlain] = yield* cards(projectId)
       assert.strictEqual(afterPlain?.change?.unpushed, 0)
-      assert.strictEqual(git(bare, 'rev-parse', workspace?.branch ?? ''), git(workspace?.path ?? '', 'rev-parse', 'HEAD'))
+      assert.strictEqual(tip(), plain?.change?.localHead)
+      // The host is the last word: where it is rewound behind what was pushed, what is ahead of it is the person's to push again.
+      git(bare, 'update-ref', 'refs/heads/althar/add-a-retry', 'althar/add-a-retry~1')
+      yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1, Duration.seconds(20))
       // A commit that isn't on the branch any more isn't pushed.
       const gone = yield* Effect.flip(changes.push(taskId, '0000000000000000000000000000000000000000'))
       assert.strictEqual(gone instanceof Error ? gone.name : String(gone), 'ChangedSinceSeen')

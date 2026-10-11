@@ -220,6 +220,7 @@ export function Outputs({
               diffKey={text.diffKey}
               onOpenFile={onOpenFile}
               accepting={acting === doing.accept}
+              locked={pending}
               {...(error === null ? {} : { error })}
               text={{
                 number: (n) => `${first.prefix}${n}`,
@@ -314,6 +315,7 @@ export function Outputs({
         diffKey={text.diffKey}
         onOpenFile={onOpenFile}
         accepting={acting === doing.mergeHere}
+        locked={pending}
         {...(first !== undefined
           ? {}
           : conflict !== null && onResolve !== undefined

@@ -917,12 +917,11 @@ export class Queries extends Context.Service<
 
       /**
        * A worktree's head, and how many commits on it what was pushed doesn't
-       * have: what is still the person's to push. What was pushed is whichever
-       * of `pushed` the worktree knows is closest to its head: the pull
-       * request's head as the host last showed it, or the commit Althar last
-       * pushed, which is newer until the host's next look. None, where it
-       * can't be told. The head and which of them it knows are one look; each
-       * count is kept by its two commits.
+       * have: what is still the person's to push. What was pushed is the first
+       * of `pushed` the worktree knows, such as the pull request's head, else
+       * the commit Althar last pushed. None, where it can't be told. The head
+       * and which of them it knows are one look; the count is kept by the two
+       * commits.
        */
       const unpushedOf = (owner: Owner, pushed: ReadonlyArray<string | null>) =>
         Effect.gen(function* () {
@@ -930,16 +929,13 @@ export class Queries extends Context.Service<
             'HEAD',
             ...pushed.filter((commit): commit is string => commit !== null),
           ])
-          const froms = [...new Set(known.filter((commit): commit is string => commit !== null))]
-          if (localHead === null || froms.length === 0) return { localHead, unpushed: 0 }
+          const from = known.find((commit): commit is string => commit !== null)
+          if (localHead === null || from === undefined) return { localHead, unpushed: 0 }
           // Counted up to the head looked at, not HEAD again: the lead may commit in between.
-          const counts = yield* Effect.forEach(froms, (from) =>
-            unpushedKept
-              .of(owner, `${from} ${localHead}`, commitsAhead(owner.path, from, localHead))
-              .pipe(Effect.orElseSucceed(() => null)),
-          )
-          const counted = counts.filter((count): count is number => count !== null)
-          return { localHead, unpushed: counted.length === 0 ? 0 : Math.min(...counted) }
+          const unpushed = yield* unpushedKept
+            .of(owner, `${from} ${localHead}`, commitsAhead(owner.path, from, localHead))
+            .pipe(Effect.orElseSucceed(() => 0))
+          return { localHead, unpushed }
         })
 
       /** One file a task changed, as a diff from its base to its worktree on this device; in several repositories, named under its repository's. */

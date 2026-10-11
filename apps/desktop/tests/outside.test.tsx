@@ -1236,6 +1236,28 @@ describe('a project, reaching outside', () => {
     expect(screen.getByRole('button', { name: 'Push 1 commit' }).getAttribute('aria-busy')).toBeNull()
   })
 
+  it('holds Accept while a push is on its way, without showing it as working', async () => {
+    let done = () => {}
+    const push = vi.fn(() => new Promise<void>((resolve) => (done = resolve)))
+    const { client } = fakeClient({
+      push,
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: { ...snapshot().task, phase: 'ready', changes: [change({ draft: false, unpushed: 1, localHead: 'def456' })], commits: 4 },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Push 1 commit' }))
+    await waitFor(() => expect(push).toHaveBeenCalled())
+    const accept = screen.getByRole('button', { name: 'Accept and merge' }) as HTMLButtonElement
+    expect(accept.disabled).toBe(true)
+    expect(accept.getAttribute('aria-busy')).toBeNull()
+    done()
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Accept and merge' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+
   it('shows a task’s issue and pull request on its card, and its ending on its plan, which can change', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>

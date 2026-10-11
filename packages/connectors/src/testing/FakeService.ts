@@ -32,6 +32,8 @@ export interface FakeServiceOptions {
   readonly account?: Account
   /** Where a push to a repository goes. Without it, a push target that fails. */
   readonly pushUrl?: (path: ReadonlyArray<string>) => string
+  /** The commit a change's branch is at on the host, as the host reads it now; without it, a name of the fake's own. */
+  readonly headOf?: (number: number) => string | null
 }
 
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
@@ -198,7 +200,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     change: (_repository, number) =>
       Effect.andThen(called('change'), () => {
         const found = changes.find((change) => change.number === number)
-        return found === undefined ? Effect.fail(missing(`change ${number}`)) : Effect.succeed(found)
+        if (found === undefined) return Effect.fail(missing(`change ${number}`))
+        const head = options.headOf?.(number) ?? null
+        return Effect.succeed(head === null ? found : { ...found, headSha: head })
       }),
     markReady: (_repository, change) =>
       Effect.andThen(called('markReady'), () => {
@@ -217,7 +221,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
               message: now.draft ? 'Pull request is in draft state' : 'Pull request is not mergeable',
             }),
           )
-        if (change.headSha !== now.headSha)
+        if (change.headSha !== (options.headOf?.(change.number) ?? now.headSha))
           return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', status: 409, message: 'Head branch was modified' }))
         update(change.number, { state: 'merged' })
         return Effect.succeed(changeNumbered(change.number))
@@ -225,7 +229,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     checks: (_repository, sha) =>
       Effect.andThen(called('checks'), () => {
         const change =
-          changes.find((candidate) => candidate.headSha === sha) ?? changes.find((candidate) => `head-${candidate.number}` === sha)
+          changes.find((candidate) => candidate.headSha === sha || options.headOf?.(candidate.number) === sha) ??
+          changes.find((candidate) => `head-${candidate.number}` === sha)
         return Effect.succeed(change === undefined ? [] : (checks.get(change.number) ?? []))
       }),
     checkLog: (_repository, check) =>
