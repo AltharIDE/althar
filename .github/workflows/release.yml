@@ -158,6 +158,8 @@ jobs:
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          # Where Report a problem posts: the reports Worker (apps/report), baked into the build. Unset, a report goes by mail.
+          ALTHAR_REPORT_URL: ${{ vars.ALTHAR_REPORT_URL }}
         run: bun run release
       - name: Forget the certificate
         if: always()

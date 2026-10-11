@@ -61,4 +61,4 @@ Before the first deploy:
 
 Then `bun run deploy` (`wrangler deploy`) publishes the Worker and makes its rate limits.
 
-Give the app the Worker's address, such as `https://althar-report.<account>.workers.dev`, as `ALTHAR_REPORT_URL` when it is built; it posts to `/reports` there. Watch the first real report arrive in Triage: the Worker's calls are checked against a fake, not yet against Linear itself.
+Give the app the Worker's address, such as `https://althar-report.<account>.workers.dev`, as `ALTHAR_REPORT_URL` when it is built (for a release, the repository's `ALTHAR_REPORT_URL` variable, which the release workflow passes on); it posts to `/reports` there. Watch the first real report arrive in Triage: the Worker's calls are checked against a fake, not yet against Linear itself.

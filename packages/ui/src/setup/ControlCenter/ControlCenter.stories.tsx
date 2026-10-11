@@ -19,6 +19,7 @@ import {
 } from '../../fixtures/setup'
 import { Choices, type ChoiceOption } from '../../primitives/Choices/Choices'
 import { IconButton } from '../../primitives/IconButton/IconButton'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Switch } from '../../primitives/Switch/Switch'
 import { States } from '../../storybook/States'
 import { Accounts } from '../Accounts/Accounts'
@@ -249,6 +250,7 @@ function Settings({
           </ControlGrid>
           <ControlFoot>
             <AppVersion version="0.1.0" notes="https://github.com/AltharIDE/althar/releases/tag/v0.1.0" />
+            <LinkButton onClick={fn()}>Report a problem</LinkButton>
             <ControlLink title="Co-author" picture={<CoAuthorFace size={16} />} off={!credit} onClick={() => setOpen('coauthor')} />
           </ControlFoot>
         </>
@@ -392,7 +394,7 @@ type Story = StoryObj<typeof meta>
 const panelOf = async (canvasElement: HTMLElement) =>
   within(await within(canvasElement.ownerDocument.body).findByRole('dialog', { name: 'Settings' }))
 
-/** At rest: round switches across the top; Agents large, the code hosts tall and two small squares beside them; co-author a quiet link in the foot. */
+/** At rest: round switches across the top; Agents large, the code hosts tall and two small squares beside them; the version and Report a problem in the foot, co-author a quiet link at its end. */
 export const AtRest: Story = {
   play: async ({ canvasElement }) => {
     const p = await panelOf(canvasElement)
@@ -401,6 +403,7 @@ export const AtRest: Story = {
     await expect(p.getByRole('button', { name: /^Code hosts and trackers\s*.*Linear signed out, needs you/ })).toBeInTheDocument()
     await expect(p.getByRole('button', { name: /^In other apps\s*Round the notch/ })).toBeInTheDocument()
     await expect(p.getByRole('button', { name: /^App icon\s*Cobalt/ })).toBeInTheDocument()
+    await expect(p.getByRole('button', { name: 'Report a problem' })).toBeInTheDocument()
     await expect(p.getByRole('button', { name: 'Co-author' })).toBeInTheDocument()
     const awake = p.getByRole('switch', { name: 'Keep awake' })
     await expect(awake).toHaveAttribute('aria-checked', 'true')
@@ -569,7 +572,7 @@ const frame = (node: ReactNode, width = 440) => (
   <div style={{ width, padding: 12, borderRadius: 20, background: 'var(--frost)' }}>{node}</div>
 )
 
-/** Open at rest, and the parts on their own: modules placed and not, the lines, a link on and off, and the Dock the icon shows in. */
+/** Open at rest, and the parts on their own: modules placed and not, the lines, a link on and off, a long foot wrapping, and the Dock the icon shows in. */
 export const AllStates: Story = {
   render: () => (
     <States
@@ -620,6 +623,17 @@ export const AllStates: Story = {
                 <ControlLink title="Co-author" picture={<CoAuthorFace size={16} />} off onClick={fn()} />
               </ControlFoot>
             </>,
+          ),
+        },
+        {
+          state: 'the foot, long: it wraps, the link still at its end',
+          node: frame(
+            <ControlFoot>
+              <AppVersion version="0.1.0" notes="https://github.com/AltharIDE/althar/releases/tag/v0.1.0" />
+              <LinkButton onClick={fn()}>Report a problem</LinkButton>
+              <ControlLink title="Co-author" picture={<CoAuthorFace size={16} />} onClick={fn()} />
+            </ControlFoot>,
+            300,
           ),
         },
         {
