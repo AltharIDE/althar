@@ -742,6 +742,8 @@ export const ToolCallItem = Schema.Struct({
     /** ACP's status: pending, in_progress, completed or failed. */
     status: Schema.String,
     command: Schema.NullOr(Schema.String),
+    /** A command as it reads at a glance (see BackgroundCommand); absent where it is not shortened or there is no command. */
+    label: Schema.optional(Schema.String),
     locations: Schema.Array(ToolLocation),
     /** Refused when it asked: by the rules, the lead or the person. */
     declined: Schema.Boolean,
@@ -1016,6 +1018,8 @@ export type ContextUse = typeof ContextUse.Type
 export const BackgroundCommand = Schema.Struct({
   id: Schema.String,
   command: Schema.String,
+  /** The command as it reads at a glance, without a leading `cd`, variables, `timeout` or output plumbing; the command is the whole of it. */
+  label: Schema.optional(Schema.String),
   /** Where it answers, as its output said, as a browser opens it: http://localhost:5173/. Null until it says, or where it never does. */
   url: Schema.NullOr(Schema.String),
   startedAt: Schema.String,
