@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vite-plus/test'
 
-import { PAGE_META, pageMeta } from '../src/content/pages'
+import { NOT_FOUND, PAGE_META, pageMeta } from '../src/content/pages'
 import { withMeta } from '../src/lib/meta'
 
 const HTML = `<!doctype html>
@@ -26,9 +26,10 @@ describe('page meta', () => {
   })
 
   it('gives every page its own title and description, short enough for search results', () => {
-    expect(new Set(pages.map((p) => p.title)).size).toBe(pages.length)
-    expect(new Set(pages.map((p) => p.description)).size).toBe(pages.length)
-    for (const p of pages) {
+    const all = [...pages, NOT_FOUND]
+    expect(new Set(all.map((p) => p.title)).size).toBe(all.length)
+    expect(new Set(all.map((p) => p.description)).size).toBe(all.length)
+    for (const p of all) {
       expect(p.title.length).toBeLessThanOrEqual(60)
       expect(p.description.length).toBeLessThanOrEqual(160)
       expect(p.description.endsWith('.')).toBe(true)
@@ -49,16 +50,24 @@ describe('page meta', () => {
     expect(pages.filter((p) => !p.index).map((p) => p.path)).toEqual(['/docs', '/enterprise'])
   })
 
-  it('finds a page by path, ignoring a trailing slash, and falls back to the root', () => {
+  it('finds a page by path, ignoring a trailing slash; any other path is the page that isn’t there', () => {
     expect(pageMeta('/shifts/').path).toBe('/shifts')
     expect(pageMeta('/thesis').path).toBe('/thesis')
-    expect(pageMeta('/nowhere').path).toBe('/')
     expect(pageMeta('/').path).toBe('/')
+    expect(pageMeta('/nowhere')).toBe(NOT_FOUND)
+    expect(NOT_FOUND.index).toBe(false)
   })
 })
 
 describe('withMeta', () => {
-  const page = { path: '/shifts', title: 'Shifts · Althar', description: 'What changed, and when.', image: '/og/shifts.png', index: true }
+  const page = {
+    path: '/shifts',
+    name: 'Shifts',
+    title: 'Shifts · Althar',
+    description: 'What changed, and when.',
+    image: '/og/shifts.png',
+    index: true,
+  }
 
   it('replaces the title and the description', () => {
     const out = withMeta(HTML, page, '')
@@ -71,23 +80,35 @@ describe('withMeta', () => {
   it('adds the preview tags inside the head, once', () => {
     const out = withMeta(withMeta(HTML, page, ''), page, '')
     const head = out.slice(0, out.indexOf('</head>'))
-    for (const tag of ['og:title', 'og:description', 'og:image', 'og:type', 'twitter:card']) {
-      expect(head.split(tag).length - 1).toBe(1)
+    for (const tag of ['og:title', 'og:description', 'og:image', 'og:image:width', 'og:type', 'og:site_name', 'twitter:card']) {
+      expect(head.split(`"${tag}"`).length - 1).toBe(1)
     }
     expect(head).toContain('<meta property="og:image" content="/og/shifts.png" />')
     expect(head).toContain('<meta name="twitter:card" content="summary_large_image" />')
   })
 
-  it('makes the image and the page address absolute when the origin is known', () => {
+  it('makes the image and the page address absolute when the origin is known, and names that address as the page’s own', () => {
     const out = withMeta(HTML, page, 'https://example.test/')
     expect(out).toContain('<meta property="og:image" content="https://example.test/og/shifts.png" />')
     expect(out).toContain('<meta property="og:url" content="https://example.test/shifts" />')
+    expect(out).toContain('<link rel="canonical" href="https://example.test/shifts" />')
     expect(withMeta(HTML, page, '')).not.toContain('og:url')
+    expect(withMeta(HTML, page, '')).not.toContain('canonical')
   })
 
-  it('marks a page that stays out of search, and only that one', () => {
-    expect(withMeta(HTML, { ...page, index: false }, '')).toContain('<meta name="robots" content="noindex" />')
+  it('marks a page that stays out of search, and only that one, and gives it no canonical address', () => {
+    const hidden = withMeta(HTML, { ...page, index: false }, 'https://example.test')
+    expect(hidden).toContain('<meta name="robots" content="noindex" />')
+    expect(hidden).not.toContain('canonical')
     expect(withMeta(HTML, page, '')).not.toContain('robots')
+  })
+
+  it('writes structured data as scripts that no string in it can close', () => {
+    const out = withMeta(HTML, page, '', [{ '@type': 'Thing', name: '</script><b>' }])
+    const scripts = out.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g) ?? []
+    expect(scripts).toHaveLength(1)
+    expect(out).not.toContain('</script><b>')
+    expect(JSON.parse(scripts[0]!.replace(/^<script[^>]*>|<\/script>$/g, ''))).toEqual({ '@type': 'Thing', name: '</script><b>' })
   })
 
   it('escapes what goes into attributes and the title', () => {

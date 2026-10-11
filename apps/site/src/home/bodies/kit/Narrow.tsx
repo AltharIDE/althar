@@ -1,20 +1,10 @@
-import { type ReactNode, useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 
+import { useMedia } from '../../../lib/browser'
 import s from './Narrow.module.css'
 import { Shot } from './Shot'
 
-/** Whether a media query matches, following it as it changes. False where there is no window (a server render). */
-export function useMedia(query: string) {
-  const [matches, setMatches] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches)
-  useEffect(() => {
-    const q = window.matchMedia(query)
-    const on = () => setMatches(q.matches)
-    on()
-    q.addEventListener('change', on)
-    return () => q.removeEventListener('change', on)
-  }, [query])
-  return matches
-}
+export { useMedia }
 
 /** Whether the page is at most `px` wide: by default a phone's width, where pictures lay themselves out for it. */
 export const useNarrow = (px = 699) => useMedia(`(max-width: ${px}px)`)

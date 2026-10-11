@@ -8,6 +8,7 @@ import { IslandOpen } from './app'
 import { BrowserWindow, Desktop, EditorWindow, TerminalWindow, type Wallpaper } from './Mac'
 import { useNarrow } from './Narrow'
 import { Reel, type ReelMoment } from './Reel'
+import { useStill } from '../../../lib/browser'
 import { cx } from '../../../lib/cx'
 import { useInView, useSeen } from './seen'
 import { Shot } from './Shot'
@@ -23,10 +24,6 @@ import t from './type.module.css'
 
 const none = () => {}
 
-const still = () =>
-  typeof window !== 'undefined' &&
-  (window.matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(window.location.search).has('t'))
-
 /**
  * The island as you would meet it: closed round the notch, then, a moment
  * after the picture is seen, dropping open, as it does when you point at it.
@@ -34,7 +31,8 @@ const still = () =>
 function OpeningIsland({ active, after = 1200 }: { active: boolean; after?: number }) {
   const spot = useRef<HTMLSpanElement>(null)
   const seen = useSeen(spot, 0.5)
-  const [open, setOpen] = useState(still)
+  const [opened, setOpen] = useState(false)
+  const open = useStill() || opened
   useEffect(() => {
     if (!active || open || !seen) return
     const timer = window.setTimeout(() => setOpen(true), after)
@@ -175,6 +173,7 @@ export function EdgeTour({ tone = 'ink' }: { tone?: 'paper' | 'ink' }) {
 function MenuBarNote() {
   const ref = useRef<HTMLDivElement>(null)
   const seen = useInView(ref, 0.35)
+  const still = useStill()
   return (
     <div ref={ref} className={s.menuNote}>
       <div className={s.menuWords}>
@@ -201,7 +200,7 @@ function MenuBarNote() {
           label="Althar in the menu bar: its mark clicked, and the list dropped open under it"
           frame={s.sceneFrame}
         >
-          <div className={cx(s.corner, (seen || still()) && s.cornerOn, still() && s.cornerStill)}>
+          <div className={cx(s.corner, (seen || still) && s.cornerOn, still && s.cornerStill)}>
             <div className={s.cornerBar}>
               <span className={s.cornerMenus}>
                 <span>Shell</span>

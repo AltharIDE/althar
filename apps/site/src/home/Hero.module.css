@@ -18,6 +18,8 @@
   mask-image: radial-gradient(ellipse 62% 60% at 50% 100%, #000 30%, transparent 82%);
 }
 .mark { position: absolute; pointer-events: none; z-index: 2; }
+/* The words are white in a light the script draws: until the page has hydrated they wait, as the launch has them, rather than show white on paper. Crawlers read them in the HTML all the same. */
+@media (scripting: enabled) { .hero:not([data-ready]) .head { visibility: hidden; } }
 
 .head {
   position: relative;

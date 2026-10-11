@@ -1,6 +1,7 @@
 import { type CSSProperties, Fragment, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 
 import type { Agent } from '../content/agents'
+import { useStill } from '../lib/browser'
 import { AgentMark } from '../shared/AgentMark'
 import s from './NameSwap.module.css'
 
@@ -23,8 +24,6 @@ const HOLD = 2200
 
 /** The punctuation after a name in a list: "Claude, Codex and Gemini." The "and" goes between the spans. */
 const listMark = (i: number, count: number) => (i === count - 1 ? '.' : i === count - 2 ? '' : ',')
-
-const still = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(window.location.search).has('t')
 
 /** A name as letters, each with its place from the left and from the right for the stagger. */
 function Word({ name }: { name: Name }) {
@@ -122,7 +121,7 @@ export function NameSwap({
   /** How much longer the first name stays, in ms: while the hero opens. */
   after?: number
 }) {
-  const [moving] = useState(() => !still())
+  const moving = !useStill()
   const all = names.map((n) => n.word)
   const spoken = `${all.slice(0, -1).join(', ')} and ${all.at(-1)}.`
 
