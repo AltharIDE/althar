@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, within } from 'storybook/test'
 
 import { States, statesOn } from '../../storybook/States'
-import { Field } from './Field'
+import { Field, TextArea } from './Field'
 
 const meta = {
   title: 'Primitives/Field',
@@ -26,6 +26,16 @@ export const Typing: Story = {
   },
 }
 
+/** Several lines, as for what happened. */
+export const Lines: Story = {
+  render: () => <TextArea aria-label="What happened?" placeholder="What you did, what you expected, and what happened instead" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.type(c.getByRole('textbox', { name: 'What happened?' }), 'It stopped.{Enter}Nothing moved.')
+    await expect(c.getByRole('textbox')).toHaveValue('It stopped.\nNothing moved.')
+  },
+}
+
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'input', focus: 'input', pressed: 'input' }),
   render: (args) => (
@@ -37,6 +47,8 @@ export const AllStates: Story = {
         { state: 'focus', node: <Field {...args} /> },
         { state: 'disabled', node: <Field {...args} disabled defaultValue="github.com/meridian/infra" /> },
         { state: 'large', node: <Field {...args} size="large" defaultValue="Refunds v2" /> },
+        { state: 'lines', node: <TextArea aria-label="What happened?" defaultValue={'It stopped.\nNothing moved.'} /> },
+        { state: 'lines, invalid', node: <TextArea aria-label="What happened?" invalid /> },
       ]}
     />
   ),
