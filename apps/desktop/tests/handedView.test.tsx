@@ -41,6 +41,7 @@ const session = {
   models: [],
   turnRunning: false,
   context: null,
+  background: [],
 }
 
 const picture = (digest: string, name: string | null = null): Picture => ({

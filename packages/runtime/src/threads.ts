@@ -76,7 +76,8 @@ export const updateItem = (projectId: ProjectId, id: string, content: unknown) =
     )
   })
 
-const toolItem = (sessionId: string, toolCallId: string) =>
+/** A session's tool call, as the thread keeps it. */
+export const toolItem = (sessionId: string, toolCallId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [row] = yield* sql<{

@@ -152,6 +152,36 @@ describe('listening', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('stops when the person says: the task shows it, and nothing said after arrives', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { threadId, taskId, cards } = yield* withPullRequest(github, bare, working)
+      const changes = yield* Changes
+      const queries = yield* Queries
+      const [listened] = yield* changes.ofTask(taskId)
+      assert.isTrue(listened?.listening)
+      // Another pull request's address stops nothing.
+      yield* changes.stopListening(taskId, 'https://github.com/meridian/api/pull/99')
+      assert.isTrue((yield* changes.ofTask(taskId))[0]?.listening)
+      yield* changes.stopListening(taskId, listened?.url ?? '')
+      assert.isFalse((yield* changes.ofTask(taskId))[0]?.listening)
+      // The task's thread and its card say so.
+      assert.isFalse((yield* queries.thread(threadId)).task.changes[0]?.listening)
+      assert.isFalse((yield* cards)[0]?.change?.listening)
+      // Asked again, it doesn't ask the host, and what is said there no longer arrives.
+      const asked = github.calls.filter((call) => call === 'activity').length
+      github.commentAs(1, 'dana', 'Anyone there?')
+      yield* changes.refresh(taskId)
+      yield* Effect.sleep('400 millis')
+      assert.strictEqual(github.calls.filter((call) => call === 'activity').length, asked)
+      assert.lengthOf(yield* arrivals(threadId), 0)
+      // Stopping again does nothing more.
+      yield* changes.stopListening(taskId, listened?.url ?? '')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('keeps going when the host fails, and goes quiet when the connection is removed', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })

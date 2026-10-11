@@ -171,8 +171,8 @@ export const useProject = (projectId: string): ProjectModel => {
   }, [client, threadId, coordinator, readHead, newest, arrived, fail])
 
   useWatch((event) => {
-    // A command's output as far as it has come is useOutputs'.
-    if (event._tag === 'Output') return
+    // A command's output as far as it has come is useOutputs'; the coordinator leaves nothing running.
+    if (event._tag === 'Output' || event._tag === 'Background') return
     if (event._tag === 'Streaming') {
       if (event.threadId !== threadId) return
       setStreaming((current) =>

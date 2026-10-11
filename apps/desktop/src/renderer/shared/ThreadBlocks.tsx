@@ -260,33 +260,36 @@ function LinkView({ link }: { link: Unfurl }) {
   )
 }
 
-/** Something heard from outside, as a quoted note: who, what they did, where, and what they said. */
+/** What happened, in the words between who and where: commented on, Checks passed on. */
+export const heardVerb = (arrival: ArrivalContent): string => {
+  switch (arrival.kind) {
+    case 'comment':
+      return text.heard.comment
+    case 'review':
+      return arrival.verdict === null ? text.heard.commented : text.heard[arrival.verdict]
+    case 'checks': {
+      const failed = arrival.failed ?? 0
+      return failed === 0 ? text.heard.checksPassed : text.heard.checksFailed(failed, failed + (arrival.passed ?? 0))
+    }
+    case 'merged':
+      return text.heard.merged
+    case 'closed':
+      return text.heard.closed
+    case 'ready':
+      return text.heard.ready
+  }
+}
+
 /**
- * Something heard from outside. What someone who can't write to the
- * repository said wasn't passed to the lead, as anyone can comment on a
- * public one; the person reads it, and can pass it on.
+ * Something heard from outside, as a quoted note: who, what they did, where,
+ * and what they said. What someone who can't write to the repository said
+ * wasn't passed to the lead, as anyone can comment on a public one; the
+ * person reads it, and can pass it on.
  */
 function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: string; onPassOn?: (words: string) => void }) {
   const where =
     arrival.path === null ? arrival.where : `${arrival.where} · ${arrival.path}${arrival.line === null ? '' : `:${arrival.line}`}`
-  const verb = ((): string => {
-    switch (arrival.kind) {
-      case 'comment':
-        return text.heard.comment
-      case 'review':
-        return arrival.verdict === null ? text.heard.commented : text.heard[arrival.verdict]
-      case 'checks': {
-        const failed = arrival.failed ?? 0
-        return failed === 0 ? text.heard.checksPassed : text.heard.checksFailed(failed, failed + (arrival.passed ?? 0))
-      }
-      case 'merged':
-        return text.heard.merged
-      case 'closed':
-        return text.heard.closed
-      case 'ready':
-        return text.heard.ready
-    }
-  })()
+  const verb = heardVerb(arrival)
   const body = arrival.kind === 'checks' ? (arrival.failing.length > 0 ? text.failing(arrival.failing) : null) : arrival.text
   const from = arrival.from ?? ''
   const foot = arrival.outsider && (

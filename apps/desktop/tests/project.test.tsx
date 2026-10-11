@@ -48,6 +48,7 @@ const session = {
   models: [],
   turnRunning: false,
   context: null,
+  background: [],
 }
 
 /** The coordinator's thread with a conversation and two cards: one running, one planned. */

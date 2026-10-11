@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import * as acp from '@agentclientprotocol/sdk'
@@ -7,6 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
 import type { InProcessAgent } from '../AgentConnection'
+import { stopBackgroundMethod, type StopBackgroundResponse } from '../background'
 
 /*
  * A scripted ACP agent for tests, so the adapter's contract runs in CI without
@@ -81,6 +83,17 @@ export const scenarios = {
   handsBack: 'hands-back',
   /** A command whose output streams until the turn is cancelled. */
   streams: 'streams',
+  /**
+   * Leaves `bun dev` running, as Claude Code reports a command it sends to
+   * the background: its tool call done, then the command spawned under what
+   * the call says it does, then the file its output goes to, where it says
+   * where it serves. Some other background work, which isn't a command, too.
+   * Stopping it ends it. `[lead:serve]` does the same for a lead, and
+   * `[lead:serve-exits]` has it end by itself just after the turn, failing.
+   */
+  background: 'background',
+  /** The same as Codex reports one: spawned after the turn, by its command, its output on its tool call. */
+  backgroundCodex: 'background-codex',
   /**
    * Followed by a command, `run git status --short`: runs it, asking first
    * with Codex's command options, each time as a tool call of its own, and
@@ -157,6 +170,8 @@ export interface FakeAgentOptions {
   readonly bare?: boolean
   /** Called when a session is closed with `session/close`. */
   readonly closed?: (sessionId: string) => void
+  /** Called when something a session left running is stopped, with its task's id. */
+  readonly stoppedBackground?: (id: string) => void
   /** Called with what the client says it can do, as it initializes. */
   readonly initialized?: (capabilities: acp.ClientCapabilities | undefined) => void
   /** Leave a permission request open when the turn is cancelled, for Althar to answer. */
@@ -202,6 +217,75 @@ interface SessionState {
   played: Set<string>
   /** Commands it has run with `run`, so each is a tool call of its own. */
   runs: number
+  /** What it left running, by its task's id. */
+  background: Map<string, { readonly toolCallId: string; readonly outputPath?: string }>
+  /** How many commands it has left running, so each has an id of its own. */
+  served: number
+}
+
+/** What `bun dev` prints, coloured as Vite colours it. */
+const SERVING =
+  '\n  \u001b[32mVITE\u001b[39m v7.1.0  ready in 312 ms\n\n  ➜  Local:   \u001b[36mhttp://localhost:\u001b[1m5173\u001b[22m/\u001b[39m\n  ➜  Network: use --host to expose\n'
+
+/**
+ * Leaves `bun dev` running in the background (`background`), as Claude Code
+ * or Codex reports it. Sent as raw notifications: ACP's schema doesn't have
+ * these updates yet.
+ */
+const leaveRunning = async (
+  sessionId: string,
+  session: SessionState,
+  client: acp.AgentContext,
+  as: 'claude' | 'codex',
+  options: { readonly exits?: boolean } = {},
+) => {
+  const notify = (update: Record<string, unknown>) =>
+    client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
+  session.served += 1
+  const id = `bg-${session.served}`
+  const toolCallId = `serve-${session.served}`
+  await notify({
+    sessionUpdate: 'tool_call',
+    toolCallId,
+    title: 'bun dev',
+    kind: 'execute',
+    status: 'in_progress',
+    rawInput: { command: 'bun dev' },
+  })
+  if (as === 'codex') {
+    session.background.set(id, { toolCallId })
+    // Codex says it once its list of background terminals names it, after the turn, and streams its output on its tool call.
+    setTimeout(() => {
+      void notify({ sessionUpdate: 'async_task_spawned', asyncTaskId: id, name: 'bun dev', taskType: 'shell', canStop: true, toolCallId })
+      void notify({ sessionUpdate: 'tool_call_update', toolCallId, _meta: { terminal_output_delta: { data: SERVING } } })
+    }, 20)
+    return
+  }
+  const folder = join(tmpdir(), 'althar-fake-agent')
+  mkdirSync(folder, { recursive: true })
+  const outputPath = join(folder, `${sessionId}-${id}.output`)
+  writeFileSync(outputPath, SERVING)
+  session.background.set(id, { toolCallId, outputPath })
+  await notify({
+    sessionUpdate: 'async_task_spawned',
+    asyncTaskId: id,
+    name: 'Start the dev server',
+    taskType: 'shell',
+    description: 'Start the dev server',
+    showInTranscript: false,
+    canStop: true,
+    toolCallId,
+  })
+  await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
+  await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
+  // Background work that isn't a command, as Claude Code reports some.
+  await notify({ sessionUpdate: 'async_task_spawned', asyncTaskId: `dream-${id}`, name: 'Dreaming', taskType: 'dream', canStop: true })
+  if (options.exits === true)
+    setTimeout(() => {
+      if (!session.background.delete(id)) return
+      appendFileSync(outputPath, 'error: Port 5173 is in use\n[exited with code 1]\n')
+      void notify({ sessionUpdate: 'async_task_state_update', asyncTaskId: id, state: 'failed' })
+    }, 300)
 }
 
 /** What `[lead:explore]` reads, in order. */
@@ -328,7 +412,7 @@ const commitIn = (cwd: string, file: string, message: string) => {
   git('commit', '-q', '-m', message)
 }
 
-const playRole = async (session: SessionState, text: string): Promise<string | undefined> => {
+const playRole = async (session: SessionState, text: string, serve: (exits: boolean) => Promise<void>): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
   const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ')
   if (session.tools === undefined || !asked) return undefined
@@ -369,6 +453,11 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
       return undefined
     }
     if (available.has('finish_step')) {
+      // A lead that leaves a dev server running, once, then carries on as its other markers say.
+      if (text.includes('[lead:serve') && !session.played.has('[lead:serve]')) {
+        session.played.add('[lead:serve]')
+        await serve(text.includes('[lead:serve-exits]'))
+      }
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
@@ -572,6 +661,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         markers: new Set(),
         played: new Set(),
         runs: 0,
+        background: new Map(),
+        served: 0,
       }
       sessions.set(sessionId, session)
       return {
@@ -608,6 +699,27 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       options.closed?.(params.sessionId)
       return {}
     })
+    .onRequest(
+      stopBackgroundMethod,
+      { parse: (params) => params as { readonly sessionId: string; readonly asyncTaskId: string } },
+      async ({ params, client }): Promise<StopBackgroundResponse> => {
+        // Stopping what a session left running, as the adapters do: it ends, and says so.
+        const session = sessions.get(params.sessionId)
+        const left = session?.background.get(params.asyncTaskId)
+        if (session === undefined || left === undefined) return { stopped: false }
+        session.background.delete(params.asyncTaskId)
+        options.stoppedBackground?.(params.asyncTaskId)
+        await client.notify(acp.methods.client.session.update, {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: 'async_task_state_update',
+            asyncTaskId: params.asyncTaskId,
+            state: 'stopped',
+          } as unknown as acp.SessionUpdate,
+        })
+        return { stopped: true }
+      },
+    )
     .onNotification(acp.methods.agent.session.cancel, ({ params }) => {
       const session = sessionOf(params.sessionId)
       session.cancelled = true
@@ -752,7 +864,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const told = /The person answered[^\n]*\n([\s\S]*)$/.exec(text)
       if (told?.[1] !== undefined) {
         await say(`told=${told[1].trim().split('\n').join(' | ')}`)
-        const after = await playRole(session, text)
+        const after = await playRole(session, text, (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }))
         if (after !== undefined) await say(after)
         return ended()
       }
@@ -767,7 +879,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const stalled = await playStall(session, text, update)
       if (stalled !== undefined) return stalled
       // With Althar's tools, a marker in the prompt says which role to play.
-      const played = await playRole(session, text)
+      const played = await playRole(session, text, (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }))
       // Stopped while it played its part, the turn was cancelled, as an agent says.
       if (played !== undefined && session.cancelled) return { stopReason: 'cancelled' }
       if (played !== undefined) {
@@ -855,6 +967,11 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           session.mode = 'ask'
           await update({ sessionUpdate: 'config_option_update', configOptions: configOptions(session) })
           await say('Left plan mode')
+          return ended()
+        case scenarios.background:
+        case scenarios.backgroundCodex:
+          await leaveRunning(params.sessionId, session, client, scenario === scenarios.background ? 'claude' : 'codex')
+          await say('serving')
           return ended()
         case scenarios.afterTurn:
           await say('Done')

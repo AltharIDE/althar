@@ -839,6 +839,22 @@ export type ThreadItem = typeof ThreadItem.Type
 export const ContextUse = Schema.Struct({ used: Schema.Number, size: Schema.Number })
 export type ContextUse = typeof ContextUse.Type
 
+/**
+ * A command the agent left running in the background, such as a dev server
+ * (docs/decisions/021): what it runs, where it answers once its output says,
+ * and how it ended if it did by itself. It runs as long as its session does.
+ */
+export const BackgroundCommand = Schema.Struct({
+  id: Schema.String,
+  command: Schema.String,
+  /** Where it answers, as its output said, as a browser opens it: http://localhost:5173/. Null until it says, or where it never does. */
+  url: Schema.NullOr(Schema.String),
+  startedAt: Schema.String,
+  /** It ended by itself: when, and its exit code where its output says. Null while it runs. */
+  ended: Schema.NullOr(Schema.Struct({ at: Schema.String, code: Schema.NullOr(Schema.Number) })),
+})
+export type BackgroundCommand = typeof BackgroundCommand.Type
+
 export const SessionSummary = Schema.Struct({
   id: Schema.String,
   agentId: Schema.String,
@@ -854,6 +870,8 @@ export const SessionSummary = Schema.Struct({
   turnRunning: Schema.Boolean,
   /** How full its context is, in tokens, as the agent last said while it runs; null until it says, or where it doesn't. */
   context: Schema.NullOr(ContextUse),
+  /** What it left running in the background, while it runs, in the order it started them. */
+  background: Schema.Array(BackgroundCommand),
 })
 export type SessionSummary = typeof SessionSummary.Type
 
@@ -1258,6 +1276,8 @@ export const WatchEvent = Schema.Union([
     text: Schema.String,
   }),
   Schema.Struct({ _tag: Schema.Literal('Context'), threadId: Schema.String, ...ContextUse.fields }),
+  /** What the session on a thread has left running, whole each time it changes. */
+  Schema.Struct({ _tag: Schema.Literal('Background'), threadId: Schema.String, background: Schema.Array(BackgroundCommand) }),
   /** A command's output as far as it has come, while it runs: its last lines, whole each time, and how many came before them. */
   Schema.Struct({
     _tag: Schema.Literal('Output'),
@@ -1634,6 +1654,12 @@ export const Api = RpcGroup.make(
   command('Push', { taskId: Schema.String, head: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
   /** Asks the task's pull request for news now. */
   command('RefreshTask', { taskId: Schema.String }, Schema.Void),
+  /** Stops listening to the task's pull request at this address: nothing said there after arrives, and the lead hears none of it. */
+  command('StopListening', { taskId: Schema.String, url: Schema.String }, Schema.Void),
+  /** Stops a command the session on a thread left running; it goes from the list. */
+  command('StopBackground', { threadId: Schema.String, id: Schema.String }, Schema.Void),
+  /** Clears one that ended by itself from the list. */
+  command('ClearBackground', { threadId: Schema.String, id: Schema.String }, Schema.Void),
   /** What changes after `since`, or from now without it. */
   Rpc.make('Watch', { payload: { since: Schema.optional(Cursor) }, success: WatchEvent, error: ApiError, stream: true }),
 )
