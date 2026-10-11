@@ -16,6 +16,7 @@ import {
   ThreadShellProvider,
   ThreadSkeleton,
   ProjectHead,
+  Running,
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
@@ -26,6 +27,8 @@ import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
 import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
+import { runningOf } from '../../shared/running'
+import { RunOf } from '../../shared/RunOf'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
@@ -173,9 +176,15 @@ export function ProjectView({
   const [handover, setHandover] = useState<Choice | null>(null)
   // What opens beside the conversation: a task you plan, or the connections.
   const [panel, setPanel] = useState<'task' | 'connections' | null>(newTask ? 'task' : null)
-  // A running turn says how long it has worked so far; a plan on its countdown, when it starts.
-  const now = useNow((model.coordinator?.session?.turnRunning ?? false) || (lanes?.next.some((task) => task.phase === 'planned') ?? false))
   const coordinator = model.coordinator
+  // Every run in the project, the tasks' too, each saying where, over the composer.
+  const launches = coordinator?.launches ?? []
+  // A running turn says how long it has worked so far; a plan on its countdown, when it starts; a run, how long it has been up.
+  const now = useNow(
+    (coordinator?.session?.turnRunning ?? false) ||
+      (lanes?.next.some((task) => task.phase === 'planned') ?? false) ||
+      launches.some((launch) => launch.ended === null),
+  )
   const host = coordinator?.host ?? null
   const named = useModelNames()
   const session = coordinator?.session ?? null
@@ -248,6 +257,20 @@ export function ProjectView({
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
+        above={
+          launches.length > 0 && (
+            <Running
+              processes={runningOf(launches, now, { where: true })}
+              onStop={(id) => void model.stopLaunch(id)}
+              onDismiss={(id) => void model.clearLaunch(id)}
+              // Where it answers opens in the person's browser.
+              onOpenUrl={(id) => {
+                const url = launches.find((launch) => launch.id === id)?.url
+                if (url != null) window.open(url, '_blank')
+              }}
+            />
+          )
+        }
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
@@ -297,6 +320,10 @@ export function ProjectView({
               menu: (
                 <ProjectMenu
                   {...menu}
+                  // The default branch runs with no agent, where its repository says how.
+                  {...(coordinator?.runCommand == null
+                    ? {}
+                    : { run: { command: coordinator.runCommand, onRun: () => void model.runProject() } })}
                   // Pushing needs no connection, so connecting the host waits in the menu until it's wanted.
                   {...(host === null || host.connected ? {} : { connect: { host: host.name, onConnect: () => setPanel('connections') } })}
                 />
@@ -380,6 +407,14 @@ export function ProjectView({
                       threadId={coordinator.threadId}
                       session={session}
                       card={(card) => <Card card={card} actions={actions} />}
+                      run={(run) => (
+                        <RunOf
+                          run={run}
+                          now={now}
+                          onStop={(id) => void model.stopLaunch(id)}
+                          onRunAgain={(taskId) => void model.runProject(taskId)}
+                        />
+                      )}
                       queued={text.queued}
                       onAnswerQuestion={model.answerQuestion}
                     />

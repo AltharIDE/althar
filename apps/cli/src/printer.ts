@@ -30,7 +30,8 @@ export const printer = (threadId: string): Printer => {
   }
 
   const print = (event: LiveEvent): string => {
-    if (event.threadId !== threadId) return ''
+    // What Althar runs of the project itself is the window's to show, not a thread's.
+    if (event._tag === 'Launches' || event.threadId !== threadId) return ''
     switch (event._tag) {
       case 'SessionStarted':
         return line(`● ${event.agentId}${event.model === undefined ? '' : ` (${event.model})`} started.`)

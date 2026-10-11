@@ -38,6 +38,7 @@ import {
   type ThreadItem,
   type ThreadSnapshot,
   type WatchEvent,
+  type Launch,
 } from '@althar/contracts'
 import { Cause, Duration, Effect, Exit, Fiber, Layer, Option, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -255,6 +256,10 @@ export interface Client {
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
   /** Clears one that ended by itself from the list. */
   readonly clearBackground: (threadId: string, id: string) => Promise<void>
+  /** Runs the project with no agent: what the task built, or with none, a copy of the default branch. */
+  readonly runProject: (projectId: string, taskId: string | null, threadId: string | null) => Promise<Launch>
+  readonly stopLaunch: (id: string) => Promise<void>
+  readonly clearLaunch: (id: string) => Promise<void>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
   /**
@@ -415,6 +420,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     stopListening: (taskId, url) => command((commandId) => api.StopListening({ commandId, taskId, url })),
     stopBackground: (threadId, id) => command((commandId) => api.StopBackground({ commandId, threadId, id })),
     clearBackground: (threadId, id) => command((commandId) => api.ClearBackground({ commandId, threadId, id })),
+    runProject: (projectId, taskId, threadId) => command((commandId) => api.RunProject({ commandId, projectId, taskId, threadId })),
+    stopLaunch: (id) => command((commandId) => api.StopLaunch({ commandId, id })),
+    clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     watch: (listener, since, onWatching) => {
       let cursor = since

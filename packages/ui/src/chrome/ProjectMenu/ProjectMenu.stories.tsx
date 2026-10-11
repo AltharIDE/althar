@@ -35,6 +35,23 @@ export const NothingToDo: Story = {
   },
 }
 
+/** Its default branch runs, with no agent, first and apart: the command it runs says what. */
+export const Running: Story = {
+  render: (args) => <ProjectMenu {...args} run={{ command: 'npm run dev', onRun: runIt }} />,
+  play: async ({ canvasElement }) => {
+    const page = within(document.body)
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'More for this project' }))
+    await userEvent.click(await page.findByRole('menuitem', { name: 'Run npm run dev' }))
+    await expect(runIt).toHaveBeenCalledOnce()
+  },
+}
+const runIt = fn()
+/** Only running to offer: the menu is there for it. */
+export const OnlyRunning: Story = {
+  args: { defaultOpen: true, onRename: undefined, onRepositories: undefined, onRules: undefined, onRemove: undefined },
+  render: (args) => <ProjectMenu {...args} run={{ command: 'npm run dev', onRun: runIt }} />,
+}
+
 export const Renaming: Story = {
   play: async ({ args, canvasElement }) => {
     const page = within(document.body)
