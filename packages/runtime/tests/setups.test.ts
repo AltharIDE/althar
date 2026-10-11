@@ -326,6 +326,18 @@ describe('setting up a task’s worktree', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('says a setup that couldn’t start, and starts the lead all the same', () =>
+    Effect.gen(function* () {
+      const { task } = yield* taskIn(repository(), 'make deps')
+      const [workspace] = yield* setUp(task.taskId)
+      assert.deepInclude(workspace?.setup, { command: 'make deps', code: null, timedOut: false })
+      assert.match(workspace?.setup?.last ?? '', /^Althar couldn't start it: .*ENOENT/)
+      const [ran] = yield* setupProcesses
+      assert.strictEqual(ran?.state, 'unknown')
+      assert.include(yield* lead(task.threadId), "Althar set it up with `make deps`, and it didn't finish.")
+    }).pipe(Effect.provide(runtime(undefined, undefined, { setups: { shell: '/althar-no-such-folder/sh' } }))),
+  )
+
   it.live('stops a setup that runs out of time, and the lead starts all the same', () =>
     Effect.gen(function* () {
       const { task } = yield* taskIn(repository(), 'echo waiting; sleep 30')
