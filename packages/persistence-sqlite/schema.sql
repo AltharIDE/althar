@@ -994,7 +994,7 @@ CREATE TABLE credited_commits (
 CREATE INDEX credited_commits_by_credited ON credited_commits (credited);
 
 CREATE TABLE issue_drafts (
-  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 7) = 'idraft_' AND length(id) = 39 AND substr(id, 8) NOT GLOB '*[^0-9a-f]*'),
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'idr_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
   project_id TEXT NOT NULL REFERENCES projects (id),
   thread_id TEXT NOT NULL,
   connection_id TEXT NOT NULL REFERENCES connections (id),

@@ -254,14 +254,14 @@ describe('the Talk room', () => {
         coordinatorSnapshot({
           items: [
             items.draft(),
-            items.draft({ draftId: 'idraft_2', title: 'Flaky checkout test', state: 'failed', error: 'Linear didn’t answer.' }),
+            items.draft({ draftId: 'idr_2', title: 'Flaky checkout test', state: 'failed', error: 'Linear didn’t answer.' }),
             items.draft({
-              draftId: 'idraft_3',
+              draftId: 'idr_3',
               title: 'Retry webhooks',
               state: 'filed',
               issue: { key: 'MER-240', url: 'https://linear.app/m/issue/MER-240' },
             }),
-            items.draft({ draftId: 'idraft_4', title: 'Rename the env var', state: 'discarded' }),
+            items.draft({ draftId: 'idr_4', title: 'Rename the env var', state: 'discarded' }),
           ],
         }),
       ),
@@ -275,7 +275,7 @@ describe('the Talk room', () => {
     expect(card.getByText('refunds').tagName).toBe('STRONG')
     expect(card.getByText('Labels: payments')).toBeTruthy()
     await userEvent.click(card.getByRole('button', { name: 'File issue' }))
-    expect(client.fileIssueDraft).toHaveBeenCalledWith('idraft_1')
+    expect(client.fileIssueDraft).toHaveBeenCalledWith('idr_1')
     await userEvent.click(card.getByRole('button', { name: 'Edit' }))
     const title = card.getByRole('textbox', { name: 'Title' })
     await userEvent.clear(title)
@@ -283,19 +283,19 @@ describe('the Talk room', () => {
     await userEvent.type(card.getByRole('textbox', { name: /Labels/ }), ', billing')
     await userEvent.click(card.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
-      expect(client.changeIssueDraft).toHaveBeenCalledWith('idraft_1', {
+      expect(client.changeIssueDraft).toHaveBeenCalledWith('idr_1', {
         title: 'Refunds bypass the limiter',
         body: 'Charges go through it; **refunds** don’t.',
         labels: ['payments', 'billing'],
       }),
     )
     await userEvent.click(card.getByRole('button', { name: 'Discard' }))
-    expect(client.discardIssueDraft).toHaveBeenCalledWith('idraft_1')
+    expect(client.discardIssueDraft).toHaveBeenCalledWith('idr_1')
 
     // Not filed: why, and filing it again.
     expect(screen.getByText(/Couldn’t file it on Linear\. Linear didn’t answer\./)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'File again' }))
-    expect(client.fileIssueDraft).toHaveBeenCalledWith('idraft_2')
+    expect(client.fileIssueDraft).toHaveBeenCalledWith('idr_2')
     // Filed: its key, as a link to it; discarded: said so.
     expect(screen.getByRole('link', { name: /MER-240/ }).getAttribute('href')).toBe('https://linear.app/m/issue/MER-240')
     expect(screen.getByText('Issue draft discarded')).toBeTruthy()

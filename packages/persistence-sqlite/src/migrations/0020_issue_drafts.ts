@@ -31,7 +31,7 @@ export const statements: ReadonlyArray<string> = [
   table(
     'issue_drafts',
     [
-      id('idraft'),
+      id('idr'),
       project(),
       scoped('thread_id'),
       ref('connection_id', 'connections'),

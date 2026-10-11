@@ -383,7 +383,7 @@ export const items = {
     agentId: null,
     kind: 'issue_draft',
     content: {
-      draftId: 'idraft_1',
+      draftId: 'idr_1',
       product: 'linear',
       tracker: 'Linear',
       container: 'Meridian',

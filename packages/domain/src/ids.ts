@@ -56,7 +56,7 @@ export const Ids = {
   command: kind('cmd', 'CommandId'),
   connection: kind('conn', 'ConnectionId'),
   externalLink: kind('xlink', 'ExternalLinkId'),
-  issueDraft: kind('idraft', 'IssueDraftId'),
+  issueDraft: kind('idr', 'IssueDraftId'),
 } as const
 
 export type IdKind = keyof typeof Ids
