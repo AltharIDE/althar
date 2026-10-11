@@ -90,6 +90,14 @@ export interface FoundRepositories {
   }>
 }
 
+/** An update that couldn't move the store, as main says: what stopped, the copy from before it where the person knows the place, and what was said. */
+export interface StoreFailure {
+  readonly stopped: 'moving' | 'copying'
+  /** `~/Library/Application Support/Althar/backups/…`; null where no copy was made. */
+  readonly backup: string | null
+  readonly reason: string
+}
+
 /**
  * What a problem the person reports is about, so the report carries it: an
  * update that couldn't move the store, with what stopped it; asked for from
@@ -156,6 +164,10 @@ export interface Host {
   readonly sounds: () => Promise<ReadonlyArray<string>>
   /** Plays one of them once, so the person hears it. */
   readonly playSound: (name: string) => Promise<void>
+  /** Calls `listener` if an update couldn't move the store, once main knows, even if it knew before the page listened, until the returned function is called. */
+  readonly onStoreFailed: (listener: (failure: StoreFailure) => void) => () => void
+  /** Shows the copy from before that update in the system's file manager. */
+  readonly showBackup: () => Promise<void>
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
   readonly onOpen: (listener: (threadId: string) => void) => () => void
   /**

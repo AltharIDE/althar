@@ -21,6 +21,7 @@ import { type Resize, servePicture } from './pictures'
 import { factsAsker, startReports } from './report/reports'
 import { findRepositories, foundIds, forWindow, placesFor, stillFound } from './repositories'
 import { alertSounds, playSound } from './sounds'
+import { failureForWindow, type StoreFailure, storeFailureOf } from './storeFailure'
 import { checkNow, startUpdates } from './updater'
 import type { UpdateGlance, Updates } from './updates'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
@@ -90,6 +91,8 @@ if (fakeMicrophone) {
   app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
 }
 const restarts: Array<number> = []
+/* The store an update couldn't move, once the runtime says so: every window shows it, and no runtime starts again. */
+let storeFailure: StoreFailure | undefined
 
 /** The profile and worktrees, as the command-line client has them, so both see the same projects. */
 const locations = () => ({ profile: defaultProfile(process.env, process.platform), worktrees: defaultWorktrees(process.env) })
@@ -274,6 +277,14 @@ const startRuntime = () => {
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
     if (message.type === 'facts') return facts.answer(message)
     if (message.type === 'nudge' && message.event !== undefined) return nudged(message.event)
+    if (message.type === 'store-failed') {
+      storeFailure = storeFailureOf(message)
+      // What stopped it goes in main's log too, so a report of it carries it.
+      if (storeFailure !== undefined)
+        logs.error('Update couldn’t move the store', { stopped: storeFailure.stopped, reason: storeFailure.reason })
+      for (const window of BrowserWindow.getAllWindows()) connect(window)
+      return
+    }
     if (message.type !== 'folder-allowed' || message.requestId === undefined) return
     granting.get(message.requestId)?.(message.grant ?? null)
     granting.delete(message.requestId)
@@ -290,7 +301,7 @@ const startRuntime = () => {
       settle(null)
       granting.delete(requestId)
     }
-    if (quitting) return
+    if (quitting || storeFailure !== undefined) return
     // A crash is survivable: reconciliation makes a restart safe, and each window reconnects when it reloads.
     const now = Date.now()
     restarts.push(now)
@@ -318,6 +329,7 @@ const allowFolder = (path: string): Promise<string | null> =>
 
 /** Gives a window a port to the runtime: once per page load, so a reload gets a fresh connection. */
 const connect = (window: BrowserWindow) => {
+  if (storeFailure !== undefined) return window.webContents.send('althar:store-failed', failureForWindow(storeFailure, homedir()))
   if (runtime === undefined) return
   const { port1, port2 } = new MessageChannelMain()
   runtime.postMessage({ type: 'connect' }, [port1])
@@ -447,6 +459,12 @@ ipcMain.handle('althar:grant-found', async (_event, id: unknown) => {
   const repository = typeof id === 'string' ? foundHere.found(id) : undefined
   const path = repository === undefined ? null : await stillFound(repository)
   return path === null ? null : allowFolder(path)
+})
+
+// Shows the copy of the store from before an update that couldn't move it, in the system's file manager.
+ipcMain.handle('althar:show-backup', () => {
+  const backup = storeFailure?.backup
+  if (typeof backup === 'string') shell.showItemInFolder(backup)
 })
 
 // The icon the person chose, or null where there is no Dock to show one; and a new one, shown on the Dock, then kept. Anything else fails, and the window says so.

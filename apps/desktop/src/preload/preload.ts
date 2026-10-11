@@ -9,9 +9,11 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
  * open in the window, and hear whether the pointer is on the island. And
  * dictation: where the speech model and the microphone stand, the model's
  * download, and what was said, sent to be written down. A token on the
- * clipboard, while connecting a service asks for one. And an update ready to
- * install, and restarting into it. Reporting a problem, and the page's own
- * errors, for the log. The page never sees or sends a
+ * clipboard, while connecting a service asks for one. An update ready to
+ * install, and restarting into it. An update that couldn't move the
+ * store, with where its copy is as the person knows the place, which main
+ * shows in the file manager when asked. And reporting a problem, and the
+ * page's own errors, for the log. The page never sees or sends a
  * path. It gets no Node, no file system, no shell.
  */
 
@@ -39,6 +41,14 @@ ipcRenderer.on('althar:open', (_event, threadId: unknown) => {
   if (typeof threadId !== 'string') return
   if (opening.size === 0) pending = threadId
   for (const listener of opening) listener(threadId)
+})
+
+/* An update that couldn't move the store, as the main process says: held for a page that listens later. */
+let storeFailure: unknown
+const storeFailed = new Set<(failure: unknown) => void>()
+ipcRenderer.on('althar:store-failed', (_event, failure: unknown) => {
+  storeFailure = failure
+  for (const listener of storeFailed) listener(failure)
 })
 
 /* Where dictation's speech engine (sherpa-onnx) has a binary; elsewhere the page gets no dictation, and shows no microphone. */
@@ -112,6 +122,12 @@ contextBridge.exposeInMainWorld('althar', {
         },
       }
     : {}),
+  onStoreFailed: (listener: (failure: unknown) => void): (() => void) => {
+    storeFailed.add(listener)
+    if (storeFailure !== undefined) listener(storeFailure)
+    return () => void storeFailed.delete(listener)
+  },
+  showBackup: (): Promise<void> => ipcRenderer.invoke('althar:show-backup'),
   // Report a problem (DEV-61): the page's dialog opens, about what it was asked from; main takes the screenshot as it opens, gathers the rest, and sends or saves it.
   reportProblem: (about: unknown): void => reportAsked(about),
   report: {
