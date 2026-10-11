@@ -358,12 +358,15 @@ Connecting is a walk, one step at a time (ADR-023). It offers only the ways
 that work on this device: the service's own browser sign-in where Althar's
 app is set up for it; gh's or glab's sign-in where the tool is signed in to
 that instance, whose token the runtime copies to its own keychain, out of
-agents' reach; and a token made on the service's page, opened filled in
+agents' reach, and sends only over HTTPS to that instance (the hosted
+service at its own address, or a server connected or found from a remote);
+and a token made on the service's page, opened filled in
 where the page takes it (GitHub's fine-grained token: its name, owner, 90
 days and permissions; GitLab's name and `api` scope), noticed on the
 clipboard as the window comes back, or pasted. A company's own server is
 asked for first, filled in from the projects' remotes, each asked without
-signing in which product answers there. Every connection is then checked
+signing in which product answers there. A remote is read as its code
+host's, under that instance's own path, whatever tracker shares its server. Every connection is then checked
 by reads alone: who it signs in as, whether it reaches the projects'
 repositories, each thing Althar does there, and when its token runs out
 where the service says. What only a write would tell is said not to be

@@ -200,6 +200,8 @@ export const words = (
         return hostSaid(productOf(text(error, 'product')), text(error, 'reason'), text(error, 'message'))
       case 'CliSignedOut':
         return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this Mac.`
+      case 'CliElsewhere':
+        return `Althar only gives ${text(error, 'tool')}'s sign-in to a server it knows, over HTTPS. ${text(error, 'address')} isn't one.`
       case 'OtherAccount':
         return `This token is ${text(error, 'login')}'s. Make one as ${text(error, 'expected')}, or connect ${text(error, 'login')} as well from the list.`
       default:
@@ -274,6 +276,7 @@ export const expected = new Set([
   'TaskRefused',
   'NotConnected',
   'CliSignedOut',
+  'CliElsewhere',
   'OtherAccount',
   'NotAnIssue',
   'NotARepository',

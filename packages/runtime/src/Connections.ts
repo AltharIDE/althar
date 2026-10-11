@@ -21,6 +21,7 @@ import {
   type Product,
   type ProductInfo,
   refreshToken,
+  type RemoteRef,
   type Service,
   SignInEnded,
   startDeviceFlow,
@@ -68,6 +69,16 @@ export class SignInUnavailable extends Schema.TaggedError<SignInUnavailable>()('
 export class CliSignedOut extends Schema.TaggedError<CliSignedOut>()('CliSignedOut', {
   tool: Schema.String,
   host: Schema.String,
+}) {}
+
+/**
+ * An address gh's or glab's sign-in isn't given to: one not over HTTPS, or
+ * not an instance Althar knows of (the hosted service at its own address, a
+ * server connected, or one a project's remote names that answered).
+ */
+export class CliElsewhere extends Schema.TaggedError<CliElsewhere>()('CliElsewhere', {
+  tool: Schema.String,
+  address: Schema.String,
 }) {}
 
 /** A token for another account than the connection it was to sign in again. */
@@ -655,20 +666,27 @@ export class Connections extends Context.Service<
           server.listen(port, '127.0.0.1', () => resume(Effect.succeed({ code, close: Effect.sync(() => void server.close()) })))
         })
 
-      /** The account a connection signs in as, for a sign-in that signs it in again. */
-      const sameAsOf = (connectionId: string | undefined) =>
+      /** The connection a sign-in signs in again: where it is, and the account it signs in as. */
+      const againOf = (connectionId: string | undefined) =>
         connectionId === undefined
           ? Effect.succeed(undefined)
-          : Effect.map(rowOf(connectionId), (row) => ({ id: row.accountId, login: row.accountLogin }))
+          : Effect.map(rowOf(connectionId), (row) => ({
+              product: row.product,
+              webUrl: row.webUrl,
+              sameAs: { id: row.accountId, login: row.accountLogin },
+            }))
 
-      const startSignIn = (input: {
+      const startSignIn = (given: {
         readonly product: Product
         readonly webUrl?: string
         readonly connectionId?: string
         readonly actorId: ActorId
       }) =>
         Effect.gen(function* () {
-          const sameAs = yield* sameAsOf(input.connectionId)
+          // Signing a connection in again: at its own instance, whatever address came with it.
+          const again = yield* againOf(given.connectionId)
+          const input = again === undefined ? given : { ...given, product: again.product, webUrl: again.webUrl }
+          const sameAs = again?.sameAs
           const info = infoOf(input.product)
           const clientId = connectors.clientIds[input.product]
           const webUrl = info === undefined ? '' : addressOf(info, input.webUrl ?? info.hosted?.webUrl ?? '')
@@ -794,10 +812,28 @@ export class Connections extends Context.Service<
           return known
         })
 
-      /** What a server answered as, when connecting asked it this launch, for whichever service. */
-      const answeredAt = (host: string) => {
-        for (const [key, found] of servers) if (found !== null && key.endsWith(` ${host}`)) return found
-        return undefined
+      /** An instance's own path on its host: `gitlab` for a server at tools.example.org/gitlab. */
+      const basePathOf = (webUrl: string): ReadonlyArray<string> => {
+        try {
+          return new URL(webUrl).pathname.split('/').filter((segment) => segment !== '')
+        } catch {
+          return []
+        }
+      }
+
+      /**
+       * The instance a remote is on, of those known on its host: the one whose
+       * own path the remote's starts with, the longest; else the one at the
+       * host's root, as an SSH remote, which doesn't say the path, is read;
+       * else the only one there. None where that leaves several.
+       */
+      const instanceAt = <A extends { readonly webUrl: string }>(known: ReadonlyArray<A>, ref: RemoteRef): A | undefined => {
+        const here = known.filter((at) => hostnameOf(at.webUrl) === ref.host)
+        const under = here
+          .map((at) => ({ at, base: basePathOf(at.webUrl) }))
+          .filter(({ base }) => base.length > 0 && base.every((segment, index) => ref.path[index]?.toLowerCase() === segment.toLowerCase()))
+          .sort((a, b) => b.base.length - a.base.length)
+        return under[0]?.at ?? here.find((at) => basePathOf(at.webUrl).length === 0) ?? (here.length === 1 ? here[0] : undefined)
       }
 
       /**
@@ -805,14 +841,22 @@ export class Connections extends Context.Service<
        * service, a server already connected, or one connecting found. With
        * `named`, each remote is read from the repository here, for its name;
        * with a service, only its places, and each other host the remotes
-       * name is asked whether it is one of that service's servers.
+       * name is asked whether it is one of that service's servers. A remote
+       * is a code host's, whatever tracker shares its server; connecting a
+       * tracker, its server may be where the code is.
        */
       const placesOf = (named: boolean, service?: Service) =>
         Effect.gen(function* () {
-          const known = new Map<string, { readonly product: Product; readonly webUrl: string }>()
+          const tracking = service !== undefined && !connectors.products.some((info) => info.service === service && info.host)
+          const fits = (product: Product) => {
+            const info = infoOf(product)
+            return info !== undefined && (tracking ? info.service === service : info.host)
+          }
+          const known: Array<{ readonly product: Product; readonly webUrl: string }> = []
           for (const info of connectors.products)
-            if (info.hosted !== null) known.set(hostnameOf(info.hosted.webUrl), { product: info.product, webUrl: info.hosted.webUrl })
-          for (const row of yield* rows) known.set(hostnameOf(row.webUrl), { product: row.product, webUrl: row.webUrl })
+            if (info.hosted !== null) known.push({ product: info.product, webUrl: info.hosted.webUrl })
+          for (const row of yield* rows) known.push({ product: row.product, webUrl: row.webUrl })
+          for (const found of servers.values()) if (found !== null) known.push(found)
           const read = yield* Effect.forEach(
             yield* bindings,
             (binding) =>
@@ -835,22 +879,24 @@ export class Connections extends Context.Service<
             for (const binding of read)
               for (const remote of binding.remotes) {
                 const ref = parseRemote(remote.url)
-                if (ref !== null && !known.has(ref.host) && ref.host.includes('.')) unknown.add(ref.host)
+                const coded = ref !== null && known.some((at) => infoOf(at.product)?.host === true && hostnameOf(at.webUrl) === ref.host)
+                if (ref !== null && !coded && ref.host.includes('.')) unknown.add(ref.host)
               }
             yield* Effect.forEach(
               [...unknown],
               (host) =>
                 Effect.map(serverAt(service, host), (found) => {
-                  if (found !== null) known.set(host, found)
+                  if (found !== null) known.push(found)
                 }),
               { concurrency: 4 },
             )
           }
+          const candidates = [...new Map(known.filter((at) => fits(at.product)).map((at) => [`${at.product} ${at.webUrl}`, at])).values()]
           const places = new Map<string, { place: Place & { repositories: Array<string> }; paths: Array<string> }>()
           for (const binding of read)
             for (const remote of binding.remotes) {
               const ref = parseRemote(remote.url)
-              const at = ref === null ? undefined : (known.get(ref.host) ?? answeredAt(ref.host))
+              const at = ref === null ? undefined : instanceAt(candidates, ref)
               if (ref === null || at === undefined) continue
               if (service !== undefined && infoOf(at.product)?.service !== service) continue
               const key = `${binding.project} ${at.product} ${at.webUrl}`
@@ -858,7 +904,8 @@ export class Connections extends Context.Service<
                 place: { product: at.product, webUrl: at.webUrl, project: binding.project, remote: remote.name, repositories: [] },
                 paths: [],
               }
-              const path = ref.path.join('/')
+              // The repository's path as its code host knows it: under the instance's own path, as its page reads it.
+              const path = pageOf(at.product, at.webUrl, ref.path).path.join('/')
               if (!entry.place.repositories.includes(path)) entry.place.repositories.push(path)
               if (binding.path !== null && !entry.paths.includes(binding.path)) entry.paths.push(binding.path)
               places.set(key, entry)
@@ -929,10 +976,39 @@ export class Connections extends Context.Service<
           })
         })
 
-      /** gh's or glab's sign-in to an instance here, and who it is: null where the tool isn't signed in there, or its token no longer works. */
-      const cliSignIn = (tool: CliTool, product: Product, webUrl: string) =>
+      /**
+       * Where gh's or glab's sign-in may go, as the instance's own address:
+       * over HTTPS only, to the hosted service at its own address however it
+       * was written, or to a server connected or found where a project's
+       * remote names it. Null anywhere else, before the tool is asked for
+       * its token.
+       */
+      const cliDestination = (product: Product, typed: string) =>
         Effect.gen(function* () {
           const info = infoOf(product)
+          if (info === undefined) return null
+          let url: URL
+          try {
+            url = new URL(typed)
+          } catch {
+            return null
+          }
+          if (url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '') return null
+          const hosted = info.hosted?.webUrl
+          if (hosted !== undefined && url.hostname === hostnameOf(hosted))
+            return url.origin === new URL(hosted).origin && url.pathname.replace(/\/+$/, '') === '' ? hosted : null
+          const webUrl = addressOf(info, typed)
+          const connected = (yield* rows).some((row) => row.product === product && row.webUrl === webUrl)
+          const found = [...servers.values()].some((server) => server?.product === product && server.webUrl === webUrl)
+          return connected || found ? webUrl : null
+        })
+
+      /** gh's or glab's sign-in to an instance here, and who it is: null where the tool isn't signed in there, or its token no longer works. */
+      const cliSignIn = (tool: CliTool, product: Product, instanceUrl: string) =>
+        Effect.gen(function* () {
+          const info = infoOf(product)
+          const webUrl = yield* cliDestination(product, instanceUrl)
+          if (webUrl === null) return null
           const token = yield* connectors.cliToken(tool, hostnameOf(webUrl))
           if (info === undefined || token === null) return null
           const report = yield* accessOf(product, webUrl, info.apiFor(webUrl), { kind: 'bearer', token }, 'token', [])
@@ -1017,7 +1093,7 @@ export class Connections extends Context.Service<
           const now = yield* credential(connectionId)
           const places = (yield* placesOf(false)).map((entry) => entry.place)
           const repositories = places
-            .filter((place) => place.product === row.product && hostnameOf(place.webUrl) === hostnameOf(row.webUrl))
+            .filter((place) => place.product === row.product && place.webUrl === row.webUrl)
             .flatMap((place) => place.repositories.map((path) => path.split('/')))
           const unique = [...new Map(repositories.map((path) => [path.join('/'), path])).values()]
           const report = yield* accessOf(row.product, row.webUrl, row.apiUrl, now, row.auth, unique)
@@ -1037,19 +1113,26 @@ export class Connections extends Context.Service<
         readonly actorId: ActorId
       }) =>
         Effect.gen(function* () {
-          const sameAs = yield* sameAsOf(input.connectionId)
-          const info = infoOf(input.product)
+          // Signing a connection in again: at its own instance, whatever address came with it.
+          const again = yield* againOf(input.connectionId)
+          const product = again?.product ?? input.product
+          const info = infoOf(product)
           const tool = info === undefined ? null : toolOf(info.service)
-          const host = hostnameOf(input.webUrl)
-          const token = tool === null ? null : yield* connectors.cliToken(tool, host)
-          if (tool === null || token === null) return yield* new CliSignedOut({ tool: tool ?? 'gh', host })
+          if (tool === null) return yield* new CliSignedOut({ tool: 'gh', host: hostnameOf(input.webUrl) })
+          // The address is checked before the tool is asked: its token goes nowhere else.
+          const address = again?.webUrl ?? input.webUrl
+          const webUrl = yield* cliDestination(product, address)
+          if (webUrl === null) return yield* new CliElsewhere({ tool, address })
+          const host = hostnameOf(webUrl)
+          const token = yield* connectors.cliToken(tool, host)
+          if (token === null) return yield* new CliSignedOut({ tool, host })
           return yield* save({
-            product: input.product,
-            webUrl: input.webUrl,
+            product,
+            webUrl,
             auth: 'token',
             secret: { token, user: null, key: null },
             actorId: input.actorId,
-            ...(sameAs === undefined ? {} : { sameAs }),
+            ...(again === undefined ? {} : { sameAs: again.sameAs }),
           })
         })
 

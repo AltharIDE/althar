@@ -171,6 +171,26 @@ describe('a connection', () => {
     }).pipe(Effect.provide(withGitHub(fetch)))
   })
 
+  it.live('signs a connection in again at its own instance, whatever address came with it', () => {
+    const { fetch, sent } = stub([device, ['POST', `${GITHUB}/login/oauth/access_token`, { json: { error: 'access_denied' } }], user])
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const made = yield* connections.connectToken({ product: 'github', token: 'ghp_old', actorId: instance.personId })
+      const started = yield* connections.startSignIn({
+        product: 'github',
+        webUrl: 'http://github.com',
+        connectionId: made.id,
+        actorId: instance.personId,
+      })
+      yield* connections.cancelSignIn(started.flowId)
+      assert.deepStrictEqual(
+        sent.filter((request) => request.url.includes('/login/')).map((request) => request.url),
+        [`${GITHUB}/login/device/code`],
+      )
+    }).pipe(Effect.provide(withGitHub(fetch)))
+  })
+
   it.live('signs in to Linear in the browser, coming back to a loopback address only it knows the code for', () => {
     const port = 41_000 + Math.floor(Math.random() * 2000)
     const tracker = makeFakeService({ product: 'linear', account: { id: 'u1', login: 'you', name: 'You' } })
