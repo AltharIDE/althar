@@ -1,6 +1,6 @@
 {
   "name": "@althar/desktop",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Althar's desktop app: Electron, with the runtime in a utility process and the interface in the window.",
   "license": "Apache-2.0",
@@ -17,7 +17,8 @@
     "test:coverage": "vp test run --coverage",
     "test:e2e": "bun run build && playwright test",
     "verify": "bun run check && bun run test:coverage && bun run test:e2e",
-    "package": "bun run build:package && node scripts/package.ts"
+    "package": "bun run build:package && node scripts/package.ts",
+    "release": "node scripts/release.ts"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.88.0",
@@ -32,6 +33,7 @@
     "@tanstack/react-query": "^5.104.1",
     "@tanstack/react-router": "^1.170.40",
     "effect": "4.0.0-rc.118",
+    "electron-updater": "6.8.10",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "sherpa-onnx-node": "1.13.8"

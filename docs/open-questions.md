@@ -36,6 +36,52 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
   answer kept but untold until the person next writes in the thread.
   Should the answer and its telling be one record that recovery picks up?
 
+## What runs behind a task, 10 October
+
+- [x] **Showing what a lead left running, and the pull requests a task
+  listens to.** Over the composer, as the kit's pills, each stoppable
+  (ADR-022).
+- [ ] **Claude Code's sandbox and dev servers.** Its sandbox refuses a
+  server's port, so a lead's `bun dev` fails unless it asks to run outside
+  the sandbox. `sandbox.network.allowLocalBinding` would let it listen on
+  this machine's ports only (macOS).
+- [ ] **Listening again.** A pull request stopped listening to stays quiet
+  until it is published again. A way to listen again, from its outputs,
+  may be wanted.
+- [ ] **Where a server answers, for sure.** Read from what it prints, for
+  two minutes; a server that holds its output back never says. Ports from
+  the process tree would say for every agent, OpenCode too.
+- [ ] **The lead, told.** Claude Code tells its model when the person stops
+  something it left running; Codex doesn't say. Whether Althar should tell
+  the lead itself.
+- [ ] **A turn of the agent's own.** Claude Code starts a turn when
+  something it left running ends, which costs usage and shows in the
+  thread. Whether to say so, or to keep it quieter.
+
+## Mini tasks, 11 October
+
+- [x] **Starting a task without the countdown.** For something small, such as
+  trying something out, the coordinator starts a mini task at once: one lead, no review, nothing outside the project when it is
+  done (docs/architecture/04, `start_task`).
+- [ ] **What a mini task looks like.** It shows as any task does, on its
+  card and on the board. Whether it should look lighter, and settle by itself
+  once nothing it started is left running.
+- [ ] **Turning one into a full task.** One that ends up changing things is
+  on its branch. Whether the person, or the coordinator, can give it a review
+  and a pull request after the fact.
+- [x] **Running the project without an agent.** Althar keeps how each
+  repository runs, works it out until then, and runs it itself (ADR-023).
+- [ ] **Several processes that run together.** A web app and its API, or a
+  server and a worker, are one command line today.
+- [ ] **Two runs on one port.** A task's run and the default branch's may
+  want the same port; the second says so in what it prints. Whether Althar
+  should give each its own port where the command takes one.
+- [ ] **A run per repository in a project of several.** The first that says
+  how it runs is run; others need naming, as the coordinator can.
+- [ ] **A picture of what a run shows.** The run card has the address, not
+  the page. Whether Althar should open it once it answers, take a picture,
+  and keep it on the card.
+
 ## Dictation, 10 October
 
 - [x] **Where speech is turned into text.** On this machine only, with a
@@ -123,8 +169,8 @@ Decided in [ADR-013](decisions/013-project-rules.md).
   Settled on 10 October 2026 in
   [ADR-018](decisions/018-allow-always-keeps-a-rule.md) (DEV-21): allow
   rules by kind, by how a command starts, or exactly, kept by Allow always
-  on a call and listed as "Always allowed" on the rules screen, where each
-  can be taken off. What always asks or is never allowed still wins, and
+  on a call and said in the rules screen's "Go ahead" sentence, where each
+  can be taken out. What always asks or is never allowed still wins, and
   an allow rule answers before the coordinator is asked to judge.
 - [x] **Who judges permission requests.** The coordinator, using its agent
   and model in a fresh read-only session, with task context and human fallback.
@@ -133,6 +179,13 @@ Decided in [ADR-013](decisions/013-project-rules.md).
   rules all come first (ADR-018).
 - [ ] **The network.** Rules on domains, as Codex's network proxy and Claude
   Code's `WebFetch(domain:…)` have.
+- [ ] **A kind on more than one list.** The rules screen reads the rules as
+  sentences, and each kind of request sits in one: moving it writes it on
+  one list and takes it off the others (11 October). The runtime still keeps
+  what it is given, so a kind put on two lists some other way reads as the
+  first of them a request meets, Never before Ask me before Go ahead.
+  - Leaning: the runtime keeps a kind on one list as it saves, the screen's
+    way, so the rules as kept and as read never differ.
 
 ## Several accounts, 3 October
 
@@ -240,6 +293,29 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   that led to the step's result.
 - [x] **A ready task's header.** Settled on 30 September 2026 in the review of
   #15: the header reads the run, as the card does, and says Ready.
+
+## Releases and updates, 11 October
+
+Decided in ADR-024 for the first testers: Developer ID signing, notarytool,
+one stable track from GitHub Releases, restart only at the person's word and
+never under running work.
+
+- [ ] **A beta channel.** Testers and everyone else share one track for now.
+  Leaning: a `beta` channel (electron-updater's `latest`/`beta` files) once
+  there are more than friends testing, chosen in Settings.
+- [ ] **Rolling back.** An update that breaks something is fixed by the next;
+  a migration can't be undone. Keep the previous app and a copy of the store
+  before migrating, or make every migration reversible?
+- [ ] **Adapters over the air** (DEV-46). Today a new adapter means an app
+  release. Shipping adapter bundles alone needs them verified before they
+  run as Althar's identity.
+- [ ] **One entitlements file for every helper.** electron-builder gives all
+  of them the agents' entitlements (JIT, unsigned executable memory, no
+  library validation). Leaning: sign the agents' binaries apart once the
+  adapters leave Electron's binary (the runAsNode question below).
+- [ ] **A download link that stays the same.** The site and the README link
+  the Releases page. A fixed asset name (`Althar-arm64.dmg`) would let
+  `releases/latest/download/…` start the download directly.
 
 ## The desktop app, 29 September
 
@@ -412,6 +488,11 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 
 ## Before a project: first run and sources
 
+- [ ] **Repositories found twice off a Mac.** The first screen and a new
+  project list each repository found once, by where it is on disk. On
+  Windows one folder has more than one name (its case, a drive's letter),
+  which that hasn't been tried against, so one may be listed twice. Left
+  until Althar runs on Windows (DEV-71).
 - [ ] **One way in, not two.** "Open a repository" and "New project" read as
   the same thing. Leaning, now in the kit and the prototype: one entrance,
   New project, which opens the folder picker (several folders, or cancel for
@@ -480,10 +561,10 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   explicit always-ask and never rules when its mode is selected. Its failures
   and uncertainty reach the person; readers remain read-only. See
   [ADR-019](decisions/019-coordinator-judges-permissions.md).
-- [ ] **Project rules: when and where they are set.** Leaning, as mocked in
-  the kit's NewProject: creating a project asks one thing, who answers when
-  agents need a yes (default "The agent in charge decides"), and every other rule starts
-  at its default. Can a task tighten the rules but never loosen them? Where
+- [ ] **Project rules: when and where they are set.** Leaning: creating a
+  project asks only its name, its colour and its folders, and every rule
+  starts at its default; who answers when agents need a yes is the first a
+  person changes, on the rules screen. Can a task tighten the rules but never loosen them? Where
   are they stored? (See Memory below.)
 - [ ] **Kinds of permission.** Commands, web fetches, MCP tools, writes
   outside the workspace, spending, messages to people. Should each kind have

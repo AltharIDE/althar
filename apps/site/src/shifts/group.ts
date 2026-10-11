@@ -32,7 +32,14 @@ export interface Month<T extends Shift = Shift> {
   items: T[]
 }
 
-const MONTH = new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+/*
+ * Month names written out rather than asked of Intl: the prerender runs in
+ * Bun, whose en-GB short September is "Sep" where browsers say "Sept", and a
+ * page must read the same in both to hydrate.
+ */
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
+const monthOf = (date: string) => Number(date.slice(5, 7)) - 1
 
 /** One group per month, in the order given: newest first unless told otherwise. */
 export function byMonth<T extends Shift>(shifts: readonly T[], order: (shifts: readonly T[]) => T[] = newestFirst): Month<T>[] {
@@ -41,7 +48,7 @@ export function byMonth<T extends Shift>(shifts: readonly T[], order: (shifts: r
     const key = s.date.slice(0, 7)
     let m = months.at(-1)
     if (m?.key !== key) {
-      m = { key, label: MONTH.format(time(s.date)), items: [] }
+      m = { key, label: `${MONTHS[monthOf(s.date)]} ${s.date.slice(0, 4)}`, items: [] }
       months.push(m)
     }
     m.items.push(s)
@@ -66,10 +73,8 @@ export function countByKind(shifts: readonly Shift[]): Record<ShiftKind, number>
 export const onlyKind = <T extends Shift>(shifts: readonly T[], kind: ShiftKind | null): T[] =>
   kind ? shifts.filter((s) => s.kind === kind) : [...shifts]
 
-const SHORT = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
-
 /** 30 Sep */
-export const shortDate = (date: string) => SHORT.format(time(date))
+export const shortDate = (date: string) => `${Number(date.slice(8, 10))} ${SHORT_MONTHS[monthOf(date)]}`
 
 const today = (now: number) => new Date(now).toISOString().slice(0, 10)
 

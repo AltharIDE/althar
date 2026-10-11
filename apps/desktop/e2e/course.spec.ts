@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject } from './support'
+import { launch, openFirstProject, startTask } from './support'
 
 /*
  * A task's course from its menu (DEV-31): stopped in the middle of its step,
@@ -26,12 +26,7 @@ test('stops, resumes, abandons and reopens a task from its menu', async () => {
   try {
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await page.getByRole('button', { name: 'New task' }).click()
-    await page.getByLabel('What should change').fill('Keep the session alive')
-    await page.getByLabel('Anything the lead should know').fill('[lead:wait]')
-    await page.getByRole('button', { name: /^Review:/ }).click()
-    await page.getByRole('button', { name: 'No review' }).click()
-    await page.getByRole('button', { name: 'Start the task' }).click()
+    await startTask(page, 'Keep the session alive', '[lead:wait]')
     await expect(page.getByText('Running', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
     await page.getByRole('button', { name: /Open task/ }).click()
     await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible({ timeout: 15_000 })

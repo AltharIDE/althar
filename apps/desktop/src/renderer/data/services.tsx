@@ -5,6 +5,7 @@ import type { WatchEvent } from '@althar/contracts'
 
 import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
 import type { Opened, ReportChoices, ReportContext, ReportPreview, Sent } from '../../main/report/bundle'
+import type { UpdateGlance } from '../../main/updates'
 
 import type { Client } from './client'
 import type { Feed } from './feed'
@@ -57,6 +58,16 @@ export interface DictationHost {
   /** Opens the system's microphone privacy or sound settings; false where there are none to open. */
   readonly openSettings: (pane: 'privacy' | 'sound') => Promise<boolean>
   readonly onEvent: (listener: (event: unknown) => void) => () => void
+}
+
+/** Updates, through the main process (ADR-024): an update ready to install, and restarting into it. */
+export interface UpdateHost {
+  /** What the window shows of the update; null where the app doesn't update, as in development. */
+  readonly glance: () => Promise<UpdateGlance | null>
+  /** Restarts into the update, at the person's word; false where it won't, as while work runs. */
+  readonly restart: () => Promise<boolean>
+  /** Calls `listener` with the update as it changes, until the returned function is called. */
+  readonly onChange: (listener: (glance: unknown) => void) => () => void
 }
 
 /**
@@ -123,9 +134,11 @@ export interface Host {
   readonly platform: string
   /** Asks the person for a folder, for a project or an agent's account; its grant, or null when they cancel. */
   readonly pickFolder: (purpose?: 'project' | 'account') => Promise<string | null>
+  /** Asks the person for folders for a new project, several at once; a grant for each, none when they cancel. */
+  readonly pickFolders: () => Promise<ReadonlyArray<string>>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */
   readonly grantDropped: (file: File) => Promise<string | null>
-  /** The git repositories where people usually keep code on this computer, newest work first, and where it looked. */
+  /** The git repositories where people usually keep code on this computer, newest work first, and where it looked; a new project offers them too. */
   readonly findRepositories: () => Promise<FoundRepositories>
   /** A grant for a repository it found, by its id; null for one it didn't. */
   readonly grantFound: (id: string) => Promise<string | null>
@@ -145,8 +158,16 @@ export interface Host {
   readonly playSound: (name: string) => Promise<void>
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
   readonly onOpen: (listener: (threadId: string) => void) => () => void
-  /** Where Althar shows while the person is in another app (`shared/edge`), and whether this Mac has a notch to choose the island by; null before the main process knows. */
-  readonly edge: () => Promise<{ readonly place: string; readonly notch: boolean } | null>
+  /**
+   * Where Althar shows while the person is in another app (`shared/edge`): the place chosen, whether a screen has a notch to
+   * choose the island by, the system, and whether it has a tray to put the mark in; null before the main process knows.
+   */
+  readonly edge: () => Promise<{
+    readonly place: string
+    readonly notch: boolean
+    readonly platform: string
+    readonly tray: boolean
+  } | null>
   /** Shows it there instead, and keeps the choice. */
   readonly setEdge: (place: string) => Promise<void>
   /** From the island: where it draws in its page, so the main process can tell when the pointer is on it. */
@@ -159,6 +180,14 @@ export interface Host {
   readonly openInWindow: (threadId?: string) => void
   /** Dictation; absent where a page can't dictate. */
   readonly dictation?: DictationHost
+  /**
+   * What is on the clipboard, only where it looks like a code host's or
+   * tracker's token (`main/clipboard`); null for anything else. Asked only
+   * while a step of connecting waits for a token, as the window comes back.
+   */
+  readonly clipboardToken: () => Promise<string | null>
+  /** Updates; absent where the page has no way to them, as the edge's. */
+  readonly update?: UpdateHost
   /** Reports a problem, with what it is about (DEV-61): the window's Report a problem dialog opens. Absent where it can't: nothing offers to then. */
   readonly reportProblem?: (about: ProblemAbout) => void
   /** How the dialog reaches the main process; absent with `reportProblem`. */

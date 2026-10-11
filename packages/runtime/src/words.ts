@@ -182,6 +182,8 @@ export const words = (
       }
       case 'NoChangeToOpen':
         return noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working
+      case 'LaunchRefused':
+        return text(error, 'message')
       case 'TaskRefused':
         return taskRefused[text(error, 'why') as TaskRefused['why']] ?? "Althar can't change the task that way."
       case 'SignOutFailed':
@@ -198,12 +200,20 @@ export const words = (
         return "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again."
       case 'ConnectorFailed':
         return hostSaid(productOf(text(error, 'product')), text(error, 'reason'), text(error, 'message'))
+      case 'CliSignedOut':
+        return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this Mac.`
+      case 'CliElsewhere':
+        return `Althar only gives ${text(error, 'tool')}'s sign-in to a server it knows, over HTTPS. ${text(error, 'address')} isn't one.`
+      case 'OtherAccount':
+        return `This token is ${text(error, 'login')}'s. Make one as ${text(error, 'expected')}, or connect ${text(error, 'login')} as well from the list.`
       default:
         return agentSaid(error) ?? "Althar's runtime couldn't do that. Its log has the details."
     }
   })()
   // A merge that conflicts says in which files, for the window to have the lead settle them.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
+  // A service's refusal says which, for the window to say it where it happened: a token it didn't take, as against one it took and limits.
+  if (reason === 'ConnectorFailed') return { reason, message, why: text(error, 'reason') }
   return { reason, message }
 }
 
@@ -262,11 +272,15 @@ const taskRefused = {
 
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
+  'LaunchRefused',
   'ChangedSinceSeen',
   'CantMerge',
   'NoChangeToOpen',
   'TaskRefused',
   'NotConnected',
+  'CliSignedOut',
+  'CliElsewhere',
+  'OtherAccount',
   'NotAnIssue',
   'NotARepository',
   'RepositoriesNeeded',
@@ -299,6 +313,7 @@ const projectRefused = {
   last_repository: 'The project needs a repository for its tasks to work in. Add another before leaving this one out.',
   no_role: "That isn't a role a repository can have.",
   not_a_fork: "That repository isn't a fork, so its pull requests open on it.",
+  id_taken: "Althar couldn't make the project under the id its mark was drawn from. Close the tab and start again.",
 } as const satisfies Record<ProjectRefused['reason'], string>
 
 /** Why an account can't be added, renamed or removed, by reason. */

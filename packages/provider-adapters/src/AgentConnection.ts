@@ -13,6 +13,13 @@ import {
   terminalOutputCapability,
 } from './events'
 import { type Classified, classify, structuredFailure, structuredFailureCapability } from './failures'
+import {
+  asyncTasksCapability,
+  type BackgroundEvent,
+  stopBackgroundMethod,
+  type StopBackgroundResponse,
+  takingBackground,
+} from './background'
 import { type CapturedFrame, type OwnedProcess, type ProcessExit, spawnOwned, type StopReport } from './process'
 import { type Question, type QuestionAnswer, questionFields } from './questions'
 import type { LaunchSpec, PermissionMeanings } from './registry'
@@ -175,6 +182,8 @@ export interface AgentSession {
   readonly interrupt: Effect.Effect<void, Failure>
   /** Sets a config option, such as the model, and returns every option as the agent now reports it. */
   setOption(configId: string, value: string): Effect.Effect<ReadonlyArray<ConfigOption>, Failure | OptionUnavailable>
+  /** Stops a command it left running (background.ts); whether there was one to stop. Closing the session stops them all. */
+  stopBackground(id: string): Effect.Effect<boolean, Failure>
 }
 
 export interface ProcessInfo {
@@ -290,6 +299,16 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       const state = sessions.get(sessionId)
       if (state !== undefined) Queue.offerUnsafe(state.inbox, inbound)
       else if (starting > 0) early.set(sessionId, [...(early.get(sessionId) ?? []), inbound])
+    }
+
+    /** The commands each session left running, as the agent last said, so closing it can stop them. */
+    const leftRunning = new Map<string, Set<string>>()
+    const heardBackground = (sessionId: string, event: BackgroundEvent) => {
+      const running = leftRunning.get(sessionId) ?? new Set<string>()
+      leftRunning.set(sessionId, running)
+      if (event._tag === 'BackgroundStarted') running.add(event.id)
+      if (event._tag === 'BackgroundEnded') running.delete(event.id)
+      receive(sessionId, { _tag: 'Event', event })
     }
 
     /** Permission requests and questions waiting for an answer, by session: each entry drops its request. */
@@ -463,9 +482,16 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         ...(capture === undefined ? {} : { capture }),
         ...(stderr === undefined ? {} : { stderr }),
       })
-      connection = app.connect(acp.ndJsonStream(owned.stdin, owned.stdout))
+      connection = app.connect(takingBackground(acp.ndJsonStream(owned.stdin, owned.stdout), heardBackground))
     } else {
-      connection = app.connect(options.transport.agent.app)
+      // In process, over a pair of streams, so what it leaves running is taken off them as a process's would be.
+      const toAgent = new TransformStream<acp.AnyMessage, acp.AnyMessage>()
+      const toClient = new TransformStream<acp.AnyMessage, acp.AnyMessage>()
+      const peer = options.transport.agent.app.connect({ readable: toAgent.readable, writable: toClient.writable })
+      const client = app.connect(takingBackground({ readable: toClient.readable, writable: toAgent.writable }, heardBackground))
+      void client.closed.then(() => peer.close())
+      void peer.closed.then(() => client.close())
+      connection = client
     }
     yield* Effect.addFinalizer(() => Effect.sync(() => connection.close()))
 
@@ -506,7 +532,17 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         clientCapabilities: {
           // A way to ask only where someone answers: without it Claude Code turns AskUserQuestion off.
           ...(options.onQuestion === undefined ? {} : { elicitation: { form: {} } }),
-          _meta: { ...structuredFailureCapability, ...terminalOutputCapability },
+          // What the agent says of itself, such as a command stopped, as a notice rather than in its own words.
+          session: { notices: {} },
+          _meta: {
+            jetbrains: {
+              air: {
+                ...structuredFailureCapability.jetbrains.air,
+                capabilities: [...structuredFailureCapability.jetbrains.air.capabilities, asyncTasksCapability],
+              },
+            },
+            ...terminalOutputCapability,
+          },
         },
       }),
     )
@@ -523,6 +559,15 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       mcp: { http: capabilities.mcpCapabilities?.http === true, sse: capabilities.mcpCapabilities?.sse === true },
       authMethods: (init.authMethods ?? []).map((method) => method.id),
     }
+
+    /** Asks the agent to stop a command a session left running; whether it did. */
+    const stopBackground = (sessionId: string, id: string) =>
+      Effect.map(
+        call(stopBackgroundMethod, () =>
+          connection.agent.request<StopBackgroundResponse>(stopBackgroundMethod, { sessionId, asyncTaskId: id }),
+        ),
+        (response) => response.stopped === true,
+      )
 
     const startSession = (sessionOptions: NewSessionOptions): Effect.Effect<AgentSession, Failure | OptionUnavailable, Scope.Scope> =>
       Effect.gen(function* () {
@@ -558,6 +603,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           ),
           (response) =>
             Effect.gen(function* () {
+              // What it left running is stopped first: it runs in a process group of its own, which stopping the agent's misses.
+              for (const id of leftRunning.get(response.sessionId) ?? []) {
+                if (connection.signal.aborted) break
+                yield* Effect.ignore(stopBackground(response.sessionId, id).pipe(Effect.timeout(Duration.seconds(2))))
+              }
+              leftRunning.delete(response.sessionId)
               sessions.delete(response.sessionId)
               waiting.delete(response.sessionId)
               yield* Queue.shutdown(state.inbox)
@@ -766,6 +817,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           cancel,
           interrupt,
           setOption,
+          stopBackground: (id) => stopBackground(sessionId, id),
         } satisfies AgentSession
       })
 

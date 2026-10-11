@@ -6,6 +6,8 @@
 .glow { height: 150%; }
 
 .words { display: grid; justify-items: center; gap: 22px; max-width: 980px; margin: 0 auto; padding: 150px var(--gut) 110px; text-align: center; }
+/* White words in a light the script draws: they wait for the page to hydrate rather than show white on paper. Crawlers read them in the HTML all the same. */
+@media (scripting: enabled) { .lit:not([data-ready]) .words { visibility: hidden; } }
 .kicker { display: inline-flex; align-items: center; gap: 9px; margin: 0; font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255, 255, 255, 0.82); }
 .kicker i { width: 6px; height: 6px; border-radius: 50%; background: #fff; }
 .title {

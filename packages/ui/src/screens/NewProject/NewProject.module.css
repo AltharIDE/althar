@@ -1,12 +1,360 @@
+/* The page: the project on the left, in a wash of its colour; its folders on the right, on paper, with their foot. */
+.page {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 44fr) minmax(0, 56fr);
+}
+
+/* ---- the project ---- */
+.who {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 40px;
+  background: radial-gradient(ellipse 70% 55% at 50% 30%, color-mix(in srgb, var(--ink) 13%, transparent), transparent 72%), var(--n-2);
+  transition: background var(--slow) var(--ease);
+}
+.whoInner {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  width: 100%;
+  max-width: 380px;
+  margin-top: -60px;
+}
+.mark,
+.blank {
+  margin-bottom: 26px;
+}
+.mark {
+  animation: drawn var(--slow) var(--ease) both;
+}
+@keyframes drawn {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+/* Before a letter is typed, where its mark will be. */
+.blank {
+  width: 112px;
+  height: 112px;
+  border: 1.5px dashed var(--line-3);
+  border-radius: 28px;
+}
+.label {
+  color: var(--t-3);
+  font: 500 10.5px/1.2 var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.gap {
+  margin-top: 18px;
+}
 .name {
   width: 100%;
-  max-width: 420px;
+  margin: 0 0 2px;
+  padding: 2px 0 6px;
+  border: 0;
+  border-bottom: 1px solid var(--line-3);
+  border-radius: 0;
+  background: none;
+  color: var(--t-1);
+  font: 640 34px/1.15 var(--font);
+  letter-spacing: -0.03em;
+  outline: none;
+  transition: border-color var(--fast) var(--ease);
 }
-.promise {
-  flex: 1 1 260px;
+.name::placeholder {
+  color: var(--t-3);
+}
+.name:focus {
+  border-bottom-color: var(--t-1);
+}
+.name[aria-invalid='true'] {
+  border-bottom-color: var(--danger);
+}
+.note {
+  margin: 0;
+  color: var(--t-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.missing {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.made {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  min-height: 20px;
+  margin: 0;
+  color: var(--t-2);
+  font-size: 12.5px;
+}
+.repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.noHost {
+  flex: none;
+  border: 1px dashed var(--line-3);
+  border-radius: 3px;
+}
+.quiet {
+  color: var(--t-3);
+}
+
+/* ---- its folders ---- */
+.side {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--n-1);
+  border-left: 1px solid var(--line);
+}
+.sideInner {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 56px 56px 24px;
+}
+.sideInner > * {
+  max-width: 600px;
+}
+.title {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 620;
+  letter-spacing: -0.018em;
+}
+.empty {
+  display: grid;
+  place-items: center;
+  height: 92px;
+  margin: 16px 0 12px;
+  border: 1px dashed var(--line-3);
+  border-radius: var(--r-lg);
+  color: var(--t-3);
+  font-size: 12.5px;
+  transition:
+    border-color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+/* Folders held over the page: the box says to let go. */
+.dropping {
+  border-color: var(--t-2);
+  background: var(--sunk);
+  color: var(--t-1);
+}
+.folders {
+  display: grid;
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--paper);
+}
+.empty + .folders {
+  margin-top: 0;
+}
+.folder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 8px 8px 14px;
+}
+.folder + .folder {
+  border-top: 1px solid var(--line);
+}
+.folderIcon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  color: var(--t-2);
+}
+.folderMain {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.folderName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 560;
+}
+.facts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--t-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: -0.01em;
+}
+.fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chooseRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.below {
+  display: grid;
+  gap: 26px;
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+.sub {
+  margin: 0 0 6px;
+  color: var(--t-2);
+  font-size: 12px;
+  font-weight: 560;
+}
+
+/* what reading them found */
+.findingRows {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.finding {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--t-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.finding > svg {
+  position: relative;
+  top: 2px;
+}
+.finding button {
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-1);
+}
+
+/* the repositories on this computer */
+.foundRows {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.foundRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+}
+.foundRow:first-child {
+  border-top: 0;
+}
+.foundMain {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.foundName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 520;
+}
+.in {
+  color: var(--t-3);
+  font-size: 12px;
+}
+.more {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+/* the foot: how many, and Create */
+.foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--line);
 }
 .error {
-  flex-basis: 100%;
-  font-size: 12px;
+  min-width: 0;
+  margin-right: auto;
   color: var(--danger);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 760px) {
+  .page {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow-y: auto;
+  }
+  .whoInner {
+    margin-top: 0;
+  }
+  .side {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .sideInner {
+    padding: 32px 24px 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .who,
+  .name,
+  .empty {
+    transition: none;
+  }
+  .mark {
+    animation: none;
+  }
 }

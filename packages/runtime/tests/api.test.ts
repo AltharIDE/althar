@@ -9,7 +9,7 @@ import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type W
 import { AgentExited, AgentRequestFailed, AgentStartFailed, OptionUnavailable, TurnInProgress } from '@althar/provider-adapters'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Cause, Context, Duration, Effect, Fiber, Layer, Stream } from 'effect'
+import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
 import { connection, isInside, services } from '../src/Api'
@@ -530,6 +530,19 @@ describe('the API', () => {
         })
         assert.deepStrictEqual([project.name, project.repository, project.repositories], ['Meridian', folder, ['web']])
         assert.deepStrictEqual((yield* client.ReadFolder({ grant: chosen })).project, { id: project.id, name: 'Meridian' })
+        // Made on purpose, under the window's id and in the ink it showed, from the same folder: a project of its own.
+        const projectId = `proj_${'2'.repeat(32)}`
+        const made = yield* client.OpenProject({
+          commandId: commandId(),
+          grant: chosen,
+          name: 'Northwind',
+          repositories: [{ grant: chosen, path: join(folder, 'api') }],
+          projectId,
+          ink: 'umber',
+        })
+        assert.deepStrictEqual([made.id, made.name, made.ink, made.repositories], [projectId, 'Northwind', 'umber', ['api']])
+        const taken = yield* Effect.flip(client.OpenProject({ commandId: commandId(), grant: chosen, projectId }))
+        assert.strictEqual(taken.reason, 'ProjectRefused')
       }),
     ),
   )
@@ -909,7 +922,7 @@ describe('editors, through the API', () => {
 })
 
 describe('a project’s menu, through the API', () => {
-  it.live('renames a project, and adds, leaves out and changes its repositories', () =>
+  it.live('renames a project, draws it in another ink, and adds, leaves out and changes its repositories', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
@@ -924,6 +937,25 @@ describe('a project’s menu, through the API', () => {
         assert.strictEqual(
           (yield* Effect.flip(client.RenameProject({ commandId: commandId(), projectId: project.id, name: ' ' }))).message,
           'Give the project a name.',
+        )
+
+        // Its mark is drawn in the ink the person picks, which stays; the drawing, from its id, is the same.
+        const other = named?.ink === 'rose' ? 'umber' : 'rose'
+        const { cursor } = yield* client.ListProjects()
+        yield* client.SetProjectInk({ commandId: commandId(), projectId: project.id, ink: other })
+        const inked = (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)
+        assert.deepStrictEqual([inked?.ink, inked?.name], [other, 'Refunds v2'])
+        // Every window hears the project changed, and reads it again.
+        const heard = yield* Stream.runHead(
+          Stream.filter(client.Watch({ since: cursor }), (event) => event._tag === 'Changed' && event.aggregateType === 'project'),
+        )
+        assert.deepStrictEqual(
+          Option.map(heard, (event) => (event._tag === 'Changed' ? [event.aggregateId, event.projectId] : [])),
+          Option.some([project.id, project.id]),
+        )
+        assert.strictEqual(
+          (yield* Effect.flip(client.SetProjectInk({ commandId: commandId(), projectId: 'project_gone', ink: 'teal' }))).message,
+          "That project isn't there any more.",
         )
 
         // Each repository has a role, suggested by its name, which the person can change.
@@ -992,7 +1024,16 @@ describe('a project’s menu, through the API', () => {
         )
         const docs = again[2]
         assert.deepStrictEqual(docs?.fork, { fork: 'you/refund-docs', upstream: 'meridian/refund-docs', target: 'fork' })
-        assert.strictEqual(docs?.remote, 'git@github.com:you/refund-docs.git')
+        // Its work goes to GitHub, which Althar knows but isn't connected to; one with no remote stays here.
+        assert.deepStrictEqual(docs?.host, {
+          product: 'github',
+          name: 'GitHub',
+          instance: null,
+          path: 'you/refund-docs',
+          url: 'https://github.com/you/refund-docs',
+          account: null,
+        })
+        assert.isNull(again[0]?.host)
         yield* client.SetRepository({
           commandId: commandId(),
           projectId: project.id,
@@ -1376,14 +1417,22 @@ describe('code hosts and trackers, through the API', () => {
 
         const offered = yield* client.ListConnections()
         assert.deepStrictEqual(
-          offered.products.map((product) => [product.product, product.browserSignIn, product.selfHosted, product.hostedUrl]),
+          offered.products.map((product) => [
+            product.product,
+            product.service,
+            product.browserSignIn,
+            product.selfHosted,
+            product.hostedUrl,
+          ]),
           [
-            ['github', false, true, 'https://github.com'],
-            ['linear', false, false, 'https://linear.app'],
-            ['trello', false, false, 'https://trello.com'],
-            ['jira_dc', false, true, null],
+            ['github', 'github', false, true, 'https://github.com'],
+            ['linear', 'linear', false, false, 'https://linear.app'],
+            ['trello', 'trello', false, false, 'https://trello.com'],
+            ['jira_dc', 'jira', false, true, null],
           ],
         )
+        assert.deepStrictEqual(offered.products[0]?.tokenPrefixes, ['github_pat_', 'ghp_'])
+        assert.deepStrictEqual(offered.places, [])
         // Trello's token goes with an API key: where a token is made for one, and what a key is checked against.
         assert.deepInclude(offered.products[0], { tokenNeeds: null, tokenHelpForKey: null, keyChecks: [] })
         const trello = offered.products.find((product) => product.product === 'trello')
@@ -1416,6 +1465,42 @@ describe('code hosts and trackers, through the API', () => {
         assert.lengthOf((yield* client.ListConnections()).connections, 3)
 
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(working) })
+        // Where its code is, as the list and connecting say it: on the GitHub its remote names.
+        assert.deepStrictEqual((yield* client.ListConnections()).places, [
+          { product: 'github', webUrl: HOST, project: project.name, remote: null, repositories: ['meridian/api'] },
+        ])
+        const guide = yield* client.GetConnectGuide({ service: 'github' })
+        assert.deepStrictEqual(guide.places, [
+          { product: 'github', webUrl: HOST, project: project.name, remote: 'origin', repositories: ['meridian/api'] },
+        ])
+        assert.deepStrictEqual(guide.clis, [])
+        // A token is made on each instance it knows, filled in for its places: a classic one on a company's own server.
+        assert.deepStrictEqual(
+          guide.tokenPages.map((page) => page.webUrl),
+          ['https://github.com', HOST],
+        )
+        assert.strictEqual(
+          guide.tokenPages.find((page) => page.webUrl === HOST)?.url,
+          `${HOST}/settings/tokens/new?description=Althar&scopes=repo%2Cworkflow`,
+        )
+        // What the connection can do there, as the service says.
+        const can = yield* client.CheckConnection({ connectionId: signedIn.id })
+        assert.deepStrictEqual(
+          can.lines.map((line) => [line.need, line.state]),
+          [
+            ['account', 'ok'],
+            ['reach', 'ok'],
+            ['push', 'ok'],
+            ['changes', 'ok'],
+            ['checks', 'ok'],
+            ['issues', 'ok'],
+          ],
+        )
+        // gh isn't signed in here; and a server that doesn't answer is said to be one.
+        const noCli = yield* Effect.flip(client.ConnectCli({ commandId: commandId(), product: 'github', webUrl: HOST }))
+        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', "gh isn't signed in to github.test on this Mac."])
+        const server = yield* client.FindServer({ service: 'jira', webUrl: 'jira.meridian.dev' })
+        assert.deepStrictEqual(server, { product: null, webUrl: 'https://jira.meridian.dev', reason: 'unreachable', tokenPage: null })
         const { issues } = yield* client.ListIssues({ projectId: project.id })
         assert.sameMembers(
           issues.map((issue) => issue.key),
@@ -1455,6 +1540,11 @@ describe('code hosts and trackers, through the API', () => {
         assert.deepInclude(ready, { phase: 'ready', changed: null })
         assert.strictEqual(ready?.change?.number, 1)
         yield* client.RefreshTask({ commandId: commandId(), taskId: started.id })
+        // The person stops listening to it.
+        const listened = thread.task.changes[0]
+        assert.isTrue(listened?.listening)
+        yield* client.StopListening({ commandId: commandId(), taskId: started.id, url: listened?.url ?? '' })
+        assert.isFalse((yield* client.GetThread({ threadId: started.threadId })).task.changes[0]?.listening)
         // It has its pull request already: there is none to open.
         const opened = yield* Effect.flip(client.OpenChange({ commandId: commandId(), taskId: started.id }))
         assert.deepStrictEqual([opened.reason, opened.message], ['NoChangeToOpen', 'The task already has its pull request.'])

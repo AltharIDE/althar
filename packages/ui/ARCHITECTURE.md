@@ -11,7 +11,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | Layer | What it holds |
 | --- | --- |
 | `foundations` | Tokens, icons, brand marks, project marks, Althar's light and its halftone mark, and the domain vocabularies. |
-| `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), `Model` (a model's mark and name, and how it is reached on hover), and Ask, which every part that asks a person shares. |
+| `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), `Model` (a model's mark and name, and how it is reached on hover), InkSwatches (the inks a project's mark can be drawn in), and Ask, which every part that asks a person shares. |
 | `thread` | What appears in a conversation: turns, tool calls, steps, permissions (a card, a stack with Allow all, their answers in small for a call on the home, and what a rule allowed), questions, Stuck, documents. |
 | `composer` | What writes into a conversation: Composer, DictationTray, ModelPick, ContextRing, Listening, Running. |
 | `coordinator` | What the coordinator shows about tasks: Issue, TaskLaunch, TaskCard, TaskMark, TaskHeld. |
@@ -19,9 +19,9 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `dock` | What opens beside the board: Dock and a peek for each kind of card. |
 | `home` | Work across every project, as the home shows it: NeedLine, ProjectList, WorkTicks, SinceRow, HomeRest, ProjectWord; and what needs you at the edge of the screen: Island, EdgeSheet. |
 | `outputs` | What a task made: ChangeSet, ArtifactCard, ChangeView, and NoOutputs (where its lead has looked, before it has made anything). |
-| `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu, and the questions they ask first: RenameProject, RemoveProject, AbandonTask; and ReportProblem, the dialog that reports a problem with Althar. |
-| `setup` | What comes before a project, what sets one up, and Settings: Runtimes, AgentInstall (an agent not on this device, and downloading it), SourceMap, Accounts and AccountSignIn, Connections, AgentTabs, ModelSwitches, ControlCenter, Preferences (the app's own: KeepAwake, OpenFilesIn, NotificationSettings, as rows of a SettingList that sit in any frame), and Conventions (NamingRule, TemplateSources). |
-| `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), Start (the first screen: the agents answering round the mark, and picking the first project's repositories), Home, NewProject, ProjectRules. |
+| `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, ProjectFront (the top of a project's screen), TaskHeader, TaskMenu, the questions they ask first: RemoveProject, AbandonTask, UpdateReady (a newer Althar in place, and restarting into it), and ReportProblem (the dialog that reports a problem with Althar). |
+| `setup` | What comes before a project, what sets one up, and Settings: Runtimes, AgentInstall (an agent not on this device, and downloading it), SourceMap, RepositoryMap (a project's folders wired to where their work goes), Accounts and AccountSignIn, Connections, ConnectCard and its parts (a walk in to a code host or tracker, as a sign-in card: the ways in, a step at a time, and what the connection can do), AgentTabs (its tabs and the chosen agent's sheet, placed apart), ModelSwitches, CoAuthor, ControlCenter (modules placed in a grid of columns and rows by how much each matters, a quiet link in its foot, and as wide as what is open in it: a card for a walk in), AppVersion (which Althar this is, and its release notes, for Settings' foot), ProjectIdentity (a project's name and ink, changed in place in its settings), Preferences (the app's own: KeepAwake, OpenFilesIn, NotificationSettings, as rows of a SettingList that sit in any frame; where Althar shows in other apps, chosen or said), EdgeMini (that place, in small), Conventions (NamingRule, TemplateSources), and the Charter, a project's rules read as sentences: each a Clause with its word in the margin, a built-in setting as an underlined RuleWord or ChoiceWord, a command as a CommandToken, and a command being added as NewCommand with its NewCommandHint. |
+| `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), Start (the first screen: the agents answering round the mark, and picking the first project's repositories), Home, NewProject (a project before it is made, in a tab of its own: its name and mark, its colour, its folders as read, what this computer has named like it, and what reading them found), ProjectRules (the Charter, with how a task ends and its accounts), ProjectRepositories. |
 
 The rules between them:
 
@@ -117,12 +117,12 @@ Widgets with real behaviour are built on Radix primitives (`radix-ui`), styled t
 | Radix primitive | Ours |
 | --- | --- |
 | Popover | Popover, ControlCenter |
-| DropdownMenu | Menu, TaskMenu, ProjectMenu |
+| DropdownMenu | Menu, TaskMenu |
 | Tooltip | HoverCard, and Tooltip for a name or a shortcut that only shows on hover. Both open for keyboard focus too. |
-| Dialog | Dialog (a short question: RenameProject, RemoveProject, AbandonTask; `tall` for a longer form, ReportProblem, whose buttons stay in sight as it scrolls), ModelBrowser, Lightbox. The title sits in `VisuallyHidden` when it isn't shown. |
+| Dialog | Dialog (a short question: RemoveProject, AbandonTask; or pages of its own, with a way back before its title that Escape takes first; `tall` for a longer form, ReportProblem, whose buttons stay in sight as it scrolls), ModelBrowser, Lightbox. The title sits in `VisuallyHidden` when it isn't shown. |
 | (none) | SidePanel, which is ours: see below. |
 | Select | Select (`position="popper"`) |
-| RadioGroup | Segmented, Choices, ModelPick's list, ModelBrowser's filters |
+| RadioGroup | Segmented, Choices, ModelPick's list, ModelBrowser's filters, ProjectIdentity's inks |
 | Checkbox | CheckList |
 | Tabs | StepPanel, AgentTabs |
 | Collapsible | Disclosure / Fold. Content is force-mounted so it can animate, and `inert` while closed. |
@@ -132,7 +132,7 @@ Widgets with real behaviour are built on Radix primitives (`radix-ui`), styled t
 
 Plain semantic elements stay plain. A button is a `<button>`, and a list is a `<ul>`.
 
-**SidePanel** is not modal. It sits beside the thread or the board, takes focus when it opens, and gives it back when it closes.
+**SidePanel** is not modal. It sits beside the thread or the board, takes focus when it opens, and gives it back when it closes. One that steps through pages of its own, as a walk in does, has a way back first in its head.
 
 **Escape goes to the innermost thing first.** Radix hears Escape on the document before anything inside can stop it, so a Popover takes `onEscapeKeyDown` to let something inside go first, and a field marked `data-own-escape` gets the same without a handler. SidePanel hears Escape last.
 
@@ -154,8 +154,8 @@ A pattern that appears in two components becomes one part, so the two cannot dri
 | FileChanges, Delta, DiffStat | Files a change touched, with lines added and removed | ChangeSet, AcceptPeek, and a tool call's meta |
 | Checks | A change's checks and reviews | ChangeSet, AcceptPeek |
 | NoteForm | A one-line note sent with an action | ChangeSet, AcceptPeek, Review, Stuck |
-| Field | One line of text to type; TextArea, several | NoteForm, SourceMap, NewProject, ReportProblem, and every other typed answer |
-| Panel, FormRow | A sheet of settings, and its label-beside-control rows | ProjectRules, NewProject |
+| Field | One line of text to type; TextArea, several | NoteForm, SourceMap, ReportProblem, and every other typed answer |
+| Panel, FormRow | A sheet of settings, and its label-beside-control rows (FormRow also names the control inside it) | Welcome; Select, Choices, Segmented and CheckList take their names from FormRow |
 | KeyValues | A small definition list | External, GraphProposal |
 | StepRow | A step's row, its track and its thread link | Step, Review |
 | StepTrack | A task's steps as a row of bars | TaskCard, WorkCard, TaskHeader |
@@ -169,6 +169,7 @@ The helpers, in `src/lib`:
 - `useOnScreen`: a clock that runs only while someone can see it.
 - `useStickToBottom`: a thread that follows new content until you scroll away.
 - `useRefocus`: focus back on the button a form replaced, when the form closes.
+- `useDragOver`: folders held over a part of the page and dropped on it, for the first screen, a new project and a project's repositories.
 - `safeHref`: the one test for whether an address becomes a link.
 
 ### Accessibility is part of the component

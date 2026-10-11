@@ -62,6 +62,10 @@ const clientIds = Object.fromEntries(
   ).flatMap(([product, id]) => (id === undefined || id === '' ? [] : [[product, id]])),
 )
 
+/** Althar's GitHub App, by its slug, for where it is installed on an owner; with its id, GitHub's browser sign-in asks to be let in. */
+const githubApp =
+  process.env.ALTHAR_GITHUB_APP === undefined || process.env.ALTHAR_GITHUB_APP === '' ? undefined : process.env.ALTHAR_GITHUB_APP
+
 /* Secrets the main process is sealing or opening, by request. */
 const sealing = new Map<string, (answer: { readonly value?: string; readonly error?: string }) => void>()
 
@@ -137,7 +141,12 @@ const program = Effect.gen(function* () {
     __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_AGENTS === '1'
       ? {
           agents: (yield* Effect.promise(() => import('./fakeAgents'))).fakeAgents,
-          connectors: (yield* Effect.promise(() => import('./fakeConnectors'))).fakeConnectors,
+          // Every service, on a demo profile; else the end-to-end tests' GitHub.
+          connectors: yield* Effect.promise(() =>
+            import('./fakeConnectors').then((loaded) =>
+              process.env.ALTHAR_FAKE_CONNECTORS === 'demo' ? loaded.demoConnectors : loaded.fakeConnectors,
+            ),
+          ),
           secrets: Secrets.memory(),
           // Nothing opens in Terminal while the tests drive the app.
           openTerminal: () => Effect.succeed(false),
@@ -150,6 +159,7 @@ const program = Effect.gen(function* () {
         ? {
             ...options,
             clientIds,
+            ...(githubApp === undefined ? {} : { githubApp }),
             secrets,
             fetch: appFetch,
             // What is known of models, for the coordinator to weigh (ADR-015): fetched as the runtime starts, kept in the profile.

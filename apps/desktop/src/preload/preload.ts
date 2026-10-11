@@ -8,8 +8,10 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
  * shows at the edge of the screen. The edge's own pages say through it where they draw, and what to
  * open in the window, and hear whether the pointer is on the island. And
  * dictation: where the speech model and the microphone stand, the model's
- * download, and what was said, sent to be written down. Reporting a problem, and the
- * page's own errors, for the log. The page never sees or sends a
+ * download, and what was said, sent to be written down. A token on the
+ * clipboard, while connecting a service asks for one. And an update ready to
+ * install, and restarting into it. Reporting a problem, and the page's own
+ * errors, for the log. The page never sees or sends a
  * path. It gets no Node, no file system, no shell.
  */
 
@@ -48,10 +50,17 @@ ipcRenderer.on('althar:dictation', (_event, message: unknown) => {
   for (const listener of dictating) listener(message)
 })
 
+/* An update ready to install, as the main process says it changes. */
+const updating = new Set<(glance: unknown) => void>()
+ipcRenderer.on('althar:update', (_event, glance: unknown) => {
+  for (const listener of updating) listener(glance)
+})
+
 contextBridge.exposeInMainWorld('althar', {
   // Which system it is, for the words the window uses: this Mac, this PC, this computer.
   platform: process.platform,
   pickFolder: (purpose: 'project' | 'account' = 'project'): Promise<string | null> => ipcRenderer.invoke('althar:pick-folder', purpose),
+  pickFolders: (): Promise<ReadonlyArray<string>> => ipcRenderer.invoke('althar:pick-folders'),
   // Only a file the person dropped has a path; one the page made has none.
   grantDropped: (file: File): Promise<string | null> => {
     const path = webUtils.getPathForFile(file)
@@ -66,7 +75,7 @@ contextBridge.exposeInMainWorld('althar', {
   findRepositories: (): Promise<unknown> => ipcRenderer.invoke('althar:find-repositories'),
   grantFound: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:grant-found', id),
   playSound: (name: string): Promise<void> => ipcRenderer.invoke('althar:play-sound', name),
-  edge: (): Promise<{ place: string; notch: boolean } | null> => ipcRenderer.invoke('althar:edge'),
+  edge: (): Promise<{ place: string; notch: boolean; platform: string; tray: boolean } | null> => ipcRenderer.invoke('althar:edge'),
   setEdge: (place: string): Promise<void> => ipcRenderer.invoke('althar:set-edge', place),
   edgeDrawn: (rect: { x: number; y: number; width: number; height: number }): void => ipcRenderer.send('althar:edge-drawn', rect),
   onEdgePointed: (listener: (on: boolean) => void): (() => void) => {
@@ -75,6 +84,16 @@ contextBridge.exposeInMainWorld('althar', {
   },
   edgeSize: (height: number): void => ipcRenderer.send('althar:edge-size', height),
   openInWindow: (threadId?: string): void => ipcRenderer.send('althar:edge-open', threadId ?? null),
+  // Only text that looks like a token; anything else the person copied never reaches the page.
+  clipboardToken: (): Promise<string | null> => ipcRenderer.invoke('althar:clipboard-token'),
+  update: {
+    glance: (): Promise<unknown> => ipcRenderer.invoke('althar:update'),
+    restart: (): Promise<boolean> => ipcRenderer.invoke('althar:update-restart'),
+    onChange: (listener: (glance: unknown) => void): (() => void) => {
+      updating.add(listener)
+      return () => void updating.delete(listener)
+    },
+  },
   ...(SPEECH.has(`${process.platform}-${process.arch}`)
     ? {
         dictation: {

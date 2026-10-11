@@ -1,16 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import {
-  type Account,
-  ChangeRequest,
-  Comment,
-  ConnectorFailed,
-  hostedOf,
-  parseRemote,
-  type Person,
-  type Product,
-  type Repository,
-} from '@althar/connectors'
+import { type Account, ChangeRequest, Comment, ConnectorFailed, type Person, type Product, type Repository } from '@althar/connectors'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore } from 'effect'
@@ -280,6 +270,8 @@ export class Changes extends Context.Service<
     ofTask(taskId: string): Effect.Effect<ReadonlyArray<ChangeSummary>, unknown>
     /** Asks the code host now, rather than at the next turn of listening. */
     refresh(taskId: string): Effect.Effect<void>
+    /** Stops listening to the task's pull request at this address, as the person says: nothing said there after arrives. */
+    stopListening(taskId: string, url: string): Effect.Effect<void, unknown>
     /** Does something with a task's pull request as one action: one at a time with replying, pushing, marking ready and merging. */
     exclusive<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
     /**
@@ -467,19 +459,13 @@ export class Changes extends Context.Service<
       /** The host a repository's remotes are on, and whether Althar is connected to it; null where they name none it knows. */
       const hostOfRemotes = (remotes: ReadonlyArray<string>): Effect.Effect<Host | null, never, Store> =>
         Effect.gen(function* () {
-          const connected = yield* connections.hostOf(remotes)
-          if (connected !== null) {
-            const { info } = yield* connections.adapters(connected.connectionId)
-            return { product: info.product, name: info.name, webUrl: info.webUrl, connected: true }
-          }
-          const hosted = hostedOf(connections.products)
-          for (const remote of remotes) {
-            const ref = parseRemote(remote)
-            const product = ref === null ? undefined : hosted.get(ref.host)
-            const info = product === undefined ? undefined : connections.products.find((candidate) => candidate.product === product)
-            if (info !== undefined && info.host && ref !== null)
-              return { product: info.product, name: info.name, webUrl: `https://${ref.host}`, connected: false }
-          }
+          const places = yield* Effect.forEach(remotes, (remote) => connections.placeOf(remote))
+          for (const place of places)
+            if (place?.code != null && place.connection?.state === 'ready')
+              return { product: place.code.product, name: place.code.name, webUrl: place.connection.webUrl, connected: true }
+          for (const place of places)
+            if (place?.code != null)
+              return { product: place.code.product, name: place.code.name, webUrl: `https://${place.host}`, connected: false }
           return null
         }).pipe(Effect.orElseSucceed(() => null))
 
@@ -752,6 +738,28 @@ export class Changes extends Context.Service<
             change: { ...snapshot, linkId, product: host.product, listening: row?.listening === 1 },
             left,
           } as const
+        })
+
+      const stopListening = (taskId: string, url: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          for (const link of yield* linksOf(taskId)) {
+            if (link.listening !== 1 || (yield* decodeSnapshot(link.snapshot)).url !== url) continue
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('external_links', link.id, { listening: 0, updatedAt: yield* timestamp })
+                yield* fact({
+                  projectId: link.projectId,
+                  aggregateType: 'external_link',
+                  aggregateId: link.id,
+                  revision,
+                  type: 'external_link.stopped_listening',
+                  actorId: instance.personId,
+                })
+              }),
+            )
+            yield* touchCard(taskId)
+          }
         })
 
       /** Saves what was seen of a change, and tells the card. */
@@ -1583,6 +1591,7 @@ export class Changes extends Context.Service<
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),
+        stopListening: (taskId, url) => provide(locked(taskId)(stopListening(taskId, url))),
         // The person looking at the task counts as something happening on it.
         refresh: (taskId) =>
           Effect.andThen(

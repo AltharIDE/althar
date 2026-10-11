@@ -37,6 +37,21 @@
 .dialog:focus {
   outline: none;
 }
+/* a way back before the title, for a dialog that steps through pages of its own */
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 0 -6px;
+}
+.back {
+  flex: none;
+  border-radius: 99px;
+  background: var(--sunk);
+}
+.back svg {
+  transform: rotate(180deg);
+}
 .title {
   margin: 0;
   font-size: 15px;

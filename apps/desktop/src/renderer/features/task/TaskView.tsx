@@ -14,7 +14,9 @@ import {
   Issue,
   TaskActivity,
   LinkButton,
+  Listening,
   type ModelInfo,
+  Running,
   TaskFace,
   TaskHeader,
   TaskMenu,
@@ -45,9 +47,13 @@ import { documentVersions, editorPath, wholePath } from '../../shared/handed'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
+import { runningOf } from '../../shared/running'
+import { RunOf } from '../../shared/RunOf'
+import { behindText, listeningOf, useHeard } from './behind'
 import { PermissionCalls } from './PermissionCall'
 import { StuckCall } from './StuckCall'
-import { ConnectPanel } from './ConnectPanel'
+import { ConnectPanel } from '../connections/ConnectPanel'
+import { serviceOfProduct } from '../connections/ways'
 import { useServices } from '../../data/services'
 import { text as reportText } from '../report/reportWords'
 import { NoOutputsView } from './NoOutputsView'
@@ -292,8 +298,10 @@ export function TaskView({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onBack, open])
-  // A running turn says how long it has worked so far, and a task under way how long it has run.
-  const now = useNow(ticking(model.snapshot))
+  // A running turn says how long it has worked so far, a task under way how long it has run, and a run of it how long it has been up.
+  const now = useNow(ticking(model.snapshot) || (model.snapshot?.task.launches.some((launch) => launch.ended === null) ?? false))
+  // What its pull request says while the task is open shows on the pill over the composer for a moment.
+  const heard = useHeard(model.snapshot?.items ?? null)
   const snapshot = model.snapshot
   if (snapshot === null) {
     return (
@@ -330,6 +338,11 @@ export function TaskView({
   const shown: Face = face ?? 'talk'
   const busy = session?.turnRunning ?? false
   const queue = queueShown(session, model.pending)
+  const listening = listeningOf(snapshot)
+  // What its lead left running, and what Althar runs of it itself: one list, each stopped its own way.
+  const running = [...(session?.background ?? []), ...snapshot.task.launches]
+  const launched = new Set(snapshot.task.launches.map((launch) => launch.id))
+  const leftRunning = runningOf(running, now)
   const blocks = [
     // What the person asked for opens the thread, in their words, before anything the lead did.
     ...(snapshot.task.request === null || snapshot.earlier
@@ -418,6 +431,8 @@ export function TaskView({
         />
       )}
       <TaskMenu
+        // What it built runs with no agent, where its repository says how.
+        {...(snapshot.task.runCommand === null ? {} : { run: { command: snapshot.task.runCommand, onRun: () => void model.runProject() } })}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
         {...(can('stop') ? { onStop: () => void model.stop() } : {})}
@@ -459,6 +474,26 @@ export function TaskView({
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
+        // What goes on outside the conversation floats over its end: the pull requests it listens to, and what its lead left running.
+        above={
+          (listening.length > 0 || leftRunning.length > 0) && (
+            <>
+              {listening.length > 0 && (
+                <Listening sources={listening} heard={heard} onStop={(url) => void model.stopListening(url)} note={behindText.note} />
+              )}
+              <Running
+                processes={leftRunning}
+                onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}
+                onDismiss={(id) => void (launched.has(id) ? model.clearLaunch(id) : model.clearBackground(id))}
+                // Where it answers opens in the person's browser.
+                onOpenUrl={(id) => {
+                  const url = running.find((command) => command.id === id)?.url
+                  if (url != null) window.open(url, '_blank')
+                }}
+              />
+            </>
+          )
+        }
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
@@ -537,7 +572,9 @@ export function TaskView({
               send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
             }}
           />
-          {connecting && <ConnectPanel onClose={() => setConnecting(false)} />}
+          {connecting && snapshot.host !== null && (
+            <ConnectPanel service={serviceOfProduct(snapshot.host.product)} onClose={() => setConnecting(false)} />
+          )}
         </div>
       ) : (
         <TaskFace
@@ -595,6 +632,9 @@ export function TaskView({
                 onPassOn={(words) => void model.send(words)}
                 onAnswerQuestion={model.answerQuestion}
                 {...(asking == null ? {} : { focusQuestion: asking })}
+                run={(run) => (
+                  <RunOf run={run} now={now} onStop={(id) => void model.stopLaunch(id)} onRunAgain={() => void model.runProject()} />
+                )}
               />
             </ThreadShellProvider>
             {snapshot.attention.map((request) =>

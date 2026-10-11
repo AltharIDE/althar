@@ -1,9 +1,11 @@
 import { Effect, Schema } from 'effect'
 
+import { type Access, type AccessLine, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { makeHttp } from './http'
 import type { Account, Issue, Person, StatusCategory, Tracker } from './model'
+import { answered, failedOf, probe, readAs, stopped, UNREADABLE, UNSAID } from './probe'
 
 /*
  * Trello, a tracker, over its REST API. A card goes by its short link (the
@@ -187,3 +189,77 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
       }),
   }
 }
+
+/*
+ * What a Trello connection can do. A token is made for the person's own
+ * Power-Up key, named Althar, and Trello lists a member's tokens with what
+ * each may do: whether Althar's may write, and when it runs out, is read
+ * there. Which of several named Althar is this one isn't said, so they are
+ * read together.
+ */
+
+const Token = Schema.Struct({
+  identifier: Schema.optional(Schema.NullOr(Schema.String)),
+  dateCreated: Schema.optional(Schema.NullOr(Schema.String)),
+  dateExpires: Schema.optional(Schema.NullOr(Schema.String)),
+  permissions: Schema.optional(Schema.Array(Schema.Struct({ idModel: Schema.String, write: Schema.optional(Schema.Boolean) }))),
+})
+
+/** The name Althar's tokens are made with. */
+const NAMED = 'Althar'
+
+export const accessTrello: Access = (input) =>
+  Effect.gen(function* () {
+    const api = input.apiUrl.replace(/\/+$/, '')
+    const ask = (url: string) => probe(input, url)
+    const key = input.credential.kind === 'app' ? input.credential.key : null
+    if (key === null) return stopped([line('key', 'no', { reason: { kind: 'failed', message: 'No API key' } })])
+    const keyLine = line('key', 'ok', { fact: `····${key.slice(-4)}` })
+
+    const me = yield* ask(`${api}/members/me?fields=id,username,fullName`)
+    if (!answered(me)) {
+      // Trello says what it didn't take in plain words, and a token it won't take can come as a 400.
+      if (/^invalid key$/i.test(me.message)) return stopped([line('key', 'no', { fact: keyLine.fact, reason: failedOf(me) })])
+      const refused = me.status === 401 || /^(invalid|expired) token$/i.test(me.message)
+      return stopped([keyLine, line('account', 'no', { reason: refused ? { kind: 'refused' } : failedOf(me) })])
+    }
+    const member = readAs(Member, me)
+    if (member === undefined) return stopped([keyLine, line('account', 'no', { reason: UNREADABLE })])
+
+    const boards = yield* ask(`${api}/members/me/boards?fields=name&filter=open`)
+    const open = answered(boards) ? readAs(Schema.Array(Board), boards) : undefined
+
+    const tokens = yield* ask(`${api}/members/me/tokens?fields=identifier,dateCreated,dateExpires,permissions`)
+    const listed = answered(tokens) ? readAs(Schema.Array(Token), tokens) : undefined
+    const ours = listed?.filter((token) => token.identifier === NAMED)
+    const writes = ours?.map(
+      (token) => token.permissions?.some((permission) => permission.idModel === '*' && permission.write === true) === true,
+    )
+    const newest = ours?.reduce<typeof Token.Type | undefined>(
+      (latest, token) => (latest === undefined || (token.dateCreated ?? '') >= (latest.dateCreated ?? '') ? token : latest),
+      undefined,
+    )
+    const write = (need: 'comment' | 'move'): AccessLine => {
+      if (answered(tokens) && listed === undefined) return line(need, 'no', { reason: UNREADABLE })
+      // Refused, the list says nothing of what the token may write; anything else that went wrong is said.
+      if (!answered(tokens) && tokens.status !== 401 && tokens.status !== 403) return line(need, 'no', { reason: failedOf(tokens) })
+      if (writes === undefined || writes.length === 0 || writes.some((one) => one !== writes[0]))
+        return line(need, 'unknown', { reason: UNSAID })
+      return writes[0] === true ? line(need, 'ok') : line(need, 'no', { reason: { kind: 'scope', scope: 'write', url: null } })
+    }
+
+    return {
+      account: { id: member.id, login: member.username, name: member.fullName ?? null },
+      lines: [
+        keyLine,
+        line('account', 'ok', { fact: member.username }),
+        open === undefined
+          ? line('read', 'no', { reason: answered(boards) ? UNREADABLE : failedOf(boards) })
+          : line('read', 'ok', { count: open.length }),
+        write('comment'),
+        write('move'),
+      ],
+      expiresAt: newest?.dateExpires ?? null,
+      scopes: null,
+    }
+  })

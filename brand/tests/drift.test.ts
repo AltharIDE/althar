@@ -11,10 +11,10 @@ import { COBALT, INK, PAPER, VIOLET } from '../src/palette'
 /*
  * What the pack keeps in step with the rest of the repository. The mark is
  * drawn in places that can't import it (another package's component, a
- * favicon, a card's HTML); the colours are the interface's; the app icons are
- * the desktop app's; export/ is what the code draws, and the wallpapers what
- * the launch draws. Each of these goes wrong
- * silently when one side changes alone.
+ * favicon, a card's HTML); the colours are the interface's; the app icons,
+ * and the avatar it shows as co-author, are the desktop app's; export/ is
+ * what the code draws, and the wallpapers what the launch draws. Each of
+ * these goes wrong silently when one side changes alone.
  */
 
 const repo = resolve(import.meta.dirname, '../..')
@@ -54,6 +54,10 @@ describe('the pack and the repository', () => {
     for (const name of ['cobalt', 'cobalt-dark', 'paper', 'ink', 'solid', 'solid-dark']) {
       expect(read(`brand/export/app-icon/${name}.svg`), name).toBe(read(`apps/desktop/resources/icons/${name}.svg`))
     }
+  })
+
+  it("has Althar's face as GitHub shows it on a commit: the AltharAi account's picture, the ink avatar", () => {
+    expect(read('brand/export/avatar/avatar-ink.svg')).toBe(read('apps/desktop/resources/faces/althar-ai.svg'))
   })
 
   it('has the wallpapers as the launch and their page draw them now: after changing either, run bun run export:wallpapers', () => {

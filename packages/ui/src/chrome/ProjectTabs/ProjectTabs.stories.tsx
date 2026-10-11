@@ -68,7 +68,7 @@ function Window({ initial, current: start = 'meridian', ...props }: Partial<Proj
           setOpen([...open, byId(id)])
           setCurrent(id)
         }}
-        onOpenFolder={fn()}
+        onNewProject={fn()}
         end={
           shown ? (
             <>
@@ -104,7 +104,7 @@ export const ManyOpen: Story = { args: { initial: MANY, current: 'billing-web' }
 export const TwentyOpen: Story = { args: { initial: TWENTY, current: 'tessera-14' } }
 /** Nothing open yet but the home. */
 export const OnlyHome: Story = { args: { initial: [], current: null } }
-/** Every project open: the + only opens a folder. */
+/** Every project open: the + starts a new project at once. */
 export const EveryProjectOpen: Story = { args: { initial: ALL } }
 /** In the app the system draws the lights; the bar keeps their space. */
 export const NativeLights: Story = { args: { lights: 'space' } }
@@ -126,6 +126,28 @@ export const SwitchingOpeningAndClosing: Story = {
     await expect(nav.getByRole('button', { name: /^Halyard/ })).toHaveAttribute('aria-current', 'page')
     await userEvent.click(nav.getByRole('button', { name: /^Home, 3 calls wait on you/ }))
     await expect(nav.getByRole('button', { name: /^Home/ })).toHaveAttribute('aria-current', 'page')
+  },
+}
+
+/** With another project to open, New project is the + menu's last item; with none, the + starts one at once. */
+export const StartingANewProject: Story = {
+  args: { onNewProject: fn() },
+  play: async ({ args, canvasElement }) => {
+    const nav = within(within(canvasElement).getByRole('navigation', { name: 'Projects' }))
+    await userEvent.click(nav.getByRole('button', { name: 'Open a project' }))
+    const menu = within(await within(document.body).findByRole('menu'))
+    await userEvent.click(menu.getByRole('menuitem', { name: /New project/ }))
+    await expect(args.onNewProject).toHaveBeenCalledOnce()
+  },
+}
+
+/** Every project open: the + is New project itself. */
+export const NewProjectAtOnce: Story = {
+  args: { initial: ALL, onNewProject: fn() },
+  play: async ({ args, canvasElement }) => {
+    const nav = within(within(canvasElement).getByRole('navigation', { name: 'Projects' }))
+    await userEvent.click(nav.getByRole('button', { name: 'New project' }))
+    await expect(args.onNewProject).toHaveBeenCalledOnce()
   },
 }
 

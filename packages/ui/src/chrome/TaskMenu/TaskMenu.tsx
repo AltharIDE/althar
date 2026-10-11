@@ -19,6 +19,9 @@ export interface TaskMenuText {
   /** Opening the folder, in the editor named. */
   open: (editor: string) => string
   openAbout: string
+  /** Running what it built, with the command it runs. */
+  run: (command: string) => string
+  runAbout: string
   startNow: string
   startNowAbout: string
   markReady: string
@@ -38,6 +41,8 @@ export const taskMenuText: TaskMenuText = {
   label: 'This task',
   open: (editor) => `Open in ${editor}`,
   openAbout: 'The task’s folder, on its branch.',
+  run: (command) => `Run ${command}`,
+  runAbout: 'Althar runs what it built, in its worktree. It shows over the composer.',
   startNow: 'Start now',
   startNowAbout: 'Its plan starts now, without waiting.',
   markReady: 'Mark ready for review',
@@ -57,6 +62,8 @@ export interface TaskMenuProps {
   onOpen?: () => void
   /** The editor it opens in, by name. */
   editor?: string
+  /** Runs what it built, with no agent: what the run command is, and running it. */
+  run?: { readonly command: string; readonly onRun: () => void }
   /** Starts its plan now, while it waits to start. */
   onStartNow?: () => void
   /** Marks its draft pull request ready for review. */
@@ -75,6 +82,7 @@ export interface TaskMenuProps {
 export function TaskMenu({
   onOpen,
   editor,
+  run,
   onStartNow,
   onMarkReady,
   onStop,
@@ -88,7 +96,8 @@ export function TaskMenu({
 }: TaskMenuProps) {
   const t = { ...taskMenuText, ...text }
   const opener = onOpen !== undefined && editor !== undefined ? { onOpen, editor } : null
-  const opens = opener !== null
+  // Ways to look at what it made: in the editor, and running.
+  const opens = opener !== null || run !== undefined
   // Forward first, then what holds or brings it back, then what settles it, set apart.
   const course = [
     onStartNow && (
@@ -131,6 +140,11 @@ export function TaskMenu({
       {opener && (
         <MenuItem icon="external" description={t.openAbout} onSelect={opener.onOpen}>
           {t.open(opener.editor)}
+        </MenuItem>
+      )}
+      {run && (
+        <MenuItem icon="terminal" description={t.runAbout} onSelect={run.onRun}>
+          {t.run(run.command)}
         </MenuItem>
       )}
       {opens && course.length > 0 && <MenuSeparator />}
