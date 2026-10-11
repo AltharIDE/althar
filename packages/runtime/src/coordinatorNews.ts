@@ -75,11 +75,11 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
     if (events.length === 0) return null
 
     const team = (parameters: PlanParameters) => {
-      const lead = parameters.steps.find((step) => step.key === 'implement')
-      const review = parameters.steps.find((step) => step.key === 'review')
+      // Every plan has its lead; a review may be left out, or skipped.
+      const review = parameters.steps.find((step) => step.key === 'review' && !step.skipped)
       return [
-        lead === undefined ? 'no lead' : `${modelOf(lead)} leads`,
-        review === undefined || review.skipped ? 'no review' : `${modelOf(review)} reviews`,
+        ...parameters.steps.filter((step) => step.key === 'implement').map((lead) => `${modelOf(lead)} leads`),
+        review === undefined ? 'no review' : `${modelOf(review)} reviews`,
       ].join(', ')
     }
     const decode = Schema.decodeUnknownSync(Schema.fromJsonString(PlanParameters))
@@ -104,13 +104,12 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       const now = decode(plan.parameters)
       const said: Array<string> = []
       if (mine.some((event) => event.type === 'task_plan.changed' && event.actorId !== instance.coordinatorId)) {
-        const before = proposed === undefined ? undefined : decode(proposed.payload)
+        // Every plan is recorded as it is proposed: what it was then.
+        const before = decode(proposed?.payload ?? plan.parameters)
         const was = proposed?.actorId === instance.coordinatorId ? 'you proposed' : 'it was'
-        const ends = (before?.end ?? null) !== (now.end ?? null)
+        const ends = (before.end ?? null) !== (now.end ?? null)
         said.push(
-          before === undefined
-            ? `The person changed its plan. Now ${team(now)}; ${endWords(now.end)}.`
-            : `The person changed its plan: ${was} ${team(before)}${ends ? `, and ${endWords(before.end)}` : ''}. Now ${team(now)}${ends ? `, and ${endWords(now.end)}` : ''}.`,
+          `The person changed its plan: ${was} ${team(before)}${ends ? `, and ${endWords(before.end)}` : ''}. Now ${team(now)}${ends ? `, and ${endWords(now.end)}` : ''}.`,
         )
       }
       if (plan.state === 'accepted')
