@@ -222,8 +222,9 @@ export type CommandTokenProps = RootProps<
 /**
  * A command rule as the sentence has it: code in its own small box, with
  * "exactly" before a rule for the whole line. One too long for its box is
- * cut short, and shows whole on hover or focus. Its × shows on hover or
- * when it has focus.
+ * cut short, and shows whole on hover; from the keyboard, its × is named by
+ * the whole command and says it on focus. Its × shows on hover or when it
+ * has focus.
  */
 export function CommandToken({ pattern, match = CommandMatch.Prefix, onRemove, text, className, ...rest }: CommandTokenProps) {
   const t = { ...commandTokenText, ...text }
@@ -241,7 +242,7 @@ export function CommandToken({ pattern, match = CommandMatch.Prefix, onRemove, t
       {exact && <span className={s.exact}>{t.exactly} </span>}
       {cut ? (
         <Tooltip label={pattern}>
-          <code ref={code} className={s.code} tabIndex={0}>
+          <code ref={code} className={s.code}>
             {pattern}
           </code>
         </Tooltip>

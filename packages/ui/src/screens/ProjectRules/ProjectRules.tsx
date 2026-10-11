@@ -120,7 +120,8 @@ export interface ProjectRulesText {
   branches: { label: string; note: string; each: string }
   titles: { label: string; note: string; each: string }
   templates: { label: string; note: string; every: string; some: string; none: string }
-  limits: { when: string; rotating: string; label: string; limit: Record<LimitPolicy, Worded> }
+  /** What a limit does; `after` goes on from the word, where the sentence needs it. */
+  limits: { when: string; rotating: string; label: string; limit: Record<LimitPolicy, Worded & { after?: string }> }
   accounts: {
     works: (agent: string) => string
     /** Between an agent's accounts, in the order work goes through them. */
@@ -301,7 +302,12 @@ export const projectRulesText: ProjectRulesText = {
         title: 'Wait for the reset',
         note: 'The step keeps its place and runs again at the reset',
       },
-      [LimitPolicy.Ask]: { word: 'waits for you', title: 'Ask me', note: 'A card in the thread, with the agents that are free' },
+      [LimitPolicy.Ask]: {
+        word: 'waits for you',
+        after: ' to move it to a model that’s free, or to wait for the reset',
+        title: 'Ask me',
+        note: 'The step waits for you: move it to a model that’s free, or wait for the reset',
+      },
     },
   },
   accounts: {
@@ -331,7 +337,7 @@ const KINDS = [
 const PLACES = [RulePlace.Never, RulePlace.Ask, RulePlace.Allow, RulePlace.Rest] as const
 const MODES = [PermissionPolicy.Rules, PermissionPolicy.Coordinator, PermissionPolicy.Ask, PermissionPolicy.AllowAll] as const
 const ENDS = [TaskEnd.DraftPr, TaskEnd.ReadyPr, TaskEnd.PushOnly] as const
-const LIMITS = [LimitPolicy.Move, LimitPolicy.Wait] as const
+const LIMITS = [LimitPolicy.Move, LimitPolicy.Wait, LimitPolicy.Ask] as const
 
 export type ProjectRulesProps = RootProps<
   'div',
@@ -797,7 +803,7 @@ export function ProjectRules({
             onChange={onLimitChange}
             options={LIMITS.map((value) => ({ value, title: t.limits.limit[value].title, note: t.limits.limit[value].note }))}
           />
-          .
+          {t.limits.limit[limit].after}.
           {agentAccounts.map((agent) => {
             const every = agent.accounts.map((account) => account.id)
             // Those named that are still there; with none, as when the one named was removed, every one, as work runs.

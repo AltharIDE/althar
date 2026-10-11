@@ -12,6 +12,7 @@ import {
   type HomeEvent,
   type HomeSnapshot,
   type IssueSummary,
+  LimitCall,
   PAGE,
   Unfurl,
   type TaskPhase,
@@ -123,6 +124,7 @@ interface ItemRow {
 }
 
 const decodeAllowedBy = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(AllowedBy)))
+const decodeLimit = Schema.decodeUnknownOption(LimitCall)
 const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
 
 /** The first of the allow rules a decision keeps, or none where it keeps none. */
@@ -138,6 +140,7 @@ export const stuckOf = (payload: unknown): StuckStep => {
   const round = field(payload, 'round')
   const open = field(payload, 'open')
   const tried = field(payload, 'tried')
+  const limit = Option.getOrUndefined(decodeLimit(field(payload, 'limit')))
   return {
     step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
     why:
@@ -165,6 +168,7 @@ export const stuckOf = (payload: unknown): StuckStep => {
           ),
         }
       : {}),
+    ...(limit === undefined ? {} : { limit }),
   }
 }
 

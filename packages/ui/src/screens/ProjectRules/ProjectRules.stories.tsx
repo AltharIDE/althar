@@ -294,6 +294,30 @@ export const NamingBranches: Story = {
 /** Pushing the branch only: the sentence says so, and what a pull request opened from it would be titled. */
 export const PushOnly: Story = { args: { end: TaskEnd.PushOnly, limit: LimitPolicy.Wait } }
 
+/** When an account runs out, the step waits for the person: the sentence says what they'll choose between. */
+export const LimitAsks: Story = {
+  args: { limit: LimitPolicy.Ask },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('listitem', { name: 'Limits' })).toHaveTextContent(
+      'When an account runs out, the work waits for you to move it to a model that’s free, or to wait for the reset.',
+    )
+  },
+}
+
+/** The three things a limit can do, from its word; asking is one. */
+export const ChoosingALimit: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'moves to the next agent free' }))
+    await expect(await page.findAllByRole('menuitemradio')).toHaveLength(3)
+    await userEvent.click(page.getByRole('menuitemradio', { name: 'Ask me' }))
+    await expect(args.onLimitChange).toHaveBeenCalledWith(LimitPolicy.Ask)
+    await expect(c.getByRole('button', { name: 'waits for you' })).toBeInTheDocument()
+  },
+}
+
 /** Work goes on with an agent's next account: the limit sentence says that comes first, and the accounts read in order. */
 export const NextAccount: Story = { args: { rotate: true } }
 

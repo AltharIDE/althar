@@ -89,6 +89,29 @@ const permissionsOf = (mode: PermissionPolicy): ProjectRulesView['permissions'] 
   }
 }
 
+const limitOf = (usageLimit: ProjectRulesView['usageLimit']): LimitPolicy => {
+  switch (usageLimit) {
+    case 'move':
+      return LimitPolicy.Move
+    case 'wait':
+      return LimitPolicy.Wait
+    case 'ask':
+      return LimitPolicy.Ask
+  }
+}
+const usageLimitOf = (limit: LimitPolicy): ProjectRulesView['usageLimit'] => {
+  switch (limit) {
+    case LimitPolicy.Move:
+      return 'move'
+    case LimitPolicy.Wait:
+      return 'wait'
+    case LimitPolicy.Ask:
+      return 'ask'
+    default:
+      return unreachable(limit)
+  }
+}
+
 /** How a task ends: a draft where the project hasn't said, as the runtime does where the host is connected. */
 const endOf = (end: ProjectRulesView['end']): TaskEnd => {
   switch (end) {
@@ -298,8 +321,8 @@ export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => 
                 name: repository.repository,
                 path: repository.template,
               }))}
-              limit={rules.usageLimit === 'wait' ? LimitPolicy.Wait : LimitPolicy.Move}
-              onLimitChange={(limit) => model.change({ usageLimit: limit === LimitPolicy.Wait ? 'wait' : 'move' })}
+              limit={limitOf(rules.usageLimit)}
+              onLimitChange={(limit) => model.change({ usageLimit: usageLimitOf(limit) })}
               agentAccounts={agentAccountsOf(model.agents)}
               rotate={rules.rotateAccounts}
               onRotateChange={(rotateAccounts) => model.change({ rotateAccounts })}

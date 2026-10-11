@@ -34,6 +34,10 @@ export type CommandId = typeof CommandId.Type
 /** A position in the store's change feed. Events after it are the ones a client hasn't seen. */
 export const Cursor = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
+/** What a project does when an agent reaches its usage limit: moves the work on to the next free agent, waits for the reset, or asks the person. */
+export const UsageLimit = Schema.Literals(['move', 'wait', 'ask'])
+export type UsageLimit = typeof UsageLimit.Type
+
 export const SignIn = Schema.Literals(['signed_in', 'signed_out', 'unknown'])
 export type SignIn = typeof SignIn.Type
 
@@ -172,8 +176,8 @@ export const ProjectSummary = Schema.Struct({
   working: Schema.Number,
   /** Tasks ready for the person: their run passed, and nothing of theirs waits or starts. */
   ready: Schema.Number,
-  /** When an agent reaches its usage limit: its work moves on to the next free agent, or waits for the reset. */
-  usageLimit: Schema.Literals(['move', 'wait']),
+  /** When an agent reaches its usage limit: its work moves on to the next free agent, waits for the reset, or asks the person. */
+  usageLimit: UsageLimit,
   /** Whether work moves on to an agent's next account here when one runs out (ADR-012): off unless the person turned it on. */
   rotateAccounts: Schema.Boolean,
   /** The accounts each agent may use here, by agent; null for every one. */
@@ -298,7 +302,7 @@ export const ProjectRulesView = Schema.Struct({
   commands: Schema.Array(CommandRule),
   /** How a task ends when its plan doesn't say; null: a draft pull request where Althar is connected to the host, else its branch. */
   end: Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
-  usageLimit: Schema.Literals(['move', 'wait']),
+  usageLimit: UsageLimit,
   rotateAccounts: Schema.Boolean,
   onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
   /** The person's patterns for branches and titles (`names.ts`), over what each repository says; null without one. */
@@ -795,6 +799,24 @@ export const SessionSummary = Schema.Struct({
 export type SessionSummary = typeof SessionSummary.Type
 
 /**
+ * An account that could take over a step a usage limit stopped: the agent,
+ * the account, and the model it would run, by the agent's id for it (null
+ * for the agent's own). Each of the project's accounts but the one out,
+ * whether out of usage or signed in, as they stood: the window reads which
+ * are free now.
+ */
+export const LimitChoice = Schema.Struct({ agentId: Schema.String, accountId: Schema.String, model: Schema.NullOr(Schema.String) })
+export type LimitChoice = typeof LimitChoice.Type
+
+/** What a step a usage limit stopped asks with: whose account, when it resets (null where it didn't say), and who could take it over. */
+export const LimitCall = Schema.Struct({
+  accountId: Schema.NullOr(Schema.String),
+  resetsAt: Schema.NullOr(Schema.String),
+  choices: Schema.Array(LimitChoice),
+})
+export type LimitCall = typeof LimitCall.Type
+
+/**
  * A step of a task's plan that needs the person (docs/architecture/05): its
  * agent didn't report after a reminder, went, couldn't start, or a restart
  * stopped it; or review ran out of rounds with changes it hasn't seen.
@@ -824,6 +846,8 @@ export const StuckStep = Schema.Struct({
   open: Schema.Number,
   /** What Althar did before asking: told the agent to carry on, started it afresh, or told it to try another way. */
   tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected']))),
+  /** For a usage limit: the account that reached it, and when it resets, where it said, and who could take the step over. */
+  limit: Schema.optional(LimitCall),
 })
 export type StuckStep = typeof StuckStep.Type
 
@@ -1365,14 +1389,25 @@ export const Api = RpcGroup.make(
   command('Send', { threadId: Schema.String, body: Schema.String, disposition: Disposition }, Schema.Void),
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
   command('TakeBack', { itemId: Schema.String }, Schema.Void),
-  /** The person's answer to a step that needs them: tell its agent what to do, hand it to an agent, or abandon it (a review is gone on without). */
+  /**
+   * The person's answer to a step that needs them: tell its agent what to do,
+   * hand it to an agent (on an account and model, where they picked one), or
+   * abandon it (a review is gone on without). A step a usage limit stopped
+   * can also wait for the reset, where it is known.
+   */
   command(
     'AnswerStuck',
     {
       attentionId: Schema.String,
       answer: Schema.Union([
         Schema.Struct({ kind: Schema.Literal('tell'), note: Schema.String }),
-        Schema.Struct({ kind: Schema.Literal('retry'), agentId: Schema.String }),
+        Schema.Struct({
+          kind: Schema.Literal('retry'),
+          agentId: Schema.String,
+          accountId: Schema.optional(Schema.String),
+          model: Schema.optional(Schema.String),
+        }),
+        Schema.Struct({ kind: Schema.Literal('wait') }),
         Schema.Struct({ kind: Schema.Literal('abandon') }),
       ]),
     },
@@ -1459,7 +1494,7 @@ export const Api = RpcGroup.make(
       alwaysAllow: Schema.optional(Schema.Array(RuleKind)),
       commands: Schema.optional(Schema.Array(CommandRule)),
       end: Schema.optional(Schema.NullOr(Schema.Literals(['draft', 'ready', 'none']))),
-      usageLimit: Schema.optional(Schema.Literals(['move', 'wait'])),
+      usageLimit: Schema.optional(UsageLimit),
       rotateAccounts: Schema.optional(Schema.Boolean),
       onlyAccounts: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String)))),
       /** Null goes back to what each repository says. */
@@ -1481,7 +1516,7 @@ export const Api = RpcGroup.make(
     Schema.Void,
   ),
   /** What the project does when an agent reaches its usage limit. */
-  command('SetUsageLimit', { projectId: Schema.String, policy: Schema.Literals(['move', 'wait']) }, Schema.Void),
+  command('SetUsageLimit', { projectId: Schema.String, policy: UsageLimit }, Schema.Void),
   /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */
   command('OpenChange', { taskId: Schema.String }, Schema.Void),
   /**
