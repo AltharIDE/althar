@@ -59,9 +59,11 @@
   - **Secrets live in a `release` environment,** with required reviewers and
     open only to `v*` tags (and main, for runs by hand): every job that uses
     one waits for a person to approve the run. The certificate comes as
-    `CSC_LINK` (its `.p12`, base64) and `CSC_KEY_PASSWORD`, which
-    electron-builder puts in a keychain of its own, unlocked for codesign
-    alone and deleted after; Apple's key as `APPLE_API_KEY` (the `.p8`'s
+    `CSC_LINK` (its `.p12`, base64) and `CSC_KEY_PASSWORD`, which the
+    workflow puts in a keychain of the job's own, with its own password,
+    with Apple's Developer ID intermediates, unlocked for codesign and
+    deleted after (electron-builder's own import unlocks its keychain with
+    the `.p12`'s password, which the macOS 26 runner refused); Apple's key as `APPLE_API_KEY` (the `.p8`'s
     contents, written to a file for the job), `APPLE_API_KEY_ID` and
     `APPLE_API_ISSUER`.
   - **Only CI publishes.** `bun run release` builds and checks a release
