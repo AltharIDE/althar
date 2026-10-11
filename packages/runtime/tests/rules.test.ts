@@ -20,6 +20,7 @@ import {
   type ProjectRuleSet,
   type RuleContext,
   sayRules,
+  shortCommand,
 } from '../src/rules'
 
 const worktree = '/work/meridian/retry/app'
@@ -978,5 +979,47 @@ describe('a task of several repositories', () => {
       decide(request({ title: 'git -C api push origin althar/retry' }), { ...several, taskBranch: 'althar/retry' }).verdict,
       'allow',
     )
+  })
+})
+
+describe('how a command reads at a glance', () => {
+  it('drops a leading cd, however many, with && or ;', () => {
+    assert.strictEqual(shortCommand('cd /Users/x/long/worktree/path && bun run dev'), 'bun run dev')
+    assert.strictEqual(shortCommand('cd /a; cd b && pnpm test'), 'pnpm test')
+    assert.strictEqual(shortCommand('cd /a || exit 1'), 'cd /a || exit 1')
+  })
+
+  it('reads quoted paths with spaces as one word', () => {
+    assert.strictEqual(shortCommand('cd "/Users/x/My Projects/app" && bun dev'), 'bun dev')
+    assert.strictEqual(shortCommand('cd \'/Users/x/My Projects/app\'; bun run "my script"'), "bun run 'my script'")
+  })
+
+  it('drops environment assignments and timeout', () => {
+    assert.strictEqual(shortCommand('cd /x && NODE_ENV=test PORT=3000 timeout 600 bun test'), 'bun test')
+    assert.strictEqual(shortCommand('timeout -s KILL 30 bun dev'), 'bun dev')
+  })
+
+  it('drops output plumbing after the command that matters', () => {
+    assert.strictEqual(shortCommand('cd /x/y && bun run dev 2>&1 | tail -20'), 'bun run dev')
+    assert.strictEqual(shortCommand('bun test | grep -i fail | head -5'), 'bun test')
+    assert.strictEqual(shortCommand('bun dev > /tmp/dev.log 2>&1'), 'bun dev')
+    assert.strictEqual(shortCommand('cd /x && bun build && bun test 2>&1 | tail -30'), 'bun build && bun test')
+  })
+
+  it('keeps a grep or tail that is the command itself', () => {
+    assert.strictEqual(shortCommand('cd /x && grep -rn todo src'), 'grep -rn todo src')
+    assert.strictEqual(shortCommand('tail -f server.log'), 'tail -f server.log')
+    assert.strictEqual(shortCommand('cd /x && cat a | grep b'), 'cat a')
+  })
+
+  it('shows a command that is only a cd as it was written', () => {
+    assert.strictEqual(shortCommand('cd /Users/x/worktree'), 'cd /Users/x/worktree')
+    assert.strictEqual(shortCommand('cd "/Users/x/My Projects" &&'), "cd '/Users/x/My Projects'")
+  })
+
+  it('leaves what the shell works out only when it runs, and plain commands, alone', () => {
+    assert.strictEqual(shortCommand('cd /x && echo $(date)'), 'cd /x && echo $(date)')
+    assert.strictEqual(shortCommand('  bun dev  '), 'bun dev')
+    assert.strictEqual(shortCommand(''), '')
   })
 })

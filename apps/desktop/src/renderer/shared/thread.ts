@@ -36,6 +36,8 @@ export type Part =
       readonly state: ToolState
       /** The whole command, when it runs one: what the row opens to, and what Copy takes. */
       readonly command: string | null
+      /** The command as it reads at a glance, which the row shows in its place, where it can be said shorter. */
+      readonly label?: string
       /** The project's rule that let it through without asking (ADR-018), where one did. */
       readonly allowedBy?: AllowedBy
       /** For a command: its output so far, or how much it printed once it ended (handed.ts). */
@@ -207,7 +209,7 @@ const TITLE_VERBS = new Set([
 export const targetOf = (content: ToolContent, worktree: string | null): string => {
   const path = content.locations[0]?.path
   if (path !== undefined) return within(path, worktree)
-  if (content.command !== null) return content.command
+  if (content.command !== null) return content.label ?? content.command
   const space = content.title.indexOf(' ')
   const first = space > 0 ? content.title.slice(0, space).toLowerCase() : ''
   return TITLE_VERBS.has(first) ? content.title.slice(space + 1) : content.title
@@ -252,6 +254,7 @@ const partOf = (
         target: targetOf(item.content, worktree),
         state,
         command: item.content.command,
+        ...(item.content.label === undefined ? {} : { label: item.content.label }),
         ...(item.content.allowedBy === undefined ? {} : { allowedBy: item.content.allowedBy }),
         ran: ranOf(item.content, state, outputs.get(item.id)),
         exit: item.content.exit,

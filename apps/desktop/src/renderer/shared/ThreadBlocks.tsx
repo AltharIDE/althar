@@ -102,7 +102,7 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
   const [open, setOpen] = useState(part.state === ToolState.Running && part.ran !== null)
   /* once opened, what it printed stays, so it doesn't vanish as the call folds */
   const [seen, setSeen] = useState(open)
-  const long = part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND)
+  const long = part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND || part.label !== undefined)
   const body =
     part.ran !== null ? (
       seen ? (

@@ -323,7 +323,14 @@ const REDIRECTS = ['>>', '&>', '2>', '>', '<']
 
 /** Splits a command line into commands and words, as a POSIX shell would for plain words, quotes and escapes. */
 export const parseCommandLine = (text: string): Parsed => {
+  const { commands, opaque } = splitCommandLine(text)
+  return expandShells(commands, opaque)
+}
+
+/** A command line's commands as written, with the separator that ends each ('' for the last). */
+const splitCommandLine = (text: string) => {
   const commands: Array<Array<string>> = []
+  const ends: Array<string> = []
   let words: Array<string> = []
   let word = ''
   let inWord = false
@@ -333,9 +340,12 @@ export const parseCommandLine = (text: string): Parsed => {
     word = ''
     inWord = false
   }
-  const endCommand = () => {
+  const endCommand = (separator = '') => {
     endWord()
-    if (words.length > 0) commands.push(words)
+    if (words.length > 0) {
+      commands.push(words)
+      ends.push(separator)
+    }
     words = []
   }
   for (let index = 0; index < text.length; index += 1) {
@@ -372,7 +382,7 @@ export const parseCommandLine = (text: string): Parsed => {
     if (char === '`' || (char === '$' && text[index + 1] === '(')) opaque = true
     const separator = SEPARATORS.find((candidate) => rest.startsWith(candidate))
     if (separator !== undefined && !(separator === '&' && rest.startsWith('&>'))) {
-      endCommand()
+      endCommand(separator)
       index += separator.length - 1
       continue
     }
@@ -397,7 +407,12 @@ export const parseCommandLine = (text: string): Parsed => {
     inWord = true
   }
   endCommand()
-  // A script handed to a shell is read as commands of its own.
+  return { commands, ends, opaque }
+}
+
+/** Commands as the shell runs them: a script handed to a shell is read as commands of its own. */
+const expandShells = (commands: ReadonlyArray<ReadonlyArray<string>>, opaqueBefore: boolean): Parsed => {
+  let opaque = opaqueBefore
   const expanded = commands.flatMap((command): Array<ReadonlyArray<string>> => {
     const inner = unwrap(command)
     const [program, ...args] = inner
@@ -454,6 +469,55 @@ export const programOf = (text: string): string | undefined => {
     return next !== undefined && /^[a-z][a-z-]{0,22}[a-z0-9]?$/.test(next) ? `${name} ${next}` : name
   }
   return undefined
+}
+
+const OUTPUT_REDIRECTS = ['>>', '&>', '2>', '>']
+/** Programs that only trim or filter what a command printed, when it pipes into them. */
+const PLUMBING = ['tail', 'head', 'grep']
+const KEPT_BETWEEN: Readonly<Record<string, string>> = { '&&': ' && ', '||': ' || ', ';': '; ', '\n': '; ', '|': ' | ', '&': ' & ' }
+
+const sayWord = (word: string) => (word === '' ? "''" : /^[^\s'"\\;&|<>()`]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`)
+
+/** A command's words without where its output goes: `2>&1`, `> out.log`. */
+const withoutRedirects = (words: ReadonlyArray<string>): ReadonlyArray<string> =>
+  words.flatMap((word, index) => {
+    if (OUTPUT_REDIRECTS.includes(word)) return []
+    return OUTPUT_REDIRECTS.includes(words[index - 1] ?? '') ? [] : [word]
+  })
+
+/**
+ * A command line as the person reads it at a glance: what it runs, without
+ * the `cd <dir> &&` an agent puts first, variable assignments, `timeout N`
+ * and the like, or the plumbing after it (`2>&1`, `| tail -20`). The line
+ * itself is never changed; this is only what to show of it. A line that only
+ * changes folder, or that has parts the shell works out when it runs, is
+ * shown as written.
+ */
+export const shortCommand = (text: string): string => {
+  const whole = text.trim()
+  const { commands, ends, opaque } = splitCommandLine(whole)
+  if (opaque || whole.includes('<<')) return whole
+  const parts = commands.map((words, index) => ({ words, end: ends[index] ?? '' }))
+  // Leading `cd dir &&`, however many.
+  let first = 0
+  while (first < parts.length - 1) {
+    const part = parts[first]
+    if (part === undefined || !['cd', 'pushd'].includes(part.words[0] ?? '') || !['&&', ';', '\n'].includes(part.end)) break
+    first += 1
+  }
+  let kept = parts.slice(first)
+  // Trailing `| tail -20`, `| grep x`, only where something comes before the pipe.
+  while (kept.length > 1 && kept.at(-2)?.end === '|' && PLUMBING.includes(unwrap(kept.at(-1)?.words ?? [])[0] ?? ''))
+    kept = kept.slice(0, -1)
+  const said = kept
+    .map(({ words, end }, index) => {
+      const shown = withoutRedirects(unwrap(words))
+      return shown.length === 0 ? '' : `${shown.map(sayWord).join(' ')}${index === kept.length - 1 ? '' : (KEPT_BETWEEN[end] ?? '; ')}`
+    })
+    .join('')
+    .trim()
+  // A line that is only a `cd`, or only plumbing, has nothing to shorten to.
+  return said === '' ? whole : said
 }
 
 // ---- Places ----------------------------------------------------------------

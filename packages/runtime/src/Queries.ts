@@ -42,7 +42,7 @@ import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
 import { commitsAhead, commitsOf, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
-import { commandIn } from './rules'
+import { commandIn, shortCommand } from './rules'
 import { Sessions } from './Sessions'
 import { actionsOf, standingOf } from './Tasks'
 
@@ -312,6 +312,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
     case 'tool_call': {
       const locations = field(content, 'locations')
       const exit = field(content, 'exit')
+      const command = commandIn(field(content, 'rawInput')) ?? null
+      const label = command === null ? command : shortCommand(command)
       const allowedBy = row.decision === 'allow' ? allowedByOf(row.rule) : undefined
       return {
         ...base,
@@ -320,7 +322,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           title: text(content, 'title'),
           toolKind: text(content, 'kind') || 'other',
           status: text(content, 'status') || 'pending',
-          command: commandIn(field(content, 'rawInput')) ?? null,
+          command,
+          ...(label !== null && label !== command ? { label } : {}),
           locations: (Array.isArray(locations) ? locations : []).flatMap((location) => {
             const path = text(location, 'path')
             const line = field(location, 'line')
