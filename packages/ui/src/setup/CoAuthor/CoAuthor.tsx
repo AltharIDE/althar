@@ -136,7 +136,7 @@ export function CoAuthor({ on, onChange, trailer, author, commit, picture, askin
             {t.opened}{' '}
             <span className={s.sub}>
               {t.openedBy}{' '}
-              <a href="https://althar.ai" target="_blank" rel="noreferrer">
+              <a href="https://github.com/AltharIDE/althar" target="_blank" rel="noreferrer">
                 {t.althar}
               </a>
               .
