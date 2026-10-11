@@ -49,6 +49,7 @@ import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
+import { PushRequestOf } from '../../shared/PushRequestOf'
 import { behindText, listeningOf, useHeard } from './behind'
 import { PermissionCalls } from './PermissionCall'
 import { StuckCall } from './StuckCall'
@@ -630,6 +631,16 @@ export function TaskView({
                 {...(asking == null ? {} : { focusQuestion: asking })}
                 run={(run) => (
                   <RunOf run={run} now={now} onStop={(id) => void model.stopLaunch(id)} onRunAgain={() => void model.runProject()} />
+                )}
+                // A push the lead asked for is pushed as the outputs push: up to the head it shows.
+                push={(request, at) => (
+                  <PushRequestOf
+                    request={request}
+                    at={at}
+                    {...(lead.name === '' ? {} : { by: lead.name })}
+                    pushing={model.pending}
+                    onPush={(head, url) => void model.push(head, url)}
+                  />
                 )}
               />
             </ThreadShellProvider>

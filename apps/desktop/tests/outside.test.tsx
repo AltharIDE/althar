@@ -888,6 +888,46 @@ describe('a task’s pull request', () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456', 'https://github.com/meridian/api/pull/12'))
   })
 
+  it('asks, in the thread, for a push the lead asked for: what would go up, pushed up to the head it shows', async () => {
+    const thread = snapshot()
+    const asked = items.push()
+    let current = { ...thread, items: [...thread.items, asked] }
+    const push = vi.fn(async () => {})
+    const { client, emit } = fakeClient({
+      push,
+      getThread: vi.fn(async () => current),
+      getThreadItem: vi.fn(async () => current.items.at(-1) as ThreadItem),
+    })
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => null)
+    withServices(<Task />, client)
+    const card = within(await screen.findByRole('article', { name: 'Push to PR #12' }))
+    expect(card.getByText('Read Retry-After as seconds')).toBeTruthy()
+    expect(card.getByText('Name the retry option')).toBeTruthy()
+    await userEvent.click(card.getByRole('button', { name: 'Open PR #12' }))
+    expect(opened).toHaveBeenCalledWith('https://github.com/meridian/api/pull/12', '_blank')
+    await userEvent.click(card.getByRole('button', { name: 'Push 2 commits to PR #12' }))
+    await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def4567890', 'https://github.com/meridian/api/pull/12'))
+    // The branch changed since: the runtime shows what is on it now, and Push pushes that.
+    const moved = {
+      ...asked,
+      content: { ...asked.content, moved: true, head: 'fed7654321', commits: [{ sha: 'fed7654', subject: 'Name it again' }], count: 1 },
+    } as ThreadItem
+    current = { ...current, items: [...thread.items, moved] }
+    act(() => emit(changed('thread_item', asked.id)))
+    expect(await screen.findByText('The branch changed since this was asked. This is what is on it now.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Push 1 commit to PR #12' }))
+    await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'fed7654321', 'https://github.com/meridian/api/pull/12'))
+    // Pushed, it stays as a record, with nothing to press.
+    current = {
+      ...current,
+      items: [...thread.items, { ...moved, content: { ...asked.content, state: 'pushed', settledAt: NOW } } as ThreadItem],
+    }
+    act(() => emit(changed('thread_item', asked.id)))
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Push \d/ })).toBeNull())
+    expect(screen.getByRole('article', { name: 'Push to PR #12' }).textContent).toContain('Pushed')
+    opened.mockRestore()
+  })
+
   it('shows what it changed, file by file, from its header, its outputs, or ⌘D', async () => {
     const file = (path: string, more: Partial<ThreadSnapshot['task']['files'][number]> = {}) => ({
       path,

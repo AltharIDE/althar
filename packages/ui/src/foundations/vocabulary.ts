@@ -394,6 +394,17 @@ export enum Outcome {
   Abandoned = 'abandoned',
 }
 
+/** Where a push the lead asked the person for stands. */
+export enum PushState {
+  /** Waiting for the person to push. */
+  Open = 'open',
+  Pushed = 'pushed',
+  /** The lead asked again, with more, further down. */
+  Replaced = 'replaced',
+  /** Its pull request was merged or closed first. */
+  Closed = 'closed',
+}
+
 /** Where a task's change stands. */
 export enum ChangeState {
   /** A draft pull request: still being checked. */
