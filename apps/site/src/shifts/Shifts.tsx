@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 
 import { LINKS } from '../content/facts'
 import { KIND_WORD, SHIFTS, ShiftKind, UPCOMING, type Shift, type Upcoming } from '../content/shifts'
+import { useHash, useToday } from '../lib/browser'
 import { cx } from '../lib/cx'
 import { Footer } from '../shared/footer/Footer'
 import { Lit } from '../shared/Lit'
@@ -123,9 +124,12 @@ function Entry({ shift, ahead }: { shift: Shift | Upcoming; ahead?: { announced:
 }
 
 export function Shifts() {
-  const [view, setView] = useState<View>(() => viewOf(window.location.hash))
+  /* The view the address points at, until one is picked; the address's #fragment is read once the page has hydrated. */
+  const hash = useHash()
+  const [picked, setPicked] = useState<View | null>(null)
+  const view = picked ?? viewOf(hash)
   const [kind, setKind] = useState<ShiftKind | null>(null)
-  const [now] = useState(() => Date.now())
+  const now = time(useToday())
   const upcoming = soonestFirst(stillAhead(UPCOMING, now))
   const upcomingView = view === 'upcoming'
   const shown = upcomingView ? upcoming : SHIFTS
@@ -135,7 +139,7 @@ export function Shifts() {
   const newest = newestFirst(SHIFTS)[0]
 
   const show = (next: View) => {
-    setView(next)
+    setPicked(next)
     setKind(null)
     window.history.replaceState(null, '', next === 'upcoming' ? '#upcoming' : window.location.pathname)
   }
@@ -143,7 +147,7 @@ export function Shifts() {
   // A link to an entry in the other view (the strip's marks, a shared link) opens that view first.
   useEffect(() => {
     const follow = () => {
-      setView(viewOf(window.location.hash))
+      setPicked(null)
       setKind(null)
     }
     window.addEventListener('hashchange', follow)

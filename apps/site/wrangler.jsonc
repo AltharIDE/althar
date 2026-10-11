@@ -1,13 +1,15 @@
 {
   // The site on Cloudflare: static assets only, no Worker code. `bun run build`
-  // writes dist/, with thesis/index.html for the thesis; any other path gets the
-  // landing page.
+  // writes dist/ with an HTML file per page (index.html, shifts.html), each
+  // served at its path with no trailing slash, and 404.html, served with a 404
+  // for any address that isn't a page or a file.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "althar-site",
   "compatibility_date": "2026-09-26",
   "assets": {
     "directory": "./dist",
-    "not_found_handling": "single-page-application",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page",
   },
   "observability": {
     "enabled": true,

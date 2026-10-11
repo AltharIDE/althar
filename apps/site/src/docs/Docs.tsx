@@ -2,6 +2,7 @@ import { LINKS } from '../content/facts'
 import { Footer } from '../shared/footer/Footer'
 import { Lit } from '../shared/Lit'
 import { Nav } from '../shared/Nav'
+import { Ways } from '../shared/Ways'
 import s from './Docs.module.css'
 
 /*
@@ -23,26 +24,13 @@ export function Docs() {
           }
           lead="How to install Althar, sign in your agents and run a project, step by step. Until they’re here:"
         />
-        <ul className={s.ways}>
-          <li>
-            <a href={LINKS.repo}>
-              <b>The README</b>
-              <span>Installing, and signing in your agents</span>
-            </a>
-          </li>
-          <li>
-            <a href="/thesis">
-              <b>The thesis</b>
-              <span>What Althar is for, and why</span>
-            </a>
-          </li>
-          <li>
-            <a href={LINKS.issues}>
-              <b>Issues</b>
-              <span>Ask, or tell us what’s missing</span>
-            </a>
-          </li>
-        </ul>
+        <Ways
+          ways={[
+            { href: LINKS.repo, name: 'The README', note: 'Installing, and signing in your agents' },
+            { href: '/thesis', name: 'The thesis', note: 'What Althar is for, and why' },
+            { href: LINKS.issues, name: 'Issues', note: 'Ask, or tell us what’s missing' },
+          ]}
+        />
       </main>
       <Footer />
     </div>

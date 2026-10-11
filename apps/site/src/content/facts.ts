@@ -4,9 +4,14 @@
  * screen are the glossary's (lead, call, notes), never worker or session.
  */
 
-const REPO = 'https://github.com/thetastemakers/althar'
+/** The site's public origin. A build can serve it from another with SITE_URL (scripts/prerender.ts). */
+export const SITE = 'https://althar.ai'
+
+const ORG = 'https://github.com/AltharIDE'
+const REPO = `${ORG}/althar`
 
 export const LINKS = {
+  org: ORG,
   repo: REPO,
   thesis: `${REPO}/blob/main/THESIS.md`,
   architecture: `${REPO}/tree/main/docs/architecture`,
@@ -18,7 +23,7 @@ export const LINKS = {
 /** How to install it. Not published yet: the release, the cask and the clone URL are placeholders until it ships. */
 export const INSTALL = {
   brew: 'brew install --cask althar',
-  clone: 'git clone github.com/thetastemakers/althar',
+  clone: 'git clone github.com/AltharIDE/althar',
   platforms: 'macOS first. Linux and Windows after.',
 } as const
 

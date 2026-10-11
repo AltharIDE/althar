@@ -1,5 +1,6 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 
+import { useStill } from '../../../lib/browser'
 import { cx } from '../../../lib/cx'
 import s from './Reel.module.css'
 
@@ -22,10 +23,6 @@ export interface ReelMoment {
   /** The picture, told whether it is the one showing now. */
   render: (active: boolean) => ReactNode
 }
-
-const still = () =>
-  typeof window !== 'undefined' &&
-  (window.matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(window.location.search).has('t'))
 
 export function Reel({
   moments,
@@ -50,7 +47,7 @@ export function Reel({
   const [picked, setPicked] = useState(false)
   const held = pointed || focused || picked
   const stage = useRef<HTMLDivElement>(null)
-  const moving = !still()
+  const moving = !useStill()
 
   useEffect(() => {
     const el = stage.current

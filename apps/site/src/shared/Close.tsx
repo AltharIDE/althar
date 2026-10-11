@@ -1,7 +1,8 @@
 import { Brand, BrandMark, Logo } from '@althar/ui'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { INSTALL, LINKS } from '../content/facts'
+import { useHydrated } from '../lib/browser'
 import { detectOs, type Os, OS_NAME, OsMark } from './OsMark'
 import { BRAND, CLOSE } from '../content/home'
 import { SHIFTS } from './Bar'
@@ -9,7 +10,7 @@ import s from './Close.module.css'
 
 /** The download and the repository, as both developer pages end. The download is for the system the page is read on; a phone gets the Mac's. */
 export function Get({ tone }: { tone: 'blue' | 'paper' }) {
-  const [os] = useState<Os>(() => detectOs() ?? 'mac')
+  const os: Os = (useHydrated() && detectOs()) || 'mac'
   return (
     <div className={tone === 'blue' ? s.getBlue : s.get}>
       <a className={s.primary} href={LINKS.releases}>
