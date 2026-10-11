@@ -298,6 +298,9 @@ describe('the client', () => {
           StopListening: () => Effect.die('unused'),
           StopBackground: () => Effect.die('unused'),
           ClearBackground: () => Effect.die('unused'),
+          RunProject: () => Effect.die('unused'),
+          StopLaunch: () => Effect.die('unused'),
+          ClearLaunch: () => Effect.die('unused'),
           Watch: ({ since }) => {
             watches.push(since)
             return Stream.make({

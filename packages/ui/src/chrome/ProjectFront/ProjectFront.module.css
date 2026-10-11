@@ -87,6 +87,9 @@
 .end {
   flex: none;
   align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-top: 2px;
 }
 .end button[data-state='open'] {

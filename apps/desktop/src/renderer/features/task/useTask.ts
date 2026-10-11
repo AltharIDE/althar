@@ -117,6 +117,10 @@ export interface TaskModel {
   readonly stopBackground: (id: string) => Promise<void>
   /** Clears one that ended by itself from the list. */
   readonly clearBackground: (id: string) => Promise<void>
+  /** Runs what it built, with no agent, in its worktree. */
+  readonly runProject: () => Promise<void>
+  readonly stopLaunch: (id: string) => Promise<void>
+  readonly clearLaunch: (id: string) => Promise<void>
   readonly dismissError: () => void
 }
 
@@ -218,6 +222,13 @@ export const useTask = (threadId: string): TaskModel => {
       )
       return
     }
+    // What Althar runs of the project, whole each time: this task's, which the pill over the composer shows.
+    if (event._tag === 'Launches')
+      return void setSnapshot((current) =>
+        current.project.id !== event.projectId
+          ? current
+          : { ...current, task: { ...current.task, launches: event.launches.filter((launch) => launch.taskId === current.task.id) } },
+      )
     if (event.threadId !== threadId) return
     // How full the lead's context is, as it says: kept on its session, which the composer shows.
     if (event._tag === 'Context')
@@ -421,6 +432,9 @@ export const useTask = (threadId: string): TaskModel => {
     stopListening: (url) => onTask((taskId) => client.stopListening(taskId, url)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),
+    runProject: () => act(async () => (snapshot === null ? undefined : client.runProject(snapshot.project.id, snapshot.task.id, threadId))),
+    stopLaunch: (id) => act(() => client.stopLaunch(id)),
+    clearLaunch: (id) => act(() => client.clearLaunch(id)),
     dismissError: () => setError(null),
   }
 }

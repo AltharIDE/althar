@@ -94,6 +94,16 @@ export const Quiet: Story = {
   },
 }
 
+const runIt = fn()
+/** Where its repository says how it runs, its default branch runs from here, with no agent, before its settings. */
+export const Runs: Story = {
+  args: { run: { command: 'bun run dev', onRun: runIt } },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Run bun run dev' }))
+    await expect(runIt).toHaveBeenCalledOnce()
+  },
+}
+
 /** A new project: its name and its one repository, nothing to say yet of how it stands. */
 export const New: Story = {
   args: {
@@ -131,6 +141,7 @@ export const Crowded: Story = {
       { id: 'ops', name: 'meridian-ops', brand: Brand.GitLab },
       PARTS[3] ?? { id: 'tracker', name: 'MER issues' },
     ],
+    run: { command: 'pnpm --filter api dev', onRun: fn() },
   },
   decorators: [(Story) => <div style={{ width: 640 }}>{Story()}</div>],
 }
@@ -143,6 +154,7 @@ export const AllStates: Story = {
       cells={[
         { state: 'standing', node: <ProjectFront {...args} /> },
         { state: 'quiet', node: <ProjectFront {...args} yours={0} inProgress={0} /> },
+        { state: 'runs', node: <ProjectFront {...args} run={{ command: 'bun run dev', onRun: fn() }} /> },
         ...[ProjectInk.Clay, ProjectInk.Moss, ProjectInk.Slate, ProjectInk.Umber].map((ink) => ({
           state: ink,
           node: <ProjectFront {...args} ink={ink} seed={ink} name={ink[0]?.toUpperCase() + ink.slice(1)} />,

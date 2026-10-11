@@ -30,5 +30,6 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [020](020-what-agents-hand-back.md) | What agents hand back is kept in the artifact store, by digest |
 | [021](021-a-question-outlives-its-session.md) | A question waits on the person, and outlives the agent that asked |
 | [022](022-what-agents-leave-running.md) | What an agent leaves running is shown over the composer, and stops with its session |
+| [023](023-althar-runs-the-project.md) | Althar runs the project itself, with no agent |
 | [025](025-new-project-in-its-own-tab.md) | A new project is made in a tab of its own, under the id the window gave it |
 | [026](026-connecting-walks-the-person-in.md) | Connecting walks the person in, and says what the connection can do |

@@ -29,11 +29,12 @@ describe('what crawlers are given', () => {
     expect(HIDDEN.map((page) => page.path)).toEqual(['/docs', '/enterprise'])
   })
 
-  it('links llms.txt only to the site’s own pages, their Markdown, the sitemap and the repository', () => {
+  it('links llms.txt only to the site’s own pages, their Markdown, the sitemap, the repository and ACP', () => {
     const allowed = new Set([
       ...indexed().map((page) => `${ORIGIN}${page.path}`),
       ...Object.values(MARKDOWN).map((path) => `${ORIGIN}${path}`),
       `${ORIGIN}/sitemap.xml`,
+      LINKS.acp,
     ])
     for (const url of urls(llmsTxt(ORIGIN))) expect(allowed.has(url) || url.startsWith(LINKS.repo)).toBe(true)
   })

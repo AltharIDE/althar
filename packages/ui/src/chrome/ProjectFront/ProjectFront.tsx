@@ -6,6 +6,7 @@ import type { ProjectInk } from '../../foundations/ProjectMark/drawing'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import { Button } from '../../primitives/Button/Button'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { type WorkNeed, WorkStatus } from '../WorkStatus/WorkStatus'
 import s from './ProjectFront.module.css'
@@ -17,17 +18,21 @@ import s from './ProjectFront.module.css'
  * (a way into the first of it, and pointed at, what each is), how much is in
  * progress, and what settled last; what it is made of is its repositories,
  * each with its host's mark, and the tracker its tasks name. Only what there
- * is to say shows. Its settings open from the slot at the end.
+ * is to say shows. Running its default branch, where its repository says
+ * how, and its settings are at the end.
  */
 
 export interface ProjectFrontText {
   inProgress: (n: number) => string
+  /** Running the default branch, with the command it runs. */
+  run: (command: string) => string
   /** The list of what the project is made of, for its landmark. */
   madeOf: string
 }
 
 export const projectFrontText: ProjectFrontText = {
   inProgress: (n) => `${n} in progress`,
+  run: (command) => `Run ${command}`,
   madeOf: 'Made of',
 }
 
@@ -58,6 +63,8 @@ export type ProjectFrontProps = RootProps<
     last?: string
     /** What the project is made of, its repositories first. */
     parts?: ReadonlyArray<ProjectPart>
+    /** Runs its default branch, with no agent: what the run command is, and running it. */
+    run?: { readonly command: string; readonly onRun: () => void }
     /** The way to the project's settings, at the end: a ControlCenter with its button. */
     settings?: ReactNode
     headingLevel?: HeadingLevel
@@ -75,6 +82,7 @@ export function ProjectFront({
   inProgress = 0,
   last,
   parts = [],
+  run,
   settings,
   headingLevel = 1,
   className,
@@ -132,7 +140,16 @@ export function ProjectFront({
           </ul>
         )}
       </div>
-      {settings != null && <div className={s.end}>{settings}</div>}
+      {(run !== undefined || settings != null) && (
+        <div className={s.end}>
+          {run !== undefined && (
+            <Button size="small" variant="quiet" icon="terminal" onClick={run.onRun}>
+              {t.run(run.command)}
+            </Button>
+          )}
+          {settings}
+        </div>
+      )}
     </header>
   )
 }

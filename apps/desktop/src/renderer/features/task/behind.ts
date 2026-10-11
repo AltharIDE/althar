@@ -1,17 +1,17 @@
 import { useState } from 'react'
 
-import type { BackgroundCommand, ThreadItem, ThreadSnapshot } from '@althar/contracts'
-import type { Heard, ListenSource, RunningProcess } from '@althar/ui'
+import type { ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import type { Heard, ListenSource } from '@althar/ui'
 
 import { productBrand } from '../../shared/products'
 import type { ArrivalContent } from '../../shared/thread'
 import { heardVerb } from '../../shared/ThreadBlocks'
-import { ago, running } from '../../shared/time'
+import { ago } from '../../shared/time'
 
 /*
  * What goes on behind a task, outside its conversation, as the pills over
  * its composer show it: the pull requests it listens to, and what was last
- * heard from them; and what its lead left running, such as a dev server.
+ * heard from them. What runs behind it is shared/running.ts's.
  */
 
 export const behindText = {
@@ -62,17 +62,3 @@ export function useHeard(items: ReadonlyArray<ThreadItem> | null): Heard | null 
   if (first === undefined || latest === undefined || latest.id === first) return null
   return { key: latest.id, text: heardLine(latest.content) }
 }
-
-/** Where one answers, as the pill says it: the address without its scheme or a bare trailing slash. */
-export const addressOf = (url: string) => url.replace(/^https?:\/\//, '').replace(/\/$/, '')
-
-/** What the lead left running, each with how long it has run, or when it ended by itself and how. */
-export const runningOf = (background: ReadonlyArray<BackgroundCommand>, now: string): ReadonlyArray<RunningProcess> =>
-  background.map((command) => ({
-    id: command.id,
-    command: command.command,
-    ...(command.url === null ? {} : { url: addressOf(command.url) }),
-    ...(command.ended === null
-      ? { since: running(command.startedAt, now) }
-      : { since: ago(command.ended.at, new Date(now)), exited: command.ended.code }),
-  }))

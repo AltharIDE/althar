@@ -34,6 +34,24 @@ export interface CoordinatorFolder {
   }>
 }
 
+/**
+ * A worktree of `repository` at `path`, detached at its default branch as the
+ * remote has it, or offline as this Mac has it: made if it isn't there, and
+ * anything written in it since thrown away, but what git ignores, such as
+ * installed packages.
+ */
+export const freshCopy = (repository: string, path: string, base: string) =>
+  Effect.gen(function* () {
+    const fetched = yield* fetchBranch(repository, base)
+    const remote = fetched ? yield* commitOf(repository, `origin/${base}`).pipe(Effect.option) : Option.none()
+    const commit = Option.isSome(remote) ? remote.value : yield* commitOf(repository, base)
+    if (!existsSync(path)) yield* git(repository, 'worktree', 'add', '--detach', path, commit)
+    else {
+      yield* git(path, 'checkout', '--detach', '--force', commit)
+      yield* git(path, 'clean', '-fdq')
+    }
+  })
+
 /** The project's coordinator folder, made if it isn't there, and each repository fresh from its default branch. */
 export const coordinatorFolder = (projectId: string) =>
   Effect.gen(function* () {
@@ -54,15 +72,7 @@ export const coordinatorFolder = (projectId: string) =>
       Effect.gen(function* () {
         const base = binding.base ?? 'main'
         const path = join(folder, binding.slug)
-        // The remote's default branch where there is one; offline, what this Mac has.
-        const fetched = yield* fetchBranch(binding.repository, base)
-        const remote = fetched ? yield* commitOf(binding.repository, `origin/${base}`).pipe(Effect.option) : Option.none()
-        const commit = Option.isSome(remote) ? remote.value : yield* commitOf(binding.repository, base)
-        if (!existsSync(path)) yield* git(binding.repository, 'worktree', 'add', '--detach', path, commit)
-        else {
-          yield* git(path, 'checkout', '--detach', '--force', commit)
-          yield* git(path, 'clean', '-fdq')
-        }
+        yield* freshCopy(binding.repository, path, base)
         return {
           name: binding.name,
           path: binding.within === null ? path : join(path, binding.within),

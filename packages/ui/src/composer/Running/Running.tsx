@@ -22,6 +22,8 @@ export interface RunningProcess {
   url?: string
   /** How long it has run, or when it stopped: 12m. */
   since?: string
+  /** Where it runs, where several places run things: a task, the default branch. */
+  where?: string
   /** It exited on its own, with this code; null where the code isn't known. */
   exited?: number | null
 }
@@ -138,9 +140,21 @@ export function Running({ processes, onStop, onDismiss, onOutput, onOpenUrl, ope
                   ))}
               </span>
               <span className={s.rowMeta}>
-                {p.exited !== undefined && <span className={cx(bad(p.exited) && s.bad)}>{t.exited(p.exited)}</span>}
-                {p.exited !== undefined && p.since && ' · '}
-                {p.since}
+                {[
+                  p.where !== undefined && (
+                    <span key="where" className={s.where}>
+                      {p.where}
+                    </span>
+                  ),
+                  p.exited !== undefined && (
+                    <span key="exited" className={cx(bad(p.exited) && s.bad)}>
+                      {t.exited(p.exited)}
+                    </span>
+                  ),
+                  p.since !== undefined && <span key="since">{p.since}</span>,
+                ]
+                  .filter(Boolean)
+                  .flatMap((part, at) => (at === 0 ? [part] : [<span key={`and${at}`}> · </span>, part]))}
               </span>
             </span>
             {onOutput && (
