@@ -340,6 +340,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       read: loggedInField,
       paidBy: claudePaidBy,
       login: 'claude auth login',
+      // The browser only: where it can't reach back, the code its page shows goes into Claude Code itself, signing in with `login` in Terminal.
       inApp: { kind: 'claude-login', ways: ['browser'], run: () => ({ command: 'claude', args: ['auth', 'login', '--claudeai'] }) },
       // Its sign-in is a Keychain item named after the home's path, which deleting the folder would leave behind.
       logout: { run: () => ({ command: 'claude', args: ['auth', 'logout'] }), line: 'claude auth logout' },

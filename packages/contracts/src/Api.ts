@@ -81,13 +81,8 @@ export type AgentStatus = typeof AgentStatus.Type
 /** How signing an account in inside Althar stands (ADR-012): the agent's own login, run in the account's home. */
 export const AccountSignInState = Schema.Union([
   Schema.Struct({ state: Schema.Literal('starting') }),
-  /** Waiting on the browser. `link` opens it elsewhere; `paste`: a code the page shows can be pasted; `refused`: the last one wasn't taken, in the agent's words. */
-  Schema.Struct({
-    state: Schema.Literal('browser'),
-    link: Schema.NullOr(Schema.String),
-    paste: Schema.Boolean,
-    refused: Schema.NullOr(Schema.String),
-  }),
+  /** Waiting on the browser. `link` opens it elsewhere. */
+  Schema.Struct({ state: Schema.Literal('browser'), link: Schema.NullOr(Schema.String) }),
   /** A one-time code to type on `page`, good until `expiresAt`. */
   Schema.Struct({ state: Schema.Literal('device'), code: Schema.String, page: Schema.String, expiresAt: Schema.String }),
   /** Signed in, as `who` on `plan` where the agent says. */
@@ -1545,8 +1540,6 @@ export const Api = RpcGroup.make(
     Schema.Struct({ flowId: Schema.String, state: AccountSignInState }),
   ),
   call('GetAccountSignIn', { flowId: Schema.String }, AccountSignInState),
-  /** A code the browser's page showed, for the agent. */
-  command('PasteAccountSignInCode', { flowId: Schema.String, code: Schema.String }, Schema.Void),
   command('CancelAccountSignIn', { flowId: Schema.String }, Schema.Void),
   /** A project's rules. */
   call('GetProjectRules', { projectId: Schema.String }, ProjectRulesView),

@@ -633,7 +633,6 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     signInAccount: vi.fn(async () => ({ line: 'codex login', opened: true })),
     startAccountSignIn: vi.fn(async () => ({ flowId: 'flow_account', state: { state: 'starting' as const } })),
     getAccountSignIn: vi.fn(async (): Promise<AccountSignInState> => ({ state: 'starting' })),
-    pasteAccountSignInCode: vi.fn(async () => {}),
     cancelAccountSignIn: vi.fn(async () => {}),
     listIssues: vi.fn(async () => ({ issues: [] })),
     markReady: vi.fn(async () => {}),

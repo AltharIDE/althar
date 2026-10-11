@@ -1,23 +1,39 @@
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import { type AgentDefinition, agents } from '../src/registry'
-import { claudeWho, type SignInFlowEvent, type SignInFlowOptions, startSignInFlow } from '../src/signInFlow'
+import { claudeWho, type SignInFlowEvent, type SignInFlowHandle, type SignInFlowOptions, startSignInFlow } from '../src/signInFlow'
 
 /*
  * Each agent's sign-in, run against a stand-in for its login: a script that
  * says what the real one says, so no browser opens and no sign-in happens.
  */
 
-/** Claude Code's login: its fallback page, a code from stdin (bad turned down), then its status. */
-const CLAUDE_LOGIN = `
+/**
+ * Claude Code's login: it says to open the browser, and prints its page for a
+ * code, which the real one reads from its input. Whatever reaches its input
+ * is kept in `heard`, for the test to read. Then the browser comes back, the
+ * login fails, or it waits.
+ */
+const CLAUDE_LOGIN = (heard: string, ending: 'signed in' | 'failed' | 'waits') => `
+const fs = require('node:fs')
+fs.writeFileSync(${JSON.stringify(heard)}, '')
+process.stdin.on('data', (data) => fs.appendFileSync(${JSON.stringify(heard)}, data))
 process.stdout.write('Opening browser to sign in…\\n')
-setTimeout(() => process.stdout.write("If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true\\n"), 20)
-process.stdin.on('data', (data) => {
-  const code = String(data).trim()
-  if (code === 'bad') return process.stderr.write('Invalid code. Please make sure the full code was copied.\\n')
-  if (code === 'stop') { process.stderr.write('Login failed: network\\n'); process.exit(1) }
-  process.exit(0)
-})`
+process.stdout.write("If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true\\n")
+${
+  ending === 'signed in'
+    ? 'setTimeout(() => process.exit(0), 100)'
+    : ending === 'failed'
+      ? "setTimeout(() => { process.stderr.write('Login failed: network\\n'); process.exit(1) }, 100)"
+      : 'setInterval(() => {}, 1000)'
+}`
+
+/** A file for what reaches Claude Code's input. */
+const heardFile = () => join(mkdtempSync(join(tmpdir(), 'althar-claude-login-')), 'heard')
 
 const CLAUDE_STATUS = `console.log(JSON.stringify({ loggedIn: true, email: 'you@meridian.dev', subscriptionType: 'max' }))`
 
@@ -55,7 +71,7 @@ process.stdin.once('data', (data) => {
   setTimeout(() => process.exit(0), 2000)
 })`
 
-const claude = (login = CLAUDE_LOGIN): AgentDefinition => ({
+const claude = (login: string): AgentDefinition => ({
   ...agents['claude-code'],
   signIn: {
     ...agents['claude-code'].signIn,
@@ -76,7 +92,7 @@ const codex = (ending: 'success' | 'failure' = 'success'): AgentDefinition => ({
 const run = (
   agent: AgentDefinition,
   options: SignInFlowOptions,
-  then: (said: ReadonlyArray<SignInFlowEvent>, handle: { paste: (code: string) => void; cancel: () => void }) => void = () => {},
+  then: (said: ReadonlyArray<SignInFlowEvent>, handle: SignInFlowHandle) => void = () => {},
 ) =>
   new Promise<ReadonlyArray<SignInFlowEvent>>((resolve) => {
     const said: SignInFlowEvent[] = []
@@ -84,7 +100,7 @@ const run = (
       agent,
       (event) => {
         said.push(event)
-        then(said, handle ?? { paste: () => {}, cancel: () => {} })
+        then(said, handle ?? { cancel: () => {} })
         if (event.kind === 'done' || event.kind === 'failed') resolve(said)
       },
       options,
@@ -93,32 +109,43 @@ const run = (
   })
 
 describe('signing in inside Althar', () => {
-  it('runs Claude Code’s login: the browser, its page for a code, a code turned down, and who it signed in as', async () => {
-    let pasted = 0
-    const said = await run(claude(), { way: 'browser' }, (events, handle) => {
-      const last = events.at(-1)
-      if (last?.kind === 'browser' && last.paste && pasted === 0) {
-        pasted += 1
-        handle.paste('bad')
-      }
-      if (last?.kind === 'refused' && pasted === 1) {
-        pasted += 1
-        handle.paste(' good ')
-      }
-    })
+  it('never writes to Claude Code’s login: not while it waits, not once it signs in, not when it is stopped', async () => {
+    // Signed in in the browser: who as, and nothing reached its input. Althar has no way to give it one.
+    const heard = heardFile()
+    let handed: ReadonlyArray<string> = []
+    const said = await run(
+      claude(CLAUDE_LOGIN(heard, 'signed in')),
+      { way: 'browser' },
+      (_said, handle) => void (handed = Object.keys(handle)),
+    )
     expect(said).toEqual([
-      { kind: 'browser', link: null, paste: false },
-      { kind: 'browser', link: 'https://claude.com/cai/oauth/authorize?code=true', paste: true },
-      { kind: 'refused', message: 'Invalid code. Please make sure the full code was copied.' },
+      { kind: 'browser', link: null },
       { kind: 'done', who: 'you@meridian.dev', plan: 'Claude Max' },
     ])
+    expect(readFileSync(heard, 'utf8')).toBe('')
+    expect(handed).toEqual(['cancel'])
+
+    // Stopped while it waits on the browser: nothing more is said, and still nothing reached it.
+    const waiting = heardFile()
+    const events: SignInFlowEvent[] = []
+    const handle = startSignInFlow(claude(CLAUDE_LOGIN(waiting, 'waits')), (event) => void events.push(event), { way: 'browser' })
+    for (let tries = 0; tries < 100 && !existsSync(waiting); tries++) await new Promise((resolve) => setTimeout(resolve, 20))
+    handle?.cancel()
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(events).toEqual([{ kind: 'browser', link: null }])
+    expect(readFileSync(waiting, 'utf8')).toBe('')
   })
 
-  it('says why Claude Code’s login stopped, in its words', async () => {
-    const said = await run(claude(), { way: 'browser' }, (events, handle) => {
-      if (events.at(-1)?.kind === 'browser' && events.length === 2) handle.paste('stop')
-    })
+  it('says why Claude Code’s login stopped, in its words, and never its page for a code', async () => {
+    const said = await run(claude(CLAUDE_LOGIN(heardFile(), 'failed')), { way: 'browser' })
     expect(said.at(-1)).toEqual({ kind: 'failed', message: 'Login failed: network' })
+    const quiet = await run(
+      claude(
+        `process.stdout.write("If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true\\n"); process.exit(1)`,
+      ),
+      { way: 'browser' },
+    )
+    expect(quiet.at(-1)).toEqual({ kind: 'failed', message: 'Claude Code stopped signing in.' })
   })
 
   it('opens Codex’s page in the browser itself, and says who signed in, minding only its own sign-in', async () => {
@@ -126,7 +153,7 @@ describe('signing in inside Althar', () => {
     const said = await run(codex(), { way: 'browser', openUrl: (url) => void opened.push(url) })
     expect(opened).toEqual(['https://auth.openai.com/oauth/authorize?x=1'])
     expect(said).toEqual([
-      { kind: 'browser', link: 'https://auth.openai.com/oauth/authorize?x=1', paste: false },
+      { kind: 'browser', link: 'https://auth.openai.com/oauth/authorize?x=1' },
       { kind: 'done', who: 'dana@northwind.io', plan: 'ChatGPT Pro' },
     ])
   })
@@ -156,7 +183,6 @@ describe('signing in inside Althar', () => {
     const handle = startSignInFlow(codex(), (event) => void said.push(event), { way: 'device' })
     await new Promise((resolve) => setTimeout(resolve, 10))
     handle?.cancel()
-    handle?.paste('ignored')
     await new Promise((resolve) => setTimeout(resolve, 200))
     expect(said.filter((event) => event.kind === 'done' || event.kind === 'failed')).toEqual([])
   })
@@ -165,7 +191,7 @@ describe('signing in inside Althar', () => {
     const said = await run(claude(`setTimeout(() => {}, 10000)`), { way: 'browser', timeout: 50 })
     expect(said.at(-1)).toEqual({ kind: 'failed', message: 'The sign-in wasn’t finished in time.' })
     expect(startSignInFlow(agents.opencode, () => {}, { way: 'browser' })).toBeNull()
-    expect(startSignInFlow(claude(), () => {}, { way: 'device' })).toBeNull()
+    expect(startSignInFlow(claude('process.exit(0)'), () => {}, { way: 'device' })).toBeNull()
   })
 
   it('reads who Claude Code is signed in as, and its plan, where it says', () => {

@@ -18,7 +18,9 @@ import s from './AccountSignIn.module.css'
  * as, then named in its line. A line or two under it holds what the step
  * asks for. The browser comes first; the other ways follow as quiet links,
  * each as the agent offers it: a one-time code, an API key, the provider's
- * console, a folder an account switcher already signed in.
+ * console, a folder an account switcher already signed in. There is no field
+ * for a code the browser's page shows: where the browser can't reach back,
+ * that code goes into the agent itself, in Terminal.
  *
  * The sign-in itself is the consumer's: it runs the agent's own login and
  * moves `step` on. This draws the step it is given and says what was chosen.
@@ -31,8 +33,8 @@ import s from './AccountSignIn.module.css'
 export type AccountSignInStep =
   /** The ways in. */
   | { kind: 'choose' }
-  /** The agent's sign-in is open in the browser, waiting on `host`. `link`: to open it elsewhere. `paste`: it takes a code the page shows when the browser can't reach back. */
-  | { kind: 'browser'; host: string; link?: string; paste?: boolean; pasteError?: ReactNode }
+  /** The agent's sign-in is open in the browser, waiting on `host`. `link`: to open it elsewhere. `terminal`: where the browser can't reach back, it signs in in Terminal instead. */
+  | { kind: 'browser'; host: string; link?: string; terminal?: boolean }
   /** The agent's sign-in runs in a terminal: opened there, or, where it couldn't be, `line` to run. `notYet`: back without being signed in. */
   | { kind: 'terminal'; line: string; opened: boolean; notYet?: boolean }
   /** A one-time code to type on `page`. `lasts`: how long it still works, as the person reads it. */
@@ -52,8 +54,8 @@ export type AccountSignInStep =
 
 /** The ways an agent offers in. Each shows only when given. */
 export interface AccountSignInWays {
-  /** The plan it signs in to in the browser: Claude, ChatGPT. */
-  browser?: string
+  /** It signs in in the browser, by its own sign-in. */
+  browser?: boolean
   /** It signs in with its own command, in a terminal: first where there is no browser way, else among the others. */
   terminal?: boolean
   /** It signs in with a one-time code too. */
@@ -73,7 +75,7 @@ export interface AccountSignInText {
   signingIn: (name: string) => string
   cancel: string
   leave: string
-  continueWith: (plan: string) => string
+  signInTo: (agent: string) => string
   inTerminalWay: string
   terminal: string
   signInAs: (who: string) => string
@@ -86,10 +88,6 @@ export interface AccountSignInText {
   holds: (who: string) => string
   approveOn: (host: string) => string
   copyLink: string
-  pasteCode: string
-  pasteField: (host: string) => string
-  continue: string
-  emptyPaste: string
   another: string
   inTerminal: string
   runIt: string
@@ -125,7 +123,7 @@ export const accountSignInText: AccountSignInText = {
   signingIn: (name) => `Signing ${name} in`,
   cancel: 'Cancel signing in',
   leave: 'Cancel',
-  continueWith: (plan) => `Continue with ${plan}`,
+  signInTo: (agent) => `Sign in to ${agent}`,
   inTerminalWay: 'Sign in in Terminal',
   terminal: 'In Terminal',
   signInAs: (who) => `Sign in as ${who}`,
@@ -138,10 +136,6 @@ export const accountSignInText: AccountSignInText = {
   holds: (who) => `The browser may still be signed in as ${who}. To add someone else, use another browser profile, or a code.`,
   approveOn: (host) => `Approve on ${host} in your browser`,
   copyLink: 'Copy the link',
-  pasteCode: 'Paste a code',
-  pasteField: (host) => `The code ${host} showed`,
-  continue: 'Continue',
-  emptyPaste: 'Paste the code first',
   another: 'Another way',
   inTerminal: 'Finish signing in in Terminal',
   runIt: 'Run this in a terminal to sign in',
@@ -189,8 +183,6 @@ export interface AccountSignInProps {
   onOpen?: () => void
   /** Asks the agent again who it is signed in as, after a sign-in in a terminal. */
   onCheck?: () => void
-  /** A code the browser showed, pasted. */
-  onPaste?: (code: string) => void
   /** A key, to check and keep. */
   onKey?: (key: string) => void
   /** Adds a folder an account switcher made, by its id. */
@@ -336,7 +328,6 @@ function Under({
   onWay,
   onOpen,
   onCheck,
-  onPaste,
   onKey,
   onAdopt,
   onChooseFolder,
@@ -359,7 +350,7 @@ function Under({
       // The first way in is a button: the browser, or else the agent's own command in a terminal.
       const first = ways.browser ? (
         <Button size="small" icon="external" onClick={() => onWay(SignInWay.Browser)}>
-          {account ? (account.who ? t.signInAs(account.who) : t.signInAgain) : t.continueWith(ways.browser)}
+          {account ? (account.who ? t.signInAs(account.who) : t.signInAgain) : t.signInTo(agent)}
         </Button>
       ) : ways.terminal ? (
         <Button size="small" icon="terminal" onClick={() => onWay(SignInWay.Terminal)}>
@@ -382,7 +373,15 @@ function Under({
       )
     }
     case 'browser':
-      return <Browser step={step} t={t} onPaste={onPaste} another={another} />
+      return (
+        <div className={s.under}>
+          <div className={s.row}>
+            {step.link && <CopyButton value={step.link} text={{ copy: t.copyLink }} />}
+            {step.terminal && <LinkButton onClick={() => onWay(SignInWay.Terminal)}>{t.inTerminalWay}</LinkButton>}
+            {another}
+          </div>
+        </div>
+      )
     case 'terminal':
       return (
         <div className={s.under}>
@@ -479,69 +478,6 @@ function Under({
     default:
       return unreachable(step)
   }
-}
-
-function Browser({
-  step,
-  t,
-  onPaste,
-  another,
-}: {
-  step: Extract<AccountSignInStep, { kind: 'browser' }>
-  t: AccountSignInText
-  onPaste?: (code: string) => void
-  another: ReactNode
-}) {
-  const [pasting, setPasting] = useState(false)
-  const field = useRef<HTMLInputElement>(null)
-  // Pasting starts in the field.
-  useEffect(() => {
-    if (pasting) field.current?.focus()
-  }, [pasting])
-  const [code, setCode] = useState('')
-  const [empty, setEmpty] = useState(false)
-  const errorId = useId()
-  if (pasting && onPaste)
-    return (
-      <form
-        className={s.under}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (code.trim() === '') return setEmpty(true)
-          onPaste(code.trim())
-        }}
-      >
-        <div className={s.row}>
-          <Field
-            ref={field}
-            value={code}
-            placeholder={t.pasteField(step.host)}
-            aria-label={t.pasteField(step.host)}
-            invalid={empty || step.pasteError !== undefined}
-            aria-describedby={empty || step.pasteError ? errorId : undefined}
-            className={s.field}
-            onChange={(event) => {
-              setCode(event.target.value)
-              setEmpty(false)
-            }}
-          />
-          <Button size="small" type="submit">
-            {t.continue}
-          </Button>
-          {another}
-        </div>
-        {(empty || step.pasteError) && <FieldError id={errorId}>{empty ? t.emptyPaste : step.pasteError}</FieldError>}
-      </form>
-    )
-  return (
-    <div className={s.under}>
-      <div className={s.row}>
-        {step.link && <CopyButton value={step.link} text={{ copy: t.copyLink }} />}
-        {step.paste && onPaste && <LinkButton onClick={() => setPasting(true)}>{t.pasteCode}</LinkButton>}
-        {another}
-      </div>
-    </div>
-  )
 }
 
 function Key({

@@ -16,14 +16,10 @@ export const brandOf = (agentId: string): Brand | undefined => BRANDS[agentId]
 /** What a step held for a usage limit waits for: the agent, and when it is back. */
 export const waitsWords = (agent: string, at: string) => `Waits for ${agent}, back at ${at}`
 
-/** What an agent signs in to in the browser, as the window names it: the plan, and the site that asks. */
-const SIGN_IN: Readonly<Record<string, { readonly plan: string; readonly host: string }>> = {
-  'claude-code': { plan: 'Claude', host: 'claude.ai' },
-  codex: { plan: 'ChatGPT', host: 'chatgpt.com' },
-}
+/** The site that asks, where an agent signs in in the browser. */
+const SIGN_IN_HOSTS: Readonly<Record<string, string>> = { 'claude-code': 'claude.ai', codex: 'chatgpt.com' }
 
-export const signInWordsOf = (agentId: string): { readonly plan: string; readonly host: string } =>
-  SIGN_IN[agentId] ?? { plan: 'your account', host: 'the sign-in page' }
+export const signInHostOf = (agentId: string): string => SIGN_IN_HOSTS[agentId] ?? 'the sign-in page'
 
 /** Who makes an agent, as Settings says it under its name; none for one that runs anyone's models. */
 const MAKERS: Readonly<Record<string, string>> = { 'claude-code': 'Anthropic', codex: 'OpenAI' }

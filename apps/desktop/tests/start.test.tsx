@@ -149,7 +149,7 @@ describe('accounts in settings', () => {
       const view = withServices(<Settings />, client)
       const accounts = await codexAccounts()
       await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-      await userEvent.click(within(accounts).getByRole('button', { name: 'Continue with ChatGPT' }))
+      await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in to Codex' }))
       await within(accounts).findByRole('textbox', { name: 'Name this account' }, { timeout: 3000 })
       // The agents' next read never comes back before the screen closes.
       vi.mocked(client.status).mockImplementation(() => new Promise(() => undefined))
@@ -170,7 +170,7 @@ describe('accounts in settings', () => {
     withServices(<Settings />, client)
     const accounts = await codexAccounts()
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-    await userEvent.click(within(accounts).getByRole('button', { name: 'Continue with ChatGPT' }))
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in to Codex' }))
     await waitFor(() => expect(client.startAccountSignIn).toHaveBeenCalledWith('acc_added', 'browser'))
     // Left before the agent's login says it started: once it does, it is stopped.
     await userEvent.keyboard('{Escape}')
@@ -188,7 +188,7 @@ describe('accounts in settings', () => {
     const screenOne = withServices(<Settings />, client)
     let accounts = await codexAccounts()
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-    await userEvent.click(within(accounts).getByRole('button', { name: 'Continue with ChatGPT' }))
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in to Codex' }))
     await waitFor(() => expect(client.startAccountSignIn).toHaveBeenCalledWith('acc_added', 'browser'))
     // Closed before the agent's login says it started: once it does, it is stopped, and the account made for it goes.
     screenOne.unmount()
@@ -200,7 +200,7 @@ describe('accounts in settings', () => {
     const screenTwo = withServices(<Settings />, client)
     accounts = await codexAccounts()
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-    await userEvent.click(within(accounts).getByRole('button', { name: 'Continue with ChatGPT' }))
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in to Codex' }))
     started({ flowId: 'flow_open', state: { state: 'starting' } })
     await waitFor(() => expect(client.getAccountSignIn).toHaveBeenCalledWith('flow_open'))
     expect(client.cancelAccountSignIn).not.toHaveBeenCalledWith('flow_open')
@@ -209,12 +209,11 @@ describe('accounts in settings', () => {
   })
 
   it(
-    'signs a new account in in the browser, takes a pasted code, and names it as who signed in',
+    'signs a new account in in the browser, and names it as who signed in',
     async () => {
       const codex = withWays(['browser', 'device'], usual('acc_usual', 'signed_in'))
       const states: AccountSignInState[] = [
-        { state: 'browser', link: 'https://auth.openai.com/oauth/authorize?x=1', paste: true, refused: null },
-        { state: 'browser', link: 'https://auth.openai.com/oauth/authorize?x=1', paste: true, refused: 'Invalid code.' },
+        { state: 'browser', link: 'https://auth.openai.com/oauth/authorize?x=1' },
         { state: 'done', who: 'dana@northwind.io', plan: 'ChatGPT Team' },
       ]
       let at = 0
@@ -222,22 +221,54 @@ describe('accounts in settings', () => {
       withServices(<Settings />, client)
       const accounts = await codexAccounts()
       await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-      await userEvent.click(within(accounts).getByRole('button', { name: 'Continue with ChatGPT' }))
+      await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in to Codex' }))
       await waitFor(() => expect(client.startAccountSignIn).toHaveBeenCalledWith('acc_added', 'browser'))
       expect(await within(accounts).findByText('Approve on chatgpt.com in your browser')).toBeTruthy()
-      // A code the page showed goes to the agent; one it turns down says so.
-      await userEvent.click(await within(accounts).findByRole('button', { name: 'Paste a code' }))
-      await userEvent.type(within(accounts).getByRole('textbox', { name: 'The code chatgpt.com showed' }), 'AB12{Enter}')
-      expect(client.pasteAccountSignInCode).toHaveBeenCalledWith('flow_account', 'AB12')
+      // Its link to open elsewhere; for a browser that can't reach back, its one-time code is another way.
+      expect(await within(accounts).findByRole('button', { name: 'Copy the link' })).toBeTruthy()
+      expect(within(accounts).queryByRole('textbox')).toBeNull()
+      expect(within(accounts).queryByRole('button', { name: 'Sign in in Terminal' })).toBeNull()
       at = 1
-      expect(await within(accounts).findByText('Invalid code.', {}, { timeout: 3000 })).toBeTruthy()
-      at = 2
       const name = await within(accounts).findByRole('textbox', { name: 'Name this account' }, { timeout: 3000 })
       expect((name as HTMLInputElement).value).toBe('Account 2')
       expect(within(accounts).getByText('dana@northwind.io')).toBeTruthy()
       expect(within(accounts).getByText('ChatGPT Team')).toBeTruthy()
       await userEvent.click(within(accounts).getByRole('button', { name: 'Add account' }))
       await waitFor(() => expect(within(accounts).queryByRole('textbox', { name: 'Name this account' })).toBeNull())
+    },
+    LONG_FLOW,
+  )
+
+  it(
+    'signs Claude Code in in the browser, or in Terminal where the browser can’t reach back, with no field for a code',
+    async () => {
+      const claude: Status = {
+        apiVersion: 1,
+        appVersion: '0.0.0',
+        agents: [{ ...agents[0]!, accounts: [usual('acc_usual', 'signed_in')] }],
+      }
+      const { client } = fakeClient({
+        status: vi.fn(async () => claude),
+        getAccountSignIn: vi.fn(async (): Promise<AccountSignInState> => ({ state: 'browser', link: null })),
+      })
+      withServices(<Settings />, client)
+      const panel = await screen.findByRole('dialog', { name: 'Settings' })
+      await userEvent.click(await within(panel).findByRole('button', { name: /^Agents/ }))
+      const accounts = within(panel).getByRole('list', { name: 'Claude Code accounts' })
+      await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
+      await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in to Claude Code' }))
+      await waitFor(() => expect(client.startAccountSignIn).toHaveBeenCalledWith('acc_added', 'browser'))
+      await waitFor(() => expect(client.getAccountSignIn).toHaveBeenCalledWith('flow_account'))
+      expect(within(accounts).getByText('Approve on claude.ai in your browser')).toBeTruthy()
+      // The code its page shows where the browser can't reach back is for Claude Code itself: Althar has no field for it.
+      expect(within(accounts).queryByRole('textbox')).toBeNull()
+      await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in in Terminal' }))
+      // The login Althar ran stops, and the same account signs in in Terminal.
+      expect(client.cancelAccountSignIn).toHaveBeenCalledWith('flow_account')
+      await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_added'))
+      expect(await within(accounts).findByText('Finish signing in in Terminal')).toBeTruthy()
+      expect(client.addAccount).toHaveBeenCalledTimes(1)
+      expect(client.removeAccount).not.toHaveBeenCalled()
     },
     LONG_FLOW,
   )

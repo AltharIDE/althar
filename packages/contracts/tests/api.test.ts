@@ -212,7 +212,6 @@ describe('the API', () => {
               SetCoAuthor: () => Effect.die('unused'),
               StartAccountSignIn: () => Effect.die('unused'),
               GetAccountSignIn: () => Effect.die('unused'),
-              PasteAccountSignInCode: () => Effect.die('unused'),
               CancelAccountSignIn: () => Effect.die('unused'),
               GetThreadItem: () => Effect.die('unused'),
               ReadOutput: () => Effect.die('unused'),

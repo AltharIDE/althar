@@ -771,7 +771,6 @@ export const handlers = Api.toLayer(
         ),
       StartAccountSignIn: ({ commandId, accountId, way }) => once(commandId, api(accountSignIns.start({ accountId, way }))),
       GetAccountSignIn: ({ flowId }) => accountSignIns.get(flowId),
-      PasteAccountSignInCode: ({ commandId, flowId, code }) => once(commandId, api(accountSignIns.paste(flowId, code))),
       CancelAccountSignIn: ({ commandId, flowId }) => once(commandId, api(accountSignIns.cancel(flowId))),
       GetProjectRules: ({ projectId }) =>
         api(

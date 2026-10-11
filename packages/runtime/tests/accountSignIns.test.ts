@@ -15,9 +15,9 @@ import { Secrets } from '../src/Secrets'
 import { definition, fakeConnectors } from './support'
 
 /*
- * Signing an account in inside Althar: the agent's own login, here a stand-in
- * for Codex's app-server that answers as the real one does, so nothing signs
- * in and no browser opens.
+ * Signing an account in inside Althar: the agent's own login, here stand-ins
+ * for Codex's app-server and Claude Code's login that answer as the real ones
+ * do, so nothing signs in and no browser opens.
  */
 
 const SERVER = `
@@ -39,16 +39,17 @@ process.stdin.on('data', (data) => {
   }
 })`
 
-/* Claude Code's login: a page to open, codes pasted on stdin, one refused, and then given up on. */
+/* Claude Code's login: its page for a code, which only Claude Code itself takes, then given up on. Anything on its input stops it at once. */
 const CLAUDE = `
 process.stdout.write('If the browser didn\\'t open, visit: https://claude.ai/oauth/authorize?x=1\\n')
 process.stdin.on('data', (data) => {
-  if (String(data).trim() === 'wrong') process.stderr.write('Invalid code. Try again.\\n')
-  else {
-    process.stderr.write('Login was not completed.\\n')
-    process.exit(1)
-  }
-})`
+  process.stderr.write('Althar wrote: ' + String(data))
+  process.exit(1)
+})
+setTimeout(() => {
+  process.stderr.write('Login was not completed.\\n')
+  process.exit(1)
+}, 300)`
 
 const claudeSigningIn = (): AgentDefinition => {
   const base = definition('claude-code')
@@ -110,12 +111,7 @@ describe('signing an account in inside Althar', () => {
       if (usual === undefined) return assert.fail('Codex has its usual account')
       const { flowId } = yield* signIns.start({ accountId: usual.id, way: 'browser' })
       const browser = yield* until(signIns.get(flowId), settled)
-      assert.deepStrictEqual(browser, {
-        state: 'browser',
-        link: 'https://auth.openai.com/oauth/authorize?x=1',
-        paste: false,
-        refused: null,
-      })
+      assert.deepStrictEqual(browser, { state: 'browser', link: 'https://auth.openai.com/oauth/authorize?x=1' })
       assert.deepStrictEqual(opened, ['https://auth.openai.com/oauth/authorize?x=1'])
       const done = yield* until(signIns.get(flowId), (state) => state.state === 'done', Duration.seconds(10))
       assert.deepStrictEqual(done, { state: 'done', who: 'dana@northwind.io', plan: 'ChatGPT Team' })
@@ -135,12 +131,10 @@ describe('signing an account in inside Althar', () => {
       if (device.state !== 'device') return
       assert.deepStrictEqual([device.code, device.page], ['LNBY-V0Q5J', 'https://auth.openai.com/codex/device'])
       assert.isTrue(new Date(device.expiresAt).getTime() > Date.now() + 14 * 60_000)
-      // Another for the same agent stops the first; pasting into one that was left does nothing.
+      // Another for the same agent stops the first.
       const second = yield* signIns.start({ accountId: usual.id, way: 'browser' })
       assert.deepStrictEqual(yield* signIns.get(first.flowId), { state: 'failed', message: 'This sign-in was left.' })
-      yield* signIns.paste(first.flowId, 'ignored')
       yield* until(signIns.get(second.flowId), settled)
-      yield* signIns.paste(second.flowId, 'code')
       yield* signIns.cancel(second.flowId)
       assert.strictEqual((yield* signIns.get(second.flowId)).state, 'failed')
       // Claude Code here has no sign-in of its own that Althar runs.
@@ -150,25 +144,15 @@ describe('signing an account in inside Althar', () => {
     }).pipe(Effect.provide(layer(false, opened)))
   })
 
-  it.live('says when a pasted code is refused, takes another, and says why it failed', () =>
+  it.live('waits on the browser for Claude Code, with no page for a code, and says why it stopped', () =>
     Effect.gen(function* () {
       const accounts = yield* Accounts
       const signIns = yield* AccountSignIns
       const [usual] = yield* accounts.of('claude-code')
       if (usual === undefined) return assert.fail('Claude Code has its usual account')
       const { flowId } = yield* signIns.start({ accountId: usual.id, way: 'browser' })
-      const browser = yield* until(signIns.get(flowId), (state) => state.state === 'browser' && state.link !== null)
-      assert.deepStrictEqual(browser, { state: 'browser', link: 'https://claude.ai/oauth/authorize?x=1', paste: true, refused: null })
-      yield* signIns.paste(flowId, 'wrong')
-      const refused = yield* until(signIns.get(flowId), (state) => state.state === 'browser' && state.refused !== null)
-      assert.deepStrictEqual(refused, {
-        state: 'browser',
-        link: 'https://claude.ai/oauth/authorize?x=1',
-        paste: true,
-        refused: 'Invalid code. Try again.',
-      })
-      // Another code clears it while it is tried.
-      yield* signIns.paste(flowId, 'another')
+      // Its page for a code isn't offered: that code goes into Claude Code itself, in Terminal.
+      assert.deepStrictEqual(yield* until(signIns.get(flowId), settled), { state: 'browser', link: null })
       const failed = yield* until(signIns.get(flowId), (state) => state.state === 'failed')
       assert.deepStrictEqual(failed, { state: 'failed', message: 'Login was not completed.' })
     }).pipe(Effect.provide(layer(false, [], claudeSigningIn()))),

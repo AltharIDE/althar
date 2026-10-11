@@ -32,12 +32,11 @@ const meta = {
     agent: 'Codex',
     position: 5,
     step: { kind: 'choose' },
-    ways: { browser: 'ChatGPT', code: true, terminal: true, key: 'OpenAI API key', console: 'OpenAI Platform', found: FOUND, choose: true },
+    ways: { browser: true, code: true, terminal: true, key: 'OpenAI API key', console: 'OpenAI Platform', found: FOUND, choose: true },
     holds: 'you@meridian.dev',
     onWay: fn(),
     onOpen: fn(),
     onCheck: fn(),
-    onPaste: fn(),
     onKey: fn(),
     onAdopt: fn(),
     onChooseFolder: fn(),
@@ -55,7 +54,7 @@ export const Choosing: Story = {
     const c = within(canvasElement)
     await expect(c.getByText('New account')).toBeInTheDocument()
     await expect(c.getByText(/may still be signed in as you@meridian\.dev/)).toBeInTheDocument()
-    await userEvent.click(c.getByRole('button', { name: 'Continue with ChatGPT' }))
+    await userEvent.click(c.getByRole('button', { name: 'Sign in to Codex' }))
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Browser)
     await userEvent.click(c.getByRole('button', { name: 'A code' }))
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Code)
@@ -76,11 +75,11 @@ export const Choosing: Story = {
 
 /** An agent with only its browser sign-in: no links after it. */
 export const OnlyTheBrowser: Story = {
-  args: { ways: { browser: 'Claude' }, holds: undefined },
+  args: { agent: 'Claude Code', ways: { browser: true }, holds: undefined },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.queryByText('or')).toBeNull()
-    await expect(c.getByRole('button', { name: 'Continue with Claude' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Sign in to Claude Code' })).toBeInTheDocument()
   },
 }
 
@@ -107,31 +106,29 @@ export const SigningInAgain: Story = {
   },
 }
 
-/** Waiting on the browser, with its link to open elsewhere, and a code to paste where the browser can't reach back. */
+/** Waiting on the browser, with its link to open elsewhere. */
 export const InTheBrowser: Story = {
-  args: { step: { kind: 'browser', host: 'chatgpt.com', link: 'https://auth.openai.com/authorize?client_id=x', paste: true } },
+  args: { step: { kind: 'browser', host: 'chatgpt.com', link: 'https://auth.openai.com/authorize?client_id=x' } },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByText('Approve on chatgpt.com in your browser')).toBeInTheDocument()
     await expect(c.getByRole('button', { name: 'Copy the link' })).toBeInTheDocument()
-    await userEvent.click(c.getByRole('button', { name: 'Paste a code' }))
-    await userEvent.click(c.getByRole('button', { name: 'Continue' }))
-    await expect(c.getByRole('alert')).toHaveTextContent('Paste the code first')
-    await expect(args.onPaste).not.toHaveBeenCalled()
-    await userEvent.type(c.getByRole('textbox', { name: 'The code chatgpt.com showed' }), ' AB12-CD34 {Enter}')
-    await expect(args.onPaste).toHaveBeenCalledWith('AB12-CD34')
+    await expect(c.queryByRole('textbox')).toBeNull()
     await userEvent.click(c.getByRole('button', { name: 'Another way' }))
     await expect(args.onBack).toHaveBeenCalled()
   },
 }
 
-/** A pasted code the agent turned down. */
-export const PasteRefused: Story = {
-  args: { step: { kind: 'browser', host: 'chatgpt.com', paste: true, pasteError: 'That code has expired.' } },
-  play: async ({ canvasElement }) => {
+/** Waiting on the browser for an agent whose page, where the browser can't reach back, shows a code for the agent itself: that sign-in is in Terminal, and Althar has no field for the code. */
+export const InTheBrowserOrTerminal: Story = {
+  args: { agent: 'Claude Code', ways: { browser: true, terminal: true }, step: { kind: 'browser', host: 'claude.ai', terminal: true } },
+  play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Paste a code' }))
-    await expect(c.getByRole('alert')).toHaveTextContent('That code has expired.')
+    await expect(c.getByText('Approve on claude.ai in your browser')).toBeInTheDocument()
+    await expect(c.queryByRole('textbox')).toBeNull()
+    await expect(c.queryByRole('button', { name: 'Copy the link' })).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Sign in in Terminal' }))
+    await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Terminal)
   },
 }
 
@@ -322,7 +319,7 @@ export const Walkthrough: Story = {
   render: (args) => <Walking {...args} />,
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Continue with ChatGPT' }))
+    await userEvent.click(c.getByRole('button', { name: 'Sign in to Codex' }))
     await expect(await c.findByText('Approve on chatgpt.com in your browser')).toBeInTheDocument()
     await expect(await c.findByRole('textbox', { name: 'Name this account' })).toHaveValue('weekend')
     await userEvent.click(c.getByRole('button', { name: 'Add account' }))
@@ -332,7 +329,8 @@ export const Walkthrough: Story = {
 
 const STEPS: { state: string; step: AccountSignInStep }[] = [
   { state: 'choosing', step: { kind: 'choose' } },
-  { state: 'in the browser', step: { kind: 'browser', host: 'chatgpt.com', link: 'https://auth.openai.com/authorize', paste: true } },
+  { state: 'in the browser', step: { kind: 'browser', host: 'chatgpt.com', link: 'https://auth.openai.com/authorize' } },
+  { state: 'in the browser, or Terminal', step: { kind: 'browser', host: 'claude.ai', terminal: true } },
   { state: 'in Terminal', step: { kind: 'terminal', line: 'codex login', opened: true, notYet: true } },
   { state: 'run it yourself', step: { kind: 'terminal', line: 'CODEX_HOME=~/.althar/codex/side codex login', opened: false } },
   { state: 'a code', step: { kind: 'code', code: 'WDJB-MJHT', page: 'auth.openai.com/device', lasts: '14 min' } },

@@ -5,17 +5,19 @@ import { type AccountSignInStep, accountsText, SignInWay } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import { useServices } from '../../data/services'
-import { signInWordsOf } from '../../shared/agents'
+import { signInHostOf } from '../../shared/agents'
 import type { StartModel } from '../start/useStart'
 
 /*
  * Signing an agent's account in, in its accounts list (ADR-012): a new one,
  * or one again. Where the agent lets it, Althar runs its own login itself:
- * the browser, which comes back by itself, with a code to paste where it
- * can't; or a one-time code to type on another device. The runtime says how
- * it stands, asked every second while it shows. Any agent can still sign in
- * with its own command in Terminal, which Althar checks when the person
- * comes back to the window or asks.
+ * the browser, which comes back by itself; or a one-time code to type on
+ * another device. The runtime says how it stands, asked every second while
+ * it shows. Any agent can still sign in with its own command in Terminal,
+ * which Althar checks when the person comes back to the window or asks.
+ * Where the browser can't reach back and the agent has no one-time code
+ * (Claude Code), Terminal is the way: the code its page shows goes into the
+ * agent itself, never into Althar.
  *
  * A new account is made as the sign-in starts, under a name for now, and
  * named by the person once it is signed in; leaving before then removes it.
@@ -45,8 +47,6 @@ export interface AccountSignInModel {
   readonly reopen: () => void
   /** Asks the agent again whether it is signed in, after Terminal. */
   readonly check: () => void
-  /** A code the browser's page showed. */
-  readonly paste: (code: string) => void
   /** Adds a folder a switcher made, by its grant. */
   readonly adopt: (grant: string) => void
   /** Adds a folder the person picks. */
@@ -86,6 +86,14 @@ const naming = (account: AccountStatus): AccountSignInStep => ({
 /** Terminal opening for the agent's sign-in, until the runtime says it has. */
 const opening: AccountSignInStep = { kind: 'terminal', line: '', opened: true }
 
+/** Waiting on the browser; for where it can't reach back, Terminal, unless the agent has a one-time code (`byCode`). */
+const inBrowser = (agentId: string, link: string | null, byCode: boolean): AccountSignInStep => ({
+  kind: 'browser',
+  host: signInHostOf(agentId),
+  ...(link === null ? {} : { link }),
+  ...(byCode ? {} : { terminal: true }),
+})
+
 /** A page as the person reads it: its host and path. */
 const pageOf = (url: string) => url.replace(/^https?:\/\//, '').replace(/\/$/, '')
 
@@ -100,6 +108,8 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
   const token = useRef(0)
 
   const agentOf = (agentId: string): AgentStatus | undefined => start.status?.agents.find((agent) => agent.id === agentId)
+  /** The agent signs in with a one-time code too, for a browser that can't reach back. */
+  const hasCode = (agentId: string) => agentOf(agentId)?.ways.includes('device') === true
   const accountsOf = (agentId: string) => agentOf(agentId)?.accounts ?? []
   const fresh = (agentId: string) => newName(accountsOf(agentId).length + 1)
 
@@ -151,11 +161,11 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
   // While Althar runs the agent's login, it is asked how it stands.
   const flowId = flow?.flowId ?? null
   const agentId = flow?.agentId ?? null
+  const byCode = agentId !== null && hasCode(agentId)
   const { recheck } = start
   useEffect(() => {
     if (flowId === null || agentId === null) return
     const mine = token.current
-    const words = signInWordsOf(agentId)
     const shown = (state: AccountSignInState) => {
       if (mine !== token.current) return
       setFlow((now) => {
@@ -164,16 +174,7 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
           case 'starting':
             return now
           case 'browser':
-            return {
-              ...now,
-              step: {
-                kind: 'browser',
-                host: words.host,
-                ...(state.link === null ? {} : { link: state.link }),
-                paste: state.paste,
-                ...(state.refused === null ? {} : { pasteError: state.refused }),
-              },
-            }
+            return { ...now, step: inBrowser(agentId, state.link, byCode) }
           case 'device':
             return {
               ...now,
@@ -208,7 +209,7 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
     ask()
     const timer = setInterval(ask, POLL)
     return () => clearInterval(timer)
-  }, [client, flowId, agentId, recheck])
+  }, [client, flowId, agentId, byCode, recheck])
 
   /** Opens the account's sign-in in Terminal, or says the line to run where it can't. */
   const terminal = async (accountId: string, mine: number) => {
@@ -286,14 +287,18 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
       const name = fresh(flow.agentId)
       switch (way) {
         case SignInWay.Browser:
-          setFlow({ ...flow, step: { kind: 'browser', host: signInWordsOf(flow.agentId).host } })
+          setFlow({ ...flow, step: inBrowser(flow.agentId, null, hasCode(flow.agentId)) })
           return void signInBy(flow.agentId, 'browser', null, name, mine)
         case SignInWay.Code:
           setFlow({ ...flow, step: { kind: 'checking' } })
           return void signInBy(flow.agentId, 'device', null, name, mine)
-        case SignInWay.Terminal:
-          setFlow({ ...flow, step: opening, since: start.checkedAt })
-          return void signInBy(flow.agentId, 'terminal', null, name, mine)
+        case SignInWay.Terminal: {
+          // From the browser: the login Althar runs stops, one still starting included, and the same account signs in in Terminal.
+          const now = flow.step.kind === 'browser' ? (token.current += 1) : mine
+          if (flow.flowId !== null) void client.cancelAccountSignIn(flow.flowId).catch(() => undefined)
+          setFlow({ ...flow, flowId: null, step: opening, since: start.checkedAt })
+          return void signInBy(flow.agentId, 'terminal', null, name, now)
+        }
         case SignInWay.Folder:
           return setFlow({ ...flow, step: { kind: 'folders' } })
         // Keys and the provider's console aren't offered here yet.
@@ -316,9 +321,6 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
       terminal(id, mine).catch((failure: unknown) => moveTo({ kind: 'failed', said: messageOf(failure) }, mine))
     },
     check: () => void start.recheck(),
-    paste: (code) => {
-      if (flow?.flowId != null) void client.pasteAccountSignInCode(flow.flowId, code).catch(() => undefined)
-    },
     adopt: (grant) => {
       const place = found.find((one) => one.grant === grant)
       if (flow === null || place === undefined) return

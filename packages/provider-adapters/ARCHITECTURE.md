@@ -16,6 +16,7 @@ The agent adapter of [docs/architecture/03](../../docs/architecture/03-agent-run
 | `events.ts` | Normalizes the agent's updates into Althar's events: words, what a message or a tool call hands back (pictures, links, resources), the files a call writes (a path, and whether it is new, never the text), and a command's output and exit from `_meta` |
 | `failures.ts` | Classifies what went wrong, and reads when a usage limit resets |
 | `signIn.ts` | Checks sign-in with each agent's documented status command |
+| `signInFlow.ts` | Runs an agent's own login inside Althar, in an account's home, and says where it stands: Claude Code's browser login, Codex's app-server with its browser and one-time code |
 | `testing/` | The scripted fake agent, in process and as a process |
 
 ## Principles
@@ -30,7 +31,7 @@ The agent adapter of [docs/architecture/03](../../docs/architecture/03-agent-run
 - **One inbox per session.** Updates, permission answers and prompt endings go into it the moment they arrive, and one reader takes from it, so events keep the order the agent sent them in.
 - **Althar asks for command output** (`terminal_output_delta` in its client capabilities, beside the AIR failure extension that makes both bundled adapters treat it as JetBrains AIR, which hears no output unless it asks): Codex streams it in chunks, Claude Code sends it whole when the command ends, each with its exit code; OpenCode says it as the tool's own text content (ADR-020).
 - **Never fatal on the unknown.** An update type or field this version doesn't know is kept as `Other`, with its raw payload.
-- **The agent's own tool owns sign-in.** Status comes from documented commands (`claude auth status`, `codex login status`, `opencode auth list`), never from reading a credential store. When signed out, Althar names the agent's own login command.
+- **The agent's own tool owns sign-in.** Status comes from documented commands (`claude auth status`, `codex login status`, `opencode auth list`), never from reading a credential store. When signed out, Althar names the agent's own login command. Nothing the person types to sign in passes through Althar: it never writes to `claude auth login`'s input, so where the browser can't reach back, the code Claude Code's page shows goes into Claude Code itself, in Terminal (ADR-012).
 - **Processes are owned.** Each agent runs in its own process group, with only an allowlist of Althar's environment; provider API keys are not on it. Stopping always signals the group, even after the agent has exited: TERM, a grace period, then KILL, and survivors are reported. A process is never found by name; its OS start time is recorded to tell it from a later process with the same pid.
 
 ## Checks

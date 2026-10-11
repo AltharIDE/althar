@@ -11,9 +11,11 @@ import { SignIns } from './SignIns'
  * Signing an agent's account in inside Althar (ADR-012), rather than in a
  * terminal: the agent's own login, run in the account's home
  * (provider-adapters' signInFlow), with what it says kept for the window to
- * read. The window asks how one stands while it shows it; a code pasted in
- * the window goes to the agent; leaving it stops the agent's login. Once
- * done, the account's sign-in is checked again, so every screen shows it.
+ * read. The window asks how one stands while it shows it; leaving it stops
+ * the agent's login. Once done, the account's sign-in is checked again, so
+ * every screen shows it. Nothing the person types to sign in comes through
+ * here: a code Claude Code's page shows goes into Claude Code itself, in
+ * Terminal (`SignInAccount`).
  *
  * Codex's login waits on one port for the browser, so an agent signs in one
  * account at a time: starting another stops the one before.
@@ -22,7 +24,7 @@ import { SignIns } from './SignIns'
 /** How a sign-in stands, as the window shows it. */
 export type AccountSignInState =
   | { readonly state: 'starting' }
-  | { readonly state: 'browser'; readonly link: string | null; readonly paste: boolean; readonly refused: string | null }
+  | { readonly state: 'browser'; readonly link: string | null }
   | { readonly state: 'device'; readonly code: string; readonly page: string; readonly expiresAt: string }
   | { readonly state: 'done'; readonly who: string | null; readonly plan: string | null }
   | { readonly state: 'failed'; readonly message: string }
@@ -53,8 +55,6 @@ export class AccountSignIns extends Context.Service<
     >
     /** How it stands; a sign-in not known is one that was left. */
     get(flowId: string): Effect.Effect<AccountSignInState>
-    /** A code the browser's page showed, for the agent. */
-    paste(flowId: string, code: string): Effect.Effect<void>
     cancel(flowId: string): Effect.Effect<void>
   }
 >()('@althar/runtime/AccountSignIns') {
@@ -99,10 +99,7 @@ export class AccountSignIns extends Context.Service<
                 if (flow === undefined || !flows.has(flowId)) return
                 switch (event.kind) {
                   case 'browser':
-                    flow.state = { state: 'browser', link: event.link, paste: event.paste, refused: null }
-                    return
-                  case 'refused':
-                    if (flow.state.state === 'browser') flow.state = { ...flow.state, refused: event.message }
+                    flow.state = { state: 'browser', link: event.link }
                     return
                   case 'device':
                     flow.state = {
@@ -139,13 +136,6 @@ export class AccountSignIns extends Context.Service<
             return { flowId, state: holder.flow.state }
           }),
         get: (flowId) => Effect.sync(() => flows.get(flowId)?.state ?? { state: 'failed', message: 'This sign-in was left.' }),
-        paste: (flowId, code) =>
-          Effect.sync(() => {
-            const flow = flows.get(flowId)
-            if (flow === undefined) return
-            if (flow.state.state === 'browser') flow.state = { ...flow.state, refused: null }
-            flow.handle.paste(code)
-          }),
         cancel: (flowId) => Effect.sync(() => stop(flowId)),
       })
     }),

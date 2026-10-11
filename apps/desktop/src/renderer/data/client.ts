@@ -218,7 +218,6 @@ export interface Client {
     way: 'browser' | 'device',
   ) => Promise<{ readonly flowId: string; readonly state: AccountSignInState }>
   readonly getAccountSignIn: (flowId: string) => Promise<AccountSignInState>
-  readonly pasteAccountSignInCode: (flowId: string, code: string) => Promise<void>
   readonly cancelAccountSignIn: (flowId: string) => Promise<void>
   /** The person's open issues, for a project. */
   readonly listIssues: (projectId: string) => Promise<IssueList>
@@ -392,7 +391,6 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     signInAccount: (accountId) => command((commandId) => api.SignInAccount({ commandId, accountId })),
     startAccountSignIn: (accountId, way) => command((commandId) => api.StartAccountSignIn({ commandId, accountId, way })),
     getAccountSignIn: (flowId) => settle(api.GetAccountSignIn({ flowId })),
-    pasteAccountSignInCode: (flowId, code) => command((commandId) => api.PasteAccountSignInCode({ commandId, flowId, code })),
     cancelAccountSignIn: (flowId) => command((commandId) => api.CancelAccountSignIn({ commandId, flowId })),
     listIssues: (projectId) => settle(api.ListIssues({ projectId })),
     markReady: (taskId, url) => command((commandId) => api.MarkReady({ commandId, taskId, ...(url === undefined ? {} : { url }) })),

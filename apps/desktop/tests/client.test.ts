@@ -220,7 +220,6 @@ describe('the client', () => {
           SetCoAuthor: () => Effect.die('unused'),
           StartAccountSignIn: () => Effect.die('unused'),
           GetAccountSignIn: () => Effect.die('unused'),
-          PasteAccountSignInCode: () => Effect.die('unused'),
           CancelAccountSignIn: () => Effect.die('unused'),
           // A refusal is an answer: it isn't tried again.
           Interrupt: ({ commandId }) => {

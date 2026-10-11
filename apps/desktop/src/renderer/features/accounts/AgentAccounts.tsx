@@ -1,7 +1,6 @@
 import type { AccountStatus, AgentStatus } from '@althar/contracts'
 import { type AccountEntry, Accounts, AccountSignIn } from '@althar/ui'
 
-import { signInWordsOf } from '../../shared/agents'
 import { shortFolder } from '../../shared/folders'
 import { clock } from '../../shared/time'
 import type { StartModel } from '../start/useStart'
@@ -45,7 +44,7 @@ export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; st
       {...(again === undefined ? {} : { account: { name: again.name } })}
       step={flow.step}
       ways={{
-        ...(agent.ways.includes('browser') ? { browser: signInWordsOf(agent.id).plan } : {}),
+        ...(agent.ways.includes('browser') ? { browser: true } : {}),
         ...(agent.ways.includes('device') ? { code: true } : {}),
         terminal: true,
         found: signIn.found.map((place) => ({ id: place.grant, name: place.name, folder: shortFolder(place.path), from: place.tool })),
@@ -54,7 +53,6 @@ export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; st
       onWay={signIn.way}
       onOpen={signIn.reopen}
       onCheck={signIn.check}
-      onPaste={signIn.paste}
       onAdopt={signIn.adopt}
       onChooseFolder={signIn.chooseFolder}
       onBack={signIn.back}

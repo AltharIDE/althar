@@ -8,15 +8,19 @@ import type { AgentDefinition } from './registry'
  * the agent keeps its sign-in; Althar never reads its credential store). The
  * agent's login runs as a child in the account's home and says where it
  * stands: the page to approve in the browser, a one-time code to type on
- * another, a code pasted back, done and who as, or why it stopped.
+ * another device, done and who as, or why it stopped.
  *
  * Two kinds, as the agents offer them:
  * - Claude Code's `claude auth login` opens the browser itself and comes back
- *   to its own callback; it also prints a page that ends in a code, which it
- *   reads from stdin, for a browser that can't reach back.
+ *   to its own callback. Nothing goes the other way: Althar never writes to
+ *   its input. For a browser that can't reach back it shows a page that ends
+ *   in a code for Claude Code itself, so that sign-in is the person's, in
+ *   Terminal (the runtime's `SignInAccount`), where they paste the code into
+ *   Claude Code, and it completes in Anthropic's own flow.
  * - Codex's app-server speaks JSON-RPC on stdio: `account/login/start` gives
- *   the page to open, or a device code, and `account/login/completed` says
- *   how it ended. It opens no browser, so Althar does.
+ *   the page to open, or a device code to type on OpenAI's page, and
+ *   `account/login/completed` says how it ended. It opens no browser, so
+ *   Althar does.
  */
 
 /** A way in that Althar can run itself. */
@@ -37,19 +41,15 @@ export type InAppSignIn =
 
 /** What a sign-in under way says. */
 export type SignInFlowEvent =
-  /** Waiting on the browser. `link` opens it elsewhere; `paste`: a code the page shows can be pasted back. */
-  | { readonly kind: 'browser'; readonly link: string | null; readonly paste: boolean }
+  /** Waiting on the browser. `link` opens it elsewhere. */
+  | { readonly kind: 'browser'; readonly link: string | null }
   /** A one-time code to type on `page`, good for `minutes`. */
   | { readonly kind: 'device'; readonly code: string; readonly page: string; readonly minutes: number }
-  /** A pasted code the agent turned down, in its words. */
-  | { readonly kind: 'refused'; readonly message: string }
   /** Signed in, as `who` on `plan` where the agent says. */
   | { readonly kind: 'done'; readonly who: string | null; readonly plan: string | null }
   | { readonly kind: 'failed'; readonly message: string }
 
 export interface SignInFlowHandle {
-  /** A code the browser's page showed, for the agent. */
-  readonly paste: (code: string) => void
   /** Stops it; nothing more is said. */
   readonly cancel: () => void
 }
@@ -127,9 +127,6 @@ export const startSignInFlow = (
   child.stdin.on('error', () => end({ kind: 'failed', message: 'The agent stopped listening while signing in.' }))
   const driven = inApp.kind === 'claude-login' ? claude(agent, child, say, end, env) : codex(child, say, end, options)
   return {
-    paste: (code) => {
-      if (!over) driven.paste(code)
-    },
     cancel: () => {
       if (over) return
       driven.cancel()
@@ -140,7 +137,12 @@ export const startSignInFlow = (
 
 type End = (event?: SignInFlowEvent) => void
 
-/* Claude Code's own login: the browser opens by itself; its fallback page and a pasted code come over stdio. */
+/*
+ * Claude Code's own login: the browser opens by itself and comes back to its
+ * callback. Its input stays open, as a terminal's would, and is never written
+ * to, so no code passes through Althar; what it prints is read only for why
+ * it stopped.
+ */
 const claude = (
   agent: AgentDefinition,
   child: ChildProcessWithoutNullStreams,
@@ -150,32 +152,22 @@ const claude = (
 ) => {
   let said = ''
   let stderr = ''
-  let link: string | null = null
   // Said once the caller has the handle.
-  queueMicrotask(() => say({ kind: 'browser', link: null, paste: false }))
-  child.stdout.on('data', (chunk: Buffer) => {
-    said += String(chunk)
-    const found = /visit:\s*(https:\/\/\S+)/.exec(said)?.[1] ?? null
-    if (found !== null && found !== link) {
-      link = found
-      say({ kind: 'browser', link, paste: true })
-    }
-  })
-  child.stderr.on('data', (chunk: Buffer) => {
-    const text = String(chunk)
-    stderr += text
-    if (/invalid code/i.test(text)) say({ kind: 'refused', message: lastLine(text) ?? text.trim() })
-  })
+  queueMicrotask(() => say({ kind: 'browser', link: null }))
+  child.stdout.on('data', (chunk: Buffer) => void (said += String(chunk)))
+  child.stderr.on('data', (chunk: Buffer) => void (stderr += String(chunk)))
   child.on('exit', (code) => {
-    if (code !== 0) return end({ kind: 'failed', message: lastLine(stderr) ?? lastLine(said) ?? 'Claude Code stopped signing in.' })
+    // A line with a link (its page for a code, which only Claude Code itself takes) isn't why it stopped.
+    if (code !== 0)
+      return end({
+        kind: 'failed',
+        message: lastLine(stderr) ?? lastLine(said.replace(/^.*https:\/\/\S+.*$/gm, '')) ?? 'Claude Code stopped signing in.',
+      })
     // Signed in: its status says who as.
     const status = agent.signIn.status(process.execPath)
     execFile(status.command, [...status.args], { env, timeout: 15_000 }, (_error, stdout) => end({ kind: 'done', ...claudeWho(stdout) }))
   })
-  return {
-    paste: (code: string) => void child.stdin.write(`${code.trim()}\n`),
-    cancel: () => undefined,
-  }
+  return { cancel: () => undefined }
 }
 
 /* Codex's app-server: JSON-RPC lines on stdio. */
@@ -237,14 +229,13 @@ const codex = (child: ChildProcessWithoutNullStreams, say: (event: SignInFlowEve
       loginId = typeof result.loginId === 'string' ? result.loginId : null
       if (typeof result.authUrl === 'string') {
         options.openUrl?.(result.authUrl)
-        say({ kind: 'browser', link: result.authUrl, paste: false })
+        say({ kind: 'browser', link: result.authUrl })
       } else if (typeof result.userCode === 'string' && typeof result.verificationUrl === 'string')
         say({ kind: 'device', code: result.userCode, page: result.verificationUrl, minutes: 15 })
       else end({ kind: 'failed', message: 'Codex didn’t say how to sign in.' })
     })
   })
   return {
-    paste: () => undefined,
     cancel: () => {
       if (loginId !== null) send('account/login/cancel', { loginId })
     },
