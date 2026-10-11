@@ -337,11 +337,14 @@ const splitCommandLine = (text: string) => {
   let operating = new Set<number>()
   let word = ''
   let inWord = false
+  /** The word in progress has a quoted or escaped part. */
+  let literal = false
   let opaque = false
   const endWord = () => {
     if (inWord) words.push(word)
     word = ''
     inWord = false
+    literal = false
   }
   const endCommand = (separator = '') => {
     endWord()
@@ -361,11 +364,13 @@ const splitCommandLine = (text: string) => {
       const end = close === -1 ? text.length : close
       word += text.slice(index + 1, end)
       inWord = true
+      literal = true
       index = end
       continue
     }
     if (char === '"') {
       inWord = true
+      literal = true
       for (index += 1; index < text.length && text[index] !== '"'; index += 1) {
         const inner = text[index] ?? ''
         if (inner === '\\' && index + 1 < text.length && '"\\$`'.includes(text[index + 1] ?? '')) {
@@ -381,6 +386,7 @@ const splitCommandLine = (text: string) => {
     if (char === '\\') {
       word += text[index + 1] ?? ''
       inWord = true
+      literal = true
       index += 1
       continue
     }
@@ -394,7 +400,7 @@ const splitCommandLine = (text: string) => {
     const redirect = REDIRECTS.find((candidate) => rest.startsWith(candidate))
     if (redirect !== undefined) {
       // `1>file`: the descriptor belongs to the redirect, not to the arguments.
-      if (inWord && /^\d+$/.test(word) && redirect.startsWith('>')) {
+      if (inWord && !literal && /^\d+$/.test(word) && redirect !== '<') {
         word = ''
         inWord = false
       }
