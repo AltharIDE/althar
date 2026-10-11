@@ -926,7 +926,9 @@ export class Changes extends Context.Service<
             if (!(yield* behindAny(path, yield* asCredited(asked.content.head), pushed))) continue
             yield* settleAsked(asked, 'pushed')
             told.push(
-              `The person pushed ${asked.content.count === 1 ? 'your commit' : `your ${asked.content.count} commits`} to ${asked.content.where}, as you asked: the pull request has them now.`,
+              asked.content.count === 1
+                ? `The person pushed your commit to ${asked.content.where}, as you asked: the pull request has it now.`
+                : `The person pushed your ${asked.content.count} commits to ${asked.content.where}, as you asked: the pull request has them now.`,
             )
           }
           yield* tellLead(link, told)
