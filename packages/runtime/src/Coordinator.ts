@@ -89,6 +89,13 @@ const Proposed = Schema.Struct({
   lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
   review: Schema.optional(Schema.NullOr(StepPick)),
 })
+/* A mini task: what to do, and the one model that does it. */
+const Started = Schema.Struct({
+  title: Schema.String,
+  description: Schema.optional(Schema.String),
+  lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
+  repositories: Schema.optional(Schema.Array(Schema.String)),
+})
 const Named = Schema.Struct({ task: Schema.String })
 const Passed = Schema.Struct({ task: Schema.String, message: Schema.String, now: Schema.optional(Schema.Boolean) })
 
@@ -281,9 +288,9 @@ export class Coordinator extends Context.Service<
             : record.text || 'The thread is empty.'
         })
 
-      const draft = (access: ToolAccess, input: unknown) =>
+      /** Drafts a task, from an issue where one is named: the task made, or the one this session made under that title before. */
+      const drafting = (access: ToolAccess, { title, description, issue: from, repositories }: typeof Drafted.Type) =>
         Effect.gen(function* () {
-          const { title, description, issue: from, repositories } = yield* read(Drafted, input)
           // A title is read at a glance, in a line on every screen: the rest of what was asked goes in the description.
           if (title.trim().length > TITLE_LENGTH)
             return yield* new ToolRefused({
@@ -336,7 +343,40 @@ export class Coordinator extends Context.Service<
             )
           if (issue !== undefined && from !== undefined)
             yield* issues.attach({ projectId: access.projectId as ProjectId, taskId: created.taskId, issue: from })
+          return { created, issue }
+        })
+
+      const draft = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const { created, issue } = yield* drafting(access, yield* read(Drafted, input))
           return `Drafted ${created.slug}${issue === undefined ? '' : `, from ${issue.key}`}. Now propose its plan with propose_plan.`
+        })
+
+      /**
+       * A mini task: drafted and started in one go, with no plan for the
+       * person to look over. One lead, no review, and nothing outside the
+       * project when it is done; the person sees it as a card, already
+       * running.
+       */
+      const startNow = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const { lead: pick, ...drafted } = yield* read(Started, input)
+          // The lead is found first, so a model that can't be used drafts nothing.
+          const lead = yield* stepOf(access.projectId, pick)
+          const { created } = yield* drafting(access, drafted)
+          // Called again, unsure the first worked, it doesn't start the same task twice.
+          if ((yield* taskOf(access, created.taskId)).state !== 'draft') return `${created.slug} has started already.`
+          const planId = yield* plans.propose({
+            projectId: access.projectId as ProjectId,
+            taskId: created.taskId,
+            steps: [{ key: 'implement', ...lead, skipped: false }],
+            reason: pick.reason ?? null,
+            actorId: instance.coordinatorId,
+            end: null,
+            held: true,
+          })
+          yield* plans.start(planId, instance.coordinatorId)
+          return `Started ${created.slug}: its lead is on it now, with no review, and nothing goes outside the project when it is done. The person sees it as a card; say in a sentence what it does.`
         })
 
       /** The models the coordinator can give work to in the project, as it reads them. */
@@ -539,6 +579,29 @@ export class Coordinator extends Context.Service<
             required: ['task', 'lead'],
           },
           propose,
+        ),
+        tool(
+          'start_task',
+          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. A change worth reviewing, or that should end in a pull request, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
+          {
+            type: 'object',
+            properties: {
+              title: { type: 'string', maxLength: TITLE_LENGTH },
+              description: { type: 'string' },
+              lead: {
+                type: 'object',
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, reason: { type: 'string' } },
+                required: ['model'],
+              },
+              repositories: {
+                type: 'array',
+                items: { type: 'string' },
+                description: "The project's repositories it works in, by name. Needed only in a project of several.",
+              },
+            },
+            required: ['title', 'lead'],
+          },
+          startNow,
         ),
         tool(
           'message_lead',

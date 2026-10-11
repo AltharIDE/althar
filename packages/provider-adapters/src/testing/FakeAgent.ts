@@ -391,7 +391,8 @@ const playStall = async (
  * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task,
- * passing on the `[lead:…]` and `[review:…]` markers it was given;
+ * passing on the `[lead:…]` and `[review:…]` markers it was given, and
+ * `[coordinator:start]` starts one at once, without a plan;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
  * it after; `[review:pass]` and `[review:findings]`
  * report a review. Settling findings, it writes a file and commits it, so
@@ -514,6 +515,17 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         return 'Stopped working.'
       }
       return undefined
+    }
+    // Asked for something small, it starts it at once, passing its lead the markers it was given.
+    if (available.has('start_task') && text.includes('[coordinator:start]')) {
+      const markers = text.match(/\[(lead|review):[a-z-]+\]/g) ?? []
+      const asked = (text.slice(0, text.indexOf('[coordinator:start]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
+      const title = asked.split(/[.!?]/)[0]?.trim() || 'Try it'
+      return await call('start_task', {
+        title,
+        description: `Try it and say how it went. ${markers.join(' ')}`,
+        lead: { agent: 'claude-code', reason: 'Quick to start.' },
+      })
     }
     if (available.has('draft_task') && text.includes('[coordinator:plan')) {
       const markers = text.match(/\[(lead|review):[a-z-]+\]/g) ?? []
