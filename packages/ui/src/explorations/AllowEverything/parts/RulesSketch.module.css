@@ -1,0 +1,33 @@
+/* the rules screen's own head, as ProjectRules lays it out */
+.page {
+  max-width: 984px;
+  min-width: 0;
+}
+.head {
+  composes: head from '../../../screens/ProjectRules/ProjectRules.module.css';
+}
+.title {
+  composes: title from '../../../screens/ProjectRules/ProjectRules.module.css';
+}
+.lede {
+  composes: lede from '../../../screens/ProjectRules/ProjectRules.module.css';
+}
+.key {
+  flex: none;
+}
+/* the path's control, between the head and the sentences */
+.top {
+  margin: 0 0 28px;
+}
+/* a kind of request, as its sentence underlines it; here it only reads */
+.kind {
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 5px;
+}
+.follows {
+  margin: 18px 0 0;
+  font-size: 12px;
+  color: var(--t-3);
+}

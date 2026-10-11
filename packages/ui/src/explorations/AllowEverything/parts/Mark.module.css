@@ -1,0 +1,54 @@
+.mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--t-1);
+  white-space: nowrap;
+}
+.small {
+  gap: 5px;
+  font-size: 11px;
+}
+.word {
+  font-weight: 600;
+}
+.detail {
+  color: var(--t-3);
+  font-weight: 450;
+  font-variant-numeric: tabular-nums;
+}
+
+/* a ChromeButton's shape and states, with its words in two weights */
+.button {
+  composes: button from '../../../chrome/ChromeButton/ChromeButton.module.css';
+}
+.button .word {
+  font-weight: 500;
+  color: var(--t-2);
+}
+.lead {
+  color: var(--t-3);
+}
+.chev {
+  flex: none;
+  color: var(--t-4);
+  transition: transform var(--fast) var(--ease);
+}
+.button[aria-expanded='true'] .chev {
+  transform: rotate(180deg);
+}
+/* everything is allowed: the words in ink, and the glyph with them */
+.strong .word {
+  font-weight: 600;
+  color: var(--t-1);
+}
+.button.strong svg:first-child {
+  color: var(--t-1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chev {
+    transition: none;
+  }
+}

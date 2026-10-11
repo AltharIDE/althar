@@ -1,0 +1,130 @@
+/*
+ * A dark stand-in, for this exploration only. The kit is paper and has no
+ * dark theme yet, so these values are drawn from what it already keeps for
+ * dark surfaces (the terminal, the island's inks) to show how each path's
+ * marks hold up on dark. It is not a proposal for the kit's dark theme.
+ */
+.dark {
+  color-scheme: dark;
+
+  --n-0: #0e0e10;
+  --n-1: #232328;
+  --n-2: #1b1b1f;
+  --n-3: #29292f;
+  --n-4: #323238;
+  --n-5: #46464d;
+  --n-5-hover: #505058;
+  --chrome: #161619;
+  --paper: #2c2c32;
+  --n-1-clear: rgba(35, 35, 40, 0);
+  --n-2-clear: rgba(27, 27, 31, 0);
+
+  --t-1: #f2f0ea;
+  --t-2: #cfcdc6;
+  --t-3: #a9a7a0;
+  --t-4: #74737a;
+
+  --line: rgba(255, 255, 255, 0.07);
+  --line-2: rgba(255, 255, 255, 0.12);
+  --line-3: rgba(255, 255, 255, 0.22);
+
+  --signal: #b28cff;
+  --signal-bright: #c2a3ff;
+  --signal-dim: rgba(178, 140, 255, 0.14);
+  --signal-line: rgba(178, 140, 255, 0.42);
+  --signal-hover: rgba(178, 140, 255, 0.2);
+  --signal-paper: #262036;
+  --signal-pressed: #9f73f5;
+  --signal-peek: #2e2643;
+  --on-signal: #141417;
+
+  --live: #8f99ff;
+  --live-dim: rgba(143, 153, 255, 0.14);
+  --danger: #f29a89;
+  --danger-dim: rgba(242, 154, 137, 0.1);
+  --danger-hover: rgba(242, 154, 137, 0.16);
+  --ok: #74cf8c;
+
+  --track: rgba(255, 255, 255, 0.1);
+  --track-done: rgba(255, 255, 255, 0.42);
+  --sunk: rgba(0, 0, 0, 0.22);
+  --shadow: rgba(0, 0, 0, 0.55);
+  --lift: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --lift-card: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --lift-2: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 10px -6px rgba(0, 0, 0, 0.5);
+  --lift-pop: 0 1px 2px rgba(0, 0, 0, 0.32), 0 10px 24px -12px rgba(0, 0, 0, 0.7);
+  --lift-dialog: 0 1px 2px rgba(0, 0, 0, 0.32), 0 24px 48px -24px rgba(0, 0, 0, 0.8);
+  --scrim: rgba(0, 0, 0, 0.45);
+
+  --frost: rgba(38, 38, 43, 0.86);
+  --frost-faint: rgba(255, 255, 255, 0.04);
+  --frost-sheet: rgba(255, 255, 255, 0.07);
+  --frost-raised: rgba(255, 255, 255, 0.1);
+  --frost-hover: rgba(255, 255, 255, 0.14);
+  --frost-well: rgba(255, 255, 255, 0.12);
+  --frost-well-hover: rgba(255, 255, 255, 0.18);
+  --frost-ring: 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+
+  /* on an ink fill, which on dark is the light one */
+  --on-ink: #141417;
+  --on-ink-2: #45454c;
+  --ink-hover: #dedcd5;
+  --ink-pressed: #ffffff;
+  --you-bubble: rgba(255, 255, 255, 0.08);
+  --traffic: #3a3a40;
+
+  background: var(--n-2);
+  color: var(--t-1);
+}
+
+/* a story's whole page in one scheme: the column it sits in */
+.page {
+  min-height: 100%;
+  padding: 1rem;
+}
+.fullscreen {
+  padding: 0;
+}
+
+/* each state in light and dark, labelled */
+.pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.pair {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pairLabel {
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.pairCells {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.stacked .pairCells {
+  grid-template-columns: minmax(0, 1fr);
+}
+.cell {
+  position: relative;
+  min-width: 0;
+  padding: 18px;
+  border-radius: 12px;
+  background: var(--n-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.cellScheme {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font: 500 10px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}

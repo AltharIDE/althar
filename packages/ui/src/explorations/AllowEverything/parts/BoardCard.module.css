@@ -1,0 +1,8 @@
+/* a lane's width, as the board gives its running work */
+.lane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 340px;
+  max-width: 100%;
+}
