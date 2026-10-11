@@ -1,4 +1,4 @@
-import { type ReactNode, useId, useLayoutEffect, useRef, useState } from 'react'
+import { type ReactNode, type Ref, useId, useLayoutEffect, useRef, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { CommandMatch } from '../../foundations/vocabulary'
@@ -148,6 +148,8 @@ export interface ChoiceWordProps<V extends string> extends Pick<MenuProps, 'open
   /** A quiet line at the menu's foot: what the setting catches, or where it comes from. */
   note?: ReactNode
   mono?: boolean
+  /** The word's button, for a consumer that moves focus to it: where a choice moves the word to another sentence. */
+  wordRef?: Ref<HTMLButtonElement>
 }
 
 /** A built-in setting with a few values: its word, and the menu it opens, with the current one checked. */
@@ -159,11 +161,22 @@ export function ChoiceWord<V extends string>({
   onChange,
   note,
   mono,
+  wordRef,
   width = 330,
   ...menu
 }: ChoiceWordProps<V>) {
   return (
-    <Menu label={label} width={width} note={note} trigger={<RuleWord mono={mono}>{word}</RuleWord>} {...menu}>
+    <Menu
+      label={label}
+      width={width}
+      note={note}
+      trigger={
+        <RuleWord ref={wordRef} mono={mono}>
+          {word}
+        </RuleWord>
+      }
+      {...menu}
+    >
       <MenuRadioGroup
         label={label}
         value={value}

@@ -31,6 +31,13 @@ type Change = Omit<ProjectRulesChange, 'projectId'>
 /** A change: as it is, or worked out from the rules as they are when it is saved; null where nothing is left to change. */
 export type RulesEdit = Change | ((rules: ProjectRulesView) => Change | null)
 
+/** A project's changes on their way, one after another; those not yet answered; and its rules as the runtime last said them. */
+interface Saving {
+  queue: Promise<unknown>
+  pending: Array<RulesEdit>
+  confirmed: ProjectRulesView | undefined
+}
+
 const resolve = (edit: RulesEdit, rules: ProjectRulesView) => (typeof edit === 'function' ? edit(rules) : edit)
 const applied = (rules: ProjectRulesView, edit: RulesEdit): ProjectRulesView => ({ ...rules, ...resolve(edit, rules) })
 
@@ -56,50 +63,54 @@ export const useRules = (projectId: string): RulesModel => {
   const [failed, setError] = useState<string | null>(null)
   const error = failed ?? (rulesRead.error === null ? null : messageOf(rulesRead.error))
 
-  // The changes on their way, one after another; those not yet answered; and the rules as the runtime last said them.
-  const queue = useRef<Promise<unknown>>(Promise.resolve())
-  const pending = useRef<Array<RulesEdit>>([])
-  const confirmed = useRef<ProjectRulesView | undefined>(undefined)
+  // Each project's own, so a change in one is never worked out from another's rules.
+  const savings = useRef(new Map<string, Saving>())
   const change = useCallback(
     (edit: RulesEdit) => {
       setError(null)
       const key = keys.rules(projectId)
+      const saving = savings.current.get(projectId) ?? { queue: Promise.resolve(), pending: [], confirmed: undefined }
+      savings.current.set(projectId, saving)
       // With nothing on its way, what the screen read is what the runtime last said, unless a read begun earlier landed after a save.
       const read = cache.getQueryData<ProjectRulesView>(key)
       if (
-        pending.current.length === 0 &&
+        saving.pending.length === 0 &&
         read !== undefined &&
-        (confirmed.current === undefined || read.revision >= confirmed.current.revision)
+        (saving.confirmed === undefined || read.revision >= saving.confirmed.revision)
       )
-        confirmed.current = read
-      pending.current.push(edit)
+        saving.confirmed = read
+      saving.pending.push(edit)
       cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : applied(now, edit)))
       /** What the screen shows: the rules as last said, with the changes still on their way. */
       const show = (rules: ProjectRulesView | undefined) => {
-        if (rules !== undefined) cache.setQueryData(key, pending.current.reduce(applied, rules))
+        if (rules !== undefined) cache.setQueryData(key, saving.pending.reduce(applied, rules))
       }
-      queue.current = queue.current.then(() => {
-        const base = confirmed.current
+      saving.queue = saving.queue.then(() => {
+        const base = saving.confirmed
         const next = base === undefined ? null : resolve(edit, base)
         if (base === undefined || next === null) {
-          pending.current.shift()
+          saving.pending.shift()
           return show(base)
         }
         const replaces = LISTS.some((list) => next[list] !== undefined)
         return client.setProjectRules({ projectId, ...next, ...(replaces ? { expectedRevision: base.revision } : {}) }).then(
           async (kept) => {
-            // A read begun before this was saved would put back the rules without it.
+            // A read begun before this was saved could put back the rules without it, and one that landed first may be newer
+            // still, as when a card kept a rule since: either way they are read again once this is shown.
+            const reading = cache.isFetching({ queryKey: key, exact: true }) > 0
+            const newer = (cache.getQueryData<ProjectRulesView>(key)?.revision ?? 0) > kept.revision
             await cache.cancelQueries({ queryKey: key, exact: true })
-            pending.current.shift()
-            confirmed.current = kept
+            saving.pending.shift()
+            saving.confirmed = kept
             show(kept)
+            if (reading || newer) void cache.invalidateQueries({ queryKey: key, exact: true })
           },
           (failure: unknown) => {
-            pending.current.shift()
+            saving.pending.shift()
             setError(messageOf(failure))
             if (failure instanceof ApiError && failure.reason === 'RulesChanged') {
               // Moved on meanwhile: what comes after was worked out from the same rules, so it goes too, and the rules are read as they are.
-              confirmed.current = undefined
+              saving.confirmed = undefined
               void cache.invalidateQueries({ queryKey: key, exact: true })
             } else show(base)
           },

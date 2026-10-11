@@ -208,7 +208,7 @@ export const EditingABuiltIn: Story = {
   },
 }
 
-/** Moved to Never, it reads as what agents never do. */
+/** Moved to Never, it reads as what agents never do, and focus goes with it. */
 export const MovingABuiltIn: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
@@ -217,7 +217,7 @@ export const MovingABuiltIn: Story = {
     await userEvent.click(await page.findByRole('menuitemradio', { name: 'Never' }))
     await expect(args.onKindChange).toHaveBeenCalledWith(RuleKind.DeleteBranch, RulePlace.Never)
     const never = c.getByRole('listitem', { name: 'Never' })
-    await expect(within(never).getByRole('button', { name: 'delete other branches' })).toBeInTheDocument()
+    await waitFor(() => expect(within(never).getByRole('button', { name: 'delete other branches' })).toHaveFocus())
   },
 }
 
@@ -308,6 +308,18 @@ export const ChoosingAccounts: Story = {
     await expect(page.getByRole('menuitemcheckbox', { name: 'Work' })).toHaveAttribute('aria-disabled', 'true')
     await userEvent.click(page.getByRole('menuitemradio', { name: 'Go on with the next' }))
     await expect(args.onRotateChange).toHaveBeenCalledWith(true)
+  },
+}
+
+/** The one account this project named is gone: work runs on every one again, and the sentence says so. */
+export const AccountGone: Story = {
+  args: { allowed: { 'claude-code': ['removed'] } },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'Personal' }))
+    await expect(await page.findByRole('menuitemcheckbox', { name: 'Personal' })).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByRole('menuitemcheckbox', { name: 'Work' })).toHaveAttribute('aria-checked', 'true')
   },
 }
 

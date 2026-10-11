@@ -499,6 +499,15 @@ export function ProjectRules({
     const next = to.index === null ? undefined : removes[Math.min(to.index, removes.length - 1)]
     ;(next ?? clause.querySelector<HTMLElement>('[data-add]'))?.focus()
   })
+  // A kind moved to another sentence takes focus there, as its word in the one it left is gone.
+  const kindWords = useRef<Partial<Record<RuleKind, HTMLButtonElement | null>>>({})
+  const moved = useRef<RuleKind | null>(null)
+  useEffect(() => {
+    const kind = moved.current
+    if (kind === null) return
+    moved.current = null
+    kindWords.current[kind]?.focus()
+  })
   // The field starts with focus as it opens.
   const opened = draft?.place
   useEffect(() => {
@@ -539,7 +548,13 @@ export function ProjectRules({
         word={words[as]}
         label={words.name}
         value={kinds[kind]}
-        onChange={(place) => onKindChange(kind, place)}
+        wordRef={(element) => {
+          kindWords.current[kind] = element
+        }}
+        onChange={(place) => {
+          if (place !== kinds[kind]) moved.current = kind
+          onKindChange(kind, place)
+        }}
         options={PLACES.map((place) => ({
           value: place,
           title: t.place[place].title,
@@ -784,7 +799,10 @@ export function ProjectRules({
           />
           .
           {agentAccounts.map((agent) => {
-            const on = allowed[agent.id] ?? agent.accounts.map((account) => account.id)
+            const every = agent.accounts.map((account) => account.id)
+            // Those named that are still there; with none, as when the one named was removed, every one, as work runs.
+            const named = (allowed[agent.id] ?? every).filter((id) => every.includes(id))
+            const on = named.length === 0 ? every : named
             const used = agent.accounts.filter((account) => on.includes(account.id))
             const shown = rotate ? used : used.slice(0, 1)
             return (
@@ -809,7 +827,7 @@ export function ProjectRules({
                           onCheckedChange={(now) =>
                             onAllowedChange(
                               agent.id,
-                              agent.accounts.map((each) => each.id).filter((id) => (id === account.id ? now : on.includes(id))),
+                              every.filter((id) => (id === account.id ? now : on.includes(id))),
                             )
                           }
                         >

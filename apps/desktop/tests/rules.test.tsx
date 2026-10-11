@@ -1,12 +1,13 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type ProjectRulesView } from '@althar/contracts'
 
 import { RulesView } from '../src/renderer/features/rules/RulesView'
 import { useRules } from '../src/renderer/features/rules/useRules'
-import { agents, fakeClient, projectRules, usual } from './fixtures'
+import { agents, changed, fakeClient, projectRules, usual } from './fixtures'
 import { withServices } from './render'
 
 function Rules({ onBack = vi.fn() }: { onBack?: () => void }) {
@@ -81,7 +82,8 @@ describe('a project’s rules', () => {
         expectedRevision: 1,
       }),
     )
-    expect(within(sentence('Never')).getByRole('button', { name: 'force push' })).toBeTruthy()
+    // Focus goes with the word to its sentence.
+    await waitFor(() => expect(document.activeElement).toBe(within(sentence('Never')).getByRole('button', { name: 'force push' })))
     // With the rest: on no list.
     await choose(within(sentence('Ask me')).getByRole('button', { name: 'writing outside the task' }), 'The rest')
     await waitFor(() =>
@@ -231,6 +233,71 @@ describe('a project’s rules', () => {
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledTimes(3))
     await waitFor(() => expect(kept.commands.map((rule) => rule.pattern)).toEqual(['bun test', 'bun install', 'git fetch']))
     expect(says('Go ahead')).toBe('They go ahead with bun test, bun install and git fetch.')
+  })
+
+  it('keeps each project’s changes to its own rules when the screen goes from one project to another', async () => {
+    const rulesFor = (projectId: string): ProjectRulesView => ({
+      ...projectRules,
+      projectId,
+      revision: projectId === 'p1' ? 11 : 1,
+      never: projectId === 'p1' ? ['deploy'] : [],
+    })
+    const { client } = fakeClient({ getProjectRules: vi.fn(async (projectId: string) => rulesFor(projectId)) })
+    vi.mocked(client.setProjectRules).mockImplementation(async ({ projectId, expectedRevision, ...change }) => {
+      // Each against its own project's rules.
+      expect(expectedRevision).toBe(rulesFor(projectId).revision)
+      return { ...rulesFor(projectId), ...change, revision: rulesFor(projectId).revision + 1 }
+    })
+    function Switching() {
+      const [projectId, setProjectId] = useState('p1')
+      return (
+        <>
+          <button type="button" onClick={() => setProjectId('p2')}>
+            Another project
+          </button>
+          <RulesView model={useRules(projectId)} onBack={vi.fn()} />
+        </>
+      )
+    }
+    withServices(<Switching />, client)
+    await choose(await screen.findByRole('button', { name: 'force pushing' }), 'Never')
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledTimes(1))
+    await userEvent.click(screen.getByRole('button', { name: 'Another project' }))
+    await waitFor(() => expect(says('Never')).toBe('Nothing is refused outright.'))
+    await choose(screen.getByRole('button', { name: 'deleting other branches' }), 'Never')
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith({
+        projectId: 'p2',
+        never: ['delete-branch'],
+        alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'deploy', 'outside'],
+        alwaysAllow: [],
+        expectedRevision: 1,
+      }),
+    )
+  })
+
+  it('reads the rules again when a save is answered while a newer read is on its way, so a rule kept meanwhile shows', async () => {
+    let server: ProjectRulesView = { ...projectRules }
+    const getProjectRules = vi.fn(async () => {
+      const now = server
+      // The read after the card kept its rule is the slow one.
+      if (now.revision === 3) await new Promise((resolve) => setTimeout(resolve, 120))
+      return now
+    })
+    const { client, emit } = fakeClient({ getProjectRules })
+    vi.mocked(client.setProjectRules).mockImplementation(async ({ projectId, expectedRevision, ...change }) => {
+      expect(expectedRevision).toBe(1)
+      const kept = { ...server, ...change, projectId, revision: 2 }
+      // Saved; then a permission answered with always allow keeps a rule, and the watch says so before this answer arrives.
+      server = { ...kept, commands: [{ pattern: 'git status', decision: 'allow' }], revision: 3 }
+      emit(changed('policy', 'pol3', null, 'p1'))
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      return kept
+    })
+    withServices(<Rules />, client)
+    await choose(await screen.findByRole('button', { name: 'force pushing' }), 'Never')
+    await waitFor(() => expect(says('Go ahead')).toBe('They go ahead with git status.'))
+    expect(says('Never')).toBe('Agents never force push.')
   })
 
   it('says nothing is let through by a rule yet, and how one gets there; Escape leaves a command being added', async () => {
