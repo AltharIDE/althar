@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
@@ -245,6 +245,58 @@ describe('running the project', () => {
       assert.isNull(yield* launches.commandFor(projectId, null))
       // A name that isn't a repository is said.
       assert.match(yield* callTool(lead, 'set_run_command', { command: 'make', repository: 'elsewhere' }), /no repository called elsewhere/)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('stops and clears only what it should, and says where there is nothing to run, or no such repository', () =>
+    Effect.gen(function* () {
+      const launches = yield* Launches
+      const projects = yield* Projects
+      const path = served()
+      const name = basename(path)
+      const { projectId } = yield* open(path)
+      const coordinator: ToolAccess = { role: 'coordinator', projectId, threadId: 'none', sessionId: 'none', taskId: null }
+      const lead: ToolAccess = { role: 'lead', projectId, threadId: 'none', sessionId: 'none', taskId: null }
+      // No such run: nothing to stop or clear.
+      yield* launches.stop('nothing')
+      yield* launches.clear('nothing')
+      // A task with no worktree on this Mac has nothing to run, nor a repository by any name.
+      assert.deepInclude(yield* Effect.flip(launches.start({ projectId, taskId: 'elsewhere', threadId: null })), {
+        why: 'elsewhere',
+        message: 'The task has no worktree here to run.',
+      })
+      assert.deepInclude(yield* Effect.flip(launches.start({ projectId, taskId: 'elsewhere', repository: 'web', threadId: null })), {
+        why: 'which',
+        message: "There's no repository called web in the task. Its repositories: none.",
+      })
+      // Named, the repository runs; cleared while it runs, it keeps running.
+      const started = yield* launches.start({ projectId, taskId: null, repository: name.toUpperCase(), threadId: null })
+      yield* launches.clear(started.id)
+      assert.lengthOf(yield* launches.ofProject(projectId), 1)
+      yield* launches.stop(started.id)
+
+      // One that ends at once, printing nothing: the coordinator hears so, and Stop only takes it off the list.
+      assert.match(
+        yield* callTool(lead, 'set_run_command', { command: 'node -e "process.exit(2)"', setup: 'true' }),
+        /^Kept: .* runs with `node -e "process\.exit\(2\)"`, after `true`\.$/,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'run_project', { repository: name }),
+        /in a fresh copy of the default branch ended at once, with exit code 2\. Its last lines:\n\n\(nothing\)\n/,
+      )
+      const [ended] = yield* launches.ofProject(projectId)
+      yield* launches.stop(ended?.id ?? '')
+      assert.lengthOf(yield* launches.ofProject(projectId), 0)
+      // Asked for a task by its id, it runs in that task's worktree.
+      const task = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', { title: 'Exit early' }),
+        projectId,
+        title: 'Exit early',
+      })
+      assert.match(
+        yield* callTool(coordinator, 'run_project', { task: task.taskId }),
+        /^`node -e .*` in exit-early's worktree ended at once/,
+      )
     }).pipe(Effect.provide(withQueries())),
   )
 })
