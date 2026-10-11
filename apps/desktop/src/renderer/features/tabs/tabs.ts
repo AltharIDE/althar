@@ -18,9 +18,10 @@ export type Place =
   | { readonly kind: 'repositories' }
   | { readonly kind: 'thread'; readonly threadId: string }
 
-/** Where the window is, as the tabs see it. */
+/** Where the window is, as the tabs see it: a new project has a tab of its own. */
 export type Where =
   | { readonly kind: 'home' }
+  | { readonly kind: 'new' }
   | { readonly kind: 'project'; readonly projectId: string; readonly place: Place }
   | { readonly kind: 'thread'; readonly threadId: string }
 
@@ -42,6 +43,7 @@ export const whereOf = (pathname: string): Where => {
     }
   const thread = /^\/threads\/([^/]+)\/?$/.exec(pathname)
   if (thread?.[1] !== undefined) return { kind: 'thread', threadId: decodeURIComponent(thread[1]) }
+  if (/^\/new\/?$/.test(pathname)) return { kind: 'new' }
   return { kind: 'home' }
 }
 

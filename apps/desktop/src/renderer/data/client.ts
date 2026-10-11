@@ -12,8 +12,11 @@ import {
   type BoardSnapshot,
   type HomeSnapshot,
   clientProtocol,
+  type ConnectGuide,
+  type ConnectionCheck,
   type ConnectionList,
   type ConnectionSummary,
+  type FoundServer,
   type CoordinatorSnapshot,
   type DocumentText,
   type DomMessagePort,
@@ -24,11 +27,13 @@ import {
   type OutputText,
   type Product,
   type ChangeTarget,
+  type ProjectInk,
   type ProjectList,
   type ProjectRepository,
   type ProjectSummary,
   type RepositoryRole,
   type PlanStep,
+  type Service,
   type SignInStart,
   type SignInState,
   type Status,
@@ -38,6 +43,7 @@ import {
   type ThreadItem,
   type ThreadSnapshot,
   type WatchEvent,
+  type Launch,
 } from '@althar/contracts'
 import { Cause, Duration, Effect, Exit, Fiber, Layer, Option, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -70,10 +76,17 @@ export interface Client {
    * Opens the folder a grant names: one the person chose in the picker or
    * dropped on the window. A folder of several repositories opens with the
    * ones the person kept, each by the grant of the folder it was found in.
+   * A project made on purpose comes with the id the window made for it
+   * (`newProjectId`), and the ink the person saw.
    */
   readonly openProject: (
     grant: string,
-    options?: { readonly name?: string; readonly repositories?: ReadonlyArray<{ readonly grant: string; readonly path: string }> },
+    options?: {
+      readonly name?: string
+      readonly repositories?: ReadonlyArray<{ readonly grant: string; readonly path: string }>
+      readonly projectId?: string
+      readonly ink?: ProjectInk
+    },
   ) => Promise<ProjectSummary>
   readonly listTasks: (projectId: string) => Promise<TaskList>
   readonly createTask: (input: {
@@ -170,21 +183,32 @@ export interface Client {
   /** The connections on this Mac, and the code hosts and trackers a person can connect. */
   readonly listConnections: () => Promise<ConnectionList>
   /** Starts a service's own sign-in. */
-  readonly startSignIn: (product: Product, webUrl?: string) => Promise<SignInStart>
+  readonly startSignIn: (product: Product, webUrl?: string, connectionId?: string) => Promise<SignInStart>
   readonly getSignIn: (flowId: string) => Promise<SignInState>
   readonly cancelSignIn: (flowId: string) => Promise<void>
-  /** Connects with a pasted token. */
+  /** Connects with a pasted token; with a connection, signs it in again with a new one. */
   readonly connectToken: (input: {
     readonly product: Product
     readonly webUrl?: string
     readonly user?: string
     readonly key?: string
     readonly token: string
+    readonly connectionId?: string
   }) => Promise<ConnectionSummary>
+  /** What connecting a service starts from. */
+  readonly getConnectGuide: (service: Service) => Promise<ConnectGuide>
+  /** Which of a service's products answers at an address. */
+  readonly findServer: (service: Service, webUrl: string) => Promise<FoundServer>
+  /** Connects with gh's or glab's sign-in on this device. */
+  readonly connectCli: (product: Product, webUrl: string, connectionId?: string) => Promise<ConnectionSummary>
+  /** What a connection can do, as its service says. */
+  readonly checkConnection: (connectionId: string) => Promise<ConnectionCheck>
   readonly disconnect: (connectionId: string) => Promise<void>
   /** A project's rules. */
   /** Renames a project; its mark and its worktrees' folders stay. */
   readonly renameProject: (projectId: string, name: string) => Promise<void>
+  /** Draws a project's mark in another ink, wherever it shows. */
+  readonly setProjectInk: (projectId: string, ink: ProjectInk) => Promise<void>
   /** Removes a project from Althar: its agents stop; its folders, worktrees and branches stay. */
   readonly removeProject: (projectId: string) => Promise<void>
   readonly getRepositories: (projectId: string) => Promise<ReadonlyArray<ProjectRepository>>
@@ -248,6 +272,16 @@ export interface Client {
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
   /** Asks a task's pull request for news now. */
   readonly refreshTask: (taskId: string) => Promise<void>
+  /** Stops listening to the task's pull request at this address. */
+  readonly stopListening: (taskId: string, url: string) => Promise<void>
+  /** Stops a command the session on a thread left running. */
+  readonly stopBackground: (threadId: string, id: string) => Promise<void>
+  /** Clears one that ended by itself from the list. */
+  readonly clearBackground: (threadId: string, id: string) => Promise<void>
+  /** Runs the project with no agent: what the task built, or with none, a copy of the default branch. */
+  readonly runProject: (projectId: string, taskId: string | null, threadId: string | null) => Promise<Launch>
+  readonly stopLaunch: (id: string) => Promise<void>
+  readonly clearLaunch: (id: string) => Promise<void>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
   /**
@@ -285,6 +319,20 @@ export const messageOf = (error: unknown): string =>
 
 /** A new command id, as the contract has them. */
 export const newCommandId = (): string => `cmd_${globalThis.crypto.randomUUID().replaceAll('-', '')}`
+
+/**
+ * A new project's id, as the runtime makes them: `proj_` and a UUIDv7, so
+ * ids sort by when they were made. The window makes one for a project before
+ * it is made, to draw its mark from as it is named.
+ */
+export const newProjectId = (now: number = Date.now()): string => {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
+  // 48 bits of milliseconds, then the version and the variant over the random rest.
+  for (let i = 0; i < 6; i++) bytes[i] = Math.floor(now / 2 ** (8 * (5 - i))) % 256
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x70
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80
+  return `proj_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+}
 
 /** Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it. */
 const settle = <A>(effect: Effect.Effect<A, unknown>): Promise<A> =>
@@ -330,6 +378,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
           grant,
           ...(options.name === undefined ? {} : { name: options.name }),
           ...(options.repositories === undefined ? {} : { repositories: options.repositories }),
+          ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
+          ...(options.ink === undefined ? {} : { ink: options.ink }),
         }),
       ),
     listTasks: (projectId) => settle(api.ListTasks({ projectId })),
@@ -367,13 +417,26 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     changePlan: (planId, steps, end) =>
       command((commandId) => api.ChangePlan({ commandId, planId, steps, ...(end === undefined ? {} : { end }) })),
     listConnections: () => settle(api.ListConnections()),
-    startSignIn: (product, webUrl) =>
-      command((commandId) => api.StartSignIn({ commandId, product, ...(webUrl === undefined ? {} : { webUrl }) })),
+    startSignIn: (product, webUrl, connectionId) =>
+      command((commandId) =>
+        api.StartSignIn({
+          commandId,
+          product,
+          ...(webUrl === undefined ? {} : { webUrl }),
+          ...(connectionId === undefined ? {} : { connectionId }),
+        }),
+      ),
     getSignIn: (flowId) => settle(api.GetSignIn({ flowId })),
     cancelSignIn: (flowId) => command((commandId) => api.CancelSignIn({ commandId, flowId })),
     connectToken: (input) => command((commandId) => api.ConnectToken({ commandId, ...input })),
+    getConnectGuide: (service) => settle(api.GetConnectGuide({ service })),
+    findServer: (service, webUrl) => settle(api.FindServer({ service, webUrl })),
+    connectCli: (product, webUrl, connectionId) =>
+      command((commandId) => api.ConnectCli({ commandId, product, webUrl, ...(connectionId === undefined ? {} : { connectionId }) })),
+    checkConnection: (connectionId) => settle(api.CheckConnection({ connectionId })),
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
     renameProject: (projectId, name) => command((commandId) => api.RenameProject({ commandId, projectId, name })),
+    setProjectInk: (projectId, ink) => command((commandId) => api.SetProjectInk({ commandId, projectId, ink })),
     removeProject: (projectId) => command((commandId) => api.RemoveProject({ commandId, projectId })),
     getRepositories: (projectId) => settle(api.GetRepositories({ projectId })),
     addRepositories: (projectId, grant) => command((commandId) => api.AddRepositories({ commandId, projectId, grant })),
@@ -404,6 +467,12 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
+    stopListening: (taskId, url) => command((commandId) => api.StopListening({ commandId, taskId, url })),
+    stopBackground: (threadId, id) => command((commandId) => api.StopBackground({ commandId, threadId, id })),
+    clearBackground: (threadId, id) => command((commandId) => api.ClearBackground({ commandId, threadId, id })),
+    runProject: (projectId, taskId, threadId) => command((commandId) => api.RunProject({ commandId, projectId, taskId, threadId })),
+    stopLaunch: (id) => command((commandId) => api.StopLaunch({ commandId, id })),
+    clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     watch: (listener, since, onWatching) => {
       let cursor = since

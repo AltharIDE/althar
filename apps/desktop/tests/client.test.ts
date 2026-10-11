@@ -174,6 +174,27 @@ describe('the client', () => {
     await client.close()
   })
 
+  it('asks what connecting starts from, and is told what it can’t do, in words', async () => {
+    const { client } = await connected()
+    const guide = await client.getConnectGuide('linear')
+    expect([guide.places, guide.clis, guide.tokenPages.map((page) => page.product)]).toEqual([[], [], ['linear']])
+    expect(await client.findServer('jira', 'not a host')).toMatchObject({ product: null, reason: 'invalid' })
+    // gh's sign-in goes nowhere but over HTTPS to an instance Althar knows.
+    expect(messageOf(await client.connectCli('github', 'http://github.com').catch((error: unknown) => error))).toBe(
+      "Althar only gives gh's sign-in to a server it knows, over HTTPS. http://github.com isn't one.",
+    )
+    // A connection to sign in again, or to check, that isn't there.
+    for (const call of [
+      client.connectCli('github', 'https://github.com', 'conn_gone'),
+      client.startSignIn('github', 'https://github.com', 'conn_gone'),
+      client.checkConnection('conn_gone'),
+      client.connectToken({ product: 'linear', token: 'lin_api_x', connectionId: 'conn_gone' }),
+    ])
+      await expect(call).rejects.toBeInstanceOf(ApiError)
+    await expect(client.startSignIn('trello')).rejects.toBeInstanceOf(ApiError)
+    await client.close()
+  })
+
   it('tries a command once more, under the same id, when the runtime gave no answer; and watches again from the last change', async () => {
     const channel = new MessageChannel()
     const commands: Array<string> = []
@@ -246,6 +267,10 @@ describe('the client', () => {
           GetSignIn: () => Effect.die('unused'),
           CancelSignIn: () => Effect.die('unused'),
           ConnectToken: () => Effect.die('unused'),
+          GetConnectGuide: () => Effect.die('unused'),
+          FindServer: () => Effect.die('unused'),
+          ConnectCli: () => Effect.die('unused'),
+          CheckConnection: () => Effect.die('unused'),
           Disconnect: () => Effect.die('unused'),
           ListIssues: () => Effect.die('unused'),
           MarkReady: () => Effect.die('unused'),
@@ -253,6 +278,7 @@ describe('the client', () => {
           GetProjectRules: () => Effect.die('unused'),
           GetVocabulary: () => Effect.die('unused'),
           RenameProject: () => Effect.die('unused'),
+          SetProjectInk: () => Effect.die('unused'),
           RemoveProject: () => Effect.die('unused'),
           GetRepositories: () => Effect.die('unused'),
           AddRepositories: () => Effect.die('unused'),
@@ -268,6 +294,12 @@ describe('the client', () => {
           SignInAccount: () => Effect.die('unused'),
           OpenChange: () => Effect.die('unused'),
           RefreshTask: () => Effect.die('unused'),
+          StopListening: () => Effect.die('unused'),
+          StopBackground: () => Effect.die('unused'),
+          ClearBackground: () => Effect.die('unused'),
+          RunProject: () => Effect.die('unused'),
+          StopLaunch: () => Effect.die('unused'),
+          ClearLaunch: () => Effect.die('unused'),
           Watch: ({ since }) => {
             watches.push(since)
             return Stream.make({

@@ -24,7 +24,7 @@ export class RepositoriesNeeded extends Schema.TaggedError<RepositoriesNeeded>()
  * that isn't one, or a pull request target for a repository that isn't a fork.
  */
 export class ProjectRefused extends Schema.TaggedError<ProjectRefused>()('ProjectRefused', {
-  reason: Schema.Literals(['no_name', 'last_repository', 'no_role', 'not_a_fork']),
+  reason: Schema.Literals(['no_name', 'last_repository', 'no_role', 'not_a_fork', 'id_taken']),
 }) {}
 
 /** Something the caller named does not exist. */

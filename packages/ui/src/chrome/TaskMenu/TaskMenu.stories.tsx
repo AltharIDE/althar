@@ -67,6 +67,18 @@ export const OpeningTheFolder: Story = {
   },
 }
 
+/** What it built runs, with no agent, beside opening it: the command it runs says what. */
+export const Running: Story = {
+  args: { onStop: undefined, onAbandon: undefined, editor: 'Zed' },
+  render: (args) => <TaskMenu {...args} run={{ command: 'bun run dev', onRun: runIt }} />,
+  play: async ({ canvasElement }) => {
+    const page = await opened(canvasElement)
+    await userEvent.click(await page.findByRole('menuitem', { name: /Run bun run dev/ }))
+    await expect(runIt).toHaveBeenCalledOnce()
+  },
+}
+const runIt = fn()
+
 export const Stopping: Story = {
   play: async ({ args, canvasElement }) => {
     const page = await opened(canvasElement)

@@ -1,13 +1,14 @@
-import { makeBitbucketCloud } from './bitbucketCloud'
-import { makeBitbucketDataCenter } from './bitbucketDataCenter'
+import type { Access } from './access'
+import { accessBitbucketCloud, makeBitbucketCloud } from './bitbucketCloud'
+import { accessBitbucketDataCenter, makeBitbucketDataCenter } from './bitbucketDataCenter'
 import type { AdapterOptions, Credential } from './credential'
-import { makeGitHub } from './github'
-import { makeGitLab } from './gitlab'
-import { makeJiraCloud, makeJiraDataCenter, siteOf } from './jira'
-import { makeLinear } from './linear'
+import { accessGitHub, classicTokenPage, makeGitHub } from './github'
+import { accessGitLab, makeGitLab } from './gitlab'
+import { accessJira, makeJiraCloud, makeJiraDataCenter, siteOf } from './jira'
+import { accessLinear, makeLinear } from './linear'
 import type { KnownHosts } from './links'
-import type { CodeHost, Product, Tracker } from './model'
-import { makeTrello } from './trello'
+import type { CodeHost, Product, Service, Tracker } from './model'
+import { accessTrello, makeTrello } from './trello'
 
 /*
  * Every product Althar connects to: its name, where its hosted service
@@ -19,6 +20,8 @@ import { makeTrello } from './trello'
 
 export interface ProductInfo {
   readonly product: Product
+  /** The service it is an edition of, as the person connects it: Bitbucket for Bitbucket Cloud and Data Center alike. */
+  readonly service: Service
   readonly name: string
   /** It hosts code, and changes to it. */
   readonly host: boolean
@@ -54,27 +57,76 @@ export interface ProductInfo {
     | null
   /**
    * A pasted token: how it is sent, what goes with it (the account's email,
-   * or the API key it was made for), and where the person makes one. With an
-   * API key, where a token is made for the key typed (`{key}` in its place),
-   * and what the key is checked against before it is sent: the first pattern
-   * it matches says what is wrong with it.
+   * or the API key it was made for), where the person makes one (filled in,
+   * where the service's page takes it), where their tokens are listed to
+   * change one, and what its tokens start with, to notice one on the
+   * clipboard. With an API key, where a token is made for the key typed
+   * (`{key}` in its place), and what the key is checked against before it is
+   * sent: the first pattern it matches says what is wrong with it.
    */
   readonly token: {
     readonly kind: Credential['kind']
     readonly needs: 'email' | 'key' | null
-    readonly help: (webUrl: string) => string
+    readonly page: (webUrl: string, made: TokenMade) => string
+    readonly settings: (webUrl: string) => string
+    readonly prefixes: ReadonlyArray<string>
     readonly helpForKey?: string
     readonly keyChecks?: ReadonlyArray<{ readonly pattern: string; readonly says: string }>
   }
   /** Its adapter, once built. */
   readonly make: ((options: AdapterOptions) => { readonly host?: CodeHost; readonly tracker?: Tracker }) | null
+  /** What a connection to it can do, asked of the service; null where nothing is asked beyond who it signs in as. */
+  readonly access: Access | null
 }
 
+/** What a token page is filled in with, where it takes it: the token's name, and the owner of the repositories it is for. */
+export interface TokenMade {
+  readonly name: string
+  readonly owner?: string
+}
+
+/** What a token Althar asks for says it is for, on the pages that take a description. */
+const PURPOSE = 'Althar pushes task branches, opens their pull requests and reads their checks.'
+
+/**
+ * GitHub's page for a fine-grained token, filled in: its name, what it is
+ * for, the owner of the repositories, 90 days, and the permissions Althar
+ * uses (docs.github.com, "Pre-filling fine-grained personal access token
+ * details using URL parameters"). Which repositories can't be filled in;
+ * the person picks them. Fine-grained tokens get no Checks permission.
+ */
+const fineGrained = (webUrl: string, made: TokenMade) => {
+  const query = new URLSearchParams({
+    name: made.name.slice(0, 40),
+    description: PURPOSE,
+    ...(made.owner === undefined ? {} : { target_name: made.owner }),
+    expires_in: '90',
+    contents: 'write',
+    pull_requests: 'write',
+    issues: 'write',
+    statuses: 'read',
+    actions: 'read',
+    workflows: 'write',
+  })
+  return `${trimmed(webUrl)}/settings/personal-access-tokens/new?${query.toString()}`
+}
+
+/** GitHub's page for a classic token, filled in, which its adapter keeps: a check links to it too. */
+export { classicTokenPage }
+
 const trimmed = (url: string) => url.replace(/\/+$/, '')
+
+/** Where an Atlassian account's API tokens are made and listed, for Jira Cloud and Bitbucket Cloud alike. */
+const ATLASSIAN_TOKENS = 'https://id.atlassian.com/manage-profile/security/api-tokens'
+
+/** A Jira Data Center account's personal access tokens. */
+const jiraTokens = (webUrl: string) =>
+  `${trimmed(webUrl)}/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens`
 
 export const products: Readonly<Record<Product, ProductInfo>> = {
   github: {
     product: 'github',
+    service: 'github',
     name: 'GitHub',
     host: true,
     tracker: true,
@@ -86,14 +138,26 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
       codeUrl: (webUrl) => `${trimmed(webUrl)}/login/device/code`,
       tokenUrl: (webUrl) => `${trimmed(webUrl)}/login/oauth/access_token`,
     },
-    token: { kind: 'bearer', needs: null, help: (webUrl) => `${trimmed(webUrl)}/settings/personal-access-tokens/new` },
+    token: {
+      kind: 'bearer',
+      needs: null,
+      // A company's own server may predate fine-grained tokens: a classic one there.
+      page: (webUrl, made) => (trimmed(webUrl) === 'https://github.com' ? fineGrained(webUrl, made) : classicTokenPage(webUrl)),
+      settings: (webUrl) =>
+        trimmed(webUrl) === 'https://github.com'
+          ? `${trimmed(webUrl)}/settings/personal-access-tokens`
+          : `${trimmed(webUrl)}/settings/tokens`,
+      prefixes: ['github_pat_', 'ghp_'],
+    },
     make: (options) => {
       const github = makeGitHub(options)
       return { host: github, tracker: github }
     },
+    access: accessGitHub,
   },
   gitlab: {
     product: 'gitlab',
+    service: 'gitlab',
     name: 'GitLab',
     host: true,
     tracker: true,
@@ -106,14 +170,24 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
       tokenUrl: (webUrl) => `${trimmed(webUrl)}/oauth/token`,
       scope: 'api',
     },
-    token: { kind: 'bearer', needs: null, help: (webUrl) => `${trimmed(webUrl)}/-/user_settings/personal_access_tokens` },
+    token: {
+      kind: 'bearer',
+      needs: null,
+      // GitLab's page takes a name, a description and scopes (docs.gitlab.com, "Prefill personal access token name and scopes"); `api` covers git over HTTPS too.
+      page: (webUrl, made) =>
+        `${trimmed(webUrl)}/-/user_settings/personal_access_tokens?${new URLSearchParams({ name: made.name, description: PURPOSE, scopes: 'api' }).toString()}`,
+      settings: (webUrl) => `${trimmed(webUrl)}/-/user_settings/personal_access_tokens`,
+      prefixes: ['glpat-'],
+    },
     make: (options) => {
       const gitlab = makeGitLab(options)
       return { host: gitlab, tracker: gitlab }
     },
+    access: accessGitLab,
   },
   bitbucket_cloud: {
     product: 'bitbucket_cloud',
+    service: 'bitbucket',
     name: 'Bitbucket',
     host: true,
     tracker: false,
@@ -121,11 +195,14 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     selfHosted: false,
     apiFor: () => 'https://api.bitbucket.org/2.0',
     browser: null,
-    token: { kind: 'basic', needs: 'email', help: () => 'https://id.atlassian.com/manage-profile/security/api-tokens' },
+    // Atlassian's page takes nothing filled in: the person names the token and ticks its scopes.
+    token: { kind: 'basic', needs: 'email', page: () => ATLASSIAN_TOKENS, settings: () => ATLASSIAN_TOKENS, prefixes: ['ATATT'] },
     make: (options) => ({ host: makeBitbucketCloud(options) }),
+    access: accessBitbucketCloud,
   },
   bitbucket_dc: {
     product: 'bitbucket_dc',
+    service: 'bitbucket',
     name: 'Bitbucket Data Center',
     host: true,
     tracker: false,
@@ -133,11 +210,19 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     selfHosted: true,
     apiFor: (webUrl) => `${trimmed(webUrl)}/rest/api/latest`,
     browser: null,
-    token: { kind: 'bearer', needs: null, help: (webUrl) => `${trimmed(webUrl)}/plugins/servlet/access-tokens/manage` },
+    token: {
+      kind: 'bearer',
+      needs: null,
+      page: (webUrl) => `${trimmed(webUrl)}/plugins/servlet/access-tokens/manage`,
+      settings: (webUrl) => `${trimmed(webUrl)}/plugins/servlet/access-tokens/manage`,
+      prefixes: [],
+    },
     make: (options) => ({ host: makeBitbucketDataCenter(options) }),
+    access: accessBitbucketDataCenter,
   },
   linear: {
     product: 'linear',
+    service: 'linear',
     name: 'Linear',
     host: false,
     tracker: true,
@@ -150,11 +235,19 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
       tokenUrl: 'https://api.linear.app/oauth/token',
       scope: 'read,write',
     },
-    token: { kind: 'key', needs: null, help: () => 'https://linear.app/settings/account/security' },
+    token: {
+      kind: 'key',
+      needs: null,
+      page: () => 'https://linear.app/settings/account/security',
+      settings: () => 'https://linear.app/settings/account/security',
+      prefixes: ['lin_api_'],
+    },
     make: (options) => ({ tracker: makeLinear(options) }),
+    access: accessLinear,
   },
   jira_cloud: {
     product: 'jira_cloud',
+    service: 'jira',
     name: 'Jira',
     host: false,
     tracker: true,
@@ -164,11 +257,13 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     // A site is its origin, whatever page of it was pasted.
     address: siteOf,
     browser: null,
-    token: { kind: 'basic', needs: 'email', help: () => 'https://id.atlassian.com/manage-profile/security/api-tokens' },
+    token: { kind: 'basic', needs: 'email', page: () => ATLASSIAN_TOKENS, settings: () => ATLASSIAN_TOKENS, prefixes: ['ATATT'] },
     make: (options) => ({ tracker: makeJiraCloud(options) }),
+    access: accessJira,
   },
   jira_dc: {
     product: 'jira_dc',
+    service: 'jira',
     name: 'Jira Data Center',
     host: false,
     tracker: true,
@@ -179,13 +274,16 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     token: {
       kind: 'bearer',
       needs: null,
-      help: (webUrl) =>
-        `${trimmed(webUrl)}/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens`,
+      page: (webUrl) => jiraTokens(webUrl),
+      settings: (webUrl) => jiraTokens(webUrl),
+      prefixes: [],
     },
     make: (options) => ({ tracker: makeJiraDataCenter(options) }),
+    access: accessJira,
   },
   trello: {
     product: 'trello',
+    service: 'trello',
     name: 'Trello',
     host: false,
     tracker: true,
@@ -197,7 +295,10 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     token: {
       kind: 'app',
       needs: 'key',
-      help: () => 'https://trello.com/power-ups/admin',
+      page: () => 'https://trello.com/power-ups/admin',
+      // A member's tokens, each with the app it was made for, where one is revoked.
+      settings: () => 'https://trello.com/my/account',
+      prefixes: ['ATTA'],
       // Trello shows the token it makes there, to copy.
       helpForKey: 'https://trello.com/1/authorize?expiration=never&name=Althar&scope=read,write&response_type=token&key={key}',
       keyChecks: [
@@ -207,6 +308,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
       ],
     },
     make: (options) => ({ tracker: makeTrello(options) }),
+    access: accessTrello,
   },
 }
 

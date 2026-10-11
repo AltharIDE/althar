@@ -11,6 +11,8 @@ describe('a git remote', () => {
     ['https://gitlab.com/group/sub/project.git', 'gitlab.com', ['group', 'sub', 'project']],
     ['git@GitLab.com:group/sub/project.git', 'gitlab.com', ['group', 'sub', 'project']],
     ['https://user@bitbucket.org/team/repo.git', 'bitbucket.org', ['team', 'repo']],
+    // Escapes that don't read are kept as written.
+    ['https://github.com/team/api%ZZ.git', 'github.com', ['team', 'api%ZZ']],
   ])('%s is %s, at its path', (remote, host, path) => {
     expect(parseRemote(remote)).toEqual({ host, path })
   })

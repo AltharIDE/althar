@@ -101,8 +101,9 @@ export function Shot({ w, h, phoneW, phone, crop, align = 'center', maxScale = 2
 
   const region = fit?.region ?? { x: 0, y: 0, w, h: h ?? 1 }
   const scale = fit?.scale ?? 0
+  // The app's own words in the picture are its demo world: data-nosnippet keeps them out of search results' snippets.
   return (
-    <div ref={box} className={cx(s.shot, align === 'start' && s.start, className)} role="img" aria-label={label}>
+    <div ref={box} className={cx(s.shot, align === 'start' && s.start, className)} role="img" aria-label={label} data-nosnippet>
       <div
         className={cx(s.frame, frame)}
         style={{ width: region.w * scale || undefined, height: region.h * scale || undefined, visibility: fit ? 'visible' : 'hidden' }}

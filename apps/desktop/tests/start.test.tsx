@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { type AccountSignInState, type AgentStatus, ApiError, type Status } from '@althar/contracts'
+import { type AccountSignInState, type AgentStatus, ApiError, type ProjectSummary, type Status } from '@althar/contracts'
 import { RuntimeState } from '@althar/ui'
 
 import { useServices } from '../src/renderer/data/services'
@@ -15,7 +15,7 @@ import { SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
 import { runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
-import { agents, changed, fakeClient, fakeHost, home, project, streamed, usual, withoutOpenCode } from './fixtures'
+import { agents, changed, fakeClient, fakeHost, project, streamed, usual, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
@@ -515,144 +515,6 @@ describe('the start', () => {
     expect(watching).toHaveLength(1)
   })
 
-  it('opens a folder as a project: from the button, from ⌘N, and dropped on the window', async () => {
-    const onProject = vi.fn()
-    const { client } = fakeClient({ getHome: vi.fn(async () => home({ projects: [{ ...project, running: 0, waiting: 2 }] })) })
-    const host = fakeHost()
-    const view = withServices(<Start onProject={onProject} />, client, host)
-    await screen.findByRole('complementary', { name: 'Projects' })
-    await userEvent.click(screen.getByRole('button', { name: 'Open a folder' }))
-    await waitFor(() => expect(onProject).toHaveBeenCalledTimes(1))
-    expect(client.openProject).toHaveBeenCalledWith('grant_picked')
-
-    fireEvent.keyDown(window, { key: 'n', metaKey: true })
-    fireEvent.keyDown(window, { key: 'n', metaKey: true, shiftKey: true })
-    fireEvent.keyDown(window, { key: 'm', metaKey: true })
-    await waitFor(() => expect(onProject).toHaveBeenCalledTimes(2))
-
-    const root = view.container.firstElementChild as Element
-    const folder = new File([], 'meridian')
-    fireEvent.dragOver(root)
-    fireEvent.drop(root, { dataTransfer: { files: [folder] } })
-    await waitFor(() => expect(client.openProject).toHaveBeenCalledWith('grant_dropped'))
-    expect(host.grantDropped).toHaveBeenCalledWith(folder)
-    fireEvent.drop(root, { dataTransfer: { files: [] } })
-    expect(host.grantDropped).toHaveBeenCalledTimes(1)
-  })
-
-  it.each([
-    ['Ask me', 'ask'],
-    ['The coordinator decides', 'coordinator'],
-  ])('opens a folder of several repositories with the selected %s permission mode', async (label, mode) => {
-    const onProject = vi.fn()
-    const found = (name: string, at: string) => ({ path: `${at}/${name}`, folder: null, name, branch: 'main', remote: null })
-    const readFolder = vi.fn(async (grant: string) =>
-      grant === 'grant_picked'
-        ? {
-            kind: 'folder' as const,
-            name: 'meridian',
-            repositories: [found('api', '/code/meridian'), found('docs', '/code/meridian'), found('web', '/code/meridian')],
-            project: null,
-          }
-        : { kind: 'repository' as const, name: 'tools', repositories: [found('tools', '/code')], project: null },
-    )
-    const { client } = fakeClient({ readFolder })
-    const pickFolder = vi.fn<() => Promise<string | null>>().mockResolvedValueOnce('grant_picked').mockResolvedValueOnce('grant_more')
-    withServices(<Start onProject={onProject} />, client, fakeHost({ pickFolder }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Open a folder' }))
-    expect(await screen.findByText('Althar found 3 git repositories in meridian. Leave out any its tasks shouldn’t change.')).toBeTruthy()
-    expect(client.openProject).not.toHaveBeenCalled()
-    // Left out, and one added from elsewhere.
-    await userEvent.click(screen.getByRole('button', { name: 'Remove docs' }))
-    await userEvent.click(screen.getByRole('button', { name: /Choose folders/ }))
-    expect(await screen.findByText('tools')).toBeTruthy()
-    await userEvent.click(screen.getByRole('radio', { name: new RegExp(label) }))
-    await userEvent.click(screen.getByRole('button', { name: 'Create project' }))
-    await waitFor(() => expect(onProject).toHaveBeenCalledTimes(1))
-    expect(client.openProject).toHaveBeenCalledWith('grant_picked', {
-      name: 'meridian',
-      repositories: [
-        { grant: 'grant_picked', path: '/code/meridian/api' },
-        { grant: 'grant_picked', path: '/code/meridian/web' },
-        { grant: 'grant_more', path: '/code/tools' },
-      ],
-    })
-    expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', permissions: mode })
-  })
-
-  it('says what went wrong forming a project, keeps at least one repository, and goes back when cancelled', async () => {
-    const found = (name: string) => ({ path: `/code/meridian/${name}`, folder: null, name, branch: null, remote: 'git@github.com:m/a.git' })
-    const readFolder = vi
-      .fn()
-      .mockResolvedValueOnce({ kind: 'folder' as const, name: 'meridian', repositories: [found('api'), found('web')], project: null })
-      .mockRejectedValueOnce(new ApiError({ reason: 'NotFound', message: 'That folder isn’t there any more.' }))
-      .mockResolvedValueOnce({
-        kind: 'inside' as const,
-        name: 'web',
-        repositories: [{ path: '/code/monorepo', folder: 'packages/web', name: 'monorepo', branch: 'main', remote: null }],
-        project: null,
-      })
-    const openProject = vi.fn(async () => Promise.reject(new ApiError({ reason: 'GitFailed', message: 'Git couldn’t read it.' })))
-    const { client } = fakeClient({ readFolder, openProject })
-    const pickFolder = vi
-      .fn<() => Promise<string | null>>()
-      .mockResolvedValueOnce('grant_picked')
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce('grant_gone')
-      .mockResolvedValueOnce('grant_inside')
-    withServices(<Start onProject={vi.fn()} />, client, fakeHost({ pickFolder }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Open a folder' }))
-    await screen.findByText('Althar found 2 git repositories in meridian. Leave out any its tasks shouldn’t change.')
-    // Choosing no folder adds nothing; one that's gone says so.
-    await userEvent.click(screen.getByRole('button', { name: /Choose folders/ }))
-    await userEvent.click(screen.getByRole('button', { name: /Choose folders/ }))
-    expect(await screen.findByText('That folder isn’t there any more.')).toBeTruthy()
-    // A folder inside a repository isn't one of several: the repository itself is what's added.
-    await userEvent.click(screen.getByRole('button', { name: /Choose folders/ }))
-    expect(await screen.findByText('That’s a folder inside monorepo. Add monorepo itself.')).toBeTruthy()
-    expect(screen.queryByText('monorepo', { exact: true })).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Create project' }))
-    expect(await screen.findByText('Git couldn’t read it.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Remove api' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Remove web' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Create project' }))
-    expect(await screen.findByText('Keep at least one repository.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(await screen.findByRole('heading', { name: 'Projects' })).toBeTruthy()
-  })
-
-  it('makes a project of the repositories kept, with the rules as they are by default', async () => {
-    const onProject = vi.fn()
-    const found = (name: string) => ({ path: `/code/meridian/${name}`, folder: null, name, branch: 'main', remote: null })
-    const readFolder = vi.fn(async () => ({
-      kind: 'folder' as const,
-      name: 'meridian',
-      repositories: [found('api'), found('web')],
-      project: null,
-    }))
-    const { client } = fakeClient({ readFolder })
-    withServices(<Start onProject={onProject} />, client, fakeHost())
-    await userEvent.click(await screen.findByRole('button', { name: 'Open a folder' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Create project' }))
-    await waitFor(() => expect(onProject).toHaveBeenCalledTimes(1))
-    expect(client.setProjectRules).not.toHaveBeenCalled()
-  })
-
-  it('opens a folder it read at once when it is a project already, or holds one repository', async () => {
-    const onProject = vi.fn()
-    const readFolder = vi.fn(async () => ({
-      kind: 'folder' as const,
-      name: 'meridian',
-      repositories: [{ path: '/code/meridian/api', folder: null, name: 'api', branch: 'main', remote: null }],
-      project: null,
-    }))
-    const { client } = fakeClient({ readFolder })
-    withServices(<Start onProject={onProject} />, client, fakeHost())
-    await userEvent.click(await screen.findByRole('button', { name: 'Open a folder' }))
-    await waitFor(() => expect(onProject).toHaveBeenCalledTimes(1))
-    expect(client.openProject).toHaveBeenCalledWith('grant_picked')
-  })
-
   it('offers to download an agent that isn’t on this Mac, says it downloads, and why it didn’t finish', async () => {
     let installing = false
     let finish: () => void = () => {}
@@ -759,16 +621,106 @@ describe('the start', () => {
     fireEvent.keyDown(window, { key: 'n', metaKey: true })
     await waitFor(() => expect(host.pickFolder).toHaveBeenCalledTimes(2))
     expect(within(list).getAllByRole('checkbox', { name: /api/ })).toHaveLength(1)
-    await userEvent.click(within(list).getByRole('checkbox', { name: /api/ }))
-    await userEvent.click(within(list).getByRole('checkbox', { name: /web/ }))
 
-    // A folder inside a repository, dropped: alone, it opens as the folder it is.
+    // A folder inside a repository, dropped: with others, it isn't made a part of the project (ADR-025).
     // Dropped anywhere on the screen: on the list, here.
     fireEvent.drop(list, { dataTransfer: { types: ['Files'], files: [new File([], 'docs')] } })
     expect(await within(list).findByRole('checkbox', { name: /docs.*~?\/m\/mono\/docs/ })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    expect(
+      await screen.findByText('docs is a folder inside mono: on its own it makes a project, but with others, add mono itself.'),
+    ).toBeTruthy()
+    expect(client.openProject).not.toHaveBeenCalled()
+    // Alone, it opens as the folder it is.
+    await userEvent.click(within(list).getByRole('checkbox', { name: /api/ }))
+    await userEvent.click(within(list).getByRole('checkbox', { name: /web/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
     await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
     expect(client.openProject).toHaveBeenCalledWith('grant_dropped', { name: 'docs' })
+  })
+
+  it('makes the first project once, however often ⌘⏎ is pressed, and leaves the keys typed into a form to the form', async () => {
+    const onProject = vi.fn()
+    let made: (made: ProjectSummary) => void = () => undefined
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      readFolder: vi.fn(async () => ({
+        kind: 'repository' as const,
+        name: 'meridian',
+        repositories: [{ path: '/Users/me/Projects/meridian', folder: null, name: 'meridian', branch: 'main', remote: null }],
+        project: null,
+      })),
+    })
+    const opened = client.openProject
+    vi.mocked(client.openProject).mockImplementation(() => new Promise((resolve) => (made = resolve)))
+    const host = fakeHost({
+      findRepositories: vi.fn(async () => ({
+        lookedIn: ['~/Projects'],
+        repositories: [{ id: 'r1', name: 'meridian', where: '~/Projects/meridian', branch: 'main', worked: 0 }],
+      })),
+    })
+    withServices(<Start onProject={onProject} />, client, host)
+    await screen.findByRole('heading', { name: 'Where should they work?' })
+
+    // Typed into an account's form, such as its key, ⌘⏎ and ⌘N are the form's.
+    const form = document.createElement('form')
+    const key = document.createElement('input')
+    form.append(key)
+    ;(await screen.findByRole('list', { name: 'Repositories for the project' })).append(form)
+    fireEvent.keyDown(key, { key: 'Enter', metaKey: true })
+    fireEvent.keyDown(key, { key: 'n', metaKey: true })
+    expect(screen.queryByText('Tick a repository for the project first.')).toBeNull()
+    expect(host.pickFolder).not.toHaveBeenCalled()
+    form.remove()
+
+    await userEvent.click(screen.getByRole('checkbox', { name: /meridian/ }))
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
+    await waitFor(() => expect(opened).toHaveBeenCalledTimes(1))
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
+    act(() => made(project))
+    await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
+    expect(opened).toHaveBeenCalledTimes(1)
+  })
+
+  it('makes no project of a repository found that is now a folder of others', async () => {
+    const inner = { path: '/Users/me/Projects/meridian/inner', folder: null, name: 'inner', branch: 'main', remote: null }
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      readFolder: vi.fn(async () => ({ kind: 'folder' as const, name: 'meridian', repositories: [inner], project: null })),
+    })
+    const host = fakeHost({
+      findRepositories: vi.fn(async () => ({
+        lookedIn: ['~/Projects'],
+        repositories: [{ id: 'r1', name: 'meridian', where: '~/Projects/meridian', branch: 'main', worked: 0 }],
+      })),
+    })
+    withServices(<Start onProject={vi.fn()} />, client, host)
+    await userEvent.click(await screen.findByRole('checkbox', { name: /meridian/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    expect(await screen.findByText('meridian isn’t a git repository any more.')).toBeTruthy()
+    expect(client.openProject).not.toHaveBeenCalled()
+  })
+
+  it('keeps focus in the project as its repositories are left out, then on the last one’s tick', async () => {
+    const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+    const host = fakeHost({
+      findRepositories: vi.fn(async () => ({
+        lookedIn: ['~/Projects'],
+        repositories: [
+          { id: 'r1', name: 'meridian', where: '~/Projects/meridian', branch: 'main', worked: 0 },
+          { id: 'r2', name: 'halyard', where: '~/Projects/halyard', branch: 'main', worked: 0 },
+        ],
+      })),
+    })
+    withServices(<Start onProject={vi.fn()} />, client, host)
+    await userEvent.click(await screen.findByRole('checkbox', { name: /meridian/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: /halyard/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Leave meridian out' }))
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Leave halyard out' })))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: /halyard/ })))
+    expect(screen.getByRole('checkbox', { name: /halyard/ }).getAttribute('aria-checked')).toBe('false')
   })
 
   it('says what went wrong making the first project, and when nothing was found or the runtime can’t answer', async () => {

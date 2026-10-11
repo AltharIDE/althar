@@ -1,6 +1,7 @@
 import type * as acp from '@agentclientprotocol/sdk'
 import type { ToolKind } from '@althar/domain'
 
+import type { BackgroundEvent } from './background'
 import type { Classified } from './failures'
 
 /*
@@ -149,6 +150,8 @@ export type SessionEvent =
   /** The agent reported a failure in structured form, during a turn or between turns. */
   | { readonly _tag: 'AgentFailure'; readonly severity: 'warning' | 'error'; readonly classified: Classified }
   | { readonly _tag: 'Other'; readonly update: string; readonly raw: unknown }
+  /** A command it left running started, said where its output goes, or ended (background.ts). */
+  | BackgroundEvent
   /**
    * The turn is over. `failure` is set when the agent reported one in
    * structured form, even if the turn itself ended normally, as Claude does

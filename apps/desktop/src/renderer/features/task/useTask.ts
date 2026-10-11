@@ -111,6 +111,16 @@ export interface TaskModel {
   readonly accept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => Promise<void>
   /** Pushes the task's branch to its pull request, up to the commit the person saw: the one at `url`, in a task of several. */
   readonly push: (head: string, url?: string) => Promise<void>
+  /** Stops listening to the task's pull request at this address. */
+  readonly stopListening: (url: string) => Promise<void>
+  /** Stops a command its lead left running. */
+  readonly stopBackground: (id: string) => Promise<void>
+  /** Clears one that ended by itself from the list. */
+  readonly clearBackground: (id: string) => Promise<void>
+  /** Runs what it built, with no agent, in its worktree. */
+  readonly runProject: () => Promise<void>
+  readonly stopLaunch: (id: string) => Promise<void>
+  readonly clearLaunch: (id: string) => Promise<void>
   readonly dismissError: () => void
 }
 
@@ -212,6 +222,13 @@ export const useTask = (threadId: string): TaskModel => {
       )
       return
     }
+    // What Althar runs of the project, whole each time: this task's, which the pill over the composer shows.
+    if (event._tag === 'Launches')
+      return void setSnapshot((current) =>
+        current.project.id !== event.projectId
+          ? current
+          : { ...current, task: { ...current.task, launches: event.launches.filter((launch) => launch.taskId === current.task.id) } },
+      )
     if (event.threadId !== threadId) return
     // How full the lead's context is, as it says: kept on its session, which the composer shows.
     if (event._tag === 'Context')
@@ -219,6 +236,11 @@ export const useTask = (threadId: string): TaskModel => {
         current.session === null
           ? current
           : { ...current, session: { ...current.session, context: { used: event.used, size: event.size } } },
+      )
+    // What it left running, whole each time: kept on its session too, which the pill over the composer shows.
+    if (event._tag === 'Background')
+      return void setSnapshot((current) =>
+        current.session === null ? current : { ...current, session: { ...current.session, background: event.background } },
       )
     if (event.aggregateType === 'thread_item') changed.current.items.add(event.aggregateId)
     else changed.current.head = true
@@ -407,6 +429,12 @@ export const useTask = (threadId: string): TaskModel => {
         for (const change of changes) await client.merge(snapshot.task.id, change.head, change.url)
       }),
     push: (head, url) => act(async () => (snapshot === null ? undefined : client.push(snapshot.task.id, head, url))),
+    stopListening: (url) => onTask((taskId) => client.stopListening(taskId, url)),
+    stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
+    clearBackground: (id) => act(() => client.clearBackground(threadId, id)),
+    runProject: () => act(async () => (snapshot === null ? undefined : client.runProject(snapshot.project.id, snapshot.task.id, threadId))),
+    stopLaunch: (id) => act(() => client.stopLaunch(id)),
+    clearLaunch: (id) => act(() => client.clearLaunch(id)),
     dismissError: () => setError(null),
   }
 }

@@ -140,7 +140,7 @@ export function HomeWindow({
           onOpenEvent={none}
           onOpenProject={none}
           onTalk={none}
-          onOpenFolder={none}
+          onNewProject={none}
         />
       </div>
     </div>

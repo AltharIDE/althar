@@ -112,36 +112,6 @@ export const STAGES = [
   },
 ] as const
 
-/** A project's "always ask me" list, and which of it is on. */
-export const ALWAYS_ASK = [
-  { id: 'prod', label: 'Deploys, and anything that reaches production' },
-  { id: 'staging', label: 'Commands that reach staging' },
-  { id: 'main', label: 'Pushing to main' },
-  { id: 'spend', label: 'Spending more than $5 on one task' },
-  { id: 'outside', label: 'Deleting files outside the task’s workspace' },
-  { id: 'people', label: 'Messages to people: email, Slack, issue comments' },
-] as const
-export const ALWAYS_ON = ['prod', 'staging', 'main', 'spend', 'outside'] as const
-
-/** A project's "never" list: refused outright, whatever the policy. */
-export const NEVER = [
-  { id: 'secrets', label: 'Reading .env files, keys and other secrets' },
-  { id: 'force', label: 'Force-pushing, or rewriting pushed history' },
-  { id: 'proddb', label: 'Writing to the production database' },
-  { id: 'install', label: 'Installing packages from outside the lockfile’s registries' },
-] as const
-export const NEVER_ON = ['secrets', 'force', 'proddb'] as const
-
-/** What Meridian lets through without asking: what permissions answered with "always allow" kept. */
-export const ALWAYS_ALLOWED = [
-  { id: 'command:prefix:bun test', label: 'Commands starting “bun test”' },
-  { id: 'command:prefix:git status', label: 'Commands starting “git status”' },
-  {
-    id: 'command:exact:pnpm replay --env staging --from 2026-09-25 refunds',
-    label: 'Exactly “pnpm replay --env staging --from 2026-09-25 refunds”',
-  },
-]
-
 /** Who could lead task 432, and why the coordinator picked Opus. */
 export const LEAD_OPTIONS: LeadOption[] = [
   { model: OPUS, note: 'Recommended · led 8 tasks on Meridian, 7 merged after one review round' },

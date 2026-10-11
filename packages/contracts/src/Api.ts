@@ -31,6 +31,10 @@ export class ApiError extends Schema.TaggedError<ApiError>()('ApiError', {
 export const CommandId = Schema.String.check(Schema.isPattern(/^cmd_[0-9a-f]{32}$/))
 export type CommandId = typeof CommandId.Type
 
+/** A new project's id, made by the window before the project is, so its mark is drawn from it while it is named: `proj_` and 32 hex digits. */
+export const NewProjectId = Schema.String.check(Schema.isPattern(/^proj_[0-9a-f]{32}$/))
+export type NewProjectId = typeof NewProjectId.Type
+
 /** A position in the store's change feed. Events after it are the ones a client hasn't seen. */
 export const Cursor = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -146,7 +150,7 @@ export const Status = Schema.Struct({
 })
 export type Status = typeof Status.Type
 
-/** A project's ink: the colour its mark is drawn in, chosen when it was made and kept. */
+/** A project's ink: the colour its mark is drawn in, chosen when it was made and kept until the person picks another. */
 export const ProjectInk = Schema.Literals(['clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber'])
 export type ProjectInk = typeof ProjectInk.Type
 
@@ -192,6 +196,31 @@ export type RepositoryRole = typeof RepositoryRole.Type
 export const ChangeTarget = Schema.Literals(['upstream', 'fork'])
 export type ChangeTarget = typeof ChangeTarget.Type
 
+/** A code host or tracker Althar connects to. Cloud and Data Center are separate products. */
+export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
+export type Product = typeof Product.Type
+
+/**
+ * Where a repository's work goes: the code host its remote is on, its path
+ * there, and who Althar reaches it as. A host Althar doesn't know is named
+ * by its address alone.
+ */
+export const RepositoryHost = Schema.Struct({
+  /** The code host, where Althar knows it; null for one it doesn't. */
+  product: Schema.NullOr(Product),
+  /** As the page says it: GitHub; or, for a host Althar doesn't know, its address, git.example.com. */
+  name: Schema.String,
+  /** A company's own server, by its address, where the host isn't the hosted service: gitlab.example.com. */
+  instance: Schema.NullOr(Schema.String),
+  /** Its path there: meridian/app. A fork's is the fork's. */
+  path: Schema.String,
+  /** Its page there; null on a host Althar doesn't know. */
+  url: Schema.NullOr(Schema.String),
+  /** Who Althar is signed in as there, and whether that sign-in still works; null where it isn't connected. */
+  account: Schema.NullOr(Schema.Struct({ login: Schema.String, state: Schema.Literals(['ready', 'reauth_required']) })),
+})
+export type RepositoryHost = typeof RepositoryHost.Type
+
 /** One of a project's repositories, as this Mac has it. */
 export const ProjectRepository = Schema.Struct({
   id: Schema.String,
@@ -200,9 +229,10 @@ export const ProjectRepository = Schema.Struct({
   path: Schema.NullOr(Schema.String),
   /** The folder inside it the project is about, such as one package of a monorepo; null for all of it. */
   folder: Schema.NullOr(Schema.String),
+  /** The branch checked out there. */
   branch: Schema.NullOr(Schema.String),
-  /** Its first remote, without any password in it. */
-  remote: Schema.NullOr(Schema.String),
+  /** Where its work goes, from its `origin` (else its first remote); null with no remote, or one that is a folder. */
+  host: Schema.NullOr(RepositoryHost),
   role: RepositoryRole,
   /** The fork its remotes make it (an `upstream` beside `origin`), by each one's path on its host, and where its pull requests open. */
   fork: Schema.NullOr(Schema.Struct({ fork: Schema.String, upstream: Schema.String, target: ChangeTarget })),
@@ -331,10 +361,6 @@ export type TaskList = typeof TaskList.Type
 
 /* ---- Code hosts and trackers (docs/architecture/06) ---- */
 
-/** A code host or tracker Althar connects to. Cloud and Data Center are separate products. */
-export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
-export type Product = typeof Product.Type
-
 /** A person's sign-in to a code host or tracker, on this Mac. */
 export const ConnectionSummary = Schema.Struct({
   id: Schema.String,
@@ -350,9 +376,15 @@ export const ConnectionSummary = Schema.Struct({
 })
 export type ConnectionSummary = typeof ConnectionSummary.Type
 
+/** A service as a person connects it: a product's Cloud and Data Center editions are one service. */
+export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello'])
+export type Service = typeof Service.Type
+
 /** A product a person can connect, and how they sign in to it. */
 export const ProductOption = Schema.Struct({
   product: Product,
+  /** The service it is an edition of. */
+  service: Service,
   name: Schema.String,
   host: Schema.Boolean,
   tracker: Schema.Boolean,
@@ -364,8 +396,8 @@ export const ProductOption = Schema.Struct({
   browserSignIn: Schema.Boolean,
   /** What a pasted token goes with: the account's email, or the API key it was made for. */
   tokenNeeds: Schema.NullOr(Schema.Literals(['email', 'key'])),
-  /** Where the person makes a token, on the hosted service. */
-  tokenHelp: Schema.String,
+  /** What its tokens start with, to notice one on the clipboard; none where they have no mark of their own. */
+  tokenPrefixes: Schema.Array(Schema.String),
   /** Where a token is made for the API key the person typed, with `{key}` where it goes. */
   tokenHelpForKey: Schema.NullOr(Schema.String),
   /** What a typed API key is checked against before it is sent: the first pattern it matches says what is wrong with it. */
@@ -373,12 +405,123 @@ export const ProductOption = Schema.Struct({
 })
 export type ProductOption = typeof ProductOption.Type
 
+/** A project's repositories on an instance of a service, as their remotes name them. */
+export const ConnectPlace = Schema.Struct({
+  product: Product,
+  /** The instance: https://github.com, or a company's own server. */
+  webUrl: Schema.String,
+  project: Schema.String,
+  /** The remote that names it, as git calls it, where git was asked: origin. */
+  remote: Schema.NullOr(Schema.String),
+  /** The repositories' paths there: northwind/meridian-api. */
+  repositories: Schema.Array(Schema.String),
+})
+export type ConnectPlace = typeof ConnectPlace.Type
+
 export const ConnectionList = Schema.Struct({
   cursor: Cursor,
   connections: Schema.Array(ConnectionSummary),
   products: Schema.Array(ProductOption),
+  /** Where the projects' code is, on the hosted services and on servers already connected. */
+  places: Schema.Array(ConnectPlace),
 })
 export type ConnectionList = typeof ConnectionList.Type
+
+/** A command-line tool's sign-in on this device, which Althar can take a copy of: gh's or glab's. */
+export const CliSignIn = Schema.Struct({
+  product: Product,
+  webUrl: Schema.String,
+  tool: Schema.Literals(['gh', 'glab']),
+  /** Who it is signed in as there. */
+  account: Schema.String,
+  /** Its token's scopes, where the service says them. */
+  scopes: Schema.NullOr(Schema.Array(Schema.String)),
+})
+export type CliSignIn = typeof CliSignIn.Type
+
+/**
+ * What connecting a service starts from: where its code is in the person's
+ * projects (each server their remotes name asked what it is), the
+ * command-line sign-ins on this device, the email the projects commit with,
+ * and where a token is made on each instance, filled in for its places.
+ */
+export const ConnectGuide = Schema.Struct({
+  service: Service,
+  places: Schema.Array(ConnectPlace),
+  clis: Schema.Array(CliSignIn),
+  /** The email the projects' commits are made with, and the project whose git says it; null for git's own setting. */
+  email: Schema.NullOr(Schema.Struct({ address: Schema.String, project: Schema.NullOr(Schema.String) })),
+  tokenPages: Schema.Array(Schema.Struct({ product: Product, webUrl: Schema.String, url: Schema.String })),
+})
+export type ConnectGuide = typeof ConnectGuide.Type
+
+/** What answered at an address the person typed, and where a token is made there. */
+export const FoundServer = Schema.Struct({
+  product: Schema.NullOr(Product),
+  /** The address as a connection keeps it. */
+  webUrl: Schema.String,
+  /** Why nothing of the service's did: not an address, nothing answered, or something else did. */
+  reason: Schema.NullOr(Schema.Literals(['invalid', 'unreachable', 'other'])),
+  tokenPage: Schema.NullOr(Schema.String),
+})
+export type FoundServer = typeof FoundServer.Type
+
+/** What Althar needs of a connection, each a line of its check. */
+export const AccessNeed = Schema.Literals([
+  'server',
+  'site',
+  'key',
+  'account',
+  'reach',
+  'push',
+  'changes',
+  'checks',
+  'issues',
+  'read',
+  'comment',
+  'move',
+])
+export type AccessNeed = typeof AccessNeed.Type
+
+/** Why a line of a check isn't ok, with what it names and the page that puts it right, where there is one. */
+export const AccessReason = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('refused') }),
+  Schema.Struct({ kind: Schema.Literal('scope'), scope: Schema.String, url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('permission'), permission: Schema.String, url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('role'), role: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('unseen'), names: Schema.Array(Schema.String), url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('not_installed'), owner: Schema.String, url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('restricted'), owner: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('sso'), owner: Schema.String, url: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('no_check_runs'), url: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('unreadable') }),
+  Schema.Struct({ kind: Schema.Literal('failed'), message: Schema.String }),
+])
+export type AccessReason = typeof AccessReason.Type
+
+export const AccessLine = Schema.Struct({
+  need: AccessNeed,
+  state: Schema.Literals(['ok', 'no', 'unknown']),
+  /** What was found, in the service's words: a login, an owner, a role, a host. */
+  fact: Schema.NullOr(Schema.String),
+  /** How many, where the fact is a count: boards, teams, projects. */
+  count: Schema.NullOr(Schema.Number),
+  reason: Schema.NullOr(AccessReason),
+})
+export type AccessLine = typeof AccessLine.Type
+
+/** What a connection can do, as its service says, asked when it is made and whenever the person asks again. */
+export const ConnectionCheck = Schema.Struct({
+  connectionId: Schema.String,
+  lines: Schema.Array(AccessLine),
+  /** When its token runs out, where the service says. */
+  expiresAt: Schema.NullOr(Schema.String),
+  /** An app's sign-in that renews itself. */
+  renews: Schema.Boolean,
+  /** Where the person's tokens for it are listed, to change one. */
+  settings: Schema.String,
+})
+export type ConnectionCheck = typeof ConnectionCheck.Type
 
 /** A sign-in under way: a code to type on the service's page, or a page to approve in the browser. */
 export const SignInStart = Schema.Union([
@@ -817,6 +960,31 @@ export const TaskItem = Schema.Struct({
   content: TaskCard,
 })
 
+/**
+ * A run of the project Althar started itself (docs/decisions/022), in the
+ * thread it was asked for in: where it runs, the command, where it answers
+ * once it says, and how it ended. Althar posts it and keeps it current; it
+ * stays as a record once the run is over.
+ */
+export const RunItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('run'),
+  content: Schema.Struct({
+    launchId: Schema.String,
+    /** What it runs: the task's, or null for a copy of the default branch. */
+    taskId: Schema.NullOr(Schema.String),
+    /** Where it runs, in words: the task's title, or the default branch. */
+    where: Schema.String,
+    command: Schema.String,
+    url: Schema.NullOr(Schema.String),
+    startedAt: Schema.String,
+    /** It ended: by itself, with its exit code where known and its last line; or stopped. Null while it runs. */
+    ended: Schema.NullOr(
+      Schema.Struct({ at: Schema.String, code: Schema.NullOr(Schema.Number), stopped: Schema.Boolean, last: Schema.NullOr(Schema.String) }),
+    ),
+  }),
+})
+
 export const ThreadItem = Schema.Union([
   UserMessageItem,
   AgentTextItem,
@@ -827,12 +995,42 @@ export const ThreadItem = Schema.Union([
   TaskItem,
   ArrivalItem,
   QuestionItem,
+  RunItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
 /** How full an agent's context is: the tokens in it, and how many it holds. */
 export const ContextUse = Schema.Struct({ used: Schema.Number, size: Schema.Number })
 export type ContextUse = typeof ContextUse.Type
+
+/**
+ * A command the agent left running in the background, such as a dev server
+ * (docs/decisions/021): what it runs, where it answers once its output says,
+ * and how it ended if it did by itself. It runs as long as its session does.
+ */
+export const BackgroundCommand = Schema.Struct({
+  id: Schema.String,
+  command: Schema.String,
+  /** Where it answers, as its output said, as a browser opens it: http://localhost:5173/. Null until it says, or where it never does. */
+  url: Schema.NullOr(Schema.String),
+  startedAt: Schema.String,
+  /** It ended by itself: when, and its exit code where its output says. Null while it runs. */
+  ended: Schema.NullOr(Schema.Struct({ at: Schema.String, code: Schema.NullOr(Schema.Number) })),
+})
+export type BackgroundCommand = typeof BackgroundCommand.Type
+
+/**
+ * The project as Althar runs it itself, with no agent (docs/decisions/022):
+ * in a task's worktree, to see what it built, or, `taskId` null, in a copy of
+ * the default branch. It runs until the person stops it, or Althar quits.
+ */
+export const Launch = Schema.Struct({
+  ...BackgroundCommand.fields,
+  taskId: Schema.NullOr(Schema.String),
+  /** Where it runs, in words: the task's title, or the default branch. */
+  where: Schema.String,
+})
+export type Launch = typeof Launch.Type
 
 export const SessionSummary = Schema.Struct({
   id: Schema.String,
@@ -849,6 +1047,8 @@ export const SessionSummary = Schema.Struct({
   turnRunning: Schema.Boolean,
   /** How full its context is, in tokens, as the agent last said while it runs; null until it says, or where it doesn't. */
   context: Schema.NullOr(ContextUse),
+  /** What it left running in the background, while it runs, in the order it started them. */
+  background: Schema.Array(BackgroundCommand),
 })
 export type SessionSummary = typeof SessionSummary.Type
 
@@ -1082,6 +1282,10 @@ export const ThreadSnapshot = Schema.Struct({
     actions: Schema.Array(TaskAction),
     /** Its plan still waiting to start, by id, for starting it now; null once started, or where it has none. */
     planId: Schema.NullOr(Schema.String),
+    /** What running what it built would run, as its repository says or keeps: `bun run dev`; null where nothing says. */
+    runCommand: Schema.NullOr(Schema.String),
+    /** What Althar runs of it, in its worktree. */
+    launches: Schema.Array(Launch),
   }),
   session: Schema.NullOr(SessionSummary),
   attention: Schema.Array(AttentionRequest),
@@ -1219,6 +1423,10 @@ export const CoordinatorSnapshot = Schema.Struct({
   earlier: Schema.Boolean,
   /** Where the project's repository is hosted, when its remote says, and whether Althar is connected to it there. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
+  /** What running the project would run, as its repository says or keeps; null where nothing says. */
+  runCommand: Schema.NullOr(Schema.String),
+  /** What Althar runs of the project's default branch. */
+  launches: Schema.Array(Launch),
 })
 export type CoordinatorSnapshot = typeof CoordinatorSnapshot.Type
 
@@ -1253,6 +1461,10 @@ export const WatchEvent = Schema.Union([
     text: Schema.String,
   }),
   Schema.Struct({ _tag: Schema.Literal('Context'), threadId: Schema.String, ...ContextUse.fields }),
+  /** What the session on a thread has left running, whole each time it changes. */
+  Schema.Struct({ _tag: Schema.Literal('Background'), threadId: Schema.String, background: Schema.Array(BackgroundCommand) }),
+  /** What Althar runs of a project itself, whole each time it changes. */
+  Schema.Struct({ _tag: Schema.Literal('Launches'), projectId: Schema.String, launches: Schema.Array(Launch) }),
   /** A command's output as far as it has come, while it runs: its last lines, whole each time, and how many came before them. */
   Schema.Struct({
     _tag: Schema.Literal('Output'),
@@ -1294,6 +1506,10 @@ export const Api = RpcGroup.make(
    * window never names a path. A folder holding several repositories opens
    * with `repositories`, the ones the person kept, each by the grant of the
    * folder it was found in and its root as read; without it, every one found.
+   * A project made on purpose comes with the id the window made for it
+   * (`projectId`, refused where it is taken), and is made even where its
+   * folder is another project's already; with `ink`, in the ink the person
+   * chose, otherwise the runtime's pick (`inkFor`).
    */
   command(
     'OpenProject',
@@ -1301,11 +1517,15 @@ export const Api = RpcGroup.make(
       grant: Schema.String,
       name: Schema.optional(Schema.String),
       repositories: Schema.optional(Schema.Array(Schema.Struct({ grant: Schema.String, path: Schema.String }))),
+      projectId: Schema.optional(NewProjectId),
+      ink: Schema.optional(ProjectInk),
     },
     ProjectSummary,
   ),
   /** Renames a project. Its mark, and the folders its tasks' worktrees are in, stay as they are. */
   command('RenameProject', { projectId: Schema.String, name: Schema.String }, Schema.Void),
+  /** Draws a project's mark in another ink, wherever it shows. The drawing, which comes from its id, stays. */
+  command('SetProjectInk', { projectId: Schema.String, ink: ProjectInk }, Schema.Void),
   /**
    * Removes a project from Althar: its agents stop, its plans don't start and
    * its runs end. Its folders, its tasks' worktrees and their branches stay.
@@ -1495,11 +1715,21 @@ export const Api = RpcGroup.make(
   /** The connections on this Mac, and the code hosts and trackers a person can connect. */
   Rpc.make('ListConnections', { success: ConnectionList, error: ApiError }),
   /** Starts the service's own sign-in: a code to type on its page, or a page to approve in the browser. */
-  command('StartSignIn', { product: Product, webUrl: Schema.optional(Schema.String) }, SignInStart),
+  command(
+    'StartSignIn',
+    // With a connection, the sign-in is to sign that one in again, and is taken only for its account.
+    { product: Product, webUrl: Schema.optional(Schema.String), connectionId: Schema.optional(Schema.String) },
+    SignInStart,
+  ),
   /** How a sign-in stands. */
   call('GetSignIn', { flowId: Schema.String }, SignInState),
   command('CancelSignIn', { flowId: Schema.String }, Schema.Void),
-  /** Connects with a token the person pasted, and what goes with it, all of which goes to the keychain. */
+  /**
+   * Connects with a token the person pasted, and what goes with it, all of
+   * which goes to the keychain. With a connection, it signs that one in again
+   * with a new token, keeping its address, email and key, for the account it
+   * was.
+   */
   command(
     'ConnectToken',
     {
@@ -1508,9 +1738,18 @@ export const Api = RpcGroup.make(
       user: Schema.optional(Schema.String),
       key: Schema.optional(Schema.String),
       token: Schema.String,
+      connectionId: Schema.optional(Schema.String),
     },
     ConnectionSummary,
   ),
+  /** What connecting a service starts from: where its code is, gh's or glab's sign-in, the email to go with a token, and the token pages. */
+  call('GetConnectGuide', { service: Service }, ConnectGuide),
+  /** Which of a service's products answers at an address, asked without signing in. */
+  call('FindServer', { service: Service, webUrl: Schema.String }, FoundServer),
+  /** Connects with gh's or glab's sign-in on this device: Althar keeps its own copy of the token, which agents never see. */
+  command('ConnectCli', { product: Product, webUrl: Schema.String, connectionId: Schema.optional(Schema.String) }, ConnectionSummary),
+  /** Asks the service what a connection can do. */
+  call('CheckConnection', { connectionId: Schema.String }, ConnectionCheck),
   command('Disconnect', { connectionId: Schema.String }, Schema.Void),
   /** The person's open issues on the connected trackers, and in the project's repository. */
   call('ListIssues', { projectId: Schema.String }, IssueList),
@@ -1627,6 +1866,27 @@ export const Api = RpcGroup.make(
   command('Push', { taskId: Schema.String, head: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
   /** Asks the task's pull request for news now. */
   command('RefreshTask', { taskId: Schema.String }, Schema.Void),
+  /** Stops listening to the task's pull request at this address: nothing said there after arrives, and the lead hears none of it. */
+  command('StopListening', { taskId: Schema.String, url: Schema.String }, Schema.Void),
+  /** Stops a command the session on a thread left running; it goes from the list. */
+  command('StopBackground', { threadId: Schema.String, id: Schema.String }, Schema.Void),
+  /** Clears one that ended by itself from the list. */
+  command('ClearBackground', { threadId: Schema.String, id: Schema.String }, Schema.Void),
+  /** Runs the project with no agent: what the task built, in its worktree, or, with no task, a copy of the default branch. One already running there is the one returned. */
+  command(
+    'RunProject',
+    {
+      projectId: Schema.String,
+      taskId: Schema.NullOr(Schema.String),
+      /** The thread it was asked for in, where its card goes; null for none. */
+      threadId: Schema.NullOr(Schema.String),
+    },
+    Launch,
+  ),
+  /** Stops a run of the project; it goes from the list. */
+  command('StopLaunch', { id: Schema.String }, Schema.Void),
+  /** Clears a run that ended by itself from the list. */
+  command('ClearLaunch', { id: Schema.String }, Schema.Void),
   /** What changes after `since`, or from now without it. */
   Rpc.make('Watch', { payload: { since: Schema.optional(Cursor) }, success: WatchEvent, error: ApiError, stream: true }),
 )
