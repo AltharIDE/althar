@@ -103,6 +103,9 @@ import { agentSaid, summarize } from './words'
 
 export type Disposition = 'after_current' | 'interrupt_and_continue'
 
+/** An agent that doesn't answer ACP startup must not leave a handover pending forever. */
+const SESSION_START_TIMEOUT = Duration.minutes(2)
+
 export const AcceptedInput = Schema.Struct({ inputId: Schema.String, sequence: Schema.Int })
 export type AcceptedInput = typeof AcceptedInput.Type
 
@@ -1574,7 +1577,16 @@ export class Sessions extends Context.Service<
               // An effort the model doesn't offer is no reason not to start.
               yield* settleEffort(definition, agent, effort ?? null)
               return { connection, agent }
-            }).pipe(Scope.provide(scope)),
+            }).pipe(
+              Scope.provide(scope),
+              Effect.timeoutOption(SESSION_START_TIMEOUT),
+              Effect.flatMap((result) => {
+                if (Option.isNone(result)) {
+                  return Effect.fail(new Error(`Timed out waiting for ${definition.name} to set up a session (2 minutes).`))
+                }
+                return Effect.succeed(result.value)
+              }),
+            ),
           )
           if (Exit.isFailure(started)) {
             yield* Scope.close(scope, Exit.void)
