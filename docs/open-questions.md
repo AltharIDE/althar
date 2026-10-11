@@ -58,6 +58,20 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
   something it left running ends, which costs usage and shows in the
   thread. Whether to say so, or to keep it quieter.
 
+## Mini tasks, 11 October
+
+- [x] **Starting a task without the countdown.** For something small, such as
+  trying something out, the coordinator starts a mini task at once: one lead, no review, nothing outside the project when it is
+  done (docs/architecture/04, `start_task`).
+- [ ] **What a mini task looks like.** It shows as any task does, on its
+  card and on the board. Whether it should look lighter, and settle by itself
+  once nothing it started is left running.
+- [ ] **Turning one into a full task.** One that ends up changing things is
+  on its branch. Whether the person, or the coordinator, can give it a review
+  and a pull request after the fact.
+- [ ] **Running the project without an agent.** Althar could keep the
+  project's run command and start it itself, with no model (DEV-56).
+
 ## Dictation, 10 October
 
 - [x] **Where speech is turned into text.** On this machine only, with a

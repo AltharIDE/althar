@@ -1585,12 +1585,15 @@ export class Sessions extends Context.Service<
                       ? `- ${repository.name}: ${repository.path} (${repository.base})`
                       : `- ${repository.name}, its folder ${repository.within}: ${repository.path} (${repository.base}). That folder is what the project is about; the rest of the repository is in ${repository.root}.`,
                   )
-                  .join('\n')}\nRead and search them to answer questions and to plan. Anything you write there is thrown away.`,
+                  .join(
+                    '\n',
+                  )}\nRead and search them to answer questions and to plan. Anything you write there is thrown away. Commands that change anything, such as installing packages or starting a server, are refused there by Althar, for your role, not by the person.`,
             [
               "To get a change made, use Althar's tools:",
               `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
               '- list_models, for the models you can give work to now, with how each scores and whether a plan pays for it.',
               '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
+              "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
               '- list_tasks, read_task and read_thread, to see what is under way and how it went.',
               "- read_issue and find_issues, for the issues on the person's connected trackers and in the project's repository. When the person points at an issue, read it, and draft the task from it with its link or key as draft_task's issue.",
               "- message_lead, to pass something to a task's lead.",
@@ -1602,7 +1605,7 @@ export class Sessions extends Context.Service<
               '- Prefer a model a plan pays for over one paid per use, when they would do the work as well.',
               "- Review with a model from a different maker than the lead's, where one can be used.",
             ].join('\n'),
-            'Answer questions yourself; only changes become tasks. Keep your replies short: the person sees each task as a card, so say in a sentence what you planned, and not the plan itself again.',
+            'Answer questions yourself; changes, and anything to try out, become tasks. Keep your replies short: the person sees each task as a card, so say in a sentence what you planned, and not the plan itself again.',
             ...(yield* threadSoFar(thread.threadId)),
           ].join('\n\n')
         })

@@ -967,6 +967,47 @@ describe('the coordinator', () => {
 })
 
 describe("the coordinator's tools", () => {
+  it.live('start a mini task at once: one lead, no review, nothing outside the project, no countdown', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, threadId } = yield* opened
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      // Without its lead, or with one nobody can run, nothing is made.
+      assert.match(yield* callTool(access, 'start_task', { title: 'Try the double jump' }), /couldn't read that/)
+      assert.match(yield* callTool(access, 'start_task', { title: 'Try the double jump', lead: { agent: 'gemini' } }), /no agent gemini/)
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM tasks`)[0]?.n, 0)
+      const asked = {
+        title: 'Try the double jump',
+        description: 'Jump twice from the hall stairs and say whether the second jump lands.',
+        lead: { agent: 'claude-code', model: 'small' },
+      }
+      assert.match(yield* callTool(access, 'start_task', asked), /^Started try-the-double-jump: /)
+      // Its card: running at once, its lead the only step, and nothing outside the project when it is done.
+      const [card] = yield* until(cardsOf(projectId), (all) => all[0]?.phase === 'running')
+      assert.strictEqual(card?.slug, 'try-the-double-jump')
+      assert.deepStrictEqual(
+        card?.plan?.steps.map((step) => [step.key, step.agentId, step.model]),
+        [['implement', 'claude-code', 'small']],
+      )
+      assert.isNull(card?.plan?.startsAt)
+      assert.isNull(card?.plan?.end)
+      // Called again, unsure the first worked, it starts nothing more.
+      assert.strictEqual(yield* callTool(access, 'start_task', asked), 'try-the-double-jump has started already.')
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM tasks`)[0]?.n, 1)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('start one when the person asks for something to be tried, its lead told what the person said', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened
+      yield* say(threadId, 'Try the double jump. [coordinator:start]')
+      const [card] = yield* until(cardsOf(projectId), (all) => all[0]?.phase === 'running', Duration.seconds(10))
+      assert.strictEqual(card?.title, 'Try the double jump')
+      assert.isNull(card?.plan?.startsAt)
+      assert.lengthOf(card?.plan?.steps ?? [], 1)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('read the project and its tasks, pass messages on, and refuse what they cannot do', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
