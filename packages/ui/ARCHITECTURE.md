@@ -155,7 +155,7 @@ A pattern that appears in two components becomes one part, so the two cannot dri
 | Checks | A change's checks and reviews | ChangeSet, AcceptPeek |
 | NoteForm | A one-line note sent with an action | ChangeSet, AcceptPeek, Review, Stuck |
 | Field | One line of text to type | NoteForm, SourceMap, and every other typed answer |
-| Panel, FormRow | A sheet of settings, and its label-beside-control rows | ProjectRules |
+| Panel, FormRow | A sheet of settings, and its label-beside-control rows (FormRow also names the control inside it) | Welcome; Select, Choices, Segmented and CheckList take their names from FormRow |
 | KeyValues | A small definition list | External, GraphProposal |
 | StepRow | A step's row, its track and its thread link | Step, Review |
 | StepTrack | A task's steps as a row of bars | TaskCard, WorkCard, TaskHeader |
