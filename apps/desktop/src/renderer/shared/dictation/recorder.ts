@@ -102,9 +102,9 @@ export const record: Record = async (onFrame, deviceId = null) => {
     let fresh: MediaStream
     try {
       fresh = await open(next)
-    } catch {
-      // Where the one asked for can't be had, and the one heard is gone, the default takes over.
-      if (!ended && change === changes && lost) void hear(null)
+    } catch (error) {
+      // Where the one asked for is refused, and the one heard is gone, the default takes over, once. One that wasn't there was already passed over for the default (`open`); where even that can't be had, it goes on hearing nothing, and what was heard stays.
+      if (next !== null && !isGone(error) && !ended && change === changes && lost) void hear(null)
       return
     } finally {
       opening -= 1

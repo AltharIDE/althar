@@ -37,6 +37,8 @@ const install = (
     fail?: DOMException
     gone?: ReadonlyArray<string>
     refuse?: ReadonlyArray<string>
+    /** No microphone opens but the first: as when the only one is pulled out. */
+    none?: boolean
     /** A microphone that takes its time to open: it waits for `release`. */
     slow?: string
   } = {},
@@ -68,6 +70,7 @@ const install = (
     if (device !== null && device === options.slow) await released
     if (device !== null && options.gone?.includes(device)) throw new DOMException('gone', 'OverconstrainedError')
     if (device !== null && options.refuse?.includes(device)) throw new DOMException('no', 'NotAllowedError')
+    if (!first && options.none === true) throw new DOMException('none', 'NotFoundError')
     if (first) {
       first = false
       return { getTracks: () => [track] }
@@ -211,5 +214,29 @@ describe('the microphone it hears', () => {
     await switching
     await vi.waitFor(() => expect(asked(fake)).toEqual(['a', 'b', null]))
     await vi.waitFor(() => expect(fake.streams[0]?.source.connect).toHaveBeenCalledWith(fake.node))
+  })
+
+  it('asks for the default once where the only microphone is pulled out, and keeps what was heard', async () => {
+    const fake = install({ none: true })
+    const recording = await record(() => {}, 'a')
+    fake.node.hear(new Float32Array([0.5]))
+    fake.track.pullOut()
+    await vi.waitFor(() => expect(asked(fake)).toEqual(['a', null]))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(asked(fake)).toEqual(['a', null])
+    expect([...recording.stop().samples]).toEqual([0.5])
+  })
+
+  it('asks for the default once where a chosen one can’t be had after the one heard was pulled out, and the default can’t either', async () => {
+    const fake = install({ slow: 'b', none: true })
+    const recording = await record(() => {}, 'a')
+    const switching = recording.use('b')
+    fake.track.pullOut()
+    fake.release()
+    await switching
+    await vi.waitFor(() => expect(asked(fake)).toEqual(['a', 'b', null]))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(asked(fake)).toEqual(['a', 'b', null])
+    recording.cancel()
   })
 })
