@@ -1208,7 +1208,7 @@ describe('a task', () => {
       stuckWords.what({ step: 'implement', why, detail, agentId: null, round: 0, open }, 'Codex')
     expect([at('session_ended'), at('restarted'), at('failed_to_start'), at('round_limit', null, 1), at('usage_limit')]).toEqual([
       'Codex stopped before the step was done.',
-      'Althar restarted while this step was running.',
+      'Althar stopped again soon after it carried this step on after a restart, so it waits for you rather than start Codex once more.',
       "Codex couldn't start.",
       "Three rounds of review are done, and the lead's last changes haven't been reviewed. One finding is still open.",
       "Codex reached its usage limit and didn't say when it resets.",
@@ -1263,6 +1263,25 @@ describe('a task', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Start Codex again' }))
     await waitFor(() =>
       expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st7', answer: { kind: 'retry', agentId: 'codex' } }),
+    )
+  })
+
+  it('starts a step restarts kept stopping again, on its agent, as the person says', async () => {
+    const restarted = {
+      id: 'st8',
+      kind: 'stuck' as const,
+      title: 'Implement',
+      reason: '',
+      command: null,
+      createdAt: '2026-09-29T12:00:00.000Z',
+      stuck: { step: 'implement' as const, why: 'restarted' as const, detail: null, agentId: 'codex', round: 0, open: 0 },
+    }
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [restarted] })) })
+    withServices(<Task />, client)
+    await screen.findByText(/Althar stopped again soon after it carried this step on after a restart/)
+    await userEvent.click(screen.getByRole('button', { name: 'Start Codex again' }))
+    await waitFor(() =>
+      expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st8', answer: { kind: 'retry', agentId: 'codex' } }),
     )
   })
 

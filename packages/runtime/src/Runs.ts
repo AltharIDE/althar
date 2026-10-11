@@ -44,6 +44,12 @@ import { summarize } from './words'
 /** Review rounds before a task is left ready with findings still open. */
 export const ROUNDS = 3
 
+/**
+ * How long a step carried on after a restart must have been at work for the
+ * next restart to carry it on again; stopped sooner, it needs the person.
+ */
+export const RESTART_GRACE = Duration.minutes(5)
+
 /** How often a step's agent cut off by its own limit on a turn carries on before it is reminded to report. */
 const CONTINUES = 3
 
@@ -1928,7 +1934,8 @@ export class Runs extends Context.Service<
             const round = yield* review(
               current,
               info.round,
-              info.why === 'round_limit' ? last?.summary : undefined,
+              // A round after the first reads what the lead settled before it.
+              info.round > 0 ? last?.summary : undefined,
               answer.kind === 'retry' ? answer.agentId : undefined,
               on,
               accountId,
@@ -2147,15 +2154,69 @@ export class Runs extends Context.Service<
           yield* touchCard(current.taskId)
         })
 
-      // A step running when Althar stopped can't be trusted to carry on on its own: each needs the person.
-      yield* provide(
+      /**
+       * Whether a restart stopped the step soon after the last one carried it
+       * on: its agent's last sign of life, on the step's thread, came within
+       * RESTART_GRACE of the line that said it carried on.
+       */
+      const restartedAgain = (current: RunRow, step: { readonly nodeKey: string; readonly nodeId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const left = yield* sql<{ taskId: string; nodeKey: string; attemptId: string; iteration: number; config: string }>`
-            SELECT r.task_id, n.node_key, a.id AS attempt_id, n.iteration, n.config
+          const [carried] = yield* sql<{ createdAt: string }>`
+            SELECT created_at FROM thread_items
+            WHERE thread_id = ${current.threadId} AND kind = 'notice' AND json_extract(content, '$.restarted') = ${step.nodeId}
+            ORDER BY sequence DESC LIMIT 1`
+          if (carried === undefined) return false
+          const [last] =
+            step.nodeKey === 'review'
+              ? yield* sql<{ at: string | null }>`
+                  SELECT max(i.created_at) AS at FROM thread_items i JOIN threads t ON t.id = i.thread_id
+                  WHERE t.task_id = ${current.taskId} AND t.kind = 'step' AND t.node_key = 'review'`
+              : yield* sql<{ at: string | null }>`SELECT max(created_at) AS at FROM thread_items WHERE thread_id = ${current.threadId}`
+          const from = Date.parse(carried.createdAt)
+          const alive = Math.max(from, last?.at == null ? from : Date.parse(last.at))
+          return alive - from < Duration.toMillis(RESTART_GRACE)
+        })
+
+      /** A step a restart stopped, to carry on once the launch is up. */
+      interface Interrupted {
+        readonly current: RunRow
+        readonly attemptId: string
+        readonly nodeId: string
+        readonly nodeKey: string
+        readonly iteration: number
+        readonly config: string
+        readonly ranOn: string | null
+        readonly ranModel: string | null
+      }
+
+      /**
+       * A step running when Althar stopped carries on by itself, as the
+       * person's resume would carry it on, and the thread says so in a line.
+       * A lead that asked the person a question still waits on them. A step
+       * carried on after a restart that stops with Althar again before its
+       * agent has been at it for RESTART_GRACE (Althar crashing on it, say)
+       * needs the person instead, so it doesn't start over forever.
+       */
+      const interrupted = yield* provide(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const left = yield* sql<{
+            taskId: string
+            nodeKey: string
+            nodeId: string
+            attemptId: string
+            iteration: number
+            config: string
+            ranOn: string | null
+            ranModel: string | null
+          }>`
+            SELECT r.task_id, n.node_key, n.id AS node_id, a.id AS attempt_id, n.iteration, n.config,
+              s.agent_id AS ran_on, s.model AS ran_model
             FROM runs r JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
-            JOIN node_attempts a ON a.node_id = n.id
+            JOIN node_attempts a ON a.node_id = n.id LEFT JOIN provider_sessions s ON s.id = a.provider_session_id
             WHERE r.state = 'running' AND a.state IN ('admitted', 'running')`
+          const carrying: Array<Interrupted> = []
           for (const step of left) {
             const current = yield* currentRun(step.taskId)
             if (current === undefined) continue
@@ -2173,22 +2234,69 @@ export class Runs extends Context.Service<
               })
               continue
             }
-            const agent = (JSON.parse(step.config) as { agentId?: string }).agentId ?? null
-            yield* stuck(
-              current,
-              { id: step.attemptId },
-              {
-                step: stepOf(step.nodeKey),
-                why: 'restarted',
-                detail: null,
-                agentId: agent,
-                round: step.iteration,
-                open: 0,
-              },
-            )
+            if (yield* restartedAgain(current, step)) {
+              const agent = step.ranOn ?? (JSON.parse(step.config) as { agentId?: string }).agentId ?? null
+              yield* stuck(
+                current,
+                { id: step.attemptId },
+                { step: stepOf(step.nodeKey), why: 'restarted', detail: null, agentId: agent, round: step.iteration, open: 0 },
+              )
+              continue
+            }
+            carrying.push({ ...step, current })
           }
-        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not mark the steps a restart stopped', cause))),
+          return carrying
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.as(Effect.logWarning('Could not mark the steps a restart stopped', cause), [] as ReadonlyArray<Interrupted>),
+          ),
+        ),
       )
+
+      /**
+       * Carries on a step a restart stopped, as the person's resume does: the
+       * lead's step on the lead, its model and effort, told to carry on; a
+       * review's round again on its reviewer; publishing tried again. An
+       * agent out of usage goes the way a limit takes it, held or handed on;
+       * a lead that can't start needs the person.
+       */
+      const carryOnAfterRestart = (step: Interrupted) =>
+        Effect.gen(function* () {
+          const { current } = step
+          const kind = stepOf(step.nodeKey)
+          const config = JSON.parse(step.config) as { agentId?: string; model?: string | null }
+          const lead = kind === 'implement' || kind === 'settle' ? yield* lastLead(current) : undefined
+          const agentId = lead?.agentId ?? step.ranOn ?? config.agentId ?? null
+          const model = lead === undefined ? (step.ranOn === null ? (config.model ?? null) : step.ranModel) : lead.model
+          const info: StuckInfo = { step: kind, why: 'restarted', detail: null, agentId, round: step.iteration, open: 0 }
+          if (kind !== 'publish' && agentId !== null && Option.isSome(yield* limits.out(agentId, current.projectId))) {
+            const on = { ...step, taskId: current.taskId, output: null, run: current, step: kind }
+            return yield* outOfUsage(on, agentId, null)
+          }
+          // Said first, so a restart while it starts counts as one soon after.
+          yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: 'Althar restarted; the step carried on from here.',
+            restarted: step.nodeId,
+          })
+          const carrying = yield* envelope('thread.send', { threadId: current.threadId, restarted: step.attemptId })
+          const carried = yield* Effect.exit(
+            carryOn(
+              current,
+              step.attemptId,
+              info,
+              { kind: 'retry', agentId: agentId ?? 'althar', ...(model == null ? {} : { model }) },
+              carrying,
+              model,
+              undefined,
+              lead?.effort,
+            ),
+          )
+          // A lead that can't start leaves its step needing the person, as when a plan starts.
+          if (carried._tag === 'Failure')
+            yield* stuck(current, { id: step.attemptId }, { ...info, why: 'failed_to_start', detail: summarize(carried.cause) || null })
+        })
 
       /** A step held for a usage limit runs again at the reset, on the agent, account and model it was held for. */
       const resumeHeld = (held: {
@@ -2352,6 +2460,24 @@ export class Runs extends Context.Service<
         }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not ask the person about a stalled step', cause), false)))
       const stalls = yield* watchStalls((giveUp) => provide(stalledStep(giveUp)))
       freshen = (threadId) => stalls.fresh(threadId)
+
+      // The steps a restart stopped carry on now the launch is up, a few at a time so their agents don't all start at once.
+      yield* Effect.forkScoped(
+        provide(
+          Effect.forEach(
+            interrupted,
+            (step) =>
+              carryOnAfterRestart(step).pipe(
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.interrupt
+                    : Effect.logWarning('Could not carry on a step a restart stopped', cause),
+                ),
+              ),
+            { concurrency: 3, discard: true },
+          ),
+        ),
+      )
 
       return Runs.of({
         run: (planId) => provide(run(planId)),

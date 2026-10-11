@@ -62,7 +62,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Resume | run resumed | From the task menu, or by writing to a stopped task: the lead carries on the step it was on, with what you wrote first. |
 | Abandon | task abandoned, its run suspended | From the task menu, asked first. Ends the task without its change. It moves to Settled. Its worktree and branch stay. |
 | Reopen | an abandoned task open again | Only for an abandoned task, never a merged one. It opens on the same worktree and branch, where it was: a step cut short resumes, work that had passed is ready again. Writing to an abandoned task reopens it too. |
-| Althar restarted | reconciliation after process loss | Not said in threads: a lead that stopped with Althar starts again when the person next writes to it, and nothing it was doing runs twice. A step that was running asks the person to carry it on. |
+| Althar restarted | reconciliation after process loss | Not said in threads: a lead that stopped with Althar starts again when the person next writes to it, and nothing it was doing runs twice. A step that was running carries on by itself, with a line in its thread; it asks the person only if its lead can't start, or a restart stops it again soon after the last one carried it on. |
 
 A call's kind reads the same everywhere it shows: on the board, in the bar's preview and on the home.
 
