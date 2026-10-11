@@ -1212,6 +1212,30 @@ describe('a project, reaching outside', () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456', 'https://github.com/meridian/web/pull/4'))
   })
 
+  it('shows only the button pressed as working, the others waiting beside it', async () => {
+    let done = () => {}
+    const push = vi.fn(() => new Promise<void>((resolve) => (done = resolve)))
+    const { client } = fakeClient({
+      push,
+      getThread: vi.fn(async () =>
+        snapshot({ task: { ...snapshot().task, changes: [change({ draft: true, unpushed: 1, localHead: 'def456' })] } }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    const ready = await screen.findByRole('button', { name: 'Mark ready for review' })
+    expect(ready.getAttribute('aria-busy')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Push 1 commit' }))
+    await waitFor(() => expect(push).toHaveBeenCalled())
+    // The push is working; marking ready waits for it, as the runtime serialises them, but doesn't look like it is working.
+    expect(screen.getByRole('button', { name: 'Push 1 commit' }).getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Mark ready for review' }).getAttribute('aria-busy')).toBeNull()
+    expect((screen.getByRole('button', { name: 'Mark ready for review' }) as HTMLButtonElement).disabled).toBe(true)
+    done()
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Mark ready for review' }) as HTMLButtonElement).disabled).toBe(false))
+    expect(screen.getByRole('button', { name: 'Push 1 commit' }).getAttribute('aria-busy')).toBeNull()
+  })
+
   it('shows a task’s issue and pull request on its card, and its ending on its plan, which can change', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>

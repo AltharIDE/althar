@@ -628,6 +628,21 @@ describe('a pull request, by the person and the lead', () => {
       assert.notInclude(pushed, 'Later')
       // Only what came after is left to push.
       yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1 && all[0]?.change?.localHead !== head)
+      // Pushed, nothing is left to push at once, without the host's next look: crediting rewrote the commits it sent,
+      // and the branch moved onto them, so the count isn't off by those.
+      const [later] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1)
+      yield* changes.push(taskId, later?.change?.localHead ?? '')
+      const [afterCredited] = yield* cards(projectId)
+      assert.strictEqual(afterCredited?.change?.unpushed, 0)
+      assert.strictEqual(afterCredited?.change?.localHead, git(workspace?.path ?? '', 'rev-parse', 'HEAD'))
+      // The same where nothing is rewritten: the commit goes up as it is.
+      yield* setCoAuthor(false)
+      commit('Plain')
+      const [plain] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1)
+      yield* changes.push(taskId, plain?.change?.localHead ?? '')
+      const [afterPlain] = yield* cards(projectId)
+      assert.strictEqual(afterPlain?.change?.unpushed, 0)
+      assert.strictEqual(git(bare, 'rev-parse', workspace?.branch ?? ''), git(workspace?.path ?? '', 'rev-parse', 'HEAD'))
       // A commit that isn't on the branch any more isn't pushed.
       const gone = yield* Effect.flip(changes.push(taskId, '0000000000000000000000000000000000000000'))
       assert.strictEqual(gone instanceof Error ? gone.name : String(gone), 'ChangedSinceSeen')

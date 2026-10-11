@@ -549,6 +549,7 @@ export function TaskView({
             snapshot={snapshot}
             lead={lead}
             pending={model.pending}
+            doing={model.doing}
             error={model.error}
             onAccept={(changes) => void model.accept(changes)}
             onMergeHere={() => void model.mergeHere()}
