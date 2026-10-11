@@ -78,6 +78,16 @@ if (fakeMicrophone) {
   app.commandLine.appendSwitch('use-fake-device-for-media-stream')
   app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
 }
+/*
+ * The end-to-end tests run quietly (ALTHAR_QUIET), so a person can carry on
+ * at their desk while agents run them: no Dock icon, and nothing becomes the
+ * active app or takes focus. The window and the island are there but drawn
+ * clear and let the pointer through; the tests drive the pages directly,
+ * which need neither. No notification reaches the system; a test that wants
+ * them puts its own catcher in.
+ */
+const quiet = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_QUIET === '1'
+if (quiet) Notification.isSupported = () => false
 const restarts: Array<number> = []
 
 /** The profile and worktrees, as the command-line client has them, so both see the same projects. */
@@ -164,6 +174,10 @@ const bringForward = () => {
   const existing = [...windows][0]
   const window = existing ?? openWindow()
   if (window.isMinimized()) window.restore()
+  if (quiet) {
+    window.showInactive()
+    return { window, fresh: existing === undefined }
+  }
   // Asked from the edge, Althar isn't the active app: it becomes it.
   app.focus({ steal: true })
   window.show()
@@ -331,8 +345,14 @@ const openWindow = () => {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
+      // Drawn clear, it would otherwise count as hidden and be slowed down.
+      backgroundThrottling: !quiet,
     },
   })
+  if (quiet) {
+    window.setOpacity(0)
+    window.setIgnoreMouseEvents(true)
+  }
   windows.add(window)
   window.on('closed', () => {
     windows.delete(window)
@@ -340,7 +360,7 @@ const openWindow = () => {
     if (windows.size === 0 && process.platform !== 'darwin') app.quit()
   })
   window.webContents.on('did-finish-load', () => connect(window))
-  window.once('ready-to-show', () => window.show())
+  window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
   window.webContents.setWindowOpenHandler(({ url }) => {
     openOutside(url)
@@ -462,6 +482,8 @@ ipcMain.on('althar:edge-open', (_event, threadId: unknown) => {
 })
 
 void app.whenReady().then(() => {
+  // Quiet, Althar is never the active app and has no place on the Dock or in the app switcher.
+  if (quiet) app.setActivationPolicy?.('accessory')
   // The window asks for nothing but the microphone, to dictate, and to put what the person copies on the clipboard (dictation.ts holds
   // both): no notifications, camera or anything else a page can ask for. Althar's own notifications come from here, as the runtime says
   // something needs the person.
@@ -488,6 +510,7 @@ void app.whenReady().then(() => {
     preload: join(here, '../preload/preload.cjs'),
     page: join(here, '../renderer/edge.html'),
     pictures: join(here, '../../resources/tray'),
+    quiet,
   })
   app.on('activate', () => {
     if (windows.size === 0) openWindow()
