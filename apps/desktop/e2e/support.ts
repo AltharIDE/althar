@@ -29,10 +29,14 @@ export const mainWindow = async (electronApp: ElectronApplication): Promise<Page
 }
 
 /**
- * Quiet unless ALTHAR_E2E_FOREGROUND=1: the app runs clear of the person's
- * desktop, never taking focus or a place on the Dock, so tests can run while
- * they work. In the foreground it shows and behaves as it does for a person.
+ * Quiet on a Mac unless ALTHAR_E2E_FOREGROUND=1: the app runs clear of the
+ * person's desktop, never taking focus or a place on the Dock, so tests can
+ * run while they work. In the foreground it shows and behaves as it does for
+ * a person. Elsewhere it runs in the foreground: on CI's Linux, under a
+ * virtual display with no one at it, quiet runs took three times as long.
  */
+const quiet = process.platform === 'darwin' && process.env.ALTHAR_E2E_FOREGROUND !== '1'
+
 export const launch = async (home: string, env: Record<string, string> = {}) => {
   const electronApp = await electron.launch({
     args: [app],
@@ -42,7 +46,7 @@ export const launch = async (home: string, env: Record<string, string> = {}) => 
       ALTHAR_WORKTREES: join(home, 'worktrees'),
       ALTHAR_FAKE_AGENTS: '1',
       ALTHAR_CODE_HOME: home,
-      ...(process.env.ALTHAR_E2E_FOREGROUND === '1' ? {} : { ALTHAR_QUIET: '1' }),
+      ...(quiet ? { ALTHAR_QUIET: '1' } : {}),
       ...env,
     },
   })

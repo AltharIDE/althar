@@ -41,7 +41,7 @@ From `apps/desktop`:
 | `bun run verify` | Check and coverage |
 | `bun run verify:all` | Check, coverage and the end-to-end tests, as CI runs them |
 
-The end-to-end tests run quietly, so you can keep working while they run: the app never takes focus and has no Dock icon, its window and the island are see-through, and no notifications reach the system. At most three runs go at once on the computer, and one per worktree (`ALTHAR_E2E_SLOTS` changes how many); a waiting run says which ones it waits for. To watch the app as the tests drive it, run them in the foreground:
+On a Mac, the end-to-end tests run quietly, so you can keep working while they run: the app never takes focus and has no Dock icon, its window and the island are see-through, and no notifications reach the system. At most three runs go at once on the computer, and one per worktree (`ALTHAR_E2E_SLOTS` changes how many); a waiting run says which ones it waits for. To watch the app as the tests drive it, run them in the foreground:
 
 ```bash
 ALTHAR_E2E_FOREGROUND=1 bun run test:e2e

@@ -33,7 +33,7 @@ From the repository root:
 | `bun run fix` | The same, fixing what can be fixed |
 | `bun run test` | Unit and component tests, in every package |
 | `bun run verify` | Checks, tests with coverage and builds, in every package, and the pitch site's end-to-end tests |
-| `bun run test:e2e` | The end-to-end tests: the pitch site's, and the desktop app's, which run quietly, at most three runs at once on the computer ([apps/desktop](apps/desktop#work-on-it)) |
+| `bun run test:e2e` | The end-to-end tests: the pitch site's, and the desktop app's, which run quietly on a Mac, at most three runs at once on the computer ([apps/desktop](apps/desktop#work-on-it)) |
 
 Each app and package has its own README with its own commands.
 
