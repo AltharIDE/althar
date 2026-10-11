@@ -138,7 +138,15 @@ const demoFetch: Fetch = async (url) => {
   if (url === 'https://git.halyard.dev/api/v4/version')
     return new Response(JSON.stringify({ message: '401 Unauthorized' }), { status: 401, headers: { 'x-gitlab-meta': '{}' } })
   if (url === 'https://northwind.atlassian.net/rest/api/2/serverInfo')
-    return new Response(JSON.stringify({ deploymentType: 'Cloud', baseUrl: 'https://northwind.atlassian.net' }), { status: 200 })
+    return new Response(
+      JSON.stringify({
+        deploymentType: 'Cloud',
+        baseUrl: 'https://northwind.atlassian.net',
+        version: '1001.0.0',
+        versionNumbers: [1001, 0, 0],
+      }),
+      { status: 200 },
+    )
   throw new Error('The demo reaches no network')
 }
 
