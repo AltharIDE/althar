@@ -24,10 +24,12 @@ export interface DialogProps {
   /** Makes it a form, submitted by Enter in a field or a submit button. */
   onSubmit?: () => void
   width?: number
+  /** A form longer than a question, such as Report a problem: it sits higher, and may take more of the window. */
+  tall?: boolean
   className?: string
 }
 
-export function Dialog({ title, description, children, actions, onClose, onSubmit, width = 420, className }: DialogProps) {
+export function Dialog({ title, description, children, actions, onClose, onSubmit, width = 420, tall = false, className }: DialogProps) {
   const body = (
     <>
       <D.Title className={s.title}>{title}</D.Title>
@@ -46,7 +48,7 @@ export function Dialog({ title, description, children, actions, onClose, onSubmi
       <D.Portal>
         <D.Overlay className={s.overlay} />
         <D.Content
-          className={cx('ch-root', s.dialog, className)}
+          className={cx('ch-root', s.dialog, tall && s.tall, className)}
           style={{ width: `min(${width}px, calc(100vw - 32px))` }}
           {...(description == null ? { 'aria-describedby': undefined } : {})}
           asChild={onSubmit !== undefined}

@@ -1,5 +1,6 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
+import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
 import { Dialog } from '../../primitives/Dialog/Dialog'
 import { Field, FieldError, TextArea } from '../../primitives/Field/Field'
@@ -96,23 +97,25 @@ export interface ReportProblemProps {
   text?: Partial<ReportProblemText>
 }
 
-/** A switch with its words beside it, and a line under them. */
+/** A switch with its words beside it, a line under them, and what it includes at the end. */
 function Option({
   label,
   note,
   checked,
   onChange,
+  aside,
   children,
 }: {
   label: string
   note?: ReactNode
   checked: boolean
   onChange: (on: boolean) => void
+  aside?: ReactNode
   children?: ReactNode
 }) {
   const id = useId()
   return (
-    <div className={s.option}>
+    <div className={cx(s.option, aside !== undefined && s.withAside)}>
       <Switch checked={checked} onChange={onChange} labelledBy={`${id}-l`} {...(note === undefined ? {} : { describedBy: `${id}-n` })} />
       <div className={s.words}>
         <span id={`${id}-l`} className={s.label}>
@@ -125,6 +128,7 @@ function Option({
         )}
         {children}
       </div>
+      {aside}
     </div>
   )
 }
@@ -185,13 +189,16 @@ export function ReportProblem({
 
   if (done !== undefined)
     return (
+      // The same dialog, in place: a form at the same height, so it says so where the person was looking, without opening again.
       <Dialog
         title={done.title}
         description={done.line}
         onClose={onClose}
+        onSubmit={onClose}
         width={520}
+        tall
         actions={
-          <Button ref={closeRef} onClick={onClose}>
+          <Button ref={closeRef} type="submit">
             {t.close}
           </Button>
         }
@@ -225,6 +232,7 @@ export function ReportProblem({
       onClose={onClose}
       onSubmit={send}
       width={520}
+      tall
       actions={
         <>
           <Button variant="quiet" onClick={onClose}>
@@ -244,7 +252,7 @@ export function ReportProblem({
           <TextArea
             ref={form}
             id={ids.what}
-            rows={5}
+            rows={4}
             value={what}
             placeholder={t.whatPlaceholder}
             invalid={empty}
@@ -258,13 +266,12 @@ export function ReportProblem({
           {empty && <FieldError id={ids.empty}>{t.empty}</FieldError>}
         </div>
         {screenshot !== undefined && (
-          <Option label={t.screenshot} checked={shot} onChange={setShot}>
-            {shot && (
-              <div className={s.shot}>
-                <img src={screenshot} alt={t.screenshotAlt} />
-              </div>
-            )}
-          </Option>
+          <Option
+            label={t.screenshot}
+            checked={shot}
+            onChange={setShot}
+            aside={<div className={cx(s.shot, !shot && s.shotOff)}>{shot && <img src={screenshot} alt={t.screenshotAlt} />}</div>}
+          />
         )}
         <Option label={t.logs} note={t.logsNote} checked={logs} onChange={setLogs}>
           <Disclosure defaultOpen={defaultShowing} className={s.disclosure}>
