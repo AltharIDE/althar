@@ -434,6 +434,27 @@ open it: asking the keychain for the key prompts the person. The runtime
 asks the app's main process to seal and open, and never holds the key. The
 command-line client has no key, so connections stay the app's.
 
+One refusal doesn't drop a connection. A call the service refuses as
+unauthorized gets a second look: the token read afresh from the keychain,
+and the service asked who it is for, by its cheapest call (GitHub's
+`GET /user`). Calls refused together share the one look, and a call whose
+look finds the sign-in working is made again. Only a token refused again,
+or gone from the keychain, is no good. A connection made with gh's or
+glab's sign-in notes which tool's it is, since the tool may replace the
+token Althar copied: signed in or refreshed again, or GitHub letting an
+older token go once an app has too many. Its token no good, Althar asks the
+tool for the one it has now, and takes it where it works for the same
+account. Only when that fails too does the connection need its person to
+sign in again, and its fact says why: the call refused, the second look,
+and what the tool had, in the service's words and never with a token.
+Publishing a task, and trying its pull request again, asks the tool again
+for a connection already waiting to be signed in again. Althar's own
+keychain or store failing it, such as the main process too busy to answer
+under load, is no refusal: the call can be tried again, and the connection
+stays as it is. A sealed secret is read or kept again, a moment apart,
+before Althar gives up on it. A caller hears that a connection's sign-in
+stopped working only once the connection needs its person.
+
 ### Agents and the hosts
 
 Agents reach code hosts and trackers only through Althar:
