@@ -1,8 +1,18 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Dash } from '../../fixtures/meridian'
-import { SHOT_AFTER, SHOT_BEFORE, SHOT_BROKEN, SHOT_LOADING, SHOT_NOT_KEPT, SHOT_RUN } from '../../fixtures/shots'
+import {
+  SHOT_AFTER,
+  SHOT_BEFORE,
+  SHOT_BROKEN,
+  SHOT_LOADING,
+  SHOT_NOT_KEPT,
+  SHOT_PORTRAIT,
+  SHOT_RUN,
+  SHOT_SMALL,
+  SHOT_UNSIZED,
+} from '../../fixtures/shots'
 import { Lightbox } from './Lightbox'
 
 const meta = {
@@ -20,6 +30,82 @@ export const NoPreview: Story = { args: { images: [{ name: '429-response.png' }]
 
 /** A picture at its src, at full size. */
 export const Picture: Story = { args: { images: [SHOT_AFTER] } }
+
+/** Taller than wide: it keeps its shape rather than sitting in a 16:9 frame. */
+export const Portrait: Story = { args: { images: [SHOT_PORTRAIT] } }
+
+/** Smaller than the screen: shown at its own size, not enlarged. */
+export const Small: Story = { args: { images: [SHOT_SMALL] } }
+
+/** The browser's word that a picture has loaded, at the size it gave. */
+const loadedAt = (img: HTMLElement, width: number, height: number) => {
+  Object.defineProperty(img, 'naturalWidth', { value: width, configurable: true })
+  Object.defineProperty(img, 'naturalHeight', { value: height, configurable: true })
+  img.dispatchEvent(new Event('load'))
+}
+
+/** No size given: the frame stays as it was while the picture arrives, so nothing moves. */
+export const Unsized: Story = {
+  args: { images: [SHOT_UNSIZED] },
+  play: async ({ canvasElement }) => {
+    const img = within(canvasElement.ownerDocument.body).getByRole('img')
+    const box = img.parentElement!
+    await expect(box.style.getPropertyValue('--w')).toBe('')
+    loadedAt(img, 1600, 600)
+    await expect(box.style.getPropertyValue('--w')).toBe('')
+  },
+}
+
+/** Unsized and small: the frame stays, and the picture is held to its own size inside it. */
+export const UnsizedSmall: Story = {
+  args: { images: [{ ...SHOT_SMALL, width: undefined, height: undefined }] },
+  play: async ({ canvasElement }) => {
+    const img = within(canvasElement.ownerDocument.body).getByRole('img')
+    const box = img.parentElement!
+    loadedAt(img, 240, 120)
+    await waitFor(() => expect(box).toHaveAttribute('data-measured'))
+    await expect(box.style.getPropertyValue('--nw')).toBe('240')
+    await expect(box.style.getPropertyValue('--w')).toBe('')
+  },
+}
+
+/** Only a width given: as good as none, so the frame stays when the height arrives. */
+export const WidthOnly: Story = {
+  args: { images: [{ ...SHOT_PORTRAIT, height: undefined }] },
+  play: async ({ canvasElement }) => {
+    const img = within(canvasElement.ownerDocument.body).getByRole('img')
+    const box = img.parentElement!
+    loadedAt(img, 390, 1200)
+    await waitFor(() => expect(box).toHaveAttribute('data-measured'))
+    await expect(box.style.getPropertyValue('--w')).toBe('')
+  },
+}
+
+/** A click or Z shows the picture at its actual size, and again to fit. */
+export const ActualSize: Story = {
+  args: { images: [SHOT_AFTER] },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body)
+    const box = page.getByRole('img').parentElement!
+    await expect(box).not.toHaveAttribute('data-actual')
+    await userEvent.keyboard('z')
+    await expect(box).toHaveAttribute('data-actual')
+    await userEvent.click(box)
+    await expect(box).not.toHaveAttribute('data-actual')
+  },
+}
+
+/** Actual size lasts for one showing: leaving and coming back starts fitted. */
+export const ActualSizeResets: Story = {
+  args: { images: [SHOT_BEFORE, SHOT_AFTER] },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body)
+    await userEvent.keyboard('z')
+    await expect(page.getByRole('img').parentElement).toHaveAttribute('data-actual')
+    await userEvent.keyboard('{ArrowRight}{ArrowLeft}')
+    await expect(page.getByRole('img').parentElement).not.toHaveAttribute('data-actual')
+  },
+}
 
 /**
  * Opened from a set: the arrows and the buttons beside the name move
