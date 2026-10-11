@@ -113,7 +113,7 @@ describe('the Talk room', () => {
         within(made)
           .getAllByRole('listitem')
           .map((part) => part.textContent),
-      ).toEqual(['meridian-api', 'meridian-web']),
+      ).toEqual(['meridian-api', 'meridian-web', 'meridian-infra']),
     )
     expect(screen.queryByText(/\/code\/meridian/)).toBeNull()
     expect(screen.getByText('The call has no retry. I planned a task.')).toBeTruthy()
