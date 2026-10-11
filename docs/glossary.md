@@ -20,7 +20,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Account | `AgentAccount`, its home | One sign-in of an agent, kept in a folder of its own. The agent's usual sign-in is its first account; the person can add more, or bring in folders a switcher made. Named by the person ("work"), it shows after the agent's name: "Codex (work)". |
 | Signed in as | `ProviderPrincipal` | Who the agent says you are, for an account. The agent keeps its own sign-in; Althar never holds the credential. |
 | Sign in | vendor login, `auth_required` | Opens the agent's own sign-in, for an account. |
-| Out of usage | usage limit, `transient_provider` | The account has used its allowance until a reset. Depending on the project rules, the task is Paused, or moves to another of the agent's accounts, then to another agent. |
+| Out of usage | usage limit, `transient_provider` | The account has used its allowance until a reset. Depending on the project rules, the task is Paused, moves to another of the agent's accounts, then to another agent, or waits on the person, who moves it to a model that is free or waits for the reset. A call for it has the kind Out of usage. |
 
 ## Who does the work
 

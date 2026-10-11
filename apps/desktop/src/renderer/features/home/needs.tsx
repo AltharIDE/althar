@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import type { HomeCall, HomeTask } from '@althar/contracts'
 import { Button, type EdgeWork, NeedLine, type ProjectRef } from '@althar/ui'
 
-import { kindWords, whereOf } from '../../shared/calls'
+import { callKindOf, kindWords, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
 import { text as stuckText } from '../task/StuckCall'
@@ -187,7 +187,7 @@ export const needsOf = ({
         : {
             id: call.id,
             threadId: call.threadId,
-            kind: kindWords.stuck,
+            kind: callKindOf(call),
             project,
             title: whereOf(call),
             brief: stuckText.what(stuck, agentName(stuck.agentId) || 'The agent'),

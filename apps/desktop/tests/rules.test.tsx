@@ -69,9 +69,11 @@ describe('a project’s rules', () => {
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', end: 'none' }))
     await userEvent.click(screen.getByRole('radio', { name: /Wait for the reset/ }))
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', usageLimit: 'wait' }))
+    const limits = screen.getByRole('radiogroup', { name: 'Usage limits' })
+    await userEvent.click(within(limits).getByRole('radio', { name: /Ask me/ }))
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', usageLimit: 'ask' }))
     // What Althar doesn't do isn't offered.
     expect(screen.queryByRole('radiogroup', { name: 'Review findings' })).toBeNull()
-    expect(screen.queryByText(/A card in the thread/)).toBeNull()
     // No agent has more than one account here: no accounts row.
     expect(screen.queryByRole('radiogroup', { name: 'Accounts' })).toBeNull()
 
@@ -257,7 +259,7 @@ describe('a project’s rules', () => {
       setProjectRules: vi.fn(async () => Promise.reject(new ApiError({ reason: 'SqlError', message: 'The disk is full.' }))),
     })
     withServices(<Rules />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: /Ask me/ }))
+    await userEvent.click(within(await screen.findByRole('radiogroup', { name: 'Permissions' })).getByRole('radio', { name: /Ask me/ }))
     expect((await screen.findByRole('alert')).textContent).toContain('disk is full')
   })
 })

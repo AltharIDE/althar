@@ -11,16 +11,27 @@ import { launch, openFirstProject } from './support'
  * An agent out of usage, as the person sees it. The fake agents are out as
  * ALTHAR_FAKE_OUT says: for an hour, with the reset in their error, or
  * for good, saying none. The project moves work on, as projects do unless
- * told to wait.
+ * told to wait, or to ask.
  */
 
-/** Opens a project and starts a task led by Claude Code, without a review, whose lead reports at once. */
-const startTask = async (out: string) => {
+/** Opens a project, set to ask about usage limits where given, and starts a task led by Claude Code, without a review, whose lead reports at once. */
+const startTask = async (out: string, { asks = false }: { readonly asks?: boolean } = {}) => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_OUT: out })
   await openFirstProject(electronApp, page, repo)
   await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+  if (asks) {
+    await page.getByRole('button', { name: 'More for this project' }).click()
+    await page.getByRole('menuitem', { name: 'Project rules' }).click()
+    const limits = page.getByRole('radiogroup', { name: 'Usage limits' })
+    await limits.getByRole('radio', { name: /Ask me/ }).click()
+    await expect(limits.getByRole('radio', { name: /Ask me/ })).toBeChecked()
+    await limits.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: 'test-results/limit-ask-rules.png', animations: 'disabled' })
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+  }
   await page.getByRole('button', { name: 'New task' }).click()
   await page.getByLabel('What should change').fill('Add a retry to the checkout call')
   await page.getByLabel('Anything the lead should know').fill('[lead:finish]')
@@ -79,11 +90,41 @@ test('asks the person when the reset isn’t known and no other agent is free', 
     await openTask(page)
     await expect(page.getByText(/^Claude Code reached its usage limit\. Codex takes over\.$/)).toBeVisible()
     await expect(page.getByText("Codex reached its usage limit and didn't say when it resets.")).toBeVisible()
-    // Telling an agent that is out anything would hit the same limit: it is handed on, or tried again.
+    // Telling an agent that is out anything would hit the same limit. Claude Code ran out first, and nothing else is free: it is tried again.
+    await expect(page.getByText('Out of usage', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Tell the lead' })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Try another agent' })).toBeVisible()
+    await expect(page.getByText('No other model is free now.')).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Continue with/ })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Try Codex again' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Wait until/ })).toHaveCount(0)
     await page.screenshot({ path: 'test-results/limit-call.png', animations: 'disabled' })
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('asks the person where the project says to, on the home too, and moves the step to the model they pick', async () => {
+  const { electronApp, page } = await startTask('claude-code:3600', { asks: true })
+  try {
+    await expect(page.getByText('Needs you', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    // The home lists it, for a person who is elsewhere.
+    await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
+    const call = page.getByRole('article', { name: 'Add a retry to the checkout call' })
+    await expect(call.getByText('Out of usage', { exact: true })).toBeVisible()
+    await expect(call.getByText(/^Claude Code reached its usage limit, until .+\.$/)).toBeVisible()
+    await page.screenshot({ path: 'test-results/limit-ask-home.png', animations: 'disabled' })
+    await call.getByRole('button', { name: 'Open' }).click()
+
+    // In the task: the models free now, and waiting for the reset.
+    await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Wait until / })).toBeVisible()
+    await page.getByRole('button', { name: 'Choose another model' }).click()
+    await expect(page.getByRole('menuitemradio', { name: /via Codex/ })).toBeVisible()
+    await page.screenshot({ path: 'test-results/limit-ask.png', animations: 'disabled' })
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: /^Continue with/ }).click()
+    await expect(page.getByText('Switched from Claude Code to Codex.')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Did the task.')).toBeVisible({ timeout: 15_000 })
   } finally {
     await electronApp.close()
   }

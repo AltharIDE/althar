@@ -16,7 +16,7 @@ import {
 
 import { waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
-import { kindWords, whereOf } from '../../shared/calls'
+import { callKindOf, kindWords, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
 import { ago, clock, running } from '../../shared/time'
@@ -226,7 +226,7 @@ export const callCardOf = (waiting: BoardCall, name: (id: string | null) => stri
   if (waiting.stuck !== null) {
     const stuck = waiting.stuck
     return {
-      kind: kindWords.stuck,
+      kind: callKindOf(waiting),
       title:
         stuck.step === 'publish' && stuck.why !== 'not_connected'
           ? stuckText.publishing(stuck)
