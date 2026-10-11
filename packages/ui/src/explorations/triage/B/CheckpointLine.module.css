@@ -1,0 +1,67 @@
+/* A quiet line, like a change to the graph or what a rule allowed: metadata until you open it. */
+.line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.glyph {
+  flex: none;
+  color: var(--t-3);
+}
+.head {
+  flex: none;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.after .head {
+  color: var(--t-2);
+}
+.part {
+  flex: none;
+  white-space: nowrap;
+}
+.when {
+  font-size: inherit;
+  color: inherit;
+}
+.acts {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 6px;
+  margin-right: -6px;
+  border-radius: var(--r);
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--t-2);
+  transition: background var(--fast) var(--ease);
+}
+.toggle:hover {
+  background: var(--sunk);
+  color: var(--t-1);
+}
+/* under the line's words, past its glyph: space does the grouping, not a rule down the side */
+.body {
+  margin: 2px 0 2px 19px;
+}
+.foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px 0 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toggle {
+    transition: none;
+  }
+}

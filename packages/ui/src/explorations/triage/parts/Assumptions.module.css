@@ -77,3 +77,20 @@
 .compact .because {
   font-size: 11.5px;
 }
+
+/* where it applies: the brief's words, as marked there, or a file */
+.anchor {
+  margin: 0 0 1px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-2);
+}
+.mark {
+  margin-right: 3px;
+  font: 600 10px/1 var(--mono);
+  color: var(--t-3);
+}
+.file {
+  font: 11.5px var(--mono);
+  color: var(--t-2);
+}

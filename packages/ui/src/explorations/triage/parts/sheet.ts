@@ -15,6 +15,8 @@ export interface Scene {
   assumptions: readonly Assumption[]
   /** The clock as it is with less motion asked for. */
   still?: boolean
+  /** Shown opened, where the direction folds it, to see what opens. */
+  open?: boolean
 }
 
 /** How a direction draws a moment. */
@@ -54,8 +56,9 @@ const MOMENTS: readonly (Omit<Moment, 'show'> & { id: MomentId; scene: Scene })[
   {
     id: 'one',
     state: 'One assumption',
+    note: 'Shown opened, where the direction folds it.',
     start: checkpoint(Phase.Open),
-    scene: { assumptions: ONE },
+    scene: { assumptions: ONE, open: true },
   },
   {
     id: 'three',

@@ -3,7 +3,7 @@
  * beside the exploration rather than in src/fixtures, so the folder can go
  * as a whole once a direction is chosen.
  */
-import { OPUS, SONNET } from '../../fixtures/models'
+import { CODEX, OPUS, SONNET } from '../../fixtures/models'
 import type { QuestionPart } from '../../thread/Question/Question'
 import { Stakes, type Assumption } from './model'
 
@@ -142,4 +142,21 @@ export const SCOPE = {
     { id: 'l1', says: 'Whether refunds share charges’ budget or get their own' },
     { id: 'l2', says: 'Whether refunds from the admin dashboard count' },
   ],
+}
+
+/** A second task at its checkpoint at the same time, for the board. */
+export const SECOND = {
+  task: '437',
+  kind: 'Delivery',
+  title: 'Log the partner on every failed refund',
+  steps: ['Implement', 'Review', 'Draft PR'],
+  lead: CODEX,
+  elapsed: '2m',
+  assumptions: [
+    {
+      id: 'ids',
+      says: 'Partner ids may go in the logs; customer emails may not',
+      because: 'notes/logging.md lists emails as personal data',
+    },
+  ] as readonly Assumption[],
 }
