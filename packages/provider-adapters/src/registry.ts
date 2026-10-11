@@ -270,7 +270,13 @@ const openCodeConfig = JSON.stringify(openCodeBase)
  * a command that stays inside runs without asking, and one that has to leave
  * (the network, a write elsewhere) asks, and reaches Althar. In a git
  * worktree the sandbox lets git write to the main repository's `.git`, except
- * its hooks and config. Where the sandbox can't start, commands run without
+ * its hooks and config. A lead may also bind and listen on localhost
+ * (`network.allowLocalBinding`), so a test run can start a server and a
+ * prototype can serve a showcase page without leaving the sandbox. On macOS
+ * Claude documents that this setting is broader than listening: commands may
+ * also connect to any localhost port, including services outside the sandbox,
+ * and listen on non-loopback addresses. The domain allowlist and writable
+ * paths are unchanged. Where the sandbox can't start, commands run without
  * it and every one asks.
  *
  * Only the MCP servers Althar gives a session are loaded, not the user's
@@ -284,7 +290,13 @@ const claudeAsks = {
       // An object: the adapter reads a string as a path to a settings file.
       settings: {
         permissions: { ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
-        sandbox: { enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: true, failIfUnavailable: false },
+        sandbox: {
+          enabled: true,
+          autoAllowBashIfSandboxed: true,
+          allowUnsandboxedCommands: true,
+          failIfUnavailable: false,
+          network: { allowLocalBinding: true },
+        },
       },
     },
   },
