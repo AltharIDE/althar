@@ -6,7 +6,12 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Ids, newId } from '@althar/domain'
+
+import { Accounts } from '../src/Accounts'
 import { Agents } from '../src/Config'
+import { Instance } from '../src/Instance'
+import { Policies } from '../src/Policies'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
@@ -21,8 +26,12 @@ import { fakeAgents, notices, repository, runtime, until } from './support'
 
 const CARRIED = 'Althar restarted; the step carried on from here.'
 
-/** A task whose lead works on Implement until it is stopped, in the store at `file`. */
-const working = (file: string) =>
+/**
+ * A task whose lead works on Implement until it is stopped, in the store at
+ * `file`: on a project whose usage limits wait, where asked, and with the
+ * lead's account out of usage until `out`, where given, as Althar stops.
+ */
+const working = (file: string, limited: { readonly usageLimit?: 'wait'; readonly out?: string } = {}) =>
   Effect.gen(function* () {
     const plans = yield* Plans
     const projects = yield* Projects
@@ -37,6 +46,10 @@ const working = (file: string) =>
       description: 'Work on it. [lead:wait]',
       draft: true,
     })
+    if (limited.usageLimit !== undefined) {
+      const policies = yield* Policies
+      yield* policies.setUsageLimit(project.projectId, limited.usageLimit, actor)
+    }
     const planId = yield* plans.propose({
       projectId: project.projectId as Parameters<typeof plans.propose>[0]['projectId'],
       taskId: created.taskId,
@@ -46,8 +59,29 @@ const working = (file: string) =>
     })
     yield* plans.start(planId, actor)
     yield* until(implement, (rows) => rows[0]?.state === 'running')
+    if (limited.out !== undefined) yield* outOfUsage(created.threadId, limited.out)
     return created
   }).pipe(Effect.provide(runtime(file)))
+
+/** The account the thread's lead runs on is out of usage until `resetsAt`, as its agent would have said. */
+const outOfUsage = (threadId: string, resetsAt: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const instance = yield* Instance
+    const [session] = yield* sql<{ agentId: string; accountId: string }>`
+      SELECT agent_id, account_id FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC LIMIT 1`
+    const principalId = yield* newId(Ids.principal)
+    const at = new Date().toISOString()
+    yield* sql`INSERT INTO principals ${sql.insert({ id: principalId, agentId: session?.agentId ?? '', accountId: session?.accountId ?? '', deviceId: instance.deviceId, subjectHint: 'Fake sign-in', authMode: 'vendor_cli', observedAt: at })}`
+    yield* sql`INSERT INTO account_statuses ${sql.insert({
+      id: yield* newId(Ids.accountStatus),
+      principalId,
+      state: 'limited',
+      windows: JSON.stringify([{ kind: 'usage', resetsAt }]),
+      source: 'error',
+      observedAt: at,
+    })}`
+  })
 
 /** The task's Implement attempts, oldest first. */
 const implement = Effect.gen(function* () {
@@ -142,6 +176,49 @@ describe('A step a restart stopped', () => {
         assert.deepStrictEqual(yield* callsOf(task.taskId), [])
         assert.strictEqual((yield* notices(task.threadId)).filter((notice) => notice.title === CARRIED).length, 1)
       }).pipe(Effect.provide(runtime(file)))
+    }),
+  )
+
+  it.live('waits for the reset of the account the project runs it on, where that is out, though another of its agent’s is free', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const back = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      // A second account the project doesn't move work to: it doesn't rotate.
+      yield* Effect.gen(function* () {
+        const accounts = yield* Accounts
+        yield* accounts.add({ agentId: 'codex', name: 'Work' })
+      }).pipe(Effect.provide(runtime(file)))
+      const task = yield* working(file, { usageLimit: 'wait', out: back })
+      yield* Effect.gen(function* () {
+        const [held] = yield* until(implement, (rows) => rows[0]?.state === 'held')
+        assert.strictEqual(held?.state, 'held')
+        assert.deepStrictEqual(yield* callsOf(task.taskId), [])
+        assert.strictEqual((yield* sessionsOf(task.threadId)).length, 1)
+      }).pipe(Effect.provide(runtime(file)))
+    }),
+  )
+
+  it.live('needs the person where its agent is out of usage and the one it is handed to can’t start', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const task = yield* working(file, { out: new Date(Date.now() + 60 * 60 * 1000).toISOString() })
+      // The other agents are signed in, but none of them starts.
+      const broken = Layer.effect(
+        Agents,
+        Effect.gen(function* () {
+          const agents = yield* Agents
+          const missing = yield* Effect.orDie(agents.get('missing'))
+          const failing = (entry: (typeof agents.list)[number]) =>
+            entry.definition.id === 'codex' ? entry : { ...entry, transport: missing.transport }
+          return Agents.of({ list: agents.list.map(failing), get: (agentId) => Effect.map(agents.get(agentId), failing) })
+        }),
+      ).pipe(Layer.provide(fakeAgents()))
+      yield* Effect.gen(function* () {
+        const [call] = yield* until(callsOf(task.taskId), (rows) => rows.length === 1)
+        assert.deepStrictEqual(call, { kind: 'stuck', state: 'open', why: 'failed_to_start' })
+        const [attempt] = yield* implement
+        assert.strictEqual(attempt?.state, 'waiting_attention')
+      }).pipe(Effect.provide(runtime(file, {}, { agents: broken })))
     }),
   )
 

@@ -694,7 +694,8 @@ export class Runs extends Context.Service<
                 SELECT (SELECT state FROM node_attempts WHERE id = ${attempt?.id ?? ''}) AS attempt`
               if (!(yield* going(run)) || now?.attempt === 'cancelled') return false
               if (attempt !== null) {
-                const revision = yield* change('node_attempts', attempt.id, { state: 'waiting_attention' })
+                // One held for a limit, whose handover didn't go through, waits on the person instead.
+                const revision = yield* change('node_attempts', attempt.id, { state: 'waiting_attention', holdReason: null })
                 yield* fact({
                   projectId: run.projectId,
                   aggregateType: 'node_attempt',
@@ -2269,31 +2270,33 @@ export class Runs extends Context.Service<
           const agentId = lead?.agentId ?? step.ranOn ?? config.agentId ?? null
           const model = lead === undefined ? (step.ranOn === null ? (config.model ?? null) : step.ranModel) : lead.model
           const info: StuckInfo = { step: kind, why: 'restarted', detail: null, agentId, round: step.iteration, open: 0 }
-          if (kind !== 'publish' && agentId !== null && Option.isSome(yield* limits.out(agentId, current.projectId))) {
-            const on = { ...step, taskId: current.taskId, output: null, run: current, step: kind }
-            return yield* outOfUsage(on, agentId, null)
-          }
-          // Said first, so a restart while it starts counts as one soon after.
-          yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
-            source: 'runtime',
-            severity: 'info',
-            title: 'Althar restarted; the step carried on from here.',
-            restarted: step.nodeId,
-          })
-          const carrying = yield* envelope('thread.send', { threadId: current.threadId, restarted: step.attemptId })
+          // Out of usage on what the project runs it on, it goes the way a limit takes it, with the account that is out.
+          const out = kind === 'publish' || agentId === null ? Option.none() : yield* limits.out(agentId, current.projectId)
           const carried = yield* Effect.exit(
-            carryOn(
-              current,
-              step.attemptId,
-              info,
-              { kind: 'retry', agentId: agentId ?? 'althar', ...(model == null ? {} : { model }) },
-              carrying,
-              model,
-              undefined,
-              lead?.effort,
-            ),
+            Option.isSome(out) && agentId !== null
+              ? outOfUsage({ ...step, taskId: current.taskId, output: null, run: current, step: kind }, agentId, out.value.accountId)
+              : Effect.gen(function* () {
+                  // Said first, so a restart while it starts counts as one soon after.
+                  yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
+                    source: 'runtime',
+                    severity: 'info',
+                    title: 'Althar restarted; the step carried on from here.',
+                    restarted: step.nodeId,
+                  })
+                  const carrying = yield* envelope('thread.send', { threadId: current.threadId, restarted: step.attemptId })
+                  yield* carryOn(
+                    current,
+                    step.attemptId,
+                    info,
+                    { kind: 'retry', agentId: agentId ?? 'althar', ...(model == null ? {} : { model }) },
+                    carrying,
+                    model,
+                    undefined,
+                    lead?.effort,
+                  )
+                }),
           )
-          // A lead that can't start leaves its step needing the person, as when a plan starts.
+          // A lead that can't start, or one handed on for a limit that can't, leaves its step needing the person, as when a plan starts.
           if (carried._tag === 'Failure')
             yield* stuck(current, { id: step.attemptId }, { ...info, why: 'failed_to_start', detail: summarize(carried.cause) || null })
         })
