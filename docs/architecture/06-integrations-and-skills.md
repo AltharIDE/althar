@@ -372,7 +372,11 @@ now. Nothing reaches the tracker on its word:
   before filing it again, and it is never filed again unasked. An adapter
   whose tracker took the issue succeeds, even where reading it back after
   fails (Jira's and Trello's do): it falls back to what it knows, the key
-  and link included.
+  and link included. A tracker that says it filed one without saying which
+  (Linear's `success` with no issue), or fails inside as it works (a 5xx,
+  or a GraphQL error of its own internals), leaves it uncertain too; only
+  what it refuses is not filed. A draft discarded after it was uncertain is
+  told to the coordinator as perhaps on the tracker, not as never filed.
 - **The same title for the same place** in the same thread is the same
   draft, for a coordinator unsure its first call worked; for another place,
   it is another draft.

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { IssueDraftCard } from '@althar/contracts'
-import { products } from '@althar/connectors'
+import { makeLinear, products } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
@@ -260,6 +260,59 @@ describe('issue drafts', () => {
     }).pipe(Effect.provide(withQueries({ linear })))
   })
 
+  it.live('are perhaps filed when Linear itself says it filed one without saying which, or fails inside', () => {
+    // Linear's own adapter, over a stand-in for its API: what it answers is each case's.
+    let answer: { readonly status: number; readonly body: unknown } = { status: 200, body: {} }
+    const fetch = (_url: string, init?: RequestInit) => {
+      const { query } = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as { query?: string }
+      const said = query?.includes('teams(')
+        ? { status: 200, body: { data: { teams: { nodes: [MERIDIAN], pageInfo: { hasNextPage: false, endCursor: null } } } } }
+        : query?.includes('viewer')
+          ? { status: 200, body: { data: { viewer: { id: '1', name: 'You', displayName: 'you' } } } }
+          : answer
+      return Promise.resolve(
+        new Response(JSON.stringify(said.body), { status: said.status, headers: { 'content-type': 'application/json' } }),
+      )
+    }
+    const linear = linearWith(MERIDIAN)
+    const connectors = Layer.succeed(
+      Connectors,
+      Connectors.of({
+        products: [{ ...products.linear, make: (options) => ({ tracker: makeLinear({ ...options, fetch }) }), access: linear.access }],
+        fetch: () => Promise.reject(new Error('No network in tests')),
+        clientIds: {},
+        callbackPort: 0,
+        cliToken: () => Effect.succeed(null),
+      }),
+    )
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, access } = yield* project()
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+      yield* callTool(access, 'draft_issue', { title: 'Retry webhooks' })
+      const [card] = yield* cardsOf(projectId)
+      const stateAfter = (status: number, body: unknown) =>
+        Effect.gen(function* () {
+          answer = { status, body }
+          return (yield* drafts.file(card?.draftId ?? '', instance.personId)).state
+        })
+      assert.strictEqual(yield* stateAfter(200, { data: { issueCreate: { success: true, issue: null } } }), 'uncertain')
+      assert.strictEqual(yield* stateAfter(200, { data: { issueCreate: { success: true } } }), 'uncertain')
+      assert.strictEqual(yield* stateAfter(500, { errors: [{ message: 'Internal error' }] }), 'uncertain')
+      assert.strictEqual(
+        yield* stateAfter(200, { errors: [{ message: 'Oops', extensions: { code: 'INTERNAL_SERVER_ERROR' } }] }),
+        'uncertain',
+      )
+      // A refusal Linear answers with files nothing.
+      assert.strictEqual(yield* stateAfter(200, { data: { issueCreate: { success: false, issue: null } } }), 'failed')
+      assert.strictEqual(
+        yield* stateAfter(400, { errors: [{ message: 'Title is too long', extensions: { code: 'INVALID_INPUT' } }] }),
+        'failed',
+      )
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors })))))
+  })
+
   it.live('fail to file while the tracker wants signing in again, or once its connection is gone', () => {
     const linear = linearWith(MERIDIAN)
     return Effect.gen(function* () {
@@ -466,6 +519,11 @@ describe('issue drafts', () => {
       const failing = yield* draftOf('Retry webhooks')
       linear.failNext('create', 'unreachable')
       yield* drafts.file(failing, instance.personId)
+      // Perhaps filed, then discarded: still perhaps on the tracker.
+      const doubted = yield* draftOf('Doubted')
+      linear.failNext('create', 'invalid_response')
+      yield* drafts.file(doubted, instance.personId)
+      yield* drafts.discard(doubted, instance.personId)
       const refused = yield* draftOf('Refused')
       linear.failNext('create', 'rejected')
       yield* drafts.file(refused, instance.personId)
@@ -479,6 +537,11 @@ describe('issue drafts', () => {
         /- The issue “Refunds skip the rate limiter” \(you drafted it as “Refunds skip the limiter”\) is filed on Linear, in Meridian, as MER-1: https:\/\/linear\.app\/\S+\. The person changed it before filing it\./,
       )
       assert.include(news, '- The person discarded the issue “Rename the env var”: nothing was filed.')
+      assert.include(
+        news,
+        '- The person discarded the issue “Doubted” without filing it again. An earlier try may have reached Linear before its answer was lost, so it may be there; Althar doesn’t know.',
+      )
+      assert.notInclude(news, '“Doubted”: nothing was filed')
       assert.include(
         news,
         '- The person changed the issue you drafted (you drafted it as “Flaky test”): it now reads “Flaky checkout test”, and waits on them to file it.',

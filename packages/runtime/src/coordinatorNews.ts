@@ -167,9 +167,12 @@ const draftNews = (projectId: string, since: number) =>
         issueUrl: string | null
         error: string | null
         drafted: string | null
+        doubted: number
       }>`
         SELECT d.title, d.state, d.container_name, d.tracker_name, d.issue_key, d.issue_url, d.error,
-          (SELECT json_extract(payload, '$.title') FROM record_events WHERE aggregate_id = d.id AND type = 'issue_draft.drafted') AS drafted
+          (SELECT json_extract(payload, '$.title') FROM record_events WHERE aggregate_id = d.id AND type = 'issue_draft.drafted') AS drafted,
+          -- Whether a try to file it ever ended unsure: that issue may be on the tracker, whatever became of the draft since.
+          EXISTS (SELECT 1 FROM record_events WHERE aggregate_id = d.id AND type = 'issue_draft.uncertain') AS doubted
         FROM issue_drafts d WHERE d.id = ${draftId}`
       if (draft === undefined) continue
       const tracker = draft.trackerName
@@ -181,7 +184,12 @@ const draftNews = (projectId: string, since: number) =>
         lines.push(
           `- The issue “${draft.title}”${was} is filed on ${tracker}, in ${draft.containerName}, as ${draft.issueKey ?? ''}: ${draft.issueUrl ?? ''}.${edited}`,
         )
-      else if (draft.state === 'discarded') lines.push(`- The person discarded the issue “${draft.title}”${was}: nothing was filed.`)
+      else if (draft.state === 'discarded')
+        lines.push(
+          draft.doubted === 1
+            ? `- The person discarded the issue “${draft.title}”${was} without filing it again. An earlier try may have reached ${tracker} before its answer was lost, so it may be there; Althar doesn’t know.`
+            : `- The person discarded the issue “${draft.title}”${was}: nothing was filed.`,
+        )
       else if (draft.state === 'failed')
         lines.push(
           `- The issue “${draft.title}”${was} couldn’t be filed on ${tracker}: ${draft.error ?? ''} The person can file it again from its card.`,
