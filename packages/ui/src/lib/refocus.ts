@@ -1,4 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react'
+import { focusQuietly } from './focusQuietly'
 
 /**
  * For a button that something replaces while it is open, like a note form
@@ -14,7 +15,7 @@ export function useRefocus<T extends HTMLElement>(open: boolean, target?: RefObj
   const was = useRef(open)
   useEffect(() => {
     const lost = document.activeElement === null || document.activeElement === document.body
-    if (was.current && !open && lost) ref.current?.focus()
+    if (was.current && !open && lost) focusQuietly(ref.current)
     was.current = open
   }, [open, ref])
   return ref

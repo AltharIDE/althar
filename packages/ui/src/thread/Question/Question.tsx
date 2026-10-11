@@ -8,6 +8,7 @@ import { Button } from '../../primitives/Button/Button'
 import { Field, FieldError } from '../../primitives/Field/Field'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './Question.module.css'
+import { focusQuietly, revealInScroller } from '../../lib/focusQuietly'
 
 /*
  * An agent asking the person something, as Claude Code's AskUserQuestion
@@ -233,7 +234,8 @@ export function Question({
       const first = form.current?.querySelector<HTMLInputElement>('input')
       if (!live || first == null) return
       first.focus({ preventScroll: true })
-      first.closest('form')?.scrollIntoView?.({ block: 'center' })
+      const card = first.closest('form')
+      if (card != null) revealInScroller(card, 'center')
     })
     return () => {
       live = false
@@ -317,12 +319,12 @@ export function Question({
       setMissing(new Set(unanswered))
       /* to the first question still to answer: its first option, or its field */
       const first = parts.findIndex((part) => part.id === unanswered[0])
-      form.current?.querySelector<HTMLElement>(`[data-part="${first}"] input`)?.focus()
+      focusQuietly(form.current?.querySelector<HTMLElement>(`[data-part="${first}"] input`))
       return
     }
     const given: QuestionAnswer = Object.fromEntries(picks.flatMap(([part, p]) => (p ? [[part.id, p]] : [])))
     /* the button keeps focus while the answer goes out, so nothing is lost as the form waits */
-    submit.current?.focus()
+    focusQuietly(submit.current)
     onAnswer?.(given)
     setAnsweredHere(true)
     setAnswer(given)
@@ -393,7 +395,7 @@ export function Question({
             e.preventDefault()
             const on = part.multiple ? !draftFor(part).other : true
             pickOther(part, on)
-            if (on) fields.current.get(part.id)?.focus()
+            if (on) focusQuietly(fields.current.get(part.id))
           }
         }}
       >
